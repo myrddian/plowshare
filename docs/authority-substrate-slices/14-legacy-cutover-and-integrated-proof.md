@@ -1,9 +1,9 @@
 # Slice 14: Legacy classification, cutover and integrated migration proof
 
-Status: implementation subset completed; bounded completion plan agreed,
-18 October 2026. Final Global document cutover remains incomplete. The new
-[completion plan](14-completion-plan.md) is documentation only; implementation of
-its contract extension and embedding changes is not yet authorized.
+Status: bounded slice 14 implementation completed, 18 October 2026. The initial
+classification/rehearsal subset and subsequent
+[Global destination and preparation-budget completion](14-completion-plan.md)
+are implemented. Deferred consumers and broader rollout remain fenced.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -88,8 +88,8 @@ Specify tested reader/writer compatibility and safe refusal before removing adap
 
 ## Implementation record, 18 October 2026
 
-The [cutover specification](14-cutover-specification.md) was recorded before
-changing enforcement. Final cutover is **incomplete**: no existing upload selector
+This section records the initial subset. The [cutover specification](14-cutover-specification.md)
+was recorded before changing enforcement. At that initial subset, final cutover was **incomplete**: no existing upload selector
 admits a document into Global account custody. The manual installer can publish
 Personal-held chapters through existing share operations, but this is not Global
 home adoption. No missing operation, SDK method, Global impersonation, permissive
@@ -177,7 +177,8 @@ reconstruction is a retained-state simulation, not a live process rollout.
 ### Remaining cutover and rollback gates
 
 These gates record the implementation state at `007c832`. The completion plan
-below now defines the agreed follow-on scope; none of its changes is implemented.
+below records the subsequently implemented follow-on scope. The first and third
+gates below are historical; deferred budgets and rollout gates remain current.
 
 1. A separately authorized existing-contract decision is needed for Global-owned
    document admission/manual adoption. The current API cannot express it. This
@@ -196,9 +197,9 @@ below now defines the agreed follow-on scope; none of its changes is implemented
    no reverse migration or restore is authorized by this implementation.
 
 
-## Agreed plan to finish slice 14, planning only
+## Completion implementation, 18 October 2026
 
-The [completion plan](14-completion-plan.md) defines two changes:
+The [completion record](14-completion-plan.md) implements two changes:
 
 1. An explicit Global account-knowledge destination on existing information
    operations, with scoped human ADMIN WRITE, separate actor/creator provenance,
@@ -207,10 +208,10 @@ The [completion plan](14-completion-plan.md) defines two changes:
    existing retained processing allowance, including both applicable embedding
    implementations, stable source/claim identity and generation/lease/output fences.
 
-The destination is a planned public-contract extension, not a new endpoint or an
-already supported capability. Shared remains a read selection. No existing
+The destination extends the existing public operation contract without adding an
+endpoint. Shared remains a read selection. No existing
 Personal/manual resources are silently moved or reattributed. Model-call limits
-will cover all preparation inference, so the same total may exhaust earlier.
+cover all preparation inference, so the same total may exhaust earlier.
 
 Semantic-query embedding, independent background repair/rebuild, nested or
 caller-conversation orchestration budgets, and transient-child budget recovery
@@ -218,9 +219,9 @@ remain deferred with their current refusals. They are not prerequisites for the
 bounded Global document acceptance path. This does not remove curation,
 compatibility-removal or broader rollout gates or certify those consumers.
 
-The required proof is Global ADMIN admission → bounded SYSTEM preparation using
+The completion record covers Global ADMIN admission → bounded SYSTEM preparation using
 its retained processing budget → human/service read/list, including creator access
 loss, rejected callers, exhaustion, invalidation and retained-state recovery without
 uncertain replay or private-log leakage. Prior test results above do not verify
-this planned behavior. No runtime, SDK/schema, migration or deployment changes are
-authorized by this documentation request.
+this behavior; the completion record supplies the new verification separately.
+No production deployment or data adoption was performed.

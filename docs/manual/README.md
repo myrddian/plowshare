@@ -96,8 +96,10 @@ permissions. Shared manual chapters are available in ordinary scopes that includ
 shared information. The manual is reference material; its examples do not confer
 tool grants or instruct an agent to execute every command it contains.
 
-Scoped service tokens cannot read the shared catalogue. The current installer
-publishes through a human account's information collection; project-scoped manual
+Scoped service tokens can read explicitly published GLOBAL_READ roots under
+current policy; historical human-only LEGACY_SHARED roots require manager review.
+The installer supports Personal publication or explicit human ADMIN `--global`
+installation into Global account custody. Project-scoped manual
 publication for service-account agents is a separate, unfinished path.
 
 The desktop Help entry and Manual tab are the primary GUI reading path. The web

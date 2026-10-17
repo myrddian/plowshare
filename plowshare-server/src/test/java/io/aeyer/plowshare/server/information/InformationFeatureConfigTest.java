@@ -58,6 +58,7 @@ class InformationFeatureConfigTest {
             io.aeyer.plowshare.server.access.GrantLineageFixture::passthrough)
         .withBean(JdbcTemplate.class, () -> jdbc)
         .withBean(UnitOfWork.class, () -> UnitOfWork.NONE)
+        .withBean(AccountKnowledgePermissions.class, () -> AccountKnowledgePermissions.DENY)
         .withBean(EmbeddingClient.class, () -> mock(EmbeddingClient.class))
         .withBean(LlmProperties.class, () -> llm)
         .withBean(Tokenizer.class, () -> mock(Tokenizer.class))

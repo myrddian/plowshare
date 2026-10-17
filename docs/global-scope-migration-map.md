@@ -1,10 +1,12 @@
 # Global scope migration map
 
 Status: baseline source map with implementation annotations, updated 18 October 2026.
-Slices 01–13 are implemented in this branch. Slice 14 completes classification
-and rehearsal for supported paths; final cutover is blocked. See the
+Slices 01–14 are implemented for their supported paths. Slice 14 includes
+classification/rehearsal and the bounded Global document destination and
+preparation-budget path. See its [completion record](authority-substrate-slices/14-completion-plan.md)
+for verification and deferred consumers, and the historical
 [cutover specification](authority-substrate-slices/14-cutover-specification.md) for
-retained null locators, restricted legacy data and unsupported Global admission.
+retained null locators, restricted legacy data and compatibility-removal gates.
 The detailed baseline below is historical unless an implementation record supersedes it.
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md).
 The [role and scope permission matrices](role-scope-permissions-proposal.md)

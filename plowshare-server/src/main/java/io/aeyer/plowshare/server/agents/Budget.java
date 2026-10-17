@@ -85,7 +85,7 @@ public final class Budget {
    */
   private volatile Integer limit;
 
-  private final java.util.UUID identity = java.util.UUID.randomUUID();
+  private final java.util.UUID identity;
 
   /** Immutable evidence of one successful claim, including its ceiling at claim time. */
   public record Claim(java.util.UUID budget, int ordinal, Integer limit, String conversation) {
@@ -131,6 +131,11 @@ public final class Budget {
   }
 
   private Budget(Integer limit, Runnable charge) {
+    this(limit, charge, java.util.UUID.randomUUID());
+  }
+
+  private Budget(Integer limit, Runnable charge, java.util.UUID identity) {
+    this.identity = Objects.requireNonNull(identity);
     this.limit = limit;
     this.charge = charge;
   }
@@ -251,6 +256,15 @@ public final class Budget {
           "a budget of " + maxModelCalls + " model calls cannot have spent " + alreadySpent);
     }
     budget.spent.set(alreadySpent);
+    return budget;
+  }
+
+  /** Rehydrates an operation-owned allowance; its repository charge must reject stale counters. */
+  public static Budget retained(java.util.UUID id, int limit, int spent, Runnable charge) {
+    if (limit < 0 || spent < 0 || spent > limit)
+      throw new IllegalArgumentException("Invalid retained allowance");
+    var budget = new Budget(limit, Objects.requireNonNull(charge), id);
+    budget.spent.set(spent);
     return budget;
   }
 

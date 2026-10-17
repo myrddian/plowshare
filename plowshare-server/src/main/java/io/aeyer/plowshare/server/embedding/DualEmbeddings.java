@@ -10,6 +10,11 @@ public interface DualEmbeddings {
   /** Processing identity includes both model spaces, but excludes index policy. */
   String fingerprint();
 
+  /** A bounded document operation; independent query/maintenance calls receive no authority. */
+  default DualEmbeddings forPreparation(EmbeddingAuthorization permit) {
+    throw new UnsupportedOperationException("Document embedding authorization is unavailable");
+  }
+
   EmbeddingProfile active(EmbeddingSlot slot);
 
   /**

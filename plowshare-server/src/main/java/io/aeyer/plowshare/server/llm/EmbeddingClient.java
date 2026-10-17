@@ -33,6 +33,12 @@ public interface EmbeddingClient {
    */
   float[] embed(String text);
 
+  /** Bind only document preparation; unsupported clients fail rather than discard authority. */
+  default EmbeddingClient forPreparation(
+      io.aeyer.plowshare.server.embedding.EmbeddingAuthorization permit) {
+    throw new UnsupportedOperationException("Document embedding authorization is unavailable");
+  }
+
   /** Owned single input. Production implementations must carry this snapshot to the dispatcher. */
   default float[] embed(String text, UsageAttribution owner) {
     java.util.Objects.requireNonNull(owner, "owner");

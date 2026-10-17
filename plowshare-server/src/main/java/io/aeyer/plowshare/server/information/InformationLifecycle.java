@@ -391,6 +391,39 @@ public final class InformationLifecycle implements AutoCloseable {
       InformationModelStages stages,
       UsageOwners owners,
       DualEmbeddings dual) {
+    return processing(
+        repository,
+        transactions,
+        catalogue,
+        store,
+        embeddings,
+        chunking,
+        batch,
+        expectedDim,
+        summariser,
+        properties,
+        stages,
+        owners,
+        dual,
+        null);
+  }
+
+  /** Production preparation carries the retained operation allowance into every inference lane. */
+  public static Processor processing(
+      InformationProcessingRepository repository,
+      UnitOfWork transactions,
+      InformationCatalogue catalogue,
+      DocumentStore store,
+      EmbeddingClient embeddings,
+      Chunking chunking,
+      int batch,
+      int expectedDim,
+      java.util.function.Supplier<Summariser> summariser,
+      DocumentsProperties properties,
+      InformationModelStages stages,
+      UsageOwners owners,
+      DualEmbeddings dual,
+      PreparationEmbeddings preparation) {
     return (lease, cancelled, fence) -> {
       var row = repository.readRevision(lease.revision());
       DocumentStore writer = store.fenced(fence);
@@ -455,9 +488,18 @@ public final class InformationLifecycle implements AutoCloseable {
             if (cancelled.getAsBoolean()) throw new StaleLease();
             List<DocumentStore.UnembeddedChunk> part =
                 waiting.subList(from, Math.min(from + batch, waiting.size()));
+            var keys =
+                part.stream()
+                    .map(
+                        chunk ->
+                            EmbeddingWorkRepository.Key.of(
+                                EmbeddingWorkRepository.Store.CHUNKS, chunk.id().toString()))
+                    .toList();
+            var permit = preparation == null ? null : preparation.forSources(lease, keys);
             if (dual != null) {
+              var prepared = permit == null ? dual : dual.forPreparation(permit);
               var result =
-                  dual.repairAll(
+                  prepared.repairAll(
                       part.stream()
                           .map(
                               chunk ->
@@ -470,14 +512,22 @@ public final class InformationLifecycle implements AutoCloseable {
             }
             List<float[]> vectors =
                 EmbeddingClient.owned(
-                    embeddings,
+                    permit == null ? embeddings : embeddings.forPreparation(permit),
                     part.stream().map(DocumentStore.UnembeddedChunk::text).toList(),
                     processingOwner(owners, row));
             if (vectors.size() != part.size()
                 || vectors.stream().anyMatch(v -> !validVector(v, expectedDim)))
               throw new IllegalStateException(
                   "embedding batch shape differs from the configured corpus space");
-            for (int i = 0; i < part.size(); i++) writer.attach(part.get(i).id(), vectors.get(i));
+            transactions.inTransaction(
+                () -> {
+                  fence.run();
+                  if (permit != null) permit.require();
+                  for (int i = 0; i < part.size(); i++)
+                    writer.attach(part.get(i).id(), vectors.get(i));
+                  if (permit != null) permit.published();
+                  return null;
+                });
           }
         }
         case "summarise" -> {
@@ -491,15 +541,17 @@ public final class InformationLifecycle implements AutoCloseable {
             throw new IllegalStateException(
                 "retained processing allowance exhausted; increase it explicitly before retrying");
           Budget budget =
-              Budget.of(
-                  remaining,
-                  () ->
-                      transactions.inTransaction(
-                          () -> {
-                            fence.run();
-                            repository.spend(lease.revision());
-                            return null;
-                          }));
+              preparation != null
+                  ? preparation.budget(lease)
+                  : Budget.of(
+                      remaining,
+                      () ->
+                          transactions.inTransaction(
+                              () -> {
+                                fence.run();
+                                repository.spend(lease.revision());
+                                return null;
+                              }));
           Summariser pass =
               cascade
                   .forRevision(writer, home, lease.owner(), row.processingLog())
@@ -525,16 +577,18 @@ public final class InformationLifecycle implements AutoCloseable {
           int remaining = row.allowance() - row.spent();
           // A cached response can finish after a post gate denial even with zero allowance left.
           Budget budget =
-              Budget.of(
-                  Math.max(1, remaining),
-                  () ->
-                      transactions.inTransaction(
-                          () -> {
-                            fence.run();
-                            requireTaggingEligible(repository, lease.revision());
-                            repository.spend(lease.revision());
-                            return null;
-                          }));
+              preparation != null
+                  ? preparation.budget(lease)
+                  : Budget.of(
+                      Math.max(1, remaining),
+                      () ->
+                          transactions.inTransaction(
+                              () -> {
+                                fence.run();
+                                requireTaggingEligible(repository, lease.revision());
+                                repository.spend(lease.revision());
+                                return null;
+                              }));
           var pass =
               tagger
                   .forRevision(writer, home, lease.owner(), row.processingLog())
@@ -587,16 +641,18 @@ public final class InformationLifecycle implements AutoCloseable {
           Home home = project == null ? Home.global() : Home.of(project);
           int remaining = row.allowance() - row.spent();
           Budget budget =
-              Budget.of(
-                  Math.max(1, remaining),
-                  () ->
-                      transactions.inTransaction(
-                          () -> {
-                            fence.run();
-                            requireGroupingEligible(repository, lease.revision());
-                            repository.spend(lease.revision());
-                            return null;
-                          }));
+              preparation != null
+                  ? preparation.budget(lease)
+                  : Budget.of(
+                      Math.max(1, remaining),
+                      () ->
+                          transactions.inTransaction(
+                              () -> {
+                                fence.run();
+                                requireGroupingEligible(repository, lease.revision());
+                                repository.spend(lease.revision());
+                                return null;
+                              }));
           var pass =
               grouper
                   .forRevision(writer, home, lease.owner(), row.processingLog())
@@ -626,18 +682,31 @@ public final class InformationLifecycle implements AutoCloseable {
                   .anyMatch(s -> s.documentId().equals(lease.revision()));
           if (!waiting) return;
           if (cancelled.getAsBoolean()) throw new StaleLease();
+          var key =
+              EmbeddingWorkRepository.Key.of(
+                  EmbeddingWorkRepository.Store.DOCUMENTS, lease.revision().toString());
+          var permit = preparation == null ? null : preparation.forSources(lease, List.of(key));
           if (dual != null) {
-            if (!dual.repair(
-                EmbeddingWorkRepository.Key.of(
-                    EmbeddingWorkRepository.Store.DOCUMENTS, lease.revision().toString()),
-                processingOwner(owners, row))) throw new StaleLease();
+            var prepared = permit == null ? dual : dual.forPreparation(permit);
+            if (!prepared.repair(key, processingOwner(owners, row))) throw new StaleLease();
             return;
           }
-          float[] vector = EmbeddingClient.owned(embeddings, summary, processingOwner(owners, row));
+          float[] vector =
+              EmbeddingClient.owned(
+                  permit == null ? embeddings : embeddings.forPreparation(permit),
+                  summary,
+                  processingOwner(owners, row));
           if (!io.aeyer.plowshare.server.documents.SummaryEmbeddings.valid(vector, expectedDim))
             throw new IllegalStateException(
                 "summary vector is invalid for the configured corpus space");
-          writer.attachSummaryEmbedding(lease.revision(), vector);
+          transactions.inTransaction(
+              () -> {
+                fence.run();
+                if (permit != null) permit.require();
+                writer.attachSummaryEmbedding(lease.revision(), vector);
+                if (permit != null) permit.published();
+                return null;
+              });
         }
         default -> throw new IllegalStateException("unknown document stage");
       }

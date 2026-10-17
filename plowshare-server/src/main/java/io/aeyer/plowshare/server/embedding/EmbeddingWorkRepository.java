@@ -65,6 +65,12 @@ public interface EmbeddingWorkRepository {
 
   boolean publish(EmbeddingProfile target, Source expected, float[] vector);
 
+  /** Document publication rechecks its lease under the same transaction as the vector write. */
+  default boolean publish(
+      EmbeddingProfile profile, Source expected, float[] vector, Runnable fence) {
+    throw new UnsupportedOperationException("Fenced document publication is unavailable");
+  }
+
   /** Store only a bounded failure category, never provider bodies, credentials or source text. */
   void failed(EmbeddingProfile target, Source expected, String category);
 

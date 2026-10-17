@@ -35,6 +35,9 @@ class DocumentsConfigTest {
           .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
           .withUserConfiguration(DocumentsConfig.class)
           .withBean(
+              io.aeyer.plowshare.server.information.AccountKnowledgePermissions.class,
+              () -> io.aeyer.plowshare.server.information.AccountKnowledgePermissions.DENY)
+          .withBean(
               io.aeyer.plowshare.server.requests.RequestProjects.class,
               () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY)
           .withBean(

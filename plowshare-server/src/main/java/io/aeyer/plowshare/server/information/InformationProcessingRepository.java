@@ -90,6 +90,45 @@ public interface InformationProcessingRepository {
 
   void spend(UUID revision);
 
+  record BudgetSource(UUID id, int limit, int spent, String log) {}
+
+  /**
+   * Production preparation uses one durable identity across chat, embeddings and resumed leases.
+   */
+  default BudgetSource budgetSource(UUID revision) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void spend(Lease lease, int expectedSpent) {
+    throw new UnsupportedOperationException();
+  }
+
+  default io.aeyer.plowshare.server.agents.Budget.Claim claimEmbedding(Lease lease) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void requireEmbeddingTargets(
+      Lease lease, List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void requireEmbeddingClear(
+      Lease lease, List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void bindEmbedding(
+      Lease lease,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void embeddingPublished(
+      Lease lease, io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding) {
+    throw new UnsupportedOperationException();
+  }
+
   void autoTags(UUID revision, InformationMetadata metadata);
 
   Grouping grouping(UUID revision);

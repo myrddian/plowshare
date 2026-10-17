@@ -23,12 +23,27 @@ public final class InformationScopes {
     }
     if (!(scope instanceof Map<?, ?> fields))
       throw new CallerFault("information scope must be an object");
-    if (!java.util.Set.of("kind", "project", "includeShared").containsAll(fields.keySet()))
-      throw new CallerFault("Unsupported information scope field");
+    if (!java.util.Set.of("kind", "project", "includeShared", "account")
+        .containsAll(fields.keySet())) throw new CallerFault("Unsupported information scope field");
     if (payload.get("project") != null)
       throw new CallerFault("Use either scope or project, not both");
     Object kind = fields.get("kind");
     if (!(kind instanceof String name)) throw new CallerFault("information scope needs a kind");
+    if (name.equalsIgnoreCase("account")) {
+      if (fields.containsKey("project")
+          || fields.containsKey("includeShared")
+          || !(fields.get("account") instanceof String id))
+        throw new CallerFault("Account scope requires only its explicit account UUID");
+      try {
+        var uuid = java.util.UUID.fromString(id);
+        if (!uuid.toString().equals(id)) throw new IllegalArgumentException();
+        return InformationContext.Selection.account(uuid);
+      } catch (IllegalArgumentException invalid) {
+        throw new CallerFault("Unsupported account knowledge target");
+      }
+    }
+    if (fields.containsKey("account"))
+      throw new CallerFault("Only account scope accepts an account");
     Object project = fields.get("project");
     if (project != null && !(project instanceof String))
       throw new CallerFault("scope project must be a name");

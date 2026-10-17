@@ -34,7 +34,9 @@ public final class InformationContentAdmission implements InformationContentAuth
       InformationContext context, String name, UUID expected, InformationContent.Typing typing) {
     access.requireWork(context);
     if (typing != null) settings.requireWrites();
-    var head = repository.head(InformationContentTypeService.namespace(context), name, false);
+    if (context.selection().scope() == InformationContext.Scope.ACCOUNT && typing != null)
+      throw new CallerFault("Account destinations do not support type assignment");
+    var head = repository.head(context.namespace(), name, false);
     head.ifPresent(value -> repository.requireWrite(context, value.revision()));
     if (expected != null && (head.isEmpty() || !expected.equals(head.get().revision())))
       throw new CallerFault("INFORMATION_REVISION_CONFLICT");

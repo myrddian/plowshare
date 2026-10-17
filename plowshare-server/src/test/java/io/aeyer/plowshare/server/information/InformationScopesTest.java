@@ -17,6 +17,28 @@ class InformationScopesTest {
   final InformationAccess access = new InformationAccess(permissions, defaults);
 
   @Test
+  void accountDestinationIsExplicitAndCannotChangeLegacyReceiptEncoding() {
+    var global = io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value();
+    var selection =
+        InformationScopes.from(
+            Map.of("scope", Map.of("kind", "account", "account", global.toString())));
+    assertEquals(InformationContext.Scope.ACCOUNT, selection.scope());
+    assertEquals(global, selection.account());
+    assertEquals("account:" + global, new InformationContext("actor", selection).namespace());
+    assertFalse(InformationJson.json(InformationContext.Selection.personal()).contains("account"));
+    for (var fields :
+        List.of(
+            Map.of("kind", "account"),
+            Map.of("kind", "account", "account", UUID.randomUUID().toString()),
+            Map.of("kind", "account", "account", global.toString(), "includeShared", false),
+            Map.of("kind", "personal", "account", global.toString()),
+            Map.of("kind", "account", "account", "GLOBAL")))
+      assertThrows(CallerFault.class, () -> InformationScopes.from(Map.of("scope", fields)));
+    assertThrows(
+        CallerFault.class, () -> access.requireWork(new InformationContext("actor", selection)));
+  }
+
+  @Test
   void omittedAndLegacyNullSelectorsResolveFromTrustedContext() {
     var fields = new HashMap<String, Object>();
     fields.put("scope", null);

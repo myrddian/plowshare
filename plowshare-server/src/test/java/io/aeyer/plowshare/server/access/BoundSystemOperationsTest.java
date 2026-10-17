@@ -50,6 +50,33 @@ class BoundSystemOperationsTest {
   }
 
   @Test
+  void embeddingClaimsBindInputsAndModelAndCannotBeUsedByOtherPurposes() {
+    var work =
+        service.admit(
+            SystemOperations.Purpose.DOCUMENT_PREPARATION,
+            Home.global(),
+            definition,
+            "batch",
+            () -> {});
+    var request = EmbeddingRequest.of("model", List.of("exact preprocessed input"));
+    var permit = work.claimed(request, Budget.of(1).tryClaim().orElseThrow());
+    permit.requireRequest(request);
+    assertThrows(
+        CallerFault.class,
+        () -> permit.requireRequest(EmbeddingRequest.of("model", List.of("other input"))));
+    assertThrows(
+        CallerFault.class,
+        () -> permit.requireRequest(EmbeddingRequest.of("other", request.input())));
+    var other =
+        service.admit(
+            SystemOperations.Purpose.MEMORY_DIGEST, Home.global(), definition, "batch", () -> {});
+    assertThrows(
+        CallerFault.class, () -> other.claimed(request, Budget.of(1).tryClaim().orElseThrow()));
+    when(authority.allowsUsing(any(), any(), any(), eq(root))).thenReturn(false);
+    assertThrows(CallerFault.class, permit::require);
+  }
+
+  @Test
   void intrinsicSystemCanProcessGlobalWithBoundInputsAndNoCreatorGrant() {
     var work =
         service.admit(

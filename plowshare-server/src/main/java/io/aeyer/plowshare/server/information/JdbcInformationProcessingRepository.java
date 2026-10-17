@@ -388,6 +388,117 @@ public final class JdbcInformationProcessingRepository implements InformationPro
         revision);
   }
 
+  public BudgetSource budgetSource(UUID revision) {
+    return jdbc.queryForObject(
+        "SELECT processing_budget_id,allowance_total,allowance_spent,processing_log FROM information_revisions WHERE id=?",
+        (r, n) ->
+            new BudgetSource(r.getObject(1, UUID.class), r.getInt(2), r.getInt(3), r.getString(4)),
+        revision);
+  }
+
+  public void spend(InformationLifecycle.Lease lease, int expectedSpent) {
+    requireLease(lease);
+    if (jdbc.update(
+            "UPDATE information_revisions SET allowance_spent=allowance_spent+1 WHERE id=? AND allowance_spent=? AND allowance_spent<allowance_total",
+            lease.revision(),
+            expectedSpent)
+        != 1)
+      throw new IllegalStateException(
+          "Processing allowance is exhausted or changed; reconcile retained work");
+    syncBudget(lease.revision());
+  }
+
+  private void syncBudget(UUID revision) {
+    jdbc.update(
+        "UPDATE conversations c SET budget_total=r.allowance_total,budget_spent=r.allowance_spent FROM information_revisions r WHERE r.id=? AND c.id=r.processing_log",
+        revision);
+  }
+
+  public io.aeyer.plowshare.server.agents.Budget.Claim claimEmbedding(
+      InformationLifecycle.Lease lease) {
+    var source = budgetSource(lease.revision());
+    spend(lease, source.spent());
+    return new io.aeyer.plowshare.server.agents.Budget.Claim(
+        source.id(), source.spent() + 1, source.limit(), source.log());
+  }
+
+  private static String targetKey(
+      io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key key) {
+    if (key.store() != io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.CHUNKS
+        && key.store()
+            != io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.DOCUMENTS)
+      throw new IllegalArgumentException("Only document preparation targets are supported");
+    return key.store().name() + ":" + key.id();
+  }
+
+  public void requireEmbeddingTargets(
+      InformationLifecycle.Lease lease,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    for (var key : targets) {
+      targetKey(key);
+      boolean valid =
+          switch (key.store()) {
+            case DOCUMENTS ->
+                lease.stage().equals("summary_embed")
+                    && lease.revision().toString().equals(key.id());
+            case CHUNKS ->
+                lease.stage().equals("embed")
+                    && Boolean.TRUE.equals(
+                        jdbc.queryForObject(
+                            "SELECT EXISTS(SELECT 1 FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE c.id=? AND p.document_id=?)",
+                            Boolean.class,
+                            UUID.fromString(key.id()),
+                            lease.revision()));
+            default -> false;
+          };
+      if (!valid)
+        throw new IllegalStateException("Embedding target is outside this preparation operation");
+    }
+  }
+
+  public void requireEmbeddingClear(
+      InformationLifecycle.Lease lease,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    for (var target : targets)
+      if (Boolean.TRUE.equals(
+          jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM inference_admissions WHERE preparation_revision=? AND preparation_generation=? AND NOT preparation_published AND ?=ANY(preparation_targets))",
+              Boolean.class,
+              lease.revision(),
+              lease.generation(),
+              targetKey(target))))
+        throw new IllegalStateException(
+            "Embedding outcome is unresolved; reconcile the original attempt without replay");
+  }
+
+  public void bindEmbedding(
+      InformationLifecycle.Lease lease,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    String encoded =
+        InformationJson.json(
+            targets.stream().map(JdbcInformationProcessingRepository::targetKey).toList());
+    if (jdbc.update(
+            "UPDATE inference_admissions SET preparation_revision=?,preparation_generation=?,preparation_targets=ARRAY(SELECT jsonb_array_elements_text(?::jsonb)) WHERE id=? AND preparation_revision IS NULL AND budget_id=(SELECT processing_budget_id FROM information_revisions WHERE id=?)",
+            lease.revision(),
+            lease.generation(),
+            encoded,
+            binding.id(),
+            lease.revision())
+        != 1) throw new IllegalStateException("Preparation claim binding refused");
+  }
+
+  public void embeddingPublished(
+      InformationLifecycle.Lease lease,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding) {
+    if (jdbc.update(
+            "UPDATE inference_admissions SET preparation_published=true WHERE id=? AND preparation_revision=? AND preparation_generation=? AND submitted",
+            binding.id(),
+            lease.revision(),
+            lease.generation())
+        != 1) throw new IllegalStateException("Preparation publication has no submitted claim");
+  }
+
   public void autoTags(UUID revision, InformationMetadata metadata) {
     jdbc.update(
         "UPDATE information_revisions SET auto_tag=CAST(? AS jsonb),auto_tag_generated=true,auto_tag_requested=false,document_author=?,document_author_source=?,document_author_evidence=? WHERE id=?",

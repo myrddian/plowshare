@@ -135,6 +135,29 @@ public final class BoundSystemOperations implements SystemOperations {
             || !envelope.bindingHash().equals(hash(task))) throw denied();
       }
 
+      public CallAuthorization claimed(EmbeddingRequest request, Budget.Claim claim) {
+        if (purpose != Purpose.DOCUMENT_PREPARATION
+            || !request.specifier().equals(envelope.model())) throw denied();
+        require();
+        var captured = calls.claimed(id(), claim, this::require);
+        var inputs = request.input();
+        return new CallAuthorization() {
+          public void require() {
+            captured.require();
+          }
+
+          public InferenceBinding binding() {
+            return captured.binding();
+          }
+
+          public void requireRequest(EmbeddingRequest asked) {
+            require();
+            if (!asked.specifier().equals(envelope.model()) || !asked.input().equals(inputs))
+              throw denied();
+          }
+        };
+      }
+
       public CallAuthorization claimed(ChatRequest request, Budget.Claim claim) {
         if (!request.tools().isEmpty() || !request.specifier().equals(envelope.model()))
           throw denied();

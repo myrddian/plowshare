@@ -14,6 +14,7 @@ import java.util.Objects;
  */
 public final class InformationAccess {
   private final ScopedPermissions permissions;
+  private final AccountKnowledgePermissions accounts;
   private final io.aeyer.plowshare.server.requests.RequestProjects projects;
 
   public InformationAccess(ScopedPermissions permissions) {
@@ -22,6 +23,14 @@ public final class InformationAccess {
 
   public InformationAccess(
       ScopedPermissions permissions, io.aeyer.plowshare.server.requests.RequestProjects projects) {
+    this(permissions, projects, AccountKnowledgePermissions.DENY);
+  }
+
+  public InformationAccess(
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.requests.RequestProjects projects,
+      AccountKnowledgePermissions accounts) {
+    this.accounts = Objects.requireNonNull(accounts);
     this.permissions = Objects.requireNonNull(permissions, "permissions");
     this.projects = Objects.requireNonNull(projects, "projects");
   }
@@ -66,6 +75,9 @@ public final class InformationAccess {
   /** Check every operation again; an earlier context is not a membership lease. */
   public void requireSelection(InformationContext context) {
     Objects.requireNonNull(context, "context");
+    if (context.selection().scope() == InformationContext.Scope.ACCOUNT
+        && context.corpus() != InformationContext.Corpus.DOCUMENTS)
+      throw new CallerFault("Account destinations currently support the documents corpus only");
     if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(context.account())
         && context.selection().scope() == InformationContext.Scope.PERSONAL)
       throw new CallerFault("Service tokens cannot select Personal information");
@@ -80,6 +92,7 @@ public final class InformationAccess {
 
   public void requireWork(InformationContext context) {
     requireSelection(context);
+    requireAccountAction(context, io.aeyer.plowshare.server.access.AuthorityAction.WRITE);
     if (context.selection().scope() == InformationContext.Scope.SHARED)
       throw new CallerFault("Shared information is a read selection; select a writable home");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
@@ -92,8 +105,21 @@ public final class InformationAccess {
   }
 
   /** Content WRITE does not grant permission to change an existing resource's audience. */
+  private void requireAccountAction(
+      InformationContext context, io.aeyer.plowshare.server.access.AuthorityAction action) {
+    if (context.selection().scope() == InformationContext.Scope.ACCOUNT
+        && !accounts.allows(
+            context.account(),
+            new io.aeyer.plowshare.server.access.AuthorityIds.AccountId(
+                context.selection().account()),
+            action))
+      throw new CallerFault(
+          "This account needs scoped human ADMIN authority for this account home");
+  }
+
   public void requireAudience(InformationContext context) {
     requireSelection(context);
+    requireAccountAction(context, io.aeyer.plowshare.server.access.AuthorityAction.SET_AUDIENCE);
     // Shared selects existing resources only. The repository checks the exact Global ADMIN
     // target; admitting the selection confers neither content WRITE nor audience authority.
     if (context.selection().scope() == InformationContext.Scope.PROJECT

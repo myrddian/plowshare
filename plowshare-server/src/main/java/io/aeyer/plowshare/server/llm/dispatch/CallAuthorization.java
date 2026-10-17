@@ -12,6 +12,11 @@ public interface CallAuthorization {
     require();
   }
 
+  /** Internal embedding calls retain exact model and input binding. */
+  default void requireRequest(EmbeddingRequest request) {
+    require();
+  }
+
   /** Explicit allowance evidence, absent for unclassified compatibility calls. */
   default InferenceBinding binding() {
     return null;
@@ -30,6 +35,12 @@ public interface CallAuthorization {
 
       @Override
       public void requireRequest(ChatRequest request) {
+        original.requireRequest(request);
+        other.require();
+      }
+
+      @Override
+      public void requireRequest(EmbeddingRequest request) {
         original.requireRequest(request);
         other.require();
       }

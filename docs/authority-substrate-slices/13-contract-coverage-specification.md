@@ -3,6 +3,12 @@
 Recorded before enforcement changes, 18 October 2026. Scope is existing operations
 and selectors only. No API, role vocabulary, scope kind or SDK method is added.
 
+This inventory records slice 13. The subsequent
+[slice 14 completion](14-completion-plan.md) adds the explicit Global account
+destination on its supported document operations and regenerates the shared
+graphs. Global type/navigation/interchange, HTTP multipart and semantic-query
+paths are not added by that completion; ordinary Global execution still refuses.
+
 ## Operation and compatibility inventory
 
 | Existing operations | Existing selector and cutover |

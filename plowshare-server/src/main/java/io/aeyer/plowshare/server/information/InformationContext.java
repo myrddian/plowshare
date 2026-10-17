@@ -64,10 +64,21 @@ public record InformationContext(
     Objects.requireNonNull(facets, "facets");
   }
 
+  /** Stable destination locator for receipts; authenticated identity is deliberately separate. */
+  public String namespace() {
+    return switch (selection.scope()) {
+      case PROJECT -> "project:" + selection.project();
+      case ACCOUNT -> "account:" + selection.account();
+      case PERSONAL -> "account:" + account;
+      case SHARED -> throw new IllegalArgumentException("Shared has no writable namespace");
+    };
+  }
+
   public enum Scope {
     PERSONAL,
     PROJECT,
-    SHARED
+    SHARED,
+    ACCOUNT
   }
 
   public record Selection(Scope scope, String project, boolean includeShared) {
@@ -81,9 +92,25 @@ public record InformationContext(
       } else if (project != null) {
         throw new IllegalArgumentException("only project selection may name a project");
       }
-      if (scope == Scope.SHARED && includeShared) {
+      if ((scope == Scope.SHARED || scope == Scope.ACCOUNT) && includeShared) {
         throw new IllegalArgumentException("shared selection does not take includeShared");
       }
+    }
+
+    /** The only additional public account home; this does not grant access to that account. */
+    public static Selection account(java.util.UUID id) {
+      if (!io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value().equals(id))
+        throw new IllegalArgumentException("Unsupported account knowledge target");
+      return new Selection(Scope.ACCOUNT, null, false);
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("account")
+    @com.fasterxml.jackson.annotation.JsonInclude(
+        com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public java.util.UUID account() {
+      return scope == Scope.ACCOUNT
+          ? io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value()
+          : null;
     }
 
     public static Selection personal() {

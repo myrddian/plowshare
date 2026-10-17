@@ -35,8 +35,11 @@ public class DocumentsConfig {
 
   @Bean
   public io.aeyer.plowshare.server.information.InformationAccess informationAccess(
-      ScopedPermissions permissions, io.aeyer.plowshare.server.requests.RequestProjects projects) {
-    return new io.aeyer.plowshare.server.information.InformationAccess(permissions, projects);
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.requests.RequestProjects projects,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions accounts) {
+    return new io.aeyer.plowshare.server.information.InformationAccess(
+        permissions, projects, accounts);
   }
 
   @Bean

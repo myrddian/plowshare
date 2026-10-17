@@ -354,7 +354,8 @@ public class InformationConfig {
             modelStages,
             usageOwners.getIfAvailable(
                 () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE),
-            dual);
+            dual,
+            new BoundPreparationEmbeddings(processing, work, system));
     var gates =
         new InformationStageHooks(
             new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),

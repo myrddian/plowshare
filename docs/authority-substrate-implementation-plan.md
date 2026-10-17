@@ -1,11 +1,10 @@
 # Authority substrate implementation roadmap
 
-Status: implementation roadmap, updated 18 October 2026. Slices 01–13 have been
-explicitly authorized and implemented in this branch. Slice 14 is authorized and
-partially implemented: classification/rehearsal and digest attribution are complete;
-final cutover remains incomplete. The agreed [completion plan](authority-substrate-slices/14-completion-plan.md)
-adds an explicit Global document destination and preparation embeddings charged to
-the existing processing budget. It is planning only; other budget gaps stay deferred.
+Status: implementation roadmap, updated 18 October 2026. Slices 01–14 are
+implemented for their documented supported paths. Slice 14 includes the
+[completion implementation](authority-substrate-slices/14-completion-plan.md):
+explicit Global document destination and preparation embeddings charged to the
+existing processing budget. Other budget gaps and broader rollout remain deferred.
 
 ## Count and scope
 
@@ -29,7 +28,7 @@ orchestration roots and synchronous agent children (11), and action checks for
 the existing acting consumers (12), and verified existing-contract selectors and
 client boundaries (13). See each slice's document
 for verification and limits. This is not a complete platform cutover: configured
-embedding/search operation budgets remain missing, and nested/model-triggered
+semantic-query and independent-maintenance budgets remain missing, and nested/model-triggered
 orchestration starts remain refused without a supported parent-budget sharing
 contract. Independent Relay roots now use slice 11's retained lineage. Production
 embeddings without supported budget evidence refuse instead of acquiring an implicit
@@ -173,14 +172,13 @@ the adopted account/scope/action and sandbox rules, required migration/negative/
 recovery evidence passes, and the supported end-to-end path in slice 14 works.
 Unsupported capabilities remain explicitly unsupported.
 
-Slices 01–13 are implemented under subsequent explicit requests. Slice 14 has
-implemented its safe subset; its [cutover specification](authority-substrate-slices/14-cutover-specification.md)
-records why the full migration remains incomplete. No new capability or permissive
-fallback was added to close the missing Global route. The agreed
-[completion plan](authority-substrate-slices/14-completion-plan.md) now scopes that
-route and document embedding on the existing processing allowance. Implementing
-it requires a subsequent instruction. Finishing this bounded path does not enable
-deferred budget consumers or establish unrestricted platform-wide cutover.
+Slices 01–14 are implemented under subsequent explicit requests. Slice 14's
+[completion record](authority-substrate-slices/14-completion-plan.md) documents the
+supported Global document route and shared preparation allowance. The historical
+[cutover specification](authority-substrate-slices/14-cutover-specification.md)
+retains classification and compatibility-removal gates. Completing this bounded
+path does not enable deferred budget consumers or establish unrestricted
+platform-wide cutover.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

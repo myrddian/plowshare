@@ -256,10 +256,7 @@ public final class InformationCatalogue implements InformationReadAccess {
             : context.corpus() == InformationContext.Corpus.CODE && !classified.isCode()
                 ? new io.aeyer.plowshare.protocol.DocumentType("code", "unknown")
                 : classified;
-    String namespace =
-        context.selection().scope() == InformationContext.Scope.PROJECT
-            ? "project:" + context.selection().project()
-            : "account:" + context.account();
+    String namespace = context.namespace();
     String fingerprint =
         InformationCatalogueFingerprint.admission(
             namespace,

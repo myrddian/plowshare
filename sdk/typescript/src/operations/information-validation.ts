@@ -226,18 +226,51 @@ export function informationPayloadProblem(
         return 'scope must be a personal, project or shared selection';
       const scope = value as Record<string, unknown>;
       if (
-        !['personal', 'project', 'shared'].includes(String(scope['kind'])) ||
+        scope['kind'] === 'account' &&
+        (![
+          'upload',
+          'list',
+          'status',
+          'await',
+          'read',
+          'tags',
+          'tags.groups',
+          'exclude',
+          'unexclude',
+          'withdraw',
+          'restore',
+          'delete',
+          'retry',
+          'rebuild',
+          'allowance',
+          'share',
+          'unshare',
+        ].includes(type.replace('information.', '')) ||
+          'typing' in body ||
+          'expectedRevision' in body ||
+          (body['corpus'] !== undefined && body['corpus'] !== 'documents'))
+      )
+        return 'this operation does not support account knowledge targets';
+      if (
+        !['personal', 'project', 'shared', 'account'].includes(
+          String(scope['kind']),
+        ) ||
         (scope['kind'] === 'project' &&
           (typeof scope['project'] !== 'string' || !scope['project'].trim()))
       )
         return 'select a valid information scope';
       if (
         Object.keys(scope).some(
-          (key) => !['kind', 'project', 'includeShared'].includes(key),
+          (key) =>
+            !['kind', 'project', 'includeShared', 'account'].includes(key),
         ) ||
         ('includeShared' in scope &&
           typeof scope['includeShared'] !== 'boolean') ||
-        (scope['kind'] !== 'project' && 'project' in scope)
+        (scope['kind'] !== 'project' && 'project' in scope) ||
+        (scope['kind'] !== 'account' && 'account' in scope) ||
+        (scope['kind'] === 'account' &&
+          (scope['account'] !== '00000000-0000-0000-0000-000000000004' ||
+            'includeShared' in scope))
       )
         return 'invalid information scope fields';
     } else if (

@@ -32,9 +32,14 @@ These selectors grant no project membership, content WRITE, processing-log acces
 or execution. Global-account policy control requires human Global Admin authority.
 Existing share/unshare can manage the audience of an already scoped Global resource
 through its owning Admin check, independent of client label. Shared is not a writable
-Global destination: existing upload/new-document selectors cannot express one, and
-no account UUID is interpreted through a project-name field. No new Global
-creation/move selector or public API is added. The
+Global destination. An explicit documents-only account selector,
+`scope: {kind: "account", account: "00000000-0000-0000-0000-000000000004"}`,
+selects Global custody on the supported information upload and maintenance path.
+Human ADMIN WRITE is checked live in Java and under repository locks; the human
+remains `created_by`. Authenticated readers use current root policy. Project names
+never decode account UUIDs. Other account targets, type registries, interchange,
+semantic search and unsupported consumers refuse this target. No new endpoint,
+general transfer or ordinary Global conversation/run capability is added. The
 [root-policy specification](authority-substrate-slices/05-root-policy-specification.md)
 records migration, privacy and concurrency behavior.
 
@@ -176,7 +181,8 @@ with a control to return to automatic grouping.
 
 ## Retention and lifecycle
 
-A source name identifies a resource in its personal or project namespace. Content
+A source name identifies a resource in its Personal, project or supported Global
+account-knowledge namespace. Content
 creates immutable UUID revisions under that resource; evidence names a revision,
 exact UTF-16 extraction offsets and a quote. URLs and paragraph IDs alone cannot
 create new evidence. The original bytes, extraction and content hash survive fetch
@@ -192,8 +198,17 @@ projection was built with a different configuration, so semantic retrieval ignor
 it until explicit repair. Changed embedding model identity matters even at the
 same vector width. Actual counts are not estimated completion percentages.
 
+The captured processing allowance pays for every preparation chat or embedding
+request, including each dual-model/active-or-staging lane. Compatible cached
+vectors cost no call. One retained budget identity and atomic counter survive
+stages/restart; counting embeddings can exhaust the same configured total sooner.
+Completed checkpoints and spending remain retained. Pending embedding claims
+block replay of unresolved outputs, including overlapping batches after partial
+publication. Query embedding and independent background repair budgets remain
+unsupported and cannot borrow this source.
+
 `information.retry` resumes missing/failed work using the captured allowance;
-`information.allowance` raises/changes the owner's allowance without moving below
+`information.allowance` raises/changes the document's allowance without moving below
 spending. `information.rebuild` accepts `embed`, `summarise`, `summary_embed`, `autoTag` or `tagGroups`.
 Embedding rebuild keeps paid summaries; summary rebuild clears downstream summary
 vectors. Source refresh/replacement creates a new revision. Extraction/structure

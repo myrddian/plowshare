@@ -11,14 +11,30 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   private final EmbeddingWorkRepository repository;
   private final EmbeddingDispatch dispatcher;
   private final EmbeddingTokenizers tokenizers;
+  private final EmbeddingAuthorization preparation;
 
   public DispatchingDualEmbeddings(
       EmbeddingWorkRepository repository,
       EmbeddingDispatch dispatcher,
       EmbeddingTokenizers tokenizers) {
+    this(repository, dispatcher, tokenizers, null);
+  }
+
+  private DispatchingDualEmbeddings(
+      EmbeddingWorkRepository repository,
+      EmbeddingDispatch dispatcher,
+      EmbeddingTokenizers tokenizers,
+      EmbeddingAuthorization preparation) {
+    this.preparation = preparation;
     this.repository = Objects.requireNonNull(repository);
     this.dispatcher = Objects.requireNonNull(dispatcher);
     this.tokenizers = Objects.requireNonNull(tokenizers);
+  }
+
+  @Override
+  public DualEmbeddings forPreparation(EmbeddingAuthorization permit) {
+    return new DispatchingDualEmbeddings(
+        repository, dispatcher, tokenizers, Objects.requireNonNull(permit));
   }
 
   @Override
@@ -49,6 +65,8 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   @Override
   public List<EmbeddingQuery> queries(
       EmbeddingProfile profile, List<String> texts, UsageAttribution owner) {
+    if (preparation != null)
+      throw new IllegalStateException("Document preparation cannot authorize search queries");
     return vectors(
             profile,
             texts,
@@ -96,10 +114,10 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     List<float[]> output;
     try {
       submitted.run();
-      output =
-          dispatcher
-              .embed(EmbeddingRequest.of(definition.modelId(), inputs).withAttribution(owner))
-              .vectors();
+      var request = EmbeddingRequest.of(definition.modelId(), inputs).withAttribution(owner);
+      if (preparation != null) request = request.withAuthorization(preparation.authorize(request));
+      output = dispatcher.embed(request).vectors();
+      if (preparation != null) preparation.require();
     } catch (LlmException failed) {
       throw new EmbeddingException(failed.getMessage(), failed);
     }
@@ -140,6 +158,7 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     Objects.requireNonNull(owner);
     if (keys == null || keys.size() > 100 || new HashSet<>(keys).size() != keys.size())
       throw new IllegalArgumentException("invalid embedding repair batch");
+    if (preparation != null) preparation.sources(keys);
     var sources = keys.stream().map(repository::source).flatMap(Optional::stream).toList();
     if (sources.size() != keys.size()) return new RepairResult(0, 0);
     var completed = new HashSet<>(keys);
@@ -158,9 +177,18 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
                   false,
                   owner,
                   calls::incrementAndGet);
-          for (int i = 0; i < missing.size(); i++)
-            if (!repository.publish(target, missing.get(i), output.get(i)))
+          for (int i = 0; i < missing.size(); i++) {
+            if (preparation != null) preparation.require();
+            if (!(preparation == null
+                ? repository.publish(target, missing.get(i), output.get(i))
+                : repository.publish(
+                    target, missing.get(i), output.get(i), preparation::require))) {
+              if (preparation != null)
+                throw new IllegalStateException("Preparation output changed");
               completed.remove(missing.get(i).key());
+            }
+          }
+          if (preparation != null) preparation.published();
         } catch (EmbeddingException failed) {
           for (var source : missing)
             repository.failed(target, source, failed.getClass().getSimpleName());
@@ -190,6 +218,8 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
 
   /** One bounded pass; staged vectors and retry timestamps are the persisted rebuild checkpoint. */
   public int tick() {
+    if (preparation != null)
+      throw new IllegalStateException("Document preparation cannot authorize maintenance");
     int published = 0;
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
       for (EmbeddingProfile target : writeProfiles(slot)) {

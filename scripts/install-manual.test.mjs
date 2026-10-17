@@ -241,3 +241,38 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     await new Promise(resolve => http.close(resolve)); await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('Global installation binds the destination and never adopts a Personal journal', async () => {
+  const destination = '00000000-0000-0000-0000-000000000004';
+  assert.equal(options(['--dry-run', '--global'], {}).global, true);
+  let effects = 0;
+  const client = { call: async () => { effects++; throw new Error('unexpected effect'); } };
+  await assert.rejects(publishManual(plan('Global manual'), client, {
+    journal: newJournal('https://server.invalid', 'admin'), destination, persist: async () => {},
+  }), /invalid|another server/);
+  assert.equal(effects, 0);
+  const journal = newJournal('https://server.invalid', 'admin', destination);
+  await assert.rejects(publishManual(plan('Global manual'), client, {
+    journal, persist: async () => {},
+  }), /invalid|another server/);
+  assert.equal(effects, 0);
+});
+
+
+test('Global installation waits for budgeted preparation and preserves destination receipts', async () => {
+  const destination = '00000000-0000-0000-0000-000000000004';
+  const server = catalogue();
+  const client = { call: async (operation, payload) => {
+    const result = await server.call(operation, payload);
+    if (operation === 'status') result.steps = ['extract','derive','embed','summarise','summary_embed'].map(stage => ({stage,state:'ready',generation:1,attempt:1}));
+    return result;
+  } };
+  const journal = newJournal('http://server.invalid', 'admin', destination);
+  const opts = {journal,destination,persist:async () => {}};
+  await publishManual(plan('Global manual'), client, opts);
+  const effects = server.calls.filter(row => row.operation === 'upload' || row.operation === 'tags').length;
+  await publishManual(plan('Global manual'), client, opts);
+  assert.equal(server.calls.filter(row => row.operation === 'upload' || row.operation === 'tags').length,effects);
+  assert.equal(journal.destination,destination);
+});

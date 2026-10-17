@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+const GLOBAL_ACCOUNT = '00000000-0000-0000-0000-000000000004';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -76,12 +77,13 @@ export async function loadManual(root = ROOT) {
 }
 
 /** The journal deliberately excludes passwords, tokens and chapter contents. */
-export function newJournal(server, account) {
-  return { version: 1, server, account, operations: {}, chapters: {} };
+export function newJournal(server, account, destination = 'personal') {
+  return { version: 1, server, account, destination, operations: {}, chapters: {} };
 }
 
-function validateJournal(journal, server, account) {
-  if (!object(journal) || journal.version !== 1 || journal.server !== server || journal.account !== account
+function validateJournal(journal, server, account, destination = 'personal') {
+  if (!['personal', GLOBAL_ACCOUNT].includes(destination)) throw new Error('Unsupported manual destination.');
+  if (!object(journal) || (journal.destination ?? 'personal') !== destination || journal.version !== 1 || journal.server !== server || journal.account !== account
       || !object(journal.operations) || !object(journal.chapters)) {
     throw new Error('Manual journal is invalid or belongs to another server/account.');
   }
@@ -115,11 +117,11 @@ const excluded = value => {
  * persist must durably save the journal before returning. No mutation is retried
  * within this invocation, and a saved pending receipt needs explicit resume. */
 export async function publishManual(plan, client, {
-  journal, persist, sharedClient, share = false, resume = false, signal,
+  journal, persist, sharedClient, share = false, resume = false, signal, destination = 'personal',
   readinessMs = 300_000, pollMs = 1000, now = Date.now,
   sleep = ms => delay(ms, undefined, { signal }), progress = () => {},
 }) {
-  validateJournal(journal, journal.server, journal.account);
+  validateJournal(journal, journal.server, journal.account, destination);
   if (share && !sharedClient) throw new Error('Shared publication needs a shared-scope reader for verification.');
   // A pending share can only be recovered with explicit sharing still selected.
   // Otherwise this run could report success while leaving that effect unresolved.
@@ -134,7 +136,7 @@ export async function publishManual(plan, client, {
 
   async function mutate(key, operation, payload, validate) {
     signal?.throwIfAborted();
-    const fingerprint = hash(JSON.stringify([operation, payload]));
+    const fingerprint = hash(JSON.stringify(destination === 'personal' ? [operation, payload] : [destination, operation, payload]));
     let row = journal.operations[key];
     if (row && row.fingerprint !== fingerprint) throw new Error('Receipt payload changed; restore the exact manual edition before resuming.');
     if (row?.state === 'done') return validate(row.result);
@@ -171,7 +173,7 @@ export async function publishManual(plan, client, {
       if (!Array.isArray(status.tags) || !status.tags.includes('plowshare-manual') || !status.tags.includes(`manual-chapter-${chapter.id}`)) {
         throw new Error(`Chapter ${chapter.id} is missing its manual tag; inspect revision ${revision}.`);
       }
-      const required = ['extract', 'derive'].map(stage => status.steps.find(row => row.stage === stage && row.generation === status.generation));
+      const required = (destination === 'personal' ? ['extract', 'derive'] : ['extract', 'derive', 'embed', 'summarise', 'summary_embed']).map(stage => status.steps.find(row => row.stage === stage && row.generation === status.generation));
       if (required.some(row => row && ['failed', 'blocked', 'cancelled', 'skipped'].includes(row.state))) {
         throw new Error(`Chapter ${chapter.id} could not become readable; inspect revision ${revision}.`);
       }
@@ -200,10 +202,11 @@ export async function publishManual(plan, client, {
 }
 
 const HELP = `Install the Markdown Plowshare manual into the existing information Library.
-Usage: node scripts/install-manual.mjs [--dry-run] [--url ORIGIN] [--share] [--resume]
+Usage: node scripts/install-manual.mjs [--dry-run] [--url ORIGIN] [--share] [--global] [--resume]
        [--state /absolute/private/journal.json] [--readiness-ms N] [--timeout-ms N]
 
 --dry-run       validate and list chapters offline, without authentication or writes
+--global        explicitly install into the Global account (human scoped ADMIN required)
 --share         explicitly publish chapters to authenticated server accounts
 --resume        resend an uncertain idempotent request with its saved UUID
 --state         private receipt journal outside the checkout (default: config/manual/)
@@ -221,6 +224,7 @@ export function options(args, env = process.env) {
     const flag = args[i];
     if (flag === '--help' || flag === '-h') opts.help = true;
     else if (flag === '--share') opts.share = true;
+    else if (flag === '--global') opts.global = true;
     else if (flag === '--resume') opts.resume = true;
     else if (flag === '--dry-run') opts.dryRun = true;
     else if (['--url', '--state', '--readiness-ms', '--timeout-ms'].includes(flag)) {
@@ -282,7 +286,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     const authTimeout = setTimeout(() => abort.abort(new Error('Manual authentication timed out.')), opts.timeoutMs);
     try { session = await authenticateConfigured(opts.url, env, abort.signal, text => process.stderr.write(text + '\n')); }
     finally { clearTimeout(authTimeout); }
-    const filename = hash(JSON.stringify([opts.url, session.handle])) + '.json';
+    const destination = opts.global ? GLOBAL_ACCOUNT : 'personal';
+    const scope = opts.global ? { kind: 'account', account: GLOBAL_ACCOUNT } : { kind: 'personal', includeShared: true };
+    const filename = hash(JSON.stringify(opts.global ? [opts.url, session.handle, destination] : [opts.url, session.handle])) + '.json';
     const state = opts.state ?? join(dirname(credentialDirectory(env)), 'manual', filename);
     if (inside(ROOT, resolve(state))) throw new Error('Keep the private manual journal outside the source checkout.');
     await mkdir(dirname(state), { recursive: true, mode: 0o700 });
@@ -296,20 +302,20 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     let journal;
     try { journal = JSON.parse(await readFile(state, 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw new Error('Manual journal is unreadable; preserve it and inspect before resuming.'); }
-    journal ??= newJournal(opts.url, session.handle);
-    validateJournal(journal, opts.url, session.handle);
+    journal ??= newJournal(opts.url, session.handle, destination);
+    validateJournal(journal, opts.url, session.handle, destination);
     // A request deadline closes the session; it never falls back to HTTP or resends.
     const transport = { ask: async (type, payload) => {
       const timeout = setTimeout(() => abort.abort(new Error('Manual request timed out; delivery may be uncertain.')), opts.timeoutMs);
       try { return await session.ask(type, payload); } finally { clearTimeout(timeout); }
     } };
-    await publishManual(plan, new InformationClient(transport, { kind: 'personal', includeShared: true }), {
-      journal, persist: value => saveJournal(state, value),
+    await publishManual(plan, new InformationClient(transport, scope), {
+      journal, destination, persist: value => saveJournal(state, value),
       sharedClient: new InformationClient(transport, { kind: 'shared' }),
       share: opts.share, resume: opts.resume, readinessMs: opts.readinessMs, signal: abort.signal,
       progress: row => process.stdout.write(`${row.id}\t${row.revision}\t${row.shared ? 'shared' : 'readable (sharing not requested)'}\n`),
     });
-    process.stdout.write(`Installed ${plan.chapters.length} chapters. Open Help to read the shared manual, or find personal chapters in Library.\n`);
+    process.stdout.write(`Installed ${plan.chapters.length} chapters. Open Help to read the shared manual, or find installed chapters in Library.\n`);
   } finally {
     session?.close();
     if (lock) await rm(lock, { recursive: true, force: true });

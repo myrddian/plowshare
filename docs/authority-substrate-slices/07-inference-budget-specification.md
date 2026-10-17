@@ -49,7 +49,12 @@ ModelCallValidator, ModelCommandJudge, ScheduleReader, DispatchingEmbeddingClien
 counting is preflight metadata, not RUN_MODEL execution. Input/output security
 filters must preserve evidence and cannot create authority.
 
-The source audit confirms a specific missing mechanism: embedding query/write/repair
+The slice 14 [completion implementation](14-completion-plan.md) supplies document
+chunk/summary embeddings from the existing retained revision allowance. The
+following audit gap remains applicable to query and independent repair work,
+including other unclassified archive embedding writes; those paths stay fenced.
+
+The original source audit confirmed a specific missing mechanism: embedding query/write/repair
 services have tokenizer/input bounds and queue deadlines, but no configured
 operation call allowance. Those are not interchangeable. Production calls without
 explicit evidence remain refused. A configured search/deployment budget mechanism

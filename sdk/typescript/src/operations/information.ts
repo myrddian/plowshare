@@ -13,7 +13,8 @@ import { isList } from '../binding/values.ts';
 export type InformationCorpus = 'documents' | 'code';
 export type InformationScope =
   | { kind: 'personal' | 'shared'; includeShared?: boolean }
-  | { kind: 'project'; project: string; includeShared?: boolean };
+  | { kind: 'project'; project: string; includeShared?: boolean }
+  | { kind: 'account'; account: '00000000-0000-0000-0000-000000000004' };
 export const INFORMATION_OPERATIONS = [
   ...NAVIGATION_OPERATIONS,
   ...INTERCHANGE_OPERATIONS,

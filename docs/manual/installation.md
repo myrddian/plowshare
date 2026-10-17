@@ -50,7 +50,8 @@ are supported through the SDK and are not stored in the manual journal.
 
 Use a human account for this installer. Clear `PLOWSHARE_TOKEN` if your environment
 currently selects a scoped service credential: those identities have no Personal
-collection and cannot read the shared catalogue. See
+collection and cannot perform Global ADMIN writes. They can read explicitly
+published GLOBAL_READ knowledge under current resource policy. See
 [accounts and service tokens](../server-administration.md). The installer currently
 has no project-scoped publication mode for service-account readers.
 
@@ -76,6 +77,35 @@ Save those IDs if diagnosing partial installation. A success line means the
 installer verified actual readable text, including a shared-scope read when
 `--share` was selected. It does not claim that every model-derived summary or
 embedding completed.
+
+## Global account installation
+
+A human with ADMIN WRITE on Global can explicitly install into the fixed Global
+account through the existing information operations:
+
+```sh
+node scripts/install-manual.mjs --url https://plowshare.example --global
+```
+
+The authenticated human remains the creator; Global is the custodian. New
+Global-held roots use their existing GLOBAL_READ audience. Global does not become
+an ordinary conversation/run destination, and no Global type registry is created.
+The installer supports the Markdown/manual path, not arbitrary cross-account or
+multipart imports.
+
+Global installation waits for extraction, derivation, chunk embedding, summary
+and summary embedding to complete. These inference calls spend the same captured
+processing allowance. An exhausted allowance preserves completed work for the
+existing explicit increase/retry controls. An unresolved embedding submission is
+held for reconciliation rather than replayed by retry.
+
+Global uses a separate destination-bound journal by default. Reusing a Personal
+journal with `--global`, or a Global journal without it, refuses before effects.
+Existing Personal/project manual installations and receipts are not moved,
+deleted or adopted. If both remain published, managing their separate audiences
+and discovery is an explicit operator action. Ordinary `--share` installation
+continues to wait only for extraction/derivation and readable text; its success
+alone does not prove full model preparation.
 
 ## Processing and cost
 

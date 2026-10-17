@@ -690,10 +690,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     boolean syntaxOnly = write.syntaxOnly();
     DocumentType documentType = write.documentType();
     String fingerprint = write.fingerprint();
-    String namespace =
-        context.selection().scope() == InformationContext.Scope.PROJECT
-            ? "project:" + context.selection().project()
-            : "account:" + context.account();
+    String namespace = context.namespace();
     if (context.selection().scope() == InformationContext.Scope.SHARED)
       throw new CallerFault("shared namespace cannot admit source bytes");
 
@@ -752,7 +749,12 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           resource,
           namespace,
           name,
-          context.account(),
+          context.selection().scope() == InformationContext.Scope.ACCOUNT
+              ? jdbc.queryForObject(
+                  "SELECT legacy_handle FROM authority_accounts WHERE id=?",
+                  String.class,
+                  context.selection().account())
+              : context.account(),
           project,
           kind,
           context.account());

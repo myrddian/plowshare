@@ -9,7 +9,7 @@ import {
 import { dispatch, type Request } from './direct.ts';
 import { parseCommand } from './commands.ts';
 import { InformationClient } from './information.ts';
-import { decodeReply } from './schema.ts';
+import { decodeReply, decodePayload } from './schema.ts';
 
 const fixtures = JSON.parse(
   readFileSync(
@@ -462,4 +462,23 @@ describe('scoped information request and receipt integration', () => {
       ).kind,
     ).toBe('usage');
   });
+});
+
+it('Global account scope is explicit and rejects unsupported information commands', () => {
+  const scope = {
+    kind: 'account',
+    account: '00000000-0000-0000-0000-000000000004',
+  } as const;
+  expect(() => decodePayload('information.list', { scope })).not.toThrow();
+  expect(() =>
+    decodePayload('information.list', {
+      scope: { ...scope, includeShared: false },
+    }),
+  ).toThrow();
+  expect(() =>
+    decodePayload('information.list', {
+      scope: { ...scope, account: '00000000-0000-0000-0000-000000000001' },
+    }),
+  ).toThrow();
+  expect(() => decodePayload('information.types.list', { scope })).toThrow();
 });

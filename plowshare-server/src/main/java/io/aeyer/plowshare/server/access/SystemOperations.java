@@ -36,6 +36,11 @@ public interface SystemOperations {
     void requireTask(Home home, AgentDefinition definition, String task);
 
     CallAuthorization claimed(ChatRequest request, Budget.Claim claim);
+
+    /** Closed preparation-only embedding; other purposes cannot acquire this dispatch lane. */
+    default CallAuthorization claimed(EmbeddingRequest request, Budget.Claim claim) {
+      throw new IllegalStateException("This SYSTEM purpose does not support embedding");
+    }
   }
 
   /**

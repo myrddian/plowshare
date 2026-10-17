@@ -300,6 +300,14 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   }
 
   @Override
+  public boolean publish(EmbeddingProfile target, Source expected, float[] vector, Runnable fence) {
+    return transactions.inTransaction(
+        () -> {
+          fence.run();
+          return publish(target, expected, vector);
+        });
+  }
+
   public boolean publish(EmbeddingProfile target, Source expected, float[] vector) {
     float[] checked = EmbeddingQuery.validate(target, vector);
     return transactions.inTransaction(

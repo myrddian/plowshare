@@ -388,6 +388,7 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   public Embeddings embed(EmbeddingRequest request) {
+    request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
     Routing routing = route(request.specifier(), Lane.EMBEDDING);
     InferenceObserver observer =
@@ -399,7 +400,12 @@ public final class LlmDispatcher implements AutoCloseable {
             request.attribution());
     boundary.accounted(request.authorization(), observer.capture());
     observer =
-        InferenceObserver.authorized(observer, () -> boundary.require(request.authorization()));
+        InferenceObserver.authorized(
+            observer,
+            () -> {
+              request.authorization().requireRequest(request);
+              boundary.require(request.authorization());
+            });
     if (routing.pool().automaticCounting())
       preflight(
           observer, routing, () -> routing.pool().countEmbedding(routing.wireModel(), request));

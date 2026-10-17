@@ -100,6 +100,31 @@ public final class InformationFrames implements FrameArea {
     // Validate the original selector before typed DTO construction can normalize an identity.
     // Navigation/interchange still require their own explicit scope and command contracts.
     var selection = verb.startsWith("migration.") ? null : InformationScopes.from(payload);
+    if (selection != null
+        && selection.scope() == InformationContext.Scope.ACCOUNT
+        && (!java.util.Set.of(
+                    "upload",
+                    "list",
+                    "status",
+                    "await",
+                    "read",
+                    "tags",
+                    "tags.groups",
+                    "exclude",
+                    "unexclude",
+                    "withdraw",
+                    "restore",
+                    "delete",
+                    "retry",
+                    "rebuild",
+                    "allowance",
+                    "share",
+                    "unshare")
+                .contains(verb)
+            || payload.containsKey("typing")
+            || payload.containsKey("expectedRevision")))
+      throw new CallerFault(
+          "This information operation does not support account knowledge targets");
     if (verb.startsWith("interchange.")) {
       return Outcome.ok(
           interchange.execute(

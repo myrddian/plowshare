@@ -93,6 +93,10 @@ public class DocumentController {
         request
             .getRequest()
             .getAttribute(io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE);
+    if (request.getRequest().getParameterMap().containsKey("scope")
+        || request.getRequest().getParameterMap().containsKey("account"))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "This HTTP route does not support account knowledge targets");
     String project = request.getRequest().getParameter("project");
     return informationAccess
         .resolve(

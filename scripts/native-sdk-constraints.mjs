@@ -293,6 +293,9 @@ export function constrain(graph) {
       if(op==='information.interchange.import') rules(s,not(eq('scope.kind','shared')));
     }
     if (op.startsWith('information.')) {
+      const accountOperations = ['upload','list','status','await','read','tags','tags.groups','exclude','unexclude','withdraw','restore','delete','retry','rebuild','allowance','share','unshare'];
+      if (!accountOperations.includes(op.slice('information.'.length))) rules(s,not(eq('scope.kind','account')));
+      else rules(s,implies(eq('scope.kind','account'),and(absent('typing','expectedRevision'),or(absent('corpus'),eq('corpus','documents')))));
       field(s, 'waitMs', { maximum: 30000 });
       for (const key of ['expectedRevision', 'version', 'type', 'attachedRevision']) field(s, key, canonicalUuid);
       field(s, 'expectedControlRevision', integer(1,9007199254740991));

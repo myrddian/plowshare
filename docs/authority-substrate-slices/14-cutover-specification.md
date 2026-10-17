@@ -2,9 +2,10 @@
 
 Recorded before slice 14 enforcement changes, 18 October 2026. This document
 retains the implemented subset's classification and compatibility boundary. The
-subsequently agreed [completion plan](14-completion-plan.md) explicitly plans a
-Global destination and document embedding on the existing processing budget. Its
-implementation is not authorized; the original refusals below remain current.
+subsequently implemented [completion plan](14-completion-plan.md) adds a
+Global destination and document embedding on the existing processing budget.
+The activation boundary below is historical for those two paths; the deferred
+consumers and compatibility-removal requirements remain current.
 
 ## Activation boundary
 

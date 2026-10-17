@@ -1,0 +1,698 @@
+package io.aeyer.plowshare.server.information;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import io.aeyer.plowshare.protocol.*;
+import io.aeyer.plowshare.protocol.frames.*;
+import io.aeyer.plowshare.server.access.*;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
+import io.aeyer.plowshare.server.agents.JobRuntime;
+import io.aeyer.plowshare.server.agents.JobStore;
+import io.aeyer.plowshare.server.agents.LogStages;
+import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.documents.*;
+import io.aeyer.plowshare.server.embedding.*;
+import io.aeyer.plowshare.server.fetch.PageFetcher;
+import io.aeyer.plowshare.server.harness.Harness;
+import io.aeyer.plowshare.server.hooks.Hooks;
+import io.aeyer.plowshare.server.llm.*;
+import io.aeyer.plowshare.server.llm.accounting.*;
+import io.aeyer.plowshare.server.llm.dispatch.*;
+import io.aeyer.plowshare.server.llm.tokens.*;
+import io.aeyer.plowshare.server.ws.*;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.*;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.*;
+
+/**
+ * Public frame admission over real policy, shared allowance, SYSTEM dispatch and publication SQL.
+ */
+@Tag("full-db")
+@Testcontainers
+class GlobalPreparationPersistenceTest {
+  @Container
+  static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("pgvector/pgvector:pg16");
+
+  static DriverManagerDataSource source;
+  JdbcTemplate jdbc;
+  UnitOfWork work;
+  InformationAccess access;
+  InformationCatalogue catalogue;
+  JdbcInformationProcessingRepository processing;
+  BoundSystemOperations system;
+  PreparationEmbeddings preparation;
+  DocumentStore documents;
+  FrameRouter router;
+  final AtomicInteger embedded = new AtomicInteger(), chatted = new AtomicInteger();
+  final Tokenizer tokenizer =
+      new Tokenizer() {
+        public TokenCount count(String text) {
+          return TokenCount.measured(text.length(), "fixture");
+        }
+
+        public String describe() {
+          return "fixture";
+        }
+      };
+  final Map<String, Object> destination =
+      Map.of("kind", "account", "account", BuiltInIdentities.GLOBAL.value().toString());
+
+  @BeforeAll
+  static void migrate() {
+    source = new DriverManagerDataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword());
+    Flyway.configure().dataSource(source).load().migrate();
+  }
+
+  @BeforeEach
+  void setup() {
+    jdbc = new JdbcTemplate(source);
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects,admins CASCADE");
+    jdbc.update(
+        "UPDATE embedding_slots SET active_space_id=NULL,target_space_id=NULL,active_mode=NULL,target_mode=NULL,active_distance=NULL,target_distance=NULL");
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,must_change_password,server_admin) VALUES('admin','fixture',false,true),('operator','fixture',false,true),('reader','fixture',false,false)");
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,must_change_password,server_admin,account_kind) VALUES('app','fixture',false,false,'SERVICE')");
+    work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
+    var identities = new JdbcIdentityRepository(jdbc);
+    var grants = new JdbcScopedGrantRepository(jdbc);
+    ApplicationPolicy applications =
+        ignored -> new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of());
+    var authority =
+        new LiveScopedAuthority(
+            grants, applications, new ApplicationGrantLineage(grants, applications), identities);
+    var members = new JdbcProjectMembers(jdbc);
+    access =
+        new InformationAccess(
+            new EffectiveProjectPermissions(members),
+            io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY,
+            new LiveAccountKnowledgePermissions(identities, grants, authority));
+    var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var readable = new java.util.concurrent.atomic.AtomicReference<InformationReadAccess>();
+    var logs =
+        new InformationJobs(
+            new JdbcJobInformationRepository(jdbc),
+            access,
+            (context, revision) -> readable.get().requireReadable(context, revision));
+    var gates =
+        new InformationWriteGates(
+            new JdbcInformationGateRepository(jdbc, Clock.systemUTC()),
+            work,
+            access,
+            logs,
+            new ConversationStore(jdbc),
+            LogStages.NONE,
+            Hooks.NONE,
+            Harness.NONE);
+    var registry = new JdbcInformationContentTypeRepository(jdbc);
+    var settings = new InformationContentSettings(true);
+    var types =
+        new InformationConfig()
+            .informationContentTypes(registry, access, members, records, work, gates, settings);
+    var content = new JdbcInformationContentRepository(jdbc, registry);
+    catalogue =
+        new InformationCatalogue(
+                records,
+                work,
+                access,
+                logs,
+                new InformationContentAdmission(content, types, access, settings),
+                content,
+                new JdbcInformationProjectionRepository(jdbc, content),
+                gates)
+            .withAllowance(() -> 30);
+    readable.set(catalogue);
+    documents = new DocumentStore(jdbc, work);
+    processing = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
+    system =
+        new BoundSystemOperations(
+            identities,
+            grants,
+            authority,
+            new JdbcSystemOperationRecords(jdbc),
+            new OperationInference(
+                mock(OperationAuthority.class), new JdbcInferenceAdmissions(jdbc)));
+    preparation = new BoundPreparationEmbeddings(processing, work, system);
+    var frames =
+        new InformationFrames(
+            catalogue,
+            access,
+            documents,
+            mock(RetrievalService.class),
+            mock(Deliberation.class),
+            mock(JobStore.class),
+            new DocumentsProperties(),
+            mock(PageFetcher.class),
+            mock(InformationContentTypes.class),
+            mock(InformationContentSettings.class),
+            mock(InformationNavigationService.class),
+            mock(InformationInterchangeService.class));
+    router = new FrameRouter(frames.frames());
+    router.useAuthorization(
+        new ProjectAuthorization(
+            new JdbcResourceScopeRepository(jdbc), members, mock(AdminStore.class)));
+  }
+
+  Outcome call(String actor, String verb, Map<String, Object> payload) {
+    var fields = new LinkedHashMap<>(payload);
+    fields.put("scope", destination);
+    return router.route(
+        new Envelope(
+            UUID.randomUUID().toString(), "information." + verb, Envelope.CURRENT_VERSION, fields),
+        new Asking("acceptance", actor));
+  }
+
+  UUID upload(UUID request) {
+    var result =
+        call(
+            "admin",
+            "upload",
+            Map.of(
+                "requestId",
+                request.toString(),
+                "name",
+                "manual.md",
+                "text",
+                "# Manual\n\nRetained deployment knowledge."));
+    assertEquals(Code.ACCEPTED, result.code(), result.said());
+    return assertInstanceOf(InformationCatalogue.Admission.class, result.payload()).revision();
+  }
+
+  @Test
+  void destinationKeepsCustodySeparateAndLiveWritesCannotBorrowCreatorOrReaderAuthority() {
+    var request = UUID.randomUUID();
+    var revision = upload(request);
+    assertEquals(revision, upload(request));
+    assertEquals(
+        "GLOBAL",
+        jdbc.queryForObject(
+            "SELECT q.owner_handle FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id WHERE r.id=?",
+            String.class,
+            revision));
+    assertEquals(
+        "admin",
+        jdbc.queryForObject(
+            "SELECT a.legacy_handle FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id JOIN authority_accounts a ON a.id=q.created_by WHERE r.id=?",
+            String.class,
+            revision));
+    assertEquals(BuiltInIdentities.GLOBAL_KNOWLEDGE.value(), processing.home(revision).value());
+    for (String actor : List.of("reader", "app")) {
+      assertEquals(Code.OK, call(actor, "list", Map.of()).code());
+      assertNotEquals(
+          Code.OK,
+          call(
+                  actor,
+                  "tags",
+                  Map.of(
+                      "revision",
+                      revision.toString(),
+                      "requestId",
+                      UUID.randomUUID().toString(),
+                      "tags",
+                      List.of("stolen")))
+              .code());
+      assertNotEquals(
+          Code.OK,
+          call(
+                  actor,
+                  "upload",
+                  Map.of(
+                      "requestId",
+                      UUID.randomUUID().toString(),
+                      "name",
+                      "denied.md",
+                      "text",
+                      "denied"))
+              .code());
+    }
+    assertEquals(
+        Code.OK,
+        call(
+                "admin",
+                "tags",
+                Map.of(
+                    "revision",
+                    revision.toString(),
+                    "requestId",
+                    UUID.randomUUID().toString(),
+                    "tags",
+                    List.of("manual")))
+            .code());
+    jdbc.update("UPDATE admins SET server_admin=false WHERE handle='admin'");
+    assertNotEquals(
+        Code.OK,
+        call(
+                "admin",
+                "tags",
+                Map.of(
+                    "revision",
+                    revision.toString(),
+                    "requestId",
+                    UUID.randomUUID().toString(),
+                    "tags",
+                    List.of("lost")))
+            .code());
+    assertEquals(
+        Code.OK,
+        call(
+                "operator",
+                "tags",
+                Map.of(
+                    "revision",
+                    revision.toString(),
+                    "requestId",
+                    UUID.randomUUID().toString(),
+                    "tags",
+                    List.of("managed")))
+            .code());
+    assertEquals(Code.BAD_REQUEST, call("operator", "types.list", Map.of()).code());
+  }
+
+  LlmDispatcher dispatcher() {
+    var transport =
+        new LlmTransport() {
+          public void close() {}
+
+          public String poolName() {
+            return "fixture";
+          }
+
+          public Completion complete(
+              String model, List<ChatMessage> messages, Sampling sampling, List<ToolSchema> tools) {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            chatted.incrementAndGet();
+            return new Completion(
+                "A grounded manual summary.", "stop", TokenUsage.UNKNOWN, List.of());
+          }
+
+          public Completion stream(
+              String model,
+              List<ChatMessage> messages,
+              Sampling sampling,
+              List<ToolSchema> tools,
+              Deltas sink,
+              java.util.function.BooleanSupplier cancelled) {
+            return complete(model, messages, sampling, tools);
+          }
+
+          public Embeddings embed(String model, List<String> texts) {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            embedded.incrementAndGet();
+            return new Embeddings(
+                texts.stream()
+                    .map(
+                        t -> {
+                          float[] v = new float[768];
+                          v[0] = 1;
+                          return v;
+                        })
+                    .toList(),
+                null);
+          }
+        };
+    return new LlmDispatcher(
+        List.of(
+            new LlmPool(
+                "fixture",
+                List.of("model", "code-encoder", "prose-encoder"),
+                Map.of("reasoning", "model"),
+                4,
+                1,
+                Duration.ofSeconds(5),
+                transport)),
+        new NoOpTokenLedger(),
+        ignored -> "model",
+        InferenceAccounting.NONE,
+        null,
+        null,
+        io.aeyer.plowshare.server.security.ChatFiltering.NONE,
+        new RetainedInferenceBoundary(new JdbcInferenceAdmissions(jdbc)));
+  }
+
+  InformationLifecycle lifecycle(LlmDispatcher dispatcher, boolean dual) {
+    var definitions = new LinkedHashMap<String, AgentDefinition>();
+    for (String name :
+        List.of(
+            Summariser.PARAGRAPH,
+            Summariser.SPAN,
+            Summariser.SECTION,
+            Summariser.CHAPTER,
+            Summariser.DOCUMENT))
+      definitions.put(
+          name,
+          new AgentDefinition(
+              name,
+              "summary",
+              "model",
+              List.of(),
+              List.of(),
+              List.of(),
+              1,
+              1,
+              "Summarise supplied evidence"));
+    var runtime = new JobRuntime(dispatcher, List.of());
+    var summariser =
+        new Summariser(
+            documents, runtime, () -> new AgentRegistry(definitions), 12, null, null, system);
+    var props = new LlmProperties();
+    props.setEmbeddingModel("model");
+    props.setEmbeddingDim(768);
+    props.setEmbeddingMaxInputTokens(2048);
+    var embeddings = new DispatchingEmbeddingClient(dispatcher, props, tokenizer);
+    var properties = new DocumentsProperties();
+    UsageOwners owners =
+        new UsageOwners() {
+          public UsageAttribution in(
+              Home home, String actor, UsageAttribution.Operation operation) {
+            return UsageAttribution.system(home.project(), operation);
+          }
+
+          public UsageAttribution processing(String log, UsageAttribution.Operation operation) {
+            return UsageAttribution.system(null, operation);
+          }
+        };
+    DualEmbeddings lanes = null;
+    if (dual) {
+      var spaces = new JdbcEmbeddingSpaceRepository(jdbc);
+      var records = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+      for (var slot : EmbeddingSlot.values()) {
+        var space =
+            spaces.register(
+                new EmbeddingSpace.Definition(
+                    slot.stored() + "-encoder",
+                    "fixture-weights",
+                    768,
+                    "query: ",
+                    "document: ",
+                    "cls",
+                    EmbeddingSpace.Normalization.NONE,
+                    "none"));
+        records.inputLimit(space, 2048);
+        records.configure(
+            slot,
+            space,
+            new EmbeddingSearchPolicy(
+                EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+      }
+      var counters = mock(EmbeddingTokenizers.class);
+      when(counters.model(any())).thenReturn(tokenizer);
+      lanes = new DispatchingDualEmbeddings(records, dispatcher::embed, counters);
+      documents.useDualEmbeddings(lanes);
+    }
+    var processor =
+        InformationLifecycle.processing(
+            processing,
+            work,
+            catalogue,
+            documents,
+            embeddings,
+            new Chunking(tokenizer, 512, 2048),
+            32,
+            768,
+            () -> summariser,
+            properties,
+            null,
+            owners,
+            lanes,
+            preparation);
+    var inputs = new InformationJobs(new JdbcJobInformationRepository(jdbc), access);
+    var hooks =
+        new InformationStageHooks(
+            new JdbcInformationStageRepository(jdbc),
+            catalogue,
+            new ConversationStore(jdbc),
+            LogStages.NONE,
+            inputs,
+            Hooks.NONE,
+            Harness.NONE,
+            () -> null,
+            system,
+            processing);
+    return new InformationLifecycle(processing, work, catalogue, processor, hooks);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void globalPreparationContinuesAfterCreatorLosesAdminAndChargesEveryInference(boolean dual) {
+    UUID revision = upload(UUID.randomUUID());
+    jdbc.update("UPDATE admins SET server_admin=false WHERE handle='admin'");
+    try (var dispatcher = dispatcher();
+        var lifecycle = lifecycle(dispatcher, dual)) {
+      for (int i = 0; i < 8; i++) {
+        if (ready(revision)) break;
+        assertTrue(
+            lifecycle.drainOne(revision),
+            () ->
+                jdbc.queryForList(
+                        "SELECT stage,state,error FROM information_steps WHERE revision_id=?",
+                        revision)
+                    .toString());
+      }
+      assertTrue(
+          ready(revision),
+          jdbc.queryForList(
+                  "SELECT stage,state,error FROM information_steps WHERE revision_id=?", revision)
+              .toString());
+      assertTrue(chatted.get() > 0);
+      assertEquals(dual ? 4 : 2, embedded.get());
+      var source = processing.budgetSource(revision);
+      assertEquals(chatted.get() + embedded.get(), source.spent());
+      assertEquals(
+          source.spent(),
+          jdbc.queryForObject(
+              "SELECT count(*) FROM inference_admissions WHERE budget_id=?",
+              Integer.class,
+              source.id()));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(DISTINCT budget_id) FROM inference_admissions", Integer.class));
+      assertEquals(
+          Code.OK,
+          call("reader", "read", Map.of("revision", revision.toString(), "limit", 500)).code());
+      assertEquals(
+          Code.OK,
+          call("app", "read", Map.of("revision", revision.toString(), "limit", 500)).code());
+      assertFalse(
+          new InformationJobs(new JdbcJobInformationRepository(jdbc), access)
+              .logAllowed(source.log(), "reader"));
+      var reopened =
+          new JdbcInformationProcessingRepository(
+              jdbc, Clock.systemUTC(), new JdbcProjectMembers(jdbc));
+      assertEquals(source, reopened.budgetSource(revision));
+      assertTrue(ready(revision));
+      assertEquals(chatted.get() + embedded.get(), reopened.budgetSource(revision).spent());
+    }
+  }
+
+  boolean ready(UUID revision) {
+    return jdbc.queryForObject(
+        "SELECT count(*)=5 FROM information_steps WHERE revision_id=? AND stage IN ('extract','derive','embed','summarise','summary_embed') AND state='ready'",
+        Boolean.class,
+        revision);
+  }
+
+  @Test
+  void explicitAllowanceIncreaseResumesWithoutResettingSpendingOrRepeatingCompletedEmbeddings() {
+    UUID revision = upload(UUID.randomUUID());
+    jdbc.update("UPDATE information_revisions SET allowance_total=1 WHERE id=?", revision);
+    UUID budget = processing.budgetSource(revision).id();
+    try (var dispatcher = dispatcher();
+        var lifecycle = lifecycle(dispatcher, false)) {
+      for (int i = 0; i < 5; i++) lifecycle.drainOne(revision);
+      assertFalse(ready(revision));
+      assertEquals(1, embedded.get());
+      assertEquals(0, chatted.get());
+      assertEquals(1, processing.budgetSource(revision).spent());
+      assertEquals(
+          Code.OK,
+          call(
+                  "operator",
+                  "allowance",
+                  Map.of(
+                      "revision", revision.toString(),
+                      "requestId", UUID.randomUUID().toString(),
+                      "maxModelCalls", 40))
+              .code());
+      assertEquals(
+          Code.OK,
+          call(
+                  "operator",
+                  "retry",
+                  Map.of(
+                      "revision", revision.toString(),
+                      "requestId", UUID.randomUUID().toString(),
+                      "stages", List.of("summarise")))
+              .code());
+      for (int i = 0; i < 8 && !ready(revision); i++) lifecycle.drainOne(revision);
+      assertTrue(ready(revision));
+      assertEquals(2, embedded.get());
+      var retained = processing.budgetSource(revision);
+      assertEquals(budget, retained.id());
+      assertEquals(chatted.get() + embedded.get(), retained.spent());
+    }
+  }
+
+  InformationLifecycle.Lease embeddingLease(UUID revision) {
+    jdbc.update(
+        "UPDATE information_steps SET state='ready' WHERE revision_id=? AND stage IN ('extract','derive')",
+        revision);
+    // A tiny retained projection supplies an exact summary output target without reading private
+    // data.
+    jdbc.update(
+        "UPDATE information_steps SET state='ready' WHERE revision_id=? AND stage IN ('embed','summarise')",
+        revision);
+    return work.inTransaction(
+        () -> {
+          var lease = processing.candidate(revision, false).orElseThrow().lease();
+          processing.start(lease, null);
+          return lease;
+        });
+  }
+
+  @Test
+  void scopedAdminRevocationWaitsForTheAdmittedMutationAndThenStopsNewWrites() throws Exception {
+    var revision = upload(UUID.randomUUID());
+    var context =
+        access.resolve(
+            "admin", InformationContext.Selection.account(BuiltInIdentities.GLOBAL.value()));
+    var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var admitted = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var mutation =
+          workers.submit(
+              () ->
+                  work.inTransaction(
+                      () -> {
+                        records.lockResource(context, revision, false);
+                        admitted.countDown();
+                        try {
+                          if (!release.await(10, TimeUnit.SECONDS))
+                            throw new IllegalStateException("fixture timeout");
+                        } catch (InterruptedException interrupted) {
+                          Thread.currentThread().interrupt();
+                          throw new IllegalStateException(interrupted);
+                        }
+                        records.tags(context, revision, List.of("committed"));
+                        return true;
+                      }));
+      assertTrue(admitted.await(10, TimeUnit.SECONDS));
+      var revoke =
+          workers.submit(
+              () -> jdbc.update("UPDATE admins SET server_admin=false WHERE handle='admin'"));
+      try {
+        assertThrows(TimeoutException.class, () -> revoke.get(200, TimeUnit.MILLISECONDS));
+      } finally {
+        release.countDown();
+      }
+      assertTrue(mutation.get(10, TimeUnit.SECONDS));
+      revoke.get(10, TimeUnit.SECONDS);
+    }
+    assertThrows(
+        RuntimeException.class,
+        () -> work.inTransaction(() -> records.lockResource(context, revision, false)));
+  }
+
+  @Test
+  void concurrentLastCallClaimsCannotOverdrawOrReplayAndReopenedBudgetStaysExhausted()
+      throws Exception {
+    UUID revision = upload(UUID.randomUUID());
+    jdbc.update("UPDATE information_revisions SET allowance_total=1 WHERE id=?", revision);
+    var lease = embeddingLease(revision);
+    var key =
+        EmbeddingWorkRepository.Key.of(
+            EmbeddingWorkRepository.Store.DOCUMENTS, revision.toString());
+    var start = new CountDownLatch(1);
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = new ArrayList<Future<Boolean>>();
+      for (int i = 0; i < 2; i++)
+        futures.add(
+            workers.submit(
+                () -> {
+                  start.await();
+                  try {
+                    new BoundPreparationEmbeddings(processing, work, system)
+                        .forSources(lease, List.of(key))
+                        .authorize(EmbeddingRequest.of("model", List.of("retained summary")));
+                    return true;
+                  } catch (IllegalStateException refused) {
+                    return false;
+                  }
+                }));
+      start.countDown();
+      int winners = 0;
+      for (var future : futures) if (future.get(10, TimeUnit.SECONDS)) winners++;
+      assertEquals(1, winners);
+    }
+    var reopened = new BoundPreparationEmbeddings(processing, work, system);
+    assertTrue(reopened.budget(lease).tryClaim().isEmpty());
+    assertEquals(1, processing.budgetSource(revision).spent());
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM inference_admissions WHERE preparation_revision=?",
+            Integer.class,
+            revision));
+  }
+
+  @Test
+  void pendingClaimBlocksReplayAndSharesStableBudgetWithChat() {
+    UUID revision = upload(UUID.randomUUID());
+    var lease = embeddingLease(revision);
+    var key =
+        EmbeddingWorkRepository.Key.of(
+            EmbeddingWorkRepository.Store.DOCUMENTS, revision.toString());
+    var permit = preparation.forSources(lease, List.of(key));
+    var request = EmbeddingRequest.of("model", List.of("retained summary"));
+    var captured = permit.authorize(request);
+    var source = processing.budgetSource(revision);
+    assertEquals(source.id(), captured.binding().budget());
+    assertEquals(1, source.spent());
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            captured.requireRequest(
+                EmbeddingRequest.of("model", List.of("substituted private input"))));
+    new RetainedInferenceBoundary(new JdbcInferenceAdmissions(jdbc)).submitted(captured);
+    var reopened =
+        new BoundPreparationEmbeddings(
+            new JdbcInformationProcessingRepository(
+                jdbc, Clock.systemUTC(), new JdbcProjectMembers(jdbc)),
+            work,
+            system);
+    assertThrows(
+        IllegalStateException.class,
+        () -> reopened.forSources(lease, List.of(key)).authorize(request));
+    assertEquals(1, processing.budgetSource(revision).spent());
+    permit.published();
+    var budget = reopened.budget(lease);
+    assertEquals(source.id(), budget.tryClaim().orElseThrow().budget());
+    assertEquals(2, processing.budgetSource(revision).spent());
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbc.update(
+                "UPDATE information_revisions SET processing_budget_id=? WHERE id=?",
+                UUID.randomUUID(),
+                revision));
+    jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", revision);
+    assertThrows(RuntimeException.class, captured::require);
+  }
+}
