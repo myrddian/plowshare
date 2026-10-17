@@ -4,8 +4,21 @@ Status: source-grounded impact assessment, 17 October 2026. The broader model
 remains proposed. The separately authorized project READ/WRITE foundation (01),
 additive identities/scopes with locked built-ins (02), and scoped RBAC grants
 with role/agent ceilings (03), and knowledge home/provenance with scoped
-READ/WRITE/control admission (04) are implemented in this branch. Global audience
-and runtime cutovers remain later work.
+READ/WRITE/control admission (04), and current-root policy with GLOBAL_READ (05)
+are implemented in this branch. Runtime/SYSTEM/acting and remaining contract
+cutovers remain later work.
+
+
+Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
+ownerOnly reconciliation, live filtering for every revision, and explicit general
+reads for active authenticated human, Application and service principals. Existing
+Manager share/unshare commands govern the root; private inputs, retained reference
+obligations and processing logs remain protected. Curation retains proposals but
+human acceptance requires source Manager and Global Admin admission. This is the
+existing copy-and-retire action; no generic copy/transfer capability was added.
+See the [slice 05 implementation and verification](authority-substrate-slices/05-root-policy-and-global-read.md).
+The baseline findings below remain historical evidence where a slice explicitly
+supersedes them; they are not claims that unmigrated runtime consumers are fixed.
 
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [migration map](global-scope-migration-map.md) and

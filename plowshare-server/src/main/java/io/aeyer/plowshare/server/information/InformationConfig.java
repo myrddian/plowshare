@@ -49,8 +49,9 @@ public class InformationConfig {
   }
 
   @Bean
-  public InformationNavigationRepository informationNavigationRepository(JdbcTemplate jdbc) {
-    return new JdbcInformationNavigationRepository(jdbc);
+  public InformationNavigationRepository informationNavigationRepository(
+      JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
+    return new JdbcInformationNavigationRepository(jdbc, members);
   }
 
   @Bean

@@ -196,7 +196,7 @@ class InformationFacetsTest {
   void lexical_retrieval_filters_candidates_before_the_hit_limit_and_coverage() {
     var store = new DocumentStore(jdbc, work);
     var chunking =
-        new Chunking(new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(4), 1000, 2000);
+        new Chunking(new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4), 1000, 2000);
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
@@ -251,6 +251,13 @@ class InformationFacetsTest {
         store.attachDocumentSummary(id, "PostgreSQL vector search");
         store.attachSummaryEmbedding(id, vector);
       }
+      // Manually attached test vectors must carry the same readiness/fingerprint as production.
+      // Otherwise coverage correctly excludes them before retrieval can exercise its facet filter.
+      jdbc.update(
+          "UPDATE information_steps SET state='ready',fingerprint=? WHERE revision_id IN (?,?) AND stage IN ('embed','summary_embed')",
+          InformationConfiguration.embedding("fixture", 768),
+          wanted.revision(),
+          other.revision());
       var embeddings = mock(EmbeddingClient.class);
       when(embeddings.embed(anyString())).thenReturn(vector);
       var retrieval = new RetrievalService(store, embeddings, "fixture", 768);
@@ -849,10 +856,23 @@ class InformationFacetsTest {
     UUID dependency = sweepCandidate("restricted-report.txt", "PostgreSQL"),
         privateInput = revision("other", "[]", "[]", "source");
     jdbc.update("INSERT INTO information_inputs VALUES(?,?)", dependency, privateInput);
-    UUID ownerless = sweepCandidate("ownerless.txt", "PostgreSQL");
+    // Construct an unclassified legacy source; mapped homes and revision identity are immutable.
+    UUID ownerlessRoot = UUID.randomUUID(), ownerless = UUID.randomUUID();
     jdbc.update(
-        "UPDATE information_resources SET owner_handle=NULL WHERE id=(SELECT resource_id FROM information_revisions WHERE id=?)",
-        ownerless);
+        "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy','ownerless-source','source')",
+        ownerlessRoot);
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,extracted_text,allowance_total) VALUES(?,?,1,'Ownerless','text/plain','fixture',1,'PostgreSQL',5)",
+        ownerless,
+        ownerlessRoot);
+    for (String stage : InformationCatalogue.STAGES)
+      jdbc.update(
+          "INSERT INTO information_steps(revision_id,generation,stage,state) VALUES(?,1,?,?)",
+          ownerless,
+          stage,
+          List.of("extract", "derive").contains(stage)
+              ? "ready"
+              : stage.equals("tagGroups") ? "failed" : "skipped");
     try (var queue =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(

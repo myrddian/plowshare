@@ -84,9 +84,8 @@ import org.slf4j.LoggerFactory;
  *
  * <h2>A ruling that a claim is local is remembered, or a pass never converges</h2>
  *
- * <p><b>All three decisions file a proposal; the decision chooses only how the curator settles its
- * own question.</b> {@code promote} approves it, {@code ask} leaves it waiting for a person, and
- * {@code keep} rejects it under {@link #BY}.
+ * <p>All three decisions file a proposal. Both {@code promote} and {@code ask} leave it waiting for
+ * an authorized person; {@code keep} records a local rejection under {@link #BY}.
  *
  * <p>The third one is the load-bearing half and it was nearly left out. A {@code keep} that filed
  * nothing creates no row, so the memory never enters {@code ProposalStore.ruledOn}; {@link
@@ -161,21 +160,12 @@ import org.slf4j.LoggerFactory;
  * {@code promotion_judge.md} changed") are human judgements. A curator re-opening its own keeps
  * would be that ≈400 with a new name.
  *
- * <h2>A promotion is filed before it is performed</h2>
+ * <h2>Recommendations require release authority</h2>
  *
- * <p>Even a confident ruling goes through {@link ProposalStore#propose} and then {@link
- * PromotionQueue#approve}, rather than calling {@link Archive#promote} directly. {@code promote}'s
- * own javadoc says two promotions of one id can both pass its checks and file two global records,
- * and that this is "unguarded on purpose … the spec puts staleness in the proposal queue, where a
- * unique index on pending rows holds it across two transactions and a Java check cannot". A curator
- * calling {@code promote} directly is exactly the caller that sentence was written about: two
- * passes over one project are two transactions. Filing first buys the index's guarantee, and buys a
- * durable row saying what was promoted and why — which {@code Verdict.reason} could not, because
- * nothing persists one.
- *
- * <p>It also means <b>one code path files, and confidence decides only whether the curator answers
- * its own question.</b> An unsure ruling stops after the proposal; a confident one settles it as
- * {@link #BY}.
+ * <p>Both confident and uncertain recommendations file a pending proposal. A model verdict and the
+ * {@link #BY} provenance label cannot authorize a Global copy. Existing human acceptance checks
+ * authenticated source MANAGER and Global ADMIN authority before the queue claims it. KEEP still
+ * records the local ruling, and pending proposals still prevent repeated judgements.
  */
 public final class Curator {
 
@@ -184,14 +174,7 @@ public final class Curator {
   /** The agent that rules on one memory, and the stem of its file. */
   public static final String AGENT = "promotion_judge";
 
-  /**
-   * Who a curator-approved promotion is credited to.
-   *
-   * <p>Not a person, and it says so. {@code PromotionQueue.approve} documents {@code by} as the
-   * human who decided a memory belongs everywhere; this is the other caller, and a row settled
-   * under this name is one no human looked at. It is spelled once so that a query for "what did the
-   * curator decide by itself" is one string rather than a guess.
-   */
+  /** Provenance for recommendations and local rulings; never an authenticated principal. */
   public static final String BY = "curator";
 
   /**
@@ -651,9 +634,8 @@ public final class Curator {
    * break no boot and fail no test, and every pass would simply resolve nothing forever. What
    * belongs in the file is the policy — what makes a claim general rather than local.
    *
-   * <p>Spelled out with what each decision does, because the words are not self-explanatory: {@code
-   * promote} acts without asking anybody, and a model that had {@code promote} and {@code ask} the
-   * wrong way round would put a project's local facts into every project's recall.
+   * <p>Confidence distinguishes a recommendation from an uncertain question. Both require a person
+   * with source release and Global destination authority before copying the memory.
    *
    * <p><b>{@code keep}'s clause says it is final, and it said "nothing is filed" until a review
    * caught it.</b> That sentence described the design this class had before a keep became a durable
@@ -677,8 +659,8 @@ public final class Curator {
             {"decision": "keep", "reason": "one sentence"}
 
             promote — this claim holds for every project, not only this one, and \
-            you are sure enough that nobody needs to be asked. It is copied into \
-            the global archive at once and this project's record is retired.
+            you confidently recommend it. An authorized person must approve \
+            copying it into the global archive and retiring this project's record.
             ask — it may well belong everywhere, and you are not sure. A person \
             is asked, and your reason is the whole of what they see.
             keep — this claim is about this project alone. Nothing is promoted \
@@ -783,29 +765,9 @@ public final class Curator {
           + " question; nothing was promoted and nobody was asked.";
 
   /**
-   * File the question, and settle it the way the judge ruled.
-   *
-   * <p><b>One path for all three</b>, so that no decision can skip the queue — see the class note,
-   * both halves of it: {@code promote} must not reach {@code Archive.promote} without the claim the
-   * unique index makes, and {@code keep} must leave a row or the memory is judged again every pass
-   * forever.
-   *
-   * <p>A refusal at either step is recorded and the pass goes on: another pass having filed the
-   * same row first, or a memory retired between the index read and the promotion, are ordinary
-   * interleavings rather than reasons to stop curating a project.
-   *
-   * <p>When the promotion is refused, {@code PromotionQueue.approve} has already given the claim
-   * back, so the row is waiting again and a person still sees the question. That is its behaviour
-   * and not this method's, and it is why nothing here tries to undo anything. <b>A refused {@code
-   * keep} is the opposite case and is left waiting on purpose</b> — the row exists, so the memory
-   * is not judged again, and a person answering a question the curator meant to answer itself is a
-   * smaller fault than a pass that never converges.
-   *
-   * <p>What that leaves on the queue is a row a person reads oddly: {@code action: promote}
-   * carrying a {@code reason} that argues against promoting it, because the judge's sentence is
-   * filed before the settlement that would have explained it. Named here rather than left to be met
-   * — it needs a concurrent settle or a database failure between the two statements, so it is rare,
-   * and the alternative is filing under a reason the judge did not give.
+   * Files each recommendation durably; only KEEP settles locally. Duplicate proposals and refused
+   * local settlements retain their existing recovery semantics. A refused KEEP stays pending so the
+   * candidate is not judged repeatedly and an authorized person can review the question.
    */
   private void file(TocEntry candidate, Ruling ruling, Tally tally) {
     Proposal filed;
@@ -820,27 +782,9 @@ public final class Curator {
     switch (ruling.decision()) {
       case ASK -> tally.proposed.add(filed.id() + " for " + candidate.id());
       case KEEP -> keep(candidate, filed, tally);
-      case PROMOTE -> promote(candidate, filed, tally);
-    }
-  }
-
-  private void promote(TocEntry candidate, Proposal filed, Tally tally) {
-    try {
-      PromotionQueue.Approval approval = queue.approve(filed.id(), BY);
-      tally.promoted.add(candidate.id() + " as " + approval.promotion().promoted().id());
-    } catch (RuntimeException refused) {
-      log.warn(
-          "Proposal {} for {} was filed but the promotion was refused.",
-          filed.id(),
-          candidate.id(),
-          refused);
-      tally.unresolved.add(
-          candidate.id()
-              + " (filed as "
-              + filed.id()
-              + ", and the promotion was refused: "
-              + describe(refused)
-              + "; the question is left for a person)");
+      // A model's confidence is not source release or Global destination control. Keep the
+      // positive judgement as a durable proposal for an authenticated authorized manager.
+      case PROMOTE -> tally.proposed.add(filed.id() + " for " + candidate.id());
     }
   }
 
@@ -875,7 +819,6 @@ public final class Curator {
   private static final class Tally {
 
     private final Home home;
-    private final List<String> promoted = new ArrayList<>();
     private final List<String> proposed = new ArrayList<>();
     private final List<String> undecided = new ArrayList<>();
     private final List<String> unresolved = new ArrayList<>();
@@ -942,10 +885,7 @@ public final class Curator {
           .append(" nothing had ruled on, it judged ")
           .append(judged)
           .append('.');
-      out.append(
-          promoted.isEmpty()
-              ? " Promoted: none."
-              : " Promoted: " + String.join(", ", promoted) + ".");
+      out.append(" Promoted: none.");
       out.append(
           proposed.isEmpty()
               ? " Proposed for a person: none."

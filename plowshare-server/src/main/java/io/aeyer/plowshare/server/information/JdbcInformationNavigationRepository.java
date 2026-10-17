@@ -15,9 +15,12 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   private static final PolicySettings DEFAULT =
       new PolicySettings(Policy.DEFAULT, Policy.NONE, true, "Restricted document");
   private final JdbcTemplate jdbc;
+  private final io.aeyer.plowshare.server.archive.ProjectMembers members;
 
-  public JdbcInformationNavigationRepository(JdbcTemplate jdbc) {
+  public JdbcInformationNavigationRepository(
+      JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.members = Objects.requireNonNull(members);
   }
 
   public void requireActive(String account) {
@@ -115,26 +118,42 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     return rows.getFirst();
   }
 
+  private UUID controlScope(PolicyTarget target) {
+    if (target.kind().equals("platform"))
+      return jdbc.queryForObject(
+          "SELECT id FROM authority_scopes WHERE builtin='SYSTEM_ADMINISTRATION'", UUID.class);
+    if (target.kind().equals("project"))
+      return jdbc.queryForObject(
+          "SELECT s.id FROM authority_scopes s JOIN projects p ON p.id=s.project_id WHERE p.name=?",
+          UUID.class,
+          target.project());
+    var scopes =
+        jdbc.queryForList(
+            "SELECT home_scope_id FROM information_resources WHERE id=? AND home_scope_id IS NOT NULL",
+            UUID.class,
+            target.resource());
+    if (scopes.isEmpty()) throw unavailable();
+    return scopes.getFirst();
+  }
+
   public boolean canManage(String account, PolicyTarget target) {
-    if (account.startsWith("@service/")) return false;
-    if (Boolean.TRUE.equals(
+    UUID scope = controlScope(target);
+    if (!Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM admins WHERE handle=? AND enabled AND NOT bootstrap AND server_admin AND account_kind='USER')",
-            Boolean.class,
-            account))) return true;
+            "SELECT information_scope_control(?,?)", Boolean.class, account, scope))) return false;
     String project = managementProject(target);
-    return project != null
-        && Boolean.TRUE.equals(
-            jdbc.queryForObject(
-                "SELECT EXISTS(SELECT 1 FROM project_members m JOIN projects p ON p.id=m.project_id JOIN admins a ON a.handle=m.handle WHERE p.name=? AND m.handle=? AND m.role='MANAGER' AND a.enabled AND NOT a.bootstrap AND a.account_kind='USER')",
-                Boolean.class,
-                project,
-                account));
+    return project == null
+        || members.mayAdminister(project, account)
+        || members
+            .role(project, account)
+            .filter(role -> role == io.aeyer.plowshare.server.archive.ProjectRole.MANAGER)
+            .isPresent();
   }
 
   public void requireManager(String account, PolicyTarget target) {
-    // The account/membership locks fence concurrent demotion through commit, not merely prepare.
-    lockIdentity(account, managementProject(target));
+    // Match content and role mutation order, and retain live lineage through policy commit.
+    jdbc.queryForObject(
+        "SELECT information_lock_scope(?,?)", Object.class, account, controlScope(target));
     if (!canManage(account, target)) throw unavailable();
   }
 
@@ -326,7 +345,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   }
 
   private static final String DOCUMENT =
-      "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT visibility FROM information_document_policies WHERE document_id=r.id),'pending') AS visibility";
+      "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT CASE WHEN audience IN ('GLOBAL_READ','LEGACY_SHARED') THEN 'shared' ELSE 'home' END FROM information_resource_policies WHERE resource_id=q.id),'pending') AS visibility";
 
   public Documents documents(
       InformationContext c,

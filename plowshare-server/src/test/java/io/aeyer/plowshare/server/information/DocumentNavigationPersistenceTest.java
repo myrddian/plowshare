@@ -54,7 +54,9 @@ class DocumentNavigationPersistenceTest {
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'viewer','VIEWER' FROM projects WHERE name='operations'");
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'bob','CONTRIBUTOR' FROM projects WHERE name='restricted'");
-    repository = new JdbcInformationNavigationRepository(jdbc);
+    repository =
+        new JdbcInformationNavigationRepository(
+            jdbc, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc));
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
   }
 
@@ -140,11 +142,16 @@ class DocumentNavigationPersistenceTest {
   void lockedReferenceDoesNotExposeTitleOrPropagateAndPinnedRevisionMustBelongToTarget() {
     UUID a = resource("alice", "operations", "service"), b = resource("bob", null, "secret");
     set(new PolicyTarget("project", "operations", null), 0, permissive());
-    set(
-        new PolicyTarget("document", null, b),
-        0,
-        new PolicySettings(
-            new Policy(true, false, false), Policy.NONE, true, "Approved locked label"));
+    work.inTransaction(
+        () -> {
+          repository.lock();
+          return repository.setPolicy(
+              "bob",
+              new PolicyTarget("document", null, b),
+              0,
+              new PolicySettings(
+                  new Policy(true, false, false), Policy.NONE, true, "Approved locked label"));
+        });
     Relationship edge = link(a, b);
     assertTrue(readable(a, "viewer", "operations"));
     assertInstanceOf(Unavailable.class, repository.select(viewer, new Target(b, null)));
@@ -301,7 +308,12 @@ class DocumentNavigationPersistenceTest {
             List.of(
                 new ScopeStep(io.aeyer.plowshare.protocol.InformationRequest.Scope.personal())));
     work.inTransaction(() -> repository.save("alice", id, 0, "Billing", path));
-    assertEquals(path, new JdbcInformationNavigationRepository(jdbc).view("alice", id).path());
+    assertEquals(
+        path,
+        new JdbcInformationNavigationRepository(
+                jdbc, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc))
+            .view("alice", id)
+            .path());
     assertThrows(RuntimeException.class, () -> repository.view("viewer", id));
     assertThrows(
         RuntimeException.class,
@@ -374,7 +386,8 @@ class DocumentNavigationPersistenceTest {
         });
     assertEquals(
         result,
-        new JdbcInformationNavigationRepository(jdbc)
+        new JdbcInformationNavigationRepository(
+                jdbc, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc))
             .receipt("alice", request)
             .orElseThrow()
             .result());

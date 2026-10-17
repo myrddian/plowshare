@@ -7,12 +7,28 @@ REST endpoints. PostgreSQL and its existing pgvector extension hold the domain.
 
 ## Scope and access
 
-Omitted scope means personal plus explicitly shared revisions. Select a project
-only when the authenticated account is currently a member; selecting one never
-creates membership. `scope: {kind: "project", project: "research", includeShared:
-false}` limits discovery to that project. Shared is an explicit revision grant,
-not an unowned global corpus. Owner controls require the resource owner; project
-membership grants reading, not editing another owner's source.
+For humans, omitted scope means Personal plus explicitly shared knowledge. Select
+a project only with current scoped READ; selecting one never creates membership.
+`scope: {kind: "project", project: "research", includeShared: false}` limits
+discovery to that project. Scoped Contributors can write in their area; Managers
+can change resource audiences through existing share/unshare commands.
+
+V155 stores immutable versions of each resource's current root audience. All
+revisions, including pinned history and later content revisions, use that policy.
+An explicit share grants GLOBAL_READ to every active authenticated human,
+Application/service account and service credential; unshare restores HOME.
+Consistent legacy Shared histories retain human-only LEGACY_SHARED until an
+explicit Manager review through share. Mixed histories narrow to HOME for review;
+conflicting privacy subjects and unclassified homes stay quarantined. Original
+per-revision flags remain historical evidence and cannot change the root policy.
+
+Service credentials may select Shared/includeShared for general reads; Personal
+remains unavailable and their internal project-only default remains unchanged.
+These selectors grant no project membership, content WRITE, processing-log access
+or execution. Global-account policy control requires human Global Admin authority.
+No new Global creation/move selector or public API is added. The
+[root-policy specification](authority-substrate-slices/05-root-policy-specification.md)
+records migration, privacy and concurrency behavior.
 
 Filters apply before ranking, counts, title matching and paging. Direct guessed
 IDs receive the same refusal as absent IDs. Excluded revisions disappear from

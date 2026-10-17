@@ -63,6 +63,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public Resource lockResource(InformationContext context, UUID revision, boolean audience) {
+    if (audience)
+      jdbc.queryForObject(
+          "SELECT pg_advisory_xact_lock(hashtextextended('information-navigation-control',0)) IS NULL",
+          Boolean.class);
     if (!Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT information_lock_knowledge(?,?,?,?,?,?)",
@@ -352,13 +356,15 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   public Information.Events events(InformationContext context, long after, int limit) {
     if (after < 0 || limit < 1 || limit > 100)
       throw new CallerFault("event cursor must be nonnegative and limit between 1 and 100");
-    List<Object> args = new ArrayList<>(selectionArgs(context));
+    List<Object> args = new ArrayList<>();
+    args.add(context.account());
+    args.addAll(selectionArgs(context));
     args.add(context.corpus().documentType());
     args.add(after);
     args.add(limit);
     List<Map<String, Object>> events =
         jdbc.queryForList(
-            "SELECT e.sequence,e.revision_id,e.generation,e.stage,e.action,e.detail,e.recorded_at,r.document_type,r.document_subtype"
+            "SELECT e.sequence,e.revision_id,e.generation,e.stage,e.action,CASE WHEN q.owner_handle=? THEN e.detail ELSE '' END AS detail,e.recorded_at,r.document_type,r.document_subtype"
                 + " FROM information_events e JOIN information_revisions r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
                 + readableSql(context)
@@ -600,8 +606,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           + " AS \"tagGroups\",CASE WHEN q.tag_groups_manual THEN 'manual' ELSE 'automatic' END AS \"tagGroupsSource\","
           + "(SELECT jsonb_build_object('type',v.type_id,'version',v.id,'ordinal',v.ordinal,'slug',t.slug,'label',t.label,'definitionHash',v.definition_hash) FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version JOIN information_content_types t ON t.id=v.type_id WHERE c.revision_id=r.id) AS \"contentType\",CASE WHEN r.processing_policy='explicit_only' THEN r.processing_policy END AS \"processingPolicy\","
           + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id";
-  // The central predicate also admits an authenticated pending source owner. A separate owner
-  // fallback would bypass live document policy and retained reference obligations.
+  // Current root policy also governs pending sources and historical revisions. A separate owner
+  // fallback would bypass audience revocation and retained reference obligations.
   private static final String READABLE =
       "r.availability='active' AND information_readable(r.id,?,?,?,?)";
 
@@ -629,9 +635,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             action,
             detail == null ? "" : detail);
     jdbc.update(
-        "INSERT INTO information_event_recipients(sequence,account) SELECT ?,a.handle FROM admins a WHERE information_readable(?,a.handle,'personal',NULL,true)"
+        "INSERT INTO information_event_recipients(sequence,account) SELECT ?,a.handle FROM admins a WHERE information_readable(?,a.handle,'shared',NULL,false) OR information_readable(?,a.handle,'personal',NULL,true)"
             + " OR EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.handle=a.handle AND information_readable(?,a.handle,'project',p.name,true)) ON CONFLICT DO NOTHING",
         sequence,
+        revision,
         revision,
         revision);
     if (List.of("withdrawn", "excluded", "deleted", "unshared", "unlinked").contains(action))
@@ -860,32 +867,48 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void share(InformationContext context, UUID revision, boolean shared) {
 
-    var resource = lockResource(context, revision, true);
+    // Root policy changes serialize with navigation policy and reference changes. This lock must
+    // precede the resource lock; upgrading a content writer's shared lock can deadlock publishers.
+    jdbc.queryForObject(
+        "SELECT pg_advisory_xact_lock(hashtextextended('information-navigation-control',0)) IS NULL",
+        Boolean.class);
+    lockResource(context, revision, true);
     if (shared && !readable(context, revision)) throw absent();
     if (shared
-        && !jdbc.queryForObject(
-            "SELECT coalesce(bool_and(information_readable(input_revision,?,'shared',NULL,true)),true)"
-                + " FROM information_inputs WHERE derived_revision=?",
-            Boolean.class,
+        && !Boolean.TRUE.equals(
+            jdbc.queryForObject("SELECT information_root_publishable(?)", Boolean.class, revision)))
+      throw new CallerFault("Private or restricted dependencies cannot authorize GLOBAL_READ");
+    Long version =
+        jdbc.queryForObject(
+            "SELECT information_set_root_audience(?,?,?,?,?,?)",
+            Long.class,
+            revision,
             context.account(),
-            revision))
-      throw new CallerFault(
-          "every input must already be shared before a derived revision can be shared");
-    String visibility = shared ? "shared" : resource.projectId() == null ? "personal" : "project";
-    Long project = shared ? null : resource.projectId();
-    if (jdbc.update(
-            "UPDATE information_document_policies SET visibility=?,project_id=? WHERE document_id=?",
-            visibility,
-            project,
-            revision)
-        != 1) throw new CallerFault("derive this revision before sharing it");
-    event(
-        revision,
-        generation(revision),
-        context.account(),
-        "sharing",
-        shared ? "shared" : "unshared",
-        "");
+            context.selection().scope().name().toLowerCase(Locale.ROOT),
+            context.selection().project(),
+            context.selection().includeShared(),
+            shared);
+    if (version == null)
+      throw new IllegalStateException("Root policy transition returned no version");
+    UUID resource =
+        jdbc.queryForObject(
+            "SELECT resource_id FROM information_revisions WHERE id=?", UUID.class, revision);
+    // Lock all revisions before the commit-order event fence. Every cached revision needs an
+    // invalidation when its root audience changes, including historical and pinned reads.
+    var revisions =
+        jdbc.query(
+            "SELECT id FROM information_revisions WHERE resource_id=? ORDER BY id FOR KEY SHARE",
+            (row, index) -> row.getObject(1, UUID.class),
+            resource);
+    for (UUID affected : revisions)
+      event(
+          affected,
+          generation(affected),
+          context.account(),
+          "sharing",
+          shared ? "shared" : "unshared",
+          "root policy version " + version);
+
     return;
   }
 

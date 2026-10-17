@@ -35,13 +35,16 @@ import java.util.Objects;
 public final class ProposalResolveHandler implements FrameHandler {
 
   private final PromotionQueue queue;
+  private final io.aeyer.plowshare.server.archive.PromotionAccess promotionAccess;
 
   /**
    * @param queue the same queue the controller is injected with, which owns the
    *     claim-before-promotion ordering neither surface may bypass
    */
-  public ProposalResolveHandler(PromotionQueue queue) {
+  public ProposalResolveHandler(
+      PromotionQueue queue, io.aeyer.plowshare.server.archive.PromotionAccess promotionAccess) {
     this.queue = Objects.requireNonNull(queue, "queue");
+    this.promotionAccess = Objects.requireNonNull(promotionAccess);
   }
 
   @Override
@@ -61,6 +64,7 @@ public final class ProposalResolveHandler implements FrameHandler {
     if (!accept) {
       return Outcome.ok(ResolvedProposal.rejecting(queue.reject(proposal, request.reason(), by)));
     }
+    promotionAccess.require(asking.requireHandle(FrameTypes.PROPOSAL_RESOLVE), proposal);
     return Outcome.ok(ResolvedProposal.approving(queue.approve(proposal, by)));
   }
 }

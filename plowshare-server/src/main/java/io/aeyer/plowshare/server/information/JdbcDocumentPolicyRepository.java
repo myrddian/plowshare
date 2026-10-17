@@ -196,6 +196,7 @@ public final class JdbcDocumentPolicyRepository implements DocumentPolicyReposit
         projectId,
         project == null ? "account:" + owner : "project:" + project,
         document);
+    jdbc.queryForObject("SELECT information_adopt_root_policy(?,?)", Object.class, document, actor);
     jdbc.update(
         "INSERT INTO information_policy_assignments (id, document_id, actor_handle, owner_handle, visibility, project_name, reason, assigned_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         UUID.randomUUID(),

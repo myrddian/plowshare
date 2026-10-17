@@ -930,7 +930,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         });
   }
 
-  /** Sharing is per revision and never overrides restrictions inherited from any input. */
+  /** Changes the current root audience; every revision retains mandatory input restrictions. */
   public void share(InformationContext context, UUID revision, boolean shared) {
     share(context, revision, shared, null);
   }

@@ -814,18 +814,9 @@ class CuratorTest {
 
   // --- what a ruling does ------------------------------------------------------
 
-  /**
-   * A confident ruling promotes, and it does so through the queue.
-   *
-   * <p>Filed and then approved, rather than promoted outright. {@code Archive.promote}'s own
-   * javadoc says two promotions of one id can both pass its checks and file two global records,
-   * "unguarded on purpose … the spec puts staleness in the proposal queue, where a unique index on
-   * pending rows holds it across two transactions and a Java check cannot" — so a curator calling
-   * {@code promote} directly would be the caller that guard was written for. Filing first buys it,
-   * and buys a durable row saying what was promoted and why.
-   */
+  /** Model confidence files a reviewable proposal without authority to copy into Global. */
   @Test
-  void a_confident_judgement_promotes() {
+  void a_confident_judgement_requires_authorized_release() {
     Scripted transport = new Scripted().then(PROMOTE);
     World world = new World(transport).holding(entry("mem_000001", "a claim"));
 
@@ -834,10 +825,11 @@ class CuratorTest {
     verify(world.proposals)
         .propose(
             "mem_000001", ProposalStore.PROMOTE, "every project retries the same way", Curator.BY);
-    verify(world.archive).promote("mem_000001", "every project retries the same way", Curator.BY);
+    verify(world.archive, never()).promote(anyString(), any(), anyString());
     assertEquals(Ending.ANSWERED, outcome.ending());
     assertTrue(outcome.text().contains("mem_000001"), outcome.text());
-    assertTrue(outcome.text().contains("glo_mem_000001"), outcome.text());
+    assertTrue(outcome.text().contains("Proposed for a person: prp_000001"), outcome.text());
+    assertTrue(outcome.text().contains("Promoted: none."), outcome.text());
   }
 
   /**
@@ -1077,7 +1069,9 @@ class CuratorTest {
 
     world.pass();
 
-    verify(world.archive).promote(anyString(), any(), eq(Curator.BY));
+    verify(world.archive, never()).promote(anyString(), any(), anyString());
+    verify(world.proposals)
+        .propose(anyString(), eq(ProposalStore.PROMOTE), anyString(), eq(Curator.BY));
   }
 
   /**
@@ -1139,36 +1133,19 @@ class CuratorTest {
     assertFalse(outcome.text().contains("null"), outcome.text());
   }
 
-  /**
-   * A promotion the archive refuses leaves the question waiting, and the pass goes on.
-   *
-   * <p>A memory can be superseded or invalidated between the index read and the promotion, which
-   * {@code Archive.promote} refuses by naming its state. {@code PromotionQueue.approve} gives the
-   * claim back for exactly this, so the row is pending again and a human still sees the question.
-   */
+  /** Confident recommendations remain pending and never try the archive effect. */
   @Test
-  void a_promotion_the_archive_refuses_leaves_the_question_waiting() {
+  void confident_recommendations_leave_each_question_waiting() {
     Scripted transport = new Scripted().thenAlways(PROMOTE);
     World world =
         new World(transport).holding(entry("mem_000001", "one"), entry("mem_000002", "two"));
-    // The archive's own words, so this test cannot pass on a fixture that
-    // is kinder than the real refusal.
-    when(world.archive.promote(eq("mem_000001"), any(), anyString()))
-        .thenThrow(
-            new ArchiveException(
-                "memory mem_000001 is superseded and cannot be"
-                    + " promoted; the archive no longer stands behind it"));
-
     Outcome outcome = world.pass();
-
     assertEquals(Ending.ANSWERED, outcome.ending());
-    verify(world.archive).promote(eq("mem_000002"), any(), anyString());
-    // Not "cannot be promoted", which is the archive's own sentence and
-    // would leave this assertion blind to whether the pass said anything at
-    // all: the curator's phrase has to be one the message it quotes does not
-    // already carry.
-    assertTrue(outcome.text().contains("the promotion was refused"), outcome.text());
-    assertTrue(outcome.text().contains("left for a person"), outcome.text());
+    verify(world.archive, never()).promote(anyString(), any(), anyString());
+    verify(world.proposals).propose(eq("mem_000001"), anyString(), anyString(), eq(Curator.BY));
+    verify(world.proposals).propose(eq("mem_000002"), anyString(), anyString(), eq(Curator.BY));
+    assertTrue(outcome.text().contains("Proposed for a person: prp_000001"), outcome.text());
+    assertTrue(outcome.text().contains("prp_000002"), outcome.text());
   }
 
   /**
@@ -1291,8 +1268,8 @@ class CuratorTest {
    * A pass that runs out of budget says so, and what it already did stands.
    *
    * <p>The budget is the tree's and it is spent by the judgements, so this is the one ending a
-   * caller has to be able to tell from "there was nothing left to do". The promotions already
-   * applied are in the archive; nothing here rolls them back, and the sentence names them.
+   * caller has to be able to tell from "there was nothing left to do". The proposals already filed
+   * are in the queue; nothing here rolls them back, and the sentence names them.
    */
   @Test
   void a_pass_that_hits_its_budget_says_so_and_keeps_what_it_did() {
@@ -1308,8 +1285,8 @@ class CuratorTest {
 
     assertEquals(Ending.CALL_BUDGET, outcome.ending());
     // The two judgements the budget paid for happened and stand.
-    verify(world.archive).promote(eq("mem_000001"), any(), anyString());
-    verify(world.archive).promote(eq("mem_000002"), any(), anyString());
+    verify(world.proposals).propose(eq("mem_000001"), anyString(), anyString(), eq(Curator.BY));
+    verify(world.proposals).propose(eq("mem_000002"), anyString(), anyString(), eq(Curator.BY));
     verify(world.archive, never()).promote(eq("mem_000003"), any(), anyString());
     assertTrue(outcome.text().contains("mem_000001"), outcome.text());
     assertEquals(2, outcome.modelCalls());
@@ -1338,7 +1315,7 @@ class CuratorTest {
     Outcome outcome = world.pass();
 
     assertEquals(Ending.UNAVAILABLE, outcome.ending());
-    verify(world.archive).promote(eq("mem_000001"), any(), anyString());
+    verify(world.proposals).propose(eq("mem_000001"), anyString(), anyString(), eq(Curator.BY));
     verify(world.archive, never()).promote(eq("mem_000003"), any(), anyString());
     // Under the judge's name, chained the way AgentRunTool chains a child's
     // — an operator reading this has to know which agent met the dead
@@ -1606,9 +1583,9 @@ class CuratorTest {
    * <b>that stopped meaning what it said when the turn loop began to stream.</b> A streamed call
    * asks the flag once per chunk, so a flag raised while the first call is in flight abandons that
    * call — no ruling, nothing promoted, and this test asserting that what was done stands would
-   * have been asserting that nothing was done. The promotion is the moment the first ruling has
-   * actually been carried out, so that is where the flag goes now, and the sentence in the name is
-   * true again.
+   * have been asserting that nothing was done. The proposal is the moment the first ruling has
+   * actually been carried out, so that is where the flag goes, and the sentence in the name is true
+   * again.
    */
   @Test
   void a_cancelled_pass_says_so_and_keeps_what_it_did() {
@@ -1616,19 +1593,20 @@ class CuratorTest {
     Scripted transport = new Scripted().thenAlways(PROMOTE);
     World world =
         new World(transport).holding(entry("mem_000001", "one"), entry("mem_000002", "two"));
+    var saved = waiting("prp_000001", "mem_000001", "every project retries the same way");
     doAnswer(
-            promotion -> {
+            call -> {
+              world.filed.put(saved.id(), saved);
               stop.set(true);
-              return new Archive.Promotion(
-                  memory("glo_" + promotion.getArgument(0), "promoted", Home.global()), List.of());
+              return saved;
             })
-        .when(world.archive)
-        .promote(anyString(), any(), anyString());
+        .when(world.proposals)
+        .propose(eq("mem_000001"), anyString(), anyString(), eq(Curator.BY));
 
     Outcome outcome = world.curator().pass("payments", Budget.of(20), stop::get);
 
     assertEquals(Ending.CANCELLED, outcome.ending());
-    verify(world.archive).promote(eq("mem_000001"), any(), anyString());
+    verify(world.proposals).propose(eq("mem_000001"), anyString(), anyString(), eq(Curator.BY));
     verify(world.archive, never()).promote(eq("mem_000002"), any(), anyString());
     // The boundary sentence, not the mid-judgement one: the first ruling
     // completed and the pass stopped between candidates.

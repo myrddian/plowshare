@@ -161,6 +161,31 @@ public class ProjectAuthorization {
           "outgoing.cancel",
           "image.upload");
   private static final Set<String> ACCOUNT_OWNED = Set.of("schedule.pause", "schedule.forget");
+  // These existing typed read handlers enforce current root policy and selection in SQL. Public
+  // source UUIDs may belong to a foreign project; that home's membership is not GLOBAL_READ.
+  // Writes, processing, private receipts and permission changes do not use this admission path.
+  private static final Set<String> GENERAL_INFORMATION_READ =
+      Set.of(
+          "information.navigation.capabilities",
+          "information.documents.list",
+          "information.documents.facets",
+          "information.documents.get",
+          "information.relationships.list",
+          "information.list",
+          "information.status",
+          "information.read",
+          "information.search",
+          "information.rank",
+          "information.facets",
+          "information.outline",
+          "information.symbols",
+          "information.evidence.read",
+          "information.content.get",
+          "information.events",
+          "information.interchange.capabilities",
+          "information.interchange.export",
+          "information.interchange.readable",
+          "information.interchange.origin");
   private static final Set<String> SERVER =
       Set.of(
           "provider.deregister",
@@ -363,6 +388,7 @@ public class ProjectAuthorization {
       }
       return;
     }
+    if (service && GENERAL_INFORMATION_READ.contains(operation)) return;
     ProjectRole permission = required(operation);
     Set<String> projects = scopes(payload, account);
     if (service && projects.isEmpty() && !SERVICE_LISTS.contains(operation))

@@ -530,7 +530,10 @@ class AuthoredInformationPersistenceTest {
               () ->
                   work.inTransaction(
                       () -> {
-                        new JdbcInformationNavigationRepository(jdbc).lock();
+                        new JdbcInformationNavigationRepository(
+                                jdbc,
+                                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc))
+                            .lock();
                         importLocked.countDown();
                         return types
                             .version("account:author", contract.version(), true)

@@ -62,17 +62,20 @@ class ProposalFramesTest {
   private static final Instant WHEN = Instant.parse("2026-08-29T12:00:00Z");
 
   private PromotionQueue queue;
+  private io.aeyer.plowshare.server.archive.PromotionAccess promotionAccess;
   private MockMvc mvc;
   private FrameRouter router;
 
   @BeforeEach
   void setUp() {
     queue = mock(PromotionQueue.class);
+    promotionAccess = mock(io.aeyer.plowshare.server.archive.PromotionAccess.class);
     // FrameParity.endpointsOf and not a bare standaloneSetup: a proposal
     // carries a createdAt, and the bare harness renders an Instant as a
     // number where a deployed server sends an ISO string.
-    mvc = FrameParity.endpointsOf(new ProposalController(queue));
-    router = new FrameRoutingConfig().frameRouter(List.of(new ProposalFrames(queue)));
+    mvc = FrameParity.endpointsOf(new ProposalController(queue, promotionAccess));
+    router =
+        new FrameRoutingConfig().frameRouter(List.of(new ProposalFrames(queue, promotionAccess)));
   }
 
   // --- proposal.list -------------------------------------------------------
@@ -181,6 +184,22 @@ class ProposalFramesTest {
     assertEquals(Code.OK, outcome.code());
     FrameParity.assertSameAnswer(http, outcome);
     verify(queue, times(2)).approve("prp_000001", "enzo");
+  }
+
+  @Test
+  void forged_provenance_cannot_authorize_global_promotion_on_either_surface() throws Exception {
+    org.mockito.Mockito.doThrow(new io.aeyer.plowshare.server.faults.CallerFault("release denied"))
+        .when(promotionAccess)
+        .require("signed-in-manager", "prp_000001");
+    var http = posted("/v1/proposals/prp_000001/resolve", "{\"accept\":true,\"by\":\"admin\"}");
+    var frame =
+        route(
+            FrameTypes.PROPOSAL_RESOLVE,
+            "{\"proposal\":\"prp_000001\",\"accept\":true,\"by\":\"admin\"}");
+    FrameParity.assertSameRefusal(http, frame);
+    assertEquals(Code.BAD_REQUEST, frame.code());
+    verify(promotionAccess, times(2)).require("signed-in-manager", "prp_000001");
+    verify(queue, never()).approve(anyString(), anyString());
   }
 
   /**
@@ -389,7 +408,8 @@ class ProposalFramesTest {
   // --- driving the two surfaces off one request ----------------------------
 
   private Outcome route(String type, String payload) {
-    return router.route(FrameParity.frame(type, payload), FrameParity.ASKING);
+    return router.route(
+        FrameParity.frame(type, payload), new Asking("session-1", "signed-in-manager"));
   }
 
   /**
@@ -417,7 +437,12 @@ class ProposalFramesTest {
   }
 
   private MockHttpServletResponse posted(String path, String body) throws Exception {
-    return mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body))
+    return mvc.perform(
+            post(path)
+                .requestAttr(
+                    io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE, "signed-in-manager")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
         .andReturn()
         .getResponse();
   }

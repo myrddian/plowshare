@@ -54,10 +54,8 @@ public final class InformationAccess {
   public void requireSelection(InformationContext context) {
     Objects.requireNonNull(context, "context");
     if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(context.account())
-        && (context.selection().scope() != InformationContext.Scope.PROJECT
-            || context.selection().includeShared()))
-      throw new CallerFault(
-          "Service tokens require a project information scope without includeShared");
+        && context.selection().scope() == InformationContext.Scope.PERSONAL)
+      throw new CallerFault("Service tokens cannot select Personal information");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
         && !permissions.allows(
             new Principal(context.account()),
@@ -69,6 +67,8 @@ public final class InformationAccess {
 
   public void requireWork(InformationContext context) {
     requireSelection(context);
+    if (context.selection().scope() == InformationContext.Scope.SHARED)
+      throw new CallerFault("Shared information is a read selection; select a writable home");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
         && !permissions.allows(
             new Principal(context.account()),
@@ -80,7 +80,9 @@ public final class InformationAccess {
 
   /** Content WRITE does not grant permission to change an existing resource's audience. */
   public void requireAudience(InformationContext context) {
-    requireWork(context);
+    requireSelection(context);
+    // Shared selects existing resources only. The repository checks the exact Global ADMIN
+    // target; admitting the selection confers neither content WRITE nor audience authority.
     if (context.selection().scope() == InformationContext.Scope.PROJECT
         && !permissions.allows(
             new Principal(context.account()),

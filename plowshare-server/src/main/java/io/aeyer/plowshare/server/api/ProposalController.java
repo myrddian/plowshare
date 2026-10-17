@@ -30,9 +30,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProposalController {
 
   private final PromotionQueue queue;
+  private final io.aeyer.plowshare.server.archive.PromotionAccess promotionAccess;
 
-  public ProposalController(PromotionQueue queue) {
+  public ProposalController(
+      PromotionQueue queue, io.aeyer.plowshare.server.archive.PromotionAccess promotionAccess) {
     this.queue = queue;
+    this.promotionAccess = java.util.Objects.requireNonNull(promotionAccess);
   }
 
   /**
@@ -104,7 +107,12 @@ public class ProposalController {
    */
   @PostMapping("/v1/proposals/{id}/resolve")
   public ResponseEntity<ResolvedProposal> resolve(
-      @PathVariable String id, @RequestBody ResolveProposalRequest request) {
+      @PathVariable String id,
+      @RequestBody ResolveProposalRequest request,
+      @org.springframework.web.bind.annotation.RequestAttribute(
+              name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE,
+              required = false)
+          String account) {
 
     boolean accept = RequestedResolution.accepted(request.accept());
     String by = RequestedResolution.by(request.by());
@@ -113,6 +121,7 @@ public class ProposalController {
       Proposal rejected = queue.reject(id, request.reason(), by);
       return ResponseEntity.ok(ResolvedProposal.rejecting(rejected));
     }
+    promotionAccess.require(account, id);
     return ResponseEntity.ok(ResolvedProposal.approving(queue.approve(id, by)));
   }
 }

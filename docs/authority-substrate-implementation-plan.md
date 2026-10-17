@@ -1,7 +1,7 @@
 # Authority substrate implementation roadmap
 
-Status: implementation roadmap, 17 October 2026. Slices 01–04 have been explicitly
-authorized and implemented in this branch; slices 05–14 remain proposed and
+Status: implementation roadmap, 17 October 2026. Slices 01–05 have been explicitly
+authorized and implemented in this branch; slices 06–14 remain proposed and
 unauthorized. This roadmap does not authorize their execution.
 
 ## Count and scope
@@ -133,7 +133,7 @@ For future implementation:
    retained-state fixtures for the affected slice. New Flyway migrations only;
    never rewrite a shipped migration or relabel historical usage as new authority.
 
-The slice 01–04 documents record implementation checks. The original roadmap
+The slice 01–05 documents record implementation checks. The original roadmap
 planning task ran no Java, PostgreSQL, SDK or live integration tests; its
 documentation checks are distinct from implementation verification.
 
@@ -160,7 +160,7 @@ the adopted account/scope/action and sandbox rules, required migration/negative/
 recovery evidence passes, and the supported end-to-end path in slice 14 works.
 Unsupported capabilities remain explicitly unsupported.
 
-Only slices 01–04 are implemented under subsequent explicit requests. Each later
+Only slices 01–05 are implemented under subsequent explicit requests. Each later
 implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

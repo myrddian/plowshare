@@ -1,6 +1,7 @@
 # Global scope migration map
 
-Status: architecture proposal and source map, 17 October 2026. No implementation.
+Status: architecture proposal and baseline source map, 17 October 2026.
+Slices 01–05 are implemented in this branch; runtime/client cutovers remain proposed.
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md).
 The [role and scope permission matrices](role-scope-permissions-proposal.md)
 separate current operation gates from proposed action bundles and scope overlays.
@@ -10,6 +11,12 @@ The [account-delegation action mapping](decisions/0030-authority-substrate-and-e
 preserves the existing Application/subject proof flow while translating coarse
 acting READ/WORK ceilings into supported scoped actions; it is distinct from
 child-agent delegation and does not enable unsupported acting APIs.
+
+Slice 05 supersedes the baseline per-revision document audience and automatic
+curation-promotion findings below. Current root policy governs all revisions;
+explicit Manager share grants GLOBAL_READ, and model recommendations retain
+proposals for authorized human acceptance. See the
+[root-policy specification](authority-substrate-slices/05-root-policy-specification.md).
 
 Source baseline: `efddb12a0cfd28c6aa1464f01b884d15597102d5`, merged main
 containing account-delegation PR #73. Source links below identify current owners
@@ -24,7 +31,8 @@ explicit identity catalogue and scoped RBAC grant helpers in this branch. The
 source inventory below records the original audit baseline; administrator
 project-role shortcuts have since been replaced as described in the
 [slice 03 compatibility specification](authority-substrate-slices/03-rbac-grant-specification.md).
-Resource/audience and runtime cutovers remain later work.
+Slices 04–05 now implement knowledge home/provenance and current-root audience;
+runtime and remaining client cutovers remain later work.
 
 ## Existing authority foundations
 

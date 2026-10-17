@@ -365,7 +365,13 @@ class KnowledgeScopePersistenceTest {
           return null;
         });
     assertEquals(
-        "shared",
+        "GLOBAL_READ",
+        jdbc.queryForObject(
+            "SELECT audience FROM information_resource_policies WHERE resource_id=?",
+            String.class,
+            first.resource()));
+    assertEquals(
+        "project",
         jdbc.queryForObject(
             "SELECT visibility FROM information_document_policies WHERE document_id=?",
             String.class,

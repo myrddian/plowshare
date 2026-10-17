@@ -30,29 +30,24 @@ class InformationAccessTest {
   }
 
   @Test
-  void serviceCannotSelectPersonalSharedOrProjectPlusSharedEvenWithManagerRole() {
+  void serviceGeneralReadSelectionDoesNotGrantPersonalOrProjectWork() {
     var members = mock(ProjectMembers.class);
     var access = new InformationAccess(new EffectiveProjectPermissions(members));
     String token = "@service/fixture";
-    for (var selection :
-        java.util.List.of(
-            InformationContext.Selection.personal(),
-            InformationContext.Selection.shared(),
-            InformationContext.Selection.project("research"))) {
-      assertThrows(CallerFault.class, () -> access.resolve(token, selection));
-    }
-    verifyNoInteractions(members);
-    when(members.role("research", token)).thenReturn(Optional.of(ProjectRole.MANAGER));
-    assertDoesNotThrow(
-        () ->
-            access.requireWork(
-                access.resolve(
-                    token,
-                    new InformationContext.Selection(
-                        InformationContext.Scope.PROJECT, "research", false))));
-    assertEquals(
-        InformationContext.Selection.shared(),
-        access.resolve("alice", InformationContext.Selection.shared()).selection());
+    assertThrows(
+        CallerFault.class, () -> access.resolve(token, InformationContext.Selection.personal()));
+    var general = access.resolve(token, InformationContext.Selection.shared());
+    assertThrows(CallerFault.class, () -> access.requireWork(general));
+    assertThrows(
+        CallerFault.class,
+        () -> access.resolve(token, InformationContext.Selection.project("research")));
+    when(members.role("research", token)).thenReturn(Optional.of(ProjectRole.VIEWER));
+    var project = access.resolve(token, InformationContext.Selection.project("research"));
+    assertTrue(project.selection().includeShared());
+    assertThrows(CallerFault.class, () -> access.requireWork(project));
+    when(members.role("research", token)).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+    assertDoesNotThrow(() -> access.requireWork(project));
+    assertThrows(CallerFault.class, () -> access.requireAudience(project));
   }
 
   @Test

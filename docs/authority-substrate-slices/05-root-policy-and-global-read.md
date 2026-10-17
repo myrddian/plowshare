@@ -1,7 +1,7 @@
 # Slice 05: Current root-document policy and GLOBAL_READ audience
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented in this branch, 17 October 2026, following explicit
+authorization for slice 05. No new public APIs, later slices or deployment are included.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -18,14 +18,14 @@ Use current root-document permissions for all revision reads and existing audien
 Dependency completion means its relevant interfaces, migrations and verification
 are available; it does not grant authority to a caller or enable an unmigrated path.
 
-## Changes
+## Implemented changes
 
 - Store/version the authoritative root-document policy and reconcile per-revision Shared flags deliberately. Current policy governs new, historical and pinned revisions; content writes cannot silently change it.
 - Map resource MANAGER/DRI audience authority to existing supported permission/share commands, including GLOBAL_READ without extra ADMIN approval. Global-account management retains human Global ADMIN control.
 - Coordinate Java admission, SQL filtering, counts/paging, references, inputs, events and supported exports. Allow general-read knowledge only when its policy authorizes the audience, within credential/task ceilings.
 - Reconcile ownerOnly/mandatory policy explicitly. Keep private dependencies and processing logs private; refuse unauthorized existing Global-promotion effects while retaining curation proposals/receipts.
 
-## Reuse and likely source owners
+## Reuse and source owners
 
 These files identify current owning contracts, not a claim that they already
 implement the proposed behavior. Keep services on typed interfaces and persistence
@@ -63,15 +63,68 @@ match the eventual change:
 
 **PostgreSQL justification:** Required for policy SQL, recursive dependency predicates, policy-version transactions and revision mapping. Existing V147 is evidence only; use new migrations.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+The implementation uses mocked admission, promotion and transport tests plus the
+selected PostgreSQL policy/consumer suites. Database coverage is limited to the
+policy SQL, recursive dependencies, revision mappings, immutable audit, event
+ordering and concurrent transactions named above. Completion evidence is recorded
+below; mocked checks do not prove live deployment behavior.
 
-## Specification required before implementation
+## Specification and implemented boundary
 
-Classify legacy audience inconsistencies and mandatory ownerOnly settings. Use only verified project/group mechanisms; information grouping/tag facets must not be assumed to be security groups.
+The [root-policy specification](05-root-policy-specification.md) was written before
+enforcement changes. V155 adds root-policy versions and immutable history without
+rewriting shipped migrations or inferring authorship from home. Consistent legacy
+Shared stays human-only LEGACY_SHARED until explicit Manager review through the
+existing share command; mixed histories narrow to HOME for review. Conflicting
+private subjects and unclassified/quarantined homes remain unavailable.
+
+Existing share/unshare changes the root under source Manager authority. Every
+revision uses that policy, including pending sources, history, pinned references,
+counts/facets, portable reads and events. Content projection cannot reset the root.
+Mandatory ownerOnly uses an explicit reconciled account UUID, independently of
+created_by; private inputs and retained reference obligations still constrain reads.
+Processing logs and diagnostic event details retain private custodian boundaries.
+
+Shared/includeShared now admit GLOBAL_READ to active authenticated humans,
+Applications and service credentials. The gateway delegates only a closed list of
+existing information read operations to their typed handlers. Project data roles,
+Application/token ceilings, mutation gates and private receipt checks remain.
+Human Global Admin control uses a live exact scoped ADMIN binding; project Manager
+is not destination publication authority. Model recommendations file proposals;
+existing acceptance requires authenticated source Manager and human Global Admin
+before the queue claims the existing copy-and-retire action. The submitted `by`
+label is provenance. Queue claims, rejection and recovery behavior are reused.
+
+RBAC helpers remain the ordinary management path; no ACL editor or security-group
+directory was added. Tag groups are facets, not security groups. Existing legacy
+assignment still uses its configured migration operator and audited transaction;
+unknown creator provenance stays unknown. Global creation/move/type selectors,
+independent SYSTEM processing, retained runtime/acting authority and client scope
+cutover remain deferred to their documented slices.
+
+## Verification results
+
+- `./gradlew format` and `./gradlew formatCheck check` passed. The default server
+  suite passed 5,752 tests, including mocked role/admission, curation and HTTP/WS
+  provenance tests. Repository-wide Java/Javadoc, formatting and client checks passed.
+- 131 selected PostgreSQL checks were verified across the policy and consumer
+  suites, with fixture failures corrected and rerun. Selection covered
+  RootDocumentPolicyPersistenceTest, RootDocumentPolicyMigrationTest,
+  DocumentNavigationPersistenceTest, DocumentPoliciesTest,
+  KnowledgeScopePersistenceTest, InformationFacetsTest, InformationCollectionsTest,
+  InformationEventConcurrencyTest, AuthoredInformationPersistenceTest and
+  ServiceInformationProcessingTest. The full database suite was not run.
+- PostgreSQL evidence includes V154-to-V155 reconciliation/restart, legacy flags
+  remaining evidence, current-root historical/pinned reads, universal principal
+  eligibility/revocation, private inputs/references/logs, counts/facets/event
+  filtering, policy audit rollback and concurrent audience/read transactions.
+- Stale fixtures were corrected for immutable homes/revisions, bounded tokenizers
+  and embedding readiness/fingerprints. Production retrieval and privacy checks
+  were not weakened. The default check includes portable-export refusal coverage;
+  this slice adds no export format or live deployment claim.
+
+No live deployment, new public operation, independent SYSTEM processing, new Global
+creation/move selector or later-slice runtime behavior was implemented.
 
 ## Rollout and rollback
 
