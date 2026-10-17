@@ -1,7 +1,8 @@
 # Slice 06: Retained operation authority and conversation actions
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented on this branch, 18 October 2026, under explicit user authorization.
+No new public API or deployment. The [operation specification](06-operation-authority-specification.md)
+records admission and effect boundaries before enforcement.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -76,3 +77,27 @@ Inventory the supported admission/continuation paths, define dispatch/revocation
 ## Rollout and rollback
 
 Keep retained operation records and ceilings. A consumer unable to interpret the new authority must refuse new effects and allow only authorized receipt reconciliation.
+
+## Implementation evidence
+
+Ordinary conversation/run admission now captures executor, immutable scope, actual
+actions and exact supporting grants in V156. Grant replacement cannot widen old
+work. Queued starts, model dispatch, reviewed resource targets and settled answer
+disclosure recheck that envelope. The existing acting proof remains an additional
+intersection; child tools retain their parent's limits. HTTP and WebSocket resume
+pass the authenticated executor explicitly. CREATE is independent of model spend.
+
+Production composition requires the authority interface. Compatibility
+constructors support isolated runtime fixtures; they are not production defaults.
+Generic job closures, SYSTEM purpose classification, budget binding and later
+consumer recovery remain in their owning slices. Bounded streaming answers are
+disclosed whole after the final check, avoiding database calls in delta sinks.
+
+Three selected PostgreSQL tests passed for immutable/sealed admissions and
+supporting grants, atomic rollback, revoked-grant replacement refusal and
+concurrent single-job binding. Mocked admission/runtime tests cover action
+separation, scope relocation, queue-time revocation and withheld inference output.
+
+Final validation: `./gradlew format formatCheck check` passed, including 5,758
+default server tests. The selected `OperationRecordsPersistenceTest` passed all
+three PostgreSQL cases. No live deployment was performed.

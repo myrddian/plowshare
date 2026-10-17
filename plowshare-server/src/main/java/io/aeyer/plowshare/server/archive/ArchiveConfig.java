@@ -81,8 +81,9 @@ public class ArchiveConfig {
    * and until this bean existed the table had no production caller at all.
    */
   @Bean
-  public ConversationStore conversationStore(JdbcTemplate jdbc) {
-    return new ConversationStore(jdbc);
+  public ConversationStore conversationStore(
+      JdbcTemplate jdbc, io.aeyer.plowshare.server.access.OperationAuthority operations) {
+    return new ConversationStore(jdbc, operations);
   }
 
   /** Local hook sets by hash (spec 2026-09-30-local-hooks-are-served §3). */

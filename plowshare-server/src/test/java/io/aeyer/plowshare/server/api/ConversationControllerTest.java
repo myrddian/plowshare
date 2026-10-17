@@ -1055,12 +1055,13 @@ class ConversationControllerTest {
                 .content("{\"agent\":\"talker\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value(containsString("Global")));
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   @Test
   void continuing_a_conversation_starts_a_run_and_answers_with_it() throws Exception {
-    when(speaking.resume(eq("cnv_1"), any(), any(), any(), any())).thenReturn("job_000007");
+    when(speaking.resume(eq("cnv_1"), any(), any(), any(), any(), isNull()))
+        .thenReturn("job_000007");
 
     mvc.perform(
             post("/v1/conversations/cnv_1/resume")
@@ -1074,7 +1075,7 @@ class ConversationControllerTest {
 
     ArgumentCaptor<TurnCap> cap = ArgumentCaptor.captor();
     verify(speaking)
-        .resume(eq("cnv_1"), any(AgentDefinition.class), isNull(), cap.capture(), eq(40));
+        .resume(eq("cnv_1"), any(AgentDefinition.class), isNull(), cap.capture(), eq(40), isNull());
     assertEquals(20, cap.getValue().turns());
   }
 
@@ -1087,7 +1088,7 @@ class ConversationControllerTest {
    */
   @Test
   void a_grant_that_decides_no_cap_leaves_the_levels_above_it_to_answer() throws Exception {
-    when(speaking.resume(any(), any(), any(), any(), any())).thenReturn("job_000008");
+    when(speaking.resume(any(), any(), any(), any(), any(), isNull())).thenReturn("job_000008");
 
     mvc.perform(
             post("/v1/conversations/cnv_1/resume")
@@ -1097,7 +1098,7 @@ class ConversationControllerTest {
                         {"agent": "talker"}"""))
         .andExpect(status().isAccepted());
 
-    verify(speaking).resume("cnv_1", agent(), null, null, null);
+    verify(speaking).resume("cnv_1", agent(), null, null, null, null);
   }
 
   /**
@@ -1114,7 +1115,7 @@ class ConversationControllerTest {
   @Test
   void a_grant_continues_as_the_agent_that_answered_the_stopped_run() throws Exception {
     when(turns.forConversation("cnv_1")).thenReturn(List.of(answeredBy("talker")));
-    when(speaking.resume(any(), any(), any(), any(), any())).thenReturn("job_000009");
+    when(speaking.resume(any(), any(), any(), any(), any(), isNull())).thenReturn("job_000009");
 
     mvc.perform(
             post("/v1/conversations/cnv_1/resume")
@@ -1125,7 +1126,7 @@ class ConversationControllerTest {
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.agent").value("talker"));
 
-    verify(speaking).resume(eq("cnv_1"), eq(agent()), isNull(), any(), isNull());
+    verify(speaking).resume(eq("cnv_1"), eq(agent()), isNull(), any(), isNull(), isNull());
   }
 
   /**
@@ -1149,7 +1150,7 @@ class ConversationControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value(containsString("talker")));
 
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   /**
@@ -1168,7 +1169,7 @@ class ConversationControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail", containsString("not exported")));
 
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   /**
@@ -1192,7 +1193,7 @@ class ConversationControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value(containsString("does not record")));
 
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   /**
@@ -1210,7 +1211,7 @@ class ConversationControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value(containsString("this run")));
 
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   /**
@@ -1221,7 +1222,7 @@ class ConversationControllerTest {
    */
   @Test
   void a_run_a_grant_does_not_continue_is_a_conflict() throws Exception {
-    when(speaking.resume(any(), any(), any(), any(), any()))
+    when(speaking.resume(any(), any(), any(), any(), any(), isNull()))
         .thenThrow(
             new Turn.Refused(
                 "conversation cnv_1's last turn ended ANSWERED, so"
@@ -1246,7 +1247,7 @@ class ConversationControllerTest {
    */
   @Test
   void a_grant_below_what_has_been_spent_is_refused_at_the_door() throws Exception {
-    when(speaking.resume(any(), any(), any(), any(), any()))
+    when(speaking.resume(any(), any(), any(), any(), any(), isNull()))
         .thenThrow(
             new CallerFault(
                 "conversation cnv_1 has already spent 9"
@@ -1277,7 +1278,7 @@ class ConversationControllerTest {
   @Test
   void a_grant_of_model_calls_to_a_conversation_with_no_ceiling_is_refused_at_the_door()
       throws Exception {
-    when(speaking.resume(any(), any(), any(), any(), any()))
+    when(speaking.resume(any(), any(), any(), any(), any(), isNull()))
         .thenThrow(
             new CallerFault(
                 "this budget has no ceiling, so there"
@@ -1309,7 +1310,7 @@ class ConversationControllerTest {
                         {"agent": "talker", "session": "  "}"""))
         .andExpect(status().isBadRequest());
 
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   /**

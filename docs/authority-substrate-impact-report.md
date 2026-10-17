@@ -5,8 +5,9 @@ remains proposed. The separately authorized project READ/WRITE foundation (01),
 additive identities/scopes with locked built-ins (02), and scoped RBAC grants
 with role/agent ceilings (03), and knowledge home/provenance with scoped
 READ/WRITE/control admission (04), and current-root policy with GLOBAL_READ (05)
-are implemented in this branch. Runtime/SYSTEM/acting and remaining contract
-cutovers remain later work.
+and retained ordinary operation authority (06) are implemented in this branch.
+All-inference/budget and SYSTEM/consumer cutovers (07–10) are authorized next;
+remaining orchestration/acting/contract cutovers remain later work.
 
 
 Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
@@ -41,7 +42,9 @@ while retaining mandatory ownerOnly/input/reference and private-record rules.
 Its [predicate inventory](authority-substrate-slices/04-knowledge-write-specification.md)
 distinguishes converted checks from retained restrictions. The existing archive
 Global tier now has an explicit scope mapping; this does not activate Global
-access or SYSTEM processing. Slices 05–14 remain unauthorized.
+access or SYSTEM processing. Slice 05 now implements the root audience; slice 06
+implements ordinary retained execution. Slices 07–10 are authorized next; 11–14
+remain proposed.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces
 the listed ordinary catalogue/content/import/relationship owner-mutation checks;

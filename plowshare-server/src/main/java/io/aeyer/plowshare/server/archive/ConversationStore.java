@@ -197,6 +197,15 @@ public final class ConversationStore {
             SELECT id FROM tree ORDER BY depth, id"""
           .formatted(DEEPEST_DELEGATION);
 
+  private io.aeyer.plowshare.server.access.OperationAuthority operations;
+
+  /** Production creation boundary with required action admission. */
+  public ConversationStore(
+      JdbcTemplate jdbc, io.aeyer.plowshare.server.access.OperationAuthority operations) {
+    this(jdbc);
+    this.operations = Objects.requireNonNull(operations);
+  }
+
   private final JdbcTemplate jdbc;
   private final Supplier<Instant> now;
   private final Supplier<String> idFactory;
@@ -264,6 +273,11 @@ public final class ConversationStore {
    */
   public ConversationRecord open(Home home, Budget budget, TurnCap turnCap, String owner) {
     Objects.requireNonNull(budget, "budget");
+    if (operations != null)
+      operations.admit(
+          owner,
+          home,
+          java.util.Set.of(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE));
     return write(Origin.TURN, home, null, null, budget, turnCap, owner, null);
   }
 
@@ -377,6 +391,11 @@ public final class ConversationStore {
     // about their own turns; one agent's run is capped by TurnCap.from(its
     // definition), resolved where the run is started, and a column here
     // would be a second answer to a question that already has one.
+    if (operations != null && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
+      operations.admit(
+          owner,
+          home,
+          java.util.Set.of(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE));
     return write(origin, home, agent, parent, owned, null, owner, openedBy);
   }
 

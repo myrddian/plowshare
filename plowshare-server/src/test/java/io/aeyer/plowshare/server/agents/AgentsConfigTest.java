@@ -128,6 +128,9 @@ class AgentsConfigTest {
         // directory is created beside the module this suite runs in --
         // which is DataProperties' whole argument for the blank.
         .withUserConfiguration(AgentsConfig.class, DataConfig.class)
+        .withBean(
+            io.aeyer.plowshare.server.access.OperationAuthority.class,
+            () -> mock(io.aeyer.plowshare.server.access.OperationAuthority.class))
         .withBean(FileStores.class, () -> FileStores.NONE)
         .withBean(ApplicationResources.class, () -> ApplicationResources.NONE)
         .withBean(LlmDispatcher.class, () -> dispatcher)

@@ -127,7 +127,8 @@ class ApplicationConversationScopeTest {
 
   @Test
   void resume_uses_current_application_definition_and_payload_session_on_both_surfaces() {
-    when(speaking.resume(eq("conversation"), any(), any(), any(), any())).thenReturn("job");
+    when(speaking.resume(eq("conversation"), any(), any(), any(), any(), eq("manager")))
+        .thenReturn("job");
     resume.handle(
         Map.of("conversation", "conversation", "session", "target-session"),
         new Asking("socket-session", "manager"));
@@ -139,7 +140,8 @@ class ApplicationConversationScopeTest {
             argThat(d -> d.prompt().contains("application prompt")),
             eq("target-session"),
             any(),
-            any());
+            any(),
+            eq("manager"));
     assertEquals("service", definitions.callerForConversation("conversation", null).handle());
     verify(access, times(2)).requireWork("application", "manager");
   }

@@ -1395,7 +1395,7 @@ class ConversationFramesTest {
   void both_surfaces_continue_the_same_run_and_both_say_accepted() throws Exception {
     when(turns.forConversation("cnv_1")).thenReturn(List.of(spoken(1, "talker", 900)));
     when(speaking.homeOf("cnv_1")).thenReturn(PAYMENTS);
-    when(speaking.resume(eq("cnv_1"), any(), any(), any(), any())).thenReturn("job_7");
+    when(speaking.resume(eq("cnv_1"), any(), any(), any(), any(), isNull())).thenReturn("job_7");
     String asked =
         """
                 {"session": "session-1", "maxModelCalls": 20}""";
@@ -1417,7 +1417,7 @@ class ConversationFramesTest {
     // any(): it decides which machine the continued run reaches, and a body
     // that named none would make RequestedSession.in(asked.session())
     // indistinguishable from a handler that never read the field.
-    verify(speaking, times(2)).resume(eq("cnv_1"), any(), eq("session-1"), any(), eq(20));
+    verify(speaking, times(2)).resume(eq("cnv_1"), any(), eq("session-1"), any(), eq(20), isNull());
   }
 
   /**
@@ -1444,7 +1444,7 @@ class ConversationFramesTest {
 
     assertEquals(Code.BAD_REQUEST, outcome.code());
     FrameParity.assertSameRefusal(http, outcome);
-    verify(speaking, never()).resume(any(), any(), any(), any(), any());
+    verify(speaking, never()).resume(any(), any(), any(), any(), any(), isNull());
   }
 
   /**
@@ -1456,7 +1456,7 @@ class ConversationFramesTest {
       throws Exception {
     when(turns.forConversation("cnv_1")).thenReturn(List.of(spoken(1, "talker", 900)));
     when(speaking.homeOf("cnv_1")).thenReturn(PAYMENTS);
-    when(speaking.resume(eq("cnv_1"), any(), any(), any(), any()))
+    when(speaking.resume(eq("cnv_1"), any(), any(), any(), any(), isNull()))
         .thenThrow(
             new Turn.Refused(
                 "conversation cnv_1 ended by answering, and an answered run has nothing"

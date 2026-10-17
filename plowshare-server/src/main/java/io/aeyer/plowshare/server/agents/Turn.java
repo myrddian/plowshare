@@ -1033,7 +1033,9 @@ public final class Turn {
                   ended,
                   TurnCap.chosen(turnCap, record.turnCap(), definition),
                   List.of(),
-                  given != null ? conversations.ownerOf(id).orElse(null) : null,
+                  speaker.kind() == Speaker.Kind.PERSON
+                      ? speaker.name()
+                      : conversations.ownerOf(id).orElse(null),
                   incoming)
               : jobs.submitAdmitted(
                   definition,
@@ -1125,6 +1127,17 @@ public final class Turn {
       String sessionId,
       TurnCap turnCap,
       Integer maxModelCalls) {
+    return resume(conversation, definition, sessionId, turnCap, maxModelCalls, null);
+  }
+
+  /** Existing resume operation, with its authenticated executor kept separate from provenance. */
+  public String resume(
+      String conversation,
+      AgentDefinition definition,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      String executor) {
     Objects.requireNonNull(definition, "definition");
     ConversationRecord record =
         conversations
@@ -1215,7 +1228,10 @@ public final class Turn {
               // The nine-argument overload, which states incoming = false: a resumed run
               // is the harness continuing something that already ran out of allowance,
               // never a person's own words arriving fresh -- spec §6.
-              under);
+              under,
+              List.of(),
+              executor,
+              false);
       started = true;
       return job;
     } finally {

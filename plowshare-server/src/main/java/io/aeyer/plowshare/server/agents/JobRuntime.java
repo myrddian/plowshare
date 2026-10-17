@@ -202,6 +202,34 @@ public final class JobRuntime {
     };
   }
 
+  private io.aeyer.plowshare.server.access.OperationAuthority operations;
+
+  /** Runtime with required authority, used by focused policy fixtures. */
+  public JobRuntime(
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      LlmDispatcher dispatcher,
+      List<AgentTool> tools) {
+    this(dispatcher, tools);
+    this.operations = Objects.requireNonNull(operations);
+  }
+
+  /** Production composition supplies authority as a mandatory constructor dependency. */
+  public JobRuntime(
+      LlmDispatcher dispatcher,
+      List<AgentTool> tools,
+      Supplier<AgentRegistry> agents,
+      RunProviders files,
+      Supplier<Instant> clock,
+      Reminding reminding,
+      ImageStore images,
+      RefusalDetector refusals,
+      LongSupplier ticker,
+      AgentDelegates delegates,
+      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+    this(dispatcher, tools, agents, files, clock, reminding, images, refusals, ticker, delegates);
+    this.operations = Objects.requireNonNull(operations);
+  }
+
   private boolean confined;
   private Runnable admittedAuthority = () -> {};
   private String admittedSubject;
@@ -262,6 +290,7 @@ public final class JobRuntime {
     retained.admittedAuthority = admittedAuthority;
     retained.admittedSubject = admittedSubject;
     retained.retainedResources = authority;
+    retained.operations = operations;
     retained.runUsage = runUsage;
     retained.hooks = hooks;
     retained.environments = environments;
@@ -1471,6 +1500,68 @@ public final class JobRuntime {
       List<Content.Image> images,
       String callerHandle,
       boolean incoming) {
+    return runOperation(
+        definition,
+        userPrompt,
+        home,
+        budget,
+        cancelled,
+        sessionId,
+        watch,
+        transcript,
+        cap,
+        images,
+        callerHandle,
+        incoming,
+        null);
+  }
+
+  /**
+   * Uses a previously retained ordinary operation; acting authority remains an additional fence.
+   */
+  public Outcome runOperation(
+      AgentDefinition definition,
+      String userPrompt,
+      Home home,
+      Budget budget,
+      BooleanSupplier cancelled,
+      String sessionId,
+      JobWatch watch,
+      Transcript transcript,
+      TurnCap cap,
+      List<Content.Image> images,
+      String callerHandle,
+      boolean incoming,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+    if (operation == null && operations != null)
+      operation =
+          operations.admit(
+              ownerOf(callerHandle, sessionId, transcript.conversationId()),
+              home,
+              definition.nativeOnly()
+                  ? java.util.Set.of(
+                      io.aeyer.plowshare.server.access.AuthorityAction.READ,
+                      io.aeyer.plowshare.server.access.AuthorityAction.WRITE)
+                  : java.util.Set.of(
+                      io.aeyer.plowshare.server.access.AuthorityAction.READ,
+                      io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
+                      io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL));
+    if (operation != null) {
+      var required =
+          definition.nativeOnly()
+              ? java.util.Set.of(
+                  io.aeyer.plowshare.server.access.AuthorityAction.READ,
+                  io.aeyer.plowshare.server.access.AuthorityAction.WRITE)
+              : java.util.Set.of(
+                  io.aeyer.plowshare.server.access.AuthorityAction.READ,
+                  io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
+                  io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL);
+      if (!operation.actions().containsAll(required)
+          || !operation
+              .executor()
+              .equals(ownerOf(callerHandle, sessionId, transcript.conversationId())))
+        throw new CallerFault("Operation does not authorize this executor's actual actions");
+    }
     if (!confined)
       return execute(
           definition,
@@ -1484,7 +1575,8 @@ public final class JobRuntime {
           cap,
           images,
           callerHandle,
-          incoming);
+          incoming,
+          operation);
     RetainedAgent.require(definition);
     JobRuntime bound = retainedCopy(retainedResources);
     // Each child pins its own definition while retaining every ancestor's checks. No mutable
@@ -1518,7 +1610,21 @@ public final class JobRuntime {
         cap,
         images,
         callerHandle,
-        incoming);
+        incoming,
+        operation);
+  }
+
+  private void requireOperationTool(
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation,
+      Home home,
+      String name,
+      String input) {
+    if (operation == null) return;
+    var targets = OperationToolTargets.decode(name, input);
+    for (String project : targets.projects())
+      if (!home.project().equals(project))
+        throw new CallerFault("Tool target exceeds operation home");
+    operations.requireTargets(operation, home, targets.resources());
   }
 
   private Outcome execute(
@@ -1533,7 +1639,8 @@ public final class JobRuntime {
       TurnCap cap,
       List<Content.Image> images,
       String callerHandle,
-      boolean incoming) {
+      boolean incoming,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
     Objects.requireNonNull(cap, "cap");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(watch, "watch");
@@ -1553,6 +1660,7 @@ public final class JobRuntime {
     // unreachable -- becomes the refusal standing, without any of the
     // loop's own returns knowing a fallback exists. See Rerouting.
     admittedAuthority.run();
+    if (operation != null) operations.requireTargets(operation, home, List.of());
     if (confined) RetainedAgent.require(definition);
     String owner = ownerOf(callerHandle, sessionId, transcript.conversationId());
     RunUsage tracking = runUsage;
@@ -1589,7 +1697,8 @@ public final class JobRuntime {
                   owner,
                   route,
                   harnessRun,
-                  watch)
+                  watch,
+                  operation)
               : converse(
                   definition,
                   userPrompt,
@@ -1605,7 +1714,8 @@ public final class JobRuntime {
                   incoming,
                   route,
                   pacing,
-                  harnessRun);
+                  harnessRun,
+                  operation);
     } catch (RuntimeException broken) {
       inFlight = broken;
       throw broken;
@@ -1632,6 +1742,7 @@ public final class JobRuntime {
     // outcome, and the calls it spent are still calls this run made.
     Outcome settled = route.settle(outcome, clock.get()).paced(pacing.pace());
     if (skills != null) skills.closed(transcript.conversationId(), settled);
+    if (operation != null) operations.require(operation);
     return settled;
   }
 
@@ -1682,7 +1793,8 @@ public final class JobRuntime {
       String callerHandle,
       Rerouting route,
       HarnessRun harnessRun,
-      JobWatch watch) {
+      JobWatch watch,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
     String conversation = transcript.conversationId();
     if (scripts == null
         || conversation == null
@@ -1759,7 +1871,8 @@ public final class JobRuntime {
             extras,
             owner,
             runHooks,
-            home);
+            home,
+            operation);
     offered.replaceAll(
         (name, tool) ->
             tool instanceof AgentRunTool delegate
@@ -1786,6 +1899,7 @@ public final class JobRuntime {
     int callsBefore = budget.spent();
     int taken = 0;
     while (!cancelled.getAsBoolean()) {
+      if (operation != null) operations.require(operation);
       if (cap.stops(taken))
         return new Outcome(
             Ending.TURN_CAP,
@@ -1942,6 +2056,7 @@ public final class JobRuntime {
             LoggedEntry.answer(
                 "Script command " + pending.sequence(),
                 List.of(new ToolCall(id, name, pre.arguments()))));
+        requireOperationTool(operation, home, name, pre.arguments());
         tool.calledAs(id);
         // The offered set enforces the admitted definition's internal grants. Each tool owns
         // resource/lifecycle checks; external proxies also recheck their provider authority.
@@ -1952,6 +2067,7 @@ public final class JobRuntime {
                       ? tool.run(pre.arguments(), home)
                       : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
                   name);
+          if (operation != null) operations.require(operation);
         } catch (AgentRunTool.SubAgentFailed child) {
           // A dependency failure is an ordinary terminal child outcome, not a runtime bug.
           // The failed command has no successful journal receipt and must never be replayed
@@ -2047,7 +2163,8 @@ public final class JobRuntime {
       boolean incoming,
       Rerouting route,
       Pacing pacing,
-      HarnessRun harnessRun) {
+      HarnessRun harnessRun,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
     // WHAT THIS RUN IS HANDED BEYOND ITS DEFINITION, asked once and before anything is
     // offered, because the answer decides both the tool block and whether the todo notice
     // below is shown. A provider that throws costs the run its extras and nothing else: a
@@ -2166,7 +2283,8 @@ public final class JobRuntime {
             extras,
             owner,
             runHooks,
-            home);
+            home,
+            operation);
     BoundCommands.Prepared bound =
         boundCommands == null
             ? null
@@ -2397,6 +2515,7 @@ public final class JobRuntime {
 
     while (true) {
       admittedAuthority.run();
+      if (operation != null) operations.require(operation);
       Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
       if (informationInputs != null)
         informationInputs.requireLog(transcript.conversationId(), owner);
@@ -2547,6 +2666,10 @@ public final class JobRuntime {
                     route
                         .requestFor(history)
                         .withAttribution(usageFor(transcript, definition, steps + 1))
+                        .withAuthorization(
+                            operation == null
+                                ? io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.DIRECT
+                                : () -> operations.require(operation))
                         .withTools(forced ? withTheWayOut(schemas) : schemas),
                     extras,
                     schemas,
@@ -3013,6 +3136,7 @@ public final class JobRuntime {
       List<String> outcomes = new ArrayList<>(asked.size());
       for (ToolCall wanted : asked) {
         admittedAuthority.run();
+        if (operation != null) operations.require(operation);
         // Counted before the dispatch and for every call the model
         // asked for, whether or not anything answers to the name. What
         // is being counted is what the model did, not what the runtime
@@ -3156,6 +3280,14 @@ public final class JobRuntime {
                 retainedResources.require(
                     home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
               admittedAuthority.run();
+              if (operation != null) operations.require(operation);
+              if (operation != null) {
+                var targets = OperationToolTargets.decode(wanted.name(), preTool.arguments());
+                for (String project : targets.projects())
+                  if (!home.project().equals(project))
+                    throw new CallerFault("Tool target exceeds operation home");
+                operations.requireTargets(operation, home, targets.resources());
+              }
               tool.calledAs(wanted.id());
               // Internal grants come from the admitted definition. External provider proxies
               // recheck their additional authority inside run, alongside tool-owned access checks.
@@ -3167,6 +3299,7 @@ public final class JobRuntime {
                               preTool.arguments(), home, usageFor(transcript, definition, steps)),
                       wanted.name());
               admittedAuthority.run();
+              if (operation != null) operations.require(operation);
               if (confined)
                 retainedResources.require(
                     home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
@@ -3473,7 +3606,8 @@ public final class JobRuntime {
             RunExtras.Extras.NONE,
             account,
             RunHooks.NONE,
-            home)
+            home,
+            null)
         .values()
         .stream()
         .map(AgentTool::schema)
@@ -3505,7 +3639,8 @@ public final class JobRuntime {
       RunExtras.Extras extras,
       String callerHandle,
       RunHooks runHooks,
-      Home toolHome) {
+      Home toolHome,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
     Map<String, AgentTool> live = new java.util.HashMap<>();
     scopedTools
         .tools(toolHome, definition.name(), sessionId, cancelled, callerHandle)
@@ -3587,36 +3722,37 @@ public final class JobRuntime {
         offered.put(
             name,
             new AgentRunTool(
-                delegates.visible(toolHome, sessionId, callerHandle),
-                this,
-                definition,
-                budget,
-                cancelled,
-                sessionId,
-                // The run's own transcript, and the only thing the tool
-                // does with it is ask it for a child's -- which is a
-                // DIFFERENT transcript over a different conversation, so
-                // nothing a child says can reach this run's prompt. The
-                // same reason ResultTools takes one: this class learns
-                // no conversation id either way.
-                transcript,
-                // The pictures THIS run was shown: the free arm of the
-                // tool's resolution, and the only one that can answer
-                // for a picture that was never stored.
-                images,
-                // And the tier's images, for an id the run was told
-                // rather than shown. NO `home` GOES WITH IT: the tool is
-                // handed one per call, in AgentTool.run, which is this
-                // run's own and never a model's -- the same reason the
-                // router above takes its home per call rather than
-                // holding one. That is what keeps a named id inside the
-                // tier its run is in.
-                this.images,
-                // A child's approval question ends this run waiting too. Each parent gets
-                // its own TurnEnd, so AWAITING walks the whole delegation chain to the root.
-                extras.end(),
-                callerHandle,
-                delegates));
+                    delegates.visible(toolHome, sessionId, callerHandle),
+                    this,
+                    definition,
+                    budget,
+                    cancelled,
+                    sessionId,
+                    // The run's own transcript, and the only thing the tool
+                    // does with it is ask it for a child's -- which is a
+                    // DIFFERENT transcript over a different conversation, so
+                    // nothing a child says can reach this run's prompt. The
+                    // same reason ResultTools takes one: this class learns
+                    // no conversation id either way.
+                    transcript,
+                    // The pictures THIS run was shown: the free arm of the
+                    // tool's resolution, and the only one that can answer
+                    // for a picture that was never stored.
+                    images,
+                    // And the tier's images, for an id the run was told
+                    // rather than shown. NO `home` GOES WITH IT: the tool is
+                    // handed one per call, in AgentTool.run, which is this
+                    // run's own and never a model's -- the same reason the
+                    // router above takes its home per call rather than
+                    // holding one. That is what keeps a named id inside the
+                    // tier its run is in.
+                    this.images,
+                    // A child's approval question ends this run waiting too. Each parent gets
+                    // its own TurnEnd, so AWAITING walks the whole delegation chain to the root.
+                    extras.end(),
+                    callerHandle,
+                    delegates)
+                .underOperation(operation));
         continue;
       }
       if (router != null && FileTools.NAMES.contains(name)) {
@@ -4705,17 +4841,30 @@ public final class JobRuntime {
   private Completion streamed(
       Scheduling.Slot slot, ChatRequest request, Deltas sink, BooleanSupplier cancelled) {
     admittedAuthority.run();
-    request = request.withAuthorization(admittedAuthority::run);
+    var originalAuthorization = request.authorization();
+    request =
+        request.withAuthorization(
+            () -> {
+              admittedAuthority.run();
+              originalAuthorization.require();
+            });
+    // Bounded answers are disclosed whole after the final check. Delta sinks must not perform
+    // database IO while draining a transport, and cannot retract already delivered fragments.
+    Deltas authorized =
+        originalAuthorization == io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.DIRECT
+            ? sink
+            : DISCARDS;
     Completion completed =
         slot.pool() == null
-            ? dispatcher.stream(request, confined ? DISCARDS : sink, cancelled)
+            ? dispatcher.stream(request, confined ? DISCARDS : authorized, cancelled)
             : dispatcher.streamOn(
                 slot.pool(),
                 request.withBudget(LlmPool.NO_DEADLINE),
-                confined ? DISCARDS : sink,
+                confined ? DISCARDS : authorized,
                 cancelled);
     // Revocation during inference prevents publishing its output or starting another effect.
     admittedAuthority.run();
+    originalAuthorization.require();
     return completed;
   }
 

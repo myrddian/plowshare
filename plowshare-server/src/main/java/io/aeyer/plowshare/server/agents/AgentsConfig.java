@@ -774,7 +774,8 @@ public class AgentsConfig {
       ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messaging,
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolProperties> relayTools,
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations,
-      ObjectProvider<ScopedTools> scopedTools) {
+      ObjectProvider<ScopedTools> scopedTools,
+      io.aeyer.plowshare.server.access.OperationAuthority operations) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
@@ -888,7 +889,8 @@ public class AgentsConfig {
                   Home home, String session, String account, String name) {
                 return contextCallers.getObject().find(home, session, account, name);
               }
-            });
+            },
+            operations);
     // Before the registry reads knownTools(): see JobRuntime.useTodos. REQUIRED, not optional:
     // a todo list is how any agent keeps a task of several steps across turns and compactions,
     // so every boot binds todo_read and todo_write and a shipped definition may declare them.
@@ -1807,14 +1809,16 @@ public class AgentsConfig {
       JobLog jobs,
       JobsProperties properties,
       ObjectProvider<RunEnds> runEnds,
-      io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess) {
+      io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess,
+      io.aeyer.plowshare.server.access.OperationAuthority operations) {
     JobStore store =
         new JobStore(
             runtime,
             events.getIfAvailable(() -> JobEvents.NONE),
             compaction,
             jobs,
-            properties.getHeartbeat());
+            properties.getHeartbeat(),
+            operations);
     store.useProjectAccess(projectAccess);
     store.onRunEnded(runEnds.getIfAvailable(() -> RunEnds.NONE));
     return store;

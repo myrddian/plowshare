@@ -212,6 +212,15 @@ public final class AgentRunTool implements AgentTool {
    */
   private final AgentDelegates agents;
 
+  private io.aeyer.plowshare.server.access.OperationAuthority.Admission operation;
+
+  /** This tool is per-run; descendants keep the parent's fixed scope/action/grant envelope. */
+  AgentRunTool underOperation(
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+    this.operation = operation;
+    return this;
+  }
+
   private final JobRuntime runtime;
   private final AgentDefinition caller;
   private final Budget budget;
@@ -738,19 +747,8 @@ public final class AgentRunTool implements AgentTool {
             .map(note -> framed + "\n\n" + note)
             .orElse(framed);
     Outcome outcome =
-        callerHandle == null
-            ? runtime.run(
-                callee,
-                handed,
-                home,
-                budget,
-                cancelled,
-                sessionId,
-                JobWatch.UNWATCHED,
-                child,
-                TurnCap.from(callee),
-                pictures)
-            : runtime.run(
+        operation != null
+            ? runtime.runOperation(
                 callee,
                 handed,
                 home,
@@ -761,7 +759,33 @@ public final class AgentRunTool implements AgentTool {
                 child,
                 TurnCap.from(callee),
                 pictures,
-                callerHandle);
+                callerHandle,
+                false,
+                operation)
+            : callerHandle == null
+                ? runtime.run(
+                    callee,
+                    handed,
+                    home,
+                    budget,
+                    cancelled,
+                    sessionId,
+                    JobWatch.UNWATCHED,
+                    child,
+                    TurnCap.from(callee),
+                    pictures)
+                : runtime.run(
+                    callee,
+                    handed,
+                    home,
+                    budget,
+                    cancelled,
+                    sessionId,
+                    JobWatch.UNWATCHED,
+                    child,
+                    TurnCap.from(callee),
+                    pictures,
+                    callerHandle);
 
     // Before the propagation check, so that a child whose failure kills the
     // caller still has its own record closed: the ending, the closing
