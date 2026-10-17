@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.information;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.*;
@@ -46,7 +47,7 @@ class InformationFacetsTest {
     jdbc.execute("TRUNCATE admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('reader','h'),('other','h')");
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
-    access = new InformationAccess(new JdbcProjectMembers(jdbc));
+    access = new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc)));
     catalogue =
         io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
                 jdbc, work, access, Clock.systemUTC())

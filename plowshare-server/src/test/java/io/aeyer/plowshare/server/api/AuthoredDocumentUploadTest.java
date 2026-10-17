@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import io.aeyer.plowshare.protocol.InformationContent;
 import io.aeyer.plowshare.protocol.SchemaValidation;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.auth.AuthFilter;
@@ -39,7 +40,8 @@ class AuthoredDocumentUploadTest {
             mock(DocumentStore.class),
             mock(Deliberation.class),
             new DocumentsProperties());
-    controller.useInformationAccess(new InformationAccess(mock(ProjectMembers.class)));
+    controller.useInformationAccess(
+        new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class))));
     controller.useInformationCatalogue(catalogue);
     mvc =
         MockMvcBuilders.standaloneSetup(controller)

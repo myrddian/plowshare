@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.*;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.*;
 import java.nio.charset.StandardCharsets;
@@ -36,7 +37,7 @@ class PortableInformationTest {
           repository,
           navigation,
           mock(InformationNavigationService.class),
-          new InformationAccess(mock(ProjectMembers.class)),
+          new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class))),
           work,
           mock(InformationTransitions.class));
   final UUID revision = UUID.randomUUID(), resource = UUID.randomUUID();

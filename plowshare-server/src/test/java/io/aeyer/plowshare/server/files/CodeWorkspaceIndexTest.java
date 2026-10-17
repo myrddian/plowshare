@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.*;
@@ -73,7 +74,8 @@ class CodeWorkspaceIndexTest {
         "INSERT INTO admins(handle,password_hash) VALUES ('alice','fixture'),('bob','fixture')");
     jdbc.update("INSERT INTO projects(name) VALUES (?)", HOME.project());
     jdbc.update("INSERT INTO project_members SELECT id,'alice' FROM projects");
-    var access = new InformationAccess(new JdbcProjectMembers(jdbc));
+    var access =
+        new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc)));
     context =
         access
             .forRun("alice", HOME)
@@ -452,7 +454,7 @@ class CodeWorkspaceIndexTest {
     var jobs =
         new InformationJobs(
             new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
-            new InformationAccess(new JdbcProjectMembers(jdbc)),
+            new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))),
             catalogue);
     String log =
         new ConversationStore(jdbc)

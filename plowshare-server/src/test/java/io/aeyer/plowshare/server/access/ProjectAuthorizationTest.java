@@ -372,7 +372,9 @@ class ProjectAuthorizationTest {
           members.mayUse("integration", account),
           jdbc.queryForObject(
               "SELECT information_project_readable(?,?)", Boolean.class, integration, account));
-    var information = new io.aeyer.plowshare.server.information.InformationAccess(members);
+    var information =
+        new io.aeyer.plowshare.server.information.InformationAccess(
+            new EffectiveProjectPermissions(members));
     var selection =
         io.aeyer.plowshare.server.information.InformationContext.Selection.project("integration");
     var viewer = information.resolve("viewer", selection);

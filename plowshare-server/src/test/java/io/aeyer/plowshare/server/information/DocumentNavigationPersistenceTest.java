@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.protocol.InformationNavigation.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.Readable;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.*;
 import java.util.*;
 import org.flywaydb.core.Flyway;
@@ -538,7 +539,10 @@ class DocumentNavigationPersistenceTest {
         request = UUID.randomUUID();
     var navigation =
         new DocumentNavigation(
-            repository, new InformationAccess(new JdbcProjectMembers(jdbc)), work, true);
+            repository,
+            new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))),
+            work,
+            true);
     var selection = io.aeyer.plowshare.protocol.InformationRequest.Selection.personal();
     var first =
         new io.aeyer.plowshare.protocol.InformationRequest.RelationshipCreate(

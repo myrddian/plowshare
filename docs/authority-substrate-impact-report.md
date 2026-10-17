@@ -1,7 +1,8 @@
 # Authority substrate and Global impact report
 
-Status: source-grounded impact assessment, 17 October 2026. Proposal only; no
-runtime, database, permission or client implementation is included.
+Status: source-grounded impact assessment, 17 October 2026. The broader model
+remains proposed. Only the separately authorized project READ/WRITE foundation
+(slice 01) is now implemented in this branch; it changes no persisted policy.
 
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [migration map](global-scope-migration-map.md) and
@@ -12,9 +13,9 @@ Navigate by status: [settled decisions](#settled-decisions),
 [reusable mechanisms](#what-can-be-reused) and [deferred gaps](#deferred-gaps).
 
 The [first implementation slice plan](authority-substrate-first-slice-plan.md)
-recommends the existing project-information READ/WRITE gate as the initial
-production consumer. It is a compatibility foundation, with no schema or Global
-cutover; implementation remains unauthorized.
+records the existing project-information READ/WRITE gate as the initial
+production consumer. It is implemented as a compatibility foundation, with no
+schema or Global cutover. Follow-on implementation remains unauthorized.
 The [14-slice roadmap](authority-substrate-implementation-plan.md) gives every
 follow-on slice its own changes, reuse, verification and rollback document.
 
@@ -32,8 +33,8 @@ project/null homes conflate several meanings, exact-owner APIs block scoped admi
 writes, and common grants are not carried across all model/admission paths.
 
 The earlier segmented recheck used proposal commit `af89b7f`; subsequent policy
-clarifications are consolidated in the settled decision record below. No runtime
-has broken because these changes remain documentation only. The compatibility
+clarifications are consolidated in the settled decision record below. The broader
+identity/Global cutover remains unimplemented. The compatibility
 findings describe what fails if the new identities or
 grants are enabled against unchanged contracts. Missing action checks and optional
 new defaults are capability gaps, not evidence that existing explicit-project
@@ -43,6 +44,10 @@ reissuance or processing-scope relocation follows from this design.
 Runtime baseline: main `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`, merged into this
 proposal branch. PR #74 enables existing information features by default; PR #75
 fixes test completion timing. Neither implements the new authority model.
+Slice 01 now adds a typed project READ/WRITE adapter at the existing information
+gate, retaining effective RBAC, resource checks and current routing. Its focused
+verification is recorded in the first-slice document; this is not a fresh audit
+of all runtime/client consumers or proof of the remaining Global migration.
 
 Three read-only sub-agents scanned separate server segments; the parent reviewed
 the findings and sampled the protocol/client boundary:
@@ -619,16 +624,19 @@ None of those properties is established by this source scan.
 
 ## Verification performed
 
+The following records the original proposal audit. Subsequent slice 01 runtime
+verification is tracked in the [first-slice document](authority-substrate-first-slice-plan.md).
+
 The earlier three-segment review checked the corrected scoped-grant model,
 including a parent review of Application role binding, user-facing Global resume
 fences, summarizer home/owner parameters and the queue-time chat callback. Findings
 were classified as contract incompatibilities, new capability gaps, policy choices
 or existing mechanisms to reuse. The source scans were read-only. This
 consolidation separates settled policy, migration requirements, reuse and deferred
-gaps; it is not a new exhaustive runtime/client audit. Changes are confined to
-the proposal, source map, permission matrix, report and documentation index. Document
-structure, local links and diff whitespace are checked before commit. No runtime
-or database tests were newly run for these documentation changes.
+gaps; it was not a new exhaustive runtime/client audit. That consolidation changed
+only the proposal, source map, permission matrix, report and documentation index.
+Document structure, local links and diff whitespace were checked before commit.
+No runtime or database tests were newly run for that documentation-only task.
 
 Earlier in this conversation, the unchanged runtime baseline passed 28 focused
 cases across InformationFeatureConfigTest, DocumentNavigationTest,

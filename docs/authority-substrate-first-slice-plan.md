@@ -1,7 +1,7 @@
 # Authority substrate: first implementation slice
 
-Status: proposed implementation scope, 17 October 2026. Planning only; this
-document does not authorize implementation, new APIs or new user capabilities.
+Status: slice 01 implemented in this branch, 17 October 2026, following explicit
+authorization to implement this slice only. No new APIs or other slices are included.
 
 This is **slice 01 of the [14-slice implementation roadmap](authority-substrate-implementation-plan.md)**.
 Its existing scope remains unchanged; each follow-on slice has its own document
@@ -9,9 +9,9 @@ and dependency/verification boundary.
 
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [impact report](authority-substrate-impact-report.md) and
-[role matrices](role-scope-permissions-proposal.md). Source was checked in the
-proposal checkout after documentation commit `63c57b6`; the runtime baseline
-remains main `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`.
+[role matrices](role-scope-permissions-proposal.md). The original source assessment
+used main `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`. This branch now adds the narrow
+implementation described below; the remaining authority model is still proposed.
 
 ## Recommended boundary and outcome
 
@@ -35,7 +35,7 @@ first slice. Those changes remain explicit follow-on work.
 
 | Existing implementation | What we reuse and preserve |
 | --- | --- |
-| [InformationAccess](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationAccess.java) | Project selection rechecks mayUse; project work additionally checks mayWork. Authentication, Personal mapping and service exclusion from Personal/Shared remain owned here. |
+| [InformationAccess](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationAccess.java) | Project selection now requests READ; project work additionally requests WRITE. Authentication, Personal mapping and service exclusion from Personal/Shared remain owned here. |
 | [ProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectMembers.java) and [ProjectRole](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) | Live effective roles and existing VIEWER/CONTRIBUTOR/MANAGER vocabulary. No wire-role rename, membership migration or enum insertion. |
 | [ApplicationProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ApplicationProjectMembers.java) | The primary injected role source intersects stored roles with current Application-manifest limits and service-token ownership/ceilings. This wrapper must not be bypassed. |
 | [JdbcProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java) | Existing persistence, account/token role resolution and current Personal/legacy server-admin compatibility. No new SQL or duplicate role lookup. |
@@ -46,15 +46,16 @@ In production, do not substitute raw JdbcProjectMembers, isMember, a role suppli
 in a request, or an AdminStore shortcut for the effective injected ProjectMembers source.
 Application manifests may narrow existing authority; they do not create membership.
 
-## Changes proposed for this slice
+## Implemented scope
 
 ### 1. Define the narrow contract
 
-Introduce a small constructor-injected permission interface in the server access
-package, with validated authenticated-principal/project-target values and explicit
-READ/WRITE requests. Candidate names such as `ScopedPermissions`, `ProjectTarget`
-and `PermissionAction` are implementation names to finalize, not new public DTOs.
-Keep the contract no wider than the first consumer requires.
+[ScopedPermissions](../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/ScopedPermissions.java)
+is the constructor-injected interface in the server access package. Its internal
+`Principal` value requires a nonblank identity from authenticated server context;
+the value itself does not authenticate. `ProjectTarget` uses the existing
+`Home.of` locator validation and preserves the exact project name. `Action`
+contains only READ and WRITE. These are internal contracts, not new public DTOs.
 
 - An explicit project target is required. Null/blank/invalid targets cannot mean
   Global, Personal, unrestricted work or a fallback project.
@@ -68,9 +69,10 @@ Keep the contract no wider than the first consumer requires.
 
 ### 2. Implement the existing RBAC mapping
 
-Back the contract with the effective ProjectMembers interface and its live role
-resolution. Evaluate each request afresh; do not cache an allow decision in an
-InformationContext or invent another permission store.
+[EffectiveProjectPermissions](../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/EffectiveProjectPermissions.java)
+uses the effective ProjectMembers interface and its live role resolution. Each
+request resolves the role afresh with explicit action/role switches. No allow
+decision is cached in InformationContext and no permission store is added.
 
 | Current effective project role | READ | WRITE |
 | --- | --- | --- |
@@ -97,10 +99,10 @@ Leave Personal/Shared routing, includeShared selection, service-token restrictio
 and SQL/resource policy composition intact. The existing permission-error contract
 should remain stable where possible; unavailable authority must fail closed.
 
-Wire the effective ProjectMembers adapter in composition and inject the narrow
-interface into InformationAccess. Update its constructor fixtures accordingly;
-do not hide composition inside a service's compatibility constructor or let
-production choose a raw repository to make tests easier.
+DocumentsConfig wires the adapter to the primary effective ProjectMembers bean
+and injects ScopedPermissions into InformationAccess. Direct-construction test
+fixtures compose the adapter explicitly; InformationAccess has no compatibility
+constructor that selects an implementation or raw repository.
 
 The central ProjectAuthorization operation classification remains unchanged.
 In particular, do not reinterpret every CONTRIBUTOR operation as WRITE or every
@@ -123,7 +125,7 @@ handlers, ProjectRole wire names, ProjectMembers SQL, Flyway, membership data,
 SYSTEM worker definitions or model dispatch. If the implementation needs those
 changes, report the concrete dependency and revise this scope before expanding it.
 
-## Verification for a future implementation
+## Verification
 
 Use mocked ProjectMembers and mock-backed ApplicationProjectMembers, plus existing
 information repository interfaces. These are authorization/compatibility tests,
@@ -139,13 +141,11 @@ not proof of live PostgreSQL or a complete Global migration.
 | Resource policy remains authoritative | Passing project READ/WRITE does not bypass current owner checks, mandatory/reference/input constraints or lifecycle gates. Denied work does not call the protected mutation. |
 | Composition and public compatibility | The InformationAccess bean uses the effective Application-aware role adapter. Existing feature-config, navigation and upload tests still exercise the existing contracts, without new endpoints or SDK methods. |
 
-Add a focused mocked test for the new adapter (for example,
-`io.aeyer.plowshare.server.access.ScopedPermissionsTest`; proposed, not present
-today) and extend the existing InformationAccess tests. Include a mock-backed
-composition check using the existing application-context test facilities: a raw
-stored MANAGER capped to VIEWER by the primary ApplicationProjectMembers bean
-must remain read-only through the injected permission adapter. This needs no
-database or new test infrastructure. Reuse focused regressions:
+The new `ScopedPermissionsTest` and extended information tests cover this matrix.
+A mock-backed ApplicationContextRunner test loads production DocumentsConfig and
+the primary ApplicationProjectMembers bean: a raw stored MANAGER capped to VIEWER
+remains read-only through the injected adapter, and manifest removal refuses its
+retained context. This uses no database or new test infrastructure. Focused checks:
 
 ```sh
 ./gradlew :plowshare-server:test \
@@ -161,9 +161,18 @@ database or new test infrastructure. Reuse focused regressions:
 ./gradlew check
 ```
 
-These commands are a future verification plan, not checks run by this planning
-task. Finalize the new test name with the implementation. No PostgreSQL/full-db
-run is required for this slice: it changes no SQL, row mapping, migrations or
+The focused command passed **47 tests**, with no failures or skips. `format`
+and `formatCheck` passed. The full `check` command ran 5,705 server tests:
+5,704 passed and one failed in the unchanged
+`CodeMapToolTest.live_symbols_page_and_exact_unicode_reads_are_hash_bound`
+(line 158: expected three symbols, received zero). A single-test rerun reproduced
+that failure. The code-map test and its implementation were not modified; the
+repository-wide completion gate is therefore not green. No code-map repair is
+included in this slice. The initial console dependency-resolution failure was
+cleared by building the existing MCP integration and installing the Desktop's
+locked dependencies, with no tracked client/build changes.
+
+No PostgreSQL/full-db run is required for this slice: it changes no SQL, row mapping, migrations or
 transaction behavior. ProjectAuthorizationTest and several construction fixtures
 are full-db tests; do not run them merely because their constructors compile
 against the new interface. Any persistence change requires a scope revision and
@@ -185,6 +194,10 @@ gate, effective role ceilings and negative/revocation cases pass, existing
 supported behavior remains compatible, required formatting/checks pass, and the
 remaining Global/owner/SYSTEM gaps are reported honestly. Passing mocks does not
 prove a Global account, SYSTEM execution sandbox or monetary budget ledger exists.
+
+The implementation and focused authorization checks are delivered. The unchanged
+code-map failure above remains an explicit repository-check limitation. No live
+deployment, SQL policy proof or atomic revocation-versus-commit proof is claimed.
 
 ## Deferred from this slice
 

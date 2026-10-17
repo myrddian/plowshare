@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.Extracted;
@@ -125,7 +126,10 @@ class ServiceInformationProcessingTest {
     UUID revision = retained(PRINCIPAL, project);
     var catalogue =
         InformationFixtures.catalogue(
-            jdbc, work, new InformationAccess(members), Clock.systemUTC());
+            jdbc,
+            work,
+            new InformationAccess(new EffectiveProjectPermissions(members)),
+            Clock.systemUTC());
     var lifecycle =
         new InformationLifecycle(
             repository,

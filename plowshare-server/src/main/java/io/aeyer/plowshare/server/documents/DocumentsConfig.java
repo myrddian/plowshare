@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.documents;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
+import io.aeyer.plowshare.server.access.ScopedPermissions;
 import io.aeyer.plowshare.server.agents.Citing;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
@@ -24,10 +26,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @EnableConfigurationProperties(DocumentsProperties.class)
 public class DocumentsConfig {
 
+  /** The unqualified source is the primary, Application-aware effective role resolver. */
+  @Bean
+  public ScopedPermissions scopedPermissions(
+      io.aeyer.plowshare.server.archive.ProjectMembers members) {
+    return new EffectiveProjectPermissions(members);
+  }
+
   @Bean
   public io.aeyer.plowshare.server.information.InformationAccess informationAccess(
-      io.aeyer.plowshare.server.archive.ProjectMembers members) {
-    return new io.aeyer.plowshare.server.information.InformationAccess(members);
+      ScopedPermissions permissions) {
+    return new io.aeyer.plowshare.server.information.InformationAccess(permissions);
   }
 
   @Bean

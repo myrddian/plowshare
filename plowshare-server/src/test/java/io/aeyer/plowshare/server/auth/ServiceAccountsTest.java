@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -173,7 +174,9 @@ class ServiceAccountsTest {
             "SELECT information_project_readable((SELECT id FROM projects WHERE name='other'),?)",
             Boolean.class,
             principal));
-    var information = new io.aeyer.plowshare.server.information.InformationAccess(members);
+    var information =
+        new io.aeyer.plowshare.server.information.InformationAccess(
+            new EffectiveProjectPermissions(members));
     var context = information.forRun(principal, Home.of("automation"));
     assertFalse(context.selection().includeShared());
     information.requireSelection(context);

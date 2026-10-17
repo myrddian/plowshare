@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.*;
 import io.aeyer.plowshare.server.information.*;
@@ -213,7 +214,7 @@ class EmbeddingRuntimeRepositoryTest {
         new RetrievalService(store, mock(EmbeddingClient.class), "unused legacy", 768)
             .checkingConfiguration();
     service.useDualEmbeddings(dual);
-    var access = new InformationAccess(mock(ProjectMembers.class));
+    var access = new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class)));
     var personal = access.resolve("alice", InformationContext.Selection.personal());
     var reader = service.scoped(access, personal);
     assertEquals(

@@ -6,10 +6,20 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.Changed;
 import io.aeyer.plowshare.protocol.InformationRequest;
 import io.aeyer.plowshare.protocol.InformationResponse;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
+import io.aeyer.plowshare.server.archive.ApplicationProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.documents.DocumentsConfig;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.llm.EmbeddingClient;
+import io.aeyer.plowshare.server.llm.LlmProperties;
+import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import java.io.IOException;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -17,9 +27,57 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Bind the shipped configuration and real services without starting workers or a database. */
 class InformationFeatureConfigTest {
+  @Test
+  void productionInformationGateUsesPrimaryApplicationLimitedRolesWithoutDatabase() {
+    var stored = mock(ProjectMembers.class);
+    var policy = mock(ApplicationPolicy.class);
+    var jdbc = mock(JdbcTemplate.class);
+    var llm = new LlmProperties();
+    llm.setEmbeddingModel("fixture-embedding");
+    llm.setEmbeddingDim(3);
+    llm.setEmbeddingMaxInputTokens(128);
+    when(stored.role("app", "admin")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(stored.isServerAdmin("admin")).thenReturn(true);
+    when(policy.read("app"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("admin", ProjectRole.VIEWER)));
+    new ApplicationContextRunner()
+        .withUserConfiguration(DocumentsConfig.class, ApplicationProjectMembers.class)
+        .withBean("jdbcProjectMembers", ProjectMembers.class, () -> stored)
+        .withBean(ApplicationPolicy.class, () -> policy)
+        .withBean(JdbcTemplate.class, () -> jdbc)
+        .withBean(UnitOfWork.class, () -> UnitOfWork.NONE)
+        .withBean(EmbeddingClient.class, () -> mock(EmbeddingClient.class))
+        .withBean(LlmProperties.class, () -> llm)
+        .withBean(Tokenizer.class, () -> mock(Tokenizer.class))
+        .withPropertyValues(
+            "plowshare.documents.chunk-target-tokens=64",
+            "plowshare.documents.embed-batch-size=1",
+            "plowshare.documents.ingest-budget=1")
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertInstanceOf(
+                  ApplicationProjectMembers.class, context.getBean(ProjectMembers.class));
+              var access = context.getBean(InformationAccess.class);
+              var selected = access.resolve("admin", InformationContext.Selection.project("app"));
+              assertThrows(CallerFault.class, () -> access.requireWork(selected));
+              when(policy.read("app"))
+                  .thenReturn(
+                      new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
+              assertThrows(CallerFault.class, () -> access.requireSelection(selected));
+              verify(stored, never()).isServerAdmin(any());
+              // Spring initializes the mock bean; neither composition nor admission issues SQL.
+              verify(jdbc).afterPropertiesSet();
+              verifyNoMoreInteractions(jdbc);
+            });
+  }
+
   private final InformationNavigationRepository repository =
       mock(InformationNavigationRepository.class);
   private final ProjectMembers members = mock(ProjectMembers.class);
@@ -33,7 +91,9 @@ class InformationFeatureConfigTest {
             context -> shipped.forEach(context.getEnvironment().getPropertySources()::addLast))
         .withUserConfiguration(InformationFeatureConfig.class)
         .withBean(InformationNavigationRepository.class, () -> repository)
-        .withBean(InformationAccess.class, () -> new InformationAccess(members))
+        .withBean(
+            InformationAccess.class,
+            () -> new InformationAccess(new EffectiveProjectPermissions(members)))
         .withBean(UnitOfWork.class, () -> UnitOfWork.NONE);
   }
 

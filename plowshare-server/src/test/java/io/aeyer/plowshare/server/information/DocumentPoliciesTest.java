@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.information;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
@@ -81,7 +82,7 @@ class DocumentPoliciesTest {
         "INSERT INTO project_members (project_id, handle)"
             + " SELECT id, 'alice' FROM projects WHERE name = 'research'");
     members = new JdbcProjectMembers(jdbc);
-    access = new InformationAccess(members);
+    access = new InformationAccess(new EffectiveProjectPermissions(members));
     assignments =
         new DocumentPolicyAssignments(
             new JdbcDocumentPolicyRepository(jdbc),

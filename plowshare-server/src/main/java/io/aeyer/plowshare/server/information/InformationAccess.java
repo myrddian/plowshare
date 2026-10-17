@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.information;
 
-import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.access.ScopedPermissions;
+import io.aeyer.plowshare.server.access.ScopedPermissions.Action;
+import io.aeyer.plowshare.server.access.ScopedPermissions.Principal;
+import io.aeyer.plowshare.server.access.ScopedPermissions.ProjectTarget;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.util.Objects;
@@ -10,10 +13,10 @@ import java.util.Objects;
  * revision.
  */
 public final class InformationAccess {
-  private final ProjectMembers members;
+  private final ScopedPermissions permissions;
 
-  public InformationAccess(ProjectMembers members) {
-    this.members = Objects.requireNonNull(members, "members");
+  public InformationAccess(ScopedPermissions permissions) {
+    this.permissions = Objects.requireNonNull(permissions, "permissions");
   }
 
   public InformationContext resolve(String account, InformationContext.Selection selection) {
@@ -56,7 +59,10 @@ public final class InformationAccess {
       throw new CallerFault(
           "Service tokens require a project information scope without includeShared");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
-        && !members.mayUse(context.selection().project(), context.account())) {
+        && !permissions.allows(
+            new Principal(context.account()),
+            new ProjectTarget(context.selection().project()),
+            Action.READ)) {
       throw new CallerFault("this account may not read the selected project's information");
     }
   }
@@ -64,7 +70,10 @@ public final class InformationAccess {
   public void requireWork(InformationContext context) {
     requireSelection(context);
     if (context.selection().scope() == InformationContext.Scope.PROJECT
-        && !members.mayWork(context.selection().project(), context.account()))
+        && !permissions.allows(
+            new Principal(context.account()),
+            new ProjectTarget(context.selection().project()),
+            Action.WRITE))
       throw new CallerFault(
           "This account needs CONTRIBUTOR access to change the selected project's information");
   }

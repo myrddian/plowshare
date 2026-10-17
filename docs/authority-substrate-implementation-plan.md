@@ -1,7 +1,8 @@
 # Authority substrate implementation roadmap
 
-Status: proposed implementation plan, 17 October 2026. Documentation only.
-No slice has been implemented or authorized for execution by this roadmap.
+Status: implementation roadmap, 17 October 2026. Slice 01 has been explicitly
+authorized and implemented in this branch; slices 02–14 remain proposed and
+unauthorized. This roadmap does not authorize their execution.
 
 ## Count and scope
 
@@ -15,9 +16,11 @@ later implementation instruction; split a unit further if evidence requires it.
 settled architecture. The [impact report](authority-substrate-impact-report.md)
 supplies source evidence, reuse and deferred gaps; the
 [role matrices](role-scope-permissions-proposal.md) define role-facing policy.
-Runtime source baseline remains main
+The original runtime source baseline was main
 `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`; the first-slice plan was committed
-as documentation in `8f57b54`. This roadmap inventories current source owners;
+as documentation in `8f57b54`. This branch now implements only its typed project
+READ/WRITE seam; see the slice 01 document for verification and limits.
+This roadmap inventories source owners;
 it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 
 ## Slice documents and dependencies
@@ -127,9 +130,9 @@ For future implementation:
    retained-state fixtures for the affected slice. New Flyway migrations only;
    never rewrite a shipped migration or relabel historical usage as new authority.
 
-No Java, PostgreSQL, SDK or live integration tests are run by this planning task.
-Document links, dependencies, source references and the documentation-only diff
-are checked separately.
+The slice 01 document records implementation checks. The original roadmap
+planning task ran no Java, PostgreSQL, SDK or live integration tests; its
+documentation checks are distinct from implementation verification.
 
 ## Deferred capabilities and stop conditions
 
@@ -154,6 +157,7 @@ the adopted account/scope/action and sandbox rules, required migration/negative/
 recovery evidence passes, and the supported end-to-end path in slice 14 works.
 Unsupported capabilities remain explicitly unsupported.
 
-This is a planning deliverable. A later implementation request determines which
-slices to execute; no source change, migration execution, credential issuance,
-external notification, production deployment or automatic follow-up is scheduled.
+Only slice 01 is implemented under the subsequent explicit request. Each later
+implementation request determines which further slices to execute; no migration
+execution, credential issuance, external notification, production deployment or
+automatic follow-up is scheduled by this roadmap.

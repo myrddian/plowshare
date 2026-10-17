@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -44,7 +45,7 @@ class InformationCollectionsTest {
         io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
             jdbc,
             new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source)),
-            new InformationAccess(new JdbcProjectMembers(jdbc)),
+            new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))),
             Clock.systemUTC());
   }
 
