@@ -26,6 +26,8 @@ public final class EffectiveProjectPermissions implements ScopedPermissions {
                       switch (role) {
                         case VIEWER, CONTRIBUTOR, MANAGER -> true;
                       };
+                  case SET_AUDIENCE ->
+                      role == io.aeyer.plowshare.server.archive.ProjectRole.MANAGER;
                   case WRITE ->
                       switch (role) {
                         case VIEWER -> false;

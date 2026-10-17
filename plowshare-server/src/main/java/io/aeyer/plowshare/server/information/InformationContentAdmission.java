@@ -35,8 +35,7 @@ public final class InformationContentAdmission implements InformationContentAuth
     access.requireWork(context);
     if (typing != null) settings.requireWrites();
     var head = repository.head(InformationContentTypeService.namespace(context), name, false);
-    if (head.isPresent() && !context.account().equals(head.get().owner()))
-      throw InformationContentTypeService.absent();
+    head.ifPresent(value -> repository.requireWrite(context, value.revision()));
     if (expected != null && (head.isEmpty() || !expected.equals(head.get().revision())))
       throw new CallerFault("INFORMATION_REVISION_CONFLICT");
     var previous = head.flatMap(value -> repository.binding(value.revision()));

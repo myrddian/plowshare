@@ -68,7 +68,7 @@ class DocumentNavigationPersistenceTest {
     jdbc.update(
         "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind,tags) VALUES(?,?,?,?,?,'source','[\"billing\"]'::jsonb)",
         id,
-        "project:" + project,
+        project == null ? "account:" + owner : "project:" + project,
         name,
         owner,
         project == null ? null : project(project));
@@ -420,13 +420,13 @@ class DocumentNavigationPersistenceTest {
   @Test
   void incompleteClosureFailsClosedAndAbsentSourcesMatchHiddenSources() {
     jdbc.update(
-        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ('22222222-2222-2222-2222-'||lpad(i::text,12,'0'))::uuid,'closure-fixture','node-'||i,'alice',?,'source' FROM generate_series(1,1025) i",
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ('22222222-2222-2222-2222-'||lpad(i::text,12,'0'))::uuid,'project:operations','node-'||i,'alice',?,'source' FROM generate_series(1,1025) i",
         project("operations"));
     jdbc.update(
-        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) SELECT id,id,1,source_name,'text/plain','fixture',1 FROM information_resources WHERE namespace='closure-fixture'");
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) SELECT id,id,1,source_name,'text/plain','fixture',1 FROM information_resources WHERE namespace='project:operations'");
     UUID root = UUID.fromString("22222222-2222-2222-2222-000000000001");
     jdbc.update(
-        "INSERT INTO information_inputs(derived_revision,input_revision) SELECT ?,id FROM information_revisions WHERE resource_id IN (SELECT id FROM information_resources WHERE namespace='closure-fixture') AND id<>?",
+        "INSERT INTO information_inputs(derived_revision,input_revision) SELECT ?,id FROM information_revisions WHERE resource_id IN (SELECT id FROM information_resources WHERE namespace='project:operations') AND id<>?",
         root,
         root);
     assertTrue(

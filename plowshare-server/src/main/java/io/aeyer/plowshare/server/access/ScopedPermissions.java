@@ -16,7 +16,8 @@ public interface ScopedPermissions {
   /** Only the implemented project actions; no ordering or implicit permission inheritance. */
   enum Action {
     READ,
-    WRITE
+    WRITE,
+    SET_AUDIENCE
   }
 
   /** Validates identity presence, not authentication; preserves the server's exact principal. */

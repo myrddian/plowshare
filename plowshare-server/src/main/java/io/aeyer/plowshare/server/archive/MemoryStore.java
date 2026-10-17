@@ -86,24 +86,13 @@ public class MemoryStore {
   private static final String RETIRED_STATES = "('superseded', 'invalidated')";
 
   /*
-   * `project_id IS NOT DISTINCT FROM ?` and not `project_id = ?`, because the
-   * global tier is a NULL project and `NULL = NULL` is NULL, not true — a
-   * plain equality would silently return zero global rows forever. The CAST is
-   * not decoration: with a bare `?` the driver sends an untyped NULL and
-   * Postgres refuses the statement with "could not determine data type of
-   * parameter".
-   *
-   * The parameter is a project id since V14 and not a name, and it is never
-   * built here: ProjectIds.toRead is the one place a Home becomes one, because
-   * the third case -- a project nothing has written to yet -- has to become a
-   * value that matches no row rather than the NULL that means global.
-   *
-   * Unqualified despite the join below, which is deliberate rather than
-   * careless: `projects` has no column of this name, so there is nothing for it
-   * to be ambiguous with, and the two columns that DO collide -- `id` and
-   * `name` -- are qualified everywhere they appear.
+   * Explicit persisted home identity is authoritative for tier selection. ProjectIds still
+   * translates the legacy wire Home: its unknown-project sentinel resolves to no scope, while
+   * the archive's documented null tier maps to the fixed Global knowledge scope. This mapping
+   * does not grant authority to callers; existing archive/curation admission remains in force.
    */
-  private static final String HOME_MATCHES = "project_id IS NOT DISTINCT FROM CAST(? AS BIGINT)";
+  private static final String HOME_MATCHES =
+      "home_scope_id = memory_knowledge_scope(CAST(? AS BIGINT))";
 
   /*
    * The join is what keeps a Home a name. A row holds an id; a Memory holds

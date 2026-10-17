@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 class InformationContentAdmissionTest {
   @Test
-  void projectWriteDoesNotBypassExistingResourceOwnerAdmission() {
+  void projectContributorCanReviseAnotherCreatorsResource() {
     var members = mock(ProjectMembers.class);
     when(members.role("research", "author"))
         .thenReturn(Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR));
@@ -24,20 +24,20 @@ class InformationContentAdmissionTest {
             Optional.of(
                 new InformationContentRepository.Head(
                     UUID.randomUUID(), revision, "other", "source", "active", true)));
-    assertThrows(
-        RuntimeException.class,
-        () ->
-            projectAdmission.resolve(
+    assertTrue(
+        projectAdmission
+            .resolve(
                 project,
                 "incident.md",
                 revision,
-                new InformationContent.Typing("clear", null, null)));
-    verify(repository, never()).binding(any());
+                new InformationContent.Typing("clear", null, null))
+            .isEmpty());
+    verify(repository).requireWrite(project, revision);
     verifyNoInteractions(types);
   }
 
   @Test
-  void projectWriteDoesNotReplacePerResourceReadabilityOrOwnerFences() {
+  void projectWriteDoesNotReplaceMandatoryResourceFences() {
     var members = mock(ProjectMembers.class);
     var scoped = new InformationAccess(new EffectiveProjectPermissions(members));
     var catalogueRepository = mock(InformationCatalogueRepository.class);
@@ -53,7 +53,7 @@ class InformationContentAdmissionTest {
     when(catalogueRepository.readable(project, revision)).thenReturn(false);
     doThrow(new io.aeyer.plowshare.server.faults.NotFoundFault("unavailable"))
         .when(catalogueRepository)
-        .lockOwner("author", revision);
+        .lockResource(project, revision, false);
     for (var role : io.aeyer.plowshare.server.archive.ProjectRole.values()) {
       when(members.role("research", "author")).thenReturn(Optional.of(role));
       assertThrows(
@@ -62,7 +62,7 @@ class InformationContentAdmissionTest {
       assertThrows(
           RuntimeException.class, () -> catalogue.availability(project, revision, "deleted"));
     }
-    verify(catalogueRepository, times(2)).lockOwner("author", revision);
+    verify(catalogueRepository, times(2)).lockResource(project, revision, false);
     verify(catalogueRepository, never()).bytes(any());
     verify(catalogueRepository, never()).availability(any(), any(), any());
   }
@@ -124,12 +124,16 @@ class InformationContentAdmissionTest {
   @Test
   void guessed_foreign_or_stale_head_never_resolves_a_contract() {
     head("other", true);
+    doThrow(new io.aeyer.plowshare.server.faults.NotFoundFault("unavailable"))
+        .when(repository)
+        .requireWrite(own, revision);
     assertThrows(
         RuntimeException.class,
         () ->
             admission.resolve(
                 own, "incident.md", revision, new InformationContent.Typing("clear", null, null)));
     head("author", true);
+    doNothing().when(repository).requireWrite(own, revision);
     assertEquals(
         "INFORMATION_REVISION_CONFLICT",
         assertThrows(
@@ -198,6 +202,7 @@ class InformationContentAdmissionTest {
                 own, "incident.md", revision, new InformationContent.Typing("clear", null, null)));
     verifyNoInteractions(repository, types);
     head("author", true);
+    doNothing().when(repository).requireWrite(own, revision);
     assertThrows(CallerFault.class, () -> disabled.resolve(own, "incident.md", null, null));
   }
 

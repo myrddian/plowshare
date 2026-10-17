@@ -296,7 +296,7 @@ class AuthoredInformationPersistenceTest {
     assertTrue(work.inTransaction(() -> worker.candidate(null, false)).isEmpty());
     work.inTransaction(
         () -> {
-          content.authorise(copy.revision(), "author", UUID.randomUUID(), List.of("derive"));
+          content.authorise(own, copy.revision(), UUID.randomUUID(), List.of("derive"));
           return null;
         });
     var lease = work.inTransaction(() -> worker.candidate(null, false)).orElseThrow().lease();
@@ -496,6 +496,56 @@ class AuthoredInformationPersistenceTest {
             origin));
     assertEquals(
         1, jdbc.queryForObject("SELECT count(*) FROM information_requests", Integer.class));
+  }
+
+  @Test
+  void import_and_metadata_assignment_take_policy_before_contract_locks() throws Exception {
+    var contract = published();
+    UUID revision = original(false, "source"), request = request();
+    var assigned = new java.util.concurrent.CountDownLatch(1);
+    var proceed = new java.util.concurrent.CountDownLatch(1);
+    var importLocked = new java.util.concurrent.CountDownLatch(1);
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var metadata =
+          pool.submit(
+              () ->
+                  work.inTransaction(
+                      () -> {
+                        types.version("account:author", contract.version(), true).orElseThrow();
+                        assigned.countDown();
+                        try {
+                          if (!proceed.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                            throw new IllegalStateException("release timeout");
+                        } catch (InterruptedException interrupted) {
+                          Thread.currentThread().interrupt();
+                          throw new IllegalStateException(interrupted);
+                        }
+                        var prepared =
+                            projections.prepare(own, request, revision, null, configuration);
+                        return projections.copy(own, request, prepared, configuration);
+                      }));
+      assertTrue(assigned.await(10, java.util.concurrent.TimeUnit.SECONDS));
+      var importing =
+          pool.submit(
+              () ->
+                  work.inTransaction(
+                      () -> {
+                        new JdbcInformationNavigationRepository(jdbc).lock();
+                        importLocked.countDown();
+                        return types
+                            .version("account:author", contract.version(), true)
+                            .orElseThrow();
+                      }));
+      try {
+        assertFalse(importLocked.await(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+      } finally {
+        proceed.countDown();
+      }
+      assertTrue(metadata.get(10, java.util.concurrent.TimeUnit.SECONDS).created());
+      assertEquals(
+          contract.version(),
+          importing.get(10, java.util.concurrent.TimeUnit.SECONDS).contract().version());
+    }
   }
 
   @Test

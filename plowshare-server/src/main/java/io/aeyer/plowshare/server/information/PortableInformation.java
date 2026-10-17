@@ -340,7 +340,7 @@ public final class PortableInformation implements InformationInterchangeService 
           : head.isEmpty() || !head.get().revision().equals(d.expectedRevision()))
         throw new CallerFault("INFORMATION_REVISION_CONFLICT");
       if (head.isPresent()) {
-        if (!head.get().owner().equals(context.account())) throw unavailable();
+        content.requireWrite(context, head.get().revision());
         catalogue.requireReadable(context, head.get().revision());
       }
       destinations.put(d.resource(), d);
@@ -396,7 +396,7 @@ public final class PortableInformation implements InformationInterchangeService 
       byRevision.put(foreign.revision(), mapping);
       heads.put(foreign.resource(), admitted.revision());
       if (expected != null) previous.put(admitted.revision(), expected);
-      records.tags(admitted.resource(), foreign.tags());
+      records.tags(context, admitted.revision(), foreign.tags());
     }
     var resourceMap = new HashMap<UUID, UUID>();
     for (var mapping : mappings) {

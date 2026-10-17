@@ -289,6 +289,7 @@ public final class InformationCatalogue implements InformationReadAccess {
                     .getBytes(StandardCharsets.UTF_8));
     return transactions.inTransaction(
         () -> {
+          access.requireWork(context);
           if (binding != null)
             contentAuthority.recheck(context, binding, typing.mode().equals("inherit"));
           return repository.admit(
@@ -319,7 +320,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       if (cancelled.getAsBoolean()) {
         transactions.inTransaction(
             () -> {
-              requireOwner(context, revision);
+              requireWrite(context, revision);
               repository.cancelProcessing(context, revision);
               return null;
             });
@@ -543,7 +544,7 @@ public final class InformationCatalogue implements InformationReadAccess {
                 // Match ordinary typed admission: lock registry authority before the resource.
                 if (binding != null)
                   contentAuthority.recheck(context, binding, typing.mode().equals("inherit"));
-                requireOwner(context, expected);
+                requireWrite(context, expected);
                 requireReadable(context, expected);
                 var admission = projections.copy(context, request, prepared, configuration.get());
                 repository.event(
@@ -668,13 +669,7 @@ public final class InformationCatalogue implements InformationReadAccess {
   }
 
   public String revisionName(InformationContext context, UUID revision) {
-    var resource = requireOwner(context, revision);
-    String namespace =
-        context.selection().scope() == InformationContext.Scope.PROJECT
-            ? "project:" + context.selection().project()
-            : "account:" + context.account();
-    if (!namespace.equals(resource.namespace()))
-      throw new CallerFault("select the resource's original namespace before revising it");
+    var resource = requireWrite(context, revision);
     if ("deleted".equals(row(revision).availability()))
       throw new CallerFault("a deleted resource cannot be revised");
     return resource.sourceName();
@@ -782,13 +777,13 @@ public final class InformationCatalogue implements InformationReadAccess {
         new InformationCommandParameters.Groups(groups),
         () -> {
           requireReadable(context, revision);
-          var owner = requireOwner(context, revision);
+          requireWrite(context, revision);
           var shown = status(context, revision);
           var tags = new java.util.HashSet<String>();
           tags.addAll(shown.tags());
           if (shown.autoTag() != null) tags.addAll(shown.autoTag());
           if (groups != null) InformationTagGroups.from(groups, tags);
-          repository.tagGroups(owner.id(), groups);
+          repository.tagGroups(context, revision, groups);
           event(
               revision,
               generation(revision),
@@ -808,8 +803,8 @@ public final class InformationCatalogue implements InformationReadAccess {
         request,
         new InformationCommandParameters.Tags(tags),
         () -> {
-          var row = requireOwner(context, revision);
-          repository.tags(row.id(), tags);
+          requireWrite(context, revision);
+          repository.tags(context, revision, tags);
           event(
               revision,
               generation(revision),
@@ -830,7 +825,7 @@ public final class InformationCatalogue implements InformationReadAccess {
     try {
       requireReadable(context, revision);
     } catch (NotFoundFault hidden) {
-      requireOwner(context, revision);
+      requireWrite(context, revision);
       readable = false;
     }
     var metadata = repository.metadata(revision);
@@ -928,7 +923,7 @@ public final class InformationCatalogue implements InformationReadAccess {
                   InformationAccess.projectSelection(context.account(), project)));
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireWrite(context, revision);
                 repository.link(context, revision, project, remove);
                 return null;
               });
@@ -950,7 +945,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         () -> {
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireMutation(context, revision, true);
                 if (shared) requireReadable(context, revision);
                 repository.share(context, revision, shared);
                 return null;
@@ -978,7 +973,7 @@ public final class InformationCatalogue implements InformationReadAccess {
             throw new CallerFault("unknown availability");
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireWrite(context, revision);
                 repository.availability(context, revision, state);
                 return null;
               });
@@ -1005,7 +1000,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         () -> {
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireWrite(context, revision);
                 selectedProcessing(context, revision, request, stages);
                 repository.retry(context, revision);
                 return null;
@@ -1039,7 +1034,7 @@ public final class InformationCatalogue implements InformationReadAccess {
                 "rebuild starts at embed, summarise, summary_embed, autoTag or tagGroups; changed extraction or derivation requires a new immutable revision");
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireWrite(context, revision);
                 requireReadable(context, revision);
                 requireStageSelection(revision, stages);
                 repository.rebuild(context, revision, from);
@@ -1083,7 +1078,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         && status.stream()
             .noneMatch(step -> step.stage().equals("autoTag") && step.state().equals("ready")))
       selected.add("autoTag");
-    contentRepository.authorise(revision, context.account(), request, List.copyOf(selected));
+    contentRepository.authorise(context, revision, request, List.copyOf(selected));
   }
 
   public void allowance(InformationContext context, UUID revision, int total) {
@@ -1101,7 +1096,7 @@ public final class InformationCatalogue implements InformationReadAccess {
           if (total < 1) throw new CallerFault("processing allowance must be positive");
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireWrite(context, revision);
                 repository.allowance(context, revision, total);
                 return null;
               });
@@ -1156,7 +1151,9 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID request,
       InformationCommandParameters parameters,
       Runnable work) {
-    var resource = requireOwner(context, revision);
+    var resource =
+        requireMutation(
+            context, revision, operation.equals("share") || operation.equals("unshare"));
     Command command = reserve(context, revision, request, operation, parameters);
     if (command != null && command.replay()) return;
     boolean safety =
@@ -1539,7 +1536,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         () -> {
           transactions.inTransaction(
               () -> {
-                requireOwner(context, revision);
+                requireWrite(context, revision);
                 requireReadable(context, revision);
                 repository.finalise(context, revision, configuration.get());
                 return null;
@@ -1552,15 +1549,24 @@ public final class InformationCatalogue implements InformationReadAccess {
     if (!repository.readable(context, revision)) throw absent();
   }
 
-  private InformationCatalogueRepository.Owner requireOwner(
+  private InformationCatalogueRepository.Resource requireWrite(
       InformationContext context, UUID revision) {
-    access.requireWork(context);
-    var resource = repository.lockOwner(context.account(), revision);
-    if (resource.projectId() != null)
-      access.requireWork(
+    return requireMutation(context, revision, false);
+  }
+
+  private InformationCatalogueRepository.Resource requireMutation(
+      InformationContext context, UUID revision, boolean audience) {
+    if (audience) access.requireAudience(context);
+    else access.requireWork(context);
+    var resource = repository.lockResource(context, revision, audience);
+    if (resource.projectId() != null) {
+      var home =
           access.resolve(
               context.account(),
-              InformationAccess.projectSelection(context.account(), resource.projectName())));
+              InformationAccess.projectSelection(context.account(), resource.projectName()));
+      if (audience) access.requireAudience(home);
+      else access.requireWork(home);
+    }
     return resource;
   }
 

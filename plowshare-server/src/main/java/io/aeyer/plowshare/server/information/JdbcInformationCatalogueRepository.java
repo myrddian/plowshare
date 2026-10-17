@@ -62,22 +62,32 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     return rows.getFirst();
   }
 
-  public Owner lockOwner(String account, UUID revision) {
-    var rows =
-        jdbc.query(
-            "SELECT q.id,q.namespace,q.source_name,q.owner_handle,q.project_id,p.name FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id LEFT JOIN projects p ON p.id=q.project_id WHERE r.id=? AND q.owner_handle=? FOR UPDATE OF q",
-            (rs, n) ->
-                new Owner(
-                    rs.getObject(1, UUID.class),
-                    rs.getString(2),
-                    rs.getString(3),
-                    rs.getString(4),
-                    (Long) rs.getObject(5),
-                    rs.getString(6)),
+  public Resource lockResource(InformationContext context, UUID revision, boolean audience) {
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT information_lock_knowledge(?,?,?,?,?,?)",
+            Boolean.class,
             revision,
-            account);
-    if (rows.isEmpty()) throw absent();
-    return rows.getFirst();
+            context.account(),
+            context.selection().scope().name().toLowerCase(Locale.ROOT),
+            context.selection().project(),
+            context.selection().includeShared(),
+            audience ? "SET_AUDIENCE" : "WRITE"))) throw absent();
+    return jdbc.queryForObject(
+        "SELECT q.id,q.namespace,q.source_name,q.owner_handle,q.project_id,p.name,q.home_scope_id,q.created_by FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id LEFT JOIN projects p ON p.id=q.project_id WHERE r.id=?",
+        (rs, n) ->
+            new Resource(
+                rs.getObject(1, UUID.class),
+                rs.getString(2),
+                rs.getString(3),
+                rs.getString(4),
+                (Long) rs.getObject(5),
+                rs.getString(6),
+                new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(
+                    rs.getObject(7, UUID.class)),
+                Optional.ofNullable(rs.getObject(8, UUID.class))
+                    .map(io.aeyer.plowshare.server.access.AuthorityIds.AccountId::new)),
+        revision);
   }
 
   public boolean readable(InformationContext context, UUID revision) {
@@ -322,13 +332,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     return jdbc
         .queryForList(
             SELECT
-                + " WHERE q.owner_handle=?"
-                + " AND ((?::text IS NULL AND q.project_id IS NULL) OR q.project_id=(SELECT id FROM projects WHERE name=?)) AND r.document_type=? AND "
+                + " WHERE information_knowledge_allows(r.id,?,?,?,?, 'WRITE')"
+                + " AND r.document_type=? AND "
                 + InformationSql.content(context, "r").sql()
                 + " ORDER BY r.created_at DESC,r.id OFFSET ? LIMIT ?",
             context.account(),
+            context.selection().scope().name().toLowerCase(Locale.ROOT),
             project,
-            project,
+            context.selection().includeShared(),
             context.corpus().documentType(),
             context.typedView(),
             offset,
@@ -644,6 +655,18 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     }
   }
 
+  /** Creation has no revision to lock yet; validate the exact destination and live role. */
+  private void requireDestination(InformationContext context) {
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT information_lock_destination(?,?,?,?)",
+            Boolean.class,
+            context.account(),
+            context.selection().scope().name().toLowerCase(Locale.ROOT),
+            context.selection().project(),
+            context.selection().includeShared()))) throw absent();
+  }
+
   public Admission admit(InformationContext context, UUID request, AdmissionWrite write) {
     Objects.requireNonNull(context);
     Objects.requireNonNull(request);
@@ -666,6 +689,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             : "account:" + context.account();
     if (context.selection().scope() == InformationContext.Scope.SHARED)
       throw new CallerFault("shared namespace cannot admit source bytes");
+
+    requireDestination(context);
 
     // Serialises this idempotency key and this namespace/name across processes, without model
     // calls.
@@ -700,7 +725,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     List<Map<String, Object>> resources =
         jdbc.queryForList(
             "SELECT id,owner_handle,kind FROM information_resources"
-                + " WHERE namespace=? AND source_name=? FOR UPDATE",
+                + " WHERE home_scope_id=information_namespace_home(?) AND source_name=? FOR UPDATE",
             namespace,
             name);
     UUID resource;
@@ -715,16 +740,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                   Long.class,
                   context.selection().project());
       jdbc.update(
-          "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind)"
-              + " VALUES(?,?,?,?,?,?)",
+          "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind,created_by,creator_evidence)"
+              + " VALUES(?,?,?,?,?,?,(SELECT id FROM authority_accounts WHERE legacy_handle=?),'authenticated_admission')",
           resource,
           namespace,
           name,
           context.account(),
           project,
-          kind);
+          kind,
+          context.account());
     } else {
-      if (!context.account().equals(resources.getFirst().get("owner_handle"))) throw absent();
+
       if (!kind.equals(resources.getFirst().get("kind")))
         throw new CallerFault("this name already belongs to a different resource kind");
       resource = (UUID) resources.getFirst().get("id");
@@ -733,6 +759,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
               "SELECT id FROM information_revisions WHERE resource_id=? ORDER BY ordinal DESC LIMIT 1",
               UUID.class,
               resource);
+      lockResource(context, head, false);
       boolean typed =
           Boolean.TRUE.equals(
               jdbc.queryForObject(
@@ -752,7 +779,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     UUID revision = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,source_uri,"
-            + "content_hash,byte_size,source_bytes,allowance_total,caller_session,document_type,document_subtype,starting_revision,revised_by,processing_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            + "content_hash,byte_size,source_bytes,allowance_total,caller_session,document_type,document_subtype,starting_revision,revised_by,processing_policy,created_by,creator_evidence) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT id FROM authority_accounts WHERE legacy_handle=?),'authenticated_admission')",
         revision,
         resource,
         ordinal,
@@ -768,7 +795,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         documentType.subtype(),
         write.expectedRevision(),
         write.typingExplicit() ? context.account() : null,
-        write.processingPolicy());
+        write.processingPolicy(),
+        context.account());
     if (write.binding() != null) {
       var binding = write.binding();
       jdbc.update(
@@ -804,7 +832,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void link(InformationContext context, UUID revision, String project, boolean remove) {
 
-    lockOwner(context.account(), revision);
+    requireDestination(
+        new InformationContext(
+            context.account(), InformationAccess.projectSelection(context.account(), project)));
+    lockResource(context, revision, false);
     if (remove)
       jdbc.update(
           "DELETE FROM information_links WHERE revision_id=? AND project_id=(SELECT id FROM projects WHERE name=?)",
@@ -829,7 +860,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void share(InformationContext context, UUID revision, boolean shared) {
 
-    var resource = lockOwner(context.account(), revision);
+    var resource = lockResource(context, revision, true);
     if (shared && !readable(context, revision)) throw absent();
     if (shared
         && !jdbc.queryForObject(
@@ -862,7 +893,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (!Set.of("active", "excluded", "included", "withdrawn", "deleted").contains(state))
       throw new IllegalArgumentException("invalid availability");
 
-    lockOwner(context.account(), revision);
+    lockResource(context, revision, false);
     if (state.equals("excluded") || state.equals("included")) {
       if (jdbc.update(
               "UPDATE information_revisions SET excluded=? WHERE id=? AND availability<>'deleted'",
@@ -941,7 +972,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void retry(InformationContext context, UUID revision) {
 
-    lockOwner(context.account(), revision);
+    lockResource(context, revision, false);
     if (!"active".equals(row(revision).availability()))
       throw new CallerFault("restore availability before retrying");
     jdbc.update(
@@ -957,7 +988,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     int first = STAGES.indexOf(from);
     if (first < 2) throw new CallerFault("invalid rebuild stage");
 
-    lockOwner(context.account(), revision);
+    lockResource(context, revision, false);
     if (!readable(context, revision)) throw absent();
     boolean code = "code".equals(row(revision).documentType());
     boolean metadata = List.of("autoTag", "tagGroups").contains(from);
@@ -1035,7 +1066,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   public void allowance(InformationContext context, UUID revision, int total) {
     if (total < 1) throw new IllegalArgumentException("allowance must be positive");
 
-    lockOwner(context.account(), revision);
+    lockResource(context, revision, false);
     jdbc.queryForMap("SELECT id FROM information_revisions WHERE id=? FOR UPDATE", revision);
     if (total < row(revision).allowanceSpent())
       throw new CallerFault("allowance cannot be lowered below actual spending");
@@ -1055,7 +1086,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void cancelProcessing(InformationContext context, UUID revision) {
-    lockOwner(context.account(), revision);
+    lockResource(context, revision, false);
     long prior = generation(revision);
     jdbc.update("UPDATE information_revisions SET generation=generation+1 WHERE id=?", revision);
     for (String stage : STAGES)
@@ -1085,7 +1116,9 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           admission.revision());
   }
 
-  public void tagGroups(UUID resource, Map<String, List<String>> groups) {
+  public void tagGroups(
+      InformationContext context, UUID revision, Map<String, List<String>> groups) {
+    UUID resource = lockResource(context, revision, false).id();
     if (groups != null) groups = InformationTagGroups.from(groups, null);
     changed(
         jdbc.update(
@@ -1095,7 +1128,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             resource));
   }
 
-  public void tags(UUID resource, List<String> tags) {
+  public void tags(InformationContext context, UUID revision, List<String> tags) {
+    UUID resource = lockResource(context, revision, false).id();
     var checked = InformationFacets.tags(tags);
     changed(
         jdbc.update(
@@ -1274,7 +1308,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   public void finalise(
       InformationContext context, UUID revision, Map<String, String> fingerprints) {
 
-    lockOwner(context.account(), revision);
+    lockResource(context, revision, false);
     if (!readable(context, revision)) throw absent();
     if (jdbc.queryForObject(
             "SELECT count(*) FROM information_steps WHERE revision_id=? AND generation=? AND stage NOT IN ('autoTag','tagGroups') AND state='ready'",

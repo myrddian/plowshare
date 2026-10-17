@@ -88,6 +88,32 @@ class MemoryStoreTest {
     store = new MemoryStore(jdbc);
   }
 
+  @Test
+  void explicit_home_scopes_preserve_memory_formation_and_retired_rows() {
+    var project = memory("explicit-project", Home.of("payments"));
+    var global = memory("explicit-global", Home.global());
+    store.save(project);
+    store.save(global);
+    var scope =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_scopes WHERE project_id=(SELECT id FROM projects WHERE name='payments')",
+            java.util.UUID.class);
+    assertEquals(
+        scope,
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM memories WHERE id=?", java.util.UUID.class, project.id()));
+    assertEquals(
+        io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM memories WHERE id=?", java.util.UUID.class, global.id()));
+    store.save(project.withState(MemoryState.SUPERSEDED));
+    assertEquals(project.formed(), store.load(project.id()).orElseThrow().formed());
+    assertEquals(
+        scope,
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM memories WHERE id=?", java.util.UUID.class, project.id()));
+  }
+
   private static final Provenance FORMED = new Provenance(Instant.EPOCH, "probe", "test");
 
   private static Memory memory(String id, Home home) {

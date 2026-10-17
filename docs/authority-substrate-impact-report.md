@@ -3,8 +3,9 @@
 Status: source-grounded impact assessment, 17 October 2026. The broader model
 remains proposed. The separately authorized project READ/WRITE foundation (01),
 additive identities/scopes with locked built-ins (02), and scoped RBAC grants
-with role/agent ceilings (03) are implemented in this branch. Global audience,
-resource and runtime cutovers remain later work.
+with role/agent ceilings (03), and knowledge home/provenance with scoped
+READ/WRITE/control admission (04) are implemented in this branch. Global audience
+and runtime cutovers remain later work.
 
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [migration map](global-scope-migration-map.md) and
@@ -21,7 +22,18 @@ Global cutover. [Slice 02](authority-substrate-slices/02-identities-and-scopes.m
 now adds explicit identity mappings and locked built-ins; it leaves legacy null
 resources and their current policy untouched. [Slice 03](authority-substrate-slices/03-rbac-grants-and-role-helpers.md)
 adds live scoped bindings, immutable role helpers and audited issuance/revocation.
-Slices 04–14 remain unauthorized.
+[Slice 04](authority-substrate-slices/04-knowledge-scopes-and-write-authority.md)
+adds explicit knowledge home/creator evidence and scoped ordinary document writes,
+while retaining mandatory ownerOnly/input/reference and private-record rules.
+Its [predicate inventory](authority-substrate-slices/04-knowledge-write-specification.md)
+distinguishes converted checks from retained restrictions. The existing archive
+Global tier now has an explicit scope mapping; this does not activate Global
+access or SYSTEM processing. Slices 05–14 remain unauthorized.
+
+The detailed source findings below retain their audit baseline. Slice 04 replaces
+the listed ordinary catalogue/content/import/relationship owner-mutation checks;
+creator-bound processing, per-revision audience policy, navigation-policy
+administration and supported-client cutover remain deferred as documented.
 The [14-slice roadmap](authority-substrate-implementation-plan.md) gives every
 follow-on slice its own changes, reuse, verification and rollback document.
 

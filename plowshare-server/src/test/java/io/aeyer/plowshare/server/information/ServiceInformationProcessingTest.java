@@ -91,9 +91,15 @@ class ServiceInformationProcessingTest {
 
   UUID retained(String owner, Long home) {
     UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+    String namespace =
+        home == null
+            ? "account:" + owner
+            : "project:"
+                + jdbc.queryForObject("SELECT name FROM projects WHERE id=?", String.class, home);
     jdbc.update(
-        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) VALUES (?,'fixture',?,?,?,'source')",
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) VALUES (?,?,?,?,?,'source')",
         resource,
+        namespace,
         resource + ".txt",
         owner,
         home);

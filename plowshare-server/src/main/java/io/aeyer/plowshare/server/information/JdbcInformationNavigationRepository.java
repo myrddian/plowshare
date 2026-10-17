@@ -543,7 +543,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     return new Connections(result, limit, offset);
   }
 
-  private UUID owned(InformationContext c, UUID resource) {
+  private UUID writable(InformationContext c, UUID resource) {
     var projects =
         jdbc.queryForList(
             "SELECT p.name FROM information_resources q LEFT JOIN projects p ON p.id=q.project_id WHERE q.id=?",
@@ -554,11 +554,11 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     lockIdentity(c.account(), project);
     var a = new ArrayList<Object>();
     a.add(resource);
-    a.add(c.account());
+    a.addAll(args(c));
     a.addAll(args(c));
     var rows =
         jdbc.queryForList(
-            "SELECT r.id FROM information_resources q JOIN information_revisions r ON r.id=information_navigation_head(q.id) WHERE q.id=? AND q.owner_handle=? AND information_readable(r.id,?,?,?,?) FOR UPDATE OF q",
+            "SELECT r.id FROM information_resources q JOIN information_revisions r ON r.id=information_navigation_head(q.id) WHERE q.id=? AND information_lock_knowledge(r.id,?,?,?,?,'WRITE') AND information_readable(r.id,?,?,?,?)",
             UUID.class,
             a.toArray());
     if (rows.isEmpty()) throw unavailable();
@@ -573,7 +573,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
       String relation,
       UUID expectedHead) {
     requireGraphBound(true);
-    if (!owned(c, source).equals(expectedHead)) throw conflict();
+    if (!writable(c, source).equals(expectedHead)) throw conflict();
     var targetRows =
         jdbc.queryForList(
             "SELECT id FROM information_resources WHERE id=? FOR UPDATE",
@@ -606,7 +606,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
         jdbc.query(
             "SELECT * FROM information_relationships WHERE id=?", (rs, n) -> relationship(rs), id);
     if (edges.isEmpty()) throw unavailable();
-    owned(c, edges.getFirst().source());
+    writable(c, edges.getFirst().source());
     if (jdbc.update(
             "UPDATE information_relationships SET removed=true,version=version+1,updated_at=now() WHERE id=? AND version=? AND NOT removed",
             id,
@@ -690,7 +690,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   public void requireReceiptReadable(InformationContext context, Receipt result) {
     if (result.relationship() == null) return;
     var edge = result.relationship();
-    owned(context, edge.source());
+    writable(context, edge.source());
     if (!ownReadable(context, new Target(edge.target(), edge.pinnedRevision()))
         && !referenceVisible(context, edge.target())) throw unavailable();
   }

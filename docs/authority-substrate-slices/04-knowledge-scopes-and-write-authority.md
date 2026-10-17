@@ -1,7 +1,7 @@
 # Slice 04: Knowledge scope, creator provenance and WRITE authority
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented in this branch, 17 October 2026, following explicit
+authorization for slice 04. No new public APIs, later slices or deployment are included.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -18,22 +18,39 @@ Admit existing document/memory mutations through scoped authority rather than cr
 Dependency completion means its relevant interfaces, migrations and verification
 are available; it does not grant authority to a caller or enable an unmigrated path.
 
-## Changes
+## Implemented changes
 
 - Persist explicit knowledge home/scope independently of created_by, revision author and executor. Recover provenance from actual evidence; do not rename owner_handle blindly or infer authorship from the current home.
 - Replace ordinary exact-owner mutation entry points with scoped READ/WRITE/control checks and protected repository contracts. Contributor task work can modify permitted area resources without gaining access-management rights.
 - Adapt existing supported create/update/import/move/retire paths only. A home/control transfer needs applicable source/destination authority; audience changes remain separate.
 - Classify document versus conversation/session/credential/receipt ownership. Preserve specialized exact-subject/private-record rules and existing input/reference/lifecycle gates.
 
-## Reuse and likely source owners
+V154 adds home scope UUIDs to resources/memories and evidence-labelled, immutable
+creator UUIDs to resources/revisions. Existing project/account keys, revision
+authorship, document attribution, formation/source history and receipt ownership
+remain separate. Unclassified document homes remain unavailable for ordinary
+writes; only the archive's documented Global memory tier maps to the fixed Global
+knowledge scope. No Global audience or execution route is activated.
 
-These files identify current owning contracts, not a claim that they already
-implement the proposed behavior. Keep services on typed interfaces and persistence
-inside specialist repositories.
+Ordinary existing create/revise/import, metadata copies, tags/groups, collection
+links, processing requests, availability and report finalisation use current
+home authority. Pending sources use scoped READ. Non-creator project
+CONTRIBUTORs can work in their area; changing a revision's audience requires
+MANAGER and still obeys its current input/publication restrictions. Java retains
+Application-aware ceilings; SQL locks and rechecks current stored/token grants,
+target home, mandatory policy and retained dependencies. Collection links require
+source and destination WRITE and never move the resource's home.
+
+## Reuse and source owners
+
+The [knowledge-write specification](04-knowledge-write-specification.md) was
+written before enforcement changes. It inventories converted owner predicates,
+retained domain restrictions and unknown creator provenance. Services continue
+to use typed contracts; specialist repositories own the SQL.
 
 | Existing source | Reuse and boundary |
 | --- | --- |
-| [InformationCatalogue.java](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationCatalogue.java) | Existing admission, ordinary mutations and current requireOwner entry point define the consumer inventory. |
+| [InformationCatalogue.java](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationCatalogue.java) | Existing admission and ordinary mutations now use requireWrite; share/unshare require scoped audience control. |
 | [JdbcInformationCatalogueRepository.java](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java) | Specialist repository owns namespace/owner predicates, locks, receipts and SQL changes. |
 | [InformationWriteGates.java](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationWriteGates.java) | Durable prepared transitions, rechecks and request receipts remain authoritative. |
 | [MemoryStore.java](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java) | Existing memory identity/project references need explicit home mapping without deleting source history. |
@@ -53,8 +70,7 @@ capability as a gap before expanding implementation scope.
 - Selected PostgreSQL tests prove SQL mutations bind the admitted scope, expected revision and provenance, preserving rollback and concurrent update fences.
 - Current mandatory ownerOnly/input/reference restrictions remain effective until their deliberate policy conversion in slice 05; no partial bypass is accepted.
 
-Existing regression owners to inspect and extend, selecting methods/tags that
-match the eventual change:
+Regression owners extended or run for the changed boundaries:
 
 - [InformationContentAdmissionTest.java](../../plowshare-server/src/test/java/io/aeyer/plowshare/server/information/InformationContentAdmissionTest.java)
 - [PortableInformationTest.java](../../plowshare-server/src/test/java/io/aeyer/plowshare/server/information/PortableInformationTest.java)
@@ -63,16 +79,64 @@ match the eventual change:
 
 **PostgreSQL justification:** Required for changed scope/provenance row mapping, mutation SQL and transaction predicates. Test business authorization with mocks separately.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+Verification completed against local PostgreSQL/Testcontainers, selected because
+this change requires real constraints, row mappings, transaction rollback and
+locking. **103 distinct selected PostgreSQL cases passed** across the stages:
 
-## Specification required before implementation
+| Test owner | Passed cases |
+| --- | ---: |
+| KnowledgeScopePersistenceTest | 14 |
+| AuthoredInformationPersistenceTest | 8 |
+| MemoryStoreTest | 39 |
+| DocumentNavigationPersistenceTest | 16 |
+| ServiceInformationProcessingTest | 18 |
+| Selected DocumentPoliciesTest methods | 6 |
+| Selected InformationFacetsTest methods | 2 |
 
-Inventory every affected legacy-owner predicate and classify it as ordinary knowledge authorization or a retained domain restriction. Define provenance treatment for unknown historical creators.
+These cover creator evidence/conflicts/unknowns across V153→V154 and restart,
+non-creator writes and immutable provenance, wrong home/Reader refusal, mandatory
+ownerOnly/private inputs/reference obligations, stable scope through project
+rename, head conflicts, rollback, revocation fencing, service-token
+ceilings, old owner-based audience-writer refusal, archive states and embeddings,
+legacy assignment, idempotent receipts and denied publication. A separate
+concurrent import/metadata test verifies policy-before-contract lock order. No
+full database suite or live deployment test was run.
+
+Mocked `KnowledgeWriteAuthorizationTest`, `InformationContentAdmissionTest`,
+`PortableInformationTest`, `InformationAccessTest` and `ScopedPermissionsTest`
+cover business admission and its effective-role boundary, including non-creator
+import, a permission change after prepare, and refusal before mutation. Mocks do
+not prove SQL enforcement or a live integration.
+
+`./gradlew format formatCheck check` passed: **5,748 default server tests**,
+zero failures/errors/skips, plus the client, Javadoc and repository-boundary checks
+included by `check`. No PostgreSQL fixtures run in that default check. Flyway
+migration versions are unique. Earlier fixture failures were corrected before
+these final passing runs; no shipped migration or unrelated runtime was edited.
+
+## Explicit gaps retained
+
+No general document home/control-transfer operation exists. No move endpoint,
+Global selector, ACL editor, arbitrary Personal sharing or type-registry rehome
+operation was added. Existing memory admission/curation remains its own boundary;
+storage has no authenticated-principal argument and promotion creates a separate
+record. Worker execution still uses its current authority until its later slice.
+
+Current root-document audience conversion, GLOBAL_READ, navigation-policy
+administration conversion, SYSTEM processing and runtime/client cutover remain
+later work. Wire owner/author fields retain their existing meaning; the new
+created_by evidence is internal, with no new public field/API. Content-type
+registry namespace renames and legacy namespace/name collisions after project
+rename remain explicit compatibility gaps; no identity merging or immutable
+contract rewrite was introduced.
 
 ## Rollout and rollback
 
-Retain old/new key mappings and provenance. Rollback must preserve authorization parity for admitted records; incompatible old writers must be refused rather than regain owner shortcuts.
+The additive migration retains legacy keys and provenance. Home/creator rewrites
+are refused; admitted records require matching explicit homes and live scope
+permissions. Audience writes carry an exact actor/revision transaction-local
+admission fence, so pre-cutover creator-based share/unshare writers are refused.
+A rollback must retain enforcement parity; downgrading to owner-based binaries is
+not a supported rollback. Preserve the schema and reconcile deployment versions
+rather than removing constraints or silently reviving old writer assumptions.
+No production migration or rollback was executed.

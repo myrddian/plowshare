@@ -78,6 +78,17 @@ public final class InformationAccess {
           "This account needs CONTRIBUTOR access to change the selected project's information");
   }
 
+  /** Content WRITE does not grant permission to change an existing resource's audience. */
+  public void requireAudience(InformationContext context) {
+    requireWork(context);
+    if (context.selection().scope() == InformationContext.Scope.PROJECT
+        && !permissions.allows(
+            new Principal(context.account()),
+            new ProjectTarget(context.selection().project()),
+            Action.SET_AUDIENCE))
+      throw new CallerFault("This account needs MANAGER access to change information audiences");
+  }
+
   /** Returns the typed criteria only after rechecking live selection admission. */
   public InformationContext admitted(InformationContext context) {
     requireSelection(context);

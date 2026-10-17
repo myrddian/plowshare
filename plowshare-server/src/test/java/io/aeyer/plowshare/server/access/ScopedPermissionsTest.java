@@ -29,6 +29,8 @@ class ScopedPermissionsTest {
     when(stored.role("research", "alice")).thenReturn(Optional.of(role));
     assertTrue(permissions.allows(alice, project, Action.READ));
     assertEquals(role != ProjectRole.VIEWER, permissions.allows(alice, project, Action.WRITE));
+    assertEquals(
+        role == ProjectRole.MANAGER, permissions.allows(alice, project, Action.SET_AUDIENCE));
     for (Action action : Action.values()) {
       assertFalse(permissions.allows(new Principal("bob"), project, action));
       assertFalse(permissions.allows(alice, new ProjectTarget("other"), action));
