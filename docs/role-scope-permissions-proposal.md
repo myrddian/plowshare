@@ -260,7 +260,7 @@ ownership, contribution, management, execution or policy-change rights.
 | Authorize `GLOBAL_READ` on a resource owned elsewhere | Separate source audience/release authority | Same independent authority | Same independent authority | No authority from reading alone |
 | Transfer another account's resource into `GLOBAL_ACCOUNT` | Human destination ADMIN plus authorized source transfer/release | No destination authority | No destination authority | No |
 | Create/resume/list/search Global-owned conversations or attach executable tools there | No | No | No | No |
-| Create a conversation with null/omitted project or a `GLOBAL_ACCOUNT` UUID in the project field | No | No | No | No |
+| Create a conversation under `GLOBAL_ACCOUNT`, explicitly or through context fallback | No | No | No | No |
 
 Curator may propose but cannot approve its own Global mutation. Read counters and
 index maintenance remain bounded bookkeeping, separate from content, lifecycle,
@@ -281,12 +281,13 @@ Unscoped Library search is proposed to search the admitted readable set across
 Personal, projects and Global/general-read resources. Project scope narrows the
 selection. Neither selection supplies additional authority or silently widens on
 empty results. A read role never grants model jobs, credentials or tool invocation.
-Conversation creation requires an explicit conversation-capable project reference,
-including Personal when desired. The current omitted-project Personal default is
-to be removed from that server boundary; client conveniences resolve Personal and
-send its actual project reference. Knowledge ownership and `GLOBAL_READ` do not
-supply project work authority. Existing ordinary projects named global remain
-ordinary projects, distinguished by typed identity and policy.
+Conversation creation may omit its target: admitted Application/project context
+routes to itself; a direct human without such context routes to its own Personal.
+Resolve and authorize that concrete project before effects, retaining actor,
+subject and token/acting ceilings. Missing/ambiguous context refuses rather than
+guessing or selecting Global. Invalid explicit targets do not default. Knowledge
+ownership and `GLOBAL_READ` supply no project work authority. Existing ordinary
+projects named global retain their ordinary typed identity and workload policy.
 
 The following matrix governs other publication and owner controls without
 weakening the human ADMIN rule for Global-owned resources.

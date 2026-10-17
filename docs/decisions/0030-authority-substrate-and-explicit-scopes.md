@@ -462,27 +462,43 @@ conversation project or workspace for it. Maintenance jobs retain administrative
 ownership and explicit knowledge targets. Deployment definitions and internal
 SYSTEM worker resolution remain separate from this knowledge scope.
 
-### Explicit conversation project contract
+### Conversation context routing
 
-Conversation creation requires an explicit, authorized, conversation-capable
-project reference, including the caller's Personal project when desired.
-`conversation_start(null, "HELLO")` is invalid in the proposed contract. Omitted,
-blank, unknown or account-valued project inputs also refuse before creating a
-conversation or admitting work. A `GLOBAL_ACCOUNT` UUID is an account identifier,
-not a project reference, and cannot become a conversation home. A read role,
-including `GLOBAL_READ`, supplies no conversation creation authority.
+An omitted/null conversation target is permitted as a request for context routing,
+not a Global execution home. Resolve an explicit, authorized, conversation-capable
+project before creating the durable conversation or admitting work:
 
-Clients may select Personal as a user-interface default, but must resolve and
-submit its actual project reference. This changes the current production behavior
-where `ConversationOpenHandler` delegates an omitted project to
-`PersonalSpaces.home` and receives the caller's Personal project. Tightening the
-conversation contract requires coordinated server, SDK and client changes; the
-ownership redesign alone does not make existing null calls invalid.
+| Request context | Omitted/null target resolves to |
+| --- | --- |
+| Admitted Application or project context | That Application/project itself |
+| Human user without an admitted Application/project context | That user's Personal project |
+| No usable context, or ambiguous Application/project binding | Refuse and require an explicit supported target |
 
-An ordinary project whose display name is `global` remains an ordinary project;
-validate reference kind and supported workload policy, not a name blacklist.
+An explicit target still requires current work authority, supported workload kind
+and all token/acting ceilings. Invalid explicit targets do not fall back to
+Personal. Context routing uses authenticated/admitted bindings, never account-name
+inference, a client-supplied Application label or the first project in a list.
+Retained acting authority preserves its admitted target; applying a default must
+not switch the actor, subject, project or existing scope ceiling.
+
+Accordingly, `conversation_start(null, "HELLO")` can route a direct human request
+to Personal, or an Application/project-bound request to itself. A service identity
+with several permitted projects but no admitted default cannot guess one. This
+preserves the current direct-human Personal convenience rather than removing it.
+`ConversationOpenHandler` and `PersonalSpaces.home` currently implement that human
+default; Application/project-relative routing still requires an explicit source
+and coordinated server/SDK/client contract before claiming implementation.
+
+`GLOBAL_ACCOUNT` is an account identifier, not a conversation project. It has no
+execution home and cannot be selected explicitly, reached by default or used as a
+fallback. An absent Personal/Application/project destination refuses instead of
+routing into Global. `GLOBAL_READ` may permit reading knowledge during a task;
+it never permits running or storing that conversation under Global. An ordinary
+project whose display name is `global` retains its own ordinary identity and
+workload policy; enforce typed references rather than a name blacklist.
+
 Knowledge lookup uses an explicit account-knowledge or project-resource target,
-while conversation creation accepts only conversation-capable project targets.
+while conversation creation resolves a conversation-capable project target.
 The current project-only `Home`/memory contracts need a typed replacement or
 extension so account-owned memories do not recreate Global through a null project.
 Existing resource identities, scopes, provenance and receipts survive migration.

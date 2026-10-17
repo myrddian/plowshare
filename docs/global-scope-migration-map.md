@@ -58,8 +58,8 @@ project/resource scope and refuses Global work.
 
 | Operation family | Current omission | Proposed selection rule |
 | --- | --- | --- |
-| Conversation open | Personal through production `PersonalSpaces` wiring | Require an explicit conversation-capable project reference; clients may resolve Personal before submitting. Null/omitted/account-valued targets refuse |
-| Ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the authenticated account's explicit Personal scope where this operation permits a default; conversation creation has the stricter explicit-project rule |
+| Conversation open | Personal through production `PersonalSpaces` wiring | Omission routes to the admitted Application/project itself, otherwise to a direct human caller's Personal project; missing/ambiguous context refuses, never Global |
+| Ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the admitted context and authorized explicit effective scope where this operation permits a default; never choose Global for execution |
 | Conversation list/latest/search | Global through `RequestedHome` | Use the documented authorized selection, never an omitted server/shared scope |
 | Memory index/recall/write, proposal listing, digest/navigation | Global through `RequestedHome` | Resolve a permitted explicit work/corpus scope; do not append shared data automatically |
 | Information/document selection | Personal plus shared for human defaults | Unscoped search selects all readable knowledge within admitted ceilings; project selection narrows the read set, independently of ownership |
@@ -127,10 +127,11 @@ and [ConversationResumeHandler](../plowshare-server/src/main/java/io/aeyer/plows
 Current source still supports legacy null-project conversation reads. This is not
 evidence that any such rows exist in a running deployment. The target model has
 no Global conversation scope: create/resume/list/search selections refuse it,
-and any historical rows require explicit migration classification. The proposed
-conversation-create boundary also rejects null/omitted project inputs instead of
-silently choosing Personal. Clients can resolve the caller's Personal project and
-submit its explicit reference. `GLOBAL_ACCOUNT` is not a conversation project;
+and any historical rows require explicit migration classification. Omitted/null
+conversation targets use admitted Application/project context, or Personal for a
+direct human without project context. Resolve the effective project before effects;
+missing/ambiguous context refuses instead of choosing Global. Preserve the existing
+human Personal convenience. `GLOBAL_ACCOUNT` is not a conversation project;
 account provisioning must not create a Personal conversation/workspace for this
 knowledge ownership identity.
 Board opening, messaging and commands require project context. A Global local
@@ -287,10 +288,14 @@ Default mocked/fake tests should cover:
   fixed registry UUIDs on every startup/installation. No Global project is created;
   existing ordinary projects named global retain their ordinary identities and
   workload rules. Missing built-in records never create replacement identities.
-- Conversation creation rejects null, omitted, blank, unknown and account-valued
-  project references before effects. Explicit authorized ordinary/Personal project
-  references work. A client Personal default sends the actual project reference;
-  `GLOBAL_READ` and an account UUID cannot establish a conversation home.
+- Omitted/null conversation targets route an admitted Application/project request
+  to itself, or a direct human request without project context to its own Personal.
+  Effective home is explicit before persistence/admission. Missing/ambiguous
+  context refuses; no first-project guess or Global fallback. Retained acting
+  targets and ceilings do not change when resolving defaults.
+- Explicit blank, unknown, unavailable or account-valued conversation project
+  references refuse without defaulting. Supported authorized project targets work.
+  `GLOBAL_READ` and a `GLOBAL_ACCOUNT` UUID cannot establish an execution home.
 - Account-owned memory/document read targets remain distinct from conversation
   project targets across server, SDK and clients; Global reads require no fake
   project, null sentinel, account impersonation or implicit execution home.
