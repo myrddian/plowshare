@@ -162,15 +162,42 @@ retained context. This uses no database or new test infrastructure. Focused chec
 ```
 
 The focused command passed **47 tests**, with no failures or skips. `format`
-and `formatCheck` passed. The full `check` command ran 5,705 server tests:
-5,704 passed and one failed in the unchanged
+and `formatCheck` passed. The initial full `check` command ran 5,705 server tests:
+5,704 passed and one failed in the then-unchanged
 `CodeMapToolTest.live_symbols_page_and_exact_unicode_reads_are_hash_bound`
-(line 158: expected three symbols, received zero). A single-test rerun reproduced
-that failure. The code-map test and its implementation were not modified; the
-repository-wide completion gate is therefore not green. No code-map repair is
-included in this slice. The initial console dependency-resolution failure was
+(line 158: expected three symbols, received zero). A single-test rerun also failed;
+later ordinary runs passed, confirming intermittent behavior. The separately
+authorized cold-start follow-up below addresses this failure; it is not slice 02.
+The initial console dependency-resolution failure was
 cleared by building the existing MCP integration and installing the Desktop's
 locked dependencies, with no tracked client/build changes.
+
+### Code-map cold-start follow-up
+
+Original-history commit `e06e2a4af343aa0a088b608e9b20f7d1df5b33b0`
+("Add Tree-sitter code outlines and scoped symbol lookup", 3 October 2026)
+introduced the two-second deadline before native parser/grammar initialization.
+`38f2df87b0ed77a2fd16fec3ebdcb6878c59c569` added the affected workspace test.
+Both first entered this repository through public snapshot
+`d38d55f4943f180dfbe7d4d9ff2249e2a8902874`; the parser implementation subsequently
+remained unchanged apart from formatting. These original-history hashes are
+provenance from the earlier repository, not commits in the public snapshot lineage.
+
+A deterministic class-loader regression delays parser loading beyond two seconds:
+the old implementation returned `limited` / `outline_limit` with no symbols for
+valid Java. The deadline now starts after parser/grammar initialization, so the
+same source produces all three declarations. The two-second parse/traversal
+budget, interruption and existing input/node/symbol limits remain intact. No
+schema, permission, parser grammar/version, retained-data rewrite or new API is
+involved. The existing workspace test now includes its response in assertion
+diagnostics. A separate test verifies interruption still refuses the outline.
+
+The code-map/parser/workspace tests and slice 01's permission/admission tests
+passed **31 focused cases** after the fix, with no failures or skips.
+`format`, `formatCheck` and the full repository `check` then passed. The final
+server test run passed **5,707 tests**, with no failures or skips, including the
+original code-map case and both new regression tests. The earlier repository-check
+blocker is resolved; no PostgreSQL/full-db tests were run.
 
 No PostgreSQL/full-db run is required for this slice: it changes no SQL, row mapping, migrations or
 transaction behavior. ProjectAuthorizationTest and several construction fixtures
@@ -195,9 +222,9 @@ supported behavior remains compatible, required formatting/checks pass, and the
 remaining Global/owner/SYSTEM gaps are reported honestly. Passing mocks does not
 prove a Global account, SYSTEM execution sandbox or monetary budget ledger exists.
 
-The implementation and focused authorization checks are delivered. The unchanged
-code-map failure above remains an explicit repository-check limitation. No live
-deployment, SQL policy proof or atomic revocation-versus-commit proof is claimed.
+The implementation and focused authorization checks are delivered. The cold-start
+follow-up is separately scoped to the code-map regression above. No live deployment,
+SQL policy proof or atomic revocation-versus-commit proof is claimed.
 
 ## Deferred from this slice
 

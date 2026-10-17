@@ -2,10 +2,79 @@ package io.aeyer.plowshare.server.documents;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class CodeOutlineTest {
+  @Test
+  void coldParserLoadingDoesNotConsumeTheDocumentParseBudget() throws Exception {
+    // A fresh document-package loader repeats dependency resolution even if another test has
+    // warmed the parent's native libraries. The delay models cold native extraction/loading.
+    try (var loader = new SlowParserLoader()) {
+      Class<?> outlineType = loader.loadClass(CodeOutline.class.getName());
+      var outline =
+          outlineType
+              .getMethod("parse", String.class, String.class, String.class)
+              .invoke(
+                  null, "// 😀\nclass A { void alpha() {} void another() {} }\n", "java", "A.java");
+      assertTrue(loader.delayed, "the cold-loading path must have been exercised");
+      assertEquals("ready", outlineType.getMethod("status").invoke(outline), outline::toString);
+      List<?> symbols =
+          assertInstanceOf(List.class, outlineType.getMethod("symbols").invoke(outline));
+      assertEquals(3, symbols.size(), outline::toString);
+    }
+  }
+
+  @Test
+  void anInterruptedParseStillRefusesAnUnboundedOutline() {
+    try {
+      Thread.currentThread().interrupt();
+      var outline = CodeOutline.parse("class A { void alpha() {} }", "java", "A.java");
+      assertEquals("limited", outline.status());
+      assertTrue(outline.symbols().isEmpty());
+      assertTrue(Thread.currentThread().isInterrupted());
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  private static final class SlowParserLoader extends URLClassLoader {
+    private boolean delayed;
+
+    SlowParserLoader() {
+      super(
+          new URL[] {CodeOutline.class.getProtectionDomain().getCodeSource().getLocation()},
+          CodeOutline.class.getClassLoader());
+    }
+
+    @Override
+    protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+      synchronized (getClassLoadingLock(name)) {
+        if (name.equals("org.treesitter.TSParser") && !delayed) {
+          delayed = true;
+          try {
+            TimeUnit.MILLISECONDS.sleep(2200);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new ClassNotFoundException(name, interrupted);
+          }
+        }
+        // Derivation.sha256 is package-private: load the document package together so this
+        // remains the same runtime package, while native bindings stay in the parent loader.
+        if (name.startsWith(CodeOutline.class.getPackageName() + ".")) {
+          Class<?> found = findLoadedClass(name);
+          if (found == null) found = findClass(name);
+          if (resolve) resolveClass(found);
+          return found;
+        }
+        return super.loadClass(name, resolve);
+      }
+    }
+  }
+
   @Test
   void java_declarations_ignore_comments_strings_and_pin_unicode_coordinates() {
     String source =
