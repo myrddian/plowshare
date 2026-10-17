@@ -1,8 +1,9 @@
 # Authority substrate and Global impact report
 
 Status: source-grounded impact assessment, 17 October 2026. The broader model
-remains proposed. Only the separately authorized project READ/WRITE foundation
-(slice 01) is now implemented in this branch; it changes no persisted policy.
+remains proposed. The separately authorized project READ/WRITE foundation (01)
+and additive identities/scopes with locked built-ins (02) are now implemented in
+this branch. Grant evaluation, Global audience and resource cutover remain later work.
 
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [migration map](global-scope-migration-map.md) and
@@ -15,7 +16,9 @@ Navigate by status: [settled decisions](#settled-decisions),
 The [first implementation slice plan](authority-substrate-first-slice-plan.md)
 records the existing project-information READ/WRITE gate as the initial
 production consumer. It is implemented as a compatibility foundation, with no
-schema or Global cutover. Follow-on implementation remains unauthorized.
+Global cutover. [Slice 02](authority-substrate-slices/02-identities-and-scopes.md)
+now adds explicit identity mappings and locked built-ins; it leaves legacy null
+resources and their current policy untouched. Slices 03–14 remain unauthorized.
 The [14-slice roadmap](authority-substrate-implementation-plan.md) gives every
 follow-on slice its own changes, reuse, verification and rollback document.
 

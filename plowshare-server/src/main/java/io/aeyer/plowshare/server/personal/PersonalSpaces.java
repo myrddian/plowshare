@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.personal;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -100,6 +101,7 @@ public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspac
   }
 
   public void ensure(String handle) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     if (repository.serviceAccount(handle))
       throw new CallerFault("Service accounts have no Personal space; supply a project");
     String name = name(handle);

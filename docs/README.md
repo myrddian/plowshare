@@ -24,7 +24,7 @@
 - [Role and scope permissions](role-scope-permissions-proposal.md) (RBAC helpers, default role profiles and proposed action matrices)
 - [Authority substrate impact report](authority-substrate-impact-report.md) (settled policy, migration requirements, reuse and deferred gaps; source evidence)
 - [Authority substrate first implementation slice](authority-substrate-first-slice-plan.md) (implemented project READ/WRITE foundation, reuse and verification)
-- [Authority substrate implementation roadmap](authority-substrate-implementation-plan.md) (14 slices: 01 implemented, 02–14 proposed, each with its own scope/reuse/verification document)
+- [Authority substrate implementation roadmap](authority-substrate-implementation-plan.md) (14 slices: 01–02 implemented, 03–14 proposed, each with its own scope/reuse/verification document)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -219,6 +220,7 @@ public class AdminSeed implements ApplicationRunner {
       }
       return;
     }
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     if (admins.byHandle(handle).isPresent()) {
       // Already seeded, on a previous boot. Idempotent, and the
       // password is deliberately not re-checked here — see the class

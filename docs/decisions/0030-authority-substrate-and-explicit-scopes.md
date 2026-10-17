@@ -772,9 +772,16 @@ Global project row to preserve the old null-project meaning.
 
 | Entity | Reserved UUID |
 | --- | --- |
-| `GLOBAL_ACCOUNT` | Separate fixed registry value to be assigned |
-| `GLOBAL_READ` role | Separate fixed registry value to be assigned |
+| SYSTEM account | `00000000-0000-0000-0000-000000000001` |
+| Intrinsic SYSTEM role | `00000000-0000-0000-0000-000000000002` |
+| SYSTEM administration scope | `00000000-0000-0000-0000-000000000003` |
+| `GLOBAL_ACCOUNT` | `00000000-0000-0000-0000-000000000004` |
 | Global account knowledge scope | `00000000-0000-0000-0000-000000000005` |
+| `GLOBAL_READ` role | `00000000-0000-0000-0000-000000000006` |
+
+These values are assigned for slice 02. They are distinct identity constants,
+not credentials or permission shortcuts. See the slice's compatibility and
+lifecycle rules before using them; audience and grant activation remain later work.
 
 Bootstrap materializes the account, role, account-knowledge scope and ordinary
 policy bindings idempotently. Lookup by reserved identity identifies a record;

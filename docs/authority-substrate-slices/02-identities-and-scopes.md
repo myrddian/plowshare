@@ -1,7 +1,7 @@
 # Slice 02: Explicit identities, scopes and locked built-ins
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented in this branch, 17 October 2026, following explicit
+authorization for slice 02 only. No new public APIs or later slices are included.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -18,7 +18,7 @@ Introduce explicit durable scope/account/role identities alongside existing keys
 Dependency completion means its relevant interfaces, migrations and verification
 are available; it does not grant authority to a caller or enable an unmigrated path.
 
-## Changes
+## Implemented changes
 
 - Define typed project, Personal, account-knowledge and administration references. Keep omission as transport absence; an unresolved persisted target cannot become unrestricted scope.
 - Add reviewed reserved UUID records and existing-key mappings through new Flyway migrations. Use the ADR's reserved registry; assign unresolved IDs before coding, never generate replacements at startup.
@@ -61,15 +61,102 @@ match the eventual change:
 
 **PostgreSQL justification:** Required for the new identity/scope tables, constraints and bootstrap persistence. Add focused tagged migration tests and inspect the existing test tags; do not run the whole database suite.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+### Implementation and verification record
 
-## Specification required before implementation
+[`V152__explicit_authority_identities.sql`](../../plowshare-server/src/main/resources/db/migration/V152__explicit_authority_identities.sql) adds `authority_accounts`,
+`authority_roles` and `authority_scopes`. `IdentityRepository` is the read-only
+typed compatibility boundary, implemented by `JdbcIdentityRepository`;
+`IdentityBootstrap` validates the migrated built-ins at startup. Runtime startup
+does not create IDs or repair missing mappings. The existing permission adapter
+continues to use effective project roles; no reserved identity grants access.
 
-Finalize the reserved registry, durable mapping and built-in lifecycle/recovery rules. A compatibility reader must refuse records it cannot interpret.
+Ordinary account and project mappings are created in the source insertion's
+transaction. Existing project metadata changes refresh their compatibility
+classification while preserving the UUID and source key. They do not introduce
+a new scope transfer operation. Direct scope reassignment and builtin mutation
+are refused. The established account administration, credential, acting and
+Personal provisioning boundaries now also refuse built-in aliases/reserved IDs.
+First-human setup and seeding exclude built-in account rows.
+
+Verification performed:
+
+- **104 default focused tests passed**, including mocked lifecycle refusals for
+  both aliases, all reserved UUIDs, credential/bootstrap/Personal/acting paths,
+  missing-registry refusal and absence of a reserved-ID permission bypass, plus
+  existing token, acting and slice 01 admission/role regressions.
+- **23 focused PostgreSQL regression cases passed** across the migration,
+  PersonalSpacesTest, ServiceAccountsTest and the two Personal-ownership methods
+  of ProjectAuthorizationTest. Those tests exercise actual SQL/account lifecycle
+  compatibility, not only constructor compilation.
+- The final expanded **IdentityMigrationTest passed 9 PostgreSQL cases**:
+  retained handles/numeric/resource/token IDs, typed Personal/knowledge separation,
+  project rename/metadata continuity, fixed registry/bootstrap/restart validation,
+  FK/uniqueness/mutation guards, reserved collisions with retry, and simulated
+  interruption late in bootstrap with full Flyway rollback and successful retry.
+- PostgreSQL ran only through the selected `-PfullDb --tests` commands, because
+  the slice changes persistence and database-enforced lifecycle invariants.
+  The disposable fixture explicitly disables TLS/GSS encryption and installs
+  vector in its shared test schema; no production connection defaults changed.
+- `format`, `formatCheck` and the full repository `check` passed. The final
+  default server suite passed **5,720 tests**, with no failures or skips; client,
+  Javadoc and repository boundary checks also passed. Documentation links,
+  Flyway version uniqueness and diff whitespace were checked.
+
+These checks do not prove a live deployment, a real process-kill recovery exercise,
+new grant evaluation, a Global resource migration or independent SYSTEM execution.
+Slice 03 and later remain unimplemented.
+
+Reproduce the persistence and repository checks with:
+
+```sh
+./gradlew :plowshare-server:test -PfullDb \
+  --tests 'io.aeyer.plowshare.server.access.IdentityMigrationTest' \
+  --tests 'io.aeyer.plowshare.server.personal.PersonalSpacesTest' \
+  --tests 'io.aeyer.plowshare.server.auth.ServiceAccountsTest' \
+  --tests 'io.aeyer.plowshare.server.access.ProjectAuthorizationTest.personal_spaces_are_owner_only_even_for_server_administrators' \
+  --tests 'io.aeyer.plowshare.server.access.ProjectAuthorizationTest.sql_information_admission_does_not_grant_admins_other_personal_spaces'
+./gradlew format
+./gradlew formatCheck check
+```
+
+## Reserved registry and compatibility specification
+
+The reserved registry is finalized in ADR 0030 before implementation: account 1,
+intrinsic SYSTEM role 2, administration scope 3, Global account 4, Global knowledge
+scope 5 and GLOBAL_READ role 6 (the common UUID prefix is
+`00000000-0000-0000-0000-`). SYSTEM and GLOBAL are locked, non-interactive
+`BUILTIN` rows in the existing account store, mapped to those account UUIDs.
+Their password fields contain an unusable sentinel, they remain disabled for
+ordinary authentication, and they never participate in first-human setup counts.
+Existing accounts with a case-insensitive SYSTEM/GLOBAL handle or one of the
+reserved UUID strings stop migration for explicit collision resolution; they
+are never adopted, renamed or silently converted. Ordinary projects named global
+remain ordinary projects.
+
+Add separate identity, role and scope catalogues alongside existing handles and
+numeric project keys. Existing and newly inserted ordinary records receive a
+durable UUID once, in the database transaction creating their mapping. Project
+renames retain the scope UUID. Personal mappings retain both the original project
+key and account UUID. USER/SERVICE account-knowledge scopes are separate from
+Personal execution scopes; service-token principals receive an identity mapping
+without a new knowledge/Personal home. This creates no grants or public selectors.
+
+Client-session projects, malformed Personal locators and legacy Personal rows
+whose owner is not a USER are recorded as RESTRICTED in the additive catalogue.
+Legacy null project/resource values remain untouched and unresolved; the new
+compatibility reader refuses them rather than mapping them to Global, Personal
+or administration. Legacy consumers retain their existing semantics until their
+own slices migrate. Scope identity lookup never authorizes an operation.
+
+Flyway materializes the exact built-ins atomically and rejects collisions.
+Restart validates their complete locked records through a repository interface;
+it never generates replacement built-in identities or repairs a missing record
+silently. Repeating migration bootstrap against intact records is a no-op.
+Failed migration rolls back and can be retried after the collision is resolved.
+Lifecycle checks and database constraints/triggers refuse builtin credentials,
+acting subjects, Personal provisioning, generic mutation/deletion and SYSTEM role
+reassignment. Rollback retains the additive tables and lifecycle guards; an older
+binary is not a supported writer after this migration.
 
 ## Rollout and rollback
 

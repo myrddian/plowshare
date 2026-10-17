@@ -34,7 +34,7 @@ public sealed interface RequestAuthority
       implements RequestAuthority {
     public Delegated {
       actor = ActingValues.serviceActor(actor);
-      subject = ActingValues.account(subject);
+      subject = ActingValues.subject(subject);
       Objects.requireNonNull(delegation, "delegation");
     }
   }
