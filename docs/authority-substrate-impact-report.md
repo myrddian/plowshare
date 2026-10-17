@@ -11,6 +11,11 @@ Navigate by status: [settled decisions](#settled-decisions),
 [migration requirements and source evidence](#migration-requirements),
 [reusable mechanisms](#what-can-be-reused) and [deferred gaps](#deferred-gaps).
 
+The [first implementation slice plan](authority-substrate-first-slice-plan.md)
+recommends the existing project-information READ/WRITE gate as the initial
+production consumer. It is a compatibility foundation, with no schema or Global
+cutover; implementation remains unauthorized.
+
 ## Result and audit boundaries
 
 The proposed separation is viable, but it is a coordinated authority and ownership
@@ -429,10 +434,11 @@ and recovery. Preserve existing attribution/attempt records while adding that
 binding; SYSTEM execution or creator provenance must not silently select a payer.
 Model-call allowance, capacity routing and monetary reservations are distinct.
 
-### First migration slice: specification checklist
+### Global cutover: later milestone prerequisites
 
-An illustrative Global ADMIN upload, SYSTEM preparation and supported reader
-path needs the following concrete specifications before code is authorized:
+The later Global ADMIN upload, SYSTEM preparation and supported reader milestone
+needs the following concrete specifications before its code is authorized. These
+are not additions to the [first READ/WRITE foundation slice](authority-substrate-first-slice-plan.md):
 
 1. Typed account/project/resource targets, reserved identity mapping and safe
    built-in bootstrap/recovery, alongside existing persistence keys.
@@ -502,6 +508,11 @@ proceed. A later slice must resolve the relevant gap before exposing that behavi
 ## Suggested implementation order and future proof
 
 These are review dependencies, not authorization to implement:
+
+The scoped [first slice](authority-substrate-first-slice-plan.md) covers the
+initial READ/WRITE contract and one existing consumer. The broader steps below
+describe subsequent migration dependencies, not requirements to include them all
+in that first change.
 
 1. Specify the affected typed targets/actions, role compatibility, identity lifecycle
    and migration records against the settled policy.

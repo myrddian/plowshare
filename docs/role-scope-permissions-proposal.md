@@ -43,6 +43,11 @@ cover compatibility; [reuse](authority-substrate-impact-report.md#what-can-be-re
 and [deferred gaps](authority-substrate-impact-report.md#deferred-gaps) describe
 existing mechanisms and boundaries without implying implementation.
 
+The [first implementation slice](authority-substrate-first-slice-plan.md) proposes
+only project READ/WRITE helpers at the existing information gate. The other role,
+Global, ACL and runtime rows below remain the target proposal, not features
+delivered or authorized by that slice.
+
 ## Rules for reading the matrices
 
 A role applies only through a valid grant naming its scope and any permitted

@@ -246,6 +246,11 @@ migration requirements, reusable mechanisms and deferred gaps. RBAC with standar
 role helpers is the routine management path; complex ACLs serve finer needs
 through the same substrate rather than becoming a setup requirement.
 
+The concrete [first-slice plan](authority-substrate-first-slice-plan.md) isolates
+the project READ/WRITE permission contract and existing information admission as
+the initial consumer, with mocked verification and no persistence/API changes.
+The wider dependency sequence below does not expand that recommended first scope.
+
 1. **Specify the affected migration contract.** Map the settled role helpers,
    actions and audiences to current scopes/grants; assign the remaining reserved
    identities and define bootstrap, technical grant records and cutover behavior.

@@ -1123,6 +1123,11 @@ These requirements apply when a migration slice is separately authorized. They
 map settled policy to existing contracts; they do not reopen the role model or
 authorize implementation, new endpoints, SDK parity or missing lifecycle controls.
 
+The [first implementation slice plan](../authority-substrate-first-slice-plan.md)
+proposes a behavior-compatible project READ/WRITE contract used by the existing
+information gate. It does not introduce the built-in identities or enable Global
+cutover; later rows apply only when their affected behavior is separately scoped.
+
 | Migration work | Required treatment |
 | --- | --- |
 | Identity and scope mapping | Assign remaining reserved identities; map account knowledge, project and Personal targets explicitly alongside existing keys. Specify bootstrap/recovery without login, accidental Personal provisioning or UUID replacement. |

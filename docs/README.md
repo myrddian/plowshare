@@ -23,6 +23,7 @@
 - [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)
 - [Role and scope permissions](role-scope-permissions-proposal.md) (RBAC helpers, default role profiles and proposed action matrices)
 - [Authority substrate impact report](authority-substrate-impact-report.md) (settled policy, migration requirements, reuse and deferred gaps; source evidence)
+- [Authority substrate first implementation slice](authority-substrate-first-slice-plan.md) (planning only: project READ/WRITE foundation, reuse and verification)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
