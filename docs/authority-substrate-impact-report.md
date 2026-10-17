@@ -440,7 +440,7 @@ Model-call allowance, capacity routing and monetary reservations are distinct.
 | Legacy owner/creator and ownerOnly migration | Settled: created_by is provenance and grants no permissions. Existing owner_handle/ownerOnly semantics must be reconciled into explicit scope/root-policy grants and any mandatory audience restrictions, preserving actual creation evidence; never substitute caller == created_by or silently remove mandatory policy |
 | Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
 | Compatibility role mapping | Specify which old VIEWER/CONTRIBUTOR/MANAGER grants map to READ/WRITE/EXECUTION; retain manifest/token identities where valid and distinguish new grants from previously retained ceilings |
-| Default public role versus individual exceptions | Every authenticated principal holds GLOBAL_READ; specify resource-level withdrawal/mandatory constraints and support for intentionally excluding a principal without confusing role membership with resource authorization |
+| GLOBAL_READ audience and exclusions | Settled: every authenticated principal holds GLOBAL_READ; resources authorizing it have no individual audience exclusions. Restricted audiences remove that authorization and use project/group permissions. Preserve account/token validity, operation ceilings and mandatory restrictions; introduce no deny-entry/blocklist capability |
 | Tenant isolation and release | Global's audience is settled: all currently authenticated, active principals in the deployment, across project/Application and future tenant boundaries. Preserve private scoped access and source-release/input/reference restrictions; define future tenant mappings separately, without reinterpreting Global as tenant-local |
 | Search aggregation | Decide selected read set, project-plus-public convenience, paging/ranking/coverage, duplicate revisions and reference-only hits before changing current Personal-plus-Shared defaults |
 | Global schema/type registry | Current type management is Personal/Project-scoped; decide where Global-owned typed documents get immutable schemas and how attached access/import behaves |
@@ -577,6 +577,11 @@ Focused mocked/fake acceptance coverage should include:
   authority or ADMIN approval, preserving home/created_by. CONTRIBUTOR cannot
   change that audience, and manager authority over one resource cannot change
   unrelated/private source permissions or Global-account administration.
+- GLOBAL_READ authorizes the authenticated deployment-wide audience without
+  per-account audience exclusions. Restricted readership removes GLOBAL_READ and
+  uses project/group permissions. Disabled/revoked identities, retained operation
+  limits and mandatory input/reference restrictions remain enforced; no deny-entry
+  mechanism or new group-management interface is inferred.
 - Human ADMIN writes a Global-owned resource through scoped action grants without
   impersonating Global or becoming its owner; Application roles use the same
   evaluator rather than separate authority logic.

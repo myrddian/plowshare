@@ -738,6 +738,23 @@ resources through explicit descendant coverage and mandatory policy checks.
 Resources owned by other accounts can authorize the same role without changing
 owner or moving into Global. No per-reader ownership transfer is involved.
 
+### GLOBAL_READ has no individual exclusions
+
+Authorizing `GLOBAL_READ` means the deployment-wide authenticated audience, with
+no resource-specific individual exclusions. A manager cannot combine that grant
+with an "everyone except account X" audience or remove the universal role from
+one principal to create such an exception. To choose a restricted audience,
+remove `GLOBAL_READ` authorization and use the appropriate project/group
+permissions under the root document's current policy. Creator provenance,
+publication state and account home remain independent of that audience choice.
+
+Current authentication/account validity, token/acting ceilings, operation
+sandboxes, document lifecycle and mandatory input/reference restrictions still
+apply. Those existing eligibility and execution boundaries are not per-account
+exceptions to the GLOBAL_READ audience. This decision introduces no deny-entry
+mechanism, per-reader blocklist or new group-management capability. Restricted
+interface/capability coverage remains subject to the existing supported contracts.
+
 ### Deployment-wide audience and isolation
 
 Global's audience is deployment-wide. Every currently authenticated, active

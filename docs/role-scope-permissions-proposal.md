@@ -33,6 +33,13 @@ role to permit general reading; possession grants no access to private resources
 that do not authorize it. It is separate from the ordinary project role hierarchy,
 from `GLOBAL_ACCOUNT` ownership and from ADMIN management.
 
+GLOBAL_READ has no individual audience exclusions. Restricted readership uses
+project/group permissions with GLOBAL_READ authorization removed, not an
+"everyone except" grant or per-account role removal. Account/credential validity,
+retained operation limits and mandatory input/reference restrictions still apply.
+This adds no deny/blocklist mechanism or group-management capability. See
+[GLOBAL_READ audience semantics](decisions/0030-authority-substrate-and-explicit-scopes.md#global_read-has-no-individual-exclusions).
+
 That audience spans the deployment, including principals in different projects,
 Applications or future tenants. It does not expand their scoped membership,
 write, control or execution permissions. Only resources authorizing that audience

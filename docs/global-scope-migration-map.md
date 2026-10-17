@@ -376,6 +376,12 @@ Default mocked/fake tests should cover:
   CONTRIBUTOR has no audience-management authority. Home/created_by and private
   dependency restrictions remain intact; this does not authorize Global-account
   management or unrelated-resource changes. See [manager audience authority](decisions/0030-authority-substrate-and-explicit-scopes.md#resource-manager-responsibility-for-audience-changes).
+- GLOBAL_READ permits the deployment-wide authenticated audience with no
+  individual exclusions. A restricted audience removes GLOBAL_READ and uses
+  project/group permissions; it does not add per-account denies or remove the
+  universal role selectively. Authentication/token validity, operation ceilings
+  and mandatory restrictions remain effective. No deny/blocklist or new group
+  capability is introduced. See [GLOBAL_READ audience semantics](decisions/0030-authority-substrate-and-explicit-scopes.md#global_read-has-no-individual-exclusions).
 - `GLOBAL_ACCOUNT`, its account knowledge scope and `GLOBAL_READ` have distinct
   fixed registry UUIDs on every startup/installation. No Global project is created;
   existing ordinary projects named global retain their ordinary identities and
