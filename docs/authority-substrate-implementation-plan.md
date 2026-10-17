@@ -5,6 +5,9 @@ implemented for their documented supported paths. Slice 14 includes the
 [completion implementation](authority-substrate-slices/14-completion-plan.md):
 explicit Global document destination and preparation embeddings charged to the
 existing processing budget. Other budget gaps and broader rollout remain deferred.
+The separately requested [follow-on slice 15](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md)
+now scopes document semantic-query budgets and read authority. It is planning
+only; those consumers remain fenced until implementation and verification.
 
 ## Count and scope
 
@@ -13,6 +16,10 @@ Recommend **14 implementation slices in total: the first documented slice plus
 planning units, not a promise of one PR per slice, an effort estimate or a request
 to execute all work. Revalidate concrete scope and source dependencies before a
 later implementation instruction; split a unit further if evidence requires it.
+
+That original sequence is complete for its documented supported paths. Slice 15
+is an additional proposed follow-on, bringing the documented inventory to 15;
+it does not retroactively expand the original slice 14 outcome.
 
 [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md) defines the
 settled architecture. The [impact report](authority-substrate-impact-report.md)
@@ -54,6 +61,7 @@ it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 | 12 | [Account acting delegation and action ceilings](authority-substrate-slices/12-account-acting-delegation.md) | 03, 06, 07 | Map the existing Application-on-behalf-of-user flow to common actions while preserving separate actor/subject proof and the currently supported target/operation set. |
 | 13 | [Existing API, scope-selection and client contract cutover](authority-substrate-slices/13-existing-contract-and-client-cutover.md) | 05, 08, 09, 10, 11, 12 | Expose the migrated semantics only through verified existing supported operations, coordinating affected contracts without requiring SDK/client parity or creating new APIs. |
 | 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Complete reviewed legacy classification and the bounded Global document admission/preparation/read path, preserving identities and private data; separately deferred consumers remain fenced. |
+| 15 (planning only) | [Semantic-query budgets and read authority](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Bind existing supported document query embeddings to a configured search-operation allowance and bounded SYSTEM purpose, preserving current reader and run sandboxes. Memory/repair/ask and other deferred consumers remain separate. |
 
 The existing first-slice document remains authoritative for slice 01; it is not
 duplicated in the slice directory. Slice 14 depends transitively on 01–13
@@ -179,6 +187,9 @@ supported Global document route and shared preparation allowance. The historical
 retains classification and compatibility-removal gates. Completing this bounded
 path does not enable deferred budget consumers or establish unrestricted
 platform-wide cutover.
+Slice 15 is documented planning only. Its proposed configuration, retained query
+source and closed SYSTEM purpose need a subsequent implementation instruction;
+no current search availability follows from the plan.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

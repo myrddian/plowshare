@@ -583,6 +583,11 @@ proceed. A later slice must resolve the relevant gap before exposing that behavi
 
 Current activation limits after the bounded slice 14 completion:
 
+The proposed [follow-on slice 15](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md)
+scopes document semantic-query budgets and read authority. It is documentation
+only: the activation limits below remain current until verified implementation.
+Memory recall, ask/deliberation and independent maintenance are outside that plan.
+
 - Document-preparation embedding now carries bounded SYSTEM authorization and
   claims against the retained processing allowance, shared with chat preparation.
   Semantic-query embedding and independent background repair/rebuild still need

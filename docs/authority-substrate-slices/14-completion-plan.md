@@ -129,6 +129,12 @@ Do not automatically increase limits, reset spending or change historical costs.
 These gaps do not block the bounded Global document path. They still prevent a
 claim that all affected platform consumers are available or fully cut over.
 
+The document-query portion is now scoped separately in proposed
+[follow-on slice 15](15-semantic-query-budgets-and-read-authority.md). That plan
+does not activate a consumer or change slice 14's completed boundary. Memory
+recall, ask/deliberation, independent repair and the other budget gaps remain
+outside that follow-on.
+
 ## Verification and acceptance
 
 1. Extend mocked boundary tests for strict destination parsing, scoped human ADMIN
