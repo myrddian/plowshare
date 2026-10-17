@@ -44,7 +44,7 @@ class DocumentNavigationPersistenceTest {
   @BeforeEach
   void setup() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('alice','fixture',false),('bob','fixture',false),('viewer','fixture',false),('admin','fixture',true)");
     jdbc.update("INSERT INTO projects(name) VALUES('operations'),('restricted')");

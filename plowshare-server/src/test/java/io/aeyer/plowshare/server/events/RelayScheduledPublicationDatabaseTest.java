@@ -69,7 +69,8 @@ class RelayScheduledPublicationDatabaseTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE relay_topics, firings, triggers, schedules, projects, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE relay_topics, firings, triggers, schedules, projects, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('operator','fixture',true)");
     schedules = new JdbcScheduleStore(jdbc);

@@ -240,7 +240,8 @@ class OrchestrationsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE orchestration_messages, orchestrations, todos, todo_notices,"
             + " entries, turns, conversations, admins, orchestration_concerns CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");

@@ -51,7 +51,8 @@ class ServiceInformationProcessingTest {
   @BeforeEach
   void setup() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE projects,admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,account_kind,must_change_password,server_admin) VALUES ('worker','hash','SERVICE',false,false), (?,'hash','SERVICE_TOKEN',false,false),('reader','hash','USER',false,false)",
         PRINCIPAL);
@@ -78,7 +79,12 @@ class ServiceInformationProcessingTest {
                 ApplicationPolicy.Kind.APPLICATION,
                 Map.of("worker", ProjectRole.CONTRIBUTOR, "reader", ProjectRole.CONTRIBUTOR)));
     members =
-        new ApplicationProjectMembers(new JdbcProjectMembers(jdbc), ignored -> boundary.get());
+        new ApplicationProjectMembers(
+            new JdbcProjectMembers(jdbc),
+            ignored -> boundary.get(),
+            new io.aeyer.plowshare.server.access.ApplicationGrantLineage(
+                new io.aeyer.plowshare.server.access.JdbcScopedGrantRepository(jdbc),
+                ignored -> boundary.get()));
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
     repository = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
   }

@@ -13,6 +13,10 @@ public final class BuiltInIdentities {
   public static final AccountId GLOBAL = new AccountId(id(4));
   public static final ScopeId GLOBAL_KNOWLEDGE = new ScopeId(id(5));
   public static final RoleId GLOBAL_READ = new RoleId(id(6));
+  public static final RoleId ADMIN = new RoleId(id(7));
+  public static final RoleId MANAGER = new RoleId(id(8));
+  public static final RoleId CONTRIBUTOR = new RoleId(id(9));
+  public static final RoleId READER = new RoleId(id(10));
   private static final List<String> RESERVED =
       List.of(
           id(1).toString(),
@@ -20,7 +24,11 @@ public final class BuiltInIdentities {
           id(3).toString(),
           id(4).toString(),
           id(5).toString(),
-          id(6).toString());
+          id(6).toString(),
+          id(7).toString(),
+          id(8).toString(),
+          id(9).toString(),
+          id(10).toString());
 
   private BuiltInIdentities() {}
 
@@ -33,7 +41,7 @@ public final class BuiltInIdentities {
     return value != null
         && (value.equalsIgnoreCase("SYSTEM")
             || value.equalsIgnoreCase("GLOBAL")
-            || RESERVED.contains(value));
+            || RESERVED.contains(value.toLowerCase(java.util.Locale.ROOT)));
   }
 
   public static void requireOrdinaryAccount(String value) {

@@ -55,7 +55,8 @@ class ReceiptScopeRepositoryTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE projects,admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES ('owner','fixture'),('other','fixture')");
     scopes = new JdbcResourceScopeRepository(jdbc);

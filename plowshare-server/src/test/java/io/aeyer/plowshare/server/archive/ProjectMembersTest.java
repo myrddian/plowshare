@@ -45,7 +45,8 @@ class ProjectMembersTest {
 
   @BeforeEach
   void reset() {
-    jdbc.execute("TRUNCATE projects, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES ('alice', 'hash', TRUE), ('bob', 'hash', TRUE)");
     ProjectIds.toWrite(jdbc, Home.of("ledger"));
@@ -54,7 +55,7 @@ class ProjectMembersTest {
 
   @Test
   void regular_accounts_cannot_claim_projects_and_admin_access_is_explicit() {
-    jdbc.update("UPDATE admins SET server_admin = FALSE");
+    jdbc.update("UPDATE admins SET server_admin = FALSE WHERE account_kind='USER'");
     assertFalse(members.mayUse("ledger", null));
     assertFalse(members.mayUse("ledger", "alice"));
     assertFalse(members.mayUse("missing", "alice"));
@@ -65,13 +66,14 @@ class ProjectMembersTest {
     members.remove("ledger", "alice");
     assertFalse(members.mayUse("ledger", "alice"));
     jdbc.update("UPDATE admins SET server_admin = TRUE WHERE handle = 'alice'");
-    assertTrue(members.mayUse("ledger", "alice"));
+    assertFalse(members.mayUse("ledger", "alice"));
+    assertTrue(members.mayAdminister("ledger", "alice"));
     assertThrows(ArchiveRefusedException.class, () -> members.add("ledger", "unknown"));
   }
 
   @Test
   void concurrent_regular_accounts_cannot_claim_an_unowned_project() throws Exception {
-    jdbc.update("UPDATE admins SET server_admin = FALSE");
+    jdbc.update("UPDATE admins SET server_admin = FALSE WHERE account_kind='USER'");
     try (var pool = Executors.newFixedThreadPool(2)) {
       CountDownLatch start = new CountDownLatch(1);
       var alice =
@@ -111,7 +113,8 @@ class ProjectMembersTest {
   }
 
   @Test
-  void a_file_channel_claims_an_unowned_project_for_its_authenticated_account() throws Exception {
+  void a_file_channel_roots_a_project_after_an_explicit_manager_grant() throws Exception {
+    members.assign("ledger", "alice", ProjectRole.MANAGER, "alice", true);
     var sessions = new io.aeyer.plowshare.server.session.SessionRegistry();
     var presences = new io.aeyer.plowshare.server.session.PresenceRegistry();
     ProjectStore projects =

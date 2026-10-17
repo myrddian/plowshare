@@ -49,7 +49,7 @@ class AuthoredInformationPersistenceTest {
   @BeforeEach
   void setup() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES('author','fixture'),('other','fixture')");
     jdbc.update("UPDATE embedding_slots SET active_space_id=NULL,target_space_id=NULL");

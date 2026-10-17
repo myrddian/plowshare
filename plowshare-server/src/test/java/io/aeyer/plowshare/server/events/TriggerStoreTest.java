@@ -42,7 +42,8 @@ class TriggerStoreTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h'), ('mara', 'h')");
     store = new JdbcTriggerStore(jdbc);
   }

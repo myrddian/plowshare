@@ -19,6 +19,13 @@ PR #74 enables existing information feature defaults and PR #75 fixes admitted-t
 test completion. Neither changes the audited Global/Shared ownership or selection
 contracts below.
 
+Implementation checkpoint: slices 01–03 now provide the project READ/WRITE seam,
+explicit identity catalogue and scoped RBAC grant helpers in this branch. The
+source inventory below records the original audit baseline; administrator
+project-role shortcuts have since been replaced as described in the
+[slice 03 compatibility specification](authority-substrate-slices/03-rbac-grant-specification.md).
+Resource/audience and runtime cutovers remain later work.
+
 ## Existing authority foundations
 
 | Area | Current source and behavior | Proposed treatment |

@@ -332,8 +332,13 @@ public class ProjectAuthorization {
       accounts.requireServerAdmin(account);
       return;
     }
-    // Administrative membership management does not grant ordinary Application use.
-    if (operation.startsWith("project.member.") && members.isServerAdmin(account)) return;
+    // Only the existing membership/access-metadata surfaces consume administrative control.
+    // Other legacy MANAGER gates retain their data-role semantics until explicitly migrated.
+    if (operation.equals("project.access") || operation.startsWith("project.member.")) {
+      var managed = scopes(payload, account);
+      if (!managed.isEmpty()
+          && managed.stream().allMatch(project -> members.mayAdminister(project, account))) return;
+    }
     if (ACCOUNT_OWNED.contains(operation)) {
       if (operation.equals("schedule.pause")) {
         // Only schedule provenance supplies this scope. An unrelated explicit project or

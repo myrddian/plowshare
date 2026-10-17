@@ -154,8 +154,8 @@ class LocalHooksEndToEndTest {
 
   @BeforeEach
   void fresh() throws Exception {
-    jdbc.execute(
-        "TRUNCATE TABLE entries, turns, conversations, local_hook_sets, admins" + " CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE entries, turns, conversations, local_hook_sets, admins" + " CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash) VALUES (?, 'h'), (?, 'h')", OWNER, STRANGER);
     conversations = new ConversationStore(jdbc);

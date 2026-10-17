@@ -123,7 +123,8 @@ class DurableJobsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, jobs, projects CASCADE");
     rows = new JdbcJobLog(jdbc);
   }

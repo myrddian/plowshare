@@ -14,16 +14,25 @@ import org.springframework.stereotype.Component;
 public final class ApplicationProjectMembers implements ProjectMembers {
   private final ProjectMembers stored;
   private final ApplicationPolicy applications;
+  private final io.aeyer.plowshare.server.access.GrantLineage lineage;
 
   public ApplicationProjectMembers(
-      @Qualifier("jdbcProjectMembers") ProjectMembers stored, ApplicationPolicy applications) {
+      @Qualifier("jdbcProjectMembers") ProjectMembers stored,
+      ApplicationPolicy applications,
+      io.aeyer.plowshare.server.access.GrantLineage lineage) {
     this.stored = stored;
     this.applications = applications;
+    this.lineage = lineage;
   }
 
   @Override
   public boolean isServerAdmin(String handle) {
     return stored.isServerAdmin(handle);
+  }
+
+  @Override
+  public boolean mayAdminister(String project, String actor) {
+    return stored.mayAdminister(project, actor);
   }
 
   @Override
@@ -53,7 +62,9 @@ public final class ApplicationProjectMembers implements ProjectMembers {
         io.aeyer.plowshare.server.auth.ServiceCredentials.principal(handle)
             ? stored.authorityAccount(handle).orElse(null)
             : handle;
-    return applications.read(project).limit(account, stored.role(project, handle));
+    return applications
+        .read(project)
+        .limit(account, lineage.projectRole(project, account, stored.role(project, handle)));
   }
 
   @Override
@@ -79,6 +90,7 @@ public final class ApplicationProjectMembers implements ProjectMembers {
 
   @Override
   public Access access(String project, String handle) {
+    if (stored.mayAdminister(project, handle)) return stored.managementAccess(project, handle);
     requireRole(project, handle, ProjectRole.VIEWER);
     Access existing = stored.access(project, handle);
     ProjectRole effective =
@@ -98,12 +110,14 @@ public final class ApplicationProjectMembers implements ProjectMembers {
   @Override
   public Access managementAccess(String project, String actor) {
     requireManagement(project, actor);
-    return stored.isServerAdmin(actor) ? stored.access(project, actor) : access(project, actor);
+    return stored.mayAdminister(project, actor)
+        ? stored.managementAccess(project, actor)
+        : access(project, actor);
   }
 
   /** Administrative grants remain manageable even when the manifest hides an application. */
   private void requireManagement(String project, String actor) {
-    if (!stored.isServerAdmin(actor)) requireRole(project, actor, ProjectRole.MANAGER);
+    if (!stored.mayAdminister(project, actor)) requireRole(project, actor, ProjectRole.MANAGER);
   }
 
   @Override

@@ -53,7 +53,8 @@ class HostedScopePersistenceTest {
 
   @BeforeEach
   void setup() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE hosted_tool_scope_mutations,hosted_tool_scope_workers,hosted_tool_scopes,provider_credentials,provider_connections,projects CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES (?, 'fixture',FALSE),(?,'fixture',FALSE) ON CONFLICT(handle) DO NOTHING",

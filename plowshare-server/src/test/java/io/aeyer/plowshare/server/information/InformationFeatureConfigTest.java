@@ -50,6 +50,9 @@ class InformationFeatureConfigTest {
         .withUserConfiguration(DocumentsConfig.class, ApplicationProjectMembers.class)
         .withBean("jdbcProjectMembers", ProjectMembers.class, () -> stored)
         .withBean(ApplicationPolicy.class, () -> policy)
+        .withBean(
+            io.aeyer.plowshare.server.access.GrantLineage.class,
+            io.aeyer.plowshare.server.access.GrantLineageFixture::passthrough)
         .withBean(JdbcTemplate.class, () -> jdbc)
         .withBean(UnitOfWork.class, () -> UnitOfWork.NONE)
         .withBean(EmbeddingClient.class, () -> mock(EmbeddingClient.class))

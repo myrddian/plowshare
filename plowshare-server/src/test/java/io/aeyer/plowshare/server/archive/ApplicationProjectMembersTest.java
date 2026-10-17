@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 class ApplicationProjectMembersTest {
   ProjectMembers stored = mock(ProjectMembers.class);
   ApplicationPolicy policy = mock(ApplicationPolicy.class);
-  ApplicationProjectMembers members = new ApplicationProjectMembers(stored, policy);
+  ApplicationProjectMembers members =
+      new ApplicationProjectMembers(
+          stored, policy, io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough());
 
   @Test
   void manifest_cannot_grant_membership_and_caps_existing_roles() {
@@ -35,6 +37,7 @@ class ApplicationProjectMembersTest {
   @Test
   void admin_management_is_separate_from_application_visibility_and_revocation_is_live() {
     when(stored.isServerAdmin("admin")).thenReturn(true);
+    when(stored.mayAdminister("chatbot", "admin")).thenReturn(true);
     when(stored.role("chatbot", "admin")).thenReturn(Optional.of(ProjectRole.MANAGER));
     when(policy.read("chatbot"))
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
@@ -67,7 +70,9 @@ class ApplicationProjectMembersTest {
   void machine_token_keeps_its_ceiling_and_uses_its_owners_explicit_manifest_grant() {
     var stored = mock(ProjectMembers.class);
     var policy = mock(ApplicationPolicy.class);
-    var effective = new ApplicationProjectMembers(stored, policy);
+    var effective =
+        new ApplicationProjectMembers(
+            stored, policy, io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough());
     String principal = "@service/fixture";
     when(stored.authorityAccount(principal)).thenReturn(Optional.of("integration"));
     when(stored.role("chatbot", principal)).thenReturn(Optional.of(ProjectRole.VIEWER));

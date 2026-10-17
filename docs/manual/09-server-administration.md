@@ -102,7 +102,10 @@ Complete the first administrator setup and rotate any account requiring a passwo
 change before using it in unattended adapters. Server administrator status is
 explicit. Project roles govern ordinary server projects: Viewer reads,
 Contributor also starts and updates work, and Manager also manages definitions
-and membership. Personal remains account-owned. An adapter needs effective
+and membership. Administrator control permits membership management without
+implicitly granting project data access. Existing administrator data access is
+preserved by migration-specific grants; new administrators need explicit data
+roles. Personal remains account-owned. An adapter needs effective
 Contributor-or-higher access in its target project, and its receiving definition
 must expose the intended capabilities.
 

@@ -69,7 +69,8 @@ class CodeWorkspaceIndexTest {
 
   @BeforeEach
   void prepare() throws Exception {
-    jdbc.execute("TRUNCATE documents, projects, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE documents, projects, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES ('alice','fixture'),('bob','fixture')");
     jdbc.update("INSERT INTO projects(name) VALUES (?)", HOME.project());

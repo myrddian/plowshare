@@ -25,7 +25,9 @@ class ApplicationVisibilityTest {
     ProjectStore projects = mock(ProjectStore.class);
     ProjectMembers stored = mock(ProjectMembers.class);
     ApplicationPolicy policy = mock(ApplicationPolicy.class);
-    ProjectMembers members = new ApplicationProjectMembers(stored, policy);
+    ProjectMembers members =
+        new ApplicationProjectMembers(
+            stored, policy, io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough());
     var application =
         new ProjectRecord(
             "chatbot", Path.of("/fixture/chatbot"), List.of(), List.of(), "DISJOINT", List.of());
@@ -77,6 +79,13 @@ class ApplicationVisibilityTest {
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.INVALID, Map.of()));
     assertFalse(access.readable("chatbot", "reader"));
     when(stored.isServerAdmin("reader")).thenReturn(true);
+    assertFalse(
+        access.allowed(
+            "project.member.add",
+            AccessRequestDecoder.decode(
+                "project.member.add", Map.of("project", "chatbot", "handle", "worker")),
+            "reader"));
+    when(stored.mayAdminister("chatbot", "reader")).thenReturn(true);
     assertTrue(
         access.allowed(
             "project.member.add",

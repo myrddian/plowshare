@@ -56,7 +56,8 @@ class SkillExecutionsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE TABLE conversations, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE conversations, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle, password_hash) VALUES ('alice', 'hash'), ('bob', 'hash')");
     var conversations = new ConversationStore(jdbc, Instant::now, null);

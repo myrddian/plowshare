@@ -63,7 +63,7 @@ class CodeWorkspaceMonitorTest {
 
   @BeforeEach
   void prepare() throws Exception {
-    jdbc.execute("TRUNCATE projects CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE projects CASCADE");
     jdbc.execute("TRUNCATE code_workspaces CASCADE");
     jdbc.execute("TRUNCATE code_workspace_mutations");
     jdbc.update("INSERT INTO projects(name) VALUES (?)", HOME.project());

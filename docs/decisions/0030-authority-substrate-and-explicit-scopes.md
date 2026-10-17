@@ -1,7 +1,8 @@
 # ADR 0030: Authority substrate and explicit scopes
 
-Status: proposed architecture, 17 October 2026. Documentation only; no runtime,
-schema, permission or client behavior is changed by this proposal.
+Status: proposed architecture, 17 October 2026. Slices 01–03 are implemented in
+this branch under separate authorization; the remaining architecture is proposed.
+See the [roadmap](../authority-substrate-implementation-plan.md) for activation boundaries.
 
 ## Problem and direction
 
@@ -280,10 +281,11 @@ Retain the familiar role model, with explicit action sets:
 | READER | Read permitted resources within a scope |
 | GLOBAL_READ | Read resources whose policy explicitly authorizes this role; every authenticated principal holds it, independently of resource ownership |
 
-The current project role name is VIEWER. READER is proposed vocabulary, not an
-implemented rename. ADMIN is currently represented by server-admin state rather
-than a member of `ProjectRole`. Define the action mapping explicitly before
-changing contracts. Never place SYSTEM above MANAGER in the current ordinal enum
+The wire project role name remains VIEWER; slice 03 maps it to the internal
+READER helper. ADMIN is a separate scoped role, not a member of `ProjectRole`;
+existing human server-admin lifecycle state supplies its explicit control bindings.
+The [slice 03 specification](../authority-substrate-slices/03-rbac-grant-specification.md)
+defines the versioned action and delegation mapping. Never place SYSTEM above MANAGER in the current ordinal enum
 and allow that ordering to become a general permission hierarchy.
 
 ### Agent grant ceiling
@@ -778,10 +780,15 @@ Global project row to preserve the old null-project meaning.
 | `GLOBAL_ACCOUNT` | `00000000-0000-0000-0000-000000000004` |
 | Global account knowledge scope | `00000000-0000-0000-0000-000000000005` |
 | `GLOBAL_READ` role | `00000000-0000-0000-0000-000000000006` |
+| ADMIN role | `00000000-0000-0000-0000-000000000007` |
+| MANAGER role | `00000000-0000-0000-0000-000000000008` |
+| CONTRIBUTOR role | `00000000-0000-0000-0000-000000000009` |
+| READER role | `00000000-0000-0000-0000-00000000000a` |
 
-These values are assigned for slice 02. They are distinct identity constants,
-not credentials or permission shortcuts. See the slice's compatibility and
-lifecycle rules before using them; audience and grant activation remain later work.
+The first six values were assigned in slice 02; the four ordinary helper roles
+are assigned in slice 03. These are identity constants, never credentials or
+permission shortcuts. Slice 03 activates scoped role bindings and root policy;
+audience, resource and runtime integrations remain later work.
 
 Bootstrap materializes the account, role, account-knowledge scope and ordinary
 policy bindings idempotently. Lookup by reserved identity identifies a record;

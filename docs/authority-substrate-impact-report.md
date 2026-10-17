@@ -1,9 +1,10 @@
 # Authority substrate and Global impact report
 
 Status: source-grounded impact assessment, 17 October 2026. The broader model
-remains proposed. The separately authorized project READ/WRITE foundation (01)
-and additive identities/scopes with locked built-ins (02) are now implemented in
-this branch. Grant evaluation, Global audience and resource cutover remain later work.
+remains proposed. The separately authorized project READ/WRITE foundation (01),
+additive identities/scopes with locked built-ins (02), and scoped RBAC grants
+with role/agent ceilings (03) are implemented in this branch. Global audience,
+resource and runtime cutovers remain later work.
 
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [migration map](global-scope-migration-map.md) and
@@ -18,7 +19,9 @@ records the existing project-information READ/WRITE gate as the initial
 production consumer. It is implemented as a compatibility foundation, with no
 Global cutover. [Slice 02](authority-substrate-slices/02-identities-and-scopes.md)
 now adds explicit identity mappings and locked built-ins; it leaves legacy null
-resources and their current policy untouched. Slices 03–14 remain unauthorized.
+resources and their current policy untouched. [Slice 03](authority-substrate-slices/03-rbac-grants-and-role-helpers.md)
+adds live scoped bindings, immutable role helpers and audited issuance/revocation.
+Slices 04–14 remain unauthorized.
 The [14-slice roadmap](authority-substrate-implementation-plan.md) gives every
 follow-on slice its own changes, reuse, verification and rollback document.
 
@@ -411,11 +414,14 @@ credential, while Application-owned token issuance retains its own receipt path.
 New public reads must preserve those revocation boundaries. Role universality is
 not anonymous access or a reason to accept retired credentials.
 
-[JdbcProjectMembers.java:138](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java)
-gives server administrators implicit MANAGER in ordinary projects. SQL also
-contains administrative project admission. Removing only one bypass disagrees
-with the other; removing both without grant migration removes existing operator
-access. Decide the explicit replacement grants without widening Personal access.
+The audited baseline gave server administrators implicit MANAGER in ordinary
+projects in both Java and SQL. Slice 03 replaces that path with explicit control
+grants and per-existing-project data compatibility bindings. New administration
+authority supplies control without implicit data access. Both the Java role
+source and SQL information admission use the live grant model; Application
+manifest limits remain an additional Java boundary. See the
+[compatibility specification](authority-substrate-slices/03-rbac-grant-specification.md).
+No Personal access was added.
 
 #### 13. Definition trust, disk layout and accounting remain separate migrations
 

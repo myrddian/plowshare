@@ -649,7 +649,8 @@ further growth. Each approved model-call chunk permits additional model use.
 
 ## Project roles
 
-Regular accounts receive Viewer, Contributor or Manager access per project. Personal
+Accounts receive explicit Viewer, Contributor or Manager data access per project.
+Administrator membership-management control supplies no implicit project data role. Personal
 spaces remain private to their account owner. See [server administration](server-administration.md#project-access-and-personal-scopes) for the permission matrix, membership commands and desktop access dialog. Workspace write restrictions still apply to every role.
 
 ## Deployed Application files

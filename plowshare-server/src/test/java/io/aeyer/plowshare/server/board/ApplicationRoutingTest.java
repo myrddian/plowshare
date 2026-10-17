@@ -23,7 +23,9 @@ class ApplicationRoutingTest {
     var registrations = mock(ApplicationRegistrations.class);
     var members =
         new ApplicationProjectMembers(
-            stored, new WorkspaceApplicationPolicy(projects, registrations));
+            stored,
+            new WorkspaceApplicationPolicy(projects, registrations),
+            io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough());
     var routing = new ProjectMessageRouting(projects, members);
     for (String name : List.of("source", "destination")) {
       Path workspace = Files.createDirectory(root.resolve(name));

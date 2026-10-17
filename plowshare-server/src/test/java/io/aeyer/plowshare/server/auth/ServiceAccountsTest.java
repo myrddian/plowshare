@@ -47,7 +47,8 @@ class ServiceAccountsTest {
 
   @BeforeEach
   void setup() {
-    jdbc.execute("TRUNCATE projects,admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects,admins CASCADE");
     context = new AnnotationConfigApplicationContext();
     context.registerBean(JdbcTemplate.class, () -> jdbc);
     context.register(ServerAdministrationTest.Transactions.class);

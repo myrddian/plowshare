@@ -10,7 +10,8 @@ and permission owners in the current implementation, then proposes permissions
 for ADMIN, MANAGER, CONTRIBUTOR and READER. Runtime source baseline:
 `efddb12a0cfd28c6aa1464f01b884d15597102d5`, refreshed through merged main
 `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7` for information feature defaults.
-The authority-substrate changes described here remain documentation only.
+Slices 01–03 are implemented in this branch; the broader resource/audience and
+runtime matrices remain proposed. See the [roadmap](authority-substrate-implementation-plan.md).
 
 ## RBAC-first management and role defaults
 
@@ -54,9 +55,10 @@ require custom ACLs for routine role assignment.
 ## Rules for reading the matrices
 
 A role applies only through a valid grant naming its scope and any permitted
-descendant coverage. Role names are not account-wide permission levels. Current
-VIEWER is the candidate for proposed READER; current ADMIN is a human
-`server_admin` property, not a `ProjectRole` value.
+descendant coverage. Role names are not account-wide permission levels. Wire VIEWER
+maps to the internal READER helper in slice 03. ADMIN is a separate scoped helper;
+the human `server_admin` lifecycle state supplies its administrative control
+bindings and is not a `ProjectRole` value.
 
 Proposed ADMIN provides scoped administrative control. It does not automatically
 include private content access or execution. A human administrator can also hold
@@ -174,11 +176,11 @@ for new capabilities.
 | Outgoing send/claim/report/cancel | Project work admission plus exact account ownership | Null-project storage is still account-bound; ownership is not interchangeable with project MANAGER |
 | Saved information views | Included in the central read set even for save/delete | These are account-owned navigation state; do not classify every command containing save/delete as content contribution |
 
-[JdbcProjectMembers.role](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java)
-currently treats a server admin as MANAGER in ordinary non-Personal/non-client
-projects. This grants more ordinary project access than the proposed explicit
-ADMIN control/data separation. Usage reports and document policies have further
-checks, so that behavior is not universal read access to all retained data.
+The audited baseline treated a server admin as MANAGER in ordinary projects.
+Slice 03 replaces that shortcut with scoped ADMIN control and explicit per-project
+compatibility data bindings for existing administrators. New administrators and
+projects do not inherit those data bindings. Existing usage/resource/lifecycle
+restrictions continue to apply. The wire roles stay unchanged.
 
 ## Proposed project action matrix
 

@@ -39,7 +39,7 @@ class InformationCollectionsTest {
   @BeforeEach
   void fresh() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('reader','h'),('other','h')");
     catalogue =
         io.aeyer.plowshare.server.information.InformationFixtures.catalogue(

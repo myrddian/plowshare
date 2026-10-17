@@ -48,7 +48,8 @@ class ServerProjectFramesTest {
 
   @BeforeEach
   void setup() {
-    jdbc.execute("TRUNCATE projects, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects, admins CASCADE");
     new AdminStore(jdbc).create("owner", "fixture-hash");
     new AdminStore(jdbc).create("member", "fixture-hash");
     jdbc.update("UPDATE admins SET server_admin = FALSE WHERE handle = 'member'");
@@ -112,7 +113,12 @@ class ServerProjectFramesTest {
     var policy =
         new io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy(
             projects, new JdbcApplicationRegistrations(jdbc));
-    var effective = new ApplicationProjectMembers(stored, policy);
+    var effective =
+        new ApplicationProjectMembers(
+            stored,
+            policy,
+            new io.aeyer.plowshare.server.access.ApplicationGrantLineage(
+                new io.aeyer.plowshare.server.access.JdbcScopedGrantRepository(jdbc), policy));
     assertFalse(effective.mayUse("chatbot", "owner"));
     assertEquals(Optional.of(ProjectRole.VIEWER), effective.role("chatbot", "member"));
     Files.delete(root.resolve("plowshare.json"));

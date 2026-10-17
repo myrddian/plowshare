@@ -82,7 +82,8 @@ class MemoryStoreTest {
     // `proposals` references `memories`, so a plain TRUNCATE is refused
     // outright. It reaches `memories`, `conversations` and `proposals`, none
     // of which this class holds anything of its own in.
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, projects CASCADE");
     store = new MemoryStore(jdbc);
   }

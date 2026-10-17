@@ -43,7 +43,8 @@ class BoardSchemaTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE firings, board_seats, board_messages, board_topics,"
             + " user_inbox, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");

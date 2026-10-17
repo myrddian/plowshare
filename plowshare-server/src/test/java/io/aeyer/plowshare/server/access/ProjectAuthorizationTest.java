@@ -39,7 +39,8 @@ class ProjectAuthorizationTest {
 
   @BeforeEach
   void setup() {
-    jdbc.execute("TRUNCATE projects,admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin,must_change_password) VALUES ('admin','hash',true,false),('manager','hash',false,false),('contributor','hash',false,false),('viewer','hash',false,false),('stranger','hash',false,false)");
     project("integration");
@@ -62,6 +63,7 @@ class ProjectAuthorizationTest {
 
   @Test
   void role_matrix_enforces_read_work_and_manage() {
+    members.assign("integration", "admin", ProjectRole.MANAGER, "admin", true);
     for (String op :
         List.of(
             "conversation.list",
@@ -405,6 +407,7 @@ class ProjectAuthorizationTest {
 
   @Test
   void listings_recheck_current_grants_and_keep_personal_work_private() {
+    members.assign("integration", "admin", ProjectRole.VIEWER, "admin", true);
     var own =
         new io.aeyer.plowshare.server.events.TriggerRecord(
             "own", "tick", "integration", null, "bot", "work", null, null, 1, false, "viewer");

@@ -73,7 +73,8 @@ class DocumentPoliciesTest {
 
   @BeforeEach
   void reset() {
-    jdbc.execute("TRUNCATE documents, projects, admins, information_policy_assignments CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE documents, projects, admins, information_policy_assignments CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash) VALUES"
             + " ('alice', 'hash'), ('bob', 'hash'), ('operator', 'hash')");

@@ -55,7 +55,7 @@ class IdentityMigrationTest {
   }
 
   private void migrate() {
-    Flyway.configure().dataSource(source).load().migrate();
+    Flyway.configure().dataSource(source).target("152").load().migrate();
   }
 
   private void user(String name) {
@@ -235,7 +235,7 @@ class IdentityMigrationTest {
     bootstrap.afterSingletonsInstantiated();
     var before = jdbc.queryForList("SELECT id,kind,account_id FROM authority_scopes ORDER BY id");
     jdbc.execute("SELECT authority_bootstrap_builtins()");
-    Flyway.configure().dataSource(source).load().migrate();
+    Flyway.configure().dataSource(source).target("152").load().migrate();
     new IdentityBootstrap(new JdbcIdentityRepository(new JdbcTemplate(source)))
         .afterSingletonsInstantiated();
     assertEquals(

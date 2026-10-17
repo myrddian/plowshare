@@ -113,7 +113,8 @@ class ReviewerCheckFactsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE orchestration_record, orchestration_checks,"
             + " orchestration_messages, orchestrations, todos, todo_notices, entries, turns,"
             + " conversations, admins CASCADE");

@@ -44,7 +44,7 @@ class InformationFacetsTest {
   @BeforeEach
   void fresh() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('reader','h'),('other','h')");
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
     access = new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc)));

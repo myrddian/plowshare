@@ -76,7 +76,11 @@ class ScopedPermissionsTest {
   void applicationManifestLimitsAdminAndRevocationIsLive() {
     var policy = mock(ApplicationPolicy.class);
     ScopedPermissions effective =
-        new EffectiveProjectPermissions(new ApplicationProjectMembers(stored, policy));
+        new EffectiveProjectPermissions(
+            new ApplicationProjectMembers(
+                stored,
+                policy,
+                io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough()));
     when(stored.isServerAdmin("alice")).thenReturn(true);
     when(stored.role("research", "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
     when(policy.read("research"))
@@ -98,7 +102,11 @@ class ScopedPermissionsTest {
   void tokenKeepsItsOwnRoleCeilingAndRequiresItsOwnersManifestGrant() {
     var policy = mock(ApplicationPolicy.class);
     ScopedPermissions effective =
-        new EffectiveProjectPermissions(new ApplicationProjectMembers(stored, policy));
+        new EffectiveProjectPermissions(
+            new ApplicationProjectMembers(
+                stored,
+                policy,
+                io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough()));
     var token = new Principal("@service/fixture");
     when(stored.authorityAccount(token.value())).thenReturn(Optional.of("integration"));
     when(stored.role("research", token.value())).thenReturn(Optional.of(ProjectRole.VIEWER));

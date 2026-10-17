@@ -52,7 +52,8 @@ class BoardPotTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE firings, board_seats, board_messages, board_topics," + " admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     store = new BoardStore(jdbc, clock);
