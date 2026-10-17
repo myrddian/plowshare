@@ -275,6 +275,13 @@ Default mocked/fake tests should cover:
   requires a retained scoped principal grant and applicable workload validation. An empty
   conversation need not invoke or charge a model. Later turns, children and async
   model work recheck authority rather than reusing only conversation admission.
+- RUN_MODEL covers all inference, including embeddings, reranking, model-based
+  validators and hook/preparation side calls. Declared SYSTEM services use their
+  existing authority bounded by the operation; callers need permission for the
+  requested operation, not its internal inference. Authorized READER semantic
+  search succeeds through bounded service inference without allowing arbitrary
+  model work or widening targets/tools. Queue/dispatch paths enforce the actual
+  executor and operation limits. Billing/spending-pool policy remains separate.
 - Global SYSTEM processing succeeds under explicit scoped READ/WRITE/EXECUTION
   grants and bounded task admission. GLOBAL_READ holders cannot create/run/write;
   human Global ADMIN READ/WRITE/control supplies no implicit execution. No name/UUID

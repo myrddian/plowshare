@@ -56,15 +56,17 @@ corresponding resource policy permits their disclosure. A reference-visible
 document is not necessarily body-readable. None of these tables grants tools,
 filesystem paths, credentials or budget merely by listing a permitted action.
 
-A permitted retrieval read may consume its admitted query-embedding allowance.
-READER does not thereby gain permission to start an independent agent, processing
-pipeline, digest or curation job. Classify model-directed navigation separately
-from a bounded retrieval read rather than treating every operation that returns
-text as the same capability. With `RUN_MODEL` now explicit, the exact treatment of
-read-side query embeddings is an open decision: either separately authorize that
-bounded action or define a read-service sponsorship contract. This paragraph is
-not an implicit exemption from execution admission or a grant of unrestricted
-model spending to `GLOBAL_READ` holders.
+`RUN_MODEL` covers all inference: chat, summarisation, embeddings, reranking,
+model-based validation and hook/preparation side calls. The actual executor needs
+that authority. Declared SYSTEM services use SYSTEM's existing authority within
+their operation sandbox; the caller needs permission for the requested operation.
+A READER can use authorized semantic search while its declared SYSTEM service
+performs bounded query embedding/reranking. The reader gains no arbitrary
+RUN_MODEL, agent, processing-pipeline, digest or curation-job authority. Supplied
+inputs and tools cannot expand the service's declared scope. Model-based
+navigation must likewise have an explicit operation contract. Each inference
+path retains admission and dispatch checks; spending allowance, payer and
+accounting remain independent of permission and are not settled by this rule.
 
 ## Scopes and boundaries present today
 

@@ -372,6 +372,31 @@ The actions remain independently checkable even when granted together through
 the bundle. Neither action grants tools, input access, output publication or
 administrative control.
 
+`RUN_MODEL` covers all model inference, including chat/generation, summarisation,
+embeddings, reranking, model-based validation and inference performed by hooks,
+preparation stages or other side calls. The same action applies whether the
+inference is synchronous, queued or background work; there is no separate
+account permission for each inference type.
+
+The account actually performing inference must have RUN_MODEL authority. A
+user/Application directly running a model needs its own applicable authority.
+A declared SYSTEM service uses SYSTEM's existing authority, bounded by that
+operation's inputs, tools, outputs and other retained limits. Its caller needs
+permission for the requested operation, not the service's internal RUN_MODEL
+authority. A READER can therefore request an authorized semantic search whose
+declared SYSTEM service performs query embedding/reranking within the search
+sandbox, without the reader receiving arbitrary model-execution permission.
+Compaction and document preparation follow the same service-authority rule.
+
+The declared service contract must validate the trigger, retain bounded targets,
+enforce inference limits and check the recipient's current result access. Caller
+text cannot turn that operation into arbitrary SYSTEM inference or enlarge its
+read/write reach. This reuses operation admission and capability fences rather
+than adding tool-level RBAC. Executor authority and operation validity are
+checked at dispatch/effect boundaries, including after queueing. Accounting
+attribution, who pays and the configured spending pool remain separate decisions;
+neither READ nor SYSTEM identity supplies an unlimited spending allowance.
+
 Admission requires both the destination's supported workload/action policy and
 the executor's valid action grant. Ordinary project and Personal scopes can
 support execution; granted human/Application authority determines who may use it.
@@ -409,7 +434,7 @@ the caller need not acquire RUN_MODEL or
 SYSTEM authority to upload a document. A denied arbitrary run must not be
 silently rerouted to SYSTEM. Ordinary delegated children remain bounded by their
 parent authority; independently admitted platform services have their own explicit
-purpose, input/output and spending contracts. Exact service sponsorship remains
+purpose, input/output and spending contracts. Exact billing/spending-pool policy remains
 to be specified before implementation.
 
 ### SYSTEM processing validity and creator access changes

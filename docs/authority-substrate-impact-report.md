@@ -66,6 +66,11 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
   checked as grants to the executing account over the resolved scope. SYSTEM can
   execute bounded Global work. GLOBAL_READ grants READ only; Global ADMIN supplies
   READ/WRITE/control without implicit EXECUTION. No reserved-ID allow branch.
+- RUN_MODEL covers all inference, including embeddings, reranking, validators
+  and side calls. Declared SYSTEM services use existing SYSTEM authority inside
+  the operation sandbox; their caller needs the requested operation's permission,
+  not internal RUN_MODEL. Authorized READER search can therefore use bounded
+  service-side inference. Payer/spending-pool policy remains separate.
 - Role/Application-role helpers use that common substrate. Ordinary knowledge
   READ/WRITE checks replace actor-equals-owner authorization. `created_by` records
   original creation provenance with no implicit rights; account home, revision
@@ -206,8 +211,10 @@ has accounting but no equivalent authorization callback in
 
 Scribe, Learner, digest models, schedule readers and harness validators also call
 model dispatch outside a normal conversational turn. A gate only in JobRuntime
-misses them. Decide the model/embedding/counting/sponsorship action contract,
-carry the retained authorization to queued work and recheck before effects. Do
+misses them. Apply the adopted all-inference RUN_MODEL action to the actual
+executor, including SYSTEM services with operation bounds; carry retained
+authorization to queued work and recheck before effects. Non-inference counting
+and spending/sponsorship contracts remain separate classifications. Do
 not treat an attribution record or positive budget as permission.
 
 Concrete side-call owners include
@@ -398,7 +405,7 @@ bill the Global owner by implication or make private processing logs public.
 | Built-in identity lifecycle | Reserve SYSTEM/Global/role/scope UUIDs; specify collisions, bootstrap, disable/delete/recovery, credential refusal and acting-subject rules |
 | Trusted Application default | Identify the authenticated binding and precedence; define generic multi-project service behavior and default resolution timing |
 | Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; current root permissions govern revisions, and the resource MANAGER/DRI may choose GLOBAL_READ without extra ADMIN approval. Reconcile per-revision Shared audiences and atomic policy-version enforcement; lifecycle/draft eligibility remains separate |
-| Meaning of RUN_MODEL | Cover chat, embeddings, reranking, model validators, preparation and side calls; decide whether bounded read-service inference uses requester grants or an explicit service sponsor |
+| Meaning of RUN_MODEL | Settled: all inference uses RUN_MODEL, including embeddings, reranking, validators and side calls. Declared SYSTEM services use their own authority within the operation sandbox; callers need permission for the requested operation. Extend every inference dispatch path; payer/pool policy remains separate |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
 | Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without issuing fresh per-task account grants. Define each workflow's trigger, inputs/outputs, sandbox, sponsor and private logs; billing policy remains unspecified |
@@ -437,7 +444,8 @@ librarian read path needs these decisions:
 2. **Role-to-action compatibility:** which existing grants supply READ, WRITE,
    CREATE and RUN_MODEL; Global ADMIN has control/write without implicit execution.
 3. **Declared SYSTEM service admission:** which authorized upload/read triggers
-   which worker, its scoped grants, inputs/outputs, sponsor/budget and private logs.
+   which worker, its existing authority and operation sandbox, inputs/outputs,
+   sponsor/budget and private logs.
 4. **Effective read policy:** implement the adopted current root-document policy
    across revisions and group/project/general-read audiences; settle supported
    Application/acting read targets, ownerOnly semantics and retained input rules.
@@ -465,7 +473,7 @@ that they already implement the complete substrate.
 | [ProjectRole:4](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) and [membership mutation:208](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java) | Preserve role-facing helpers, transactional grant changes, audit and last-manager checks while introducing the action mapping |
 | [LiveActingAuthorization:28](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/LiveActingAuthorization.java) | Reuse actor/subject proof, Application identity, current consent/membership and narrowing ceilings; extend read targets deliberately instead of dropping the proof model |
 | [JobRuntime retained admission:215](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java) and [JobStore admitted submission:762](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobStore.java) | Keep checks around steps, tools, inference and disclosure, plus receipt-before-start ordering; generalize from supported retained turns to common actions |
-| [Chat dispatch:172](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/LlmDispatcher.java) and [beforeDispatch:64](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/InferenceObserver.java) | Live callback checks already exist for chat dispatch variants, including after queueing. Supply actual grant authority where requests currently default DIRECT; embeddings need equivalent carriage if required by their action policy |
+| [Chat dispatch:172](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/LlmDispatcher.java) and [beforeDispatch:64](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/InferenceObserver.java) | Live callback checks already exist for chat dispatch variants, including after queueing. Supply actual executor authority and operation bounds where requests default DIRECT; embeddings also need equivalent carriage under the adopted all-inference RUN_MODEL rule |
 | [Information lifecycle:148](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationLifecycle.java) and [Summariser.forRevision:310](../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/Summariser.java) | Keep claims, generation fences, lease renewal, pre/post gates, budgets/checkpoints and the separately supplied home/owner/parent fields. Retain SYSTEM identity/authority and enforce the operation sandbox; processing can remain in Global |
 | [Shared transition:830](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java) | Existing audience changes preserve owner/home. Reuse that distinction and receipts for GLOBAL_READ migration without treating it as ownership transfer |
 | [InformationSql:10](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationSql.java), [reference composition:147](../plowshare-server/src/main/resources/db/migration/V147__document_navigation_policy.sql) and [InformationJobs:46](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationJobs.java) | Reuse filtering before paging/counts, retained-input/reference obligations and current disclosure checks; adapt their target vocabulary rather than bypass predicates |
@@ -517,6 +525,11 @@ Focused mocked/fake acceptance coverage should include:
 - Human, Application/service and supported retained-acting reads work through list,
   direct revision, schema attachment, relationships, jobs and export; GLOBAL_READ
   supplies no mutation or execution authority and no private-resource disclosure.
+- Every inference path checks RUN_MODEL for its actual executor, including
+  embeddings, reranking, validators and queued side calls. A READER without
+  RUN_MODEL can request authorized search with bounded SYSTEM-service inference;
+  the same caller cannot invoke arbitrary model work or expand the service's
+  targets/tools. Queue-time checks retain executor authority, sandbox and limits.
 - Removing public authorization or withdrawing a required input stops future
   disclosure, including saved views, delayed work, references and message delivery.
 - Publishing to a group does not grant GLOBAL_READ. Current root-document
