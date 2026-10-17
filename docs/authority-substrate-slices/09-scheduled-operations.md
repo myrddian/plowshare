@@ -77,4 +77,3 @@ Classify actual actions for each existing firing family and preserve existing de
 ## Rollout and rollback
 
 Fence incompatible firings and retain leases/receipts. Never manufacture a replacement firing/request identity or replay uncertain work to obtain new authority.
-

@@ -78,4 +78,3 @@ Make an operation-by-operation coverage and compatibility inventory. If an exist
 ## Rollout and rollback
 
 Define versioned refusal for clients/servers unable to represent the new scope. Do not silently downgrade a mutation, retry uncertain delivery, remap Global to null or impersonate its account.
-

@@ -157,4 +157,3 @@ Unsupported capabilities remain explicitly unsupported.
 This is a planning deliverable. A later implementation request determines which
 slices to execute; no source change, migration execution, credential issuance,
 external notification, production deployment or automatic follow-up is scheduled.
-

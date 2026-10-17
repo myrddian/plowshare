@@ -78,4 +78,3 @@ Inventory the existing message/Relay effect families, classify read versus mutat
 ## Rollout and rollback
 
 Keep original invocation/delivery/consumer identities and causal chains. Incompatible work is fenced and read-only reconciled, not reissued under different authority.
-

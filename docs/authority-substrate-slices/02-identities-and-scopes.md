@@ -74,4 +74,3 @@ Finalize the reserved registry, durable mapping and built-in lifecycle/recovery 
 ## Rollout and rollback
 
 Keep additive records and their mappings. Only a version that enforces their locked lifecycle may access newly admitted records; do not delete identities or let an older binary reinterpret them as users.
-

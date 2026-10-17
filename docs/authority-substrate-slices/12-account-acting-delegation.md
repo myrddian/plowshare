@@ -78,4 +78,3 @@ List supported operations and targets explicitly. Global/project read-source exp
 ## Rollout and rollback
 
 Retain proofs and admitted ceilings; never strip acting context to make an old consumer run. Preserve current authorized receipt reads without replay.
-

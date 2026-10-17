@@ -78,4 +78,3 @@ Specify each existing purpose's trigger, executor, input/output bindings, budget
 ## Rollout and rollback
 
 Retain SYSTEM operation identity, bounds, stage receipts and costs. An older owner-dependent worker cannot resume new operations; reconcile/hold them instead of changing executor or replaying stages.
-

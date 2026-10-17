@@ -77,4 +77,3 @@ Specify each existing independent consumer's retained-authority contract; a cons
 ## Rollout and rollback
 
 Preserve parent/child records, request IDs and budgets. Incompatible continuations stop new effects and use existing authorized receipt/status recovery.
-

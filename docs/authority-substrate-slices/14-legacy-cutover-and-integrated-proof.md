@@ -79,4 +79,3 @@ All predecessor slices need evidence for their affected paths; no final rehearsa
 ## Rollout and rollback
 
 Specify tested reader/writer compatibility and safe refusal before removing adapters. Preserve new grants, receipts, policy/provenance and costs; never restore a binary/state combination that broadens access. This plan does not authorize backup restoration or deployment.
-

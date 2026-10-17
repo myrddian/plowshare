@@ -75,4 +75,3 @@ Write the current-to-target role compatibility table, exact issuing/agent-except
 ## Rollout and rollback
 
 Preserve role/grant history and explicit mappings. Never return to an older authorization path that would ignore narrowing or turn control-only ADMIN into implicit data access.
-

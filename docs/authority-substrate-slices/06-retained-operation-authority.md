@@ -76,4 +76,3 @@ Inventory the supported admission/continuation paths, define dispatch/revocation
 ## Rollout and rollback
 
 Keep retained operation records and ceilings. A consumer unable to interpret the new authority must refuse new effects and allow only authorized receipt reconciliation.
-

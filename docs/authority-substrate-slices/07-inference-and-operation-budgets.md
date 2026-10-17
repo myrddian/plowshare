@@ -81,4 +81,3 @@ authorization.
 ## Rollout and rollback
 
 Preserve spend/attempt records and budget bindings. Stop incompatible new dispatch rather than recharge a creator, switch pools, treat unknown usage as zero or replay inference.
-

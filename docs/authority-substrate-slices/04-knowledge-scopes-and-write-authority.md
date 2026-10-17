@@ -76,4 +76,3 @@ Inventory every affected legacy-owner predicate and classify it as ordinary know
 ## Rollout and rollback
 
 Retain old/new key mappings and provenance. Rollback must preserve authorization parity for admitted records; incompatible old writers must be refused rather than regain owner shortcuts.
-
