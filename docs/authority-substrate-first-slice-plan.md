@@ -3,6 +3,10 @@
 Status: proposed implementation scope, 17 October 2026. Planning only; this
 document does not authorize implementation, new APIs or new user capabilities.
 
+This is **slice 01 of the [14-slice implementation roadmap](authority-substrate-implementation-plan.md)**.
+Its existing scope remains unchanged; each follow-on slice has its own document
+and dependency/verification boundary.
+
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [impact report](authority-substrate-impact-report.md) and
 [role matrices](role-scope-permissions-proposal.md). Source was checked in the
@@ -193,6 +197,6 @@ prove a Global account, SYSTEM execution sandbox or monetary budget ledger exist
 - New omitted Application defaults, expanded acting targets, ACL/group engines,
   SDK/client parity, lifecycle controls or new APIs.
 
-Those remain governed by the consolidated proposal. The next migration slice
-should be selected from the verified dependencies after this foundation is
-reviewed; this plan does not automatically authorize that work.
+Those remain governed by the consolidated proposal. The roadmap documents the
+recommended follow-on slices, beginning with explicit identities/scopes. Their
+plans and dependencies do not automatically authorize implementation.

@@ -15,6 +15,8 @@ The [first implementation slice plan](authority-substrate-first-slice-plan.md)
 recommends the existing project-information READ/WRITE gate as the initial
 production consumer. It is a compatibility foundation, with no schema or Global
 cutover; implementation remains unauthorized.
+The [14-slice roadmap](authority-substrate-implementation-plan.md) gives every
+follow-on slice its own changes, reuse, verification and rollback document.
 
 ## Result and audit boundaries
 
@@ -514,20 +516,20 @@ initial READ/WRITE contract and one existing consumer. The broader steps below
 describe subsequent migration dependencies, not requirements to include them all
 in that first change.
 
-1. Specify the affected typed targets/actions, role compatibility, identity lifecycle
-   and migration records against the settled policy.
-2. Map role/Application-role helpers to common account/scope/action grants and
-   migrate resource READ/WRITE authorization away from actor-equals-owner checks.
-   Keep created_by/home/actor distinct, with mandatory input policy intact. Use
-   standard role profiles for routine setup and ACLs only where finer grants are needed.
-3. Add CREATE/RUN_MODEL checks to every owning admission and model dispatch path,
-   including queued and non-conversational work. Retain existing SYSTEM authority
-   inside an explicit service-operation sandbox with its configured budget before
-   replacing blanket gates and legacy owner-access dependencies.
-4. Introduce Global ownership and general-read policy across Java, SQL, retained
-   consumers and public contracts together; preserve narrow legacy admissions.
-5. Classify database and disk records, review audience expansion, migrate the
-   manual separately, and coordinate server/SDK/client cutover.
+Use the [numbered roadmap](authority-substrate-implementation-plan.md) as the
+implementation decomposition, with 14 slices including the existing first slice:
+
+| Workstream | Slices |
+| --- | --- |
+| Project foundation, identities and scoped RBAC helpers | 01–03 |
+| Knowledge scope/provenance, WRITE and current root-document audience policy | 04–05 |
+| Retained operations, all-inference/budget checks and sandboxed SYSTEM services | 06–08 |
+| Scheduled work, Relay/messages, orchestration/children and account acting | 09–12 |
+| Existing contract/client cutover and integrated legacy migration proof | 13–14 |
+
+Each slice carries its own negative/persistence/recovery evidence. The final
+cutover consolidates that proof; it does not defer earlier security checks or
+authorize new APIs, SDK parity or any deferred capability.
 
 Focused mocked/fake acceptance coverage should include:
 

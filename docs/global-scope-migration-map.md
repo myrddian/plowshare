@@ -251,6 +251,12 @@ the project READ/WRITE permission contract and existing information admission as
 the initial consumer, with mocked verification and no persistence/API changes.
 The wider dependency sequence below does not expand that recommended first scope.
 
+The canonical [14-slice roadmap](authority-substrate-implementation-plan.md)
+contains a separate document for every slice, including the existing first one.
+The six items below summarize broad migration workstreams; they are not slice IDs
+or additional implementation beyond that roadmap. Deferred capabilities remain
+outside the count.
+
 1. **Specify the affected migration contract.** Map the settled role helpers,
    actions and audiences to current scopes/grants; assign the remaining reserved
    identities and define bootstrap, technical grant records and cutover behavior.

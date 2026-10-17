@@ -1128,6 +1128,10 @@ proposes a behavior-compatible project READ/WRITE contract used by the existing
 information gate. It does not introduce the built-in identities or enable Global
 cutover; later rows apply only when their affected behavior is separately scoped.
 
+The [14-slice implementation roadmap](../authority-substrate-implementation-plan.md)
+documents slice 01 and thirteen follow-ons individually. Its dependency order
+does not authorize code changes or add the deferred capabilities below.
+
 | Migration work | Required treatment |
 | --- | --- |
 | Identity and scope mapping | Assign remaining reserved identities; map account knowledge, project and Personal targets explicitly alongside existing keys. Specify bootstrap/recovery without login, accidental Personal provisioning or UUID replacement. |

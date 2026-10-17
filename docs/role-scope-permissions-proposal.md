@@ -47,6 +47,9 @@ The [first implementation slice](authority-substrate-first-slice-plan.md) propos
 only project READ/WRITE helpers at the existing information gate. The other role,
 Global, ACL and runtime rows below remain the target proposal, not features
 delivered or authorized by that slice.
+The [14-slice roadmap](authority-substrate-implementation-plan.md) assigns later
+consumers to separate plans; it does not make the complete matrix implemented or
+require custom ACLs for routine role assignment.
 
 ## Rules for reading the matrices
 
