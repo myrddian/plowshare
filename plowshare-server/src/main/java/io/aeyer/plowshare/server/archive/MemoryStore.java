@@ -5,7 +5,9 @@ import io.aeyer.plowshare.protocol.Invalidation;
 import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.protocol.MemoryState;
 import io.aeyer.plowshare.protocol.Provenance;
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.embedding.*;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -45,7 +47,7 @@ import org.springframework.stereotype.Repository;
  * that could.
  */
 @Repository
-public class MemoryStore {
+public class MemoryStore implements MemoryReadRepository {
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
@@ -56,6 +58,80 @@ public class MemoryStore {
 
   public void protectInformation() {
     informationProtected = true;
+  }
+
+  @Override
+  public Selection pin(MemoryQueries.Request request) {
+    if (!informationProtected)
+      throw new IllegalStateException("Memory privacy protection is required");
+    var rows =
+        jdbc.query(
+            """
+            SELECT a.id, CASE WHEN ?::text IS NULL THEN ?::uuid
+              ELSE (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?) END
+            FROM authority_accounts a
+            WHERE a.legacy_handle=? AND information_global_read_member(?)
+              AND (?::text IS NULL OR information_project_readable(
+                (SELECT id FROM projects WHERE name=?),?))
+            """,
+            (row, n) ->
+                new QuerySources.Pin(
+                    row.getObject(1, java.util.UUID.class), row.getObject(2, java.util.UUID.class)),
+            request.home().project(),
+            BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
+            request.home().project(),
+            request.account(),
+            request.account(),
+            request.home().project(),
+            request.home().project(),
+            request.account());
+    if (rows.size() != 1 || rows.getFirst().scope() == null)
+      throw new CallerFault("Memory query is outside live read authority");
+    var tiers =
+        request.home().isGlobal() || request.runBound()
+            ? List.of(request.home())
+            : List.of(request.home(), Home.global());
+    return new Selection(rows.getFirst(), tiers);
+  }
+
+  @Override
+  public void require(MemoryQueries.Request request, Selection expected) {
+    if (!expected.equals(pin(request)))
+      throw new CallerFault("Memory query identity or scope changed");
+  }
+
+  @Override
+  public void lockRead(MemoryQueries.Request request, Selection expected) {
+    jdbc.queryForObject(
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
+        Boolean.class);
+    jdbc.queryForObject(
+        "SELECT information_lock_scope(?,?) IS NULL",
+        Boolean.class,
+        request.account(),
+        expected.pin().scope());
+    if (expected.tiers().stream().anyMatch(Home::isGlobal) && !request.home().isGlobal())
+      jdbc.queryForObject(
+          "SELECT information_lock_scope(?,?) IS NULL",
+          Boolean.class,
+          request.account(),
+          BuiltInIdentities.GLOBAL_KNOWLEDGE.value());
+    // Source-before-provenance matches memory writes. Serialize short telemetry-bearing reads;
+    // no provider IO occurs while these locks are held. Privacy evidence cannot change mid-read.
+    jdbc.execute("LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE");
+    jdbc.execute(
+        "LOCK TABLE memory_provenance,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
+    require(request, expected);
+  }
+
+  @Override
+  public Memory used(Memory memory, Instant at) {
+    if (jdbc.update(
+            "UPDATE memories SET uses=uses+1,last_used=? WHERE id=? AND state IN ('active','cold')",
+            utc(at),
+            memory.id())
+        != 1) throw new IllegalStateException("Recalled memory changed before telemetry");
+    return Lifecycle.recordUse(memory, at);
   }
 
   private String safe(boolean aliased) {

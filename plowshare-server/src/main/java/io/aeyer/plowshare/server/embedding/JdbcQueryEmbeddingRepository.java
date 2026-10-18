@@ -67,8 +67,7 @@ public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingReposit
     }
   }
 
-  public Source open(
-      InformationContext context, Pin pin, String fingerprint, String invocation, Integer limit) {
+  public Source open(Pin pin, String fingerprint, String invocation, Integer limit) {
     if (limit != null && limit < 0)
       throw new IllegalArgumentException(
           "Semantic search allowance must be nonnegative or unlimited");

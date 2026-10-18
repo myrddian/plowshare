@@ -1,7 +1,9 @@
 # Follow-on slice 16: memory query embedding and recall
 
-Status: scoped plan only, 18 October 2026. No implementation, migration execution,
-API change or deployment is authorized by this document. Source baseline:
+Status: implemented under the subsequent explicit instruction, 18 October 2026.
+The original scope and planning evidence follow; the implementation record below
+identifies activated consumers and verification. No API change or deployment.
+Planning source baseline:
 `dce9ddd37526f9b9a2d14e6a4d0ec6f3d8bf0bbb`.
 
 Depends on implemented slices 04–08, 13 and
@@ -23,7 +25,7 @@ candidate retrieval, curation surveys, re-embedding and background repair are
 separate consumers even when they call the same Archive methods. Do not activate
 them through an unbound convenience overload or merely because recall now works.
 
-## Verified source findings
+## Verified source findings at planning baseline
 
 | Owner | Current behavior and consequence |
 | --- | --- |
@@ -209,7 +211,7 @@ graph change is planned; inspect generator output if implementation touches a
 shared graph rather than editing generated files by hand. Record commands,
 results, actual activated consumers and remaining gaps before declaring completion.
 
-## Exclusions and current verification
+## Exclusions and original planning verification
 
 No memory write/Scribe/promotion rollout, broader survey activation, background
 repair/rebuild, document ask/deliberation, new Global selector, wider acting or
@@ -220,3 +222,83 @@ This planning pass inspected current source and checked documentation links and
 diff whitespace. No Java, PostgreSQL, provider or deployment tests ran for this
 plan. Prior slice 15 results are evidence for the shared foundation, not proof
 that the consumers planned here are already admitted.
+
+## Implementation record
+
+Implemented from `a0e7a4b8e722871a69d9d151ec5df70d34ade50e` under the explicit
+slice 16 implementation request. The supported consumers are existing frame/HTTP
+recall, `memory_recall` and the existing eligible automatic Reminder survey.
+
+- `MemoryQueries.Request` carries the actual recipient, exact Home, read kind,
+  query, limit and trusted live origin. `BoundMemoryQueries` uses existing READ
+  permissions, account/scope incarnation pins and SEMANTIC_QUERY execution through
+  `SemanticEmbedding`. Callers acquire no RUN_MODEL or publication permission.
+- `MemoryReadRepository` owns typed tier admission, privacy/read fences, existing
+  ranking/count queries and telemetry. MemoryStore implements that contract.
+  Production Archive composition requires query admission and privacy protection.
+  Unbound production embedding/recall/survey/precomputed entry points refuse;
+  isolated fixture constructors retain their previous behavior.
+- Standalone permitted reads preserve project-before-Global ordering. Retained
+  tool/reminder reads select only their exact home, excluding implicit Global
+  fallback before ranking, missing-vector counts, output and use increments.
+  Current information-derived privacy filters remain mandatory. Ordinary target
+  envelopes and explicit cross-home reference gates are unchanged.
+- Existing `embedding_queries` source/claim methods are shared through
+  `QuerySources`; information/document queries retain their own access adapter.
+  No new ledger, table, Flyway migration, budget key or public contract is needed.
+  Memory queries explicitly select the existing read-side spending policy:
+  default unlimited, `0` disabled, positive finite. Unlimited retains nullable
+  ceilings and usage. A parent's finite allowance is neither selected nor charged
+  merely because it exists.
+- Request/socket lifetime and retained parent/cancellation fences are independent
+  of accounting enablement. Tool identities use the original conversation/call;
+  Reminder identities use the retained conversation and turn, including its
+  continuation identity. Missing origins cannot create a source. Known repeated
+  attempts refuse without provider replay or another allowance.
+- Both embedding modes reuse existing input/tokenizer/profile validation. Dual
+  recall captures the active prose profile; query permits cannot publish or repair
+  document-prefixed vectors. SYSTEM performs only the admitted query batch.
+- Final result assembly takes the existing navigation/scope fences, then short
+  memory and privacy-evidence table locks. These serialize memory result assembly
+  and briefly delay concurrent mutations; no provider IO occurs while held.
+  Recall updates only `uses` and `last_used`, preserving source/lifecycle fields.
+  Survey increments no uses. Validity is checked again after assembly, so a
+  cancelled transaction rolls back telemetry while retaining the paid claim.
+
+Memory writes, Scribe candidates, Curator surveys, reembed/independent repair,
+ask/deliberation, navigation extensions, broader acting/read targets and deployment
+remain outside this implementation. Existing Reminder eligibility, summary-only
+output, volatile placement and optional failure behavior are preserved.
+
+### Performed verification
+
+- `./gradlew format formatCheck check sdkContractCheck` passed. The default server
+  suite passed 5,860 tests with no failures, errors or skips. Repository client,
+  architecture, formatting and Javadoc checks passed. SDK contracts remain at
+  276 operations and 17 outcome codes; SDK/protocol sources and public graphs
+  were not changed. Native SDK conformance and live provider/deployment tests
+  were not run for this internal consumer change.
+- Focused non-database verification passed `BoundMemoryQueriesTest` (6) and
+  `MemoryQueryEntryPointsTest` (2). Coverage includes default unlimited and
+  explicit finite/disabled policy, retained usage, scope/cancellation checks,
+  no-inference shortcuts, exact input/mode binding, fixture-only unbound helpers,
+  HTTP/frame lifetime binding without accounting, and optional Reminder origin.
+- The selected `-PfullDb --tests` invocation passed 11 PostgreSQL cases in
+  `GlobalPreparationPersistenceTest`. PostgreSQL is necessary for the actual
+  memory/private-input predicates, row mapping, shared immutable query counters,
+  revocation/disclosure locking and transaction rollback. Both encoder modes
+  exercise human and service reads with project/Global/private/missing-vector
+  fixtures. A READ-only parent can recall and receive a reminder without its own
+  RUN_MODEL, and its finite conversation budget remains unspent.
+- Database cases prove invocation replay refusal, account replacement despite
+  restored membership, revocation during provider IO, invalidation ordered after
+  a fenced result, bounded telemetry preserving changed content, and cancellation
+  rolling back use updates while retaining the submitted claim. Existing finite
+  and unlimited query-source concurrency/replay cases also passed. Deterministic
+  provider fixtures assert that inference never runs inside a database transaction.
+- The first root check stopped at Desktop's process-shutdown assertion in
+  `files.test.ts`, introduced by `f78e4f04`. The unchanged Desktop task passed all
+  235 tests on rerun, and the final root check passed. No client fix was included.
+- Changed documentation file links and diff whitespace passed. No full database
+  suite, migration execution against retained deployment data, credentials,
+  external provider calls or deployment was involved.

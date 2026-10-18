@@ -161,6 +161,23 @@ public final class Reminder implements Reminding {
       "The full text of any of them is at " + MemoryTools.READ_NAME + ", by id.";
 
   private final Archive archive;
+  private String account;
+  private Home home;
+  private java.util.function.Supplier<io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin>
+      origin;
+
+  @Override
+  public Reminding forQueries(
+      String account,
+      Home home,
+      java.util.function.Supplier<io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin>
+          origin) {
+    var bound = new Reminder(archive);
+    bound.account = account;
+    bound.home = Objects.requireNonNull(home);
+    bound.origin = Objects.requireNonNull(origin);
+    return bound;
+  }
 
   public Reminder(Archive archive) {
     this.archive = Objects.requireNonNull(archive, "archive");
@@ -191,9 +208,11 @@ public final class Reminder implements Reminding {
     Archive.Survey held;
     try {
       held =
-          owner == null
-              ? archive.survey(utterance, home, MemoryTools.DEFAULT_LIMIT)
-              : archive.survey(utterance, home, MemoryTools.DEFAULT_LIMIT, owner);
+          archive.querying()
+              ? archive.survey(query(utterance, home))
+              : owner == null
+                  ? archive.survey(utterance, home, MemoryTools.DEFAULT_LIMIT)
+                  : archive.survey(utterance, home, MemoryTools.DEFAULT_LIMIT, owner);
     } catch (RuntimeException unreachable) {
       // Wide, and wide on purpose: the caller is a turn that has not made
       // its first model call yet, and there is nothing an archive can do
@@ -262,6 +281,20 @@ public final class Reminder implements Reminding {
         tier(home),
         held.found().stream().map(TocEntry::id).toList());
     return Optional.of(ChatMessage.user(rendered(held.found(), home, definition)));
+  }
+
+  private io.aeyer.plowshare.server.archive.MemoryQueries.Request query(
+      String text, Home requested) {
+    if (origin == null || !requested.equals(home))
+      throw new IllegalStateException("Reminder needs its retained turn");
+    return new io.aeyer.plowshare.server.archive.MemoryQueries.Request(
+        account,
+        home,
+        io.aeyer.plowshare.server.archive.MemoryQueries.Kind.REMINDER,
+        text,
+        MemoryTools.DEFAULT_LIMIT,
+        true,
+        origin.get());
   }
 
   /**

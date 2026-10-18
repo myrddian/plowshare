@@ -57,6 +57,15 @@ import java.util.Optional;
 @FunctionalInterface
 public interface Reminding {
 
+  /** Bind only the existing optional reminder to a trusted retained turn and its live fence. */
+  default Reminding forQueries(
+      String account,
+      Home home,
+      java.util.function.Supplier<io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin>
+          origin) {
+    return this;
+  }
+
   /**
    * A server that reminds nobody of anything.
    *

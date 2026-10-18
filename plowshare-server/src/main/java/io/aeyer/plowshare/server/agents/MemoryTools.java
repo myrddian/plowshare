@@ -152,6 +152,31 @@ public final class MemoryTools {
 
     private final Archive archive;
     private final ToolSchema schema;
+    private String account;
+    private String log;
+    private Runnable validity;
+    private String call;
+
+    /** Runtime-owned origin; the model cannot select an account, sandbox or spending source. */
+    public Recall forRun(String account, String log, Runnable validity) {
+      var bound = new Recall(archive);
+      bound.account = account;
+      bound.log = log;
+      bound.validity = Objects.requireNonNull(validity);
+      return bound;
+    }
+
+    @Override
+    public void calledAs(String id) {
+      call = id;
+    }
+
+    private io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin origin() {
+      if (account == null || log == null || call == null || validity == null)
+        throw new IllegalStateException("Memory recall needs its retained invocation");
+      return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
+          "memory-tool:" + log + ":" + call, validity);
+    }
 
     public Recall(Archive archive) {
       this.archive = Objects.requireNonNull(archive, "archive");
@@ -197,9 +222,19 @@ public final class MemoryTools {
       int limit = Math.min(asked, MAX_LIMIT);
 
       Archive.Recall found =
-          owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-              ? archive.recall(question, home, limit)
-              : archive.recall(question, home, limit, owner);
+          archive.querying()
+              ? archive.recall(
+                  new io.aeyer.plowshare.server.archive.MemoryQueries.Request(
+                      account,
+                      home,
+                      io.aeyer.plowshare.server.archive.MemoryQueries.Kind.RECALL,
+                      question,
+                      limit,
+                      true,
+                      origin()))
+              : owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                  ? archive.recall(question, home, limit)
+                  : archive.recall(question, home, limit, owner);
 
       StringBuilder out = new StringBuilder();
       if (found.memories().isEmpty()) {

@@ -2512,10 +2512,37 @@ public final class JobRuntime {
     // reminder recorded here would come back inside `before()` on the next
     // turn, in the middle of the history rather than at its end -- which is
     // the position this exists not to take.
+    var memoryReminder =
+        reminding.forQueries(
+            owner,
+            home,
+            () -> {
+              if (operation == null
+                  || cancelled.getAsBoolean()
+                  || !operation
+                      .actions()
+                      .contains(io.aeyer.plowshare.server.access.AuthorityAction.READ))
+                throw new IllegalStateException("Reminder turn is unavailable");
+              operations.requireTargets(operation, home, List.of());
+              var spoken = transcript.spokenIn();
+              if (spoken == null)
+                throw new IllegalStateException("Reminder has no retained turn identity");
+              int ordinal =
+                  transcript.continuingTurn() == null
+                      ? spoken.turnOrdinal()
+                      : transcript.continuingTurn();
+              return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
+                  "memory-reminder:" + spoken.conversationId() + ":" + ordinal,
+                  () -> {
+                    if (cancelled.getAsBoolean())
+                      throw new IllegalStateException("Reminder turn ended");
+                    operations.requireTargets(operation, home, List.of());
+                  });
+            });
     Optional<ChatMessage> reminder =
         transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-            ? reminding.whatTheArchiveHolds(definition, home, userPrompt)
-            : reminding.whatTheArchiveHolds(definition, home, userPrompt, transcript.usage());
+            ? memoryReminder.whatTheArchiveHolds(definition, home, userPrompt)
+            : memoryReminder.whatTheArchiveHolds(definition, home, userPrompt, transcript.usage());
     reminder.ifPresent(history::add);
     for (Addition added : pre.additions()) {
       if (added.mode() == Mode.VOLATILE) {
@@ -3915,6 +3942,20 @@ public final class JobRuntime {
         continue;
       }
       if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
+      if (tool instanceof MemoryTools.Recall recall)
+        tool =
+            recall.forRun(
+                callerHandle,
+                transcript.conversationId(),
+                () -> {
+                  if (operation == null
+                      || cancelled.getAsBoolean()
+                      || !operation
+                          .actions()
+                          .contains(io.aeyer.plowshare.server.access.AuthorityAction.READ))
+                    throw new IllegalStateException("Memory query run is unavailable");
+                  operations.requireTargets(operation, toolHome, List.of());
+                });
       if (tool instanceof AskTool shared) {
         // THE FOURTH KIND BUILT PER RUN, and the only one that is
         // registered as a shared tool first. The three above are absent

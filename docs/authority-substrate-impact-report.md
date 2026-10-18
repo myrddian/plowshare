@@ -13,8 +13,9 @@ account. No new endpoints or deployment are included. The bounded slice 14
 completion extends the selector on existing information operations.
 
 This is not a complete cutover. Slice 15 supplies document-query operation
-allowances and shared SYSTEM embedding execution; memory-query and independent
-maintenance bindings remain missing. Production inference without supported
+allowances and shared SYSTEM embedding execution; slice 16 connects selected
+memory recall and automatic Reminder reads. Memory write/Scribe/curation,
+ask/deliberation and independent-maintenance bindings remain deferred. Production inference without supported
 evidence refuses.
 Independent Relay orchestration roots now use retained lineage. Nested/model-triggered
 orchestration starts still refuse: their existing fresh allowances do not retain a parent budget.
@@ -78,7 +79,9 @@ charges document embeddings to the existing processing budget. It preserves
 ordinary Global execution refusal and private logs. Query embedding, independent
 background repair, nested orchestration and transient-child recovery budgets
 remain deferred. Slice 15 subsequently implements the selected document-query
-bindings and shared embedding foundation; other query consumers stay deferred. This is not unrestricted platform-wide activation.
+bindings and shared embedding foundation. Slice 16 adds existing memory recall and
+Reminder reads; the remaining consumers stay deferred. This is not unrestricted
+platform-wide activation.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces
 the listed ordinary catalogue/content/import/relationship owner-mutation checks.
@@ -592,14 +595,12 @@ source and adding the first search consumers with their search-operation budget.
 It adds no embedding role or per-consumer permission system. Selected document
 search consumers now have retained authority and spending policy. Search spending
 defaults to unlimited; explicit disabled/limited policies remain configurable.
-Memory recall, ask/deliberation and independent maintenance activation remain deferred;
-they can reuse the foundation once their own operation bindings are supported.
-The [slice 16 plan](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
-scopes existing recall and automatic Reminder reads next, including typed memory
-admission, tier/sandbox intersection, disclosure and the applicable read-side
-spending policy. It defaults to unlimited; the presence of another finite budget
-does not make that budget applicable. The plan does not activate these consumers
-or include memory write/Scribe/curation/repair work.
+The implemented [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
+connects existing recall and automatic Reminder reads with typed memory admission,
+tier/sandbox intersection, disclosure and the applicable read-side spending policy.
+It defaults to unlimited; another finite budget does not automatically apply.
+Memory write/Scribe/curation, ask/deliberation and independent maintenance remain
+deferred. These consumers need their own operation contracts before activation.
 
 - Document-preparation embedding now carries bounded SYSTEM authorization and
   claims against the retained processing allowance, shared with chat preparation.
@@ -617,6 +618,8 @@ or include memory write/Scribe/curation/repair work.
   `PinnedOperationAuthority.requireTargets`; slice 05's standalone knowledge
   GLOBAL_READ policy does not widen that sandbox. Broader model-tool read targets
   need an explicit supported envelope in later contract/cutover work.
+  Slice 16 also excludes implicit Global fallback from retained recall/reminder
+  ranking, counts and telemetry, while preserving permitted standalone tier reads.
 
 ## Suggested implementation order and future proof
 

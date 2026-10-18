@@ -75,6 +75,42 @@ import org.slf4j.LoggerFactory;
  * only thing a model still does is turn text into a vector.
  */
 public class Archive implements UsageAware {
+  private MemoryQueries queries;
+
+  /** Required by production composition; legacy constructors remain isolated test fixtures. */
+  public void useQueries(MemoryQueries queries) {
+    this.queries = java.util.Objects.requireNonNull(queries);
+  }
+
+  public boolean querying() {
+    return queries != null;
+  }
+
+  public Recall recall(MemoryQueries.Request request) {
+    if (request.kind() != MemoryQueries.Kind.RECALL)
+      throw new IllegalArgumentException("Recall operation required");
+    var result =
+        java.util.Objects.requireNonNull(queries, "Memory query admission required").read(request);
+    return new Recall(result.memories(), result.unsearchable());
+  }
+
+  public Survey survey(MemoryQueries.Request request) {
+    if (request.kind() != MemoryQueries.Kind.REMINDER)
+      throw new IllegalArgumentException("Reminder operation required");
+    var result =
+        java.util.Objects.requireNonNull(queries, "Memory query admission required").read(request);
+    return new Survey(
+        result.memories().stream()
+            .map(memory -> new TocEntry(memory.id(), memory.summary(), memory.scope(), false))
+            .toList(),
+        result.unsearchable());
+  }
+
+  private void requireUnboundFixture() {
+    if (queries != null)
+      throw new IllegalStateException("Memory read needs an admitted query operation");
+  }
+
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
@@ -356,6 +392,7 @@ public class Archive implements UsageAware {
   }
 
   public Recall recall(String question, Home home, int limit, UsageAttribution owner) {
+    requireUnboundFixture();
     if (limit <= 0) {
       // Ahead of the embedding, and that is the whole of what this clause
       // buys: a caller paginating to the end must not pay a model call to
@@ -382,6 +419,7 @@ public class Archive implements UsageAware {
    *     drift away from what it means.
    */
   public Recall recall(Precomputed query, Home home, int limit) {
+    requireUnboundFixture();
     if (limit <= 0) {
       return new Recall(List.of(), 0);
     }
@@ -446,6 +484,7 @@ public class Archive implements UsageAware {
   }
 
   public Precomputed embedding(String text, UsageAttribution owner) {
+    requireUnboundFixture();
     // Embedded before any unit of work opens, and the order is the point:
     // this is a call to a model that can take a connect-plus-read timeout
     // to answer, and inside a transaction it would hold a pooled database
@@ -504,6 +543,7 @@ public class Archive implements UsageAware {
   }
 
   public Survey survey(String question, Home home, int limit, UsageAttribution owner) {
+    requireUnboundFixture();
     if (limit <= 0) {
       return new Survey(List.of(), 0);
     }

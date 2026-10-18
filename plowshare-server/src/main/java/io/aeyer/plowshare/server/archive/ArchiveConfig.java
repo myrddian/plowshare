@@ -44,15 +44,20 @@ public class ArchiveConfig {
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
-      ArchiveProperties props) {
-    return new Archive(
-        store,
-        reasons,
-        embeddings,
-        unitOfWork,
-        props.getMaxBodyChars(),
-        props.getIndexThreshold(),
-        props.getHalfLifeDays());
+      ArchiveProperties props,
+      MemoryQueries queries) {
+    store.protectInformation();
+    var archive =
+        new Archive(
+            store,
+            reasons,
+            embeddings,
+            unitOfWork,
+            props.getMaxBodyChars(),
+            props.getIndexThreshold(),
+            props.getHalfLifeDays());
+    archive.useQueries(queries);
+    return archive;
   }
 
   /**

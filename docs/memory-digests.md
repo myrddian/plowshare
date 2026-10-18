@@ -4,6 +4,23 @@ The digest archive connects long-term summaries to learned memories and original
 conversation spans. The learner still decides whether an experience warrants a
 lesson. A fold enters the digest archive even when the learner extracts nothing.
 
+## Shallow recall and automatic reminders
+
+Existing `memory.recall`/HTTP recall, the `memory_recall` tool and eligible
+automatic Reminder surveys use shared SYSTEM query embedding. The recipient still
+needs current READ. Standalone permitted project reads can include Global;
+retained tools/reminders use only their admitted home. Filtering applies before
+ranking, missing-vector counts and use telemetry. Reminder surveys return index
+lines without incrementing uses and retain their existing optional prompt behavior.
+
+Spending follows the read service's `plowshare.embeddings.search-budget` policy:
+unset/empty/`unlimited` is unlimited by default, `0` disables query inference, and
+a positive integer limits calls per logical read. All admitted calls retain usage
+and claim evidence. A parent conversation budget does not automatically apply.
+This does not activate memory write/Scribe/curation, independent repair or deeper
+navigation/digest inference. See [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
+for the supported consumer boundary.
+
 ## Use
 
 - CLI: `plowshare memory navigate "why did we choose this?" [--project NAME]`.

@@ -78,8 +78,10 @@ Negative, non-integer and out-of-range values fail binding. Unlimited uses the e
 nullable budget ceiling and still retains every admitted call and usage count;
 scope, lifetime, input/profile and result disclosure checks remain enforced.
 Current single-query and batched stance requests each consume one dispatcher
-call. This does not enable memory recall, independent repair or ask/deliberation,
-or change preparation's allowance. Existing lexical-mode document search still
+call. Existing memory recall and eligible automatic Reminder surveys now use the
+same read-side policy through their own typed admission. This does not enable
+memory write/Scribe/curation, independent repair or ask/deliberation, or change
+preparation's allowance. Existing lexical-mode document search still
 embeds its query and therefore also follows the search spending policy.
 
 Each query captures its source and limit once. Completion, failure or cancellation
@@ -89,6 +91,12 @@ public reads remain new operations. Missing authority or failed inference is not
 an empty result, and no alternate model or lexical fallback is attempted.
 Active profile changes during a query refuse the stale read without another
 embedding call. Existing slot activation/coverage requirements still apply.
+
+Memory recall resolves permitted tiers before embedding. Standalone authorized
+project reads may include Global; retained tools/reminders remain within their
+exact home. Privacy, counts and use telemetry share the final read fence; reminder
+surveys do not increment use counts. Query claims cannot publish stored memory
+vectors. See [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md).
 
 All five embedding stores now have unconstrained `code_embedding` and
 `prose_embedding` columns, with space IDs and source revisions. An immutable

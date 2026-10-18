@@ -84,7 +84,8 @@ class GlobalPreparationPersistenceTest {
   void setup() {
     jdbc = new JdbcTemplate(source);
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE documents,information_resources,embedding_queries,projects,admins CASCADE");
+        jdbc,
+        "TRUNCATE documents,information_resources,memories,digests,embedding_queries,projects,admins CASCADE");
     jdbc.update(
         "UPDATE embedding_slots SET active_space_id=NULL,target_space_id=NULL,active_mode=NULL,target_mode=NULL,active_distance=NULL,target_distance=NULL");
     jdbc.update(
@@ -179,6 +180,417 @@ class GlobalPreparationPersistenceTest {
         work,
         new BoundSemanticEmbedding(system),
         () -> limit);
+  }
+
+  Archive memoryQueries(LlmDispatcher dispatcher, boolean dual, Integer limit) {
+    return memoryQueries(dispatcher, dual, limit, new MemoryStore(jdbc));
+  }
+
+  Archive memoryQueries(LlmDispatcher dispatcher, boolean dual, Integer limit, MemoryStore store) {
+    store.protectInformation();
+    var props = new LlmProperties();
+    props.setEmbeddingModel("model");
+    props.setEmbeddingDim(768);
+    props.setEmbeddingMaxInputTokens(2048);
+    var embeddings = new DispatchingEmbeddingClient(dispatcher, props, tokenizer);
+    DualEmbeddings lanes = null;
+    if (dual) {
+      var records =
+          new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+      var space =
+          new JdbcEmbeddingSpaceRepository(jdbc)
+              .register(
+                  new EmbeddingSpace.Definition(
+                      "prose-encoder",
+                      "memory-fixture",
+                      768,
+                      "query: ",
+                      "document: ",
+                      "cls",
+                      EmbeddingSpace.Normalization.NONE,
+                      "none"));
+      records.inputLimit(space, 2048);
+      records.configure(
+          EmbeddingSlot.PROSE,
+          space,
+          new EmbeddingSearchPolicy(
+              EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+      assertTrue(records.activate(records.target(EmbeddingSlot.PROSE).orElseThrow()));
+      var counters = mock(EmbeddingTokenizers.class);
+      when(counters.model(any())).thenReturn(tokenizer);
+      lanes = new DispatchingDualEmbeddings(records, dispatcher::embed, counters);
+    }
+    var selected = lanes;
+    var archive = new Archive(store, new JdbcReasonLog(jdbc), embeddings, work, 1000, 50, 30);
+    archive.useQueries(
+        new BoundMemoryQueries(
+            store,
+            new JdbcQueryEmbeddingRepository(jdbc),
+            work,
+            new BoundSemanticEmbedding(system),
+            embeddings,
+            () -> selected,
+            () -> limit,
+            Clock.systemUTC(),
+            new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))));
+    return archive;
+  }
+
+  void memoryProject() {
+    jdbc.update("INSERT INTO projects(name) VALUES('memory-project')");
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,actor,'VIEWER' FROM projects CROSS JOIN (VALUES('reader'),('app')) callers(actor) WHERE name='memory-project'");
+  }
+
+  void seedMemory(String id, Home home, boolean searchable, boolean dual) {
+    var store = new MemoryStore(jdbc);
+    store.save(
+        new Memory(
+            id,
+            "knowledge " + id,
+            "deployment",
+            new Provenance(Instant.now(), "fixture", "fixture"),
+            MemoryState.ACTIVE,
+            false,
+            0,
+            null,
+            "body " + id,
+            null,
+            null,
+            null,
+            home));
+    if (!searchable) return;
+    float[] vector = new float[768];
+    vector[0] = 1;
+    if (dual) {
+      var records =
+          new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+      assertTrue(
+          records.publish(
+              records.active(EmbeddingSlot.PROSE).orElseThrow(),
+              records
+                  .source(
+                      EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, id))
+                  .orElseThrow(),
+              vector));
+    } else store.saveEmbedding(id, vector);
+  }
+
+  MemoryQueries.Request memoryRead(
+      String actor, boolean runBound, String invocation, MemoryQueries.Kind kind) {
+    return new MemoryQueries.Request(
+        actor,
+        Home.of("memory-project"),
+        kind,
+        "knowledge",
+        5,
+        runBound,
+        new QueryEmbeddings.Origin(invocation, () -> {}));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void memoryRecallUsesSystemAndFiltersPrivacyAndRetainedTiersInBothEncoderModes(boolean dual) {
+    memoryProject();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryQueries(dispatcher, dual, null);
+      seedMemory("mem_project", Home.of("memory-project"), true, dual);
+      seedMemory("mem_global", Home.global(), true, dual);
+      seedMemory("mem_missing", Home.global(), false, dual);
+      seedMemory("mem_private", Home.global(), true, dual);
+      var privateLog =
+          new ConversationStore(jdbc)
+              .log(
+                  Origin.SUBMISSION,
+                  Home.of("memory-project"),
+                  "private",
+                  null,
+                  io.aeyer.plowshare.server.agents.Budget.of(1),
+                  "reader",
+                  null)
+              .id();
+      jdbc.update("INSERT INTO memory_provenance VALUES(?,?,1)", "mem_private", privateLog);
+      jdbc.update(
+          "INSERT INTO information_quarantined_payloads VALUES(?,'private fixture')", privateLog);
+      var handler = new MemoryRecallHandler(archive);
+      for (String actor : List.of("reader", "app")) {
+        var result =
+            handler.handle(
+                Map.of("project", "memory-project", "question", "knowledge"),
+                new Asking(null, actor));
+        assertEquals(Code.OK, result.code());
+        var response =
+            assertInstanceOf(io.aeyer.plowshare.server.api.RecallResponse.class, result.payload());
+        assertEquals(
+            List.of("mem_project", "mem_global"),
+            response.memories().stream().map(Memory::id).toList());
+        assertEquals(1, response.unsearchable());
+      }
+      var confined =
+          archive.recall(memoryRead("reader", true, "memory:run:1", MemoryQueries.Kind.RECALL));
+      assertEquals(List.of("mem_project"), confined.memories().stream().map(Memory::id).toList());
+      assertEquals(0, confined.unsearchable());
+      var survey =
+          archive.survey(
+              memoryRead("reader", true, "memory:reminder:1", MemoryQueries.Kind.REMINDER));
+      assertEquals(1, survey.found().size());
+      assertEquals(
+          3,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_project'", Integer.class));
+      assertEquals(
+          2, jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_global'", Integer.class));
+      assertEquals(
+          0,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_private'", Integer.class));
+      assertEquals(4, embedded.get());
+      assertEquals(
+          4,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE call_limit IS NULL AND spent=1 AND closed",
+              Integer.class));
+    }
+  }
+
+  @Test
+  void memoryToolAndReminderKeepReadOnlyParentAndDoNotBorrowItsFiniteBudget() {
+    memoryProject();
+    var identities = new JdbcIdentityRepository(jdbc);
+    var grants = new JdbcScopedGrantRepository(jdbc);
+    ApplicationPolicy applications =
+        ignored -> new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of());
+    var authority =
+        new LiveScopedAuthority(
+            grants, applications, new ApplicationGrantLineage(grants, applications), identities);
+    var operations =
+        new PinnedOperationAuthority(
+            identities,
+            grants,
+            authority,
+            new JdbcProjectMembers(jdbc),
+            new JdbcOperationRecords(jdbc),
+            new JdbcResourceScopeRepository(jdbc));
+    var home = Home.of("memory-project");
+    var parent = operations.admit("reader", home, Set.of(AuthorityAction.READ));
+    var log =
+        new ConversationStore(jdbc)
+            .log(
+                Origin.SUBMISSION,
+                home,
+                "memory_reader",
+                null,
+                io.aeyer.plowshare.server.agents.Budget.of(1),
+                "reader",
+                null)
+            .id();
+    var alive = new java.util.concurrent.atomic.AtomicBoolean(true);
+    Runnable valid =
+        () -> {
+          if (!alive.get()) throw new IllegalStateException("turn ended");
+          operations.requireTargets(parent, home, List.of());
+        };
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryQueries(dispatcher, false, null);
+      seedMemory("mem_project", home, true, false);
+      var tool =
+          new io.aeyer.plowshare.server.agents.MemoryTools.Recall(archive)
+              .forRun("reader", log, valid);
+      tool.calledAs("call-1");
+      assertTrue(tool.run("{\"question\":\"knowledge\"}", home).contains("mem_project"));
+      assertThrows(RuntimeException.class, () -> tool.run("{\"question\":\"knowledge\"}", home));
+      var reminder =
+          new io.aeyer.plowshare.server.agents.learner.Reminder(archive)
+              .forQueries(
+                  "reader",
+                  home,
+                  () -> new QueryEmbeddings.Origin("memory-reminder:" + log + ":1", valid));
+      var definition =
+          new AgentDefinition(
+              "memory_reader",
+              "read",
+              "model",
+              List.of(io.aeyer.plowshare.server.agents.MemoryTools.RECALL_NAME),
+              List.of(),
+              List.of(),
+              1,
+              1,
+              "read");
+      assertTrue(reminder.whatTheArchiveHolds(definition, home, "knowledge").isPresent());
+      assertTrue(reminder.whatTheArchiveHolds(definition, home, "knowledge").isEmpty());
+      alive.set(false);
+      tool.calledAs("call-2");
+      assertThrows(RuntimeException.class, () -> tool.run("{\"question\":\"knowledge\"}", home));
+      assertEquals(2, embedded.get());
+      assertEquals(
+          1,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_project'", Integer.class));
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT budget_spent FROM conversations WHERE id=?", Integer.class, log));
+      assertFalse(parent.actions().contains(AuthorityAction.RUN_MODEL));
+    }
+  }
+
+  @Test
+  void disabledMemoryReadsAndRevocationDuringProviderIoCannotDiscloseOrChargeAnotherSource() {
+    memoryProject();
+    try (var dispatcher = dispatcher()) {
+      seedMemory("mem_project", Home.of("memory-project"), true, false);
+      var disabled = memoryQueries(dispatcher, false, 0);
+      assertThrows(
+          RuntimeException.class,
+          () -> disabled.recall(memoryRead("reader", true, "disabled", MemoryQueries.Kind.RECALL)));
+      assertEquals(0, embedded.get());
+      var archive = memoryQueries(dispatcher, false, 1);
+      afterEmbedding =
+          () ->
+              jdbc.update(
+                  "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='memory-project')");
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.recall(memoryRead("reader", true, "revoked", MemoryQueries.Kind.RECALL)));
+      assertEquals(1, embedded.get());
+      assertEquals(
+          0,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_project'", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE call_limit=1 AND spent=1 AND closed",
+              Integer.class));
+    }
+  }
+
+  @Test
+  void memoryAccountReplacementCannotReuseAnOldReadEvenWithRestoredMembership() {
+    memoryProject();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryQueries(dispatcher, false, null);
+      seedMemory("mem_project", Home.of("memory-project"), true, false);
+      afterEmbedding =
+          () -> {
+            jdbc.update("DELETE FROM admins WHERE handle='reader'");
+            jdbc.update(
+                "INSERT INTO admins(handle,password_hash,must_change_password,server_admin) VALUES('reader','fixture',false,false)");
+            jdbc.update(
+                "INSERT INTO project_members(project_id,handle,role) SELECT id,'reader','VIEWER' FROM projects WHERE name='memory-project'");
+          };
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              archive.recall(memoryRead("reader", true, "old-account", MemoryQueries.Kind.RECALL)));
+      assertEquals(1, embedded.get());
+      assertEquals(
+          0,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_project'", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+    }
+  }
+
+  @Test
+  void memoryDisclosureOrdersInvalidationAndOnlyUpdatesUseTelemetry() throws Exception {
+    memoryProject();
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var attempted = new CountDownLatch(1);
+    var store = spy(new MemoryStore(jdbc));
+    doAnswer(
+            invocation -> {
+              entered.countDown();
+              assertTrue(release.await(10, TimeUnit.SECONDS));
+              return invocation.callRealMethod();
+            })
+        .when(store)
+        .used(any(), any());
+    try (var dispatcher = dispatcher();
+        var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var archive = memoryQueries(dispatcher, false, null, store);
+      seedMemory("mem_project", Home.of("memory-project"), true, false);
+      var read =
+          workers.submit(
+              () ->
+                  archive.recall(
+                      memoryRead(
+                          "reader", true, "before-invalidation", MemoryQueries.Kind.RECALL)));
+      assertTrue(entered.await(10, TimeUnit.SECONDS));
+      var invalidation =
+          workers.submit(
+              () -> {
+                attempted.countDown();
+                return jdbc.update(
+                    "UPDATE memories SET state='invalidated',invalidated_at=now(),invalidated_by='admin',invalidated_why='fixture',body='new body' WHERE id='mem_project'");
+              });
+      try {
+        assertTrue(attempted.await(10, TimeUnit.SECONDS));
+        assertThrows(TimeoutException.class, () -> invalidation.get(100, TimeUnit.MILLISECONDS));
+      } finally {
+        release.countDown();
+      }
+      assertEquals(1, read.get(10, TimeUnit.SECONDS).memories().size());
+      assertEquals(1, invalidation.get(10, TimeUnit.SECONDS));
+      var later =
+          archive.recall(
+              memoryRead("reader", true, "after-invalidation", MemoryQueries.Kind.RECALL));
+      assertTrue(later.memories().isEmpty());
+      assertEquals(0, later.unsearchable());
+      assertEquals(
+          "new body",
+          jdbc.queryForObject("SELECT body FROM memories WHERE id='mem_project'", String.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_project'", Integer.class));
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  void memoryCancellationDuringAssemblyRollsBackUsesButRetainsSubmittedClaim() {
+    memoryProject();
+    var alive = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var store = spy(new MemoryStore(jdbc));
+    doAnswer(
+            invocation -> {
+              var result = invocation.callRealMethod();
+              alive.set(false);
+              return result;
+            })
+        .when(store)
+        .used(any(), any());
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryQueries(dispatcher, false, null, store);
+      seedMemory("mem_project", Home.of("memory-project"), true, false);
+      var request =
+          new MemoryQueries.Request(
+              "reader",
+              Home.of("memory-project"),
+              MemoryQueries.Kind.RECALL,
+              "knowledge",
+              5,
+              true,
+              new QueryEmbeddings.Origin(
+                  "cancelled-during-read",
+                  () -> {
+                    if (!alive.get()) throw new IllegalStateException("turn ended");
+                  }));
+      assertThrows(IllegalStateException.class, () -> archive.recall(request));
+      assertEquals(1, embedded.get());
+      assertEquals(
+          0,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_project'", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM inference_admissions WHERE submitted AND query_id IS NOT NULL",
+              Integer.class));
+    }
   }
 
   RetrievalService queryReader(LlmDispatcher dispatcher, boolean dual) {
