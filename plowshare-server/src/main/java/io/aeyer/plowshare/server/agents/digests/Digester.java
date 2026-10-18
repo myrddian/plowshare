@@ -14,6 +14,26 @@ import org.slf4j.LoggerFactory;
 
 /** Fold leaves are copied transactionally; this pass builds and repairs their parents. */
 public final class Digester {
+  private io.aeyer.plowshare.server.embedding.EmbeddingRepairs repairs;
+
+  public void useRepairs(io.aeyer.plowshare.server.embedding.EmbeddingRepairs repairs) {
+    this.repairs = java.util.Objects.requireNonNull(repairs);
+  }
+
+  private void repair(DigestStore.Node node, Budget budget, DigestModel.Operation operation) {
+    if (repairs == null) return;
+    try {
+      repairs.repair(
+          io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key.of(
+              io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.DIGESTS, node.id()),
+          budget,
+          operation::require);
+    } catch (RuntimeException failed) {
+      log.warn(
+          "Digest {} retained without a vector: {}", node.id(), failed.getClass().getSimpleName());
+    }
+  }
+
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
@@ -45,12 +65,12 @@ public final class Digester {
   public void folded() {
     if (!passing.compareAndSet(false, true)) return;
     try {
-      int remaining = properties.getDigestBudget();
+      Integer remaining = properties.digestLimit();
       for (Home home : store.homes()) {
-        if (remaining == 0) break;
-        Budget budget = Budget.of(remaining);
+        if (Integer.valueOf(0).equals(remaining)) break;
+        Budget budget = io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(remaining);
         pass(home, budget, () -> false);
-        remaining -= budget.spent();
+        if (remaining != null) remaining -= budget.spent();
       }
     } catch (RuntimeException failed) {
       log.warn(
@@ -63,6 +83,12 @@ public final class Digester {
 
   public String pass(Home home, Budget budget, BooleanSupplier cancelled) {
     try (var operation = model.operation("memory_digester", home, budget)) {
+      if (operation != null)
+        operation.withValidity(
+            () -> {
+              if (cancelled.getAsBoolean())
+                throw new IllegalStateException("Digest pass cancelled");
+            });
       String result = build(home, budget, cancelled, operation);
       if (operation != null) {
         operation.result(result, result.startsWith("Built"));
@@ -79,7 +105,7 @@ public final class Digester {
     int written = 0;
     for (DigestStore.Node stale : store.stale(home)) {
       if (cancelled.getAsBoolean()) return "Cancelled; digest repairs remain queued.";
-      if (budget.remaining() == 0) return "Digest allowance exhausted; stale paths remain marked.";
+      if (budget.exhausted()) return "Digest allowance exhausted; stale paths remain marked.";
       String memory = store.memory(stale.id());
       String summary;
       if (memory != null) {
@@ -90,7 +116,10 @@ public final class Digester {
         if (children.stream().anyMatch(n -> n.staleAt() != null)) continue;
         summary = summarise(home, children, budget, operation);
       }
-      if (store.refresh(home, stale, summary, embed(summary, operation.usage()))) written++;
+      if (store.refresh(home, stale, summary, embed(summary, operation.usage()))) {
+        repair(store.get(home, stale.id()), budget, operation);
+        written++;
+      }
     }
     List<DigestStore.Node> roots = store.roots(home);
     while (roots.size() > 1) {
@@ -104,10 +133,11 @@ public final class Digester {
         }
         if (group.stream().anyMatch(n -> n.staleAt() != null))
           return "Stale paths remain; rebuild before grouping them.";
-        if (budget.remaining() == 0)
-          return "Digest allowance exhausted; completed groups are retained.";
+        if (budget.exhausted()) return "Digest allowance exhausted; completed groups are retained.";
         String summary = summarise(home, group, budget, operation);
-        next.add(store.group(home, group, summary, embed(summary, operation.usage())));
+        var node = store.group(home, group, summary, embed(summary, operation.usage()));
+        repair(node, budget, operation);
+        next.add(node);
         written++;
       }
       roots = next;
@@ -119,6 +149,13 @@ public final class Digester {
 
   private String summarise(
       Home home, List<DigestStore.Node> members, Budget budget, DigestModel.Operation operation) {
+    var pinned = List.copyOf(members);
+    operation.inputs(
+        () -> {
+          for (var member : pinned)
+            if (!member.equals(store.get(home, member.id())))
+              throw new IllegalStateException("Digest summary input changed");
+        });
     return operation.call(
         "memory_digester",
         "Summarise the subjects and distinctions in these archive summaries in at most 300 words. "
@@ -148,7 +185,7 @@ public final class Digester {
 
   private float[] embed(
       String summary, io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
-    if (dualEmbeddings != null)
+    if (dualEmbeddings != null || repairs != null)
       return null; // Both source-fenced vectors are repaired after the digest commits.
     try {
       return EmbeddingClient.owned(

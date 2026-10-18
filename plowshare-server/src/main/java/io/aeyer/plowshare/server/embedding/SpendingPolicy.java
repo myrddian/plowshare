@@ -4,6 +4,14 @@ package io.aeyer.plowshare.server.embedding;
 public final class SpendingPolicy {
   private SpendingPolicy() {}
 
+  public static io.aeyer.plowshare.server.agents.Budget budget(Integer ceiling) {
+    return ceiling == null
+        ? io.aeyer.plowshare.server.agents.Budget.none()
+        : ceiling == 0
+            ? io.aeyer.plowshare.server.agents.Budget.noCalls()
+            : io.aeyer.plowshare.server.agents.Budget.of(ceiling);
+  }
+
   public static Integer limit(String value, String setting) {
     if (value == null || value.isBlank() || value.strip().equalsIgnoreCase("unlimited"))
       return null;

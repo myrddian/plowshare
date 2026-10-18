@@ -9,6 +9,28 @@ import org.springframework.context.annotation.*;
 @Configuration
 @EnableConfigurationProperties(EmbeddingProperties.class)
 public class SemanticEmbeddingConfig {
+  /** Late binding avoids Archive -> repair -> embedding/runtime composition cycles. */
+  @Bean
+  public org.springframework.beans.factory.SmartInitializingSingleton remainingEmbeddingConsumers(
+      io.aeyer.plowshare.server.archive.Archive archive,
+      io.aeyer.plowshare.server.agents.curator.Curator curator,
+      EmbeddingRepairs repairs,
+      OperationEmbeddings operations,
+      EmbeddingProperties properties,
+      io.aeyer.plowshare.server.agents.digests.DigestModel digestModel,
+      io.aeyer.plowshare.server.agents.digests.Digester digester,
+      io.aeyer.plowshare.server.archive.PassageIndex passages,
+      QueryEmbeddings queries,
+      InformationAccess access) {
+    return () -> {
+      archive.useRepairs(repairs, properties::maintenanceAllowance);
+      curator.useEmbeddingOperations(operations);
+      digestModel.useEmbeddingOperations(operations);
+      digester.useRepairs(repairs);
+      passages.useOperations(queries, access, operations, properties::maintenanceAllowance);
+    };
+  }
+
   /** Source/version access is also needed by admitted legacy write-time publication. */
   @Bean
   public EmbeddingWorkRepository embeddingWorkRepository(

@@ -440,12 +440,17 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
         conversations
             .find(run.conductorConversation())
             .orElseThrow(() -> new CallerFault("The conductor conversation is unavailable"));
+    var allowance =
+        row.budget() != null
+            ? row.budget()
+            : conversations
+                .allowanceFor(row.id())
+                .orElseThrow(() -> new CallerFault("Missing retained orchestration allowance"));
     if (!bound.admission().executor().equals(run.callerHandle())
         || !bound.admission().home().equals(homeOf(run))
         || !bound.agent().equals(row.agent())
         || !row.home().equals(homeOf(run))
-        || row.budget() == null
-        || !bound.budget().equals(row.budget().reference()))
+        || !bound.budget().equals(allowance.reference()))
       throw new CallerFault("The orchestration execution envelope changed");
     operations.require(bound.admission());
   }
@@ -875,8 +880,20 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   public OrchestrationRecord start(Start start, java.util.UUID requestId, String payload) {
     access.requireWork(start.home().project(), start.callerHandle());
     access.requireSession(start.callerSession(), start.callerHandle());
-    if (operations != null && (start.parent() != null || start.callerConversation() != null))
-      throw new CallerFault("Child orchestration requires a retained shared-budget contract");
+    if (operations != null && start.parent() != null && start.callerConversation() == null)
+      throw new CallerFault("Nested start needs its retained caller");
+    if (operations != null && start.callerConversation() != null) {
+      var caller =
+          operations
+              .conversation(start.callerConversation())
+              .orElseThrow(() -> new CallerFault("Caller has no retained authority"));
+      operations.require(caller.admission());
+      if (!caller.admission().executor().equals(start.callerHandle())
+          || !caller.admission().home().equals(start.home())
+          || !caller.admission().actions().contains(AuthorityAction.CONVERSATION_CREATE))
+        throw new CallerFault("Caller cannot start this orchestration");
+    }
+
     OrchestrationDefinition definition = start.definition();
     // The person's caps (spec 2026-09-29 §2): the budget the conversation is logged with and
     // the first turn's steps. Every later turn is rebuilt, and capped again, in rebuild.
@@ -902,28 +919,61 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                     if (operations != null) {
                       var actions = new HashSet<>(OperationExecution.actions(conductor));
                       actions.add(AuthorityAction.CONVERSATION_CREATE);
-                      envelope = operations.admit(start.callerHandle(), start.home(), actions);
+                      if (start.callerConversation() == null) {
+                        if (start.parent() != null)
+                          throw new CallerFault("Nested start needs its retained caller");
+                        envelope = operations.admit(start.callerHandle(), start.home(), actions);
+                      } else {
+                        var parent =
+                            operations
+                                .conversation(start.callerConversation())
+                                .orElseThrow(
+                                    () -> new CallerFault("Caller has no retained authority"));
+                        if (!parent.admission().executor().equals(start.callerHandle())
+                            || !parent.admission().home().equals(start.home())
+                            || !parent
+                                .admission()
+                                .actions()
+                                .contains(AuthorityAction.CONVERSATION_CREATE))
+                          throw new CallerFault("Caller cannot start this orchestration");
+                        envelope = operations.derive(parent.admission(), actions);
+                      }
                     }
+                    var shared =
+                        operations != null && start.callerConversation() != null
+                            ? conversations
+                                .allowanceFor(start.callerConversation())
+                                .orElseThrow(
+                                    () ->
+                                        new CallerFault(
+                                            "Caller has no durable conversation allowance"))
+                            : null;
                     ConversationRecord conversation =
-                        conversations.log(
-                            Origin.ORCHESTRATION,
-                            start.home(),
-                            conductor.name(),
-                            null,
-                            conductor.nativeOnly()
-                                ? Budget.noCalls()
-                                : Budget.of(conductor.maxModelCalls()),
-                            // Retain log custody separately; the envelope supplies execution
-                            // authority.
-                            start.callerHandle());
+                        shared != null
+                            ? conversations.logSharedOrchestration(
+                                start.home(),
+                                conductor.name(),
+                                start.callerHandle(),
+                                shared.reference())
+                            : conversations.log(
+                                Origin.ORCHESTRATION,
+                                start.home(),
+                                conductor.name(),
+                                null,
+                                conductor.nativeOnly()
+                                    ? Budget.noCalls()
+                                    : Budget.of(conductor.maxModelCalls()),
+                                // Retain log custody separately; the envelope supplies execution
+                                // authority.
+                                start.callerHandle());
                     if (envelope != null)
                       operations.bind(
                           new OperationAuthority.Conversation(
                               conversation.id(),
                               conductor.name(),
                               envelope,
-                              null,
-                              conversation.id(),
+                              shared == null ? null : start.callerConversation(),
+                              shared == null ? conversation.id() : shared.reference(),
                               OperationExecution.fingerprint(conductor)));
                     OrchestrationRecord inserted =
                         store.insert(
@@ -4455,7 +4505,13 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   }
 
   private Optional<Budget> budgetOf(OrchestrationRecord run) {
-    return conversations.find(run.conductorConversation()).map(ConversationRecord::budget);
+    return conversations
+        .find(run.conductorConversation())
+        .flatMap(
+            row ->
+                row.budget() != null
+                    ? Optional.of(row.budget())
+                    : conversations.allowanceFor(row.id()));
   }
 
   /**

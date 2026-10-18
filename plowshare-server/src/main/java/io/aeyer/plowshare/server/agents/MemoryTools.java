@@ -156,6 +156,7 @@ public final class MemoryTools {
     private String log;
     private Runnable validity;
     private String call;
+    private boolean globalRead;
 
     /** Runtime-owned origin; the model cannot select an account, sandbox or spending source. */
     public Recall forRun(String account, String log, Runnable validity) {
@@ -163,6 +164,12 @@ public final class MemoryTools {
       bound.account = account;
       bound.log = log;
       bound.validity = Objects.requireNonNull(validity);
+      return bound;
+    }
+
+    public Recall forRun(String account, String log, Runnable validity, boolean globalRead) {
+      var bound = forRun(account, log, validity);
+      bound.globalRead = globalRead;
       return bound;
     }
 
@@ -175,7 +182,8 @@ public final class MemoryTools {
       if (account == null || log == null || call == null || validity == null)
         throw new IllegalStateException("Memory recall needs its retained invocation");
       return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
-          "memory-tool:" + log + ":" + call, validity);
+              "memory-tool:" + log + ":" + call, validity)
+          .withGlobalRead(globalRead);
     }
 
     public Recall(Archive archive) {
@@ -345,6 +353,13 @@ public final class MemoryTools {
 
     private final Archive archive;
     private final ToolSchema schema;
+    private java.util.function.Consumer<List<String>> targetFence;
+
+    public Read forRun(java.util.function.Consumer<List<String>> fence) {
+      var bound = new Read(archive);
+      bound.targetFence = Objects.requireNonNull(fence);
+      return bound;
+    }
 
     public Read(Archive archive) {
       this.archive = Objects.requireNonNull(archive, "archive");
@@ -373,7 +388,10 @@ public final class MemoryTools {
 
       List<Memory> memories;
       try {
-        memories = archive.read(ids);
+        memories =
+            targetFence == null
+                ? archive.read(ids)
+                : archive.read(ids, () -> targetFence.accept(ids));
       } catch (ArchiveException unknownId) {
         return missing(ids, unknownId);
       }

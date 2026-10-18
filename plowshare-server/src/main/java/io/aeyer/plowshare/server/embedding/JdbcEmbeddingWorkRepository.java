@@ -65,7 +65,12 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   }
 
   private static String eligible(Store store) {
-    return store == Store.DOCUMENTS ? "s.summary IS NOT NULL" : "true";
+    return switch (store) {
+      case MEMORIES -> "s.state IN ('active','cold') AND information_memory_safe(s.id)";
+      case DIGESTS -> "information_digest_safe(s.id)";
+      case DOCUMENTS -> "s.summary IS NOT NULL";
+      default -> "true";
+    };
   }
 
   // Global maintenance is automatic work. Explicit owner repairs use source()/publish() only
@@ -311,6 +316,38 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
         });
   }
 
+  @Override
+  public boolean publishLegacy(Source expected, float[] vector, Runnable fence) {
+    if (expected.key().store() != Store.MEMORIES && expected.key().store() != Store.DIGESTS)
+      throw new IllegalArgumentException("Unsupported legacy repair store");
+    if (vector == null || vector.length != 768)
+      throw new IllegalArgumentException("Invalid legacy embedding width");
+    double magnitude = 0;
+    for (float value : vector) {
+      if (!Float.isFinite(value)) throw new IllegalArgumentException("Non-finite embedding");
+      magnitude += (double) value * value;
+    }
+    if (magnitude == 0) throw new IllegalArgumentException("Zero embedding");
+    return transactions.inTransaction(
+        () -> {
+          fence.run();
+          if (!source(expected.key()).filter(expected::equals).isPresent()) return false;
+          int written =
+              jdbc.update(
+                  "UPDATE "
+                      + table(expected.key().store())
+                      + " s SET embedding=CAST(? AS vector) WHERE "
+                      + identity(expected.key())
+                      + " AND s.embedding_source_revision=? AND "
+                      + eligible(expected.key().store()),
+                  Arrays.toString(vector),
+                  expected.key().id(),
+                  expected.revision());
+          fence.run();
+          return written == 1;
+        });
+  }
+
   public boolean publish(EmbeddingProfile target, Source expected, float[] vector) {
     float[] checked = EmbeddingQuery.validate(target, vector);
     return transactions.inTransaction(
@@ -442,6 +479,44 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
                   expected.revision(),
                   category));
           return true;
+        });
+  }
+
+  @Override
+  public boolean beginRepair(EmbeddingProfile target, Source expected) {
+    return transactions.inTransaction(
+        () -> {
+          lock(target.slot(), false);
+          if (!target.equals(target(target.slot()).orElse(null))
+              && !target.equals(active(target.slot()).orElse(null))) return false;
+          if (!source(expected.key()).filter(expected::equals).isPresent()) return false;
+          var store = expected.key().store();
+          String failures = table(store) + "_embedding_failures";
+          return jdbc.update(
+                  "INSERT INTO "
+                      + failures
+                      + "("
+                      + keys(store)
+                      + ",slot,space_id,source_revision,category,retry_at) VALUES("
+                      + "?,".repeat(keyArguments(expected.key()).size())
+                      + "?,?,?,'RepairInFlight','infinity'::timestamptz) "
+                      + "ON CONFLICT("
+                      + keys(store)
+                      + ",slot,space_id) DO UPDATE SET "
+                      + "source_revision=excluded.source_revision,category=excluded.category,retry_at=excluded.retry_at "
+                      + "WHERE "
+                      + failures
+                      + ".source_revision<>excluded.source_revision OR ("
+                      + failures
+                      + ".category<>'RepairInFlight' AND "
+                      + failures
+                      + ".retry_at<=CURRENT_TIMESTAMP)",
+                  append(
+                      keyArguments(expected.key()),
+                      target.slot().stored(),
+                      target.space().id(),
+                      expected.revision()))
+              == 1;
         });
   }
 

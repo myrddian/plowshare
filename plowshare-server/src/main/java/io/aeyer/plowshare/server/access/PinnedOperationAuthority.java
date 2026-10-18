@@ -18,6 +18,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
   private final ProjectMembers members;
   private final OperationRecords records;
   private final ResourceScopeRepository resources;
+  private final io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge;
 
   public PinnedOperationAuthority(
       IdentityRepository identities,
@@ -26,6 +27,26 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       ProjectMembers members,
       OperationRecords records,
       ResourceScopeRepository resources) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        io.aeyer.plowshare.server.information.AccountKnowledgePermissions.DENY);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge) {
+    this.knowledge = Objects.requireNonNull(knowledge);
     this.identities = Objects.requireNonNull(identities);
     this.grants = Objects.requireNonNull(grants);
     this.authority = Objects.requireNonNull(authority);
@@ -61,7 +82,15 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     }
     var admission =
         new Admission(
-            UUID.randomUUID(), executor, account.id(), target.id(), home, recipient, support);
+            UUID.randomUUID(),
+            executor,
+            account.id(),
+            target.id(),
+            home,
+            recipient,
+            support,
+            actions.contains(AuthorityAction.READ)
+                && knowledge.allows(executor, BuiltInIdentities.GLOBAL, AuthorityAction.READ));
     require(admission);
     records.retain(admission);
     return admission;
@@ -118,7 +147,8 @@ public final class PinnedOperationAuthority implements OperationAuthority {
             parent.scope(),
             parent.home(),
             parent.source(),
-            parent.support().stream().filter(item -> actions.contains(item.action())).toList());
+            parent.support().stream().filter(item -> actions.contains(item.action())).toList(),
+            parent.globalRead() && actions.contains(AuthorityAction.READ));
     records.retainChild(child, parent.id());
     require(child);
     return child;
@@ -143,12 +173,16 @@ public final class PinnedOperationAuthority implements OperationAuthority {
           || !ancestor.scope().equals(admission.scope())
           || !ancestor.home().equals(admission.home())
           || !ancestor.source().equals(admission.source())
-          || !ancestor.support().containsAll(admission.support())) throw denied();
+          || !ancestor.support().containsAll(admission.support())
+          || admission.globalRead() && !ancestor.globalRead()) throw denied();
       admission = ancestor;
     }
   }
 
   private void requireOwn(Admission admission) {
+    if (admission.globalRead()
+        && !knowledge.allows(admission.executor(), BuiltInIdentities.GLOBAL, AuthorityAction.READ))
+      throw denied();
     var executor = identities.account(admission.executor());
     if (executor.kind() == IdentityRepository.AccountKind.BUILTIN
         || !executor.id().equals(admission.account())) throw denied();
@@ -188,6 +222,24 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     for (var reference : references) {
       var projects = resources.projects(reference);
       if (projects.size() != 1 || !home.project().equals(projects.getFirst())) throw denied();
+    }
+  }
+
+  @Override
+  public void requireReadTargets(
+      Admission admission, Home home, List<AccessRequest.Resource> references) {
+    require(admission);
+    if (!admission.actions().contains(AuthorityAction.READ)
+        || !admission.home().equals(home) && !(home.isGlobal() && admission.globalRead()))
+      throw denied();
+    for (var reference : references) {
+      var projects = resources.projects(reference);
+      if (projects.size() != 1) throw denied();
+      var project = projects.getFirst();
+      if (!admission.home().project().equals(project)
+          && !(project == null
+              && reference.kind() == ResourceScopeRepository.Kind.MEMORY
+              && admission.globalRead())) throw denied();
     }
   }
 

@@ -145,6 +145,20 @@ class PassesTest {
     assertEquals(12, budgetOfTheSubmittedPass().limit());
   }
 
+  @Test
+  void defaultIsUnlimitedAndDisabledPolicyDoesNotDispatch() {
+    props.setCuratorBudget("unlimited");
+    passes.start("payments", null);
+    assertTrue(!budgetOfTheSubmittedPass().capped());
+  }
+
+  @Test
+  void disabledDeploymentPolicyCarriesNoCalls() {
+    props.setCuratorBudget(0);
+    passes.start("payments", null);
+    assertTrue(budgetOfTheSubmittedPass().exhausted());
+  }
+
   // --- what a pass that is not refused does ------------------------------------
 
   @Test

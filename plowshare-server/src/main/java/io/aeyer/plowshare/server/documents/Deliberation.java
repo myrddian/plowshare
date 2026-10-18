@@ -231,6 +231,24 @@ public final class Deliberation implements UsageAware {
   private final CitationStore citations;
   private final JobRuntime runtime;
   private DocumentStages stages = DocumentStages.NONE;
+  private volatile boolean ended;
+  private Runnable sourceFence = () -> {};
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production composition supplies the same bounded model-only lane as preparation. */
+  public void useSystemOperations(io.aeyer.plowshare.server.access.SystemOperations system) {
+    this.system = Objects.requireNonNull(system);
+  }
+
+  private Runnable validity(UUID document, BooleanSupplier cancelled) {
+    return () -> {
+      if (ended || cancelled.getAsBoolean() || Thread.currentThread().isInterrupted())
+        throw new IllegalStateException("Document ask ended");
+      sourceFence.run();
+      if (store.find(document).isEmpty())
+        throw new IllegalStateException("Document ask input is no longer available");
+    };
+  }
 
   public void useStages(DocumentStages stages) {
     this.stages = stages;
@@ -310,6 +328,7 @@ public final class Deliberation implements UsageAware {
     scoped.callerSession = session;
     scoped.inputs = inputs;
     scoped.inputContext = context;
+    scoped.system = system;
     return scoped;
   }
 
@@ -335,6 +354,26 @@ public final class Deliberation implements UsageAware {
   }
 
   public Outcome ask(
+      UUID documentId, String question, Budget budget, BooleanSupplier cancelled, String account) {
+    // One live lifetime per pass, even if callers reuse the configured singleton concurrently.
+    var pass = new Deliberation(store, retrieval, citations, runtime, agents, clock, logs);
+    pass.home = home;
+    pass.owner = owner;
+    pass.callerSession = callerSession;
+    pass.parentLog = parentLog;
+    pass.inputs = inputs;
+    pass.inputContext = inputContext;
+    pass.stages = stages;
+    pass.system = system;
+    pass.usageOwners = usageOwners;
+    try {
+      return pass.perform(documentId, question, budget, cancelled, account);
+    } finally {
+      pass.ended = true;
+    }
+  }
+
+  private Outcome perform(
       UUID documentId, String question, Budget budget, BooleanSupplier cancelled, String account) {
     Objects.requireNonNull(documentId, "documentId");
     Objects.requireNonNull(question, "question");
@@ -382,12 +421,25 @@ public final class Deliberation implements UsageAware {
       return refused;
     }
 
+    if (budget.exhausted())
+      return new Outcome(
+          Ending.CALL_BUDGET,
+          "Document ask inference is disabled or exhausted by its operation policy",
+          0,
+          0,
+          "");
     List<DocumentStore.Passage> passages;
     try {
+      var reader =
+          retrieval.queriesEnabled()
+              ? retrieval.forQueries(
+                  io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.operation(
+                      validity(documentId, cancelled), budget))
+              : retrieval;
       passages =
           account == null
-              ? retrieval.within(documentId, question, TOP_PASSAGES)
-              : retrieval.within(
+              ? reader.within(documentId, question, TOP_PASSAGES)
+              : reader.within(
                   documentId,
                   question,
                   TOP_PASSAGES,
@@ -449,6 +501,12 @@ public final class Deliberation implements UsageAware {
               + " agreement with a proposed answer would mean nothing. Ingesting it again"
               + " derives the hierarchy and summarises it");
     }
+    sourceFence =
+        () -> {
+          if (!store.find(documentId).filter(document::equals).isPresent()
+              || !hierarchy.equals(store.hierarchy(documentId)))
+            throw new IllegalStateException("Document ask inputs changed or were withdrawn");
+        };
     Evidence evidence =
         new Evidence(document, named, passages, hierarchy, store.references(documentId));
 
@@ -938,15 +996,25 @@ public final class Deliberation implements UsageAware {
                   home,
                   owner,
                   stageTask ->
-                      runtime.run(
-                          stage,
-                          stageTask,
-                          home,
-                          budget,
-                          cancelled,
-                          null,
-                          JobWatch.UNWATCHED,
-                          conversation));
+                      (system == null
+                              ? runtime
+                              : runtime.forSystemWork(
+                                  system.admit(
+                                      io.aeyer.plowshare.server.access.SystemOperations.Purpose
+                                          .DOCUMENT_ASK,
+                                      home,
+                                      stage,
+                                      stageTask,
+                                      validity(documentId, cancelled))))
+                          .run(
+                              stage,
+                              stageTask,
+                              home,
+                              budget,
+                              cancelled,
+                              null,
+                              JobWatch.UNWATCHED,
+                              conversation));
     } catch (DocumentStages.Blocked blocked) {
       tally.calls += blocked.modelCalls();
       Outcome stopped =

@@ -400,4 +400,96 @@ class EmbeddingRuntimeRepositoryTest {
             });
     assertEquals(List.of("first"), hits.stream().map(m -> m.id()).toList());
   }
+
+  @Test
+  void legacyRepairPublicationRequiresTheCurrentSourceAndItsLiveOperation() {
+    var key = EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "memory");
+    var old = repository.source(key).orElseThrow();
+    var vector = new float[768];
+    vector[0] = 1;
+    jdbc.update("UPDATE memories SET summary='changed' WHERE id='memory'");
+    assertFalse(repository.publishLegacy(old, vector, () -> {}));
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT embedding::text FROM memories WHERE id='memory'", String.class));
+    var current = repository.source(key).orElseThrow();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            repository.publishLegacy(
+                current,
+                vector,
+                () -> {
+                  throw new IllegalStateException("operation ended");
+                }));
+    assertTrue(repository.publishLegacy(current, vector, () -> {}));
+    assertNotNull(
+        jdbc.queryForObject(
+            "SELECT embedding::text FROM memories WHERE id='memory'", String.class));
+  }
+
+  @Test
+  void automaticRepairRetainsUnknownSubmissionWithoutReplayAcrossReopen() {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var key = EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "memory");
+    var source = repository.source(key).orElseThrow();
+    assertEquals(
+        List.of(
+            new io.aeyer.plowshare.server.access.AccessRequest.Resource(
+                io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.MEMORY, "memory")),
+        new DigestStore(jdbc, work).readTargets(Home.global(), "dig_m_memory"));
+    assertTrue(repository.beginRepair(target, source));
+    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    assertFalse(reopened.beginRepair(target, source));
+    assertFalse(reopened.pending(target, key.store(), 100).contains(source));
+    jdbc.update("UPDATE memories SET summary='new content' WHERE id='memory'");
+    var changed = reopened.source(key).orElseThrow();
+    assertTrue(reopened.beginRepair(target, changed));
+    assertTrue(reopened.publish(target, changed, vector(target)));
+    assertTrue(reopened.ready(target, changed));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM memories_embedding_failures WHERE source_id='memory'",
+            Integer.class));
+  }
+
+  @Test
+  void legacyPassageRepairRetainsExactQueuePositionAndEncoderWithoutReplay() {
+    var passages = new JdbcPassageRepository(jdbc, work);
+    var source = passages.pending("next").getFirst();
+    assertTrue(passages.beginRepair(source, "next"));
+    var reopened = new JdbcPassageRepository(jdbc, work);
+    assertFalse(reopened.beginRepair(source, "next"));
+    assertFalse(reopened.pending("next").contains(source));
+    assertTrue(reopened.pending("replacement").stream().anyMatch(s -> s.id().equals(source.id())));
+    assertTrue(reopened.beginRepair(source, "replacement"));
+  }
+
+  @Test
+  void globalNavigationFiltersConversationTreesBeforeCoverageAndRanking() {
+    var passages = new JdbcPassageRepository(jdbc, work);
+    var scope = new PassageRepository.ReadScope(true, null, true);
+    var before = passages.coverage(Home.global(), "digest", "fixture", scope);
+    jdbc.update(
+        "INSERT INTO conversations(id,created_at,budget_total,budget_spent,origin) VALUES('historical',now(),2,0,'turn')");
+    jdbc.update(
+        "INSERT INTO digests(id,depth,summary) VALUES('historical-digest',0,'private historical text')");
+    jdbc.update(
+        "INSERT INTO digest_spans(digest_id,conversation_id,since_turn,through_turn) VALUES('historical-digest','historical',0,1)");
+    jdbc.update(
+        "UPDATE retrieval_sources SET status='ready',generation='fixture' WHERE source_id='historical-digest'");
+    var vector = new float[768];
+    vector[0] = 1;
+    jdbc.update(
+        "INSERT INTO retrieval_passages(source_type,source_id,position,passage,embedding) VALUES('digest','historical-digest',0,'private historical text',CAST(? AS vector))",
+        Arrays.toString(vector));
+    assertEquals(before, passages.coverage(Home.global(), "digest", "fixture", scope));
+    assertTrue(passages.rank(Home.global(), "digest", vector, 32, "fixture", scope).isEmpty());
+    assertEquals(
+        before.eligible() + 1,
+        passages
+            .coverage(Home.global(), "digest", "fixture", PassageRepository.ReadScope.UNRESTRICTED)
+            .eligible());
+  }
 }

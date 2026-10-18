@@ -178,4 +178,49 @@ class PinnedOperationAuthorityTest {
     when(resources.projects(target)).thenReturn(List.of("other"));
     assertThrows(CallerFault.class, () -> policy.require(admitted));
   }
+
+  @Test
+  void capturedGlobalReadIsReadOnlyInheritedAndLiveWithoutWideningOldAdmissions() {
+    var knowledge = mock(io.aeyer.plowshare.server.information.AccountKnowledgePermissions.class);
+    when(knowledge.allows("alice", BuiltInIdentities.GLOBAL, AuthorityAction.READ))
+        .thenReturn(true);
+    var live =
+        new PinnedOperationAuthority(
+            identities, grants, authority, members, records, resources, knowledge);
+    when(authority.allowsUsing(recipient, target, AuthorityAction.READ, grant)).thenReturn(true);
+    when(authority.allowsUsing(recipient, target, AuthorityAction.WRITE, grant)).thenReturn(true);
+    var root =
+        live.admit("alice", Home.of("one"), Set.of(AuthorityAction.READ, AuthorityAction.WRITE));
+    assertTrue(root.globalRead());
+    var memory = new AccessRequest.Resource(ResourceScopeRepository.Kind.MEMORY, "global-memory");
+    when(resources.projects(memory)).thenReturn(java.util.Collections.singletonList(null));
+    assertDoesNotThrow(() -> live.requireReadTargets(root, Home.of("one"), List.of(memory)));
+    assertThrows(
+        CallerFault.class, () -> live.requireTargets(root, Home.of("one"), List.of(memory)));
+    assertThrows(CallerFault.class, () -> live.requireTargets(root, Home.global(), List.of()));
+    assertThrows(
+        CallerFault.class, () -> live.requireReadTargets(root, Home.of("other"), List.of()));
+    var conversation =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "old-null");
+    when(resources.projects(conversation)).thenReturn(java.util.Collections.singletonList(null));
+    assertThrows(
+        CallerFault.class,
+        () -> live.requireReadTargets(root, Home.of("one"), List.of(conversation)));
+    var old =
+        new OperationAuthority.Admission(
+            root.id(),
+            root.executor(),
+            root.account(),
+            root.scope(),
+            root.home(),
+            root.source(),
+            root.support());
+    assertFalse(old.globalRead());
+    assertThrows(
+        CallerFault.class, () -> live.requireReadTargets(old, Home.of("one"), List.of(memory)));
+    when(knowledge.allows("alice", BuiltInIdentities.GLOBAL, AuthorityAction.READ))
+        .thenReturn(false);
+    assertThrows(
+        CallerFault.class, () -> live.requireReadTargets(root, Home.of("one"), List.of(memory)));
+  }
 }

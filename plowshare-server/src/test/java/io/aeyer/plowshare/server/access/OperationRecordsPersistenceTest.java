@@ -435,4 +435,193 @@ class OperationRecordsPersistenceTest {
     assertTrue(records.conversation(log.id()).isPresent());
     assertThrows(CallerFault.class, () -> policy.require(parent));
   }
+
+  @Test
+  void sharedConductorsRetainCallerAllowanceAcrossRepositoryReopenAndRefuseMissingBinding() {
+    var conversations = new ConversationStore(jdbc);
+    var parent =
+        policy.admit(
+            "alice",
+            Home.of("one"),
+            Set.of(
+                AuthorityAction.READ,
+                AuthorityAction.WRITE,
+                AuthorityAction.RUN_MODEL,
+                AuthorityAction.CONVERSATION_CREATE));
+    var root =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "parent",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(3),
+            "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            root.id(), "parent", parent, null, root.id(), "0".repeat(64)));
+    var transactions =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(source));
+    var child =
+        transactions.execute(
+            status -> {
+              var authority = policy.derive(parent, parent.actions());
+              var log =
+                  conversations.logSharedOrchestration(
+                      Home.of("one"), "conductor", "alice", root.id());
+              policy.bind(
+                  new OperationAuthority.Conversation(
+                      log.id(), "conductor", authority, root.id(), root.id(), "1".repeat(64)));
+              return log;
+            });
+    assertNotNull(child);
+    assertNull(child.budget());
+    assertNull(
+        child.parentId()); // Independent log lifecycle, explicit retained authority ancestry.
+    var childAdmission = policy.conversation(child.id()).orElseThrow().admission();
+    var delegate =
+        transactions.execute(
+            status -> {
+              var authority = policy.derive(childAdmission, childAdmission.actions());
+              var log =
+                  conversations.log(
+                      Origin.DELEGATION, Home.of("one"), "delegate", child.id(), null, "alice");
+              policy.bind(
+                  new OperationAuthority.Conversation(
+                      log.id(), "delegate", authority, child.id(), root.id(), "3".repeat(64)));
+              return log;
+            });
+    assertEquals(root.id(), conversations.allowanceFor(delegate.id()).orElseThrow().reference());
+    var voice =
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.orchestrations.ConductorVoice.class);
+    var seeding = org.mockito.Mockito.mock(io.aeyer.plowshare.server.todos.StageSeeding.class);
+    var request =
+        new io.aeyer.plowshare.server.orchestrations.Orchestrations.Start(
+            start().definition(),
+            Home.of("one"),
+            "Help",
+            null,
+            delegate.id(),
+            "delegate",
+            "alice",
+            null,
+            null,
+            0);
+    var started = engine(voice, seeding).start(request, UUID.randomUUID(), "{}");
+    var retained = records.conversation(started.conductorConversation()).orElseThrow();
+    assertEquals(delegate.id(), retained.parent());
+    assertEquals(root.id(), retained.budget());
+    assertNull(conversations.find(started.conductorConversation()).orElseThrow().budget());
+    var reopened = new ConversationStore(jdbc);
+    var budget = reopened.allowanceFor(child.id()).orElseThrow();
+    assertEquals(root.id(), budget.reference());
+    budget.tryClaim().orElseThrow();
+    assertEquals(1, reopened.allowanceFor(child.id()).orElseThrow().spent());
+    reopened.turnEnded(child.id(), budget);
+    assertNull(reopened.find(child.id()).orElseThrow().budget());
+    assertThrows(
+        org.springframework.transaction.TransactionSystemException.class,
+        () ->
+            transactions.execute(
+                status ->
+                    conversations.logSharedOrchestration(
+                        Home.of("one"), "unbound", "alice", root.id())));
+    var other =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "other",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(100),
+            "alice");
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            transactions.execute(
+                status -> {
+                  var authority = policy.derive(parent, parent.actions());
+                  var log =
+                      conversations.logSharedOrchestration(
+                          Home.of("one"), "wrong", "alice", root.id());
+                  records.bind(
+                      new OperationAuthority.Conversation(
+                          log.id(), "wrong", authority, root.id(), other.id(), "2".repeat(64)));
+                  return log;
+                }));
+    assertEquals(3, reopened.allowanceFor(child.id()).orElseThrow().limit());
+    var parentView = reopened.allowanceFor(root.id()).orElseThrow();
+    var childView = reopened.allowanceFor(child.id()).orElseThrow();
+    assertEquals(parentView.identity(), childView.identity());
+    assertEquals(2, parentView.tryClaim().orElseThrow().ordinal());
+    assertEquals(3, childView.tryClaim().orElseThrow().ordinal());
+    assertTrue(parentView.tryClaim().isEmpty());
+    assertTrue(childView.tryClaim().isEmpty());
+  }
+
+  @Test
+  void globalReadCeilingIsRetainedImmutableAndCannotBeAddedToAnOldParent() {
+    var ordinary = admit();
+    assertFalse(records.find(ordinary.id()).orElseThrow().globalRead());
+    var enabled =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            ordinary.executor(),
+            ordinary.account(),
+            ordinary.scope(),
+            ordinary.home(),
+            ordinary.source(),
+            ordinary.support(),
+            true);
+    records.retain(enabled);
+    assertTrue(new JdbcOperationRecords(jdbc).find(enabled.id()).orElseThrow().globalRead());
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbc.update(
+                "UPDATE operation_admissions SET global_read=true WHERE id=?", ordinary.id()));
+    var widened =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            ordinary.executor(),
+            ordinary.account(),
+            ordinary.scope(),
+            ordinary.home(),
+            ordinary.source(),
+            ordinary.support(),
+            true);
+    assertThrows(DataAccessException.class, () -> records.retainChild(widened, ordinary.id()));
+    assertTrue(records.find(widened.id()).isEmpty());
+  }
+
+  @Test
+  void newRunGlobalTierIsExplicitAndAccountQueryPinsTheGlobalKnowledgeScope() {
+    var memories = new MemoryStore(jdbc);
+    memories.protectInformation();
+    var origin =
+        new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin("retained-call", () -> {});
+    var old =
+        new MemoryQueries.Request(
+            "alice", Home.of("one"), MemoryQueries.Kind.RECALL, "query", 5, true, origin);
+    assertEquals(List.of(Home.of("one")), memories.pin(old).tiers());
+    var current =
+        new MemoryQueries.Request(
+            "alice",
+            Home.of("one"),
+            MemoryQueries.Kind.RECALL,
+            "query",
+            5,
+            true,
+            origin.withGlobalRead(true));
+    assertEquals(List.of(Home.of("one"), Home.global()), memories.pin(current).tiers());
+    var queries = new io.aeyer.plowshare.server.embedding.JdbcQueryEmbeddingRepository(jdbc);
+    var global =
+        new io.aeyer.plowshare.server.information.InformationContext(
+            "alice",
+            io.aeyer.plowshare.server.information.InformationContext.Selection.account(
+                BuiltInIdentities.GLOBAL.value()));
+    assertEquals(BuiltInIdentities.GLOBAL_KNOWLEDGE.value(), queries.pin(global).scope());
+    jdbc.update("UPDATE admins SET enabled=false WHERE handle='alice'");
+    assertThrows(CallerFault.class, () -> memories.pin(current));
+    assertThrows(CallerFault.class, () -> queries.pin(global));
+  }
 }

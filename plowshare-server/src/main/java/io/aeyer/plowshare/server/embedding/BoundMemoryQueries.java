@@ -173,6 +173,7 @@ public final class BoundMemoryQueries implements MemoryQueries {
                   selection.pin().account().toString(),
                   selection.pin().scope().toString(),
                   Boolean.toString(request.runBound()),
+                  selection.tiers().toString(),
                   request.text(),
                   Integer.toString(request.limit())));
     }

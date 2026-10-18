@@ -22,7 +22,8 @@ public class EmbeddingConfig {
       EmbeddingSpaceRepository spaces,
       EmbeddingWorkRepository work,
       LlmDispatcher dispatcher,
-      EmbeddingTokenizers tokenizers) {
+      EmbeddingTokenizers tokenizers,
+      OperationEmbeddings operations) {
     properties.validate();
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
       var model = properties.model(slot);
@@ -45,7 +46,9 @@ public class EmbeddingConfig {
       work.inputLimit(space, model.maxInputTokens());
       work.configure(slot, space, model.policy());
     }
-    return new DispatchingDualEmbeddings(work, dispatcher::embed, tokenizers);
+    var dual = new DispatchingDualEmbeddings(work, dispatcher::embed, tokenizers);
+    dual.useOperations(operations, properties::maintenanceAllowance);
+    return dual;
   }
 
   @Bean

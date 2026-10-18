@@ -118,8 +118,7 @@ public final class Digests {
   public Navigator.Result navigate(String project, String question) {
     String asked = RequestedMemoryQuestion.navigated(question);
     Home home = RequestedHome.in(project);
-    return navigator.navigate(
-        home, asked, Budget.of(properties.getNavigationBudget()), () -> false);
+    return navigator.navigate(home, asked, properties.navigationAllowance(), () -> false);
   }
 
   /**
@@ -140,7 +139,7 @@ public final class Digests {
             AGENT,
             home,
             cancelled -> {
-              Budget budget = Budget.of(properties.getDigestBudget());
+              Budget budget = properties.digestAllowance();
               String text = digester.pass(home, budget, cancelled);
               return new Outcome(
                   ending(text, budget, cancelled.getAsBoolean()),
@@ -166,6 +165,6 @@ public final class Digests {
     if (text.startsWith(BUILT)) {
       return Outcome.Ending.ANSWERED;
     }
-    return budget.remaining() == 0 ? Outcome.Ending.CALL_BUDGET : Outcome.Ending.STUCK;
+    return budget.exhausted() ? Outcome.Ending.CALL_BUDGET : Outcome.Ending.STUCK;
   }
 }

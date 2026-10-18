@@ -73,6 +73,7 @@ plowshare:
     # and a positive integer limits calls. Unlimited still records usage and checks authority.
     # Preparation retains its independent revision allowance.
     search-budget: ${PLOWSHARE_SEMANTIC_SEARCH_BUDGET:unlimited}
+    maintenance-budget: ${PLOWSHARE_EMBEDDING_MAINTENANCE_BUDGET:unlimited}
     enabled: ${PLOWSHARE_DUAL_EMBEDDINGS_ENABLED:false}
     paused: ${PLOWSHARE_EMBEDDING_REPAIR_PAUSED:false}
   llm:
@@ -221,13 +222,9 @@ plowshare:
     # ClasspathDefinitions and DataLayout, respectively. Left in place it would
     # have loaded the same shipped definitions twice, from two sources.
     #
-    # How many model calls one curator pass may spend when the caller of
-    # memory_curate names no number of its own. Task 9's arithmetic, not a round
-    # number: a ruling is TWO model calls, because promotion_judge.md tells the
-    # judge to read the memory before it rules, so 200 settles about a hundred
-    # candidates. Spending it is not a failure — the pass stops, says so, and
-    # keeps every promotion and proposal it already made.
-    curator-budget: ${PLOWSHARE_CURATOR_BUDGET:200}
+    # Whole-pass spending policy: unlimited by default, 0 disabled, positive finite cap.
+    # An explicit maxModelCalls request selects its own finite policy.
+    curator-budget: ${PLOWSHARE_CURATOR_BUDGET:unlimited}
   # What a conversation is opened with when whoever opened it did not say.
   #
   # WHY THIS KEY EXISTS, given that this server spent several slices refusing to
@@ -404,7 +401,7 @@ plowshare:
       # How many days a curator's ruling is kept before a sweep marks it.
       #
       # UNSET, AND THAT IS THE DEFAULT RATHER THAN A GAP. This file ships numbers
-      # when there is arithmetic for them -- curator-budget is 200 because a
+      # when there is arithmetic for them -- a finite curator policy may bound a
       # ruling is two model calls, default-budget is 240 because a turn of the
       # interlocutor measured about twelve. There is no arithmetic for "how many
       # days a curator trace is worth keeping"; it depends on what this operator
@@ -923,7 +920,7 @@ plowshare:
     # this key is the default that body falls back to. What it is for is a stage
     # growing a second call later: a number an operator changes rather than a
     # constant somebody recompiles.
-    ask-budget: ${PLOWSHARE_ASK_BUDGET:5}
+    ask-budget: ${PLOWSHARE_ASK_BUDGET:unlimited}
   # The operator's policy over search providers -- what V33's search_providers
   # registry deliberately does not hold. A row there records what a provider
   # IS (its key, its base URL, the facts it fetched about itself, its health);

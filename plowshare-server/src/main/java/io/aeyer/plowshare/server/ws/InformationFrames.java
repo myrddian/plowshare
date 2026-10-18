@@ -108,6 +108,8 @@ public final class InformationFrames implements FrameArea {
                     "status",
                     "await",
                     "read",
+                    "search",
+                    "rank",
                     "tags",
                     "tags.groups",
                     "exclude",
@@ -413,7 +415,10 @@ public final class InformationFrames implements FrameArea {
         Corpus.theOneToAsk(documents.scoped(access, context), revision);
         String question = required(payload, "question");
         var pass = deliberation.scoped(access, context, asking.sessionId());
-        Budget budget = Budget.of(number(payload, "maxModelCalls", properties.getAskBudget()));
+        Budget budget =
+            payload.containsKey("maxModelCalls")
+                ? Budget.of(number(payload, "maxModelCalls", 1))
+                : properties.askAllowance();
         Home home =
             context.selection().project() == null
                 ? Home.global()

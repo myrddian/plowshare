@@ -65,6 +65,11 @@ public interface EmbeddingWorkRepository {
 
   boolean publish(EmbeddingProfile target, Source expected, float[] vector);
 
+  /** Legacy memory/digest vectors use the same current-source and live-operation fence. */
+  default boolean publishLegacy(Source expected, float[] vector, Runnable fence) {
+    throw new UnsupportedOperationException("Legacy publication fence unavailable");
+  }
+
   /** Document publication rechecks its lease under the same transaction as the vector write. */
   default boolean publish(
       EmbeddingProfile profile, Source expected, float[] vector, Runnable fence) {
@@ -73,6 +78,17 @@ public interface EmbeddingWorkRepository {
 
   /** Store only a bounded failure category, never provider bodies, credentials or source text. */
   void failed(EmbeddingProfile target, Source expected, String category);
+
+  /** Atomic background-attempt fence. Uncertain attempts wait for reconciliation, not a timer. */
+  default boolean beginRepair(EmbeddingProfile target, Source expected) {
+    throw new UnsupportedOperationException("Retained repair attempt unavailable");
+  }
+
+  final class UnreconciledRepair extends io.aeyer.plowshare.server.llm.EmbeddingException {
+    public UnreconciledRepair(Throwable cause) {
+      super("Repair requires reconciliation before retry", cause);
+    }
+  }
 
   /**
    * Complete current-source coverage and all requested indexes are prerequisites for activation.

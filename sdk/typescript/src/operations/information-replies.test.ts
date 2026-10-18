@@ -471,6 +471,17 @@ it('Global account scope is explicit and rejects unsupported information command
   } as const;
   expect(() => decodePayload('information.list', { scope })).not.toThrow();
   expect(() =>
+    decodePayload('information.search', { scope, query: 'manual' }),
+  ).not.toThrow();
+  expect(() =>
+    decodePayload('information.rank', { scope, query: 'manual' }),
+  ).not.toThrow();
+  expect(
+    parseCommand(
+      'information search ' + JSON.stringify({ scope, query: 'manual' }),
+    ).kind,
+  ).not.toBe('usage');
+  expect(() =>
     decodePayload('information.list', {
       scope: { ...scope, includeShared: false },
     }),

@@ -142,4 +142,58 @@ class OperationExecutionTest {
             OperationToolTargets.decode(
                 "conversation_context", "{\"project\":\"one\",\"project\":\"two\"}"));
   }
+
+  @Test
+  void existingBoardContinuationUsesAFreshChargedLeaseFromTheSameRetainedRoot() {
+    var definition =
+        new AgentDefinition(
+            "worker", "worker", "fast", List.of(), List.of(), List.of(), 3, 3, "task");
+    var account = new io.aeyer.plowshare.server.access.AuthorityIds.AccountId(UUID.randomUUID());
+    var admission =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            "alice",
+            account,
+            new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(UUID.randomUUID()),
+            Home.of("one"),
+            io.aeyer.plowshare.server.access.GrantRecipient.account(account),
+            List.of(
+                new OperationAuthority.Support(
+                    io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL,
+                    UUID.randomUUID())));
+    var charges = new java.util.concurrent.atomic.AtomicInteger();
+    var first = Budget.boardLease("topic", 3, charges::incrementAndGet);
+    var bound =
+        new OperationAuthority.Conversation(
+            "child",
+            "worker",
+            admission,
+            "seat",
+            first.reference(),
+            OperationExecution.fingerprint(definition));
+    first.tryClaim().orElseThrow();
+    var continuation = Budget.boardLease("topic", 2, charges::incrementAndGet);
+    assertEquals(first.reference(), continuation.reference());
+    assertDoesNotThrow(
+        () ->
+            OperationExecution.requireBinding(
+                bound, "alice", Home.of("one"), definition, continuation));
+    var second = continuation.tryClaim().orElseThrow();
+    assertEquals(2, charges.get());
+    assertNotEquals(first.tryClaim().orElseThrow().budget(), second.budget());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            OperationExecution.requireBinding(
+                bound,
+                "alice",
+                Home.of("one"),
+                definition,
+                Budget.boardLease("other-topic", 3, () -> {})));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            OperationExecution.requireBinding(
+                bound, "alice", Home.of("one"), definition, Budget.none()));
+  }
 }

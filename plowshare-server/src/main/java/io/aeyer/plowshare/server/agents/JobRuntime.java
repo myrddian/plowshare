@@ -1703,7 +1703,9 @@ public final class JobRuntime {
     for (String project : targets.projects())
       if (!home.project().equals(project))
         throw new CallerFault("Tool target exceeds operation home");
-    operations.requireTargets(operation, home, targets.resources());
+    if (name.equals(MemoryTools.READ_NAME))
+      operations.requireReadTargets(operation, home, targets.resources());
+    else operations.requireTargets(operation, home, targets.resources());
   }
 
   private Outcome execute(
@@ -2532,12 +2534,16 @@ public final class JobRuntime {
                       ? spoken.turnOrdinal()
                       : transcript.continuingTurn();
               return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
-                  "memory-reminder:" + spoken.conversationId() + ":" + ordinal,
-                  () -> {
-                    if (cancelled.getAsBoolean())
-                      throw new IllegalStateException("Reminder turn ended");
-                    operations.requireTargets(operation, home, List.of());
-                  });
+                      "memory-reminder:" + spoken.conversationId() + ":" + ordinal,
+                      () -> {
+                        if (cancelled.getAsBoolean())
+                          throw new IllegalStateException("Reminder turn ended");
+                        operations.requireTargets(operation, home, List.of());
+                        if (operation.globalRead() && !confined)
+                          operations.requireReadTargets(operation, Home.global(), List.of());
+                      })
+                  // Acting/retained-work authority remains an additional exact-home ceiling.
+                  .withGlobalRead(operation.globalRead() && !confined);
             });
     Optional<ChatMessage> reminder =
         transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
@@ -3399,7 +3405,9 @@ public final class JobRuntime {
                 for (String project : targets.projects())
                   if (!home.project().equals(project))
                     throw new CallerFault("Tool target exceeds operation home");
-                operations.requireTargets(operation, home, targets.resources());
+                if (wanted.name().equals(MemoryTools.READ_NAME))
+                  operations.requireReadTargets(operation, home, targets.resources());
+                else operations.requireTargets(operation, home, targets.resources());
               }
               tool.calledAs(wanted.id());
               // Internal grants come from the admitted definition. External provider proxies
@@ -3828,7 +3836,16 @@ public final class JobRuntime {
         continue;
       }
       if (byName.get(name) instanceof MemoryNavigateTool navigation) {
-        offered.put(name, navigation.cancelling(cancelled));
+        offered.put(
+            name,
+            navigation.forRun(
+                cancelled,
+                operation != null && operation.globalRead(),
+                refs -> {
+                  if (operation == null || cancelled.getAsBoolean())
+                    throw new IllegalStateException("Memory navigation run is unavailable");
+                  operations.requireReadTargets(operation, toolHome, refs);
+                }));
         continue;
       }
       if (agents != null && AgentRunTool.NAME.equals(name)) {
@@ -3942,6 +3959,24 @@ public final class JobRuntime {
         continue;
       }
       if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
+      if (tool instanceof MemoryTools.Read read && operation != null)
+        tool =
+            read.forRun(
+                ids -> {
+                  if (cancelled.getAsBoolean())
+                    throw new IllegalStateException("Memory read run ended");
+                  operations.requireReadTargets(
+                      operation,
+                      toolHome,
+                      ids.stream()
+                          .map(
+                              id ->
+                                  new io.aeyer.plowshare.server.access.AccessRequest.Resource(
+                                      io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind
+                                          .MEMORY,
+                                      id))
+                          .toList());
+                });
       if (tool instanceof MemoryTools.Recall recall)
         tool =
             recall.forRun(
@@ -3955,7 +3990,10 @@ public final class JobRuntime {
                           .contains(io.aeyer.plowshare.server.access.AuthorityAction.READ))
                     throw new IllegalStateException("Memory query run is unavailable");
                   operations.requireTargets(operation, toolHome, List.of());
-                });
+                  if (operation.globalRead())
+                    operations.requireReadTargets(operation, Home.global(), List.of());
+                },
+                operation != null && operation.globalRead());
       if (tool instanceof AskTool shared) {
         // THE FOURTH KIND BUILT PER RUN, and the only one that is
         // registered as a shared tool first. The three above are absent

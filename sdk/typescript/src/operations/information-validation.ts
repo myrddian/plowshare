@@ -230,6 +230,8 @@ export function informationPayloadProblem(
         (![
           'upload',
           'list',
+          'search',
+          'rank',
           'status',
           'await',
           'read',

@@ -90,8 +90,9 @@ public enum Origin {
   EVENT("event"),
 
   /**
-   * An orchestration's conductor speaking: its own conversation, owning the orchestration's
-   * allowance, spoken to by the harness at each turn. Spec §5.
+   * An orchestration's conductor speaking in its own lifecycle/log. Independent roots own their
+   * allowance; caller-backed conductors retain the caller's original allowance. The harness speaks
+   * each turn. Spec §5.
    */
   ORCHESTRATION("orchestration"),
 

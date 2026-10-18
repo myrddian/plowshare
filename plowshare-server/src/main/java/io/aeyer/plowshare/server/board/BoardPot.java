@@ -78,7 +78,7 @@ public final class BoardPot {
       }
       leased.merge(root, size, Integer::sum);
       Grant grant = new Grant(root, size);
-      Budget lease = Budget.of(size, () -> charge(grant));
+      Budget lease = Budget.boardLease(root, size, () -> charge(grant));
       granted.put(lease, grant);
       return Optional.of(lease);
     } finally {

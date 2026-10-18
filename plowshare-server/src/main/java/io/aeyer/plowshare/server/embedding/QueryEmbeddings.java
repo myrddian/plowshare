@@ -30,7 +30,25 @@ public interface QueryEmbeddings {
   /**
    * The live owner fence is server supplied; invocation keys exist only for retained tool calls.
    */
-  record Origin(String invocation, Runnable validity) {
+  record Origin(
+      String invocation,
+      Runnable validity,
+      io.aeyer.plowshare.server.agents.Budget budget,
+      boolean globalRead) {
+    public Origin(String invocation, Runnable validity) {
+      this(invocation, validity, null, false);
+    }
+
+    public Origin(
+        String invocation, Runnable validity, io.aeyer.plowshare.server.agents.Budget budget) {
+      this(invocation, validity, budget, false);
+    }
+
+    /** Only a runtime with a retained read envelope may include the Global tier. */
+    public Origin withGlobalRead(boolean include) {
+      return new Origin(invocation, validity, budget, include);
+    }
+
     public Origin {
       Objects.requireNonNull(validity);
       if (invocation != null
@@ -42,6 +60,12 @@ public interface QueryEmbeddings {
 
     public static Origin request(Runnable validity) {
       return new Origin(null, validity);
+    }
+
+    /** Internal ask retrieval spends the owning pass's policy, never a new search allowance. */
+    public static Origin operation(
+        Runnable validity, io.aeyer.plowshare.server.agents.Budget budget) {
+      return new Origin(null, validity, Objects.requireNonNull(budget));
     }
   }
 

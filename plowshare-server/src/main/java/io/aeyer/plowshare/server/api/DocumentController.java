@@ -246,9 +246,8 @@ public class DocumentController {
     UUID document = RequestedDocument.askedAbout(id);
     String question = RequestedCorpusQuestion.asked(request.question());
     Corpus.theOneToAsk(documentReads(), document);
-    int allowance =
-        request.maxModelCalls() == null ? props.getAskBudget() : request.maxModelCalls();
-    Budget budget = Budget.of(allowance);
+    Budget budget =
+        request.maxModelCalls() == null ? props.askAllowance() : Budget.of(request.maxModelCalls());
     Deliberation pass = documentPass();
     var context = informationAccess == null ? null : informationContext();
     String jobId =

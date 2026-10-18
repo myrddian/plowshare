@@ -30,9 +30,6 @@ public final class BoundQueryEmbeddings implements QueryEmbeddings {
   }
 
   public Read open(InformationContext context, Query query, Origin origin) {
-    if (context.selection().scope() == InformationContext.Scope.ACCOUNT)
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
-          "Account query targets are unsupported");
     access.requireSelection(context);
     var pin = records.pin(context);
     Integer limit = allowance.get();
@@ -68,7 +65,7 @@ public final class BoundQueryEmbeddings implements QueryEmbeddings {
             transactions.inTransaction(
                 () -> {
                   require();
-                  if (candidate[0] == null)
+                  if (origin.budget() == null && candidate[0] == null)
                     candidate[0] =
                         records.open(context, pin, fingerprint, origin.invocation(), limit);
                   var captured =
@@ -80,8 +77,19 @@ public final class BoundQueryEmbeddings implements QueryEmbeddings {
                               fingerprint,
                               this::require),
                           task,
-                          () -> records.claim(candidate[0]));
-                  records.bind(candidate[0], captured.binding(), hash);
+                          () ->
+                              origin.budget() == null
+                                  ? records.claim(candidate[0])
+                                  : origin
+                                      .budget()
+                                      .tryClaim()
+                                      .orElseThrow(
+                                          () ->
+                                              new IllegalStateException(
+                                                  "Ask operation allowance exhausted")));
+                  // Parent-owned calls already retain their exact budget/ordinal in the common
+                  // inference ledger. A query source would create a second, unrelated allowance.
+                  if (candidate[0] != null) records.bind(candidate[0], captured.binding(), hash);
                   return captured;
                 });
         source = candidate[0];

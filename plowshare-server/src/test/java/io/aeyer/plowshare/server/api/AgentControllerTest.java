@@ -2139,10 +2139,7 @@ class AgentControllerTest {
 
     ArgumentCaptor<Budget> budget = ArgumentCaptor.forClass(Budget.class);
     verify(curator).pass(eq("payments"), budget.capture(), any());
-    assertEquals(
-        new AgentsProperties().getCuratorBudget(),
-        budget.getValue().limit(),
-        "the default is the property's, read from it rather than repeated here");
+    assertFalse(budget.getValue().capped(), "the default curator policy is unlimited");
   }
 
   /**

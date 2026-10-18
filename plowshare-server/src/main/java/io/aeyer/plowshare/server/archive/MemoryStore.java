@@ -88,7 +88,7 @@ public class MemoryStore implements MemoryReadRepository, MemoryWriteRepository 
     if (rows.size() != 1 || rows.getFirst().scope() == null)
       throw new CallerFault("Memory query is outside live read authority");
     var tiers =
-        request.home().isGlobal() || request.runBound()
+        request.home().isGlobal() || request.runBound() && !request.origin().globalRead()
             ? List.of(request.home())
             : List.of(request.home(), Home.global());
     return new Selection(rows.getFirst(), tiers);

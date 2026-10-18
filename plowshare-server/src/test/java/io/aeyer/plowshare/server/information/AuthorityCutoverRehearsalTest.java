@@ -341,7 +341,8 @@ class AuthorityCutoverRehearsalTest {
             "SELECT jsonb_agg(to_jsonb(r) ORDER BY request_id)::text FROM information_requests r",
             String.class),
         jdbc.queryForObject(
-            "SELECT jsonb_agg(to_jsonb(c) ORDER BY id)::text FROM conversations c", String.class),
+            "SELECT jsonb_agg(to_jsonb(c)-'budget_id' ORDER BY id)::text FROM conversations c",
+            String.class),
         jdbc.queryForObject(
             "SELECT jsonb_agg(to_jsonb(a) ORDER BY attempt_id)::text FROM inference_attempts a",
             String.class),

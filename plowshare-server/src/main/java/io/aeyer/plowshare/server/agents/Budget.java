@@ -94,7 +94,46 @@ public final class Budget {
     }
   }
 
+  private java.util.function.Supplier<java.util.Optional<Claim>> durableClaim;
+  private java.util.function.Consumer<Integer> durableLimit;
+
+  public java.util.UUID identity() {
+    return identity;
+  }
+
+  public boolean durable() {
+    return durableClaim != null;
+  }
+
+  /** Atomic owner claims support existing asynchronous conductors without copying an allowance. */
+  public void bindDurableConversation(
+      String conversation,
+      java.util.function.Supplier<java.util.Optional<Claim>> claim,
+      java.util.function.Consumer<Integer> limit) {
+    claiming.lock();
+    try {
+      if (this.conversation != null && !this.conversation.equals(conversation))
+        throw new IllegalStateException("Budget cannot change its durable owner");
+      this.conversation = Objects.requireNonNull(conversation);
+      if (durableClaim == null) {
+        durableClaim = Objects.requireNonNull(claim);
+        durableLimit = Objects.requireNonNull(limit);
+      }
+    } finally {
+      claiming.unlock();
+    }
+  }
+
+  public static Budget restored(java.util.UUID id, Integer limit, int spent) {
+    if (spent < 0 || limit != null && (limit < 0 || spent > limit))
+      throw new IllegalArgumentException("Invalid retained conversation allowance");
+    var budget = new Budget(limit, null, id);
+    budget.spent.set(spent);
+    return budget;
+  }
+
   private String conversation;
+  private java.util.UUID leaseSource;
   private java.util.function.Consumer<Claim> persistClaim;
 
   /** The repository binds the durable allowance owner once; children retain the same binding. */
@@ -116,7 +155,9 @@ public final class Budget {
   public String reference() {
     claiming.lock();
     try {
-      return conversation == null ? "budget:" + identity : conversation;
+      return conversation == null
+          ? "budget:" + (leaseSource == null ? identity : leaseSource)
+          : conversation;
     } finally {
       claiming.unlock();
     }
@@ -163,6 +204,16 @@ public final class Budget {
       throw new CallerFault(tooSmall(maxModelCalls));
     }
     return new Budget(maxModelCalls);
+  }
+
+  /** Existing board wakes have distinct charged leases from one retained root pot. */
+  public static Budget boardLease(String root, int limit, Runnable charge) {
+    if (root == null || root.isBlank()) throw new IllegalArgumentException("Board root required");
+    var budget = of(limit, charge);
+    budget.leaseSource =
+        java.util.UUID.nameUUIDFromBytes(
+            ("board-pot:" + root).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    return budget;
   }
 
   /** An immutable zero-call allowance for deterministic native execution; never unlimited. */
@@ -306,6 +357,19 @@ public final class Budget {
   public java.util.Optional<Claim> tryClaim() {
     claiming.lock();
     try {
+      if (durableClaim != null) {
+        var claimed = durableClaim.get();
+        if (claimed.isPresent()) {
+          var claim = claimed.get();
+          if (!identity.equals(claim.budget())
+              || !conversation.equals(claim.conversation())
+              || claim.ordinal() <= spent.get())
+            throw new IllegalStateException("Durable claim changed its source or counter");
+          spent.set(claim.ordinal());
+          limit = claim.limit();
+        }
+        return claimed;
+      }
       Integer ceiling = limit;
       if (ceiling != null && spent.get() >= ceiling) return java.util.Optional.empty();
       if (spent.get() == Integer.MAX_VALUE)
@@ -488,6 +552,7 @@ public final class Budget {
     }
     claiming.lock();
     try {
+      if (durableLimit != null) durableLimit.accept(maxModelCalls);
       this.limit = maxModelCalls;
     } finally {
       claiming.unlock();

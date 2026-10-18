@@ -17,6 +17,13 @@ public final class DigestModel implements UsageAware {
     usageOwners = java.util.Objects.requireNonNull(source);
   }
 
+  private io.aeyer.plowshare.server.embedding.OperationEmbeddings embeddingOperations;
+
+  public void useEmbeddingOperations(
+      io.aeyer.plowshare.server.embedding.OperationEmbeddings operations) {
+    embeddingOperations = java.util.Objects.requireNonNull(operations);
+  }
+
   private final LlmDispatcher dispatcher;
   private final Supplier<Compaction> logs;
   private final MemoryProperties properties;
@@ -51,6 +58,37 @@ public final class DigestModel implements UsageAware {
   }
 
   public final class Operation implements AutoCloseable {
+    private Runnable validity = () -> {};
+    private Runnable inputs = () -> {};
+    private boolean closed;
+    private Home home;
+
+    public Operation withValidity(Runnable validity) {
+      this.validity = java.util.Objects.requireNonNull(validity);
+      return this;
+    }
+
+    public void inputs(Runnable inputs) {
+      this.inputs = java.util.Objects.requireNonNull(inputs);
+      require();
+    }
+
+    public void require() {
+      if (closed || Thread.currentThread().isInterrupted())
+        throw new IllegalStateException("Memory operation ended");
+      validity.run();
+      inputs.run();
+    }
+
+    public io.aeyer.plowshare.server.archive.PassageIndex.Query query(
+        io.aeyer.plowshare.server.archive.PassageIndex index, String text) {
+      require();
+      if (embeddingOperations == null) return index.capture(text, usage());
+      try (var permit = embeddingOperations.query(home, text, budget, this::require)) {
+        return index.capture(text, usage(), permit);
+      }
+    }
+
     private final Transcript trace;
     private final Budget budget;
     private final UsageAttribution owner;
@@ -70,6 +108,7 @@ public final class DigestModel implements UsageAware {
 
     public String call(
         String role, String instruction, String evidence, Home home, Budget allowance) {
+      require();
       if (allowance != budget) throw new IllegalArgumentException("Operation owns its budget");
       return DigestModel.this.call(this, role, instruction, evidence, home, allowance);
     }
@@ -80,7 +119,7 @@ public final class DigestModel implements UsageAware {
         ending =
             complete
                 ? Outcome.Ending.ANSWERED
-                : budget.remaining() == 0 ? Outcome.Ending.CALL_BUDGET : Outcome.Ending.STUCK;
+                : budget.exhausted() ? Outcome.Ending.CALL_BUDGET : Outcome.Ending.STUCK;
     }
 
     public void cancelled() {
@@ -89,6 +128,7 @@ public final class DigestModel implements UsageAware {
 
     @Override
     public void close() {
+      closed = true;
       trace.closed(
           "System memory operation",
           new Outcome(ending, result, budget.spent(), budget.spent(), ""));
@@ -117,8 +157,8 @@ public final class DigestModel implements UsageAware {
             List.of(),
             List.of(),
             List.of(),
-            budget.limit(),
-            budget.limit(),
+            1,
+            budget.capped() ? Math.max(1, budget.limit()) : 1,
             "System memory operation",
             false,
             false);
@@ -148,6 +188,7 @@ public final class DigestModel implements UsageAware {
       trace.accounted(owned);
     }
     var operation = new Operation(trace, budget, owned);
+    operation.home = home;
     if (system != null)
       operation.systemWork =
           system.admit(
@@ -155,7 +196,7 @@ public final class DigestModel implements UsageAware {
               home,
               definition,
               String.valueOf(trace.conversationId()),
-              () -> {});
+              operation::require);
     return operation;
   }
 
@@ -185,7 +226,7 @@ public final class DigestModel implements UsageAware {
             List.of(),
             List.of(),
             1,
-            budget.limit(),
+            budget.capped() ? Math.max(1, budget.limit()) : 1,
             instruction,
             false,
             false);
@@ -204,6 +245,7 @@ public final class DigestModel implements UsageAware {
                       .withAttribution(
                           operation.owner.forOperation(operation.owner.operation(), role)),
                   claim));
+      operation.require();
       if ("length".equals(result.finishReason()))
         throw new IllegalStateException("Memory model output was truncated");
       String answer = result.content();

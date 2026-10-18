@@ -12,28 +12,26 @@ creator retaining access; ordinary execution uses its actual bound
 account. No new endpoints or deployment are included. The bounded slice 14
 completion extends the selector on existing information operations.
 
-This is not a complete cutover. Slice 15 supplies document-query operation
-allowances and shared SYSTEM embedding execution; slice 16 connects selected
-memory recall and automatic Reminder reads. Slice 17 connects existing memory
-writes/Scribe and Learner filing with their own explicit operation policy and
-fenced publication. Curation/promotion, ask/deliberation and independent-maintenance
-bindings remain deferred. Production inference without supported evidence refuses.
-Independent Relay orchestration roots now use retained lineage. Nested/model-triggered
-orchestration starts still refuse: their existing fresh allowances do not retain a parent budget.
-Non-conversation child allowances cannot resume under replacement leases. Original
-receipts remain inspectable without replay. Slice 14 implements classification/rehearsal and its bounded
-Global document destination and preparation-budget path. Existing
-contract selectors are now cut over only where the current operation can safely express the target. Acting
-now intersects scoped actions with its retained proof; additional Global sources
-and general project acting execution remain unsupported.
+Slices 15–17 connect preparation, selected search/recall/Reminder and memory
+write/Scribe/Learner consumers to the SYSTEM foundation. Slice 18 connects the
+remaining existing curation, ask, independent maintenance, digest/navigation and
+conversation-search paths. Caller-backed orchestration now retains parent
+admission and the original durable allowance; board wake continuations retain
+their existing pot source. Receipts remain inspectable without replay.
 
-The single current deferred inventory and follow-on plan is
-[slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md). It records
-each deferral's reason, current behavior, impact if unfinished and closure
-requirement. There are 18 documented slices: 01–17 implemented for their supported
-paths and 18 planned. Optional capability decisions are recorded separately from
-existing-consumer migration and deployment acceptance requirements within that
-one document.
+New ordinary admissions explicitly capture read-only Global knowledge eligibility
+alongside their home. Existing retained admissions are not widened. Global
+writes/execution, unrelated project reads and historical NULL-home conversation
+access remain prohibited. Account-scoped semantic search/rank use existing READ
+admission and the shared client command validator. Tool/token/acting restrictions
+remain additional bounds; the acting operation whitelist is unchanged.
+
+The [slice 18 closure record](authority-substrate-slices/18-deferred-scope-and-cutover.md)
+is the current inventory. All 18 slices have source implementations for their
+supported paths. D1–D12 distinguish required compatibility from genuinely new
+extensions: SDK/client preservation was incorrectly labeled optional as a whole.
+Live-data classification/adoption and deployment restart/restore/forward-recovery
+acceptance remain required rollout gates and have not been performed locally.
 
 Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
 ownerOnly reconciliation, live filtering for every revision, and explicit general
@@ -581,34 +579,32 @@ not every log, prompt, receipt or accounting row sharing a scope.
 
 The authoritative current inventory is now the single
 [slice 18 deferred-scope document](authority-substrate-slices/18-deferred-scope-and-cutover.md).
-It consolidates the previous lists with the post-slice-17 source findings:
+It retains the original reasons/impacts and records the slice 18 closures:
 
-- **Existing runtime gaps (R1–R7):** Curator/promotion, ask/deliberation,
-  independent repair/rebuild, digest/navigation embeddings, nested orchestration
-  lineage, non-conversation child recovery and broader retained read targets.
-  Some paths refuse; others retain explicit degraded fallbacks. The document
-  identifies which behavior applies and the impact of leaving each unfinished.
-- **Migration and acceptance requirements (M1–M3):** compatibility readers/writers,
-  reviewed real-data/manual adoption and deployment restart/restore/rollback proof.
-  Synthetic migration and repository reconstruction do not establish live adoption.
-- **Optional capabilities/decisions (D1–D12):** tenant rollout, Application default
-  convenience, search presentation, Global schema authoring, general curation
-  outcomes, wider acting, public SYSTEM continuation, SDK/client parity, new
-  controls, advanced ACL facilities and spending-pool/UI work. Recording these
-  does not require or authorize building them to complete the supported migration.
+- **R1–R7:** existing consumer bindings, shared lineage/source accounting, board
+  wake leases and newly captured read-only Global targets are implemented for
+  supported paths. No general restartable-closure runtime or unsupported acting
+  operation was added.
+- **M1:** legacy locators remain where required by existing stores, governed by
+  explicit identities/current-root policies and retained operation evidence.
+  Physical NULL history is not public Global execution authority. Local migrations
+  preserve historical payloads/accounting and reject missing/replaced authority.
+- **M2–M3:** reviewed live-data/manual adoption and deployment restart/backup/
+  restore/compatible recovery are still required under separate deployment
+  authorization. They are not optional features or proven by synthetic fixtures.
+- **D1–D12:** existing isolation, default routing, search privacy, typed documents,
+  curation, acting, SYSTEM services, clients, lifecycle controls, RBAC/ACL and
+  selected policies are required compatibility. Only new tenant models, broader
+  routing/parity, new publishing/type products, wider acting, new controls/ACL UI
+  and spending-pool/billing products remain extensions.
 
-Slices 15–17 already supply the shared SYSTEM foundation and their selected
-preparation, document-query, recall/Reminder and memory-write/Scribe/Learner-filing
-bindings. Those are no longer blanket missing-budget items. Spending defaults to
-unlimited; disabled/limited policies apply only when selected for that operation.
-A nearby finite budget is not automatically applicable. Independent Relay roots
-already retain lineage. Neither these completions nor GLOBAL_READ enlarge the
-exact-home sandbox of ordinary retained runs.
-
-Earlier scope documents remain historical evidence; use slice 18 for the current
-reason, impact, remaining decision, source owner and verification requirement of
-each deferral. No runtime activation or new capability is included in this
-consolidation.
+Unlimited spending is the default; disabled/limited policies apply when selected
+for the particular operation. Child orchestration cannot duplicate an applicable
+finite source. Curator, ask and navigation policies do not borrow a nearby
+conversation cap. Automatic uncertain repair stays held; restart does not replay
+provider effects. Earlier source snapshots in this report are historical; the
+slice 18 closure record supersedes their statements that those consumers remain
+unbound. This implementation does not establish live deployment acceptance.
 
 ## Suggested implementation order and future proof
 

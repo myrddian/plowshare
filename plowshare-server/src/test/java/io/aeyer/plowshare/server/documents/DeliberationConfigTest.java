@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.documents;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,7 +37,10 @@ class DeliberationConfigTest {
           .withBean(RetrievalService.class, () -> Mockito.mock(RetrievalService.class))
           .withBean(CitationStore.class, () -> Mockito.mock(CitationStore.class))
           .withBean(JobRuntime.class, () -> Mockito.mock(JobRuntime.class))
-          .withBean(Compaction.class, () -> Mockito.mock(Compaction.class));
+          .withBean(Compaction.class, () -> Mockito.mock(Compaction.class))
+          .withBean(
+              io.aeyer.plowshare.server.access.SystemOperations.class,
+              () -> Mockito.mock(io.aeyer.plowshare.server.access.SystemOperations.class));
 
   @Test
   void the_shipped_allowance_starts() {
@@ -48,38 +53,28 @@ class DeliberationConfigTest {
             });
   }
 
-  /**
-   * <b>An allowance below one pass's worst case is refused at boot, naming the key.</b>
-   *
-   * <p>Three is the tempting number and it is the wrong one: a pass is three stages <em>plus</em>
-   * one retry of a critic whose JSON did not parse, and that retry is the ordinary failure it
-   * exists for rather than an exceptional one. An allowance of three would produce a deliberation
-   * that reports {@code CALL_BUDGET} the first time a small model answers a JSON question in prose
-   * — which is a configuration mistake presenting as an intermittent one.
-   */
+  /** Small finite policies are valid choices, even when a full pass needs more. */
   @Test
-  void an_allowance_that_cannot_cover_a_pass_is_refused_and_names_the_key() {
+  void explicitSmallPolicyIsValidAndEnforcedByTheOwningOperation() {
     runner
         .withPropertyValues("plowshare.documents.ask-budget=4")
         .run(
             context -> {
-              assertNotNull(context.getStartupFailure());
-              String said =
-                  context.getStartupFailure().getMessage() + causes(context.getStartupFailure());
-              assertTrue(said.contains("plowshare.documents.ask-budget"), said);
-              assertTrue(said.contains("retry"), said);
+              assertNull(context.getStartupFailure());
+              assertEquals(4, context.getBean(DocumentsProperties.class).askAllowance().limit());
             });
   }
 
-  /**
-   * Zero is the same refusal and not a different one: a pass that may make no model call is not a
-   * smaller pass.
-   */
+  /** Zero disables spending without preventing server startup. */
   @Test
-  void an_allowance_of_none_is_refused_too() {
+  void zeroPolicyStartsWithSpendingDisabled() {
     runner
         .withPropertyValues("plowshare.documents.ask-budget=0")
-        .run(context -> assertNotNull(context.getStartupFailure()));
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertTrue(context.getBean(DocumentsProperties.class).askAllowance().exhausted());
+            });
   }
 
   /**
@@ -99,6 +94,18 @@ class DeliberationConfigTest {
                   "this context deliberately has no registry");
               assertNotNull(context.getBean(Deliberation.class));
             });
+  }
+
+  @Test
+  void defaultIsUnlimitedAndInvalidPolicyRefusesBoot() {
+    runner.run(
+        context -> {
+          assertNull(context.getStartupFailure());
+          assertFalse(context.getBean(DocumentsProperties.class).askAllowance().capped());
+        });
+    runner
+        .withPropertyValues("plowshare.documents.ask-budget=-1")
+        .run(context -> assertNotNull(context.getStartupFailure()));
   }
 
   private static String causes(Throwable failure) {

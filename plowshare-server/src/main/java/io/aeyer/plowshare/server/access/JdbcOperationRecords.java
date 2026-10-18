@@ -24,13 +24,14 @@ public final class JdbcOperationRecords implements OperationRecords {
     transactions.executeWithoutResult(
         status -> {
           jdbc.update(
-              "INSERT INTO operation_admissions(id,executor,executor_handle,scope,project_name,source_account) VALUES(?,?,?,?,?,?)",
+              "INSERT INTO operation_admissions(id,executor,executor_handle,scope,project_name,source_account,global_read) VALUES(?,?,?,?,?,?,?)",
               admission.id(),
               admission.account().value(),
               admission.executor(),
               admission.scope().value(),
               admission.home().project(),
-              admission.source().account().value());
+              admission.source().account().value(),
+              admission.globalRead());
           for (var item : admission.support())
             jdbc.update(
                 "INSERT INTO operation_admission_support(operation,action,grant_id) VALUES(?,?,?)",
@@ -88,7 +89,8 @@ public final class JdbcOperationRecords implements OperationRecords {
                             new OperationAuthority.Support(
                                 AuthorityAction.valueOf(support.getString(1)),
                                 support.getObject(2, UUID.class)),
-                        id)),
+                        id),
+                    rs.getBoolean("global_read")),
             id)
         .stream()
         .findFirst();

@@ -39,6 +39,53 @@ class BoundQueryEmbeddingsTest {
   }
 
   @Test
+  void askRetrievalChargesOnlyItsOwningPolicyAndDoesNotMintAQuerySource() {
+    var budget = Budget.of(2);
+    var authorization = mock(CallAuthorization.class);
+    when(records.pin(context)).thenReturn(pin);
+    when(foundation.authorize(any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              Supplier<Budget.Claim> claim = call.getArgument(2);
+              assertEquals(1, claim.get().ordinal());
+              return authorization;
+            });
+    var service = new BoundQueryEmbeddings(records, access, UnitOfWork.NONE, foundation, () -> 0);
+    try (var read =
+        service.open(
+            context,
+            new QueryEmbeddings.Query(QueryEmbeddings.Kind.RETRIEVE, "question", null, 5, null),
+            QueryEmbeddings.Origin.operation(() -> {}, budget))) {
+      read.authorize(EmbeddingRequest.of("model", List.of("question")));
+      assertEquals(1, budget.spent());
+      assertEquals("answer", read.disclose(() -> "answer"));
+    }
+    verify(records, never()).open(any(), any(), anyString(), any(), any());
+    verify(records, never()).claim(any());
+    verify(records, never()).close(any());
+  }
+
+  @Test
+  void existingGlobalAccountSelectorUsesTheNormalReadGate() {
+    var global =
+        new InformationContext(
+            "reader", InformationContext.Selection.account(BuiltInIdentities.GLOBAL.value()));
+    when(records.pin(global))
+        .thenReturn(
+            new QuerySources.Pin(UUID.randomUUID(), BuiltInIdentities.GLOBAL_KNOWLEDGE.value()));
+    try (var read =
+        new BoundQueryEmbeddings(records, access, UnitOfWork.NONE, foundation, () -> null)
+            .open(
+                global,
+                new QueryEmbeddings.Query(QueryEmbeddings.Kind.SEARCH, "question", null, 5, null),
+                QueryEmbeddings.Origin.request(() -> {}))) {
+      read.disclose(() -> "result");
+    }
+    verify(access, atLeastOnce()).requireSelection(global);
+    verify(records).lockRead(eq(global), any(), isNull());
+  }
+
+  @Test
   void emptyReadDoesNotAcquireAnAllowanceAndClosedCapabilityCannotBeReused() {
     var read =
         service(0)

@@ -132,6 +132,39 @@ class BoundSystemOperationsTest {
   }
 
   @Test
+  void existingAskAndRepairConsumersRetainPurposeCarriageAndQueuedValidity() {
+    var alive = new AtomicBoolean(true);
+    Runnable validity =
+        () -> {
+          if (!alive.get()) throw new IllegalStateException("ended");
+        };
+    var ask =
+        service.admit(
+            SystemOperations.Purpose.DOCUMENT_ASK, Home.global(), definition, "document", validity);
+    var budget = Budget.none();
+    var chat = ChatRequest.of("model", null, "document evidence");
+    var captured = ask.claimed(chat, budget.tryClaim().orElseThrow());
+    captured.requireRequest(chat);
+    assertThrows(
+        CallerFault.class,
+        () -> captured.requireRequest(ChatRequest.of("model", null, "substitution")));
+    var repair =
+        service.admit(
+            SystemOperations.Purpose.EMBEDDING_REPAIR,
+            Home.global(),
+            definition,
+            "revision",
+            validity);
+    var embed = EmbeddingRequest.of("model", List.of("exact source"));
+    repair.claimed(embed, budget.tryClaim().orElseThrow()).requireRequest(embed);
+    assertThrows(CallerFault.class, () -> repair.claimed(chat, budget.tryClaim().orElseThrow()));
+    alive.set(false);
+    assertThrows(IllegalStateException.class, captured::require);
+    assertThrows(IllegalStateException.class, repair::require);
+    verify(identities, never()).account(any());
+  }
+
+  @Test
   void systemRuntimePreservesWorkerHooksWithoutBorrowingCreatorAuthority() {
     var work =
         service.admit(

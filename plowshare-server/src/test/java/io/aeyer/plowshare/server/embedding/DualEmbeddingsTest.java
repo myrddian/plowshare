@@ -297,4 +297,32 @@ class DualEmbeddingsTest {
             null);
     assertEquals(4096, supported.definition().dimensions());
   }
+
+  @Test
+  void activatedMaintenanceDoesNotAutomaticallyRepeatAnUncertainSubmission() {
+    var profile = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
+    var source =
+        new EmbeddingWorkRepository.Source(
+            EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "m"),
+            1,
+            "summary",
+            null);
+    when(work.target(EmbeddingSlot.PROSE)).thenReturn(Optional.of(profile));
+    when(work.target(EmbeddingSlot.CODE))
+        .thenReturn(
+            Optional.of(profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE)));
+    when(work.pending(eq(profile), eq(source.key().store()), anyInt())).thenReturn(List.of(source));
+    when(work.inputLimit(profile.space())).thenReturn(100);
+    when(work.beginRepair(profile, source)).thenReturn(true, false);
+    var operations = mock(OperationEmbeddings.class);
+    var permit = mock(OperationEmbeddings.Publication.class);
+    when(permit.authorize(any(EmbeddingPermit.Task.class))).thenReturn(CallAuthorization.DIRECT);
+    when(operations.publication(any(), anyList(), any(), any())).thenReturn(permit);
+    when(dispatcher.embed(any())).thenThrow(new EmbeddingException("unknown provider outcome"));
+    dual.useOperations(operations, io.aeyer.plowshare.server.agents.Budget::none);
+    assertEquals(0, dual.tick());
+    assertEquals(0, dual.tick());
+    verify(dispatcher, times(1)).embed(any());
+    verify(work, never()).failed(any(), any(), anyString());
+  }
 }

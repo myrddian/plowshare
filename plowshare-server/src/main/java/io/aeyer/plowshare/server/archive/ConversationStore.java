@@ -78,7 +78,7 @@ public final class ConversationStore {
   private static final String COLUMNS =
       "c.id, p.name AS project, c.origin, c.lifecycle, c.parent_id, c.agent,"
           + " c.created_at, c.last_turn_at, c.budget_total, c.budget_spent,"
-          + " c.budget_lifted, c.turn_cap, c.turn_cap_lifted, c.title";
+          + " c.budget_id, c.budget_lifted, c.turn_cap, c.turn_cap_lifted, c.title";
 
   private static final String FROM_CONVERSATIONS =
       " FROM conversations c LEFT JOIN projects p ON p.id = c.project_id";
@@ -359,6 +359,38 @@ public final class ConversationStore {
     return logInternal(origin, home, agent, parent, owned, owner, openedBy, work);
   }
 
+  /**
+   * Existing nested conductors keep their own lifecycle/log while sharing the retained caller's
+   * durable allowance. The orchestration owner binds authority and budget lineage in this same
+   * transaction; a deferred database constraint rejects a missing binding at commit.
+   */
+  public ConversationRecord logSharedOrchestration(
+      Home home, String agent, String owner, String budgetOwner) {
+    var source =
+        find(budgetOwner).orElseThrow(() -> new ArchiveException("Missing caller allowance"));
+    if (!source.home().equals(home) || source.budget() == null)
+      throw new ArchiveException("Orchestration needs its caller's retained allowance");
+    return write(Origin.ORCHESTRATION, home, agent, null, null, null, owner, null);
+  }
+
+  /** Reads only an existing immutable operation-to-budget relationship, never inventing one. */
+  public Optional<Budget> allowanceFor(String conversation) {
+    var record = find(conversation);
+    if (record.isEmpty()) return Optional.empty();
+    if (record.get().budget() != null) return Optional.of(record.get().budget());
+    if (record.get().origin() != Origin.ORCHESTRATION && record.get().origin() != Origin.DELEGATION)
+      return Optional.empty();
+    var owners =
+        jdbc.queryForList(
+            "SELECT budget_conversation FROM operation_conversations WHERE conversation=?",
+            String.class,
+            conversation);
+    if (owners.size() != 1 || owners.getFirst().startsWith("budget:")) return Optional.empty();
+    return find(owners.getFirst())
+        .filter(source -> source.home().equals(record.get().home()))
+        .map(ConversationRecord::budget);
+  }
+
   private ConversationRecord logInternal(
       Origin origin,
       Home home,
@@ -476,8 +508,8 @@ public final class ConversationStore {
                     + " (id, project_id, origin, lifecycle, parent_id, agent,"
                     + " created_at, last_turn_at, budget_total, budget_spent,"
                     + " budget_lifted, turn_cap, turn_cap_lifted, opened_by_call,"
-                    + " owner_handle)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?,"
+                    + " budget_id, owner_handle)"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?,"
                     // The named owner, or a delegated child's parent's (amendment 2).
                     + " COALESCE(CAST(? AS TEXT), (SELECT p.owner_handle"
                     + " FROM conversations p WHERE p.id = CAST(? AS TEXT))))",
@@ -500,6 +532,7 @@ public final class ConversationStore {
                 cap,
                 lifted,
                 openedBy,
+                budget == null ? java.util.UUID.randomUUID() : budget.identity(),
                 owner,
                 parent));
     // No title, and it is not a field this door takes. A conversation is
@@ -517,7 +550,11 @@ public final class ConversationStore {
             agent,
             at,
             null,
-            readBudget(total, spent, budgetLifted),
+            readBudget(
+                budget == null ? java.util.UUID.randomUUID() : budget.identity(),
+                total,
+                spent,
+                budgetLifted),
             readBack(cap, lifted),
             null));
   }
@@ -548,22 +585,33 @@ public final class ConversationStore {
   }
 
   private void bindBudget(String id, Budget budget) {
-    budget.bindConversation(
+    budget.bindDurableConversation(
         id,
-        claim -> {
-          // Persist before transport, under the Budget's claim/limit lock. The expected ordinal
-          // refuses concurrent stale readers rather than lending the same call twice after restart.
-          int changed =
-              jdbc.update(
-                  "UPDATE conversations SET budget_total=?,budget_lifted=?,budget_spent=? WHERE id=? AND budget_spent=?",
-                  claim.limit(),
-                  claim.limit() == null,
-                  claim.ordinal(),
+        () -> {
+          var claims =
+              jdbc.query(
+                  "UPDATE conversations SET budget_spent=budget_spent+1 WHERE id=? AND budget_id=? "
+                      + "AND budget_spent<2147483647 AND (budget_lifted OR budget_spent<budget_total) "
+                      + "RETURNING budget_spent,budget_total",
+                  (r, n) ->
+                      new Budget.Claim(
+                          budget.identity(), r.getInt(1), r.getObject(2, Integer.class), id),
                   id,
-                  claim.ordinal() - 1);
-          if (changed != 1)
-            throw new ArchiveException(
-                "Conversation allowance changed; reconcile the original operation");
+                  budget.identity());
+          return claims.stream().findFirst();
+        },
+        ceiling -> {
+          if (jdbc.update(
+                  "UPDATE conversations SET budget_total=?,budget_lifted=? WHERE id=? AND budget_id=? "
+                      + "AND (CAST(? AS integer) IS NULL OR budget_spent<=?) AND budget_total IS DISTINCT FROM 0",
+                  ceiling,
+                  ceiling == null,
+                  id,
+                  budget.identity(),
+                  ceiling,
+                  ceiling)
+              != 1)
+            throw new ArchiveException("Conversation allowance changed or cannot be raised");
         });
   }
 
@@ -1168,6 +1216,28 @@ public final class ConversationStore {
   public ConversationRecord turnEnded(String id, Budget budget) {
     String wanted = named(id);
     Objects.requireNonNull(budget, "budget");
+    if (!budget.reference().startsWith("budget:") && !budget.reference().equals(wanted)) {
+      var child = find(wanted).orElseThrow();
+      if (child.origin() != Origin.ORCHESTRATION
+          || child.budget() != null
+          || allowanceFor(wanted).filter(b -> b.reference().equals(budget.reference())).isEmpty())
+        throw new ArchiveException("Turn cannot replace its allowance owner");
+      turnEnded(budget.reference(), budget);
+      jdbc.update(
+          "UPDATE conversations SET last_turn_at=? WHERE id=?",
+          now.get().atOffset(java.time.ZoneOffset.UTC),
+          wanted);
+      return find(wanted).orElseThrow();
+    }
+    if (budget.durable()) {
+      if (jdbc.update(
+              "UPDATE conversations SET last_turn_at=? WHERE id=? AND budget_id=?",
+              utc(now.get()),
+              wanted,
+              budget.identity())
+          != 1) throw new ArchiveException("Turn has a different retained allowance source");
+      return find(wanted).orElseThrow();
+    }
     Instant at = now.get();
     int spent = budget.spent();
     // The ceiling is asked for only when there is one. An uncapped budget
@@ -1523,11 +1593,12 @@ public final class ConversationStore {
    * rather than of a cursor. That is what lets the insert's return value and a later read go
    * through the same three lines instead of agreeing by hand.
    */
-  private static Budget readBudget(Integer total, Integer spent, boolean lifted) {
+  private static Budget readBudget(
+      java.util.UUID id, Integer total, Integer spent, boolean lifted) {
     if (total != null) {
-      return Budget.resumed(total, spent);
+      return Budget.restored(id, total, spent);
     }
-    return lifted ? Budget.lifted(spent) : null;
+    return lifted ? Budget.restored(id, null, spent) : null;
   }
 
   private static final RowMapper<ConversationRecord> ROW_MAPPER =
@@ -1568,7 +1639,11 @@ public final class ConversationStore {
             rs.getString("agent"),
             instant(rs, "created_at"),
             instant(rs, "last_turn_at"),
-            readBudget(total, spent, rs.getBoolean("budget_lifted")),
+            readBudget(
+                rs.getObject("budget_id", java.util.UUID.class),
+                total,
+                spent,
+                rs.getBoolean("budget_lifted")),
             readBack(turnCap, rs.getBoolean("turn_cap_lifted")),
             // Straight through, null included. A conversation with no name
             // is an ordinary row -- every one written before V38, and every

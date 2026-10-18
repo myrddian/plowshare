@@ -139,7 +139,8 @@ public final class BoundSystemOperations implements SystemOperations {
       public CallAuthorization claimed(EmbeddingRequest request, Budget.Claim claim) {
         if ((purpose != Purpose.DOCUMENT_PREPARATION
                 && purpose != Purpose.SEMANTIC_QUERY
-                && purpose != Purpose.MEMORY_WRITE)
+                && purpose != Purpose.MEMORY_WRITE
+                && purpose != Purpose.EMBEDDING_REPAIR)
             || !request.specifier().equals(envelope.model())) throw denied();
         require();
         var captured = calls.claimed(id(), claim, this::require);
@@ -162,7 +163,9 @@ public final class BoundSystemOperations implements SystemOperations {
       }
 
       public CallAuthorization claimed(ChatRequest request, Budget.Claim claim) {
-        if ((purpose == Purpose.SEMANTIC_QUERY || purpose == Purpose.MEMORY_WRITE)
+        if ((purpose == Purpose.SEMANTIC_QUERY
+                || purpose == Purpose.MEMORY_WRITE
+                || purpose == Purpose.EMBEDDING_REPAIR)
             || !request.tools().isEmpty()
             || !request.specifier().equals(envelope.model())) throw denied();
         require();

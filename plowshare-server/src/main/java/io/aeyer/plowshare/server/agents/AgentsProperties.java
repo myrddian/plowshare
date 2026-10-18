@@ -30,27 +30,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "plowshare.agents")
 public class AgentsProperties {
 
-  /**
-   * How many model calls one curator pass may spend when the caller names no number of its own.
-   *
-   * <p>200, and the reason is Task 9's own arithmetic rather than a round number. A ruling is
-   * <b>two</b> model calls — {@code promotion_judge.md} tells the judge to read the memory first,
-   * so an ordinary ruling is a tool turn and an answer turn — so this is about a hundred candidates
-   * settled per pass. A first pass over a 200-memory project therefore takes two nights rather than
-   * one, and every later pass costs only what has been written since, because a settled memory
-   * never comes back: {@code ProposalStore.ruledOn} is subtracted before the loop.
-   *
-   * <p>Spending it is not a failure. {@code CALL_BUDGET} is a designed ending — the pass stops,
-   * says so, and keeps every promotion and proposal it already made — which is what makes a
-   * conservative default the safe one.
-   */
-  private int curatorBudget = 200;
+  /** Selected whole-pass policy: unlimited by default, zero disabled, positive limited. */
+  private String curatorBudget = "unlimited";
 
-  public int getCuratorBudget() {
+  public String getCuratorBudget() {
     return curatorBudget;
   }
 
-  public void setCuratorBudget(int curatorBudget) {
-    this.curatorBudget = curatorBudget;
+  public void setCuratorBudget(String value) {
+    io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(value, "curator-budget");
+    curatorBudget = value;
+  }
+
+  public void setCuratorBudget(int value) {
+    setCuratorBudget(Integer.toString(value));
+  }
+
+  public Budget curatorAllowance() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+        io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(curatorBudget, "curator-budget"));
   }
 }

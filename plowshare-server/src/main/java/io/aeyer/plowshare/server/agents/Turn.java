@@ -662,7 +662,11 @@ public final class Turn {
       if (given != null) {
         external[0] = new DelegatedAllowance(given, () -> {});
       } else if (conductor.budget() == null) {
-        external[0] = delegatedAllowances.apply(conductor);
+        external[0] =
+            conversations
+                .allowanceFor(conductor.id())
+                .map(source -> new DelegatedAllowance(source, () -> {}))
+                .orElseGet(() -> delegatedAllowances.apply(conductor));
       }
       Budget budget = external[0] == null ? conductor.budget() : external[0].budget();
       if (external[0] == null)
@@ -1056,7 +1060,16 @@ public final class Turn {
     boolean started = false;
     try {
       admissible.accept(record);
-      Budget budget = given != null ? given : record.budget();
+      Budget budget =
+          given != null
+              ? given
+              : record.budget() != null
+                  ? record.budget()
+                  : record.origin() == Origin.ORCHESTRATION
+                      ? conversations
+                          .allowanceFor(record.id())
+                          .orElseThrow(() -> new Refused("The conductor has no retained allowance"))
+                      : null;
       // grant() before exhausted() is read, on resume()'s own ordering
       // and for the identical reason: a raise has to land before the
       // very check it exists to get past. grant() throws CallerFault --
@@ -1087,6 +1100,7 @@ public final class Turn {
       boolean automaticBudgetGrant =
           admission == null
               && given == null
+              && (record.budget() != null || id.equals(budget.reference()))
               && !definition.nativeOnly()
               && budget.exhausted()
               && automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);

@@ -218,7 +218,20 @@ public final class Curator {
    *     boot whose wiring has not landed, and {@link #pass} reports that rather than promoting
    *     anything.
    */
+  private record CurationInput(
+      Home home, String summary, String scope, io.aeyer.plowshare.protocol.MemoryState state) {}
+
+  private static CurationInput input(io.aeyer.plowshare.protocol.Memory memory) {
+    return new CurationInput(memory.home(), memory.summary(), memory.scope(), memory.state());
+  }
+
   private io.aeyer.plowshare.server.access.SystemOperations system;
+  private io.aeyer.plowshare.server.embedding.OperationEmbeddings embeddingOperations;
+
+  public void useEmbeddingOperations(
+      io.aeyer.plowshare.server.embedding.OperationEmbeddings operations) {
+    embeddingOperations = Objects.requireNonNull(operations);
+  }
 
   /** Existing maintenance rulings use root authority with fixed materialized evidence. */
   public Curator(
@@ -343,6 +356,9 @@ public final class Curator {
       if (cancelled.getAsBoolean()) {
         return tally.stopped(Ending.CANCELLED, "This pass was cancelled.", "");
       }
+      if (budget.exhausted())
+        return tally.stopped(
+            Ending.CALL_BUDGET, "This pass's selected spending policy is exhausted.", "");
       List<TocEntry> neighbours;
       try {
         // survey and not recall, and the difference is a number. recall
@@ -354,7 +370,24 @@ public final class Curator {
         // and so feed demotion, which means triage was quietly
         // reordering the index every project reads. Recorded by Task 9,
         // closed in Task 10 by Archive.survey.
-        Archive.Survey surveyed = archive.survey(question(candidate), Home.global(), NEIGHBOURS);
+        Archive.Survey surveyed;
+        if (embeddingOperations == null) {
+          surveyed = archive.survey(question(candidate), Home.global(), NEIGHBOURS);
+        } else {
+          var snapshot = input(archive.get(candidate.id()));
+          Runnable valid =
+              () -> {
+                if (cancelled.getAsBoolean()
+                    || !snapshot.equals(input(archive.get(candidate.id()))))
+                  throw new IllegalStateException("Curation input changed or operation ended");
+              };
+          int before = budget.spent();
+          try (var query = embeddingOperations.query(home, question(candidate), budget, valid)) {
+            surveyed = archive.surveyGlobal(question(candidate), NEIGHBOURS, query);
+          } finally {
+            tally.modelCalls += budget.spent() - before;
+          }
+        }
         neighbours = surveyed.found();
         tally.unseen = Math.max(tally.unseen, surveyed.unsearchable());
       } catch (RuntimeException unsearchable) {
@@ -399,6 +432,28 @@ public final class Curator {
       // pass's, shared by reference across every ruling in it, and a copy
       // on each ruling's row would be as many second allowances as there
       // are candidates.
+      var promptInputs = new java.util.LinkedHashMap<String, CurationInput>();
+      if (system != null) {
+        for (var item :
+            java.util.stream.Stream.concat(
+                    java.util.stream.Stream.of(candidate), neighbours.stream())
+                .toList()) {
+          var current = input(archive.get(item.id()));
+          if (!current.summary().equals(item.summary()) || !current.scope().equals(item.scope()))
+            throw new IllegalStateException("Curation input changed before judgment");
+          promptInputs.put(item.id(), current);
+        }
+      }
+      Runnable validJudgment =
+          () -> {
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted())
+              throw new IllegalStateException("Curation pass ended");
+            promptInputs.forEach(
+                (id, expected) -> {
+                  if (!expected.equals(input(archive.get(id))))
+                    throw new IllegalStateException("Curation input changed or was withdrawn");
+                });
+          };
       String task = task(home, candidate, neighbours);
       Transcript log =
           logs == null ? Transcript.NONE : logs.logFor(Origin.CURATOR, home, judge, null, null);
@@ -415,7 +470,7 @@ public final class Curator {
                       home,
                       judge,
                       task,
-                      () -> {}));
+                      validJudgment));
       Outcome ruling =
           execution.run(judge, task, home, budget, cancelled, null, JobWatch.UNWATCHED, log);
       log.closed(task, ruling);

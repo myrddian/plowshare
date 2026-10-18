@@ -20,7 +20,19 @@ public interface OperationAuthority {
       ScopeId scope,
       Home home,
       GrantRecipient source,
-      List<Support> support) {
+      List<Support> support,
+      boolean globalRead) {
+    public Admission(
+        UUID id,
+        String executor,
+        AccountId account,
+        ScopeId scope,
+        Home home,
+        GrantRecipient source,
+        List<Support> support) {
+      this(id, executor, account, scope, home, source, support, false);
+    }
+
     public Admission {
       Objects.requireNonNull(id);
       Objects.requireNonNull(account);
@@ -32,6 +44,8 @@ public interface OperationAuthority {
       if (source.agent().isPresent())
         throw new IllegalArgumentException("Account operation source required");
       support = List.copyOf(support);
+      if (globalRead && support.stream().noneMatch(s -> s.action() == AuthorityAction.READ))
+        throw new IllegalArgumentException("Global READ needs a retained READ action");
       if (support.isEmpty() || support.size() > 256)
         throw new IllegalArgumentException("Bounded supporting authority required");
     }
@@ -87,6 +101,12 @@ public interface OperationAuthority {
 
   /** Refuses targets outside the fixed operation home; domain/tool fences still apply. */
   void requireTargets(Admission admission, Home home, List<AccessRequest.Resource> references);
+
+  /** Captured Global knowledge READ never widens WRITE, execution, or conversation access. */
+  default void requireReadTargets(
+      Admission admission, Home home, List<AccessRequest.Resource> references) {
+    requireTargets(admission, home, references);
+  }
 
   /** Associates an existing job identity before its executor can start. */
   void started(Admission admission, String job);

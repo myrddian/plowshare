@@ -574,7 +574,7 @@ class AgentFramesTest {
     verify(curator, times(2)).pass(eq("payments"), allowance.capture(), any());
     for (Budget given : allowance.getAllValues()) {
       assertEquals(
-          props.getCuratorBudget(),
+          props.curatorAllowance().limit(),
           given.limit(),
           "both surfaces asked with the operator's own default");
     }

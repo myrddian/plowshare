@@ -13,7 +13,8 @@ public record EmbeddingProperties(
     Model prose,
     boolean paused,
     java.util.List<TokenizerBinding> retainedTokenizers,
-    String searchBudget) {
+    String searchBudget,
+    String maintenanceBudget) {
   public EmbeddingProperties(
       boolean enabled,
       Model code,
@@ -33,11 +34,35 @@ public record EmbeddingProperties(
     this(enabled, code, prose, paused, retainedTokenizers, Integer.toString(searchBudget));
   }
 
+  public EmbeddingProperties(
+      boolean enabled,
+      Model code,
+      Model prose,
+      boolean paused,
+      java.util.List<TokenizerBinding> retainedTokenizers,
+      String searchBudget) {
+    this(enabled, code, prose, paused, retainedTokenizers, searchBudget, "unlimited");
+  }
+
+  /** Maintenance selects its own policy; query/write policies and nearby budgets do not apply. */
+  public Integer maintenanceLimit() {
+    return SpendingPolicy.limit(maintenanceBudget, "plowshare.embeddings.maintenance-budget");
+  }
+
+  public io.aeyer.plowshare.server.agents.Budget maintenanceAllowance() {
+    return SpendingPolicy.budget(maintenanceLimit());
+  }
+
   @org.springframework.boot.context.properties.bind.ConstructorBinding
   public EmbeddingProperties {
     searchBudget =
         searchBudget == null || searchBudget.isBlank() ? "unlimited" : searchBudget.strip();
     searchCeiling(searchBudget);
+    maintenanceBudget =
+        maintenanceBudget == null || maintenanceBudget.isBlank()
+            ? "unlimited"
+            : maintenanceBudget.strip();
+    SpendingPolicy.limit(maintenanceBudget, "plowshare.embeddings.maintenance-budget");
   }
 
   /** Converts configuration to the existing nullable Budget.Claim ceiling; null is unlimited. */

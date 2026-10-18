@@ -22,11 +22,13 @@ public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingReposit
   public Pin pin(InformationContext context) {
     var rows =
         jdbc.query(
-            "SELECT a.id,CASE WHEN ?='project' THEN information_namespace_home('project:' || ?) WHEN ?='personal' THEN information_namespace_home('account:' || a.legacy_handle) ELSE ?::uuid END FROM authority_accounts a WHERE a.legacy_handle=? AND information_global_read_member(?)",
+            "SELECT a.id,CASE WHEN ?='project' THEN information_namespace_home('project:' || ?) WHEN ?='personal' THEN information_namespace_home('account:' || a.legacy_handle) WHEN ?='account' THEN ?::uuid ELSE ?::uuid END FROM authority_accounts a WHERE a.legacy_handle=? AND information_global_read_member(?)",
             (r, n) -> new Pin(r.getObject(1, UUID.class), r.getObject(2, UUID.class)),
             scope(context),
             context.selection().project(),
             scope(context),
+            scope(context),
+            io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
             io.aeyer.plowshare.server.access.BuiltInIdentities.ADMINISTRATION.value(),
             context.account(),
             context.account());

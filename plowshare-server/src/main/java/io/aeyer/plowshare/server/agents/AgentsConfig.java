@@ -838,8 +838,7 @@ public class AgentsConfig {
                         informationTypes::getObject,
                         informationNavigation::getObject),
                     new MemoryNavigateTool(
-                        navigator::getObject,
-                        () -> memoryProperties.getObject().getNavigationBudget()),
+                        navigator::getObject, () -> memoryProperties.getObject().navigationLimit()),
                     new DocumentTools.AgentList(documents),
                     new AskTool(asking(deliberation), corpus, () -> askBudget(props)),
                     new GetDateTool(Instant::now, ZoneId.systemDefault()),
@@ -974,9 +973,9 @@ public class AgentsConfig {
    * because this is read inside a tool call, where a failure to find a property would end
    * somebody's run over a bean that was never going to be asked.
    */
-  private static int askBudget(ObjectProvider<DocumentsProperties> documents) {
+  private static Integer askBudget(ObjectProvider<DocumentsProperties> documents) {
     DocumentsProperties props = documents.getIfAvailable();
-    return props == null ? Deliberation.A_PASS : props.getAskBudget();
+    return props == null ? null : props.askLimit();
   }
 
   /**

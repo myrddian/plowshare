@@ -133,7 +133,9 @@ public final class ConversationSearch implements UsageAware {
     List<PassageIndex.Match> semantic = List.of();
     String fallback = null;
     try {
-      semantic = index.rank(home, "entry", index.capture(question, owner), CANDIDATES + 1);
+      try (var query = index.capture(question, owner, home)) {
+        semantic = index.rank(home, "entry", query, CANDIDATES + 1);
+      }
     } catch (EmbeddingException unavailable) {
       if (mode.equals("semantic"))
         throw new EmbeddingException(

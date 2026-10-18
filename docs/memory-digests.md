@@ -9,7 +9,8 @@ lesson. A fold enters the digest archive even when the learner extracts nothing.
 Existing `memory.recall`/HTTP recall, the `memory_recall` tool and eligible
 automatic Reminder surveys use shared SYSTEM query embedding. The recipient still
 needs current READ. Standalone permitted project reads can include Global;
-retained tools/reminders use only their admitted home. Filtering applies before
+newly admitted tools/reminders retain their home plus read-only Global knowledge.
+Historical admissions keep their original home-only ceiling. Filtering applies before
 ranking, missing-vector counts and use telemetry. Reminder surveys return index
 lines without incrementing uses and retain their existing optional prompt behavior.
 
@@ -17,8 +18,8 @@ Spending follows the read service's `plowshare.embeddings.search-budget` policy:
 unset/empty/`unlimited` is unlimited by default, `0` disables query inference, and
 a positive integer limits calls per logical read. All admitted calls retain usage
 and claim evidence. A parent conversation budget does not automatically apply.
-These read permits do not authorize write/Scribe/curation, independent repair or deeper
-navigation/digest inference. See [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
+These read permits do not authorize write/Scribe/curation, independent repair or
+navigation/digest inference; those use their own operation bindings. See [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
 for the supported consumer boundary.
 
 ## Memory filing and Scribe
@@ -48,9 +49,11 @@ not retried under another phase. Known retained invocations cannot obtain a new
 source or duplicate the write. This adds no HTTP retry/idempotency API.
 
 Old null-project conversation windows cannot silently become Global learning
-publication. Curator/promotion, independent repair/reembed and deeper
-digest/navigation inference remain deferred. See [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
-for implementation scope and verification.
+publication. Curator/promotion, independent repair/reembed and digest/navigation
+now use the shared foundation through their own bounded operations. Existing
+human promotion acceptance still requires source MANAGER and Global ADMIN.
+See [slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md) for
+implementation scope, policy selection and verification.
 
 ## Use
 
@@ -65,7 +68,9 @@ for implementation scope and verification.
   clients do not silently fall back to them after a socket failure.
 
 The interlocutor's internal `memory_navigate` tool accepts only a question. Its
-run supplies the home; it searches that project before global. Navigation returns
+run supplies the home; it searches that project before any captured Global
+knowledge tier. GLOBAL_READ never permits historical NULL-home conversation
+access. Navigation filters the underlying evidence before model input and disclosure. Navigation returns
 text, source IDs, the level reached, completion status, and model-call count.
 It can return a current lesson, original log entries, a surviving span summary,
 or an explicitly incomplete higher digest. Retired memories are labelled as
@@ -120,9 +125,16 @@ Configuration properties (restart required):
 
 | Property | Default |
 | --- | --- |
-| `plowshare.memory.navigation-budget` | `32` model calls |
-| `plowshare.memory.digest-budget` | `100` model calls |
+| `plowshare.memory.navigation-budget` | `unlimited` |
+| `plowshare.memory.digest-budget` | `unlimited` |
 | `plowshare.llm.system-overrides.memory` | `fast` |
+
+The spending keys accept `unlimited`, `0` (disabled), or a positive finite limit.
+Query embedding, branch decisions and digest vector work spend the owning
+navigation/digest policy. An unrelated conversation cap does not apply.
+Independent reembed/maintenance uses `plowshare.embeddings.maintenance-budget`,
+also unlimited by default. Curator uses `plowshare.agents.curator-budget` with
+the same syntax unless its caller explicitly selects a finite request cap.
 
 Memory is harness work and is bound with the rest of it. The digester and the
 navigator run on `plowshare.llm.system-overrides.memory`, which falls back to
