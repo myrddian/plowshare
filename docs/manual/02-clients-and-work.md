@@ -46,6 +46,13 @@ inference. Each tool has its own execution time. Missing usage is shown as not r
 and a recorded zero remains zero. These counts describe past inference calls; the
 Context panel constructs the next request and its separate token count.
 
+Trajectory entries also explain their model-context policy. Approval diagnostics say
+“Not sent to model”; runtime notes say “Active run only” because they were delivered
+in that run and are not replayed later. Hook records stay outside model context,
+although their transformations may affect the request. Folded entries identify their
+replacement summary. “Model context eligible” describes the entry kind and current
+compaction state; it is not proof that a specific inference received that entry.
+
 ## Follow work and read its result
 
 For explicit CLI work, choose a project with `--project NAME` and use the command

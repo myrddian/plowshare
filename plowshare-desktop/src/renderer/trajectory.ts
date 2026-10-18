@@ -6,6 +6,7 @@ import { activeJob, stoppedJob } from '../shared.ts';
 import type { DesktopState, Job } from '../shared.ts';
 import {
   turnsOf,
+  modelContextOf,
   stepKey,
   callStanding,
 } from 'plowshare-client-ts/operations/trajectory';
@@ -148,11 +149,13 @@ function fromStep(step: Step): Item {
           : 'Model response without text'
         : `${step.entry.state} entry`),
     standing:
-      step.entry.supersededBy !== undefined
-        ? 'folded for model'
-        : step.entry.state === 'stands'
-          ? 'recorded'
-          : step.entry.state,
+      step.kind === 'note' || step.kind === 'reasoning'
+        ? modelContextOf(step.entry.kind, step.entry.supersededBy).label
+        : step.entry.supersededBy !== undefined
+          ? 'folded for model'
+          : step.entry.state === 'stands'
+            ? 'recorded'
+            : step.entry.state,
     turn: step.turn,
     ...(step.entry.tookMillis === undefined
       ? {}
@@ -394,7 +397,11 @@ function renderDetail() {
       linked && call.result ? '<' : '',
     );
     for (const hook of call.hooks)
-      body += section('Hook', hook.text ?? '(content unavailable)');
+      body += section(
+        'Hook',
+        hook.text ?? '(content unavailable)',
+        modelContextOf(hook.kind).detail,
+      );
   } else if (row.step) {
     const entry = row.step.entry;
     body = section(
@@ -417,6 +424,11 @@ function renderDetail() {
     );
     if (row.job.detail && row.job.text)
       body += section('Status', row.job.detail);
+  }
+  if (row.step) {
+    const entry = row.step.entry;
+    const visibility = modelContextOf(entry.kind, entry.supersededBy);
+    body = section('Model context', visibility.label, visibility.detail) + body;
   }
   if (row.step && row.step.kind !== 'call' && row.step.entry.dispatch) {
     const entry = row.step.entry;

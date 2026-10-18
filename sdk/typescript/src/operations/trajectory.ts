@@ -29,6 +29,68 @@ export function outcomeClass(outcome: string | undefined): Standing {
   return 'fail';
 }
 
+/**
+ * Explains the log kind's input policy, not proof of a particular inference payload.
+ * Keep this aligned with EntryKind.role(): runtime notes are already delivered in-run,
+ * while hook records describe transformations whose effects may reach the model.
+ */
+export function modelContextOf(
+  kind: string,
+  supersededBy?: number | null,
+): { readonly label: string; readonly detail: string } {
+  switch (kind) {
+    case 'diagnostic':
+    case 'attempt_failed':
+    case 'plan':
+      return {
+        label: 'Not sent to model',
+        detail:
+          'Recorded for inspection only. This log entry is excluded from model context.',
+      };
+    case 'hook':
+      return {
+        label: 'Harness record only',
+        detail:
+          'This hook record is not sent to the model. The changes it describes may affect the model request or tool execution.',
+      };
+    case 'runtime_note':
+      return {
+        label: 'Active run only',
+        detail:
+          'Delivered as context during the active run. Retained in the log, but not replayed into later turns.',
+      };
+    case 'thinking':
+    case 'refusal':
+      return {
+        label: 'Model output · not replayed',
+        detail:
+          'Recorded model output. This entry is excluded from later model context.',
+      };
+    case 'utterance':
+    case 'answer':
+    case 'tool_result':
+    case 'summary':
+    case 'turn_summary':
+    case 'notice':
+      return supersededBy == null
+        ? {
+            label: 'Model context eligible',
+            detail:
+              'This entry kind can contribute to model context, subject to history selection and filtering. This label is not a receipt for a specific inference request.',
+          }
+        : {
+            label: 'Folded for model',
+            detail: `Replaced by summary #${supersededBy} in current model context. The original remains in the log and may have been sent before compaction.`,
+          };
+    default:
+      return {
+        label: 'Model visibility unknown',
+        detail:
+          'This client does not recognize the entry kind and cannot determine whether it contributes to model context.',
+      };
+  }
+}
+
 interface Based {
   readonly ordinal: number;
   readonly turn: number;

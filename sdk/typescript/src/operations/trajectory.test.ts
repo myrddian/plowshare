@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Entry } from './client-views.ts';
-import { stepsOf, turnsOf } from './trajectory.ts';
+import { modelContextOf, stepsOf, turnsOf } from './trajectory.ts';
 
 describe('human trajectory after model compaction', () => {
   it('retains folded messages and paired tool results across repeated folds', () => {
@@ -173,4 +173,48 @@ it('does not count an orphaned timed tool result as model inference', () => {
     },
   ]);
   expect(turnsOf(steps)[0]).toMatchObject({ modelCalls: 0, modelMillis: 0 });
+});
+
+describe('model context labels', () => {
+  it('distinguishes approval audit from the denial tool result the model receives', () => {
+    const audit: Entry = {
+      ordinal: 1,
+      turnOrdinal: 1,
+      kind: 'diagnostic',
+      state: 'stands',
+      text: 'Command denied by person_1: outside the approved scope',
+    };
+    const denial: Entry = {
+      ...audit,
+      ordinal: 2,
+      kind: 'tool_result',
+      toolCallId: 'run_1',
+    };
+    expect(modelContextOf(audit.kind).label).toBe('Not sent to model');
+    expect(modelContextOf(denial.kind).label).toBe('Model context eligible');
+    expect(modelContextOf(denial.kind).detail).toContain('not a receipt');
+  });
+
+  it('does not describe already delivered runtime notes or hook effects as invisible', () => {
+    expect(modelContextOf('runtime_note').label).toBe('Active run only');
+    expect(modelContextOf('runtime_note').detail).toContain(
+      'Delivered as context during the active run',
+    );
+    expect(modelContextOf('hook').detail).toContain(
+      'may affect the model request',
+    );
+    expect(modelContextOf('thinking').label).toBe(
+      'Model output · not replayed',
+    );
+  });
+
+  it('distinguishes compaction from never sent, and leaves unfamiliar kinds unknown', () => {
+    expect(modelContextOf('utterance', 17).detail).toContain(
+      'may have been sent before compaction',
+    );
+    expect(modelContextOf('diagnostic', 17).label).toBe('Not sent to model');
+    expect(modelContextOf('future_kind').label).toBe(
+      'Model visibility unknown',
+    );
+  });
 });
