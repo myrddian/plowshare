@@ -1,6 +1,6 @@
 # Authority substrate implementation roadmap
 
-Status: implementation roadmap, updated 18 October 2026. Slices 01–16 are
+Status: implementation roadmap, updated 18 October 2026. Slices 01–17 are
 implemented for their documented supported paths. Slice 14 includes the
 [completion implementation](authority-substrate-slices/14-completion-plan.md):
 explicit Global document destination and preparation embeddings charged to the
@@ -15,10 +15,11 @@ The separately requested [slice 16](authority-substrate-slices/16-memory-query-e
 implements memory query embedding for existing recall and eligible automatic
 reminders. It retains current read tiers, parent sandbox and operation policy;
 memory write/Scribe/curation/repair consumers remain separate.
-The proposed [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
-scopes existing memory writes and Scribe against that foundation, including the
-Learner filing hook. It defaults to unlimited operation spending and plans an
-explicit optional write policy; it is documentation only and activates no consumer.
+The implemented [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
+connects existing memory writes and Scribe to that foundation, including the
+Learner filing hook. Its explicit write policy defaults to unlimited operation
+spending; disabled/limited configuration applies only to the filing pipeline.
+Curator/promotion and independent repair remain separate.
 
 ## Count and scope
 
@@ -31,7 +32,7 @@ later implementation instruction; split a unit further if evidence requires it.
 That original sequence is complete for its documented supported paths. Slice 15
 and slice 16 are additional implemented follow-ons, bringing the inventory to 16
 documents with their supported paths implemented. Slice 17 is an additional
-proposed slice, bringing the inventory to 17 documents, with 01–16 implemented
+implemented slice, bringing the inventory to 17 documents, with 01–17 implemented
 for their supported paths. These follow-ons do not expand the original slice 14
 outcome retroactively.
 
@@ -49,7 +50,7 @@ orchestration roots and synchronous agent children (11), and action checks for
 the existing acting consumers (12), and verified existing-contract selectors and
 client boundaries (13). See each slice's document
 for verification and limits. This is not a complete platform cutover: configured
-memory-write/Scribe/curation, ask/deliberation and independent-maintenance bindings
+curation/promotion, ask/deliberation and independent-maintenance bindings
 remain deferred, and nested/model-triggered
 orchestration starts remain refused without a supported parent-budget sharing
 contract. Independent Relay roots now use slice 11's retained lineage. Production
@@ -78,7 +79,7 @@ it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 | 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Complete reviewed legacy classification and the bounded Global document admission/preparation/read path, preserving identities and private data; separately deferred consumers remain fenced. |
 | 15 | [SYSTEM embedding foundation and initial search consumers](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Share scoped SYSTEM embedding execution across existing preparation and initial document-search consumers. Each operation supplies its scope, validity and spending policy; search defaults to unlimited, with disabled/limited configuration available. Readers gain no embedding permission. Memory/repair/ask activation and other deferred consumers remain separate. |
 | 16 | [Memory query embedding and recall](authority-substrate-slices/16-memory-query-embedding-and-recall.md) | 04–08, 13, 15 | Connect existing recall and automatic Reminder query embeddings to the shared SYSTEM foundation with current read tiers, retained sandbox/lifetime and policy-selected spending. Reuse read-side disabled/limited/unlimited policy, default unlimited; a nearby finite budget does not automatically apply. Writes/Scribe/curation/repair and broader targets stay separate. |
-| 17 (planned) | [Memory writes and Scribe](authority-substrate-slices/17-memory-writes-and-scribe.md) | 04–08, 13, 15, 16 | Admit existing write/Scribe/Learner-filing consumers with same-home candidates, shared SYSTEM inference, atomic content/provenance and fenced write-time vector publication. One write operation policy defaults to unlimited; optional disabled/limited configuration explicitly applies. Curator/promotion and independent repair remain deferred. |
+| 17 | [Memory writes and Scribe](authority-substrate-slices/17-memory-writes-and-scribe.md) | 04–08, 13, 15, 16 | Admit existing write/Scribe/Learner-filing consumers with same-home candidates, shared SYSTEM inference, atomic content/provenance and fenced write-time vector publication. One write operation policy defaults to unlimited; optional disabled/limited configuration explicitly applies. Curator/promotion and independent repair remain deferred. |
 
 The existing first-slice document remains authoritative for slice 01; it is not
 duplicated in the slice directory. Slice 14 depends transitively on 01–13
@@ -209,10 +210,11 @@ closed query-purpose evidence on its selected consumers. Search spending default
 to unlimited, with explicit disabled/limited policies available. Slice 16 connects
 selected memory recall and Reminder reads, reusing the existing read-side spending
 policy without applying a nearby finite budget automatically. Retained reads
-exclude Global tiers outside their parent sandbox. Memory write/Scribe/curation,
-ask/repair and the other deferred consumers are not activated. Slice 17 documents
-the next memory-write/Scribe binding, including explicit write-policy configuration
-and the existing Learner filing step; it has no implementation authorization yet.
+exclude Global tiers outside their parent sandbox. Slice 17 connects memory
+writes/Scribe and the existing Learner filing step with explicit write-policy
+configuration, source/claim retention and fenced vector publication. All 17
+currently documented slices are implemented for their supported paths. This does
+not activate curation/promotion, ask/repair or the other deferred consumers.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

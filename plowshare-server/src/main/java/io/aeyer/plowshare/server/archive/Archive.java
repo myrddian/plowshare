@@ -74,7 +74,43 @@ import org.slf4j.LoggerFactory;
  * code afterwards. There is no {@code Librarian} class here and there is not meant to be one; the
  * only thing a model still does is turn text into a vector.
  */
-public class Archive implements UsageAware {
+public class Archive implements UsageAware, MemoryFiling {
+  private java.util.function.Supplier<MemoryWrites> writes;
+
+  public void useWrites(java.util.function.Supplier<MemoryWrites> writes) {
+    this.writes = java.util.Objects.requireNonNull(writes);
+  }
+
+  public boolean writing() {
+    return writes != null;
+  }
+
+  public WriteResult write(MemoryWrites.Request request) {
+    if (writes == null) throw new IllegalStateException("Memory write admission unavailable");
+    return writes.get().write(request);
+  }
+
+  /** The admitted consumer owns live mutation/provenance and exact post-commit indexing. */
+  public interface WriteBinding {
+    void mutation(Verdict verdict);
+
+    void provenance(String id);
+
+    void embed(Memory memory);
+  }
+
+  public WriteResult applyAdmitted(
+      MemoryProposal proposal, Verdict verdict, Home home, WriteBinding binding) {
+    return file(
+        proposal,
+        verdict,
+        home,
+        null,
+        binding::provenance,
+        UsageAttribution.LEGACY,
+        java.util.Objects.requireNonNull(binding));
+  }
+
   private MemoryQueries queries;
 
   /** Required by production composition; legacy constructors remain isolated test fixtures. */
@@ -821,6 +857,18 @@ public class Archive implements UsageAware {
       Precomputed precomputed,
       java.util.function.Consumer<String> provenance,
       UsageAttribution owner) {
+    if (writing()) throw new IllegalStateException("Admitted memory write required");
+    return file(proposal, verdict, home, precomputed, provenance, owner, null);
+  }
+
+  private WriteResult file(
+      MemoryProposal proposal,
+      Verdict verdict,
+      Home home,
+      Precomputed precomputed,
+      java.util.function.Consumer<String> provenance,
+      UsageAttribution owner,
+      WriteBinding binding) {
     // Outside the transaction: a malformed proposal is refused before a
     // connection is taken at all, and this reads nothing.
     Validation.check(proposal, maxBodyChars);
@@ -832,6 +880,7 @@ public class Archive implements UsageAware {
               // fallback: adding a fourth verdict kind would fail this to compile
               // rather than fall through to a runtime "unknown verdict" nobody
               // sees until a caller sends one.
+              if (binding != null) binding.mutation(verdict);
               Filed filed =
                   switch (verdict.kind()) {
                     case NEW -> create(proposal, home);
@@ -862,7 +911,9 @@ public class Archive implements UsageAware {
     // javadoc — "the row is already committed by the time this runs" —
     // actually true. It was not, while the boundary was an annotation
     // around this whole method.
-    if (committed.toEmbed() != null) {
+    if (committed.toEmbed() != null && binding != null) {
+      binding.embed(committed.toEmbed());
+    } else if (committed.toEmbed() != null) {
       embed(
           committed.toEmbed(),
           precomputed,

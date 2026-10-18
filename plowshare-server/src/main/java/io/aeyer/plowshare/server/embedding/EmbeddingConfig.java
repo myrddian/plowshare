@@ -10,19 +10,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Composition for the opt-in transition. Both models are required; no deployment defaults. */
 @Configuration
 @EnableConfigurationProperties(EmbeddingProperties.class)
 @ConditionalOnProperty(name = "plowshare.embeddings.enabled", havingValue = "true")
 public class EmbeddingConfig {
-  @Bean
-  public EmbeddingWorkRepository embeddingWorkRepository(
-      JdbcTemplate jdbc, UnitOfWork work, EmbeddingSpaceRepository spaces) {
-    return new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
-  }
-
   @Bean
   public DispatchingDualEmbeddings dualEmbeddings(
       EmbeddingProperties properties,

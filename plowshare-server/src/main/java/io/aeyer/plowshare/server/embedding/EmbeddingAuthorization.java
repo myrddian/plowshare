@@ -4,7 +4,8 @@ import io.aeyer.plowshare.server.llm.dispatch.*;
 import java.util.List;
 
 /**
- * A single document lease's exact output set, claim carriage and durable publication checkpoint.
+ * An admitted publication operation's exact outputs, claim carriage and publication checkpoint.
+ * Document leases and synchronous memory writes retain their own validity contracts.
  */
 public interface EmbeddingAuthorization extends EmbeddingPermit {
   default Mode mode() {
@@ -17,4 +18,9 @@ public interface EmbeddingAuthorization extends EmbeddingPermit {
 
   /** Called only after all outputs for the preceding request have been committed. */
   void published();
+
+  /** Called inside the repository publication transaction before source/version locks. */
+  default void publicationFence() {
+    require();
+  }
 }

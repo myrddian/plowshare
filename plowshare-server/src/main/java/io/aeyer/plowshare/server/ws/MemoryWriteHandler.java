@@ -56,6 +56,16 @@ public final class MemoryWriteHandler implements FrameHandler {
     Home home = RequestedHome.in(request.project());
     Validation.check(proposal, archive.maxBodyChars());
 
+    if (archive.writing())
+      return Outcome.ok(
+          archive.write(
+              new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
+                  asking.requireHandle(FrameTypes.MEMORY_WRITE),
+                  home,
+                  proposal,
+                  io.aeyer.plowshare.server.archive.MemoryWrites.Origin.request(
+                      asking.queryValidity()))));
+
     var owner = archive.usage(home, asking.handle(), UsageAttribution.Operation.REVIEW);
     Scribe.Judgement judged =
         archive.accountingEnabled()

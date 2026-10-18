@@ -17,9 +17,40 @@ Spending follows the read service's `plowshare.embeddings.search-budget` policy:
 unset/empty/`unlimited` is unlimited by default, `0` disables query inference, and
 a positive integer limits calls per logical read. All admitted calls retain usage
 and claim evidence. A parent conversation budget does not automatically apply.
-This does not activate memory write/Scribe/curation, independent repair or deeper
+These read permits do not authorize write/Scribe/curation, independent repair or deeper
 navigation/digest inference. See [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
 for the supported consumer boundary.
+
+## Memory filing and Scribe
+
+Existing memory writes and the Learner's proposal-filing step use one admitted
+SYSTEM operation for same-home candidate lookup, optional Scribe judgement and
+write-time indexing. The caller needs WRITE for ordinary filing; SYSTEM processing
+uses its own bounded authority. The Scribe remains a tool-free single consult.
+Content, reason and learning provenance commit together. Indexing runs after that
+transaction and can finish after creator access loss while its source and
+operation remain valid. Changed, withdrawn or invalidated sources cannot receive
+stale vectors.
+
+`plowshare.archive.write-budget` (`PLOWSHARE_MEMORY_WRITE_BUDGET`) selects spending
+for one filing operation. Omitted/empty/`unlimited` defaults to unlimited; `0`
+disables its optional inference; a positive integer limits actual provider
+requests across candidate embedding, the optional consult and indexing. Search
+policy and nearby conversation budgets do not automatically apply. Learner's
+preceding extraction call remains a separate existing operation.
+
+Disabled or unavailable optional judgement files a valid proposal flat. Indexing
+failure/exhaustion preserves committed content and may leave it unsearchable.
+Authority, cancellation and stale-target failures cannot authorize flat filing.
+A completed compatible legacy vector can be reused locally; dual DOCUMENT
+vectors use their captured profiles/prefixes. Uncertain equivalent attempts are
+not retried under another phase. Known retained invocations cannot obtain a new
+source or duplicate the write. This adds no HTTP retry/idempotency API.
+
+Old null-project conversation windows cannot silently become Global learning
+publication. Curator/promotion, independent repair/reembed and deeper
+digest/navigation inference remain deferred. See [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
+for implementation scope and verification.
 
 ## Use
 

@@ -61,6 +61,9 @@ class GlobalPreparationPersistenceTest {
   FrameRouter router;
   final AtomicInteger embedded = new AtomicInteger(), chatted = new AtomicInteger();
   Runnable afterEmbedding = () -> {};
+  Runnable afterChat = () -> {};
+  String chatAnswer = "A grounded manual summary.";
+  List<ChatMessage> chatMessages = List.of();
   final Tokenizer tokenizer =
       new Tokenizer() {
         public TokenCount count(String text) {
@@ -234,6 +237,501 @@ class GlobalPreparationPersistenceTest {
             Clock.systemUTC(),
             new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))));
     return archive;
+  }
+
+  Archive memoryWrites(LlmDispatcher dispatcher, boolean dual, Integer limit, boolean withScribe) {
+    return memoryWrites(dispatcher, dual, limit, withScribe, new MemoryStore(jdbc));
+  }
+
+  Archive memoryWrites(
+      LlmDispatcher dispatcher,
+      boolean dual,
+      Integer limit,
+      boolean withScribe,
+      MemoryStore store) {
+    // Search disabled deliberately: it is not the admitted write's policy.
+    var archive = memoryQueries(dispatcher, dual, 0);
+    store.protectInformation();
+    var records =
+        new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+    DualEmbeddings lanes = null;
+    if (dual) {
+      var prose = records.active(EmbeddingSlot.PROSE).orElseThrow();
+      records.configure(EmbeddingSlot.CODE, prose.space(), prose.search());
+      assertTrue(records.activate(records.target(EmbeddingSlot.CODE).orElseThrow()));
+      var counters = mock(EmbeddingTokenizers.class);
+      when(counters.model(any())).thenReturn(tokenizer);
+      lanes = new DispatchingDualEmbeddings(records, dispatcher::embed, counters);
+    }
+    var props = new LlmProperties();
+    props.setEmbeddingModel("model");
+    props.setEmbeddingDim(768);
+    props.setEmbeddingMaxInputTokens(2048);
+    var embeddings = new DispatchingEmbeddingClient(dispatcher, props, tokenizer);
+    var identities = new JdbcIdentityRepository(jdbc);
+    var grants = new JdbcScopedGrantRepository(jdbc);
+    ApplicationPolicy applications =
+        ignored -> new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of());
+    var authority =
+        new LiveScopedAuthority(
+            grants, applications, new ApplicationGrantLineage(grants, applications), identities);
+    var registry =
+        withScribe
+            ? new AgentRegistry(
+                Map.of(
+                    "scribe",
+                    new AgentDefinition(
+                        "scribe",
+                        "Scribe",
+                        "model",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        1,
+                        1,
+                        "Judge shape")))
+            : null;
+    var scribe =
+        new io.aeyer.plowshare.server.agents.scribe.Scribe(
+            dispatcher, archive, () -> registry, system);
+    var selected = lanes;
+    var writes =
+        new BoundMemoryWrites(
+            archive,
+            scribe,
+            store,
+            new JdbcQueryEmbeddingRepository(jdbc),
+            records,
+            work,
+            new BoundSemanticEmbedding(system),
+            system,
+            embeddings,
+            () -> selected,
+            () -> limit,
+            new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc)),
+            authority,
+            identities);
+    archive.useWrites(() -> writes);
+    return archive;
+  }
+
+  MemoryWrites.Request memoryWrite(String actor, Home home, String invocation) {
+    return new MemoryWrites.Request(
+        actor,
+        home,
+        new MemoryProposal("knowledge", "deployment", "The memory body", "writer", "fixture"),
+        new MemoryWrites.Origin(invocation, () -> {}, () -> {}, null));
+  }
+
+  void memoryWriter() {
+    memoryProject();
+    jdbc.update(
+        "UPDATE project_members SET role='CONTRIBUTOR' WHERE handle IN ('reader','app') AND project_id=(SELECT id FROM projects WHERE name='memory-project')");
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void memoryWritesShareSystemSourceAndFenceBothEncoderModes(boolean dual) {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, dual, null, true);
+      seedMemory("mem_candidate", Home.of("memory-project"), true, dual);
+      seedMemory("mem_global_decoy", Home.global(), true, dual);
+      seedMemory("mem_private", Home.of("memory-project"), true, dual);
+      var privateLog =
+          new ConversationStore(jdbc)
+              .log(
+                  Origin.SUBMISSION,
+                  Home.of("memory-project"),
+                  "private",
+                  null,
+                  io.aeyer.plowshare.server.agents.Budget.of(1),
+                  "reader",
+                  null)
+              .id();
+      jdbc.update("INSERT INTO memory_provenance VALUES(?,?,1)", "mem_private", privateLog);
+      jdbc.update(
+          "INSERT INTO information_quarantined_payloads VALUES(?,'private fixture')", privateLog);
+      chatAnswer = "{\"verdict\":\"new\",\"reason\":\"distinct claim\"}";
+      var result = archive.write(memoryWrite("reader", Home.of("memory-project"), "write-one"));
+      assertEquals(VerdictKind.NEW, result.kind());
+      assertEquals(1, chatted.get());
+      assertFalse(chatMessages.toString().contains("mem_private"));
+      assertEquals(
+          0,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_private'", Integer.class));
+      assertEquals(dual ? 3 : 1, embedded.get());
+      assertEquals(
+          dual ? 4 : 2,
+          jdbc.queryForObject(
+              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Integer.class));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT closed AND call_limit IS NULL FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Boolean.class));
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT uses FROM memories WHERE id='mem_global_decoy'", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject("SELECT uses FROM memories WHERE id='mem_candidate'", Integer.class));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT "
+                  + (dual
+                      ? "prose_embedding IS NOT NULL AND code_embedding IS NOT NULL"
+                      : "embedding IS NOT NULL")
+                  + " FROM memories WHERE id=?",
+              Boolean.class,
+              result.memoryId()));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM memory_reasons WHERE memory_id=?",
+              Integer.class,
+              result.memoryId()));
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("reader", Home.of("memory-project"), "write-one")));
+      assertEquals(4, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              archive.applyVerdict(
+                  new MemoryProposal("x", "y", "z", "a", "b"),
+                  new Verdict(VerdictKind.NEW, null, "fixture"),
+                  Home.of("memory-project")));
+    }
+  }
+
+  @Test
+  void memoryWriteDisabledRetainsNoCallAdmissionAndRejectsReplayAndReader() {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, 0, true);
+      var result =
+          archive.write(memoryWrite("reader", Home.of("memory-project"), "disabled-write"));
+      assertTrue(result.reason().contains("disabled by policy"));
+      assertEquals(0, embedded.get());
+      assertEquals(0, chatted.get());
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT closed AND spent=0 AND call_limit=0 FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Boolean.class));
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("reader", Home.of("memory-project"), "disabled-write")));
+      jdbc.update("UPDATE project_members SET role='VIEWER' WHERE handle='reader'");
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("reader", Home.of("memory-project"), "reader-write")));
+      assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+      assertThrows(
+          DataAccessException.class,
+          () ->
+              jdbc.update(
+                  "UPDATE embedding_queries SET consumer_kind='QUERY' WHERE consumer_kind='MEMORY_WRITE'"));
+    }
+  }
+
+  @Test
+  void memoryWriteFinitePolicyDoesNotBorrowSearchOrFreshScribeAllowance() {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, 1, true);
+      seedMemory("mem_candidate", Home.of("memory-project"), true, false);
+      var result = archive.write(memoryWrite("app", Home.of("memory-project"), "finite-write"));
+      assertTrue(result.reason().contains("allowance exhausted"));
+      assertEquals(1, embedded.get());
+      assertEquals(0, chatted.get());
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Integer.class));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT embedding IS NOT NULL FROM memories WHERE id=?",
+              Boolean.class,
+              result.memoryId()));
+    }
+  }
+
+  @Test
+  void memoryWriteRevocationDuringCandidateInferenceCannotFileFlat() {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, null, true);
+      afterEmbedding = () -> jdbc.update("DELETE FROM project_members WHERE handle='reader'");
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("reader", Home.of("memory-project"), "revoked-write")));
+      assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Integer.class));
+    }
+  }
+
+  @Test
+  void memoryWriteCommittedSystemIndexingSurvivesCreatorRevocation() {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, null, false);
+      afterEmbedding = () -> jdbc.update("DELETE FROM project_members WHERE handle='reader'");
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              archive.write(memoryWrite("reader", Home.of("memory-project"), "postcommit-revoke")));
+      assertTrue(jdbc.queryForObject("SELECT embedding IS NOT NULL FROM memories", Boolean.class));
+      assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM memory_reasons", Integer.class));
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void memoryWriteStaleOutputCannotPublishAfterContentChanges(boolean dual) {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, dual, null, false);
+      afterEmbedding =
+          () -> jdbc.update("UPDATE memories SET summary='changed' WHERE summary='knowledge'");
+      var result =
+          archive.write(memoryWrite("reader", Home.of("memory-project"), "changed-output"));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT embedding IS NULL AND prose_embedding IS NULL AND code_embedding IS NULL FROM memories WHERE id=?",
+              Boolean.class,
+              result.memoryId()));
+      assertEquals(
+          "changed",
+          jdbc.queryForObject(
+              "SELECT summary FROM memories WHERE id=?", String.class, result.memoryId()));
+    }
+  }
+
+  @Test
+  void memoryWriteGlobalRequiresHumanAdministrationAndUsesFixedScope() {
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, null, false);
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("reader", Home.global(), "global-reader")));
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("app", Home.global(), "global-service")));
+      var result = archive.write(memoryWrite("admin", Home.global(), "global-admin"));
+      assertEquals(
+          BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
+          jdbc.queryForObject(
+              "SELECT home_scope_id FROM memories WHERE id=?", UUID.class, result.memoryId()));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT embedding IS NOT NULL FROM memories WHERE id=?",
+              Boolean.class,
+              result.memoryId()));
+    }
+  }
+
+  @Test
+  void memoryWriteStaleScribeTargetCannotMutateEvenWithLiveWritePermission() {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, null, true);
+      seedMemory("mem_candidate", Home.of("memory-project"), true, false);
+      chatAnswer =
+          "{\"verdict\":\"merged_into\",\"target\":\"mem_candidate\",\"reason\":\"more detail\"}";
+      afterChat =
+          () ->
+              jdbc.update(
+                  "UPDATE memories SET body='changed by another write' WHERE id='mem_candidate'");
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(memoryWrite("reader", Home.of("memory-project"), "stale-target")));
+      assertEquals(
+          "changed by another write",
+          jdbc.queryForObject("SELECT body FROM memories WHERE id='mem_candidate'", String.class));
+      assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM memory_reasons", Integer.class));
+      assertEquals(
+          2,
+          jdbc.queryForObject(
+              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Integer.class));
+    }
+  }
+
+  MemoryWrites.Request learnedMemory(String log, EntryRecord entry, String invocation) {
+    return new MemoryWrites.Request(
+        null,
+        Home.of("memory-project"),
+        new MemoryProposal("lesson", "scope", "learned body", "learner", "window"),
+        new MemoryWrites.Origin(
+            invocation, () -> {}, () -> {}, new MemoryWrites.Learning(log, List.of(entry), 0)));
+  }
+
+  @Test
+  void memoryWriteLearningUsesSystemWindowAndAtomicProvenanceWithoutCreatorMembership() {
+    memoryWriter();
+    String log =
+        new ConversationStore(jdbc)
+            .open(Home.of("memory-project"), io.aeyer.plowshare.server.agents.Budget.of(1))
+            .id();
+    var entry =
+        new EntryStore(jdbc, work)
+            .append(
+                log,
+                1,
+                io.aeyer.plowshare.server.agents.LoggedEntry.utterance(
+                    "stable source", io.aeyer.plowshare.server.agents.Speaker.person("reader")));
+    jdbc.update("DELETE FROM project_members WHERE handle='reader'");
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, null, false);
+      var result = archive.write(learnedMemory(log, entry, "learning-window"));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT embedding IS NOT NULL FROM memories WHERE id=?",
+              Boolean.class,
+              result.memoryId()));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM memory_provenance WHERE memory_id=? AND conversation_id=? AND turn_ordinal=1",
+              Integer.class,
+              result.memoryId(),
+              log));
+      assertEquals(
+          BuiltInIdentities.SYSTEM.value(),
+          jdbc.queryForObject(
+              "SELECT account_id FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              UUID.class));
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(learnedMemory(log, entry, "learning-window")));
+      jdbc.update("UPDATE entries SET content='changed source' WHERE conversation_id=?", log);
+      assertThrows(
+          RuntimeException.class, () -> archive.write(learnedMemory(log, entry, "changed-window")));
+      assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+    }
+  }
+
+  @Test
+  void memoryWriteLearningProvenanceFailureRollsBackContentAndReason() {
+    memoryWriter();
+    String log =
+        new ConversationStore(jdbc)
+            .open(Home.of("memory-project"), io.aeyer.plowshare.server.agents.Budget.of(1))
+            .id();
+    var entry =
+        new EntryStore(jdbc, work)
+            .append(
+                log,
+                1,
+                io.aeyer.plowshare.server.agents.LoggedEntry.utterance(
+                    "stable source", io.aeyer.plowshare.server.agents.Speaker.person("reader")));
+    var store =
+        new MemoryStore(jdbc) {
+          @Override
+          public void provenance(String id, MemoryWrites.Learning source) {
+            super.provenance(id, source);
+            throw new IllegalStateException("fixture provenance failure");
+          }
+        };
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, 0, false, store);
+      assertThrows(
+          RuntimeException.class,
+          () -> archive.write(learnedMemory(log, entry, "rollback-window")));
+      assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+      assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM memory_reasons", Integer.class));
+      assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM memory_provenance", Integer.class));
+      assertEquals(0, embedded.get());
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT closed AND spent=0 FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Boolean.class));
+    }
+  }
+
+  @Test
+  void memoryWriteConcurrentAdmissionsDoNotDuplicateContentOrInference() throws Exception {
+    memoryWriter();
+    try (var dispatcher = dispatcher();
+        var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var archive = memoryWrites(dispatcher, false, 1, false);
+      var start = new CountDownLatch(1);
+      var attempts = new ArrayList<Future<Boolean>>();
+      for (int i = 0; i < 2; i++)
+        attempts.add(
+            workers.submit(
+                () -> {
+                  start.await();
+                  try {
+                    archive.write(
+                        memoryWrite("reader", Home.of("memory-project"), "concurrent-write"));
+                    return true;
+                  } catch (RuntimeException denied) {
+                    return false;
+                  }
+                }));
+      start.countDown();
+      int accepted = 0;
+      for (var attempt : attempts) if (attempt.get(10, TimeUnit.SECONDS)) accepted++;
+      assertEquals(1, accepted);
+      assertEquals(1, embedded.get());
+      assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+      assertTrue(
+          jdbc.queryForObject(
+              "SELECT closed AND spent=1 AND call_limit=1 FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              Boolean.class));
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"merged_into", "supersedes"})
+  void memoryWriteVerdictsRetainExistingMergeAndSupersessionLifecycle(String verdict) {
+    memoryWriter();
+    try (var dispatcher = dispatcher()) {
+      var archive = memoryWrites(dispatcher, false, null, true);
+      seedMemory("mem_candidate", Home.of("memory-project"), true, false);
+      chatAnswer =
+          "{\"verdict\":\""
+              + verdict
+              + "\",\"target\":\"mem_candidate\",\"reason\":\"revised evidence\"}";
+      var result = archive.write(memoryWrite("reader", Home.of("memory-project"), "verdict-write"));
+      assertEquals(verdict, result.kind().wireName());
+      assertEquals("mem_candidate", result.targetId());
+      assertEquals(1, embedded.get());
+      assertEquals(1, chatted.get());
+      if (verdict.equals("merged_into")) {
+        assertEquals("mem_candidate", result.memoryId());
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
+        assertTrue(
+            jdbc.queryForObject(
+                "SELECT body LIKE '%The memory body%' AND state='active' FROM memories WHERE id='mem_candidate'",
+                Boolean.class));
+      } else {
+        assertNotEquals("mem_candidate", result.memoryId());
+        assertEquals(
+            "superseded",
+            jdbc.queryForObject(
+                "SELECT state FROM memories WHERE id='mem_candidate'", String.class));
+        assertTrue(
+            jdbc.queryForObject(
+                "SELECT embedding IS NOT NULL FROM memories WHERE id=?",
+                Boolean.class,
+                result.memoryId()));
+      }
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM memory_reasons WHERE memory_id=?",
+              Integer.class,
+              result.memoryId()));
+    }
   }
 
   void memoryProject() {
@@ -767,8 +1265,9 @@ class GlobalPreparationPersistenceTest {
               String model, List<ChatMessage> messages, Sampling sampling, List<ToolSchema> tools) {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             chatted.incrementAndGet();
-            return new Completion(
-                "A grounded manual summary.", "stop", TokenUsage.UNKNOWN, List.of());
+            chatMessages = List.copyOf(messages);
+            afterChat.run();
+            return new Completion(chatAnswer, "stop", TokenUsage.UNKNOWN, List.of());
           }
 
           public Completion stream(

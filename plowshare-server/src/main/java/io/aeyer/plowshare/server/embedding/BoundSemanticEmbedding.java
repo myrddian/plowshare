@@ -20,7 +20,7 @@ public final class BoundSemanticEmbedding implements SemanticEmbedding {
       Operation operation, EmbeddingPermit.Task task, Supplier<Budget.Claim> claim) {
     var expected =
         switch (operation.purpose()) {
-          case DOCUMENT_PREPARATION -> EmbeddingPermit.Mode.DOCUMENT;
+          case DOCUMENT_PREPARATION, MEMORY_WRITE -> EmbeddingPermit.Mode.DOCUMENT;
           case SEMANTIC_QUERY -> EmbeddingPermit.Mode.QUERY;
           default -> throw new IllegalStateException("Unsupported embedding operation");
         };

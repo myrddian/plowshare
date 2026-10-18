@@ -45,7 +45,8 @@ public class ArchiveConfig {
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
       ArchiveProperties props,
-      MemoryQueries queries) {
+      MemoryQueries queries,
+      org.springframework.beans.factory.ObjectProvider<MemoryWrites> writes) {
     store.protectInformation();
     var archive =
         new Archive(
@@ -57,6 +58,7 @@ public class ArchiveConfig {
             props.getIndexThreshold(),
             props.getHalfLifeDays());
     archive.useQueries(queries);
+    archive.useWrites(writes::getObject);
     return archive;
   }
 

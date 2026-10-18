@@ -404,8 +404,8 @@ public final class Learner implements Learning, UsageAware {
     }
 
     int filed = 0;
-    for (MemoryProposal proposal : proposed) {
-      if (file(proposal, window, owner)) {
+    for (int ordinal = 0; ordinal < proposed.size(); ordinal++) {
+      if (file(proposed.get(ordinal), window, owner, ordinal)) {
         filed++;
       }
     }
@@ -439,9 +439,27 @@ public final class Learner implements Learning, UsageAware {
    *
    * @return whether the archive took it
    */
-  private boolean file(MemoryProposal proposal, LearningWindow window, UsageAttribution owner) {
+  private boolean file(
+      MemoryProposal proposal, LearningWindow window, UsageAttribution owner, int ordinal) {
     try {
       Validation.check(proposal, archive.maxBodyChars());
+      if (archive.writing()) {
+        archive.write(
+            new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
+                null,
+                window.home(),
+                proposal,
+                new io.aeyer.plowshare.server.archive.MemoryWrites.Origin(
+                    "learning:" + window.conversationId() + ":" + window.ordinals() + ":" + ordinal,
+                    () -> {
+                      if (Thread.currentThread().isInterrupted())
+                        throw new IllegalStateException("Learning ended");
+                    },
+                    () -> {},
+                    new io.aeyer.plowshare.server.archive.MemoryWrites.Learning(
+                        window.conversationId(), window.entries(), ordinal))));
+        return true;
+      }
       Scribe.Judgement judged =
           owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
               ? scribe.judge(proposal, window.home())

@@ -1,7 +1,8 @@
 # Follow-on slice 17: memory writes and Scribe
 
-Status: proposed implementation scope, 18 October 2026. Documentation only;
-no runtime, API, configuration or database change is implemented by this plan.
+Status: implemented under the subsequent explicit instruction, 18 October 2026.
+The original plan and baseline findings follow; the implementation record below
+identifies changes, verification and exclusions. No public API or deployment.
 Source baseline: `1c08347b0c564bf2147f114a648b4e6bd3e86226`.
 
 Depends on implemented slices 04–08, 13, the shared SYSTEM embedding foundation
@@ -279,3 +280,99 @@ If binding an existing producer requires a new public target or lifecycle/recove
 capability, record the exact gap and revise this plan before expanding scope.
 Historical evidence cannot reconstruct a live operation or justify uncertain
 replay. This proposal authorizes no implementation or migration execution.
+
+
+## Implementation record
+
+Implemented from the committed plan `cd8e7cd639b5aa5a97c4bd1224e7f886aff942d2`
+under the explicit slice 17 instruction. The selected consumers are existing
+HTTP/frame writes, the ordinary agent `memory_write` tool and Learner proposal
+filing. Extraction, Curator/promotion and independent maintenance are not enabled
+or given these permits.
+
+- `MemoryWrites` carries a typed proposal, trusted request/run/learning origin and
+  separate liveness/caller-authority fences. `BoundMemoryWrites` admits the write,
+  supplies same-home candidates and exact Scribe chat claims, and commits through
+  Archive's existing lifecycle through MemoryFiling and MemoryJudgements
+  interfaces. MemoryWriteRepository owns identity, privacy, provenance and
+  publication persistence; MemoryStore implements it.
+- Production Archive composition requires write admission independently of
+  accounting. Legacy bare verdict/Scribe helpers refuse there. Model arguments
+  cannot choose policy, SYSTEM identity, invocation or payer. Runtime supplies
+  original call identity and WRITE/target/cancellation checks, preserving the
+  existing document-input restriction and acting boundaries.
+- The operation explicitly selects `plowshare.archive.write-budget`, with the
+  environment override `PLOWSHARE_MEMORY_WRITE_BUDGET`. Default/empty/unlimited
+  has no finite ceiling; zero disables optional inference; positive limits share
+  one retained source across candidates, consult and indexing. The common parser
+  preserves read-policy syntax. Search and conversation ceilings do not apply
+  merely because they exist. Actual requests retain monotonic claims and usage.
+- Existing source/claim tables are reused. V164 adds the closed MEMORY_WRITE
+  purpose and immutable consumer classification; only memory-write sources may
+  retain a zero-call admission. Disabled/no-model writes therefore retain replay
+  evidence too. Old query sources keep their policy and constraints. No parallel
+  ledger or historical-usage relabeling is introduced.
+- Both encoder modes use the shared SemanticEmbedding foundation. Legacy reuse
+  is held inside the live admitted write and checked against its committed text;
+  a bare Precomputed is not publication authority. Dual writes use a narrow
+  `forWrite` publication adapter, exact output key/source revision and captured
+  serving/replacement profiles. Query vectors cannot substitute for DOCUMENT
+  vectors. Unknown equivalent batches cannot be retried under another phase.
+- Content/reason/demotion/provenance retain one transaction; provider IO is
+  outside it. Candidate reads and mutations take short scope/source/privacy
+  fences. Publication uses slot-before-source ordering, consistent with profile
+  activation. Legacy publication also compares scope, source revision, canonical
+  text, state and privacy atomically. These short memory fences serialize result
+  assembly/mutation and briefly block concurrent memory writes; no provider IO
+  runs under them.
+- Interactive query/consult permits expire at the content-commit phase transition;
+  they cannot inherit indexing's creator-independent validity. Queued consults
+  recheck retained candidate content/privacy before provider dispatch. Final
+  result disclosure also checks liveness after indexing, even if content committed.
+- After commit, indexing retains SYSTEM authority while source/operation validity
+  still holds, independently of creator membership. Current recipient access is
+  checked separately for returned results. Learning filing pins the exact retained
+  conversation/entry window and stable proposal ordinal and attaches provenance
+  inside the content transaction; it never derives authority from usage metadata.
+  Old null-project conversation windows are not silently classified as Global
+  publication destinations. This slice supplies no new Global learning producer.
+- Optional inference failures can file a valid write flat; lost authority or
+  cancellation cannot. Indexing failure/exhaustion preserves durable content,
+  claims and valid checkpoints. Operations close synchronously; retained evidence
+  cannot recreate them after restart. No retry/resume API or broader HTTP
+  idempotency guarantee is added.
+
+### Performed verification
+
+- Focused `BoundMemoryWritesTest` (13) and `MemoryWriteEntryPointsTest` (6)
+  passed. These non-database cases cover selected policy/defaults, retained claims,
+  actor/parent/request contexts without accounting, optional failure versus
+  authority loss, legacy/dual unknown-batch refusal, post-commit cancellation,
+  judgement-phase expiry, queued candidate withdrawal, Learner filing identity
+  and refusal to classify old null-project windows as Global knowledge.
+- The selected `-PfullDb --tests` invocation passed 20 cases in
+  GlobalPreparationPersistenceTest: 15 write cases plus five reused query-claim
+  regressions. PostgreSQL is required for V164, actual role/privacy predicates,
+  source/claim immutability and concurrency, transaction rollback and versioned
+  publication. Both encoder modes prove candidate privacy, same-home selection,
+  claims/usage and publication. Cases also prove Global administration, finite/
+  disabled policy, invocation replay/concurrent admission, creator revocation,
+  stale output/target refusal, merge/supersession and atomic learning provenance.
+  Deterministic providers assert IO occurs outside database transactions.
+- All 164 local Flyway versions are unique; only V164 is new. Existing migrations
+  were not edited. Documentation link targets and diff whitespace pass.
+
+- Final `./gradlew formatCheck check sdkContractCheck` passed after Java `format`.
+  All 5,879 default server tests passed across 516 suites, with no failures,
+  errors or skips. Repository formatting, architecture, Javadoc and client
+  checks passed. SDK contracts remain at 276 operations and 17 outcome codes;
+  no SDK/protocol/public operation graph was changed.
+- The first root run failed CLI's concurrent-login fixture with an interrupted
+  refresh-token renewal assertion, introduced by `f78e4f04`. The unchanged CLI
+  task passed all 70 tests on rerun, and the final root check passed. No CLI fix
+  was included.
+
+No live model, production database, credentials, deployment, full database suite,
+dockerSmoke or native SDK conformance was involved. All 17 currently documented
+slices are now implemented for their supported paths. The roadmap's separately
+deferred consumers and broader migration gaps are not completed by this slice.

@@ -40,6 +40,12 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   }
 
   @Override
+  public DualEmbeddings forWrite(EmbeddingAuthorization permit) {
+    return new DispatchingDualEmbeddings(
+        repository, dispatcher, tokenizers, Objects.requireNonNull(permit));
+  }
+
+  @Override
   public DualEmbeddings forQuery(EmbeddingPermit permit) {
     if (permit.mode() != EmbeddingPermit.Mode.QUERY)
       throw new IllegalArgumentException("Query permit required");
@@ -215,7 +221,7 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
             if (!(preparation == null
                 ? repository.publish(target, missing.get(i), output.get(i))
                 : repository.publish(
-                    target, missing.get(i), output.get(i), preparation::require))) {
+                    target, missing.get(i), output.get(i), preparation::publicationFence))) {
               if (preparation != null)
                 throw new IllegalStateException("Preparation output changed");
               completed.remove(missing.get(i).key());

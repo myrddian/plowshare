@@ -12,6 +12,7 @@ import java.util.UUID;
 public interface SystemOperations {
   enum Purpose {
     SEMANTIC_QUERY,
+    MEMORY_WRITE,
     DOCUMENT_PREPARATION,
     CONVERSATION_COMPACTION,
     SKILL_SUMMARY,

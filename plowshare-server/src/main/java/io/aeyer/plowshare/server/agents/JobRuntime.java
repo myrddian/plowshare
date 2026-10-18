@@ -3990,7 +3990,27 @@ public final class JobRuntime {
                     .withInputs(informationInputs, transcript.conversationId());
       }
       if (tool instanceof MemoryTools.Write write)
-        tool = write.forRun(informationInputs, transcript.conversationId());
+        tool =
+            write.forRun(
+                informationInputs,
+                transcript.conversationId(),
+                callerHandle,
+                () -> {
+                  if (cancelled.getAsBoolean())
+                    throw new IllegalStateException("Memory write run ended");
+                },
+                () -> {
+                  if (operation == null
+                      || !operation
+                          .actions()
+                          .contains(io.aeyer.plowshare.server.access.AuthorityAction.WRITE))
+                    throw new IllegalStateException("Memory write action unavailable");
+                  operations.requireTargets(operation, toolHome, List.of());
+                  if (informationInputs != null
+                      && informationInputs.hasInputs(transcript.conversationId()))
+                    throw new IllegalStateException(
+                        "Document inputs cannot be published as memory");
+                });
       if (tool instanceof InformationTool information) {
         tool =
             information

@@ -46,16 +46,7 @@ public record EmbeddingProperties(
   }
 
   private static Integer searchCeiling(String policy) {
-    if (policy.equalsIgnoreCase("unlimited")) return null;
-    try {
-      int limit = Integer.parseInt(policy);
-      if (limit >= 0) return limit;
-    } catch (NumberFormatException invalid) {
-      throw new IllegalArgumentException(
-          "plowshare.embeddings.search-budget must be unlimited or a nonnegative integer", invalid);
-    }
-    throw new IllegalArgumentException(
-        "plowshare.embeddings.search-budget must be unlimited or a nonnegative integer");
+    return SpendingPolicy.limit(policy, "plowshare.embeddings.search-budget");
   }
 
   public void validate() {

@@ -1009,6 +1009,9 @@ plowshare:
     # and an entry naming one of those literally refuses the boot.
     allow-private: ${PLOWSHARE_FETCH_ALLOW_PRIVATE:}
   archive:
+    # One filing operation, including Scribe and indexing. Search policy is separate.
+    # unlimited is the default; 0 disables optional inference; positive caps actual requests.
+    write-budget: ${PLOWSHARE_MEMORY_WRITE_BUDGET:unlimited}
     max-body-chars: ${PLOWSHARE_MAX_BODY_CHARS:8000}
     index-threshold: ${PLOWSHARE_INDEX_THRESHOLD:200}
     half-life-days: ${PLOWSHARE_HALF_LIFE_DAYS:30.0}

@@ -14,9 +14,10 @@ completion extends the selector on existing information operations.
 
 This is not a complete cutover. Slice 15 supplies document-query operation
 allowances and shared SYSTEM embedding execution; slice 16 connects selected
-memory recall and automatic Reminder reads. Memory write/Scribe/curation,
-ask/deliberation and independent-maintenance bindings remain deferred. Production inference without supported
-evidence refuses.
+memory recall and automatic Reminder reads. Slice 17 connects existing memory
+writes/Scribe and Learner filing with their own explicit operation policy and
+fenced publication. Curation/promotion, ask/deliberation and independent-maintenance
+bindings remain deferred. Production inference without supported evidence refuses.
 Independent Relay orchestration roots now use retained lineage. Nested/model-triggered
 orchestration starts still refuse: their existing fresh allowances do not retain a parent budget.
 Non-conversation child allowances cannot resume under replacement leases. Original
@@ -599,16 +600,17 @@ The implemented [slice 16](authority-substrate-slices/16-memory-query-embedding-
 connects existing recall and automatic Reminder reads with typed memory admission,
 tier/sandbox intersection, disclosure and the applicable read-side spending policy.
 It defaults to unlimited; another finite budget does not automatically apply.
-Memory write/Scribe/curation, ask/deliberation and independent maintenance remain
-deferred. These consumers need their own operation contracts before activation.
-The proposed [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
-now scopes memory writes, Scribe candidates/consult and the existing Learner filing
+Curation/promotion, ask/deliberation and independent maintenance remain deferred.
+These consumers need their own operation contracts before activation.
+The implemented [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
+connects memory writes, Scribe candidates/consult and the existing Learner filing
 hook. It reuses shared SYSTEM dispatch, retained claims and source-version
-publication, and plans a single write-operation spending policy: unlimited by
-default, explicitly disabled/limited when configured. The write setting does not
-exist at this baseline; search policy and nearby conversation budgets are not
-implicitly applied. This is planning only. Curator/promotion, independent repair,
-ask/deliberation and broader read/acting targets remain separate.
+publication, with one write-operation spending policy: unlimited by default,
+explicitly disabled/limited through `plowshare.archive.write-budget`. Search policy
+and nearby conversation budgets are not implicitly applied. V164 retains closed
+write-source classification and zero-call invocation evidence without changing
+historical query claims. Curator/promotion, independent repair, ask/deliberation
+and broader read/acting targets remain separate.
 
 - Document-preparation embedding now carries bounded SYSTEM authorization and
   claims against the retained processing allowance, shared with chat preparation.

@@ -500,6 +500,32 @@ public final class MemoryTools {
       this.schema = ToolSchema.from(WRITE_NAME, WRITE_DESCRIPTION, writeSchema());
     }
 
+    private String account;
+    private String log;
+    private String call;
+    private Runnable alive;
+    private Runnable authority;
+
+    /** Runtime supplies independent cancellation and caller/action fences. */
+    public Write forRun(
+        io.aeyer.plowshare.server.information.InformationJobs inputs,
+        String log,
+        String account,
+        Runnable alive,
+        Runnable authority) {
+      Write copy = forRun(inputs, log);
+      copy.account = account;
+      copy.log = log;
+      copy.alive = Objects.requireNonNull(alive);
+      copy.authority = Objects.requireNonNull(authority);
+      return copy;
+    }
+
+    @Override
+    public void calledAs(String id) {
+      call = id;
+    }
+
     private java.util.function.BooleanSupplier restricted = () -> false;
 
     public Write forRun(io.aeyer.plowshare.server.information.InformationJobs inputs, String log) {
@@ -565,6 +591,18 @@ public final class MemoryTools {
         throw new BadArguments(invalid.getMessage());
       }
       Validation.check(proposal, archive.maxBodyChars());
+      if (archive.writing()) {
+        if (account == null || log == null || call == null || alive == null || authority == null)
+          throw new IllegalStateException("Memory write requires its retained origin");
+        return render(
+            archive.write(
+                new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
+                    account,
+                    home,
+                    proposal,
+                    new io.aeyer.plowshare.server.archive.MemoryWrites.Origin(
+                        "tool:" + log + ":" + call, alive, authority, null))));
+      }
       Scribe.Judgement judged =
           owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
               ? scribe.get().judge(proposal, home)

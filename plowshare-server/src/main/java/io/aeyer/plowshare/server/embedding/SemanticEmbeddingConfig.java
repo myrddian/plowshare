@@ -9,6 +9,15 @@ import org.springframework.context.annotation.*;
 @Configuration
 @EnableConfigurationProperties(EmbeddingProperties.class)
 public class SemanticEmbeddingConfig {
+  /** Source/version access is also needed by admitted legacy write-time publication. */
+  @Bean
+  public EmbeddingWorkRepository embeddingWorkRepository(
+      org.springframework.jdbc.core.JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      EmbeddingSpaceRepository spaces) {
+    return new JdbcEmbeddingWorkRepository(jdbc, transactions, spaces);
+  }
+
   @Bean
   public QueryEmbeddings queryEmbeddings(
       QueryEmbeddingRepository records,

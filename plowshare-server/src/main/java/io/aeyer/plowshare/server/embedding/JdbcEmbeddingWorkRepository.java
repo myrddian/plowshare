@@ -303,6 +303,9 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   public boolean publish(EmbeddingProfile target, Source expected, float[] vector, Runnable fence) {
     return transactions.inTransaction(
         () -> {
+          // Activation locks slot before source tables. The consumer fence must use that same
+          // order when it freezes memory/privacy state for publication.
+          lock(target.slot(), false);
           fence.run();
           return publish(target, expected, vector);
         });

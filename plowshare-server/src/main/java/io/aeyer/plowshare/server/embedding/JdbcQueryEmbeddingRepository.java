@@ -74,17 +74,29 @@ public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingReposit
     if (Integer.valueOf(0).equals(limit))
       throw new CallerFault(
           "Semantic search inference is disabled by plowshare.embeddings.search-budget=0");
+    return openSource(pin, fingerprint, invocation, limit, "QUERY");
+  }
+
+  @Override
+  public Source openWrite(Pin pin, String fingerprint, String invocation, Integer limit) {
+    if (limit != null && limit < 0) throw new IllegalArgumentException("Invalid write allowance");
+    return openSource(pin, fingerprint, invocation, limit, "MEMORY_WRITE");
+  }
+
+  private Source openSource(
+      Pin pin, String fingerprint, String invocation, Integer limit, String consumer) {
     var source = new Source(UUID.randomUUID(), UUID.randomUUID(), limit);
     int count =
         jdbc.update(
-            "INSERT INTO embedding_queries(id,budget_id,account_id,scope_id,fingerprint,invocation,call_limit) VALUES(?,?,?,?,?,?,?) ON CONFLICT(account_id,invocation) DO NOTHING",
+            "INSERT INTO embedding_queries(id,budget_id,account_id,scope_id,fingerprint,invocation,call_limit,consumer_kind) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,invocation) DO NOTHING",
             source.id(),
             source.budget(),
             pin.account(),
             pin.scope(),
             fingerprint,
             invocation,
-            limit);
+            limit,
+            consumer);
     if (count != 1)
       throw new IllegalStateException(
           "Query invocation already admitted; reconcile without replay");

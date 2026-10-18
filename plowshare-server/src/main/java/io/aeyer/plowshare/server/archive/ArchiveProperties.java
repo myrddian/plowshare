@@ -3,8 +3,8 @@ package io.aeyer.plowshare.server.archive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * The three numbers {@link Archive}'s constructor takes and nothing else does — where they come
- * from, so an operator can change them without a rebuild.
+ * Archive sizing/decay and the explicit filing-operation spending policy. Unlimited write spending
+ * is the default; a configured zero disables optional inference.
  *
  * <p>Defaults copied from Excalibur's {@code excalibur.example.toml}, not invented: {@code
  * max_body_chars = 8000}, {@code toc_threshold = 200}, {@code half_life_days = 30.0}. Matching the
@@ -13,6 +13,23 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "plowshare.archive")
 public class ArchiveProperties {
+
+  private String writeBudget = "unlimited";
+
+  public String getWriteBudget() {
+    return writeBudget;
+  }
+
+  public void setWriteBudget(String value) {
+    writeBudget = value == null || value.isBlank() ? "unlimited" : value.strip();
+    writeLimit();
+  }
+
+  /** Null deliberately means unlimited, not absence of operation authority. */
+  public Integer writeLimit() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+        writeBudget, "plowshare.archive.write-budget");
+  }
 
   /** Body length ceiling enforced by {@link Validation}. */
   private int maxBodyChars = 8000;

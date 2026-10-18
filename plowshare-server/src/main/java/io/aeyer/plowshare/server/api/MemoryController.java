@@ -114,6 +114,22 @@ public class MemoryController {
         RequestedProposal.toFile(request.proposal(), request.verdict() != null);
     Home home = RequestedHome.in(request.project());
     Validation.check(proposal, archive.maxBodyChars());
+    if (archive.writing()) {
+      Thread requester = Thread.currentThread();
+      return ResponseEntity.ok(
+          archive.write(
+              new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
+                  handle,
+                  home,
+                  proposal,
+                  io.aeyer.plowshare.server.archive.MemoryWrites.Origin.request(
+                      () -> {
+                        if (requester.isInterrupted())
+                          throw new IllegalStateException("Request ended");
+                      }))));
+    }
+    // Isolated fixture compatibility. Production writes carry an admitted operation whose
+    // completed legacy vector may be reused; dual DOCUMENT vectors are generated separately.
     // One embedding call, not two, and it used to be two. Scribe.judge
     // embeds its candidate question with the same text the memory will be
     // embedded for, so it hands the vector back and applyVerdict stores it
