@@ -327,7 +327,7 @@ function renderDetail() {
     return;
   }
   const root = d.root,
-    budget = root.potTotal ?? 0,
+    budget = root.potTotal,
     spent = root.potSpent ?? 0;
   const ancestors: { id: string; title: string }[] = [],
     seen = new Set<string>();
@@ -344,7 +344,8 @@ function renderDetail() {
     parent = p?.parent ?? null;
   }
   content.innerHTML = `<nav class="board-breadcrumb" aria-label="Topic ancestors">${ancestors.map((p) => `<button data-topic="${esc(p.id)}">${esc(p.title)}</button> / `).join('')}<span>${esc(d.topic.title)}</span></nav><header><div class="eyebrow">${esc(d.topic.project)}${d.topic.swarm ? ` · ${esc(d.topic.swarm.name)}` : ''} · ${esc(d.topic.label)} · ${esc(d.topic.state)}</div><h2>${esc(d.topic.title)}</h2><p class="board-subtitle">Opened by ${esc(d.topic.opener)} · ${esc(date(d.topic.openedAt))} · ${esc(d.topic.id)}${d.topic.closedAt ? ` · closed ${esc(date(d.topic.closedAt))}` : ''}</p></header>${reading?.error ? `<p class="error-banner">${esc(reading.error)}</p>` : ''}
-    <div class="board-budget"><meter min="0" max="${Math.max(1, budget)}" value="${spent}"></meter><strong>${spent} / ${budget} model calls spent</strong><small>${root.reserve ?? 0} closing reserve${d.topic.parent ? ' · shared root budget' : ''}</small></div>
+    <div class="board-budget">${budget === null ? '' : `<meter min="0" max="${Math.max(1, budget)}" value="${spent}"></meter>`}<strong>${budget === null ? `${spent} model calls spent · unlimited allowance` : `${spent} / ${budget} model calls spent`}</strong><small>${root.reserve ?? 0} closing reserve${d.topic.parent ? ' · shared root budget' : ''}</small>${budget !== null && !root.closedAt ? `<button class="secondary-button" data-topup="${esc(root.id)}" ${!state.connected || budget === 2147483647 ? 'disabled' : ''}>Raise allowance…</button>` : ''}</div>
+    ${root.state === 'exhausted' && !root.closedAt ? '<p class="board-subtitle">The shared allowance is exhausted. Raise it to continue owed work, then retry any failed members. Step limits remain separate.</p>' : ''}
     <h3>${icon('activity')}Seats</h3>${d.seats.length ? seatsHtml(d.seats, d.topic.project) : '<p class="board-subtitle">No agent seats on this topic.</p>'}
     ${d.topic.resolution ? `<section class="board-resolution"><div class="eyebrow">Resolution</div>${prose(d.topic.resolution)}</section>` : ''}
     <h3>${icon('message')}Messages · ${d.messages.length}</h3>${
@@ -696,7 +697,7 @@ function renderOpening() {
     choices
       .map(
         (type) =>
-          `<option value="${esc(type.name)}" ${type.selection ? '' : 'disabled'}>${esc(type.name)} · ${type.members.length} members · ${type.budget} calls</option>`,
+          `<option value="${esc(type.name)}" ${type.selection ? '' : 'disabled'}>${esc(type.name)} · ${type.members.length} members · ${type.budget === null ? 'unlimited calls' : `${type.budget} calls`}</option>`,
       )
       .join('');
   // Keep a retained draft's selector even when the definition disappears; receipt recovery
@@ -864,6 +865,63 @@ $('#board-create-form').addEventListener(
 );
 
 const retryDialog = $<HTMLDialogElement>('#board-retry-dialog');
+const topupDialog = $<HTMLDialogElement>('#board-topup-dialog');
+const topupLimit = $<HTMLInputElement>('#topup-limit');
+let topupRoot = '';
+let topupBusy = false;
+document.addEventListener('click', (event) => {
+  const target = (event.target as Element).closest<HTMLElement>('[data-topup]');
+  const root = state.board.details[state.board.selected ?? '']?.value?.root;
+  if (
+    !target ||
+    !root ||
+    root.id !== target.dataset.topup ||
+    root.potTotal === null ||
+    topupBusy
+  )
+    return;
+  topupRoot = root.id;
+  topupLimit.min = String(root.potTotal + 1);
+  topupLimit.value = '';
+  $('#topup-description').textContent =
+    `${root.title}: ${root.potSpent ?? 0} calls spent of ${root.potTotal}. Enter the new total, including calls already spent.`;
+  $('#topup-error').hidden = true;
+  topupDialog.showModal();
+});
+$('#board-topup-close').addEventListener('click', () => {
+  if (!topupBusy) topupDialog.close();
+});
+topupDialog.addEventListener('cancel', (event) => {
+  if (topupBusy) event.preventDefault();
+});
+$('#board-topup-form').addEventListener(
+  'submit',
+  ownedEvent(async (event: SubmitEvent) => {
+    event.preventDefault();
+    if (topupBusy || !topupRoot) return;
+    topupBusy = true;
+    $<HTMLButtonElement>('#topup-submit').disabled = true;
+    $<HTMLButtonElement>('#board-topup-close').disabled = true;
+    try {
+      const reply = await window.plowshare.request({
+        action: 'board-topup',
+        topic: topupRoot,
+        maxModelCalls: Number(topupLimit.value),
+      });
+      update(reply.state);
+      topupDialog.close();
+    } catch (error) {
+      $('#topup-error').textContent = errorMessage(error);
+      $('#topup-error').hidden = false;
+      // Refresh reads current state after uncertain delivery; the mutation is never replayed.
+      await action({ action: 'board-refresh' });
+    } finally {
+      topupBusy = false;
+      $<HTMLButtonElement>('#topup-submit').disabled = false;
+      $<HTMLButtonElement>('#board-topup-close').disabled = false;
+    }
+  }),
+);
 const retryLimit = $<HTMLInputElement>('#retry-limit');
 let retryDraft:
   | {

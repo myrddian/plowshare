@@ -283,7 +283,8 @@ public class OrchestrationsConfig {
       Checking checking,
       CallerAccess access,
       org.springframework.jdbc.core.JdbcTemplate jdbc,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      io.aeyer.plowshare.server.allowances.AllowanceRepository allowances) {
     var scripts = new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc);
     runtime.useScripts(scripts);
     Orchestrations orchestrations =
@@ -305,7 +306,8 @@ public class OrchestrationsConfig {
             access,
             new JdbcOrchestrationRecovery(jdbc, work),
             scripts,
-            operations);
+            operations,
+            allowances);
     orchestrations.useResumeListener(
         (run, requestId) ->
             pushes

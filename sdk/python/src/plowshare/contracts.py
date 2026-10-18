@@ -1366,7 +1366,7 @@ class BoardMessageDto:
 @dataclass(frozen=True, kw_only=True)
 class SwarmSelectionDto:
     """Validated fields of the SwarmSelection protocol contract."""
-    budget: float
+    budget: ScheduleDefinitionDtoLimitsDtoMaxModelCalls
     description: str
     members: tuple[str, ...]
     name: str
@@ -3460,7 +3460,7 @@ class SwarmDto:
 @dataclass(frozen=True, kw_only=True)
 class SwarmTypeDto:
     """Validated fields of the SwarmType protocol contract."""
-    budget: float
+    budget: ScheduleDefinitionDtoLimitsDtoMaxModelCalls
     members: tuple[str, ...]
     name: str
     origin: str

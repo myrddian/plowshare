@@ -1,20 +1,138 @@
 # Standalone allowances and execution recovery
 
-Status: proposed implementation plan, 19 October 2026; the separately authorized
-SYSTEM summary spending correction is implemented as recorded below.
-Source baseline: `1a075d51a87108ecfd8c927542a5a27c663a13cf`.
-Findings below describe this checkout, not an inspected live deployment.
-
-Implementation update, 19 October 2026: the SYSTEM compaction/skill-summary
-spending separation below is implemented and locally tested. The remaining
-standalone-row migration, swarm recovery and other work packages are still
-proposed; this document is not a claim that the full plan has been implemented.
+Status: implementation authorized, 19 October 2026. Packages A–E are implemented
+in this checkout; final local verification is recorded below. No live deployment
+or data adoption is claimed.
+Source baseline for the original audit: `1a075d51a87108ecfd8c927542a5a27c663a13cf`.
+The inventory below describes the pre-change source; the implementation mapping
+supersedes its storage descriptions.
 
 This follows the authority-substrate work and the
 [slice 18 inventory](authority-substrate-slices/18-deferred-scope-and-cutover.md).
 It scopes the remaining coupling between execution and allowance storage,
 including existing swarm recovery. It does not reopen the eighteen historical
 slices or claim that their supported paths never worked.
+
+## Implementation mapping
+
+- **A:** `AllowanceId`, `AllowanceSnapshot` and `AllowanceRepository` define the
+  internal contract. `JdbcAllowanceRepository` and migration V170 own standalone
+  `execution_allowances` rows and immutable `execution_allowance_claims`. A claim
+  atomically increments one counter and retains its ordinal/ceiling before
+  inference admission; admission validates the claim without charging twice. Source
+  retention is explicit; attaching/restoring an existing Budget is read-only and
+  does not insert rows during history/status queries.
+- **B:** operation envelopes carry a typed allowance ID, separately from actual
+  input/parent conversation IDs. Orchestration start/recovery reconstructs that
+  ID through the repository. Conversations are reference adapters and projected
+  status, never spending stores. Turn completion updates its timestamp only.
+  Applicable automatic increases update the canonical ceiling without resetting
+  usage. A stale reader refreshes shared usage before an exhausted-source decision.
+  Board continuations retain their owning lease callback and its closing floor.
+  Child binding accepts the retained parent or a proven derived continuation of
+  it, while retaining the exact allowance and scoped grant ancestry.
+- **C:** board trees and message instances share canonical rows. Unlimited roots
+  have no finite total or percentage reserve; every wake still has a finite
+  scheduling window. Root claim ordinals are distinct from a wake's local spent
+  count. A retry step override does not enlarge that call window. Exhaustion
+  leaves the tree recoverable; top-up retains history/spent, alerts agent openers
+  through the existing exhausted-notice route and re-owes eligible unread work.
+  Failed members require explicit retry. Explicit close remains terminal.
+- **D:** processing, query and memory-write repositories claim their selected
+  source directly. Processing logs do not mirror spending. Source closure,
+  generation/lease validity, target fences and current read authority still apply.
+  Query closure serializes with its last claim. Existing SYSTEM consumers with
+  live `Budget` objects join canonical storage at retained inference admission;
+  independent service operations remain independent sources. The older ingest
+  and summariser stages keep their distinct existing selected policies; this is
+  not permission to merge them into one payer.
+- **E:** established status DTOs read canonical projections. Old counter columns
+  retain insertion/backfill snapshots and reject subsequent mutations. Legacy
+  string budget references and conversation-binding helpers are removed from
+  `Budget`; historical string evidence remains stored. No new public operation
+  was added. The changed swarm catalog/selection `budget` fields use JSON null
+  for unlimited, with regenerated TypeScript/Python/Go/.NET contracts. Existing
+  `BoardTopic.potTotal` was already nullable. Desktop adds an affordance for
+  existing `board.topup` and reconciles uncertain delivery by reading, with no
+  automatic mutation replay. Desktop and TUI display unlimited explicitly.
+
+New conversation admissions default to `unlimited` through
+`PLOWSHARE_CONVERSATION_BUDGET`; configure a positive value to retain a finite
+new-admission default, or zero to disable inference. Explicit request limits and
+existing stored policies survive unchanged. Omitted swarm-definition budgets
+also mean unlimited; explicit finite definition/deployment policies still apply.
+Existing processing/ask/service policy selection is preserved. Unlimited does not
+remove step limits, capacity routing, current authority or operation validity.
+
+Operation controls use the existing scoped role helpers: Contributor-or-higher
+for top-up/retry, Reader-or-higher for explicit project/topic inspection. This
+allows an authorized operator to manage another account's public project topic
+without becoming its executor or gaining access to private messaging topics.
+Account-wide aggregate inspection remains account scoped. Token/application and
+acting ceilings still apply at the existing request boundaries.
+
+An explicit-only metadata revision's zero allocation remains allocatable through
+its existing authorized processing control. This is different from a disabled
+SYSTEM/native source. Automatic increases cannot enable either zero source;
+source allocation does not authorize processing outside the existing lifecycle.
+
+### Cutover and retained evidence
+
+V170 preserves existing conversation, processing and query UUIDs/usage. Board
+roots receive one canonical ID; existing seat/delegate references migrate to that
+root. Historical per-wake inference UUIDs/ordinals stay separate because merging
+them would collide. Historical input conversation attribution is retained as
+provenance, not reinterpreted as an allowance owner or funding check.
+
+Migration must run with old workers stopped and pending/unknown provider work
+reconciled through its existing receipts. Take the deployment's normal verified
+backup before adoption. Mixed old/new writers are unsupported: historical-counter
+writes are refused. Restart only the new binary. Old-binary rollback requires
+restoring the pre-migration backup; no live rollback or rolling upgrade has been
+proved here. Unknown legacy source references are left unavailable with an
+explicit reconciliation error; the migration never invents unlimited authority.
+Historical closed swarms are not reopened. Deployment adoption and live provider
+restart/operator acceptance remain deployment work.
+
+Independent orchestration from board-backed work remains refused: a spending ID
+alone cannot reconstruct its owning wake window, reserve, closure or scheduling
+lifecycle. This preserves the earlier unsupported boundary, now with a specific
+lifecycle refusal instead of the missing-conversation-budget error. Board wakes
+and resumed delegates continue through their existing lease adapter. Enabling an
+independent asynchronous board consumer needs a separately scoped lifecycle bridge.
+
+The previously documented delegated-runtime capability repair and monetary
+accounting/pools remain deferred. This change neither grants missing capabilities
+nor creates a new resume, reservation or billing API.
+
+## Local acceptance evidence, 19 October 2026
+
+- `format`, `formatCheck` and repository `check` passed. The default server test
+  run contains 5,909 passing cases; no full-db suite is part of that gate.
+- `sdkCheck` passed, including Node/Python/.NET/Go typed codec and real WebSocket
+  fixture conformance. Generated contracts retain 276 operations and the shared
+  DTO fixture has 485 cases. Existing toolchains were selected through the
+  documented overrides; no SDK was published.
+- The selected PostgreSQL sweep passed 298 cases across 13 classes, covering
+  conversation/source persistence, migration, concurrent claims, immutable
+  lineage, board pots/lifecycle/inspection/retry, messaging, authored information
+  and Global preparation. The final read-only/lineage follow-up passed 119 cases,
+  including derived-continuation delegation, the independent-board refusal and
+  read-only history restoration. These overlap the sweep; they are not additive
+  test totals. All used disposable Testcontainers databases; the entire database
+  suite and live deployment database were not run.
+- Desktop's 14 board tests passed, including uncertain top-up without replay.
+  The native Electron board smoke passed the top-up dialog, existing retry
+  recovery, isolation, reconnect and compact layout against its mock server.
+  The focused TUI/TypeScript allowance checks passed 11 cases.
+- Generated manifests/contracts, unique migration versions, whitespace and
+  repository documentation checks passed. The older board fixture was repaired
+  to preserve migration-owned builtin authority while truncating test data.
+
+One unchanged CLI login concurrency case failed during a broad run, then passed
+its isolated rerun and full-gate rerun. Its authentication guards were not changed.
+This is local source/fixture acceptance: live provider execution, deployment
+adoption, production backup/restore and old-binary rollback remain unverified.
 
 ## Intended result
 
@@ -321,7 +439,8 @@ Those changes are part of this plan, not already implemented capabilities.
 ## Implementation work packages and completion gates
 
 These are bounded packages within this follow-on plan, not a renumbering of the
-eighteen authority slices. They are not authorized for implementation by this doc.
+eighteen authority slices. The follow-on user instruction authorized implementation
+of these packages; the implementation mapping below records the resulting boundaries.
 
 | Package | Changes | Completion gate |
 | --- | --- | --- |

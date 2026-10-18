@@ -270,7 +270,7 @@ plowshare:
   # conversation says so, and every turn it did take is in the archive. That is
   # what makes a number in the middle safe to ship and an operator's to change.
   conversations:
-    default-budget: ${PLOWSHARE_CONVERSATION_BUDGET:240}
+    default-budget: ${PLOWSHARE_CONVERSATION_BUDGET:unlimited}
     # What becomes of a conversation's stored tool results, and where they are
     # written first.
     #
@@ -403,21 +403,9 @@ plowshare:
       # export-directory: /srv/plowshare-exports
       # How many days a curator's ruling is kept before a sweep marks it.
       #
-      # UNSET, AND THAT IS THE DEFAULT RATHER THAN A GAP. This file ships numbers
-      # when there is arithmetic for them -- a finite curator policy may bound a
-      # ruling is two model calls, default-budget is 240 because a turn of the
-      # interlocutor measured about twelve. There is no arithmetic for "how many
-      # days a curator trace is worth keeping"; it depends on what this operator
-      # debugs, how often, and what their disk costs.
-      #
-      # AND THE TWO DIRECTIONS OF BEING WRONG ARE NOT SYMMETRIC, which is what
-      # decides it. default-budget can ship a number because both ways of being
-      # wrong there are recoverable: too small stops somebody mid-thought, too
-      # large costs some inference budget, and spending a budget is a designed
-      # ending. Here, too large costs disk and TOO SMALL DELETES A FILE BODY. A
-      # default that deletes is a default that has to be right, and this one
-      # cannot be derived -- so an unconfigured server ejects nothing however
-      # often a sweep is run.
+      # Unset retention ejects nothing. Retention is an independent operator decision:
+      # an overly short interval can delete an exported file body. Spending policy,
+      # including unlimited conversations, does not select a retention policy.
       #
       # WHY THE CURATOR IS THE ONE TO SET FIRST. What a curator pass DECIDED is
       # recorded by the machinery it acts through -- proposals, promotions, the

@@ -7,48 +7,20 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * One row of {@code conversations}: the long-lived thing a person talks to, and the allowance every
- * turn in it spends from.
+ * A conversation's history/lifecycle and projected allowance state.
  *
- * <h2>{@link Budget} and not two integers, which is a decision with a cost</h2>
+ * <p>The store reconstructs {@link Budget} from the canonical source. Separate readers retain the
+ * same identity and claim one durable counter atomically; within a run, delegates share the same
+ * live object as well. A status snapshot is not a reservation or permission to execute.
  *
- * <p>The row holds {@code budget_total} and {@code budget_spent}, so a record carrying an {@code
- * int} pair would be the more literal translation of it — and it would put the mistake {@code
- * Budget}'s own javadoc is written against back at every call site. That class exists because
- * "passing a number down would give the child a fresh copy of the parent's allowance"; a caller
- * holding a total and a count has to remember to say {@code Budget.resumed(total, spent)} rather
- * than {@code Budget.of(total)}, and the one that forgets hands a conversation a fresh allowance
- * and nothing anywhere fails. Handing back the object means the only budget a caller can get is the
- * right one.
- *
- * <p><b>The cost is a package dependency that did not exist before</b>, and it is named here rather
- * than left for somebody to find: this is the first import of {@code server.agents} by {@code
- * server.archive}, and {@code agents} already imports {@code archive} in five files, so the two
- * packages now refer to each other. Nothing in the build forbids it — {@code InvariantsTest} guards
- * Spring in the client, the {@code OkHttpClient} holders, the reference box's address and the key
- * prefix, and no layering rule. The tidier repair is that {@code Budget} belongs to neither
- * package: it is a value that jobs, delegation trees and now conversations all share. Moving it is
- * a rename across every signature that carries one and is not this task's.
- *
- * <h2>A snapshot of a row, and the live sharing is one level up</h2>
- *
- * <p>Two calls to {@link ConversationStore#find} return two <em>different</em> {@link Budget}
- * objects at the same count, because each is built from what the row said when it was read. That is
- * what a row snapshot is, and it is not the sharing {@code Budget} is for: within a turn, one
- * object is shared by reference down the delegation tree exactly as {@code Curator.pass} shares one
- * across a pass, and {@link ConversationStore#turnEnded} writes what it came to back onto the row.
- * <b>Two turns running concurrently on one conversation would each hold their own object and each
- * see the whole remainder</b>; the row is where that has to be settled, and {@code turnEnded}
- * refusing to lower a row's spending is the half of it this task can honestly build. Whether a
- * conversation may have two turns in flight at all is the task that builds turns' question.
+ * <p>A child can reference the source without exposing a second owned budget here. Its source is
+ * resolved through the retained relationship; turn completion stamps history without rewriting
+ * spending. Turn serialization and lifecycle checks remain independent execution controls.
  *
  * @param id stable identity, {@code cnv_} under {@code MemoryIds.mint}
- * @param home the project this conversation is held in, or {@code Home.global()}. Typed as {@link
- *     Home} and not as a bare project string, for the reason {@link Proposal#home()} gives: the
- *     global tier stays the absence of a project rather than a name a project could take. Global is
- *     ordinary here — {@code RequestedHome.in} mints one for every submission that names no project
- *     — and {@code V6__conversations.sql} says why the column is nullable rather than carrying the
- *     plan's suggested NOT NULL
+ * @param home the execution project, or the retained Global compatibility value for historical
+ *     records and bounded SYSTEM traces. Ordinary admission selects an explicit account/project
+ *     home; an absent project is not a fresh unrestricted execution scope
  * @param origin which door this conversation came through — see {@link Origin}, which carries the
  *     whole of why it is stored rather than derived. Never null: every conversation came through
  *     one of them, and a row that did not say which is a run nobody classified
@@ -76,16 +48,9 @@ import java.util.Objects;
  *     defaulted to {@link #createdAt()}, because "nobody has spoken into this yet" and "one turn,
  *     at the instant it was opened" are different facts and a conversation opened and never used is
  *     exactly the row where the difference is interesting
- * @param budget the allowance at the count the row records, or {@code null} for a conversation that
- *     spends an allowance it does not own.
- *     <p><b>Nullable is the one thing about this record that had to change when every run became a
- *     conversation, and it is structural rather than defensive.</b> A delegated child spends its
- *     parent's {@link Budget} by reference and a curator's ruling spends the pass's; a row carrying
- *     a copy of either would be a second allowance of the same size, and the first thing to sum
- *     this column would count every model call twice — with both rows holding plausible numbers,
- *     which is what makes that failure quiet. So such a row holds nothing at all and {@code
- *     conversations_an_allowance_is_owned_or_shared} refuses to let it hold anything. {@link
- *     Origin#ownsItsAllowance()} is the same rule in Java, and the two must agree
+ * @param budget the canonical allowance projected at read time, or {@code null} for a log that
+ *     shares another operation's source. The retained allowance reference still identifies its
+ *     counter; null here does not mean unlimited or create a fresh allowance
  * @param turnCap the ceiling this conversation puts on each of its turns, or {@code null} for a
  *     conversation that does not decide one — in which case the agent answering the turn is capped
  *     at what its own definition asks for. <b>Three states in one nullable field</b>, and the null

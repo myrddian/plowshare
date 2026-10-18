@@ -771,7 +771,11 @@ background(
         }
         if (request.action === 'board-view' && request.view !== board[0])
           throw new Error('Open this section from the workspace sidebar.');
-        if (request.action === 'board-retry') return client.dispatch(request);
+        if (
+          request.action === 'board-retry' ||
+          request.action === 'board-topup'
+        )
+          return client.dispatch(request);
         if (
           request.action === 'board-swarm-types' ||
           request.action === 'board-create' ||
@@ -805,6 +809,7 @@ background(
           'board-swarm-types',
           'board-create',
           'board-retry',
+          'board-topup',
           'board-post',
           'board-post-topics',
         ].includes(request?.action)

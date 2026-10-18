@@ -169,7 +169,7 @@ public final class BoundOperationEmbeddings implements OperationEmbeddings {
                                 fingerprint,
                                 home.toString(),
                                 sources.toString(),
-                                budget.reference())),
+                                budget.identity().toString())),
                         this::live),
                     task,
                     () ->

@@ -91,13 +91,49 @@ class BoardPotTest {
     }
 
     @Override
-    public void spend(String root, int calls) {
+    public java.util.Optional<Budget.Claim> claim(String root, int reserve) {
       if (!failedOnce) {
         failedOnce = true;
         throw new RuntimeException("simulated: the connection to the pot dropped");
       }
-      super.spend(root, calls);
+      return super.claim(root, reserve);
     }
+  }
+
+  @Test
+  void unlimitedRootsShareOneIdentityWhileEachWakeKeepsItsOwnFiniteWindow() {
+    BoardTopic topic =
+        store.openRoot(
+            new BoardStore.NewTopic(
+                "payments",
+                "Review",
+                "REVIEW",
+                "enzo",
+                BoardTopic.BY_PERSON,
+                "enzo",
+                null,
+                null,
+                0));
+    BoardPot pot = new BoardPot(store);
+    Budget first = pot.lease(topic.id(), false, 2).orElseThrow();
+    Budget second = pot.lease(topic.id(), false, 2).orElseThrow();
+    assertEquals(first.identity(), second.identity());
+    assertEquals(1, first.tryClaim().orElseThrow().ordinal());
+    assertEquals(2, second.tryClaim().orElseThrow().ordinal());
+    assertEquals(3, first.tryClaim().orElseThrow().ordinal());
+    assertTrue(first.tryClaim().isEmpty());
+    assertEquals(2, first.spent());
+    assertEquals(1, second.spent());
+    assertFalse(pot.spent(topic.id(), false));
+    pot.settle(topic.id(), first);
+    pot.settle(topic.id(), second);
+    Budget continued =
+        new BoardPot(new BoardStore(jdbc, clock)).lease(topic.id(), false, 2).orElseThrow();
+    assertEquals(first.identity(), continued.identity());
+    assertEquals(4, continued.tryClaim().orElseThrow().ordinal());
+    org.junit.jupiter.api.Assertions.assertNull(store.topic(topic.id()).orElseThrow().potTotal());
+    store.close(topic.id(), "explicit closure");
+    assertTrue(continued.tryClaim().isEmpty());
   }
 
   @Test

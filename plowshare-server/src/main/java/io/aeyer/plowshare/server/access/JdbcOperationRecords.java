@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.access;
 
+import io.aeyer.plowshare.server.allowances.AllowanceId;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -109,22 +110,30 @@ public final class JdbcOperationRecords implements OperationRecords {
                         .orElseThrow(
                             () -> new IllegalStateException("Missing conversation admission")),
                     rs.getString("parent_conversation"),
-                    rs.getString("budget_conversation"),
+                    migratedAllowance(rs.getObject("allowance_id", UUID.class), id),
                     rs.getString("capabilities")),
             id)
         .stream()
         .findFirst();
   }
 
+  private static AllowanceId migratedAllowance(UUID source, String conversation) {
+    if (source == null)
+      throw new IllegalStateException(
+          "Operation "
+              + conversation
+              + " has no migrated allowance; reconcile retained evidence before resuming");
+    return new AllowanceId(source);
+  }
+
   @Override
   public List<AccessRequest.Resource> targets(UUID operation) {
     var targets =
         jdbc.query(
-            "SELECT conversation,parent_conversation,budget_conversation FROM operation_conversations WHERE operation=?",
+            "SELECT conversation,parent_conversation FROM operation_conversations WHERE operation=?",
             (rs, n) ->
-                java.util.stream.Stream.of(rs.getString(1), rs.getString(2), rs.getString(3))
+                java.util.stream.Stream.of(rs.getString(1), rs.getString(2))
                     .filter(Objects::nonNull)
-                    .filter(id -> !id.startsWith("budget:"))
                     .distinct()
                     .map(
                         id ->
@@ -140,12 +149,12 @@ public final class JdbcOperationRecords implements OperationRecords {
     transactions.executeWithoutResult(
         status -> {
           jdbc.update(
-              "INSERT INTO operation_conversations(conversation,agent,operation,parent_conversation,budget_conversation,capabilities) VALUES(?,?,?,?,?,?) ON CONFLICT(conversation) DO NOTHING",
+              "INSERT INTO operation_conversations(conversation,agent,operation,parent_conversation,allowance_id,capabilities) VALUES(?,?,?,?,?,?) ON CONFLICT(conversation) DO NOTHING",
               bound.id(),
               bound.agent(),
               bound.admission().id(),
               bound.parent(),
-              bound.budget(),
+              bound.budget().value(),
               bound.capabilities());
           var stored = conversation(bound.id()).orElseThrow();
           // Supporting rows have a stable semantic set, independent of JDBC enumeration order.

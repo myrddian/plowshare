@@ -14,7 +14,8 @@ the agents you choose.
 Use [delegation](07-coordination-and-workflows.md) when you need a specialist's
 result in the current task, and [messaging](13-messaging-and-routing.md) when you
 need an addressed asynchronous exchange. A board topic is shared deliberation
-within one project, owned by the account that opened it.
+within one project. Its opening account remains the execution principal; project
+permissions govern inspection and operation controls.
 
 ## Prepare the project and models
 
@@ -108,8 +109,9 @@ work and report completion; a board discussion does not itself provide an isolat
 checkout for every seat or resolve conflicting edits.
 
 The complete shipped-member example is also in [default.md](../examples/swarm/default.md).
-`members` must be a nonempty list of agent names. Duplicate member names are refused; their declared order is retained. `budget` is an integer of at least two; omitting it uses
-100. Only `members` and `budget` are accepted frontmatter keys. Invalid YAML,
+`members` must be a nonempty list of agent names. Duplicate member names are refused; their declared order is retained. `budget` is an integer of at least two, or `unlimited`; omitting it is unlimited.
+Existing explicit definition/deployment limits remain effective. The wire catalog
+and retained selection use `budget: null` for unlimited. Only `members` and `budget` are accepted frontmatter keys. Invalid YAML,
 duplicate keys, an unknown key or an invalid budget refuses the whole file.
 Missing definitions and unserved model bindings refuse those particular members.
 If none remain, opening a topic is refused.
@@ -161,8 +163,8 @@ reusing it for different content or another swarm type is refused. An identical
 receipt remains recoverable even if its source definition is later edited or deleted. It does not make a fresh UUID for
 the same question deduplicate.
 
-The opening `maxModelCalls` cannot raise the configured swarm budget: it is capped
-at that budget. It is the total for the topic tree, not an allowance per member.
+An opening `maxModelCalls` sets a finite ceiling; when the definition has a finite
+limit, the request is capped at that limit. It is the total for the topic tree, not an allowance per member.
 Admission does not promise that every member has already completed its work.
 
 An assistant can also open a topic when its definition has `board: true` and the
@@ -250,11 +252,15 @@ Closing a parent also closes its descendants and preserves their recorded work.
 
 ## Budget, fairness and recovery
 
-The root tracks `potTotal`, `potSpent` and a closing reserve. By default ten percent
-is reserved for openers; rounding keeps at least one call and leaves at least one
-for members. Members cannot spend the closing reserve. Subtopics use the same pot.
-Exhaustion can stop member work before every question has an answer; complete
-exhaustion can close the tree through a generated harness resolution.
+The root references one durable allowance shared with its children and delegates.
+`potTotal` is nullable for unlimited; `potSpent` remains cumulative. A finite pot
+reserves ten percent for openers by default; rounding leaves at least one call for
+members and one for closing. Unlimited has no numeric closing reserve.
+
+Exhaustion leaves the tree recoverable, retaining messages and conversations. It
+refuses member wakes and notifies agent openers. It creates no automatic closure
+or generated resolution. Explicitly closed topics remain terminal, including
+historical topics previously closed on exhaustion.
 
 The scheduler gives bounded turns across ready seats. Defaults are four model
 steps per scheduling quantum, twelve steps per wake, and a ten-minute wait
@@ -278,7 +284,9 @@ An explicit top-up raises the **absolute root total**, not an increment:
 bin/plowshare-cli --validate board topup '{"topic":"<topic-id>","maxModelCalls":48}'
 ```
 
-This is valid only when 48 exceeds the current total and the topic is open.
+This requires project Contributor-or-higher access and an open finite root whose
+current total is below 48. The operator can manage another account’s topic; the
+original account still executes the work. Unlimited topics need no top-up.
 Top-up can recover owed member work; it does not reset failed seats or their
 conversation history. To retry one stopped, failed member in that same conversation:
 
@@ -286,11 +294,17 @@ conversation history. To retry one stopped, failed member in that same conversat
 bin/plowshare-cli --validate board retry '{"project":"research","topic":"<topic-id>","member":"critic","maxTurns":12,"requestId":"fcd3c6a7-26b2-48f7-9a1a-b573a3053b3a"}'
 ```
 
-Choose an existing failed member, replace the topic/UUID, and validate. The owning
-account, current project membership, retained member, open root and remaining
-member allowance are checked. An already busy or healthy member is refused.
+Choose an existing failed member, replace the topic/UUID, and validate. Current project WRITE authority (the Contributor role helper), retained member,
+open root and remaining member allowance are checked. An already busy or healthy member is refused.
 The retry posts a correlated continuation and preserves its seat conversation.
-It consumes the existing topic pot; it does not supply extra model calls.
+It consumes the existing topic allowance. `maxTurns` changes the retry’s step
+limit, without enlarging its configured per-wake call window.
+
+Desktop topic detail shows spent/finite or unlimited allowance. **Raise allowance**
+uses the same absolute top-up operation. After an uncertain reply, refresh the
+current total before submitting another change; it is never automatically replayed.
+Top-up also notifies agent openers to continue, and re-owes eligible unread work.
+Failed members still require an explicit retry.
 
 Restart recovery re-owes unread addressed messages and preserves pending resolution
 delivery. An interrupted member can remain failed/unavailable and require explicit

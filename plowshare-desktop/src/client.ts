@@ -1503,6 +1503,9 @@ export class DesktopClient {
           request.swarm,
         );
         break;
+      case 'board-topup':
+        await this.board.topup(request.topic, request.maxModelCalls);
+        break;
       case 'board-retry':
         await this.board.retry(
           request.project,

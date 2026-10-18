@@ -291,7 +291,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   }
 
   private static final String HEADS =
-      " FROM information_resources q JOIN information_revisions r ON r.id=information_navigation_head(q.id)";
+      " FROM information_resources q JOIN information_revision_allowances r ON r.id=information_navigation_head(q.id)";
 
   private InformationSql.Filter selected(
       InformationContext c, UUID relatedTo, String relation, String direction) {
@@ -441,7 +441,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     a.add(target.resource());
     if (target.revision() != null) a.add(target.revision());
     String from =
-        " FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id AND r.id="
+        " FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id AND r.id="
             + (target.revision() == null ? "information_navigation_head(q.id)" : "?");
     // Keep parameter order explicit for pinned revisions, which precede the access predicate.
     if (target.revision() != null) {
@@ -505,7 +505,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     var rows =
         jdbc.query(
             DOCUMENT
-                + " FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id AND r.id=coalesce(?,information_navigation_head(q.id)) WHERE q.id=? AND information_navigation_own_readable(r.id,?,?) AND information_reference_readable(r.id,?,?) AND "
+                + " FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id AND r.id=coalesce(?,information_navigation_head(q.id)) WHERE q.id=? AND information_navigation_own_readable(r.id,?,?) AND information_reference_readable(r.id,?,?) AND "
                 + boundary.sql(),
             (rs, n) -> document(rs, c.selection().includeGlobal()),
             a.toArray());
@@ -595,7 +595,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     a.addAll(args(c));
     var rows =
         jdbc.queryForList(
-            "SELECT r.id FROM information_resources q JOIN information_revisions r ON r.id=information_navigation_head(q.id) WHERE q.id=? AND information_lock_knowledge(r.id,?,?,?,?,'WRITE') AND information_readable(r.id,?,?,?,?)",
+            "SELECT r.id FROM information_resources q JOIN information_revision_allowances r ON r.id=information_navigation_head(q.id) WHERE q.id=? AND information_lock_knowledge(r.id,?,?,?,?,'WRITE') AND information_readable(r.id,?,?,?,?)",
             UUID.class,
             a.toArray());
     if (rows.isEmpty()) throw unavailable();
@@ -619,7 +619,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     if (targetRows.isEmpty()) throw unavailable();
     if (target.revision() != null
         && jdbc.queryForList(
-                "SELECT id FROM information_revisions WHERE id=? AND resource_id=?",
+                "SELECT id FROM information_revision_allowances WHERE id=? AND resource_id=?",
                 UUID.class,
                 target.revision(),
                 target.resource())

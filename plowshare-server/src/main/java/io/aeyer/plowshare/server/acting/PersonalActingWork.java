@@ -28,7 +28,7 @@ public final class PersonalActingWork implements ActingWork {
   private final ActingAgents agents;
   private final ActingTurns turns;
   private final UnitOfWork transactions;
-  private final int budget;
+  private final Integer budget;
   private final ResourceScopeRepository resources;
 
   public PersonalActingWork(
@@ -37,9 +37,10 @@ public final class PersonalActingWork implements ActingWork {
       ActingAgents agents,
       ActingTurns turns,
       UnitOfWork transactions,
-      int budget,
+      Integer budget,
       ResourceScopeRepository resources) {
-    if (budget < 1) throw new IllegalArgumentException("finite positive budget required");
+    if (budget != null && budget < 1)
+      throw new IllegalArgumentException("finite positive budget required");
     this.repository = repository;
     this.policy = policy;
     this.agents = agents;

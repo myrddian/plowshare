@@ -195,7 +195,7 @@ class OperationRecordsPersistenceTest {
             "alice");
     policy.bind(
         new OperationAuthority.Conversation(
-            source.id(), "parent", parent, null, source.id(), "0".repeat(64)));
+            source.id(), "parent", parent, null, source.budget().snapshot().id(), "0".repeat(64)));
     var child =
         policy.derive(
             parent, Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL));
@@ -203,17 +203,17 @@ class OperationRecordsPersistenceTest {
         conversations.log(Origin.DELEGATION, Home.of("one"), "child", source.id(), null, "alice");
     var envelope =
         new OperationAuthority.Conversation(
-            log.id(), "child", child, source.id(), source.id(), "1".repeat(64));
+            log.id(), "child", child, source.id(), source.budget().snapshot().id(), "1".repeat(64));
     policy.bind(envelope);
     var restored = new JdbcOperationRecords(jdbc);
     var read = restored.conversation(log.id()).orElseThrow();
     assertEquals(child.id(), read.admission().id());
     assertEquals(source.id(), read.parent());
-    assertEquals(source.id(), read.budget());
+    assertEquals(source.budget().snapshot().id(), read.budget());
     assertEquals(Optional.of(parent.id()), restored.parent(child.id()));
     restored.bind(envelope);
     assertThrows(
-        IllegalStateException.class,
+        RuntimeException.class,
         () ->
             restored.bind(
                 new OperationAuthority.Conversation(
@@ -221,7 +221,7 @@ class OperationRecordsPersistenceTest {
                     "child",
                     child,
                     source.id(),
-                    "budget:" + UUID.randomUUID(),
+                    io.aeyer.plowshare.server.agents.Budget.none().snapshot().id(),
                     "1".repeat(64))));
     assertThrows(
         DataAccessException.class,
@@ -237,6 +237,66 @@ class OperationRecordsPersistenceTest {
     members.assign("one", "alice", ProjectRole.CONTRIBUTOR, "admin", true);
     assertThrows(CallerFault.class, () -> policy.require(read.admission()));
     assertDoesNotThrow(this::admit);
+  }
+
+  @Test
+  void aRetainedContinuationCanDelegateWithItsOriginalConversationAndAllowance() {
+    ConversationStore conversations = new ConversationStore(jdbc);
+    ConversationRecord parent =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "parent",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(4),
+            "alice");
+    OperationAuthority.Admission original = admit();
+    policy.bind(
+        new OperationAuthority.Conversation(
+            parent.id(),
+            "parent",
+            original,
+            null,
+            parent.budget().snapshot().id(),
+            "0".repeat(64)));
+    OperationAuthority.Admission continuation = policy.derive(original, original.actions());
+    OperationAuthority.Admission child = policy.derive(continuation, Set.of(AuthorityAction.READ));
+    ConversationRecord log =
+        conversations.log(Origin.DELEGATION, parent.home(), "child", parent.id(), null, "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            log.id(),
+            "child",
+            child,
+            parent.id(),
+            parent.budget().snapshot().id(),
+            "1".repeat(64)));
+    assertEquals(Optional.of(continuation.id()), records.parent(child.id()));
+    assertEquals(
+        parent.budget().identity(), conversations.allowanceFor(log.id()).orElseThrow().identity());
+  }
+
+  @Test
+  void aDelegatedChildCanRetainTheAllowanceOfAnOrdinaryConversationWithoutAnAgentEnvelope() {
+    ConversationStore conversations = new ConversationStore(jdbc);
+    ConversationRecord parent =
+        conversations.open(
+            io.aeyer.plowshare.protocol.Home.of("one"),
+            io.aeyer.plowshare.server.agents.Budget.of(4));
+    assertNull(parent.agent());
+    OperationAuthority.Admission child = policy.derive(admit(), Set.of(AuthorityAction.READ));
+    ConversationRecord log =
+        conversations.log(Origin.DELEGATION, parent.home(), "child", parent.id(), null, "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            log.id(),
+            "child",
+            child,
+            parent.id(),
+            parent.budget().snapshot().id(),
+            "0".repeat(64)));
+    assertEquals(
+        parent.budget().identity(), conversations.allowanceFor(log.id()).orElseThrow().identity());
   }
 
   @Test
@@ -305,7 +365,8 @@ class OperationRecordsPersistenceTest {
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
         new io.aeyer.plowshare.server.orchestrations.JdbcOrchestrationRecovery(jdbc, work),
         new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc),
-        policy);
+        policy,
+        new io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository(jdbc));
   }
 
   private io.aeyer.plowshare.server.orchestrations.Orchestrations.Start start() {
@@ -332,6 +393,50 @@ class OperationRecordsPersistenceTest {
   }
 
   @Test
+  void aBoardSourceDoesNotEnableIndependentOrchestrationWithoutItsWakeLifecycle() {
+    ConversationStore conversations = new ConversationStore(jdbc);
+    io.aeyer.plowshare.server.board.BoardStore board =
+        new io.aeyer.plowshare.server.board.BoardStore(jdbc, java.time.Instant::now);
+    io.aeyer.plowshare.server.board.BoardTopic topic =
+        board.openRoot(
+            new io.aeyer.plowshare.server.board.BoardStore.NewTopic(
+                "one", "Review", "REVIEW", "alice", "person", "alice", null, 20, 2));
+    ConversationRecord seat =
+        conversations.log(Origin.BOARD, Home.of("one"), "worker", null, null, "alice");
+    board.seatIfAbsent(topic.id(), "worker", seat.id());
+    policy.bind(
+        new OperationAuthority.Conversation(
+            seat.id(), "worker", admit(), null, board.allowance(topic.id()).id(), "0".repeat(64)));
+    io.aeyer.plowshare.server.orchestrations.Orchestrations.Start request =
+        new io.aeyer.plowshare.server.orchestrations.Orchestrations.Start(
+            start().definition(),
+            Home.of("one"),
+            "Help",
+            null,
+            seat.id(),
+            "worker",
+            "alice",
+            null,
+            null,
+            0);
+    io.aeyer.plowshare.server.orchestrations.ConductorVoice voice =
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.orchestrations.ConductorVoice.class);
+    CallerFault refused =
+        assertThrows(
+            CallerFault.class,
+            () ->
+                engine(
+                        voice,
+                        org.mockito.Mockito.mock(
+                            io.aeyer.plowshare.server.todos.StageSeeding.class))
+                    .start(request, UUID.randomUUID(), "{}"));
+    assertTrue(refused.getMessage().contains("wake's lease and lifecycle"));
+    assertEquals(0, board.allowance(topic.id()).spent());
+    org.mockito.Mockito.verifyNoInteractions(voice);
+    assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class));
+  }
+
+  @Test
   void orchestration_receipt_and_envelope_commit_together_and_restart_does_not_repeat_dispatch() {
     var voice =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.orchestrations.ConductorVoice.class);
@@ -340,7 +445,13 @@ class OperationRecordsPersistenceTest {
     var original = engine(voice, seeding).start(start(), key, "{\"task\":\"Help\"}");
     var envelope = records.conversation(original.conductorConversation()).orElseThrow();
     assertEquals("alice", envelope.admission().executor());
-    assertEquals(original.conductorConversation(), envelope.budget());
+    assertEquals(
+        new io.aeyer.plowshare.server.archive.ConversationStore(jdbc)
+            .allowanceFor(original.conductorConversation())
+            .orElseThrow()
+            .snapshot()
+            .id(),
+        envelope.budget());
     var restored = engine(voice, seeding).start(start(), key, "{\"task\":\"Help\"}");
     assertEquals(original.id(), restored.id());
     org.mockito.Mockito.verify(voice, org.mockito.Mockito.times(1))
@@ -429,7 +540,7 @@ class OperationRecordsPersistenceTest {
             "alice");
     policy.bind(
         new OperationAuthority.Conversation(
-            log.id(), "worker", parent, null, log.id(), "0".repeat(64)));
+            log.id(), "worker", parent, null, log.budget().snapshot().id(), "0".repeat(64)));
     assertDoesNotThrow(() -> policy.require(parent));
     jdbc.update("DELETE FROM conversations WHERE id=?", log.id());
     assertTrue(records.conversation(log.id()).isPresent());
@@ -458,7 +569,7 @@ class OperationRecordsPersistenceTest {
             "alice");
     policy.bind(
         new OperationAuthority.Conversation(
-            root.id(), "parent", parent, null, root.id(), "0".repeat(64)));
+            root.id(), "parent", parent, null, root.budget().snapshot().id(), "0".repeat(64)));
     var transactions =
         new org.springframework.transaction.support.TransactionTemplate(
             new org.springframework.jdbc.datasource.DataSourceTransactionManager(source));
@@ -468,10 +579,15 @@ class OperationRecordsPersistenceTest {
               var authority = policy.derive(parent, parent.actions());
               var log =
                   conversations.logSharedOrchestration(
-                      Home.of("one"), "conductor", "alice", root.id());
+                      Home.of("one"), "conductor", "alice", root.budget());
               policy.bind(
                   new OperationAuthority.Conversation(
-                      log.id(), "conductor", authority, root.id(), root.id(), "1".repeat(64)));
+                      log.id(),
+                      "conductor",
+                      authority,
+                      root.id(),
+                      root.budget().snapshot().id(),
+                      "1".repeat(64)));
               return log;
             });
     assertNotNull(child);
@@ -488,10 +604,17 @@ class OperationRecordsPersistenceTest {
                       Origin.DELEGATION, Home.of("one"), "delegate", child.id(), null, "alice");
               policy.bind(
                   new OperationAuthority.Conversation(
-                      log.id(), "delegate", authority, child.id(), root.id(), "3".repeat(64)));
+                      log.id(),
+                      "delegate",
+                      authority,
+                      child.id(),
+                      root.budget().snapshot().id(),
+                      "3".repeat(64)));
               return log;
             });
-    assertEquals(root.id(), conversations.allowanceFor(delegate.id()).orElseThrow().reference());
+    assertEquals(
+        root.budget().identity(),
+        conversations.allowanceFor(delegate.id()).orElseThrow().identity());
     var voice =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.orchestrations.ConductorVoice.class);
     var seeding = org.mockito.Mockito.mock(io.aeyer.plowshare.server.todos.StageSeeding.class);
@@ -510,11 +633,11 @@ class OperationRecordsPersistenceTest {
     var started = engine(voice, seeding).start(request, UUID.randomUUID(), "{}");
     var retained = records.conversation(started.conductorConversation()).orElseThrow();
     assertEquals(delegate.id(), retained.parent());
-    assertEquals(root.id(), retained.budget());
+    assertEquals(root.budget().snapshot().id(), retained.budget());
     assertNull(conversations.find(started.conductorConversation()).orElseThrow().budget());
     var reopened = new ConversationStore(jdbc);
     var budget = reopened.allowanceFor(child.id()).orElseThrow();
-    assertEquals(root.id(), budget.reference());
+    assertEquals(root.budget().identity(), budget.identity());
     budget.tryClaim().orElseThrow();
     assertEquals(1, reopened.allowanceFor(child.id()).orElseThrow().spent());
     reopened.turnEnded(child.id(), budget);
@@ -525,7 +648,7 @@ class OperationRecordsPersistenceTest {
             transactions.execute(
                 status ->
                     conversations.logSharedOrchestration(
-                        Home.of("one"), "unbound", "alice", root.id())));
+                        Home.of("one"), "unbound", "alice", root.budget())));
     var other =
         conversations.log(
             Origin.SUBMISSION,
@@ -542,10 +665,15 @@ class OperationRecordsPersistenceTest {
                   var authority = policy.derive(parent, parent.actions());
                   var log =
                       conversations.logSharedOrchestration(
-                          Home.of("one"), "wrong", "alice", root.id());
+                          Home.of("one"), "wrong", "alice", root.budget());
                   records.bind(
                       new OperationAuthority.Conversation(
-                          log.id(), "wrong", authority, root.id(), other.id(), "2".repeat(64)));
+                          log.id(),
+                          "wrong",
+                          authority,
+                          root.id(),
+                          other.budget().snapshot().id(),
+                          "2".repeat(64)));
                   return log;
                 }));
     assertEquals(3, reopened.allowanceFor(child.id()).orElseThrow().limit());

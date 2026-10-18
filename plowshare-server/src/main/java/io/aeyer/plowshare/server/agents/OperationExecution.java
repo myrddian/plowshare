@@ -71,7 +71,7 @@ public final class OperationExecution {
         || !bound.admission().home().equals(home)
         || !bound.agent().equals(definition.name())
         || !bound.capabilities().equals(fingerprint(definition))
-        || !bound.budget().equals(budget.reference()))
+        || !bound.budget().value().equals(budget.identity()))
       throw new CallerFault("Execution cannot replace its retained account, agent, home or budget");
   }
 

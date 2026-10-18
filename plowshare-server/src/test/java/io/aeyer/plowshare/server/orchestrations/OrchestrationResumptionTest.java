@@ -44,6 +44,8 @@ import org.junit.jupiter.api.Test;
 class OrchestrationResumptionTest {
   private final io.aeyer.plowshare.server.access.OperationAuthority operations =
       mock(io.aeyer.plowshare.server.access.OperationAuthority.class);
+  private final io.aeyer.plowshare.server.allowances.AllowanceRepository allowances =
+      mock(io.aeyer.plowshare.server.allowances.AllowanceRepository.class);
   private io.aeyer.plowshare.server.access.OperationAuthority.Admission envelope;
   private final OrchestrationStore store = mock(OrchestrationStore.class);
   private final ConversationStore conversations = mock(ConversationStore.class);
@@ -125,7 +127,8 @@ class OrchestrationResumptionTest {
             access,
             recovery,
             scripts,
-            operations);
+            operations,
+            allowances);
     engine.useResumeListener(
         (run, requestId) -> {
           assertEquals(OrchestrationState.RUNNING, store.find(run.id()).orElseThrow().state());
@@ -137,7 +140,7 @@ class OrchestrationResumptionTest {
     when(store.find(ask.id())).thenReturn(Optional.of(failed));
     var conversation = mock(ConversationRecord.class);
     var budget = Budget.of(40);
-    budget.bindConversation("cnv_conductor", claim -> {});
+    when(allowances.restore(budget.snapshot().id())).thenReturn(budget);
     when(conversation.budget()).thenReturn(budget);
     when(conversation.home()).thenReturn(io.aeyer.plowshare.protocol.Home.of("project"));
     when(conversation.agent()).thenReturn("retryable");
@@ -162,7 +165,7 @@ class OrchestrationResumptionTest {
                     "retryable",
                     envelope,
                     null,
-                    "cnv_conductor",
+                    budget.snapshot().id(),
                     io.aeyer.plowshare.server.agents.OperationExecution.fingerprint(
                         io.aeyer.plowshare.server.agents.OrchestrationRegistry.parsePinned(
                                 "retryable",

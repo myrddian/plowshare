@@ -3,70 +3,28 @@ package io.aeyer.plowshare.server.api;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * What a conversation is opened with when whoever opened it did not say.
- *
- * <h2>The refusal this replaces, and the half of it that still stands</h2>
- *
- * <p>{@code POST /v1/conversations} required {@code maxModelCalls} and argued it: "how much a
- * person is going to say has no arithmetic behind it", so "a configured default here would be a
- * number with no method, which is the defect this project keeps correcting". <b>That argument was
- * about the server inventing a number, and it stands.</b> Nothing in this class computes an
- * allowance from a workload, because there is no workload to compute one from, and no code path
- * here picks a number that an operator has not.
- *
- * <p><b>What has changed is who is being asked.</b> The refusal reached a person, through a console
- * that had to put a number field in front of them before they could open a conversation at all, and
- * the judgement recorded against it is the owner's: a budget "shouldnt be there — from a user point
- * of view it is messy and quite convoluted with no explanation ... it should just inherit that from
- * the system". An operator setting one number, once, for their own box is a different act from a
- * server picking one on a caller's behalf: it is a policy about what this deployment lets a
- * conversation cost, said in the file where every other cost bound on this server is said. A person
- * opening a conversation is not choosing a cost bound; they are starting to talk.
- *
- * <p><b>It is a default and not a ceiling.</b> A body that names {@code maxModelCalls} is honoured
- * exactly as before — the number is still the caller's to state, and the three clients that know
- * what they want (the CLI's {@code conversation_open}, a harness, a script) go on stating it. This
- * answers only the body that says nothing, which used to be answered with a 400.
- *
- * <h2>Why the prefix is its own</h2>
- *
- * <p>Not {@code plowshare.agents}, where {@code curator-budget} lives: a conversation is not an
- * agent's, and its allowance is spent by whichever agents are asked to answer turns in it. {@code
- * conversations_a_person_s_conversation_names_no_agent} is that same fact held in the schema, and a
- * key filed under the agents prefix would say the opposite of it.
+ * Default spending policy for new conversations, independent of agent definitions and step limits.
+ * Omitted policy is unlimited. Explicit request limits override this default; stored allowances
+ * retain their selected policy across restart and configuration changes.
  */
 @ConfigurationProperties(prefix = "plowshare.conversations")
 public class ConversationsProperties {
 
-  /**
-   * How many model calls a conversation opened without an allowance may spend.
-   *
-   * <p><b>240, and the arithmetic is the interlocutor's own measurement rather than a round
-   * number.</b> {@code interlocutor.md} records that "a full turn of this agent costs about twelve
-   * calls" and sets its own {@code max-model-calls: 40} at "three of those with room" — that number
-   * bounding a run started on the agent's own behalf and being inert for a turn of an actual
-   * conversation, which spends the conversation's. Twenty of those turns is 240, and twenty
-   * utterances is a conversation rather than a question: long enough that a person is not stopped
-   * in the middle of a thought by a bound they never set, small enough that a tab left open on a
-   * loop costs a bounded amount of somebody's inference budget.
-   *
-   * <p><b>Spending it is not a failure.</b> {@code CALL_BUDGET} is a designed ending — the
-   * conversation stops, says so, and every turn it did take is in the archive — and the next
-   * conversation starts with the whole of this again. That is what makes a conservative number the
-   * safe one to ship, on {@code AgentsProperties.curatorBudget}'s reasoning exactly.
-   *
-   * <p>An operator whose agents are cheaper, or whose people talk longer, sets {@code
-   * PLOWSHARE_CONVERSATION_BUDGET} and never reads this sentence again. {@code application.yml}
-   * carries the same argument beside the key.
-   */
-  private int defaultBudget = 240;
+  /** "unlimited", zero (no inference), or a positive model-call ceiling. */
+  private String defaultBudget = "unlimited";
 
-  public int getDefaultBudget() {
-    return defaultBudget;
+  public Integer getDefaultBudget() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+        defaultBudget, "default-budget");
   }
 
-  public void setDefaultBudget(int defaultBudget) {
-    this.defaultBudget = defaultBudget;
+  public void setDefaultBudget(int value) {
+    setDefaultBudget(Integer.toString(value));
+  }
+
+  public void setDefaultBudget(String value) {
+    io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(value, "default-budget");
+    defaultBudget = value;
   }
 
   /**

@@ -81,8 +81,15 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
     String log = state.log();
     if (log == null || !state.systemCompatible()) {
       String previous = log;
-      var budget =
-          io.aeyer.plowshare.server.agents.Budget.resumed(state.allowance(), state.spent());
+      io.aeyer.plowshare.server.agents.Budget budget;
+      if (processing != null) {
+        InformationProcessingRepository.BudgetSource selected =
+            processing.budgetSource(lease.revision());
+        budget =
+            io.aeyer.plowshare.server.agents.Budget.restored(
+                selected.id(), selected.limit(), selected.spent());
+      } else
+        budget = io.aeyer.plowshare.server.agents.Budget.resumed(state.allowance(), state.spent());
       if (system == null) {
         log =
             conversations

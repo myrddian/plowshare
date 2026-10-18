@@ -32,6 +32,7 @@ class BoardInspectionTest {
   BoardFixture f;
   BoardInspectionFrames frames;
   BoardTopic topic;
+  io.aeyer.plowshare.server.archive.ProjectMembers members;
 
   @BeforeAll
   static void migrate() {
@@ -61,7 +62,14 @@ class BoardInspectionTest {
     var scheduler =
         new SwarmScheduler(
             pools, () -> 4, () -> Duration.ofMinutes(10), Clock.systemUTC(), Duration.ofMillis(10));
-    frames = new BoardInspectionFrames(f.store, scheduler);
+    members = org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
+    org.mockito.Mockito.doThrow(new CallerFault("No project read authority"))
+        .when(members)
+        .requireRole(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.eq("other"),
+            org.mockito.ArgumentMatchers.any());
+    frames = new BoardInspectionFrames(f.store, scheduler, members);
     topic = f.openByBot(f.board(BoardFixture.TWO)).topic();
   }
 
@@ -116,6 +124,27 @@ class BoardInspectionTest {
   }
 
   @Test
+  void scopedReaderCanInspectAnotherAccountsPublicTopicWithoutWideningAccountAggregates()
+      throws Exception {
+    BoardInspectionFrames.Messages detail =
+        (BoardInspectionFrames.Messages)
+            read(FrameTypes.BOARD_MESSAGES, Map.of("topic", topic.id()), "operator");
+    assertEquals(topic.id(), detail.topic().id());
+    assertFalse(detail.seats().isEmpty());
+    BoardInspectionFrames.Topics scoped =
+        (BoardInspectionFrames.Topics)
+            read(FrameTypes.BOARD_TOPICS, Map.of("project", topic.project()), "operator");
+    assertEquals(1, scoped.topics().size());
+    org.mockito.Mockito.verify(members, org.mockito.Mockito.atLeastOnce())
+        .requireRole(
+            topic.project(), "operator", io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
+    assertTrue(
+        ((BoardInspectionFrames.Topics) read(FrameTypes.BOARD_TOPICS, Map.of(), "operator"))
+            .topics()
+            .isEmpty());
+  }
+
+  @Test
   void account_scope_hides_topics_seats_and_queue_and_requires_signin() throws Exception {
     f.jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('other', 'h')");
     assertTrue(
@@ -135,7 +164,8 @@ class BoardInspectionTest {
         assertThrows(
             CallerFault.class,
             () -> read(FrameTypes.BOARD_MESSAGES, Map.of("topic", "missing"), "other"));
-    assertEquals(denied.getMessage(), missing.getMessage());
+    assertEquals("No project read authority", denied.getMessage());
+    assertEquals("No public board topic with that id.", missing.getMessage());
     for (String type : frames.frames().keySet())
       assertThrows(CallerFault.class, () -> read(type, Map.of(), null));
     assertThrows(
@@ -207,7 +237,11 @@ class BoardInspectionTest {
                         2,
                         Duration.ofMinutes(11),
                         true))));
-    frames = new BoardInspectionFrames(f.store, scheduler);
+    frames =
+        new BoardInspectionFrames(
+            f.store,
+            scheduler,
+            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
     var swarm = (BoardInspectionFrames.Swarm) read(FrameTypes.SWARM_STATUS, Map.of(), "enzo");
     assertEquals(1, swarm.ready().size());
     assertEquals(2, swarm.ready().getFirst().position());

@@ -10124,6 +10124,62 @@
     "operation": "swarm.types",
     "value": {
       "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": null,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": null
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": null,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
       "types": []
     },
     "valid": true

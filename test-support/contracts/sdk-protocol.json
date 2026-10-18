@@ -13524,7 +13524,7 @@
         "type": "object",
         "properties": {
           "budget": {
-            "$ref": "#/$defs/shape16"
+            "$ref": "#/$defs/shape535"
           },
           "description": {
             "$ref": "#/$defs/shape1"
@@ -21940,7 +21940,7 @@
         "type": "object",
         "properties": {
           "budget": {
-            "$ref": "#/$defs/shape16"
+            "$ref": "#/$defs/shape535"
           },
           "members": {
             "$ref": "#/$defs/shape47"

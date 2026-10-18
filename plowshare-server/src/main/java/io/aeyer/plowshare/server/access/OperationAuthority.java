@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.access;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.access.AuthorityIds.*;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
 import java.util.*;
 
 /** Immutable admission evidence and live checks for existing bounded execution paths. */
@@ -63,7 +64,7 @@ public interface OperationAuthority {
       String agent,
       Admission admission,
       String parent,
-      String budget,
+      AllowanceId budget,
       String capabilities) {
     public Conversation {
       if (id == null
@@ -71,10 +72,8 @@ public interface OperationAuthority {
           || agent == null
           || agent.isBlank()
           || budget == null
-          || budget.isBlank()
           || id.length() > 1024
           || agent.length() > 1024
-          || budget.length() > 1024
           || (parent != null && (parent.isBlank() || parent.length() > 1024)))
         throw new IllegalArgumentException("Bound conversation, agent and budget required");
       Objects.requireNonNull(admission);

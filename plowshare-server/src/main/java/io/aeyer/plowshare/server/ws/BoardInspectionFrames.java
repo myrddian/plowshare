@@ -16,10 +16,15 @@ import org.springframework.stereotype.Component;
 public class BoardInspectionFrames implements FrameArea {
   private final BoardStore store;
   private final SwarmScheduler scheduler;
+  private final io.aeyer.plowshare.server.archive.ProjectMembers members;
 
-  public BoardInspectionFrames(BoardStore store, SwarmScheduler scheduler) {
+  public BoardInspectionFrames(
+      BoardStore store,
+      SwarmScheduler scheduler,
+      io.aeyer.plowshare.server.archive.ProjectMembers members) {
     this.store = store;
     this.scheduler = scheduler;
+    this.members = members;
   }
 
   @Override
@@ -71,6 +76,9 @@ public class BoardInspectionFrames implements FrameArea {
   Outcome topics(Map<String, Object> payload, Asking asking) {
     String account = asking.requireHandle(FrameTypes.BOARD_TOPICS);
     ListBody body = Payloads.as(payload, ListBody.class, FrameTypes.BOARD_TOPICS);
+    if (body.project() != null)
+      members.requireRole(
+          body.project(), account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
     int limit = body.limit() == null ? 200 : body.limit();
     int offset = body.offset() == null ? 0 : body.offset();
     if (limit < 1 || limit > 200 || offset < 0) {
@@ -88,8 +96,10 @@ public class BoardInspectionFrames implements FrameArea {
     BoardTopic topic =
         store
             .topic(id)
-            .filter(t -> account.equals(t.account()) && !store.messagingTopic(id))
-            .orElseThrow(() -> new CallerFault("No topic with that id is owned by this account."));
+            .filter(t -> !store.messagingTopic(id))
+            .orElseThrow(() -> new CallerFault("No public board topic with that id."));
+    members.requireRole(
+        topic.project(), account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
     BoardTopic root = store.topic(topic.root()).orElseThrow();
     var snapshot = scheduler.snapshot();
     return Outcome.ok(
@@ -141,7 +151,8 @@ public class BoardInspectionFrames implements FrameArea {
     else if (BoardTopic.CLOSED.equals(activity.topicState())) state = "closed";
     else if (seat.passed()) state = "passed";
     else if (seat.failedEnding() != null) state = "failed";
-    else if (activity.remaining() <= (seat.isOpener() ? 0 : activity.reserve())) state = "held";
+    else if (activity.remaining() != null
+        && activity.remaining() <= (seat.isOpener() ? 0 : activity.reserve())) state = "held";
     else if ("queued".equals(activity.wake())) state = "owed";
     else if (seat.silentWakes() > 0) state = "silent";
     else if ("refused".equals(activity.wake())) state = "blocked";

@@ -85,7 +85,7 @@ public class BoardPostingFrames implements FrameArea {
             throw new CallerFault("This account is not a member of the selected project.");
           store
               .topic(topic)
-              .filter(row -> account.equals(row.account()) && project.equals(row.project()))
+              .filter(row -> project.equals(row.project()))
               .orElseThrow(
                   () ->
                       new CallerFault(
@@ -194,7 +194,7 @@ public class BoardPostingFrames implements FrameArea {
           var selected =
               store
                   .topic(topic)
-                  .filter(row -> account.equals(row.account()) && project.equals(row.project()))
+                  .filter(row -> project.equals(row.project()))
                   .orElseThrow(
                       () ->
                           new CallerFault(

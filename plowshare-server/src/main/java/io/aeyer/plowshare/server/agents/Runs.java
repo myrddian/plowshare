@@ -285,7 +285,8 @@ public final class Runs {
         var opened =
             conversations.open(
                 home,
-                Budget.of(conversationProperties.getDefaultBudget()),
+                io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+                    conversationProperties.getDefaultBudget()),
                 turnCap,
                 ask.callerHandle());
         logStages.getObject().opened(LogStages.LogOpened.ofConversation(opened, session));

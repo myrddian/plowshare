@@ -466,6 +466,8 @@ input('application.files', { project: 'chatbot', location: { store: 'outputs', p
 const namedSelection = {name:'privacy', revision:'a'.repeat(64), description:'Review privacy', members:['researcher'], budget:20};
 const namedType = {name:'privacy', members:['researcher'], budget:20, refused:{}, origin:'swarm/privacy.md', selection:namedSelection};
 result('swarm.types', {project:'fixture', types:[namedType]}, true);
+result('swarm.types', {project:'fixture', types:[{...namedType,budget:null,selection:{...namedSelection,budget:null}}]}, true);
+result('swarm.types', {project:'fixture', types:[{...namedType,budget:null}]}, false);
 result('swarm.types', {project:'fixture', types:[]}, true);
 for (const change of [{name:'../privacy'}, {revision:'bad'}, {budget:1}, {budget:2.5}, {description:'x'.repeat(4097)}, {members:['researcher','researcher']}, {members:[' ']}])
   result('swarm.types', {project:'fixture', types:[{...namedType, selection:{...namedSelection,...change}}]}, false);

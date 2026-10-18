@@ -3070,6 +3070,7 @@
       "typescriptConstants": [],
       "desktopConsumer": true,
       "desktopSourceReferences": [
+        "plowshare-desktop/src/board.ts",
         "plowshare-desktop/src/operator.ts"
       ],
       "headlessCliConsumer": true,

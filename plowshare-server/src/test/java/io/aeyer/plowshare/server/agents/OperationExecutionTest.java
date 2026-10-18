@@ -162,25 +162,30 @@ class OperationExecutionTest {
                     io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL,
                     UUID.randomUUID())));
     var charges = new java.util.concurrent.atomic.AtomicInteger();
-    var first = Budget.boardLease("topic", 3, charges::incrementAndGet);
+    UUID source = UUID.randomUUID();
+    java.util.function.Supplier<Optional<Budget.Claim>> claim =
+        () -> Optional.of(new Budget.Claim(source, charges.incrementAndGet(), null));
+    Budget first = Budget.boardLease(source, 3, claim);
     var bound =
         new OperationAuthority.Conversation(
             "child",
             "worker",
             admission,
             "seat",
-            first.reference(),
+            first.snapshot().id(),
             OperationExecution.fingerprint(definition));
     first.tryClaim().orElseThrow();
-    var continuation = Budget.boardLease("topic", 2, charges::incrementAndGet);
-    assertEquals(first.reference(), continuation.reference());
+    Budget continuation = Budget.boardLease(source, 2, claim);
+    assertEquals(first.identity(), continuation.identity());
     assertDoesNotThrow(
         () ->
             OperationExecution.requireBinding(
                 bound, "alice", Home.of("one"), definition, continuation));
     var second = continuation.tryClaim().orElseThrow();
     assertEquals(2, charges.get());
-    assertNotEquals(first.tryClaim().orElseThrow().budget(), second.budget());
+    assertEquals(first.tryClaim().orElseThrow().budget(), second.budget());
+    assertEquals(
+        1, continuation.spent(), "the wake window counts its own calls, not root ordinals");
     assertThrows(
         CallerFault.class,
         () ->
@@ -189,7 +194,7 @@ class OperationExecutionTest {
                 "alice",
                 Home.of("one"),
                 definition,
-                Budget.boardLease("other-topic", 3, () -> {})));
+                Budget.boardLease(UUID.randomUUID(), 3, Optional::empty)));
     assertThrows(
         CallerFault.class,
         () ->

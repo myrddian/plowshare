@@ -20,7 +20,7 @@ public final class JdbcInformationInterchangeRepository
   public List<UUID> dependencies(UUID revision) {
     Objects.requireNonNull(revision);
     return jdbc.queryForList(
-        "SELECT input_revision FROM information_inputs WHERE derived_revision=? UNION SELECT coalesce(o.pinned_revision,information_navigation_head(o.target)) FROM information_reference_obligations o JOIN information_revisions r ON r.resource_id=o.source WHERE r.id=? AND coalesce(o.pinned_revision,information_navigation_head(o.target))<>?",
+        "SELECT input_revision FROM information_inputs WHERE derived_revision=? UNION SELECT coalesce(o.pinned_revision,information_navigation_head(o.target)) FROM information_reference_obligations o JOIN information_revision_allowances r ON r.resource_id=o.source WHERE r.id=? AND coalesce(o.pinned_revision,information_navigation_head(o.target))<>?",
         UUID.class,
         revision,
         revision,
@@ -52,9 +52,9 @@ public final class JdbcInformationInterchangeRepository
     // source/current-head and neighbour disclosure predicates as ordinary outgoing navigation.
     return jdbc
         .query(
-            "SELECT e.source,e.target,e.pinned_revision,e.relation FROM information_relationships e WHERE NOT e.removed AND e.source IN (SELECT resource_id FROM information_revisions WHERE id IN ("
+            "SELECT e.source,e.target,e.pinned_revision,e.relation FROM information_relationships e WHERE NOT e.removed AND e.source IN (SELECT resource_id FROM information_revision_allowances WHERE id IN ("
                 + slots
-                + ")) AND e.target IN (SELECT resource_id FROM information_revisions WHERE id IN ("
+                + ")) AND e.target IN (SELECT resource_id FROM information_revision_allowances WHERE id IN ("
                 + slots
                 + ")) AND (e.pinned_revision IS NULL OR e.pinned_revision IN ("
                 + slots

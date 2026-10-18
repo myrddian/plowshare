@@ -626,8 +626,8 @@ Enable `caps.autoIncrease` in the project JSON file:
 another finite chunk when the step or model-call allowance is exhausted. Chunks use
 `steps` and `budget` when configured, otherwise the running agent's definition
 values. Spending remains cumulative; delegates spend the same parent allowance.
-Model-call increases for ordinary conversations are committed to the owning
-conversation before additional calls; an exhausted chat can accept its next
+Model-call increases for ordinary conversations are committed to the shared
+standalone allowance before additional calls; an exhausted chat can accept its next
 utterance without a manual top-up. In orchestration runs the engine records and
 continues the capped conductor through its existing continuation path, including
 script-driven conductors.

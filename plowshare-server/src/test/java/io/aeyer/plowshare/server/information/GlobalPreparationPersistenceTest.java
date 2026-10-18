@@ -364,11 +364,11 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           dual ? 4 : 2,
           jdbc.queryForObject(
-              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT spent FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Integer.class));
       assertTrue(
           jdbc.queryForObject(
-              "SELECT closed AND call_limit IS NULL FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT closed AND call_limit IS NULL FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Boolean.class));
       assertEquals(
           0,
@@ -418,7 +418,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(0, chatted.get());
       assertTrue(
           jdbc.queryForObject(
-              "SELECT closed AND spent=0 AND call_limit=0 FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT closed AND spent=0 AND call_limit=0 FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Boolean.class));
       assertThrows(
           RuntimeException.class,
@@ -449,7 +449,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT spent FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Integer.class));
       assertTrue(
           jdbc.queryForObject(
@@ -472,7 +472,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT spent FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Integer.class));
     }
   }
@@ -559,7 +559,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           2,
           jdbc.queryForObject(
-              "SELECT spent FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT spent FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Integer.class));
     }
   }
@@ -606,7 +606,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           BuiltInIdentities.SYSTEM.value(),
           jdbc.queryForObject(
-              "SELECT account_id FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT account_id FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               UUID.class));
       assertThrows(
           RuntimeException.class,
@@ -651,7 +651,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(0, embedded.get());
       assertTrue(
           jdbc.queryForObject(
-              "SELECT closed AND spent=0 FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT closed AND spent=0 FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Boolean.class));
     }
   }
@@ -685,7 +685,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM memories", Integer.class));
       assertTrue(
           jdbc.queryForObject(
-              "SELECT closed AND spent=1 AND call_limit=1 FROM embedding_queries WHERE consumer_kind='MEMORY_WRITE'",
+              "SELECT closed AND spent=1 AND call_limit=1 FROM embedding_query_allowances WHERE consumer_kind='MEMORY_WRITE'",
               Boolean.class));
     }
   }
@@ -844,7 +844,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           4,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE call_limit IS NULL AND spent=1 AND closed",
+              "SELECT count(*) FROM embedding_query_allowances WHERE call_limit IS NULL AND spent=1 AND closed",
               Integer.class));
     }
   }
@@ -954,7 +954,7 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE call_limit=1 AND spent=1 AND closed",
+              "SELECT count(*) FROM embedding_query_allowances WHERE call_limit=1 AND spent=1 AND closed",
               Integer.class));
     }
   }
@@ -984,7 +984,8 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+              "SELECT count(*) FROM embedding_query_allowances WHERE spent=1 AND closed",
+              Integer.class));
     }
   }
 
@@ -1082,7 +1083,8 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+              "SELECT count(*) FROM embedding_query_allowances WHERE spent=1 AND closed",
+              Integer.class));
       assertEquals(
           1,
           jdbc.queryForObject(
@@ -1499,12 +1501,12 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           4,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND call_limit IS NULL AND closed",
+              "SELECT count(*) FROM embedding_query_allowances WHERE spent=1 AND call_limit IS NULL AND closed",
               Integer.class));
       assertEquals(
           0,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE budget_id=?",
+              "SELECT count(*) FROM embedding_query_allowances WHERE budget_id=?",
               Integer.class,
               source.id()));
       assertEquals(source.spent(), reopened.budgetSource(revision).spent());
@@ -1523,7 +1525,8 @@ class GlobalPreparationPersistenceTest {
     var disabled = queries(0).open(context, query, origin);
     assertThrows(RuntimeException.class, () -> disabled.authorize(request));
     disabled.close();
-    assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM embedding_queries", Integer.class));
+    assertEquals(
+        0, jdbc.queryForObject("SELECT count(*) FROM embedding_query_allowances", Integer.class));
     var read = queries(limit).open(context, query, origin);
     var permit = read.authorize(request);
     new RetainedInferenceBoundary(new JdbcInferenceAdmissions(jdbc)).submitted(permit);
@@ -1531,12 +1534,17 @@ class GlobalPreparationPersistenceTest {
     try (var reopened = queries(limit == null ? 1 : null).open(context, query, origin)) {
       assertThrows(RuntimeException.class, () -> reopened.authorize(request));
     }
-    assertEquals(1, jdbc.queryForObject("SELECT sum(spent) FROM embedding_queries", Integer.class));
+    assertEquals(
+        1, jdbc.queryForObject("SELECT sum(spent) FROM embedding_query_allowances", Integer.class));
     read.close();
     assertThrows(RuntimeException.class, permit::require);
     assertThrows(
-        DataAccessException.class, () -> jdbc.update("UPDATE embedding_queries SET spent=0"));
-    assertThrows(DataAccessException.class, () -> jdbc.update("DELETE FROM embedding_queries"));
+        DataAccessException.class,
+        () ->
+            jdbc.update(
+                "UPDATE execution_allowances SET spent=0 WHERE id IN (SELECT budget_id FROM embedding_queries)"));
+    assertThrows(
+        DataAccessException.class, () -> jdbc.update("DELETE FROM embedding_query_allowances"));
     assertThrows(
         DataAccessException.class,
         () ->
@@ -1551,7 +1559,8 @@ class GlobalPreparationPersistenceTest {
                     ? "UPDATE embedding_queries SET call_limit=5"
                     : "UPDATE embedding_queries SET call_limit=NULL"));
     assertEquals(
-        limit, jdbc.queryForObject("SELECT call_limit FROM embedding_queries", Integer.class));
+        limit,
+        jdbc.queryForObject("SELECT call_limit FROM embedding_query_allowances", Integer.class));
     assertEquals(
         limit,
         jdbc.queryForObject(
@@ -1681,7 +1690,7 @@ class GlobalPreparationPersistenceTest {
     assertEquals(
         expected,
         jdbc.queryForObject(
-            "SELECT spent FROM embedding_queries WHERE id=?", Integer.class, source.id()));
+            "SELECT spent FROM embedding_query_allowances WHERE id=?", Integer.class, source.id()));
   }
 
   @Test
@@ -1700,8 +1709,8 @@ class GlobalPreparationPersistenceTest {
     var forged =
         new InferenceBinding(
             UUID.randomUUID(), UUID.randomUUID(), source.budget(), claim.ordinal(), 5);
-    ledger.retain(forged);
-    assertThrows(DataAccessException.class, () -> records.bind(source, forged, "b".repeat(64)));
+    assertThrows(DataAccessException.class, () -> ledger.retain(forged));
+    assertThrows(RuntimeException.class, () -> records.bind(source, forged, "b".repeat(64)));
     var second = work.inTransaction(() -> records.claim(source));
     var actual =
         new InferenceBinding(
@@ -1719,7 +1728,7 @@ class GlobalPreparationPersistenceTest {
     assertEquals(
         2,
         jdbc.queryForObject(
-            "SELECT spent FROM embedding_queries WHERE id=?", Integer.class, source.id()));
+            "SELECT spent FROM embedding_query_allowances WHERE id=?", Integer.class, source.id()));
   }
 
   @Test
@@ -1750,7 +1759,19 @@ class GlobalPreparationPersistenceTest {
         "a".repeat(64));
     var records = new JdbcQueryEmbeddingRepository(old);
     var ledger = new JdbcInferenceAdmissions(old);
-    ledger.retain(binding);
+    // Seed historical evidence with the shipped schema, rather than running a new repository
+    // against a schema that deliberately predates its canonical allowance contract.
+    old.update(
+        "INSERT INTO operation_inference_budgets(operation_id,budget_id) VALUES(?,?)",
+        binding.operation(),
+        budget);
+    old.update(
+        "INSERT INTO inference_admissions(id,operation_id,budget_id,ordinal,call_limit) VALUES(?,?,?,?,?)",
+        binding.id(),
+        binding.operation(),
+        budget,
+        1,
+        3);
     records.bind(new QueryEmbeddingRepository.Source(query, budget, 3), binding, "b".repeat(64));
     ledger.submitted(binding);
     Flyway.configure().dataSource(upgrade).schemas(schema).defaultSchema(schema).load().migrate();
@@ -1758,10 +1779,11 @@ class GlobalPreparationPersistenceTest {
     assertEquals(
         3,
         old.queryForObject(
-            "SELECT call_limit FROM embedding_queries WHERE id=?", Integer.class, query));
+            "SELECT call_limit FROM embedding_query_allowances WHERE id=?", Integer.class, query));
     assertEquals(
         1,
-        old.queryForObject("SELECT spent FROM embedding_queries WHERE id=?", Integer.class, query));
+        old.queryForObject(
+            "SELECT spent FROM embedding_query_allowances WHERE id=?", Integer.class, query));
     var retained = new QueryEmbeddingRepository.Source(query, budget, 3);
     assertEquals(2, records.claim(retained).ordinal());
     assertEquals(3, records.claim(retained).ordinal());
@@ -1790,7 +1812,8 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+              "SELECT count(*) FROM embedding_query_allowances WHERE spent=1 AND closed",
+              Integer.class));
       assertEquals(
           1,
           jdbc.queryForObject(
@@ -1862,7 +1885,9 @@ class GlobalPreparationPersistenceTest {
   @Test
   void explicitAllowanceIncreaseResumesWithoutResettingSpendingOrRepeatingCompletedEmbeddings() {
     UUID revision = upload(UUID.randomUUID());
-    jdbc.update("UPDATE information_revisions SET allowance_total=1 WHERE id=?", revision);
+    jdbc.update(
+        "UPDATE execution_allowances SET call_limit=1 WHERE id=(SELECT processing_budget_id FROM information_revisions WHERE id=?)",
+        revision);
     UUID budget = processing.budgetSource(revision).id();
     try (var dispatcher = dispatcher();
         var lifecycle = lifecycle(dispatcher, false)) {
@@ -1965,7 +1990,9 @@ class GlobalPreparationPersistenceTest {
   void concurrentLastCallClaimsCannotOverdrawOrReplayAndReopenedBudgetStaysExhausted()
       throws Exception {
     UUID revision = upload(UUID.randomUUID());
-    jdbc.update("UPDATE information_revisions SET allowance_total=1 WHERE id=?", revision);
+    jdbc.update(
+        "UPDATE execution_allowances SET call_limit=1 WHERE id=(SELECT processing_budget_id FROM information_revisions WHERE id=?)",
+        revision);
     var lease = embeddingLease(revision);
     var key =
         EmbeddingWorkRepository.Key.of(

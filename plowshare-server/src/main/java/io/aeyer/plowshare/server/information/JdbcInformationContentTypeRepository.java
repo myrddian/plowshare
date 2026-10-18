@@ -102,7 +102,7 @@ public final class JdbcInformationContentTypeRepository
         .query(
             SELECT
                 + " JOIN information_revision_content c ON c.type_version=v.id"
-                + " JOIN information_revisions r ON r.id=c.revision_id WHERE c.revision_id=? AND c.type_version=?"
+                + " JOIN information_revision_allowances r ON r.id=c.revision_id WHERE c.revision_id=? AND c.type_version=?"
                 + " AND NOT c.redacted AND r.availability<>'deleted'",
             JdbcInformationContentTypeRepository::decode,
             revision,

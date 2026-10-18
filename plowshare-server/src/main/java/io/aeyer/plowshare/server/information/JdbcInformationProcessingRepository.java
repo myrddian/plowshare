@@ -1,5 +1,8 @@
 package io.aeyer.plowshare.server.information;
 
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.documents.Extracted;
 import io.aeyer.plowshare.server.information.InformationLifecycle.*;
@@ -10,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** Owns leases and committed checkpoints. Callers keep a fence and its write in one transaction. */
 public final class JdbcInformationProcessingRepository implements InformationProcessingRepository {
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
   private final Clock clock;
 
   // Independent SYSTEM processing uses live intrinsic authority and retained input validity.
@@ -30,9 +34,15 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   public JdbcInformationProcessingRepository(
       JdbcTemplate jdbc, Clock clock, ProjectMembers members) {
+    this(jdbc, clock, members, new JdbcAllowanceRepository(jdbc));
+  }
+
+  public JdbcInformationProcessingRepository(
+      JdbcTemplate jdbc, Clock clock, ProjectMembers members, AllowanceRepository allowances) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
     Objects.requireNonNull(members);
+    this.allowances = Objects.requireNonNull(allowances);
   }
 
   private OffsetDateTime now() {
@@ -54,7 +64,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
     var candidates =
         sweepCandidates(
-            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r"
+            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revision_allowances r"
                 + " JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='autoTag'"
                 + " WHERE r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL"
@@ -80,7 +90,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
     String tags = InformationFacetSql.visibleTags("r", "q");
     var candidates =
         sweepCandidates(
-            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id"
+            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='tagGroups'"
                 + " WHERE r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL AND NOT q.tag_groups_manual"
                 + " AND jsonb_array_length("
@@ -155,7 +165,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       var rows =
           jdbc.query(
               "SELECT s.*,r.resource_id,q.owner_handle,q.project_id,p.name AS project_name FROM information_steps s"
-                  + " JOIN information_revisions r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
+                  + " JOIN information_revision_allowances r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
                   + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
                   + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                   + " AND "
@@ -224,7 +234,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public boolean renew(Lease lease) {
     if (!authorized(authority(lease))) return false;
     return jdbc.update(
-            "UPDATE information_steps s SET lease_until=? FROM information_revisions r,information_resources q"
+            "UPDATE information_steps s SET lease_until=? FROM information_revision_allowances r,information_resources q"
                 + " WHERE r.id=s.revision_id AND q.id=r.resource_id AND "
                 + SYSTEM_OPERATION_VALID
                 + " AND "
@@ -248,7 +258,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
     if (!authorized(authority(lease))) throw new StaleLease();
     List<UUID> valid =
         jdbc.query(
-            "SELECT r.id FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
+            "SELECT r.id FROM information_revision_allowances r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
                 + SYSTEM_OPERATION_VALID
                 + " AND "
@@ -271,7 +281,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public io.aeyer.plowshare.server.access.AuthorityIds.ScopeId home(UUID revision) {
     var id =
         jdbc.queryForObject(
-            "SELECT q.home_scope_id FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id WHERE r.id=?",
+            "SELECT q.home_scope_id FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id WHERE r.id=?",
             UUID.class,
             revision);
     if (id == null) throw new StaleLease();
@@ -296,7 +306,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
     Boolean eligible =
         jdbc.queryForObject(
             "SELECT r.auto_tag_requested OR r.auto_tag_generated OR (NOT r.excluded AND jsonb_array_length(q.tags)=0 AND jsonb_array_length(r.auto_tag)=0)"
-                + " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+                + " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             Boolean.class,
             revision);
 
@@ -306,14 +316,14 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public boolean groupingEligible(UUID revision) {
     return !Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT q.tag_groups_manual OR r.excluded FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+            "SELECT q.tag_groups_manual OR r.excluded FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             Boolean.class,
             revision));
   }
 
   public Revision readRevision(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT r.*,q.source_name,q.kind FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+        "SELECT r.*,q.source_name,q.kind FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
         (r, n) ->
             new Revision(
                 r.getString("source_name"),
@@ -377,20 +387,15 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   }
 
   public void spend(UUID revision) {
-    if (jdbc.update(
-            "UPDATE information_revisions SET allowance_spent=allowance_spent+1 WHERE id=? AND allowance_spent<allowance_total",
-            revision)
-        != 1)
-      throw new IllegalStateException(
-          "processing allowance exhausted; increase it explicitly before retrying");
-    jdbc.update(
-        "UPDATE conversations c SET budget_total=r.allowance_total,budget_spent=r.allowance_spent FROM information_revisions r WHERE r.id=? AND c.id=r.processing_log",
-        revision);
+    BudgetSource source = budgetSource(revision);
+    allowances
+        .claim(new AllowanceId(source.id()), 0)
+        .orElseThrow(() -> new IllegalStateException("Processing allowance exhausted"));
   }
 
   public BudgetSource budgetSource(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT processing_budget_id,allowance_total,allowance_spent,processing_log FROM information_revisions WHERE id=?",
+        "SELECT processing_budget_id,allowance_total,allowance_spent,processing_log FROM information_revision_allowances WHERE id=?",
         (r, n) ->
             new BudgetSource(r.getObject(1, UUID.class), r.getInt(2), r.getInt(3), r.getString(4)),
         revision);
@@ -398,28 +403,23 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   public void spend(InformationLifecycle.Lease lease, int expectedSpent) {
     requireLease(lease);
-    if (jdbc.update(
-            "UPDATE information_revisions SET allowance_spent=allowance_spent+1 WHERE id=? AND allowance_spent=? AND allowance_spent<allowance_total",
-            lease.revision(),
-            expectedSpent)
-        != 1)
-      throw new IllegalStateException(
-          "Processing allowance is exhausted or changed; reconcile retained work");
-    syncBudget(lease.revision());
-  }
-
-  private void syncBudget(UUID revision) {
-    jdbc.update(
-        "UPDATE conversations c SET budget_total=r.allowance_total,budget_spent=r.allowance_spent FROM information_revisions r WHERE r.id=? AND c.id=r.processing_log",
-        revision);
+    BudgetSource source = budgetSource(lease.revision());
+    allowances
+        .claim(new AllowanceId(source.id()), 0, expectedSpent)
+        .orElseThrow(() -> new IllegalStateException("Processing allowance exhausted or changed"));
   }
 
   public io.aeyer.plowshare.server.agents.Budget.Claim claimEmbedding(
       InformationLifecycle.Lease lease) {
-    var source = budgetSource(lease.revision());
-    spend(lease, source.spent());
-    return new io.aeyer.plowshare.server.agents.Budget.Claim(
-        source.id(), source.spent() + 1, source.limit(), source.log());
+    return claim(lease)
+        .orElseThrow(() -> new IllegalStateException("Processing allowance exhausted or changed"));
+  }
+
+  public Optional<io.aeyer.plowshare.server.agents.Budget.Claim> claim(
+      InformationLifecycle.Lease lease) {
+    requireLease(lease);
+    BudgetSource source = budgetSource(lease.revision());
+    return allowances.claim(new AllowanceId(source.id()), 0, source.spent());
   }
 
   private static String targetKey(
@@ -479,7 +479,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
         InformationJson.json(
             targets.stream().map(JdbcInformationProcessingRepository::targetKey).toList());
     if (jdbc.update(
-            "UPDATE inference_admissions SET preparation_revision=?,preparation_generation=?,preparation_targets=ARRAY(SELECT jsonb_array_elements_text(?::jsonb)) WHERE id=? AND preparation_revision IS NULL AND budget_id=(SELECT processing_budget_id FROM information_revisions WHERE id=?)",
+            "UPDATE inference_admissions SET preparation_revision=?,preparation_generation=?,preparation_targets=ARRAY(SELECT jsonb_array_elements_text(?::jsonb)) WHERE id=? AND preparation_revision IS NULL AND budget_id=(SELECT processing_budget_id FROM information_revision_allowances WHERE id=?)",
             lease.revision(),
             lease.generation(),
             encoded,
@@ -519,14 +519,14 @@ public final class JdbcInformationProcessingRepository implements InformationPro
         jdbc.queryForObject(
             "SELECT "
                 + InformationFacetSql.visibleTags("r", "q")
-                + " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+                + " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             String.class,
             revision);
     List<String> tags = InformationFacets.tags(strings(encoded));
     boolean generated =
         Boolean.TRUE.equals(
             jdbc.queryForObject(
-                "SELECT tag_groups_generated AND tag_groups_input_tags=CAST(? AS jsonb) FROM information_revisions WHERE id=?",
+                "SELECT tag_groups_generated AND tag_groups_input_tags=CAST(? AS jsonb) FROM information_revision_allowances WHERE id=?",
                 Boolean.class,
                 encoded,
                 revision));

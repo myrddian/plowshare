@@ -358,7 +358,7 @@ class PersonalActingWorkTest {
     boolean transaction;
     String owner;
     String nextJob;
-    int budget;
+    Integer budget;
     final UnitOfWork transactions =
         new UnitOfWork() {
           @Override
@@ -378,7 +378,7 @@ class PersonalActingWorkTest {
     }
 
     @Override
-    public String open(String subject, int allowance) {
+    public String open(String subject, Integer allowance) {
       owner = subject;
       budget = allowance;
       return "cnv_" + (bindings.size() + 1);

@@ -97,6 +97,14 @@ describe('board reads and entry commands', () => {
 });
 
 describe('board and swarm navigation', () => {
+  it('describes an unlimited root without inventing a zero ceiling', () => {
+    const b = browser();
+    b.details['demo-board']!.root.potTotal = null;
+    const detail = keyed(b, 'descend');
+    expect(words(detail)).toContain('unlimited allowance');
+    expect(words(detail)).not.toContain('/0 model calls');
+  });
+
   it('keeps root trees, project/state filters, and a stable cursor through reordering', () => {
     let b = browser();
     expect(boardRows(b).map((r) => r.id)).toEqual([

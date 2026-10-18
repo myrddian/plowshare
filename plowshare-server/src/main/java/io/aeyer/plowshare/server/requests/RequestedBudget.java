@@ -70,7 +70,7 @@ public final class RequestedBudget {
    *     the number it names — or the configured default, when it names none — is one {@link
    *     Budget#of} refuses
    */
-  public static Budget in(Integer maxModelCalls, Boolean noBudget, int configuredDefault) {
+  public static Budget in(Integer maxModelCalls, Boolean noBudget, Integer configuredDefault) {
     boolean lifted = Boolean.TRUE.equals(noBudget);
     if (lifted && maxModelCalls != null) {
       throw new CallerFault(
@@ -83,7 +83,7 @@ public final class RequestedBudget {
     if (lifted) {
       return Budget.none();
     }
-    int limit = maxModelCalls == null ? configuredDefault : maxModelCalls;
-    return Budget.of(limit);
+    if (maxModelCalls != null) return Budget.of(maxModelCalls);
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(configuredDefault);
   }
 }

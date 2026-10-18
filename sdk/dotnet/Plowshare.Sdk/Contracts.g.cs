@@ -1971,7 +1971,7 @@ public sealed record BoardMessageDto {
 
 /// <summary>Fields of the SwarmSelection protocol contract.</summary>
 public sealed record SwarmSelectionDto {
- [JsonPropertyName("budget")] public required double Budget { get; init; }
+ [JsonPropertyName("budget")] public required ScheduleDefinitionDtoLimitsDtoMaxModelCalls Budget { get; init; }
  [JsonPropertyName("description")] public required string Description { get; init; }
  [JsonPropertyName("members")] public required IReadOnlyList<string> Members { get; init; }
  [JsonPropertyName("name")] public required string Name { get; init; }
@@ -4471,7 +4471,7 @@ public sealed record SwarmDto {
 
 /// <summary>Fields of the SwarmType protocol contract.</summary>
 public sealed record SwarmTypeDto {
- [JsonPropertyName("budget")] public required double Budget { get; init; }
+ [JsonPropertyName("budget")] public required ScheduleDefinitionDtoLimitsDtoMaxModelCalls Budget { get; init; }
  [JsonPropertyName("members")] public required IReadOnlyList<string> Members { get; init; }
  [JsonPropertyName("name")] public required string Name { get; init; }
  [JsonPropertyName("origin")] public required string Origin { get; init; }

@@ -1688,7 +1688,7 @@ public final class JobRuntime {
             callee.name(),
             operation,
             parentConversation,
-            budget.reference(),
+            budget.snapshot().id(),
             OperationExecution.fingerprint(callee)));
     return operation;
   }

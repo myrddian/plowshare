@@ -533,6 +533,11 @@ export type Request =
       maxModelCalls?: number;
     }
   | {
+      action: 'board-topup';
+      topic: string;
+      maxModelCalls: number;
+    }
+  | {
       action: 'board-retry';
       project: string;
       topic: string;

@@ -375,7 +375,8 @@ class SeatRunnerTest {
             dispatcher::drain,
             fixture.work,
             () -> 10,
-            fixture.clock);
+            fixture.clock,
+            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
     AgentRegistry registry = AgentRegistry.of(agents, Set.of("file_read"));
     SeatRunner seats =
         new SeatRunner(
@@ -633,12 +634,12 @@ class SeatRunnerTest {
           private boolean first = true;
 
           @Override
-          public void spend(String root, int calls) {
+          public java.util.Optional<Budget.Claim> claim(String root, int reserve) {
             if (first) {
               first = false;
               throw new IllegalStateException("once");
             }
-            super.spend(root, calls);
+            return super.claim(root, reserve);
           }
         };
     BoardPot retryPot = new BoardPot(flaky);
@@ -731,7 +732,7 @@ class SeatRunnerTest {
     var call = voice.calls.getFirst();
     assertEquals(before.conversation(), call.conversation());
     assertEquals(24, call.wakeCap().turns());
-    assertEquals(18, call.lease().limit()); // budget 20 less reserve 2
+    assertEquals(12, call.lease().limit(), "retry steps do not enlarge the configured call window");
     assertEquals(0, store.topic(opened.topic().id()).orElseThrow().potSpent());
     assertTrue(call.lease().trySpend());
     assertEquals(1, store.topic(opened.topic().id()).orElseThrow().potSpent());

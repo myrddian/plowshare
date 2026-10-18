@@ -4,6 +4,9 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.MemoryIds;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -81,7 +84,7 @@ public final class ConversationStore {
           + " c.budget_id, c.budget_lifted, c.turn_cap, c.turn_cap_lifted, c.title";
 
   private static final String FROM_CONVERSATIONS =
-      " FROM conversations c LEFT JOIN projects p ON p.id = c.project_id";
+      " FROM conversation_allowance_state c LEFT JOIN projects p ON p.id = c.project_id";
 
   /*
    * `IS NOT DISTINCT FROM` and not `=`, and the CAST is not decoration —
@@ -202,11 +205,20 @@ public final class ConversationStore {
   /** Production creation boundary with required action admission. */
   public ConversationStore(
       JdbcTemplate jdbc, io.aeyer.plowshare.server.access.OperationAuthority operations) {
-    this(jdbc);
+    this(jdbc, operations, new JdbcAllowanceRepository(jdbc));
+  }
+
+  /** Production wiring supplies the canonical allowance contract. */
+  public ConversationStore(
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      AllowanceRepository allowances) {
+    this(jdbc, Instant::now, null, allowances);
     this.operations = Objects.requireNonNull(operations);
   }
 
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
   private final Supplier<Instant> now;
   private final Supplier<String> idFactory;
 
@@ -225,7 +237,16 @@ public final class ConversationStore {
    *     back in needs ids it chose rather than random hex
    */
   public ConversationStore(JdbcTemplate jdbc, Supplier<Instant> now, Supplier<String> idFactory) {
+    this(jdbc, now, idFactory, new JdbcAllowanceRepository(jdbc));
+  }
+
+  public ConversationStore(
+      JdbcTemplate jdbc,
+      Supplier<Instant> now,
+      Supplier<String> idFactory,
+      AllowanceRepository allowances) {
     this.jdbc = jdbc;
+    this.allowances = Objects.requireNonNull(allowances);
     this.now = now;
     this.idFactory = idFactory != null ? idFactory : () -> MemoryIds.mint(PREFIX, now.get());
   }
@@ -365,30 +386,26 @@ public final class ConversationStore {
    * transaction; a deferred database constraint rejects a missing binding at commit.
    */
   public ConversationRecord logSharedOrchestration(
-      Home home, String agent, String owner, String budgetOwner) {
-    var source =
-        find(budgetOwner).orElseThrow(() -> new ArchiveException("Missing caller allowance"));
-    if (!source.home().equals(home) || source.budget() == null)
-      throw new ArchiveException("Orchestration needs its caller's retained allowance");
+      Home home, String agent, String owner, Budget shared) {
+    allowances().attach(Objects.requireNonNull(shared));
     return write(Origin.ORCHESTRATION, home, agent, null, null, null, owner, null);
   }
 
   /** Reads only an existing immutable operation-to-budget relationship, never inventing one. */
   public Optional<Budget> allowanceFor(String conversation) {
-    var record = find(conversation);
-    if (record.isEmpty()) return Optional.empty();
-    if (record.get().budget() != null) return Optional.of(record.get().budget());
-    if (record.get().origin() != Origin.ORCHESTRATION && record.get().origin() != Origin.DELEGATION)
-      return Optional.empty();
-    var owners =
-        jdbc.queryForList(
-            "SELECT budget_conversation FROM operation_conversations WHERE conversation=?",
-            String.class,
-            conversation);
-    if (owners.size() != 1 || owners.getFirst().startsWith("budget:")) return Optional.empty();
-    return find(owners.getFirst())
-        .filter(source -> source.home().equals(record.get().home()))
-        .map(ConversationRecord::budget);
+    named(conversation);
+    return jdbc
+        .query(
+            "SELECT allowance_id FROM conversations WHERE id=? AND allowance_id IS NOT NULL",
+            (r, n) -> new AllowanceId(r.getObject(1, java.util.UUID.class)),
+            conversation)
+        .stream()
+        .findFirst()
+        .map(allowances()::restore);
+  }
+
+  private AllowanceRepository allowances() {
+    return allowances;
   }
 
   private ConversationRecord logInternal(
@@ -585,34 +602,7 @@ public final class ConversationStore {
   }
 
   private void bindBudget(String id, Budget budget) {
-    budget.bindDurableConversation(
-        id,
-        () -> {
-          var claims =
-              jdbc.query(
-                  "UPDATE conversations SET budget_spent=budget_spent+1 WHERE id=? AND budget_id=? "
-                      + "AND budget_spent<2147483647 AND (budget_lifted OR budget_spent<budget_total) "
-                      + "RETURNING budget_spent,budget_total",
-                  (r, n) ->
-                      new Budget.Claim(
-                          budget.identity(), r.getInt(1), r.getObject(2, Integer.class), id),
-                  id,
-                  budget.identity());
-          return claims.stream().findFirst();
-        },
-        ceiling -> {
-          if (jdbc.update(
-                  "UPDATE conversations SET budget_total=?,budget_lifted=? WHERE id=? AND budget_id=? "
-                      + "AND (CAST(? AS integer) IS NULL OR budget_spent<=?) AND budget_total IS DISTINCT FROM 0",
-                  ceiling,
-                  ceiling == null,
-                  id,
-                  budget.identity(),
-                  ceiling,
-                  ceiling)
-              != 1)
-            throw new ArchiveException("Conversation allowance changed or cannot be raised");
-        });
+    allowances().attach(budget);
   }
 
   /** The account a hook's notify reaches, or empty for a log nobody owns (decision 8). */
@@ -1169,132 +1159,32 @@ public final class ConversationStore {
   }
 
   /**
-   * Record what a turn spent, and stamp when it ended.
+   * Stamp turn completion without mirroring the shared allowance into its history row.
    *
-   * <p>One conditional UPDATE, and the condition is the rule: {@code budget_spent} may rise and may
-   * stay where it is, and may never fall. A plain {@code SET budget_spent = ?} would let a caller
-   * holding a stale {@link ConversationRecord} — one read before another turn ran — hand back calls
-   * that have already been made, and the row would come back a plausible number that is simply
-   * wrong. The database is the authority on how much of a conversation has been used, exactly as
-   * {@code ProposalStore.resolve} makes it the authority on whether a proposal is still waiting.
+   * <p>Durable claims and authorized ceiling changes have already committed through the allowance
+   * repository or retained inference admission. Completion cannot replace the retained identity,
+   * restate a stale ceiling or reduce usage. Child logs can finish turns without becoming owners of
+   * copied counters.
    *
-   * <p><b>The ceiling is not restated here.</b> {@code conversations_spent_within_budget} refuses a
-   * write past the total, and {@link Budget#trySpend} refuses to produce one; a third copy of the
-   * same predicate in this WHERE clause would be a line no fixture could reach, because the two
-   * above it fire first.
-   *
-   * <p><b>The total is written as well as the spending, and that sentence used to say the
-   * opposite.</b> It read "a conversation's total is what it was opened with, and a turn that could
-   * change it would be a turn that grants itself more" — and the second half of that is still
-   * exactly right, which is why the first half had to change rather than the rule. A turn cannot
-   * change the total: nothing a model does moves a {@link Budget}'s limit, and no tool takes one.
-   * <b>An operator can</b>, through {@code POST /v1/jobs/&#123;id&#125;/limits}, on the live object
-   * this conversation's turn is spending — and a raise that was not written here would be granted
-   * for one turn and silently gone at the next, with the row still saying what somebody decided
-   * against.
-   *
-   * <p>That cannot write a total below the row's spending, which would break {@code
-   * conversations_spent_within_budget}: the endpoint refuses to lower a budget under what has
-   * already been spent, naming cancellation as the verb for stopping a run, so the number arriving
-   * here is never one this table would refuse.
-   *
-   * <p><b>A budget with no ceiling writes the absence of one</b>, rather than this method reaching
-   * for a limit that is not there — {@link Budget#limit()} refuses an uncapped budget instead of
-   * answering with a number nobody set. The count is written exactly as it is for every other
-   * conversation, and the condition on it does not change: spending rises or stays, ceiling or no
-   * ceiling, so a stale caller is caught the same way.
-   *
-   * @param id the conversation
-   * @param budget the allowance as the turn left it, at the limit it now stands at, or with none if
-   *     the ceiling was lifted
-   * @return the row as it now stands
-   * @throws ArchiveException if no conversation has that id, or if this write would lower its
-   *     spending. Two situations and two sentences: the first is a caller naming something that is
-   *     not there, the second is a caller naming something that is and being out of date about it,
-   *     and an operator does entirely different things about them
+   * @param id the existing execution/history conversation
+   * @param budget the same retained source used by the turn
+   * @return the conversation with current projected allowance state
+   * @throws ArchiveException if the conversation/source is missing or its identity differs
    */
   public ConversationRecord turnEnded(String id, Budget budget) {
     String wanted = named(id);
     Objects.requireNonNull(budget, "budget");
-    if (!budget.reference().startsWith("budget:") && !budget.reference().equals(wanted)) {
-      var child = find(wanted).orElseThrow();
-      if (child.origin() != Origin.ORCHESTRATION
-          || child.budget() != null
-          || allowanceFor(wanted).filter(b -> b.reference().equals(budget.reference())).isEmpty())
-        throw new ArchiveException("Turn cannot replace its allowance owner");
-      turnEnded(budget.reference(), budget);
-      jdbc.update(
-          "UPDATE conversations SET last_turn_at=? WHERE id=?",
-          now.get().atOffset(java.time.ZoneOffset.UTC),
-          wanted);
-      return find(wanted).orElseThrow();
-    }
-    if (budget.durable()) {
-      if (jdbc.update(
-              "UPDATE conversations SET last_turn_at=? WHERE id=? AND budget_id=?",
-              utc(now.get()),
-              wanted,
-              budget.identity())
-          != 1) throw new ArchiveException("Turn has a different retained allowance source");
-      return find(wanted).orElseThrow();
-    }
-    Instant at = now.get();
-    int spent = budget.spent();
-    // The ceiling is asked for only when there is one. An uncapped budget
-    // refuses `limit()` rather than answering with a number nobody set, so
-    // the write puts the absence in the row -- no total and the boolean --
-    // which is the same three-state encoding `write` uses on the way in.
-    //
-    // A retained native zero-call budget also stays zero, even if a stale or malformed
-    // caller supplies a different Budget object. The guard is right for both: spending may rise
-    // and may stay where it is and may never fall, whether or not anything
-    // is stopping it, and it is what makes this write safe against a caller
-    // holding a record read before another turn ran.
-    boolean lifted = !budget.capped();
-    Integer total = lifted ? null : budget.limit();
-    int rows =
-        ArchiveUnavailableException.translating(
-            "record the end of a turn",
-            () ->
-                jdbc.update(
-                    "UPDATE conversations SET budget_total = ?, budget_spent = ?,"
-                        + " budget_lifted = ?, last_turn_at = ?"
-                        + " WHERE id = ? AND budget_spent <= ?"
-                        + " AND (budget_total IS DISTINCT FROM 0 OR (? = 0 AND ? = FALSE))",
-                    total,
-                    spent,
-                    lifted,
-                    utc(at),
-                    wanted,
-                    spent,
-                    total,
-                    lifted));
-    if (rows == 0) {
-      // Which of the two it was, asked only once the write has already
-      // declined — so the common path is one statement, and the second
-      // read happens where somebody is about to read a message anyway.
-      throw find(wanted)
-          .map(
-              stale ->
-                  new ArchiveException(
-                      "conversation "
-                          + wanted
-                          + " has already"
-                          + " spent "
-                          + stale.budget().spent()
-                          + " model calls, and this turn"
-                          + " reports "
-                          + spent
-                          + "; a conversation's spending does not go"
-                          + " down, so this write is holding a record read before another"
-                          + " turn ran"))
-          .orElseGet(() -> new ArchiveException("no conversation has the id " + wanted));
-    }
-    return find(wanted)
-        .orElseThrow(
-            () ->
-                new ArchiveException(
-                    "conversation " + wanted + " was updated and is no longer there"));
+    Budget retained =
+        allowanceFor(wanted)
+            .orElseThrow(
+                () ->
+                    new ArchiveException(
+                        "There is no conversation with a retained allowance: " + wanted));
+    if (!retained.identity().equals(budget.identity()))
+      throw new ArchiveException("Turn has a different retained allowance source");
+    if (jdbc.update("UPDATE conversations SET last_turn_at=? WHERE id=?", utc(now.get()), wanted)
+        != 1) throw new ArchiveException("Conversation disappeared");
+    return find(wanted).orElseThrow();
   }
 
   /**
@@ -1304,21 +1194,9 @@ public final class ConversationStore {
     String wanted = named(id);
     if (spent < 0 || total <= spent)
       throw new IllegalArgumentException("increase must leave calls available");
-    int rows =
-        ArchiveUnavailableException.translating(
-            "increase a conversation budget",
-            () ->
-                jdbc.update(
-                    "UPDATE conversations SET budget_total = ?, budget_spent = ?"
-                        + " WHERE id = ? AND budget_lifted = FALSE AND budget_total > 0 AND budget_total <= ? AND budget_spent <= ?",
-                    total,
-                    spent,
-                    wanted,
-                    total,
-                    spent));
-    if (rows != 1)
-      throw new ArchiveException(
-          "conversation budget moved before its automatic increase; nothing granted");
+    Budget source =
+        allowanceFor(wanted).orElseThrow(() -> new ArchiveException("Missing allowance"));
+    allowances().increase(new AllowanceId(source.identity()), total, spent);
   }
 
   /**

@@ -48,7 +48,6 @@ class ChildOperationLineageTest {
     var child = mock(Transcript.class);
     when(child.conversationId()).thenReturn("child-conversation");
     var budget = Budget.of(2);
-    budget.bindConversation("source-conversation", claim -> {});
     assertTrue(budget.trySpend());
     var runtime = new JobRuntime(operations, mock(LlmDispatcher.class), List.of());
     assertSame(
@@ -61,7 +60,7 @@ class ChildOperationLineageTest {
                 "child",
                 childAdmission,
                 "parent-conversation",
-                "source-conversation",
+                budget.snapshot().id(),
                 OperationExecution.fingerprint(leaf)));
     assertEquals(1, budget.spent());
     assertEquals(2, budget.limit());
@@ -92,7 +91,6 @@ class ChildOperationLineageTest {
   @Test
   void continuation_uses_the_envelope_and_refuses_replaced_account_agent_home_or_budget() {
     var budget = Budget.of(2);
-    budget.bindConversation("original-source", claim -> {});
     var envelope = admission(OperationExecution.actions(leaf));
     var bound =
         new OperationAuthority.Conversation(
@@ -100,7 +98,7 @@ class ChildOperationLineageTest {
             "child",
             envelope,
             "parent",
-            "original-source",
+            budget.snapshot().id(),
             OperationExecution.fingerprint(leaf));
     when(operations.conversation("child-conversation")).thenReturn(Optional.of(bound));
     when(operations.derive(envelope, envelope.actions())).thenReturn(envelope);
@@ -223,7 +221,6 @@ class ChildOperationLineageTest {
       when(childLog.conversationId()).thenReturn("child-log");
       when(parentLog.delegate(eq(leaf), eq(home), any())).thenReturn(childLog);
       var budget = Budget.of(3);
-      budget.bindConversation("source", claim -> {});
       var observed = new ArrayList<Budget.Claim>();
       when(claims.claimed(any(OperationAuthority.Admission.class), any()))
           .thenAnswer(
@@ -287,15 +284,14 @@ class ChildOperationLineageTest {
                   "child",
                   childAdmission,
                   "parent-log",
-                  "source",
+                  budget.snapshot().id(),
                   OperationExecution.fingerprint(leaf)));
       assertEquals(budget.spent(), observed.size());
       assertEquals(1, observed.stream().map(Budget.Claim::budget).distinct().count());
       assertEquals(
           List.of(1, 2), observed.subList(0, 2).stream().map(Budget.Claim::ordinal).toList());
       assertTrue(
-          observed.stream()
-              .allMatch(claim -> claim.limit() == 3 && "source".equals(claim.conversation())));
+          observed.stream().allMatch(claim -> claim.limit() == 3 && claim.conversation() == null));
       verify(claims).claimed(eq(childAdmission), any());
     }
   }
@@ -310,7 +306,7 @@ class ChildOperationLineageTest {
             "child",
             envelope,
             "parent",
-            budget.reference(),
+            budget.snapshot().id(),
             OperationExecution.fingerprint(leaf));
     assertThrows(
         CallerFault.class,

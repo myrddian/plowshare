@@ -46,7 +46,7 @@ class BoardConfigTest {
               IllegalStateException.class,
               () ->
                   new BoardConfig()
-                      .board(null, null, null, null, null, null, null, properties, null),
+                      .board(null, null, null, null, null, null, null, properties, null, null),
               String.valueOf(bad));
       assertEquals(
           "plowshare.swarm.closing-reserve is "
@@ -144,6 +144,8 @@ class BoardConfigTest {
     properties.setMaxDepth(-1);
     assertThrows(
         IllegalStateException.class,
-        () -> new BoardConfig().board(null, null, null, null, null, null, null, properties, null));
+        () ->
+            new BoardConfig()
+                .board(null, null, null, null, null, null, null, properties, null, null));
   }
 }

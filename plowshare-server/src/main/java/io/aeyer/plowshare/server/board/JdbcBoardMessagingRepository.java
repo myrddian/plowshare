@@ -2,6 +2,9 @@ package io.aeyer.plowshare.server.board;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.board.BoardMessaging.Instance;
 import io.aeyer.plowshare.server.board.BoardMessaging.Route;
 import java.time.Instant;
@@ -14,9 +17,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcBoardMessagingRepository implements BoardMessagingRepository {
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
 
   public JdbcBoardMessagingRepository(JdbcTemplate jdbc) {
+    this(jdbc, new JdbcAllowanceRepository(jdbc));
+  }
+
+  public JdbcBoardMessagingRepository(JdbcTemplate jdbc, AllowanceRepository allowances) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.allowances = Objects.requireNonNull(allowances);
   }
 
   private static void changed(int count) {
@@ -231,9 +240,10 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
 
   public void addAllowance(String topic, int allowance) {
     if (allowance < 1) throw new IllegalArgumentException("allowance must be positive");
-    changed(
-        jdbc.update(
-            "UPDATE board_topics SET pot_total = pot_total + ? WHERE id = ?", allowance, topic));
+    java.util.UUID source =
+        jdbc.queryForObject(
+            "SELECT allowance_id FROM board_topics WHERE id=?", java.util.UUID.class, topic);
+    allowances.add(new AllowanceId(source), allowance);
   }
 
   public void handled(String message) {

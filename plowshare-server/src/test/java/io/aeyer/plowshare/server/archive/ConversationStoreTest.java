@@ -291,15 +291,15 @@ class ConversationStoreTest {
     store.turnEnded(opened.id(), busier);
 
     Budget behind = stale.budget();
-    assertThrows(ArchiveException.class, behind::trySpend);
+    assertTrue(behind.trySpend(), "stale readers claim the next shared ordinal atomically");
     ArchiveException refused =
         assertThrows(
             ArchiveException.class, () -> store.turnEnded(opened.id(), Budget.resumed(10, 1)));
 
-    assertTrue(refused.getMessage().contains("already spent 3"), refused.getMessage());
-    assertTrue(refused.getMessage().contains("reports 1"), refused.getMessage());
+    assertTrue(
+        refused.getMessage().contains("different retained allowance source"), refused.getMessage());
     assertEquals(
-        3,
+        4,
         store.find(opened.id()).orElseThrow().budget().spent(),
         "and the row still holds what was really spent");
   }
@@ -431,10 +431,8 @@ class ConversationStoreTest {
         refused.getMessage().contains("conversations_an_allowance_is_both_halves_or_neither"),
         refused.getMessage());
 
-    jdbc.update(
-        "UPDATE conversations SET budget_total = NULL, budget_spent = 3,"
-            + " budget_lifted = TRUE WHERE id = ?",
-        "cnv_ordinary");
+    new io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository(jdbc)
+        .ceiling(store.find("cnv_ordinary").orElseThrow().budget().snapshot().id(), null);
 
     assertFalse(
         store.find("cnv_ordinary").orElseThrow().budget().capped(),
@@ -846,8 +844,7 @@ class ConversationStoreTest {
             () -> insert("cnv_negative", "payments", OPENED_AT, 4, -1));
 
     assertTrue(
-        refused.getMessage().contains("conversations_spending_is_not_negative"),
-        refused.getMessage());
+        refused.getMessage().contains("execution_allowances_spent_check"), refused.getMessage());
     assertTrue(
         !refused.getMessage().contains("conversations_spent_within_budget"),
         "and not the other one, which -1 also satisfies — " + refused.getMessage());
@@ -1617,7 +1614,8 @@ class ConversationStoreTest {
     clock.set(OPENED_AT.minus(Duration.ofDays(30)));
     ConversationRecord spokenInto = store.open(PAYMENTS, Budget.of(4));
     clock.set(OPENED_AT);
-    store.turnEnded(spokenInto.id(), Budget.resumed(4, 1));
+    spokenInto.budget().trySpend();
+    store.turnEnded(spokenInto.id(), spokenInto.budget());
 
     assertEquals(
         List.of(),

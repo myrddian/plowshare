@@ -24,20 +24,14 @@ public final class BoundPreparationEmbeddings implements PreparationEmbeddings {
   }
 
   public Budget budget(InformationLifecycle.Lease lease) {
-    var source = records.budgetSource(lease.revision());
-    var expected = new java.util.concurrent.atomic.AtomicInteger(source.spent());
-    return Budget.retained(
-        source.id(),
-        source.limit(),
-        source.spent(),
-        () ->
-            transactions.inTransaction(
-                () -> {
-                  records.requireLease(lease);
-                  records.spend(lease, expected.get());
-                  expected.incrementAndGet();
-                  return null;
-                }));
+    InformationProcessingRepository.BudgetSource source = records.budgetSource(lease.revision());
+    Budget budget = Budget.restored(source.id(), source.limit(), source.spent());
+    budget.bindAllowance(
+        () -> transactions.inTransaction(() -> records.claim(lease)),
+        ignored -> {
+          throw new IllegalStateException("Use the document allowance control");
+        });
+    return budget;
   }
 
   public EmbeddingAuthorization forSources(

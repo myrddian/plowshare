@@ -5,6 +5,9 @@ import static io.aeyer.plowshare.server.information.InformationCatalogue.STAGES;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.DocumentType;
 import io.aeyer.plowshare.protocol.Information;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.faults.*;
 import io.aeyer.plowshare.server.information.InformationCatalogue.Admission;
 import java.time.*;
@@ -14,12 +17,19 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** Owns catalogue row codecs and fixed permission-scoped queries. */
 public final class JdbcInformationCatalogueRepository implements InformationCatalogueRepository {
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
   private final Clock clock;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   public JdbcInformationCatalogueRepository(JdbcTemplate jdbc, Clock clock) {
+    this(jdbc, clock, new JdbcAllowanceRepository(jdbc));
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc, Clock clock, AllowanceRepository allowances) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
+    this.allowances = Objects.requireNonNull(allowances);
   }
 
   private static NotFoundFault absent() {
@@ -45,7 +55,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   public Snapshot row(UUID revision) {
     var rows =
         jdbc.query(
-            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.availability,r.extracted_text,q.owner_handle,r.generation,r.allowance_spent FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.availability,r.extracted_text,q.owner_handle,r.generation,r.allowance_spent FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             (rs, n) ->
                 new Snapshot(
                     rs.getObject(1, UUID.class),
@@ -78,7 +88,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             context.selection().includeGlobal(),
             audience ? "SET_AUDIENCE" : "WRITE"))) throw absent();
     return jdbc.queryForObject(
-        "SELECT q.id,q.namespace,q.source_name,q.owner_handle,q.project_id,p.name,q.home_scope_id,q.created_by FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id LEFT JOIN projects p ON p.id=q.project_id WHERE r.id=?",
+        "SELECT q.id,q.namespace,q.source_name,q.owner_handle,q.project_id,p.name,q.home_scope_id,q.created_by FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id LEFT JOIN projects p ON p.id=q.project_id WHERE r.id=?",
         (rs, n) ->
             new Resource(
                 rs.getObject(1, UUID.class),
@@ -171,12 +181,16 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public String text(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT extracted_text FROM information_revisions WHERE id=?", String.class, revision);
+        "SELECT extracted_text FROM information_revision_allowances WHERE id=?",
+        String.class,
+        revision);
   }
 
   public byte[] bytes(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT source_bytes FROM information_revisions WHERE id=?", byte[].class, revision);
+        "SELECT source_bytes FROM information_revision_allowances WHERE id=?",
+        byte[].class,
+        revision);
   }
 
   public Optional<Span> codeSpan(UUID revision, UUID chunk) {
@@ -194,7 +208,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     var selected = discovery(context, null);
     return List.copyOf(
         jdbc.queryForList(
-            "SELECT r.id FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE "
+            "SELECT r.id FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE "
                 + selected.sql(),
             UUID.class,
             selected.arguments().toArray()));
@@ -260,7 +274,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private Information.Facets facetCounts(
       io.aeyer.plowshare.server.information.InformationSql.Filter selected, boolean typedView) {
     String from =
-        " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE "
+        " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE "
             + selected.sql();
     var counts = new java.util.LinkedHashMap<String, List<Information.FacetCount>>();
     var more = new java.util.LinkedHashMap<String, Boolean>();
@@ -365,7 +379,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     List<Map<String, Object>> events =
         jdbc.queryForList(
             "SELECT e.sequence,e.revision_id,e.generation,e.stage,e.action,CASE WHEN q.owner_handle=? THEN e.detail ELSE '' END AS detail,e.recorded_at,r.document_type,r.document_subtype"
-                + " FROM information_events e JOIN information_revisions r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id"
+                + " FROM information_events e JOIN information_revision_allowances r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
                 + readableSql(context)
                 + " AND r.document_type=? AND e.sequence>? ORDER BY e.sequence LIMIT ?",
@@ -381,7 +395,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     args.add(id);
     List<Map<String, Object>> found =
         jdbc.queryForList(
-            "SELECT e.id,e.revision_id,e.paragraph_id,e.start_offset,e.end_offset,e.quote,e.locator,e.created_at FROM information_evidence e JOIN information_revisions r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id WHERE "
+            "SELECT e.id,e.revision_id,e.paragraph_id,e.start_offset,e.end_offset,e.quote,e.locator,e.created_at FROM information_evidence e JOIN information_revision_allowances r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id WHERE "
                 + readableSql(context)
                 + " AND e.id=?",
             args.toArray());
@@ -400,7 +414,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     args.addAll(filter.arguments());
     var rows =
         jdbc.queryForList(
-            "SELECT r.extracted_text,o.* FROM information_revisions r JOIN code_outlines o ON o.document_id=r.id"
+            "SELECT r.extracted_text,o.* FROM information_revision_allowances r JOIN code_outlines o ON o.document_id=r.id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='derive' AND s.state='ready'"
                 + " WHERE r.id=? AND r.content_hash=? AND r.document_type='code' AND r.availability='active' AND NOT r.excluded AND o.parser_version=? AND o.source_hash=r.text_hash AND "
                 + filter.sql(),
@@ -412,7 +426,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     var symbols =
         jdbc.query(
             "SELECT s.ordinal,s.name,s.kind,s.qualified_name,s.parent_ordinal,s.signature,s.start_offset,s.end_offset,s.start_line,s.end_line"
-                + " FROM code_symbols s JOIN information_revisions r ON r.id=s.document_id WHERE r.id=? AND "
+                + " FROM code_symbols s JOIN information_revision_allowances r ON r.id=s.document_id WHERE r.id=? AND "
                 + filter.sql()
                 + " ORDER BY s.ordinal LIMIT 10001",
             (rs, n) ->
@@ -455,7 +469,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     arguments.addAll(filter.arguments());
     var sources =
         jdbc.queryForList(
-            "SELECT document_type,document_subtype,text_hash FROM information_revisions r WHERE r.id=? AND "
+            "SELECT document_type,document_subtype,text_hash FROM information_revision_allowances r WHERE r.id=? AND "
                 + filter.sql(),
             arguments.toArray());
     if (sources.isEmpty()) throw absent();
@@ -464,7 +478,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       throw new CallerFault("outline requires a code revision");
     var rows =
         jdbc.queryForList(
-            "SELECT source_hash,language,parser_version,status,reason,symbol_count FROM code_outlines o JOIN information_revisions r ON r.id=o.document_id WHERE r.id=? AND "
+            "SELECT source_hash,language,parser_version,status,reason,symbol_count FROM code_outlines o JOIN information_revision_allowances r ON r.id=o.document_id WHERE r.id=? AND "
                 + filter.sql(),
             arguments.toArray());
     var result = new java.util.LinkedHashMap<String, Object>();
@@ -503,7 +517,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     arguments.add(limit + 1);
     var symbols =
         jdbc.queryForList(
-            "SELECT s.ordinal,s.name,s.kind,s.qualified_name,s.parent_ordinal,s.signature,s.start_offset,s.end_offset,s.start_line,s.end_line FROM code_symbols s JOIN information_revisions r ON r.id=s.document_id WHERE r.id=? AND "
+            "SELECT s.ordinal,s.name,s.kind,s.qualified_name,s.parent_ordinal,s.signature,s.start_offset,s.end_offset,s.start_line,s.end_line FROM code_symbols s JOIN information_revision_allowances r ON r.id=s.document_id WHERE r.id=? AND "
                 + filter.sql()
                 + " ORDER BY s.ordinal OFFSET ? LIMIT ?",
             arguments.toArray());
@@ -522,7 +536,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       if (!"code"
           .equals(
               jdbc.queryForObject(
-                  "SELECT document_type FROM information_revisions WHERE id=?",
+                  "SELECT document_type FROM information_revision_allowances WHERE id=?",
                   String.class,
                   revision))) throw new CallerFault("symbols requires a code revision");
     }
@@ -547,7 +561,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             "SELECT r.id AS revision,q.source_name,r.document_subtype AS language,o.status AS outline_status,o.source_hash,o.parser_version,"
                 + "s.ordinal,s.name,s.kind,s.qualified_name,s.parent_ordinal,s.signature,s.start_offset,s.end_offset,s.start_line,s.end_line"
                 + " FROM code_symbols s JOIN code_outlines o ON o.document_id=s.document_id"
-                + " JOIN information_revisions r ON r.id=s.document_id JOIN information_resources q ON q.id=r.resource_id"
+                + " JOIN information_revision_allowances r ON r.id=s.document_id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
                 + filter.sql()
                 + " AND r.document_type='code' AND NOT r.excluded"
@@ -600,7 +614,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           + InformationFacetSql.visibleGroups("r", "q")
           + " AS \"tagGroups\",CASE WHEN q.tag_groups_manual THEN 'manual' ELSE 'automatic' END AS \"tagGroupsSource\","
           + "(SELECT jsonb_build_object('type',v.type_id,'version',v.id,'ordinal',v.ordinal,'slug',t.slug,'label',t.label,'definitionHash',v.definition_hash) FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version JOIN information_content_types t ON t.id=v.type_id WHERE c.revision_id=r.id) AS \"contentType\",CASE WHEN r.processing_policy='explicit_only' THEN r.processing_policy END AS \"processingPolicy\","
-          + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id";
+          + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id";
 
   public void event(
       UUID revision, long generation, String actor, String stage, String action, String detail) {
@@ -611,7 +625,9 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     // own event. Holding the fence while waiting for that worker creates a deadlock.
     // Transactions publishing multiple revisions must lock all of them before the fence.
     jdbc.queryForObject(
-        "SELECT id FROM information_revisions WHERE id=? FOR KEY SHARE", UUID.class, revision);
+        "SELECT id FROM information_revision_allowances WHERE id=? FOR KEY SHARE",
+        UUID.class,
+        revision);
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock(hashtextextended('information-event-order',0)) IS NULL",
         Boolean.class);
@@ -756,7 +772,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       resource = (UUID) resources.getFirst().get("id");
       UUID head =
           jdbc.queryForObject(
-              "SELECT id FROM information_revisions WHERE resource_id=? ORDER BY ordinal DESC LIMIT 1",
+              "SELECT id FROM information_revision_allowances WHERE resource_id=? ORDER BY ordinal DESC LIMIT 1",
               UUID.class,
               resource);
       lockResource(context, head, false);
@@ -773,7 +789,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     }
     int ordinal =
         jdbc.queryForObject(
-            "SELECT coalesce(max(ordinal),0)+1 FROM information_revisions" + " WHERE resource_id=?",
+            "SELECT coalesce(max(ordinal),0)+1 FROM information_revision_allowances"
+                + " WHERE resource_id=?",
             Integer.class,
             resource);
     UUID revision = UUID.randomUUID();
@@ -885,12 +902,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       throw new IllegalStateException("Root policy transition returned no version");
     UUID resource =
         jdbc.queryForObject(
-            "SELECT resource_id FROM information_revisions WHERE id=?", UUID.class, revision);
+            "SELECT resource_id FROM information_revision_allowances WHERE id=?",
+            UUID.class,
+            revision);
     // Lock all revisions before the commit-order event fence. Every cached revision needs an
     // invalidation when its root audience changes, including historical and pinned reads.
     var revisions =
         jdbc.query(
-            "SELECT id FROM information_revisions WHERE resource_id=? ORDER BY id FOR KEY SHARE",
+            "SELECT id FROM information_revision_allowances WHERE resource_id=? ORDER BY id FOR KEY SHARE",
             (row, index) -> row.getObject(1, UUID.class),
             resource);
     for (UUID affected : revisions)
@@ -921,7 +940,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     }
     String old =
         jdbc.queryForObject(
-            "SELECT availability FROM information_revisions WHERE id=? FOR UPDATE",
+            "SELECT availability FROM information_revision_allowances WHERE id=? FOR UPDATE",
             String.class,
             revision);
     if (old.equals(state)) return;
@@ -1011,7 +1030,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (code && first > 2 && !metadata)
       throw new CallerFault("code documents do not run the prose summary cascade");
     long old = generation(revision);
-    jdbc.queryForMap("SELECT id FROM information_revisions WHERE id=? FOR UPDATE", revision);
+    jdbc.queryForMap(
+        "SELECT id FROM information_revision_allowances WHERE id=? FOR UPDATE", revision);
     jdbc.update("UPDATE information_revisions SET generation=generation+1 WHERE id=?", revision);
     jdbc.update(
         "UPDATE information_steps SET state='cancelled',lease_token=NULL,lease_until=NULL WHERE revision_id=? AND generation=? AND state<>'ready' AND "
@@ -1083,14 +1103,16 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (total < 1) throw new IllegalArgumentException("allowance must be positive");
 
     lockResource(context, revision, false);
-    jdbc.queryForMap("SELECT id FROM information_revisions WHERE id=? FOR UPDATE", revision);
+    jdbc.queryForMap(
+        "SELECT id FROM information_revision_allowances WHERE id=? FOR UPDATE", revision);
     if (total < row(revision).allowanceSpent())
       throw new CallerFault("allowance cannot be lowered below actual spending");
-    jdbc.update("UPDATE information_revisions SET allowance_total=? WHERE id=?", total, revision);
-    jdbc.update(
-        "UPDATE conversations SET budget_total=? WHERE id=(SELECT processing_log FROM information_revisions WHERE id=?)",
-        total,
-        revision);
+    UUID source =
+        jdbc.queryForObject(
+            "SELECT processing_budget_id FROM information_revisions WHERE id=?",
+            UUID.class,
+            revision);
+    allowances.ceiling(new AllowanceId(source), total);
     event(
         revision,
         generation(revision),
@@ -1344,7 +1366,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     }
     jdbc.update(
         "UPDATE information_reports SET status='superseded' WHERE status='final' AND revision_id IN"
-            + " (SELECT older.id FROM information_revisions older JOIN information_revisions current ON older.resource_id=current.resource_id WHERE current.id=? AND older.id<>?)",
+            + " (SELECT older.id FROM information_revision_allowances older JOIN information_revision_allowances current ON older.resource_id=current.resource_id WHERE current.id=? AND older.id<>?)",
         revision,
         revision);
     if (jdbc.update(

@@ -1,12 +1,17 @@
 package io.aeyer.plowshare.server.embedding;
 
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.information.*;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceBinding;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Retained allowance and single-attempt evidence. All claim methods join the owner's transaction.
@@ -14,9 +19,16 @@ import org.springframework.stereotype.Repository;
 @Repository
 public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingRepository {
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
 
   public JdbcQueryEmbeddingRepository(JdbcTemplate jdbc) {
+    this(jdbc, new JdbcAllowanceRepository(jdbc));
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public JdbcQueryEmbeddingRepository(JdbcTemplate jdbc, AllowanceRepository allowances) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.allowances = Objects.requireNonNull(allowances);
   }
 
   public Pin pin(InformationContext context) {
@@ -106,15 +118,24 @@ public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingReposit
   }
 
   public Budget.Claim claim(Source source) {
-    var rows =
-        jdbc.query(
-            "UPDATE embedding_queries SET spent=spent+1 WHERE id=? AND budget_id=? AND NOT closed AND (call_limit IS NULL OR spent<call_limit) AND call_limit IS NOT DISTINCT FROM ?::integer RETURNING spent",
-            (r, n) -> r.getInt(1),
-            source.id(),
-            source.budget(),
-            source.limit());
-    if (rows.size() != 1) throw new IllegalStateException("Query allowance exhausted or closed");
-    return new Budget.Claim(source.budget(), rows.getFirst(), source.limit());
+    // Serialize closure with the last claim. The lock ends before any provider IO.
+    TransactionTemplate transaction =
+        new TransactionTemplate(
+            new DataSourceTransactionManager(Objects.requireNonNull(jdbc.getDataSource())));
+    return transaction.execute(
+        status -> {
+          if (jdbc.query(
+                      "SELECT id FROM embedding_queries WHERE id=? AND budget_id=? AND NOT closed AND call_limit IS NOT DISTINCT FROM ?::integer FOR UPDATE",
+                      (r, n) -> r.getObject(1, UUID.class),
+                      source.id(),
+                      source.budget(),
+                      source.limit())
+                  .size()
+              != 1) throw new IllegalStateException("Query source closed or changed");
+          return allowances
+              .claim(new AllowanceId(source.budget()), 0)
+              .orElseThrow(() -> new IllegalStateException("Query allowance exhausted"));
+        });
   }
 
   public void bind(Source source, InferenceBinding binding, String taskHash) {

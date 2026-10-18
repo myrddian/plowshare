@@ -108,4 +108,11 @@ public record BoardTopic(
   public boolean isClosed() {
     return CLOSED.equals(state);
   }
+
+  /** Root allowance eligibility; null ceiling is unlimited, never an exhausted zero. */
+  @JsonIgnore
+  public boolean exhausted(boolean forOpener) {
+    if (!isRoot()) throw new IllegalStateException("Allowance belongs to the root");
+    return potTotal != null && (long) potSpent + (forOpener ? 0 : reserve) >= potTotal;
+  }
 }

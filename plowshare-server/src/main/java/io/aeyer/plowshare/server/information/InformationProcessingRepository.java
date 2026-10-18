@@ -107,6 +107,11 @@ public interface InformationProcessingRepository {
     throw new UnsupportedOperationException();
   }
 
+  /** Empty means the selected source is exhausted; an invalid lease still throws. */
+  default Optional<io.aeyer.plowshare.server.agents.Budget.Claim> claim(Lease lease) {
+    throw new UnsupportedOperationException();
+  }
+
   default void requireEmbeddingTargets(
       Lease lease, List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
     throw new UnsupportedOperationException();

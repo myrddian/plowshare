@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.*;
 import io.aeyer.plowshare.server.harness.Harness;
@@ -122,8 +123,9 @@ public class InformationConfig {
   }
 
   @Bean
-  public InformationCatalogueRepository informationCatalogueRepository(JdbcTemplate jdbc) {
-    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+  public InformationCatalogueRepository informationCatalogueRepository(
+      JdbcTemplate jdbc, AllowanceRepository allowances) {
+    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), allowances);
   }
 
   @Bean
@@ -301,6 +303,7 @@ public class InformationConfig {
   @Bean(destroyMethod = "close")
   public InformationLifecycle informationLifecycle(
       JdbcTemplate jdbc,
+      AllowanceRepository allowances,
       io.aeyer.plowshare.server.archive.ProjectMembers members,
       UnitOfWork work,
       InformationCatalogue catalogue,
@@ -339,7 +342,8 @@ public class InformationConfig {
                 GlobalAgentSnapshots.supply(globals, agents).get(),
                 dual,
                 counters));
-    var processing = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
+    var processing =
+        new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members, allowances);
     var processor =
         InformationLifecycle.processing(
             processing,

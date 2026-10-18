@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.agents.JobsProperties;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
@@ -89,8 +90,10 @@ public class ArchiveConfig {
    */
   @Bean
   public ConversationStore conversationStore(
-      JdbcTemplate jdbc, io.aeyer.plowshare.server.access.OperationAuthority operations) {
-    return new ConversationStore(jdbc, operations);
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      AllowanceRepository allowances) {
+    return new ConversationStore(jdbc, operations, allowances);
   }
 
   /** Local hook sets by hash (spec 2026-09-30-local-hooks-are-served §3). */

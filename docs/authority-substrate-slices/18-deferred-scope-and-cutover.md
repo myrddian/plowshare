@@ -261,3 +261,14 @@ accounts, intersected with retained operation ceilings across memory and documen
 The API selectors are `global_read` and `includeGlobal`; legacy Shared roots narrow
 to HOME pending deliberate publication. This does not close the separate
 [delegated runtime composition TODO](../delegated-runtime-authority-todo.md).
+
+
+## Follow-up: standalone allowances and recoverable exhaustion
+
+The [standalone allowance follow-up](../standalone-allowance-and-recovery-plan.md)
+supersedes the conversation-owned allowance storage assumption above. Supported
+orchestration starts retain a typed canonical allowance reference; a valid source
+no longer needs a conversation-owned counter. Board seat/delegate references
+retain their root source and scheduling leases. New exhaustion is recoverable
+through existing scoped top-up/retry controls; explicit historical closure stays
+terminal. See that document for migration, local evidence and deployment limits.

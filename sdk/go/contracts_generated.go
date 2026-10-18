@@ -3544,11 +3544,11 @@ type BoardMessageDto struct {
 
 // SwarmSelectionDto is the explicit SwarmSelection protocol shape.
 type SwarmSelectionDto struct {
-	Budget      float64  `json:"budget"`
-	Description string   `json:"description"`
-	Members     []string `json:"members"`
-	Name        string   `json:"name"`
-	Revision    string   `json:"revision"`
+	Budget      ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"budget"`
+	Description string                                      `json:"description"`
+	Members     []string                                    `json:"members"`
+	Name        string                                      `json:"name"`
+	Revision    string                                      `json:"revision"`
 }
 
 // BoardTopicDto is the explicit BoardTopic protocol shape.
@@ -7014,12 +7014,12 @@ type SwarmDto struct {
 
 // SwarmTypeDto is the explicit SwarmType protocol shape.
 type SwarmTypeDto struct {
-	Budget    float64            `json:"budget"`
-	Members   []string           `json:"members"`
-	Name      string             `json:"name"`
-	Origin    string             `json:"origin"`
-	Refused   map[string]string  `json:"refused"`
-	Selection BoardTopicDtoSwarm `json:"selection"`
+	Budget    ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"budget"`
+	Members   []string                                    `json:"members"`
+	Name      string                                      `json:"name"`
+	Origin    string                                      `json:"origin"`
+	Refused   map[string]string                           `json:"refused"`
+	Selection BoardTopicDtoSwarm                          `json:"selection"`
 }
 
 // SwarmTypesDto is the explicit SwarmTypes protocol shape.
