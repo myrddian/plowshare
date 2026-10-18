@@ -9,7 +9,8 @@ The separately requested [follow-on slice 15](authority-substrate-slices/15-sema
 now scopes a shared SYSTEM embedding foundation and initial search consumers.
 Consumer permissions, disclosure and budget ownership stay separate. Slice 15 is
 implemented for preparation and its selected search consumers; other consumers
-remain fenced, and search requires explicit positive budget configuration.
+remain fenced. Search spending defaults to unlimited; operators may configure
+disabled or limited spending without changing embedding authority.
 
 ## Count and scope
 
@@ -190,9 +191,9 @@ retains classification and compatibility-removal gates. Completing this bounded
 path does not enable deferred budget consumers or establish unrestricted
 platform-wide cutover.
 Slice 15 implements the shared embedding foundation, retained query source and
-closed query-purpose evidence on its selected consumers. Search inference remains
-inactive without explicit positive configuration; memory/ask/repair and the other
-deferred consumers are not activated.
+closed query-purpose evidence on its selected consumers. Search spending defaults
+to unlimited, with explicit disabled/limited policies available; memory/ask/repair
+and the other deferred consumers are not activated.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

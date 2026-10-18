@@ -590,8 +590,8 @@ The implemented [follow-on slice 15](authority-substrate-slices/15-semantic-quer
 scopes a shared SYSTEM embedding foundation, retaining preparation's existing
 source and adding the first search consumers with their search-operation budget.
 It adds no embedding role or per-consumer permission system. Selected document
-search consumers now have retained authority and allowances, with explicit
-positive configuration required to enable query inference.
+search consumers now have retained authority and spending policy. Search spending
+defaults to unlimited; explicit disabled/limited policies remain configurable.
 Memory recall, ask/deliberation and independent maintenance activation remain deferred;
 they can reuse the foundation once their own operation bindings are supported.
 
