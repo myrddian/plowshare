@@ -112,7 +112,7 @@ export function stepsOf(entries: readonly Entry[]): Step[] {
         steps.push({ kind: 'fold', ...base });
         break;
       case 'answer':
-        if ((entry.text ?? '').trim() !== '') {
+        if ((entry.text ?? '').trim() !== '' || entry.dispatch !== undefined) {
           steps.push({ kind: 'answer', ...base });
         }
         for (const asked of entry.calls ?? []) {
@@ -193,7 +193,15 @@ export function turnsOf(steps: readonly Step[]): Turn[] {
     .map(([ordinal, own]) => {
       const answers = new Map<number, Entry>();
       for (const step of own) {
-        if (step.kind === 'answer' || step.kind === 'call') {
+        if (
+          (step.kind === 'answer' ||
+            step.kind === 'call' ||
+            step.kind === 'note' ||
+            step.kind === 'fold') &&
+          (step.entry.dispatch !== undefined ||
+            ((step.kind === 'answer' || step.kind === 'call') &&
+              step.entry.tookMillis !== undefined))
+        ) {
           answers.set(step.entry.ordinal, step.entry);
         }
       }

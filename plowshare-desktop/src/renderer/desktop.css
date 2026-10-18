@@ -398,6 +398,7 @@
 .trajectory-row.fail .step-kind { color:#d48b75; }
 .step-preview { flex:1; min-width:20px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#928f81; font-size:10px; }
 .step-outcome { margin-left:auto; color:#78796e; font-size:9px; white-space:nowrap; flex-shrink:0; }
+.trajectory-row.answer .step-outcome { white-space:normal; overflow-wrap:anywhere; max-width:42%; flex-shrink:1; text-align:right; }
 .trajectory-row.ok .step-outcome { color:#8da375; }
 .trajectory-row.fail .step-outcome { color:#d48b75; }
 .trajectory-detail { display:flex; flex-direction:column; min-width:0; min-height:0; background:#1b1b19; }

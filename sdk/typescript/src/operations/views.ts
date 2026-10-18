@@ -796,6 +796,10 @@ export interface Entry {
   readonly outcome?: string;
   /** How long the model call (an answer) or the tool (a result) took. */
   readonly tookMillis?: number;
+  /** Provider-reported usage for one inference, never a text-length estimate. */
+  readonly promptTokens?: number;
+  readonly completionTokens?: number;
+  readonly reasoningTokens?: number;
   /** When the row was written, as the server spelt it. */
   readonly recordedAt?: string;
   /** On a stored tool result: the handle `result_read` takes. */
@@ -876,6 +880,9 @@ export function entriesOf(answer: Answer): Entry[] {
     const toolCallId = textAt(fields, 'toolCallId');
     const outcome = textAt(fields, 'outcome');
     const tookMillis = countAt(fields, 'tookMillis');
+    const promptTokens = countAt(fields, 'promptTokens');
+    const completionTokens = countAt(fields, 'completionTokens');
+    const reasoningTokens = countAt(fields, 'reasoningTokens');
     const recordedAt = textAt(fields, 'recordedAt');
     const handle = textAt(fields, 'handle');
     const supersededBy = countAt(fields, 'supersededBy');
@@ -902,6 +909,9 @@ export function entriesOf(answer: Answer): Entry[] {
       ...(toolCallId === undefined ? {} : { toolCallId }),
       ...(outcome === undefined || outcome === '' ? {} : { outcome }),
       ...(tookMillis === undefined ? {} : { tookMillis }),
+      ...(promptTokens === undefined ? {} : { promptTokens }),
+      ...(completionTokens === undefined ? {} : { completionTokens }),
+      ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
       ...(recordedAt === undefined ? {} : { recordedAt }),
       ...(handle === undefined ? {} : { handle }),
       ...(supersededBy === undefined ? {} : { supersededBy }),

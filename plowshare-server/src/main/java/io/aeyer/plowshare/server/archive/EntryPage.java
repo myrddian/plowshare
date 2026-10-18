@@ -142,6 +142,9 @@ public record EntryPage(List<Row> listed, int total, int through, Boolean more) 
    * @param completion what the completion was judged to be — {@code answered}, {@code refused},
    *     {@code cut_off}, {@code called_tools} — or null, likewise. What tells a fallback that
    *     answered from one that refused in turn
+   * @param promptTokens provider-reported input tokens for this inference, or null when absent
+   * @param completionTokens provider-reported output tokens, including tool-call output, or null
+   * @param reasoningTokens provider-reported reasoning subset of output tokens, or null
    * @param speaker who spoke this — set only on an {@code UTTERANCE}, and null for every other
    *     kind. {@code V57}: an utterance written before it has no speaker recorded and reads as
    *     {@link Speaker#person(String) Speaker.person(null)}
@@ -167,7 +170,54 @@ public record EntryPage(List<Row> listed, int total, int through, Boolean more) 
       String completion,
       Speaker speaker,
       String outcome,
-      String job) {
+      String job,
+      Integer promptTokens,
+      Integer completionTokens,
+      Integer reasoningTokens) {
+
+    /** Older callers do not supply usage; absence never means zero tokens. */
+    public Row(
+        int ordinal,
+        int turnOrdinal,
+        EntryKind kind,
+        String excerpt,
+        int length,
+        Instant ejectedAt,
+        Integer supersededBy,
+        String toolCallId,
+        List<Asked> toolCalls,
+        UUID handle,
+        Instant recordedAt,
+        Long tookMillis,
+        String dispatch,
+        String wireModel,
+        String completion,
+        Speaker speaker,
+        String outcome,
+        String job) {
+      this(
+          ordinal,
+          turnOrdinal,
+          kind,
+          excerpt,
+          length,
+          ejectedAt,
+          supersededBy,
+          toolCallId,
+          toolCalls,
+          handle,
+          recordedAt,
+          tookMillis,
+          dispatch,
+          wireModel,
+          completion,
+          speaker,
+          outcome,
+          job,
+          null,
+          null,
+          null);
+    }
 
     /** Compatibility constructor for unbound entries. Unknown jobs are never inferred. */
     public Row(

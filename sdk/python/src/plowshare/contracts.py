@@ -1506,6 +1506,7 @@ AskedViewDtoOpened: TypeAlias = "None | OpenedViewDto"
 class EntryViewDto:
     """Validated fields of the EntryView protocol contract."""
     completion: TierDtoProject
+    completion_tokens: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
     cut: bool
     dispatch: TierDtoProject
     ejected_at: TierDtoProject
@@ -1516,6 +1517,8 @@ class EntryViewDto:
     length: float
     ordinal: float
     outcome: TierDtoProject
+    prompt_tokens: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    reasoning_tokens: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
     recorded_at: TierDtoProject
     source: EntryViewDtoSource | Unset = UNSET
     speaker: TierDtoProject
@@ -9605,7 +9608,7 @@ _FIELDS = {
     SourceViewDto: {"kind": "kind", "reference": "reference"},
     OpenedViewDto: {"agent": "agent", "conversation": "conversation"},
     AskedViewDto: {"arguments": "arguments", "cut": "cut", "id": "id", "length": "length", "name": "name", "opened": "opened", "salient": "salient"},
-    EntryViewDto: {"completion": "completion", "cut": "cut", "dispatch": "dispatch", "ejectedAt": "ejected_at", "excerpt": "excerpt", "handle": "handle", "job": "job", "kind": "kind", "length": "length", "ordinal": "ordinal", "outcome": "outcome", "recordedAt": "recorded_at", "source": "source", "speaker": "speaker", "speakerName": "speaker_name", "supersededBy": "superseded_by", "tookMillis": "took_millis", "toolCallId": "tool_call_id", "toolCalls": "tool_calls", "turnOrdinal": "turn_ordinal", "wireModel": "wire_model"},
+    EntryViewDto: {"completion": "completion", "completionTokens": "completion_tokens", "cut": "cut", "dispatch": "dispatch", "ejectedAt": "ejected_at", "excerpt": "excerpt", "handle": "handle", "job": "job", "kind": "kind", "length": "length", "ordinal": "ordinal", "outcome": "outcome", "promptTokens": "prompt_tokens", "reasoningTokens": "reasoning_tokens", "recordedAt": "recorded_at", "source": "source", "speaker": "speaker", "speakerName": "speaker_name", "supersededBy": "superseded_by", "tookMillis": "took_millis", "toolCallId": "tool_call_id", "toolCalls": "tool_calls", "turnOrdinal": "turn_ordinal", "wireModel": "wire_model"},
     EntryPageViewDto: {"entries": "entries", "limit": "limit", "more": "more", "offset": "offset", "oldest": "oldest", "through": "through", "total": "total"},
     CompactionViewDto: {"summary": "summary", "throughOrdinal": "through_ordinal"},
     MeasuredTurnDto: {"grewBy": "grew_by", "promptTokens": "prompt_tokens", "since": "since", "turn": "turn"},

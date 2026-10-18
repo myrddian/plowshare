@@ -14029,6 +14029,9 @@
           "completion": {
             "$ref": "#/$defs/shape43"
           },
+          "completionTokens": {
+            "$ref": "#/$defs/shape532"
+          },
           "cut": {
             "$ref": "#/$defs/shape8"
           },
@@ -14058,6 +14061,12 @@
           },
           "outcome": {
             "$ref": "#/$defs/shape43"
+          },
+          "promptTokens": {
+            "$ref": "#/$defs/shape532"
+          },
+          "reasoningTokens": {
+            "$ref": "#/$defs/shape532"
           },
           "recordedAt": {
             "$ref": "#/$defs/shape43"

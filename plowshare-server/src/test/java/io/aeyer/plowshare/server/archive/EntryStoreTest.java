@@ -2070,6 +2070,12 @@ class EntryStoreTest {
         "every field of the call a fallback made has to come back as it was written,"
             + " so nothing can attribute its words to another model");
     assertTrue(entries.invocationOf(conversation, 1).isEmpty(), "an utterance is not a model call");
+    var page = entries.pageOfLog(conversation, 0, 10).listed();
+    assertNull(page.get(0).promptTokens());
+    assertEquals(812, page.get(1).promptTokens());
+    assertEquals(14, page.get(1).completionTokens());
+    assertEquals(40, page.get(1).reasoningTokens());
+    assertEquals(900L, page.get(1).tookMillis());
   }
 
   @Test

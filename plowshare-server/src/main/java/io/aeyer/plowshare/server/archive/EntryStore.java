@@ -136,9 +136,8 @@ public final class EntryStore {
 
   /*
    * V39's columns, read on their own and never through COLUMNS. What a model
-   * call was is execution provenance: no reader that renders a conversation
-   * wants it, and adding it to the row every projection reads would put it one
-   * careless mapping away from a prompt.
+   * call was is execution provenance: it must not enter the row every model projection reads.
+   * The human-facing page may expose recorded usage, while prompt assembly remains separate.
    */
   private static final String INVOCATION_OF =
       """
@@ -800,7 +799,8 @@ public final class EntryStore {
                       FROM jsonb_array_elements(entries.tool_calls)
                            WITH ORDINALITY AS each(call, asked)) AS tool_calls,
                    handle, recorded_at, took_ms,
-                   dispatch, wire_model, completion, speaker, speaker_name, outcome, job_id
+                   dispatch, wire_model, completion, speaker, speaker_name, outcome, job_id,
+                   prompt_tokens, completion_tokens, reasoning_tokens
               FROM entries
              WHERE conversation_id = ?%s""";
 
@@ -2832,8 +2832,9 @@ public final class EntryStore {
               rs.getObject("took_ms", Long.class),
               // V39, and null on every row but an answer or a refusal, and on
               // every one written before the migration. A page shows which target
-              // answered; the rest of the provenance is invocationOf's to hand an
-              // audit. dispatch and completion are stored spellings, read as the
+              // answered, with provider token counts alongside. Other provenance stays behind
+              // invocationOf's explicit audit read. dispatch and completion are stored spellings,
+              // read as the
               // strings they are rather than parsed here -- a page is not the
               // place a value this table already constrained is validated again.
               rs.getString("dispatch"),
@@ -2846,7 +2847,10 @@ public final class EntryStore {
                   rs.getString("speaker_name")),
               // V62, and null for every row but a TOOL_RESULT and for one written before it.
               rs.getString("outcome"),
-              rs.getString("job_id"));
+              rs.getString("job_id"),
+              rs.getObject("prompt_tokens", Integer.class),
+              rs.getObject("completion_tokens", Integer.class),
+              rs.getObject("reasoning_tokens", Integer.class));
 
   private static final RowMapper<StoredResults.Result> LISTING_MAPPER =
       (rs, rowNum) ->

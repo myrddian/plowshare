@@ -120,7 +120,11 @@ function fixture(nativeSessions?: NativeSessions) {
             ].includes(type)
           )
             return onAdmin(type, payload);
-          if (type.startsWith('usage.')) return onUsage(type, payload);
+          if (
+            type.startsWith('usage.') ||
+            type === 'conversation.context.snapshot'
+          )
+            return onUsage(type, payload);
           if (
             [
               'application.deploy',
@@ -1756,6 +1760,68 @@ await test('context measurements use model counts and remain scoped to conversat
   assert.equal(
     present(f.client.state.contexts[contextKey('first', 'bot')]).sent,
     15240,
+  );
+});
+
+await test('context inspection sends boolean flags and exposes the system block, tools and failures', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  const snapshot = {
+    conversation: 'first',
+    agent: 'bot',
+    projection: 'next',
+    captured_at: '2026-10-19T00:00:00Z',
+    model: 'fixture-model',
+    sampling: {},
+    messages: [
+      {
+        role: 'system',
+        parts: [{ type: 'text', text: 'The constructed system prompt' }],
+        tool_calls: [],
+        tool_call_id: null,
+      },
+    ],
+    tools: [
+      {
+        name: 'run',
+        description: 'Run a command',
+        parameters: { type: 'object' },
+      },
+    ],
+    count: null,
+  };
+  f.usage(() => ({ code: 'OK', payload: snapshot }));
+  for (const measure of [false, true]) {
+    await f.client.dispatch({
+      action: 'context-snapshot',
+      conversation: 'first',
+      agent: 'bot',
+      measure,
+    });
+    assert.deepEqual(f.calls.at(-1), {
+      type: 'conversation.context.snapshot',
+      payload: { conversation: 'first', agent: 'bot', measure },
+    });
+    assert.deepEqual(
+      f.client.state.contextSnapshots?.[contextKey('first', 'bot')],
+      { value: snapshot },
+    );
+  }
+  f.usage(() => ({ code: 'NOT_FOUND', said: 'Agent definition unavailable' }));
+  await f.client.dispatch({
+    action: 'context-snapshot',
+    conversation: 'first',
+    agent: 'bot',
+    measure: false,
+  });
+  const failed = f.client.state.contextSnapshots?.[contextKey('first', 'bot')];
+  assert.deepEqual(failed?.value, snapshot);
+  assert.match(failed?.error ?? '', /Agent definition unavailable/);
+  assert.equal(failed?.loading, undefined);
+  assert.equal(
+    f.calls.some((call) => call.type === 'agent.run'),
+    false,
   );
 });
 

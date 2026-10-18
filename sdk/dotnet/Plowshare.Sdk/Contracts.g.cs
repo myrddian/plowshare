@@ -2133,6 +2133,7 @@ internal sealed class AskedViewDtoOpenedConverter : JsonConverter<AskedViewDtoOp
 /// <summary>Fields of the EntryView protocol contract.</summary>
 public sealed record EntryViewDto {
  [JsonPropertyName("completion")] public required TierDtoProject Completion { get; init; }
+ [JsonPropertyName("completionTokens")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<ScheduleDefinitionDtoLimitsDtoMaxModelCalls> CompletionTokens { get; init; }
  [JsonPropertyName("cut")] public required bool Cut { get; init; }
  [JsonPropertyName("dispatch")] public required TierDtoProject Dispatch { get; init; }
  [JsonPropertyName("ejectedAt")] public required TierDtoProject EjectedAt { get; init; }
@@ -2143,6 +2144,8 @@ public sealed record EntryViewDto {
  [JsonPropertyName("length")] public required double Length { get; init; }
  [JsonPropertyName("ordinal")] public required double Ordinal { get; init; }
  [JsonPropertyName("outcome")] public required TierDtoProject Outcome { get; init; }
+ [JsonPropertyName("promptTokens")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<ScheduleDefinitionDtoLimitsDtoMaxModelCalls> PromptTokens { get; init; }
+ [JsonPropertyName("reasoningTokens")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<ScheduleDefinitionDtoLimitsDtoMaxModelCalls> ReasoningTokens { get; init; }
  [JsonPropertyName("recordedAt")] public required TierDtoProject RecordedAt { get; init; }
  [JsonPropertyName("source")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<EntryViewDtoSource> Source { get; init; }
  [JsonPropertyName("speaker")] public required TierDtoProject Speaker { get; init; }

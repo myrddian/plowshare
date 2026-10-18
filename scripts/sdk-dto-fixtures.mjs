@@ -177,6 +177,13 @@ result('conversation.trajectory', originPage({ ...originEntry, job: null, source
 for (const source of [{ kind: 'message', reference: null }, { kind: 'unknown', reference: 'msg_fixture' }, { kind: 'forged', reference: 'msg_fixture' }, { kind: 'message', reference: ' ' }])
   result('conversation.trajectory', originPage({ ...originEntry, source }), false);
 result('conversation.trajectory', originPage({ ...originEntry, job: ' ' }), false);
+// Provider usage is additive: unknown differs from a measured zero in every SDK.
+for (const tokens of [null, 0, 1200])
+  result('conversation.trajectory', originPage({ ...originEntry, promptTokens: tokens, completionTokens: tokens, reasoningTokens: tokens }), true);
+for (const key of ['promptTokens', 'completionTokens', 'reasoningTokens'])
+  for (const tokens of [-1, 1.5, '12'])
+    result('conversation.trajectory', originPage({ ...originEntry, [key]: tokens }), false);
+
 const messageDelivery = { message: 'msg_fixture', sender: 'sender', recipient: 'recipient',
   replyTo: null, replyExpected: false, finalReply: false, generated: false, state: 'handled',
   ending: 'ANSWERED', reply: null, job: 'job_fixture', deadlineAt: null,
