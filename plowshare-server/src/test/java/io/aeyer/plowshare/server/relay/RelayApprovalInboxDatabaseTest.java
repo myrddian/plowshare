@@ -54,6 +54,8 @@ class RelayApprovalInboxDatabaseTest {
   private static JdbcTemplate jdbc;
   private static UnitOfWork transactions;
   private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
+  private final java.util.concurrent.atomic.AtomicReference<Instant> notificationTime =
+      new java.util.concurrent.atomic.AtomicReference<>(NOW);
   private RunApprovalStore approvals;
   private Inbox inbox;
   private AccountPushes pushes;
@@ -102,7 +104,8 @@ class RelayApprovalInboxDatabaseTest {
     approvals = new RunApprovalStore(jdbc, () -> NOW);
     inboxStore = new JdbcInboxStore(jdbc);
     pushes = mock(AccountPushes.class);
-    inbox = new Inbox(inboxStore, pushes, () -> NOW);
+    notificationTime.set(NOW);
+    inbox = new Inbox(inboxStore, pushes, notificationTime::get);
     var conversations = mock(ConversationStore.class);
     when(conversations.ownerOf("cnv_owner")).thenReturn(Optional.of("owner"));
     voice = mock(PersonDelivery.Voice.class);
@@ -129,7 +132,14 @@ class RelayApprovalInboxDatabaseTest {
             jdbc, transactions, new JdbcRelayDeliveryRepository(jdbc, transactions));
     sources =
         new JdbcRelaySourceRepository(jdbc, transactions, relay, mock(RelayNativeRepository.class));
-    repository = new JdbcRelayApprovalInboxRepository(jdbc, transactions, relay, consumers);
+    repository =
+        new JdbcRelayApprovalInboxRepository(
+            jdbc,
+            transactions,
+            relay,
+            consumers,
+            io.aeyer.plowshare.server.events.EventsProperties.DEFAULT_QUESTION_ALERT_RETRY,
+            notificationTime::get);
     requested = new Relay.TopicKey(project, "approval.requested");
   }
 
@@ -148,9 +158,12 @@ class RelayApprovalInboxDatabaseTest {
   @Test
   void native_workers_deliver_an_approval_alert_without_any_local_signal() throws Exception {
     var alerted = new java.util.concurrent.CountDownLatch(1);
+    var retried = new java.util.concurrent.CountDownLatch(1);
+    var attempts = new java.util.concurrent.atomic.AtomicInteger();
     doAnswer(
             call -> {
-              alerted.countDown();
+              if (attempts.incrementAndGet() == 1) alerted.countDown();
+              else retried.countDown();
               return null;
             })
         .when(pushes)
@@ -174,6 +187,17 @@ class RelayApprovalInboxDatabaseTest {
       workers.useApprovalInbox(() -> adapter);
       workers.start();
       assertTrue(alerted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      // Wait for the first availability event to be consumed, then advance only the alert
+      // clock. No Relay publication or local signal asks the supervisor to retry this push.
+      long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+      var subscription =
+          new Relay.SubscriptionKey(requested, RelayApprovalInboxRepository.SUBSCRIBER);
+      while (relay.read(subscription, 10).subscription().seenThrough() < 1
+          && System.nanoTime() < deadline) Thread.sleep(10);
+      assertEquals(1, relay.read(subscription, 10).subscription().seenThrough());
+      notificationTime.set(NOW.plusSeconds(30));
+      assertTrue(retried.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      assertEquals(1, inbox.list("owner", false, 0, 10).size());
       assertEquals(1, inboxStore.unread("owner"));
       assertEquals(RunApproval.ASKED, approvals.find(approval.id()).orElseThrow().state());
       verifyNoInteractions(voice);
@@ -347,6 +371,38 @@ class RelayApprovalInboxDatabaseTest {
     adapter.consume(resolved, 10);
     assertEquals(0, inboxStore.unread("owner"));
     assertEquals(RunApproval.DENIED, approvals.find(approval.id()).orElseThrow().state());
+    verifyNoInteractions(voice);
+  }
+
+  @Test
+  void a_missed_push_retries_after_restart_until_read_or_answered_without_replaying_commands() {
+    var approval = ask();
+    assertTrue(sources.publishNext(requested));
+    var adapter = new DurableRelayApprovalInbox(relay, consumers, repository, notifications);
+    // The first push reaches no client. AccountPushes cannot acknowledge end-to-end receipt.
+    adapter.consume(requested, 10);
+    org.mockito.Mockito.verify(pushes, org.mockito.Mockito.times(1)).push(eq("owner"), any());
+    assertTrue(!repository.ready(null, 10).contains(requested));
+    notificationTime.set(NOW.plusSeconds(29));
+    assertTrue(!repository.ready(null, 10).contains(requested));
+    notificationTime.set(NOW.plusSeconds(30));
+    assertTrue(repository.ready(null, 10).contains(requested));
+    // Reconstruct the worker after its offset advanced: retries are durable, not a local timer.
+    adapter = new DurableRelayApprovalInbox(relay, consumers, repository, notifications);
+    adapter.consume(requested, 10);
+    org.mockito.Mockito.verify(pushes, org.mockito.Mockito.times(2)).push(eq("owner"), any());
+    assertEquals(1, inbox.list("owner", false, 0, 10).size());
+    var item = inbox.list("owner", true, 0, 10).getFirst();
+    inboxStore.markRead("owner", List.of(item.id()), notificationTime.get());
+    notificationTime.set(NOW.plusSeconds(60));
+    assertTrue(!repository.ready(null, 10).contains(requested));
+    adapter.consume(requested, 10);
+    org.mockito.Mockito.verify(pushes, org.mockito.Mockito.times(2)).push(eq("owner"), any());
+    assertEquals(RunApproval.ASKED, approvals.find(approval.id()).orElseThrow().state());
+    assertTrue(approvals.deny(approval.id(), "owner"));
+    notificationTime.set(NOW.plusSeconds(90));
+    adapter.consume(requested, 10);
+    org.mockito.Mockito.verify(pushes, org.mockito.Mockito.times(2)).push(eq("owner"), any());
     verifyNoInteractions(voice);
   }
 }

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.events;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -32,9 +33,22 @@ public interface InboxStore {
   InboxItem noticeOnceFromLog(
       String handle, String kind, String text, String log, String about, Instant at);
 
+  /**
+   * Atomically reserve an alert attempt for an unread, unsettled question. This is an attempt,
+   * never a receipt: a crash or a lost push leaves it eligible again after the retry interval.
+   * Concurrent attempts cannot reserve the same interval. Read and settlement state is preserved.
+   */
+  boolean claimQuestionAlert(String handle, String id, Instant at, Duration retryInterval);
+
   List<String> settle(String about, Instant at);
 
   List<InboxItem> list(String handle, boolean unreadOnly, int offset, int limit);
+
+  /**
+   * Unread ordinary items for a bot to consume. Human approval notices are excluded before
+   * pagination, so retaining their unread receipts cannot hide older ordinary deliveries.
+   */
+  List<InboxItem> unreadForAgent(String handle, int offset, int limit);
 
   int markRead(String handle, List<String> ids, Instant at);
 

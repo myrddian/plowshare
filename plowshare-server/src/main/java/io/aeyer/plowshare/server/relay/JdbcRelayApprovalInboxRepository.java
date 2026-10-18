@@ -1,18 +1,30 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.events.EventsProperties;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Discovery and lease-fenced acknowledgements for human notifications, independent of handlers. */
 public final class JdbcRelayApprovalInboxRepository implements RelayApprovalInboxRepository {
   private static final String MISSING =
       """
-      a.state='asked' AND NOT EXISTS (SELECT 1 FROM user_inbox i
+      a.state='asked' AND (NOT EXISTS (SELECT 1 FROM user_inbox i
         WHERE i.kind='approval' AND i.about='approval:'||a.id
           AND i.handle=COALESCE(a.handle,(SELECT c.owner_handle FROM conversations c
             WHERE c.id=a.conversation)))
+        OR EXISTS (SELECT 1 FROM user_inbox i
+          WHERE i.kind='approval' AND i.about='approval:'||a.id
+            AND i.handle=COALESCE(a.handle,(SELECT c.owner_handle FROM conversations c
+              WHERE c.id=a.conversation))
+            AND i.read_at IS NULL AND i.settled_at IS NULL
+            AND (i.question_alert_attempted_at IS NULL
+              OR i.question_alert_attempted_at<=?)))
       """;
   private static final String STALE =
       """
@@ -23,9 +35,34 @@ public final class JdbcRelayApprovalInboxRepository implements RelayApprovalInbo
   private final UnitOfWork transactions;
   private final Relay relay;
   private final RelayConsumerRepository consumers;
+  private final Duration alertRetry;
+  private final Supplier<Instant> clock;
 
   public JdbcRelayApprovalInboxRepository(
       JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, RelayConsumerRepository consumers) {
+    this(jdbc, transactions, relay, consumers, EventsProperties.DEFAULT_QUESTION_ALERT_RETRY);
+  }
+
+  public JdbcRelayApprovalInboxRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      RelayConsumerRepository consumers,
+      Duration alertRetry) {
+    this(jdbc, transactions, relay, consumers, alertRetry, Instant::now);
+  }
+
+  public JdbcRelayApprovalInboxRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      RelayConsumerRepository consumers,
+      Duration alertRetry,
+      Supplier<Instant> clock) {
+    if (alertRetry == null || alertRetry.isNegative() || alertRetry.isZero())
+      throw new IllegalArgumentException("Positive question alert interval required");
+    this.alertRetry = alertRetry;
+    this.clock = Objects.requireNonNull(clock);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.transactions = Objects.requireNonNull(transactions);
     this.relay = Objects.requireNonNull(relay);
@@ -58,6 +95,7 @@ public final class JdbcRelayApprovalInboxRepository implements RelayApprovalInbo
         SUBSCRIBER,
         after,
         after,
+        Timestamp.from(clock.get().minus(alertRetry)),
         limit);
   }
 
@@ -71,6 +109,7 @@ public final class JdbcRelayApprovalInboxRepository implements RelayApprovalInbo
             + " AND (CAST(? AS text) IS NULL OR a.id>?) ORDER BY a.id LIMIT ?",
         String.class,
         projectId,
+        Timestamp.from(clock.get().minus(alertRetry)),
         after,
         after,
         limit);
@@ -136,7 +175,7 @@ public final class JdbcRelayApprovalInboxRepository implements RelayApprovalInbo
   }
 
   @Override
-  public int prune(java.time.Duration retention, int limit) {
+  public int prune(Duration retention, int limit) {
     if (retention == null || retention.isNegative() || retention.isZero())
       throw new IllegalArgumentException("Positive audit retention required");
     RelayValues.limit(limit, 1000);

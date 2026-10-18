@@ -516,35 +516,24 @@ await test('a failed account listing cannot swallow an independently readable co
   assert.deepEqual(f.client.state.approvals, []);
 });
 
-await test('Yes settles the single stored approval instead of starting another model turn', async (t) => {
+await test('a bare Yes cannot approve a newly discovered command', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());
   await connect(f.client);
+  assert.equal(f.client.state.approvals.length, 0);
   f.conversationApprovals('first', [approvalWire()]);
-  f.answer(() => ({
-    code: 'OK',
-    payload: {
-      id: 'approval-one',
-      state: 'allowed',
-      job: 'continued-job',
-      busy: false,
-      note: null,
-    },
-  }));
-  await f.client.dispatch({
-    action: 'run',
-    conversation: 'first',
-    agent: 'bot',
-    text: 'Yes',
-  });
-  assert.deepEqual(
-    f.calls
-      .filter((row) => row.type === 'approval.answer')
-      .map((row) => row.payload),
-    [{ id: 'approval-one', decision: 'once' }],
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'run',
+      conversation: 'first',
+      agent: 'bot',
+      text: 'Yes',
+    }),
+    /Use Approve or Deny/,
   );
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
   assert.equal(
-    f.calls.some((row) => row.type === 'agent.run'),
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
     false,
   );
 });
@@ -582,11 +571,12 @@ await test('ambiguous approval replies retain the request and explain how to rec
   );
 });
 
-await test('a chat approval answer reports a busy continuation instead of silently losing its note', async (t) => {
+await test('an explicit approval answer reports a busy continuation instead of silently losing its note', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());
   await connect(f.client);
-  f.conversationApprovals('first', [approvalWire()]);
+  f.approvals([approvalWire()]);
+  await f.client.dispatch({ action: 'approvals-refresh' });
   f.answer(() => ({
     code: 'OK',
     payload: {
@@ -598,10 +588,9 @@ await test('a chat approval answer reports a busy continuation instead of silent
     },
   }));
   const reply = await f.client.dispatch({
-    action: 'run',
-    conversation: 'first',
-    agent: 'bot',
-    text: 'Yes',
+    action: 'answer',
+    id: 'approval-one',
+    decision: 'once',
   });
   assert.match(reply.notice ?? '', /Approval recorded.*still closing/);
   assert.equal(
@@ -2819,4 +2808,85 @@ await test('desktop native commands invoke directly and socket loss closes insta
     await f.client.shutdown();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+await test('chat preflight cannot resurrect a decision answered during its read', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  let finish: (value: Outcome) => void = () => {
+    throw new Error('Read did not start');
+  };
+  f.rawApprovals(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const sending = f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Continue investigating',
+  });
+  const rejected = assert.rejects(sending, /approvals changed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+  f.answer(() => ({
+    code: 'OK',
+    payload: {
+      id: 'approval-one',
+      state: 'denied',
+      job: null,
+      busy: true,
+      note: null,
+    },
+  }));
+  await f.client.dispatch({
+    action: 'answer',
+    id: 'approval-one',
+    decision: 'deny',
+  });
+  assert.deepEqual(f.client.state.approvals, []);
+  finish({ code: 'OK', payload: { approvals: [approvalWire()] } });
+  await rejected;
+  assert.deepEqual(
+    f.client.state.approvals,
+    [],
+    'An overtaken preflight must not restore the settled request',
+  );
+});
+
+await test('chat preflight cannot overwrite a newer snapshot after another client answers', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  let finish: (value: Outcome) => void = () => {
+    throw new Error('Read did not start');
+  };
+  f.rawApprovals(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const sending = f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Yes',
+  });
+  const rejected = assert.rejects(sending, /approvals changed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+  await f.client.dispatch({ action: 'approvals-refresh' });
+  finish({ code: 'OK', payload: { approvals: [approvalWire()] } });
+  await rejected;
+  assert.deepEqual(f.client.state.approvals, []);
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
 });

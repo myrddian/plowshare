@@ -115,10 +115,10 @@ and does not hide requests successfully read from another scope. Use **Check com
 approvals** to retry discovery; failures remain visible beside that control.
 
 Before sending chat text, Desktop checks that conversation's pending command approvals.
-For exactly one request, `yes`, `approve` or `once` records an allow-once decision;
-`no` or `deny` refuses it. Other text, or a reply with multiple pending requests, is
-held with instructions to use the individual Approve/Deny controls. It does not start
-another agent turn. Approval continuation includes the exact command argument array
+Chat text, including `yes` or `no`, is held while a command request is pending.
+Use that request's **Approve** or **Deny** control; discovery cannot authorize a
+command the person has not seen. A decision that overtakes the check causes a fresh
+read and leaves the chat text unsent. Approval continuation includes the exact command argument array
 and directory so embedded spaces and literal quote characters remain distinct.
 
 The inbox holds durable deliveries and read receipts. Opening the application or

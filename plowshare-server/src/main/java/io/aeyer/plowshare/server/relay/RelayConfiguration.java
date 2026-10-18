@@ -118,8 +118,13 @@ public class RelayConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayApprovalInboxRepository relayApprovalInboxRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, RelayConsumerRepository consumers) {
-    return new JdbcRelayApprovalInboxRepository(jdbc, transactions, relay, consumers);
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      RelayConsumerRepository consumers,
+      io.aeyer.plowshare.server.events.EventsProperties properties) {
+    return new JdbcRelayApprovalInboxRepository(
+        jdbc, transactions, relay, consumers, properties.getQuestionAlertRetryInterval());
   }
 
   @Bean

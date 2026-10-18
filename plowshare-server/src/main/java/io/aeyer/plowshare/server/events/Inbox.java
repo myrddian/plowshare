@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.AccountEvent;
 import io.aeyer.plowshare.server.agents.Outcome;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -15,8 +16,22 @@ public class Inbox {
   private final InboxStore store;
   private final AccountPushes pushes;
   private final Supplier<Instant> clock;
+  private final Duration questionAlertRetry;
 
   public Inbox(InboxStore store, AccountPushes pushes, Supplier<Instant> clock) {
+    this(store, pushes, clock, EventsProperties.DEFAULT_QUESTION_ALERT_RETRY);
+  }
+
+  public Inbox(
+      InboxStore store,
+      AccountPushes pushes,
+      Supplier<Instant> clock,
+      Duration questionAlertRetry) {
+    if (questionAlertRetry == null
+        || questionAlertRetry.isNegative()
+        || questionAlertRetry.isZero())
+      throw new IllegalArgumentException("Positive question alert interval required");
+    this.questionAlertRetry = questionAlertRetry;
     this.store = Objects.requireNonNull(store, "store");
     this.pushes = Objects.requireNonNull(pushes, "pushes");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -41,6 +56,11 @@ public class Inbox {
 
   public List<InboxItem> list(String handle, boolean unreadOnly, int offset, int limit) {
     return store.list(handle, unreadOnly, offset, limit);
+  }
+
+  /** Bot consumption cannot acknowledge or page over unread human command approvals. */
+  public List<InboxItem> unreadForAgent(String handle, int offset, int limit) {
+    return store.unreadForAgent(handle, offset, limit);
   }
 
   /** A notice no run produced — a sync conflict — to the same account-owned inbox. */
@@ -69,8 +89,12 @@ public class Inbox {
 
   /** A retried durable question must not create another Inbox item or revive a settled one. */
   public void notifyOnceFromLog(String handle, String kind, String text, String log, String about) {
-    store.noticeOnceFromLog(handle, kind, text, log, about, clock.get());
-    pushes.push(handle, changed(store.unread(handle)));
+    Instant at = clock.get();
+    InboxItem item = store.noticeOnceFromLog(handle, kind, text, log, about, at);
+    // Push delivery has no end-to-end acknowledgement. Only read/settlement acknowledges the
+    // notice; reserve an attempt before sending so concurrent workers cannot flood the account.
+    if (store.claimQuestionAlert(handle, item.id(), at, questionAlertRetry))
+      pushes.push(handle, changed(store.unread(handle)));
   }
 
   /**

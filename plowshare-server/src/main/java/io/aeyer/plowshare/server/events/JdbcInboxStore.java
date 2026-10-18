@@ -4,6 +4,7 @@ import io.aeyer.plowshare.protocol.MemoryIds;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -175,6 +176,24 @@ public class JdbcInboxStore implements InboxStore {
         : inserted.getFirst();
   }
 
+  @Override
+  public boolean claimQuestionAlert(String handle, String id, Instant at, Duration retryInterval) {
+    if (retryInterval == null || retryInterval.isNegative() || retryInterval.isZero())
+      throw new IllegalArgumentException("Positive question alert interval required");
+    return jdbc.update(
+            """
+        UPDATE user_inbox SET question_alert_attempted_at=?
+        WHERE handle=? AND id=? AND about IS NOT NULL AND kind='approval'
+          AND read_at IS NULL AND settled_at IS NULL
+          AND (question_alert_attempted_at IS NULL OR question_alert_attempted_at<=?)
+        """,
+            Timestamp.from(at),
+            handle,
+            id,
+            Timestamp.from(at.minus(retryInterval)))
+        == 1;
+  }
+
   /** Settles all notices about a decision and returns the accounts whose Inbox counts changed. */
   public List<String> settle(String about, Instant at) {
     return jdbc.queryForList(
@@ -186,6 +205,16 @@ public class JdbcInboxStore implements InboxStore {
   }
 
   public List<InboxItem> list(String handle, boolean unreadOnly, int offset, int limit) {
+    return list(handle, unreadOnly, offset, limit, false);
+  }
+
+  @Override
+  public List<InboxItem> unreadForAgent(String handle, int offset, int limit) {
+    return list(handle, true, offset, limit, true);
+  }
+
+  private List<InboxItem> list(
+      String handle, boolean unreadOnly, int offset, int limit, boolean ordinaryOnly) {
     return jdbc.query(
         "SELECT "
             + COLUMNS
@@ -193,6 +222,7 @@ public class JdbcInboxStore implements InboxStore {
             + " AND settled_at IS NULL"
             + informationVisible()
             + (unreadOnly ? " AND read_at IS NULL" : "")
+            + (ordinaryOnly ? " AND kind<>'approval'" : "")
             + " ORDER BY arrived_at DESC, id DESC OFFSET ? LIMIT ?",
         JdbcInboxStore::row,
         handle,

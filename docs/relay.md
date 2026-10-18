@@ -61,6 +61,16 @@ the retained foreground root owner receives it. No recipient, missing read autho
 or an Inbox failure leaves the approval pending and discoverable. Inbox delivery
 never starts a model, answers an approval or executes a command.
 
+An Inbox commit or socket send is not proof the person saw an alert. While the
+approval remains pending and its notice unread, the worker retries `inbox.changed`
+after `plowshare.events.question-alert-retry-interval` (30 seconds by default,
+configurable from 1 second to 1 hour). The persisted attempt timestamp bounds retries
+across restart and concurrent workers. Marking the item read or answering the
+approval stops retries. An agent reading the Inbox does not acknowledge command
+approval alerts or mark those notices read. No retry resets read state, creates another item or executes
+a command. With internal Relay workers disabled, this periodic retry is unavailable;
+the direct fallback only delivers on drain/boot.
+
 Inbox admission is idempotent by account and question. Re-delivery preserves read
 and settlement state. Acknowledging a Relay availability notice does not acknowledge
 the human decision: bounded, rotating scans repair pending requests without Inbox

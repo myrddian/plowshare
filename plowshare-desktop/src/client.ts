@@ -634,6 +634,7 @@ export class DesktopClient {
     | undefined;
   private approvalSnapshots = new Map<string, readonly Approval[]>();
   private approvalRevision = 0;
+  private approvalVersions = new Map<string, number>();
   private contextReads = new Map<string, number>();
   private views = new Map<string, string>();
   private followed = '';
@@ -1734,7 +1735,7 @@ export class DesktopClient {
         notice = await this.startWorkflow(request);
         break;
       case 'run':
-        notice = await this.run(
+        await this.run(
           text(request.conversation, 'conversation', 512),
           text(request.agent, 'agent', 512),
           text(request.text, 'message'),
@@ -1952,10 +1953,9 @@ export class DesktopClient {
         throw new Error(
           'The approval answer carried no continuation information. Inspect it before retrying.',
         );
-      this.state.approvals = this.state.approvals.filter(
-        (row) => row.id !== id,
+      this.replaceApprovals(
+        this.state.approvals.filter((row) => row.id !== id),
       );
-      this.approvalRevision++;
       for (const [source, rows] of this.approvalSnapshots)
         this.approvalSnapshots.set(
           source,
@@ -2311,33 +2311,30 @@ export class DesktopClient {
       );
     if (this.state.mode === 'live') {
       // A chat reply must not create a competing turn while a command is waiting. Read the
-      // owning API even if the notification/control was missed, then bind a narrow answer to
-      // exactly one stored request. Ambiguous replies leave every decision untouched.
+      // owning API even if the notification/control was missed. Discovery never grants permission:
+      // every decision uses the explicit controls bound to the displayed request ID.
+      const revision = this.approvalVersions.get(id) ?? 0;
       const listed = approvalsOf(ok(await this.send(listingAsked(id))));
+      if (revision !== (this.approvalVersions.get(id) ?? 0)) {
+        await this.refresh();
+        throw new Error(
+          'Command approvals changed while checking. Review the current requests before sending again. Your message was not sent.',
+        );
+      }
       if (!listed)
         throw new Error(
           'Could not read command approvals. Refresh approvals before sending your message.',
         );
-      this.state.approvals = [
+      this.replaceApprovals([
         ...this.state.approvals.filter((row) => row.conversation !== id),
         ...listed,
-      ];
+      ]);
       this.approvalSnapshots.set(`conversation:${id}`, listed);
       this.emit();
       const pending = this.state.approvals.filter(
         (row) => row.state === 'asked' && row.conversation === id,
       );
       if (pending.length) {
-        const answer = task.trim().toLowerCase();
-        const decision = ['yes', 'approve', 'once'].includes(answer)
-          ? 'once'
-          : ['no', 'deny'].includes(answer)
-            ? 'deny'
-            : undefined;
-        const only = pending.length === 1 ? pending[0] : undefined;
-        if (only && decision) {
-          return await this.answerApproval(only.id, decision);
-        }
         throw new Error(
           `This conversation is waiting for ${pending.length} command approval${pending.length === 1 ? '' : 's'}. Use Approve or Deny on the pending request${pending.length === 1 ? '' : 's'} (${pending.map((row) => row.id).join(', ')}). Your message was not sent to the agent.`,
         );
@@ -2570,6 +2567,28 @@ export class DesktopClient {
     }
     this.emit();
   }
+  /** Only changes in a conversation's decision identities invalidate its chat preflight. */
+  private replaceApprovals(rows: Approval[]) {
+    const previous = this.state.approvals;
+    const conversations = new Set(
+      [...previous, ...rows].map((row) => row.conversation),
+    );
+    for (const conversation of conversations) {
+      const ids = (items: readonly Approval[]) =>
+        items
+          .filter((row) => row.conversation === conversation)
+          .map((row) => row.id)
+          .sort();
+      if (JSON.stringify(ids(previous)) !== JSON.stringify(ids(rows))) {
+        this.approvalVersions.set(
+          conversation,
+          (this.approvalVersions.get(conversation) ?? 0) + 1,
+        );
+        this.approvalRevision++;
+      }
+    }
+    this.state.approvals = rows;
+  }
   private refresh(): Promise<void> {
     if (this.state.mode === 'demo' || !this.state.connected)
       return Promise.resolve();
@@ -2617,7 +2636,7 @@ export class DesktopClient {
         const failures: string[] = [];
         if (generation !== this.generation || !this.state.connected) return;
         if (revision !== this.approvalRevision) {
-          // An answer overtook this read. Reconcile rather than resurrect its old pending row.
+          // An answer or newer snapshot overtook this read. Reconcile rather than restore stale rows.
           flight.dirty = true;
           continue;
         }
@@ -2639,7 +2658,7 @@ export class DesktopClient {
         for (const rows of this.approvalSnapshots.values())
           for (const row of rows) listed.set(row.id, row);
         if (generation === this.generation && this.state.connected) {
-          this.state.approvals = [...listed.values()];
+          this.replaceApprovals([...listed.values()]);
           const previousError = this.state.approvalError;
           this.state.approvalError = failures.length
             ? `Could not refresh command approvals. Retry approvals before continuing. ${failures.join(' ')}`

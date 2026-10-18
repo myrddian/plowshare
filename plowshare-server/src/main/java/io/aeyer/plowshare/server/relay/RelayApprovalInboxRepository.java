@@ -8,7 +8,9 @@ public interface RelayApprovalInboxRepository {
 
   List<Relay.TopicKey> ready(String after, int limit);
 
-  /** IDs lacking their owning account's Inbox item, including legacy delivery acknowledgements. */
+  /**
+   * IDs missing their Inbox item or due another unread alert; reading or settling stops retries.
+   */
   List<String> missing(long projectId, String after, int limit);
 
   /** Settled decisions whose Inbox item survived a lost resolution delivery. */
