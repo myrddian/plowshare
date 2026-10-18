@@ -21,6 +21,7 @@
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
 - [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled proposal policy; implementation deferred)
 - [Global knowledge read contract](global-knowledge-read-contract.md) (implemented read boundaries and selector cutover)
+- [Standalone allowances and execution recovery](standalone-allowance-and-recovery-plan.md) (proposed: shared Budget storage, policy preservation, swarm/operator recovery and verification)
 - [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)
 - [Role and scope permissions](role-scope-permissions-proposal.md) (RBAC helpers, default role profiles and proposed action matrices)
 - [Authority substrate impact report](authority-substrate-impact-report.md) (settled policy, migration requirements, reuse and deferred gaps; source evidence)
