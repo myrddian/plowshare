@@ -607,6 +607,9 @@ describe('complete conversation, agent and project WS replies', () => {
           'outcome',
           'job',
           'source',
+          'promptTokens',
+          'completionTokens',
+          'reasoningTokens',
         ],
       ],
       [
@@ -709,7 +712,13 @@ describe('complete conversation, agent and project WS replies', () => {
               type === 'ApplicationFileListing') &&
               field.name.getText(source) === 'location') ||
             (type === 'EntryView' &&
-              ['job', 'source'].includes(field.name.getText(source))) ||
+              [
+                'job',
+                'source',
+                'promptTokens',
+                'completionTokens',
+                'reasoningTokens',
+              ].includes(field.name.getText(source))) ||
             (type === 'AgentView' &&
               [
                 'skills',
@@ -736,6 +745,50 @@ describe('complete conversation, agent and project WS replies', () => {
         }),
         type,
       ).toEqual(fields);
+    }
+  });
+});
+
+describe('per-inference token usage', () => {
+  it('accepts absent, unknown and zero usage and refuses malformed counts', () => {
+    const fixture = fixtures['conversation.trajectory'];
+    const page = fixture.payload as { entries: Record<string, unknown>[] };
+    const base = page.entries[0]!;
+    for (const tokens of [undefined, null, 0, 1200]) {
+      const entry = {
+        ...base,
+        ...(tokens === undefined
+          ? {}
+          : {
+              promptTokens: tokens,
+              completionTokens: tokens,
+              reasoningTokens: tokens,
+            }),
+      };
+      expect(
+        conversationReply('conversation.trajectory', {
+          code: 'OK',
+          payload: { ...page, oldest: base['ordinal'], entries: [entry] },
+        }),
+      ).toBeDefined();
+    }
+    for (const tokens of [
+      -1,
+      1.5,
+      '12',
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]) {
+      expect(
+        conversationReply('conversation.trajectory', {
+          code: 'OK',
+          payload: {
+            ...page,
+            oldest: base['ordinal'],
+            entries: [{ ...base, promptTokens: tokens }],
+          },
+        }),
+      ).toBeUndefined();
     }
   });
 });

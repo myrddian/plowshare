@@ -899,6 +899,7 @@ const BOOLEAN_FIELDS = [
   'paused',
   'mine',
   'unread',
+  'measure',
 ];
 const NUMBER_FIELDS = [
   'expiresInDays',

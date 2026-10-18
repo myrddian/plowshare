@@ -3,8 +3,29 @@ import { describe, expect, it } from 'vitest';
 import { CLI_OPERATIONS } from './catalog.ts';
 import { isPayloadCommand, parseCommand, withSession } from './commands.ts';
 import { dispatch, parseDirect, request } from './direct.ts';
+import { commandProblem } from './payload-validation.ts';
 
 describe('operator WS boundaries', () => {
+  it('accepts explicit context preview and counting flags without treating them as text', () => {
+    for (const measure of [false, true]) {
+      expect(
+        commandProblem('conversation.context.snapshot', {
+          conversation: 'conversation',
+          agent: 'agent',
+          measure,
+        }),
+      ).toBeUndefined();
+    }
+    for (const measure of ['false', 'true', null, 0, {}]) {
+      expect(
+        commandProblem('conversation.context.snapshot', {
+          conversation: 'conversation',
+          agent: 'agent',
+          measure,
+        }),
+      ).toBe('measure must be boolean');
+    }
+  });
   it('keeps standalone runs separate from conversations and preserves conversation-owned scope', () => {
     expect(
       parseCommand('agent run {"agent":"a","task":"work"}', 'repo'),

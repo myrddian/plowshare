@@ -3739,27 +3739,30 @@ func (v *AskedViewDtoOpened) UnmarshalJSON(data []byte) error {
 
 // EntryViewDto is the explicit EntryView protocol shape.
 type EntryViewDto struct {
-	Completion   TierDtoProject                              `json:"completion"`
-	Cut          bool                                        `json:"cut"`
-	Dispatch     TierDtoProject                              `json:"dispatch"`
-	EjectedAt    TierDtoProject                              `json:"ejectedAt"`
-	Excerpt      TierDtoProject                              `json:"excerpt"`
-	Handle       TierDtoProject                              `json:"handle"`
-	Job          *TierDtoProject                             `json:"job,omitempty"`
-	Kind         string                                      `json:"kind"`
-	Length       float64                                     `json:"length"`
-	Ordinal      float64                                     `json:"ordinal"`
-	Outcome      TierDtoProject                              `json:"outcome"`
-	RecordedAt   TierDtoProject                              `json:"recordedAt"`
-	Source       *EntryViewDtoSource                         `json:"source,omitempty"`
-	Speaker      TierDtoProject                              `json:"speaker"`
-	SpeakerName  TierDtoProject                              `json:"speakerName"`
-	SupersededBy ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"supersededBy"`
-	TookMillis   ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"tookMillis"`
-	ToolCallId   TierDtoProject                              `json:"toolCallId"`
-	ToolCalls    []AskedViewDto                              `json:"toolCalls"`
-	TurnOrdinal  float64                                     `json:"turnOrdinal"`
-	WireModel    TierDtoProject                              `json:"wireModel"`
+	Completion       TierDtoProject                               `json:"completion"`
+	CompletionTokens *ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"completionTokens,omitempty"`
+	Cut              bool                                         `json:"cut"`
+	Dispatch         TierDtoProject                               `json:"dispatch"`
+	EjectedAt        TierDtoProject                               `json:"ejectedAt"`
+	Excerpt          TierDtoProject                               `json:"excerpt"`
+	Handle           TierDtoProject                               `json:"handle"`
+	Job              *TierDtoProject                              `json:"job,omitempty"`
+	Kind             string                                       `json:"kind"`
+	Length           float64                                      `json:"length"`
+	Ordinal          float64                                      `json:"ordinal"`
+	Outcome          TierDtoProject                               `json:"outcome"`
+	PromptTokens     *ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"promptTokens,omitempty"`
+	ReasoningTokens  *ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"reasoningTokens,omitempty"`
+	RecordedAt       TierDtoProject                               `json:"recordedAt"`
+	Source           *EntryViewDtoSource                          `json:"source,omitempty"`
+	Speaker          TierDtoProject                               `json:"speaker"`
+	SpeakerName      TierDtoProject                               `json:"speakerName"`
+	SupersededBy     ScheduleDefinitionDtoLimitsDtoMaxModelCalls  `json:"supersededBy"`
+	TookMillis       ScheduleDefinitionDtoLimitsDtoMaxModelCalls  `json:"tookMillis"`
+	ToolCallId       TierDtoProject                               `json:"toolCallId"`
+	ToolCalls        []AskedViewDto                               `json:"toolCalls"`
+	TurnOrdinal      float64                                      `json:"turnOrdinal"`
+	WireModel        TierDtoProject                               `json:"wireModel"`
 }
 
 // EntryViewDtoSource is a closed union: exactly one variant must be selected.

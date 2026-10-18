@@ -560,7 +560,11 @@ export function constrain(graph) {
       field(s, 'reference', { minLength: 1, nonblank: true });
       rules(s, { eq: [eq('kind', 'unknown'), eq('reference', null)] });
     }
-    if (title === 'EntryView') field(s, 'job', { minLength: 1, nonblank: true });
+    if (title === 'EntryView') {
+      field(s, 'job', { minLength: 1, nonblank: true });
+      for (const key of ['promptTokens', 'completionTokens', 'reasoningTokens'])
+        field(s, key, integer(0, 9007199254740991));
+    }
     if (title === 'MessageDelivery') {
       for (const k of ['conversation', 'sourceConversation']) field(s, k, { minLength: 1, nonblank: true });
     }

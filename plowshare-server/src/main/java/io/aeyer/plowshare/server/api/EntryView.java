@@ -71,6 +71,9 @@ import java.util.List;
  *     every other kind and for a result older than {@code V62}
  * @param job actual owning job identity, or null for an unbound entry. Resumed work may have a
  *     different job within the same turn; the turn ordinal is not a job identity
+ * @param promptTokens provider-reported input tokens for this inference, or null when absent
+ * @param completionTokens provider-reported output tokens, including tool calls, or null
+ * @param reasoningTokens provider-reported reasoning subset of output tokens, or null
  * @param source the immediate origin of an utterance, or null for other kinds. Following its
  *     reference requires the owning API's authorization
  */
@@ -95,7 +98,10 @@ public record EntryView(
     String speakerName,
     String outcome,
     String job,
-    SourceView source) {
+    SourceView source,
+    Integer promptTokens,
+    Integer completionTokens,
+    Integer reasoningTokens) {
 
   /**
    * The immediate recorded origin of an utterance, not a conversation's first cause. References
@@ -162,7 +168,7 @@ public record EntryView(
         row.tookMillis(),
         // Which target answered, on an answer or a refusal, and null on
         // everything else -- an utterance carries no model. The rest of
-        // the provenance (pool, tokens, the fallback reason) is behind a
+        // the provenance (pool and the fallback reason) is behind a
         // deliberate second read; a trajectory shows who spoke, not the
         // whole audit. These are stored spellings passed straight
         // through: the wire carries what the column holds.
@@ -173,7 +179,10 @@ public record EntryView(
         row.speaker() == null ? null : row.speaker().name(),
         row.outcome(),
         row.job(),
-        SourceView.of(row.speaker()));
+        SourceView.of(row.speaker()),
+        row.promptTokens(),
+        row.completionTokens(),
+        row.reasoningTokens());
   }
 
   /**

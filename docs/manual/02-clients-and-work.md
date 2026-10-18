@@ -38,6 +38,14 @@ on the effective definitions and grants. Type a normal message to converse.
 An administrative command performs the named operation and need not involve a
 model. `/information` is the terminal path for retained documents and the manual.
 
+Desktop's trajectory shows each recorded model response, including responses that
+only request tools. Model rows carry the recorded model duration and provider-reported
+input and output token counts; selecting one also shows any recorded reasoning-token
+count, which is a subset of output tokens. A response requesting several tools is one
+inference. Each tool has its own execution time. Missing usage is shown as not recorded,
+and a recorded zero remains zero. These counts describe past inference calls; the
+Context panel constructs the next request and its separate token count.
+
 ## Follow work and read its result
 
 For explicit CLI work, choose a project with `--project NAME` and use the command

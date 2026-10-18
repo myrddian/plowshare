@@ -201,6 +201,10 @@ export interface EntryView {
   /** Actual owning job; absent on older peers and null on unbound historical entries. */
   readonly job?: string | null;
   readonly source?: SourceView | null;
+  /** Provider-reported inference usage; absent on older peers, null when unreported. */
+  readonly promptTokens?: number | null;
+  readonly completionTokens?: number | null;
+  readonly reasoningTokens?: number | null;
 }
 export interface SourceView {
   readonly kind: string;
@@ -595,16 +599,19 @@ const source = record(
   },
   (row) => (row['kind'] === 'unknown') === (row['reference'] === null),
 );
-/** Validate additive provenance at the generated decoder boundary as well as WS outcome reads. */
-export function validateEntryOrigins(type: string, value: unknown): void {
+/** Validate additive provenance and inference usage at the generated decoder boundary as well as WS outcome reads. */
+export function validateEntryMetadata(type: string, value: unknown): void {
   if (type !== 'conversation.chat' && type !== 'conversation.trajectory')
     return;
-  const origins = record({
+  const metadata = record({
+    promptTokens: (found) => found === undefined || nullable(count)(found),
+    completionTokens: (found) => found === undefined || nullable(count)(found),
+    reasoningTokens: (found) => found === undefined || nullable(count)(found),
     job: (found) => found === undefined || nullable(named)(found),
     source: (found) => found === undefined || nullable(source)(found),
   });
-  if (!object(value) || !list(origins)(value['entries']))
-    throw new Error('Invalid recorded entry origin');
+  if (!object(value) || !list(metadata)(value['entries']))
+    throw new Error('Invalid recorded entry metadata');
 }
 const entry = record({
   ordinal: positive,
@@ -620,6 +627,9 @@ const entry = record({
   handle: nullable(text),
   recordedAt: nullable(named),
   tookMillis: nullable(count),
+  promptTokens: (value) => value === undefined || nullable(count)(value),
+  completionTokens: (value) => value === undefined || nullable(count)(value),
+  reasoningTokens: (value) => value === undefined || nullable(count)(value),
   dispatch: nullable(text),
   wireModel: nullable(text),
   completion: nullable(text),

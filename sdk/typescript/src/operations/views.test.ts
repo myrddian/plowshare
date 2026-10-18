@@ -56,6 +56,9 @@ describe('shared client response readers', () => {
             dispatch: 'fallback',
             wireModel: 'model',
             completion: 'called_tools',
+            promptTokens: 1000,
+            completionTokens: 0,
+            reasoningTokens: 0,
             toolCalls: [
               {
                 id: 'c',
@@ -83,6 +86,9 @@ describe('shared client response readers', () => {
       9, 10,
     ]);
     expect(entriesOf(answer)[0]).toMatchObject({
+      promptTokens: 1000,
+      completionTokens: 0,
+      reasoningTokens: 0,
       dispatch: 'fallback',
       wireModel: 'model',
       kind: 'FUTURE_KIND',
