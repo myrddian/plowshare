@@ -336,6 +336,10 @@ new search inference without disabling the foundation, preparation or deleting
 prior evidence. No data move, credential issuance, deployment, old-binary rollback
 or live schema migration is authorized here.
 
+The separately scoped [slice 16 plan](16-memory-query-embedding-and-recall.md)
+addresses memory query embedding for existing recall and automatic reminders.
+It does not implement those consumers or activate memory write/curation/repair.
+
 ## Initial planning verification
 
 The original planning task inspected the baseline above and checked documentation

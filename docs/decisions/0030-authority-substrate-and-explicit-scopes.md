@@ -566,6 +566,11 @@ disable inference, impose a finite call limit or permit unlimited calls. Unlimit
 removes the spending ceiling; it retains usage/accounting, operation validity,
 scope, sandbox and single-attempt checks. The initial semantic-search consumer
 defaults to unlimited; operators may configure disabled or limited spending.
+The operation's admitted policy determines which budget and limits apply. A
+nearby or parent Budget object, source record or usage attribution is not itself
+a decision to charge that budget or impose its finite ceiling. Preserve any
+policy-selected limits; do not treat exhaustion or missing authority as permission
+to switch to unlimited or another source.
 
 | Operation | Configured budget source |
 | --- | --- |

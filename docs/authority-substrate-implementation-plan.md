@@ -11,6 +11,9 @@ Consumer permissions, disclosure and budget ownership stay separate. Slice 15 is
 implemented for preparation and its selected search consumers; other consumers
 remain fenced. Search spending defaults to unlimited; operators may configure
 disabled or limited spending without changing embedding authority.
+The next [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
+is scoped as a plan for memory query embedding, existing recall and automatic
+reminders. It is not implemented or activated by the planning document.
 
 ## Count and scope
 
@@ -21,8 +24,9 @@ to execute all work. Revalidate concrete scope and source dependencies before a
 later implementation instruction; split a unit further if evidence requires it.
 
 That original sequence is complete for its documented supported paths. Slice 15
-is an additional implemented follow-on, bringing the documented inventory to 15;
-it does not retroactively expand the original slice 14 outcome.
+is an additional implemented follow-on. Slice 16 is a separately planned
+follow-on, bringing the inventory to 16 documents with 15 supported slices
+implemented. Neither expands the original slice 14 outcome retroactively.
 
 [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md) defines the
 settled architecture. The [impact report](authority-substrate-impact-report.md)
@@ -38,7 +42,7 @@ orchestration roots and synchronous agent children (11), and action checks for
 the existing acting consumers (12), and verified existing-contract selectors and
 client boundaries (13). See each slice's document
 for verification and limits. This is not a complete platform cutover: configured
-memory-query and independent-maintenance budget bindings remain missing, and nested/model-triggered
+memory-read operation/policy and independent-maintenance bindings remain missing, and nested/model-triggered
 orchestration starts remain refused without a supported parent-budget sharing
 contract. Independent Relay roots now use slice 11's retained lineage. Production
 embeddings without supported budget evidence refuse instead of acquiring an implicit
@@ -65,6 +69,7 @@ it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 | 13 | [Existing API, scope-selection and client contract cutover](authority-substrate-slices/13-existing-contract-and-client-cutover.md) | 05, 08, 09, 10, 11, 12 | Expose the migrated semantics only through verified existing supported operations, coordinating affected contracts without requiring SDK/client parity or creating new APIs. |
 | 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Complete reviewed legacy classification and the bounded Global document admission/preparation/read path, preserving identities and private data; separately deferred consumers remain fenced. |
 | 15 | [SYSTEM embedding foundation and initial search consumers](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Share scoped SYSTEM embedding execution across existing preparation and initial document-search consumers. Each operation supplies its scope, validity and spending policy; search defaults to unlimited, with disabled/limited configuration available. Readers gain no embedding permission. Memory/repair/ask activation and other deferred consumers remain separate. |
+| 16 (planned) | [Memory query embedding and recall](authority-substrate-slices/16-memory-query-embedding-and-recall.md) | 04–08, 13, 15 | Connect existing recall and automatic Reminder query embeddings to the shared SYSTEM foundation with current read tiers, retained sandbox/lifetime and policy-selected spending. Reuse read-side disabled/limited/unlimited policy, default unlimited; a nearby finite budget does not automatically apply. Writes/Scribe/curation/repair and broader targets stay separate. |
 
 The existing first-slice document remains authoritative for slice 01; it is not
 duplicated in the slice directory. Slice 14 depends transitively on 01–13
@@ -194,6 +199,10 @@ Slice 15 implements the shared embedding foundation, retained query source and
 closed query-purpose evidence on its selected consumers. Search spending defaults
 to unlimited, with explicit disabled/limited policies available; memory/ask/repair
 and the other deferred consumers are not activated.
+Slice 16 is planning only. Its selected memory-read consumers reuse the existing
+read-side spending policy; implementation must retain that policy decision rather
+than apply a finite budget solely because one is present. No memory consumer is
+activated by adding the scope document.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

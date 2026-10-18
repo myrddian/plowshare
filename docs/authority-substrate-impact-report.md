@@ -594,6 +594,12 @@ search consumers now have retained authority and spending policy. Search spendin
 defaults to unlimited; explicit disabled/limited policies remain configurable.
 Memory recall, ask/deliberation and independent maintenance activation remain deferred;
 they can reuse the foundation once their own operation bindings are supported.
+The [slice 16 plan](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
+scopes existing recall and automatic Reminder reads next, including typed memory
+admission, tier/sandbox intersection, disclosure and the applicable read-side
+spending policy. It defaults to unlimited; the presence of another finite budget
+does not make that budget applicable. The plan does not activate these consumers
+or include memory write/Scribe/curation/repair work.
 
 - Document-preparation embedding now carries bounded SYSTEM authorization and
   claims against the retained processing allowance, shared with chat preparation.
