@@ -184,9 +184,8 @@ public class ApprovalFrames implements FrameArea {
               + " open question on this account).");
     }
     if (Boolean.TRUE.equals(body.mine())) {
-      // THE ACCOUNT'S, WHEREVER THEY WERE RAISED. A question raised under an orchestration is
-      // written against a conductor's conversation, which no person has open; listing by
-      // conversation could never show it to them.
+      // Include pinned background recipients and owned foreground roots. Neither requires an
+      // open client view: closing a tab must not make its pending decision undiscoverable.
       String handle = asking.requireHandle(FrameTypes.APPROVAL_LIST);
       return Outcome.ok(
           new Listed(

@@ -132,6 +132,41 @@ class RunApprovalStoreTest {
     assertTrue(store.find(question.id()).orElseThrow().deliveredAt() != null);
   }
 
+  @Test
+  void account_discovery_recovers_owned_foreground_questions_without_exposing_other_owners() {
+    for (String owner : List.of("enzo", "mara")) {
+      jdbc.update(
+          "INSERT INTO conversations (id, project_id, origin, lifecycle, created_at,"
+              + " budget_total, budget_spent, owner_handle) VALUES (?, ?, 'turn', 'active', ?, 20, 0, ?)",
+          "cnv_" + owner,
+          project,
+          java.sql.Timestamp.from(Instant.now()),
+          owner);
+    }
+    RunApproval foreground = asked("cnv_enzo", "local", TEST);
+    RunApproval foreign = asked("cnv_mara", "local", TEST);
+    // A pinned recipient takes precedence over the conversation's owner.
+    RunApproval pinned =
+        store.ask(project, "cnv_enzo", "cnv_enzo", "mara", "coder", "local", TEST, "/repo", null);
+    RunApproval ownerless = asked("cnv_no_owner", "local", TEST);
+
+    assertEquals(
+        List.of(foreground.id()), store.openFor("enzo").stream().map(RunApproval::id).toList());
+    assertEquals(
+        java.util.Set.of(foreign.id(), pinned.id()),
+        store.openFor("mara").stream()
+            .map(RunApproval::id)
+            .collect(java.util.stream.Collectors.toSet()));
+    store.delivered(foreground.id());
+    assertEquals(
+        foreground.id(),
+        store.openFor("enzo").getFirst().id(),
+        "notification delivery does not settle the decision");
+    store.deny(foreground.id(), "enzo");
+    assertTrue(store.openFor("enzo").isEmpty());
+    assertTrue(store.find(ownerless.id()).isPresent());
+  }
+
   /**
    * A command given input is approved with that input: the question shows it, and only a call given
    * the same input is let through — the input to a program that reads its code from stdin is the

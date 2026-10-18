@@ -27,7 +27,23 @@ public class EventsProperties {
   private boolean tickerEnabled = true;
   private boolean recoverAtBoot = true;
   private Duration tickInterval = Duration.ofSeconds(15);
+  public static final Duration DEFAULT_QUESTION_ALERT_RETRY = Duration.ofSeconds(30);
+  private Duration questionAlertRetryInterval = DEFAULT_QUESTION_ALERT_RETRY;
   private RuntimeConfig live;
+
+  /** Retry unread approval alerts until the person marks the notice read or answers it. */
+  public Duration getQuestionAlertRetryInterval() {
+    return questionAlertRetryInterval;
+  }
+
+  public void setQuestionAlertRetryInterval(Duration value) {
+    if (value == null
+        || value.compareTo(Duration.ofSeconds(1)) < 0
+        || value.compareTo(Duration.ofHours(1)) > 0)
+      throw new IllegalArgumentException(
+          "question alert retry interval must be 1 second through 1 hour");
+    questionAlertRetryInterval = value;
+  }
 
   public boolean isTickerEnabled() {
     return tickerEnabled;

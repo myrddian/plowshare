@@ -58,7 +58,7 @@ class InboxNoticingTest {
             "three PRs",
             Instant.parse("2026-09-13T09:02:00Z"),
             null);
-    when(inbox.list("enzo", true, 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
+    when(inbox.unreadForAgent("enzo", 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
     AgentTool tool = noticing.inboxToolFor(null, "s-enzo").orElseThrow();
     assertEquals("inbox_read", tool.schema().name());
     String answer = tool.run("{}", null);

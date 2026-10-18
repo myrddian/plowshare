@@ -45,6 +45,43 @@ Lifecycle payloads use `source`, `subject`, `state`, nullable `context` and null
 no message body, command, question, answer or orchestration result. Private mailbox
 topics are classified at transaction end and checked again before publication.
 
+### Human approval Inbox
+
+`approval.requested` and `approval.resolved` have a built-in
+`builtin.approvals.inbox` subscriber per project. It routes every command approval,
+including a foreground chat request, to the owning account's durable Inbox. The
+existing `inbox.changed` account notification alerts connected clients; GUI, TUI
+and CLI read and answer the same approval ID through the public operations. A
+chat question is a display of that decision, never a request for the model to ask
+the person or grant itself permission.
+
+The notification consumer waits for the requesting execution to close before
+delivering a question. A pinned background recipient takes precedence; otherwise
+the retained foreground root owner receives it. No recipient, missing read authority
+or an Inbox failure leaves the approval pending and discoverable. Inbox delivery
+never starts a model, answers an approval or executes a command.
+
+An Inbox commit or socket send is not proof the person saw an alert. While the
+approval remains pending and its notice unread, the worker retries `inbox.changed`
+after `plowshare.events.question-alert-retry-interval` (30 seconds by default,
+configurable from 1 second to 1 hour). The persisted attempt timestamp bounds retries
+across restart and concurrent workers. Marking the item read or answering the
+approval stops retries. An agent reading the Inbox does not acknowledge command
+approval alerts or mark those notices read. No retry resets read state, creates another item or executes
+a command. With internal Relay workers disabled, this periodic retry is unavailable;
+the direct fallback only delivers on drain/boot.
+
+Inbox admission is idempotent by account and question. Re-delivery preserves read
+and settlement state. Acknowledging a Relay availability notice does not acknowledge
+the human decision: bounded, rotating scans repair pending requests without Inbox
+items and settled decisions whose old items remain visible. Those owning rows
+survive a dropped push, worker restart and Relay publication expiration. Retention
+gaps are recorded before their offset is acknowledged. Upgrade republishes retained
+pending identities whose notifications were previously missing; no command is replayed.
+
+With internal Relay workers explicitly disabled, owning direct-delivery recovery
+uses the same account Inbox path. It never delivers a question into a model turn.
+
 Each native wake topic/destination pair has a stable `builtin.wakes.*` group,
 independent offset, virtual worker and database ownership lease. Notification
 callbacks signal workers; they do not start native work through a parallel legacy

@@ -39,6 +39,8 @@ public class ApprovalsConfig {
       Callers callers,
       Inbox inbox,
       JobRuntime runtime,
+      io.aeyer.plowshare.server.agents.RunningConversations running,
+      io.aeyer.plowshare.server.relay.RelayProperties relay,
       ObjectProvider<SpeakerHandles> speakers) {
     PersonDelivery people =
         new PersonDelivery(
@@ -66,8 +68,16 @@ public class ApprovalsConfig {
                   String handle, String kind, String text, String about, String source) {
                 inbox.notifyFromLog(handle, kind, text, source, about);
               }
+
+              public void notifyOnceFromLog(
+                  String handle, String kind, String text, String about, String source) {
+                inbox.notifyOnceFromLog(handle, kind, text, source, about);
+              }
             });
     ApprovalDelivery delivery = new ApprovalDelivery(store, people, inbox::settle);
+    delivery.useRelayDelivery(relay.isInternalEnabled());
+    delivery.whenNotificationReady(
+        conversation -> !turn.isSpeaking(conversation) && !running.hasRunningJob(conversation));
     // V68: an answered, denied or withdrawn question's notice leaves the person's inbox.
     store.whenSettled(delivery::settled);
     runtime.useApprovalDelivery(delivery);

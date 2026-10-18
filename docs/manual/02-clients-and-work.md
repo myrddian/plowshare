@@ -98,10 +98,28 @@ leaving an approval for later and granting a request have different effects.
 Hooks and access checks can still deny work that a person approved.
 
 Desktop reads pending approvals from both the signed-in account and each open
-conversation. Foreground command questions belong to their conversation and may
-not appear in the account-wide listing. Opening or refreshing that conversation
-rediscovers its pending requests without submitting another agent turn. A run
+conversation. Account discovery includes foreground questions in conversations owned
+by that account, even when no view is open, as well as pinned background requests.
+Conversation reads also support servers predating account-wide foreground discovery.
+Opening or refreshing a conversation rediscovers its pending requests without
+submitting another agent turn. A run
 ending `AWAITING` also refreshes its conversation's questions.
+
+Every command approval also reaches the owning account's durable Inbox through
+Relay. The Inbox alert is shared across clients; chat controls are another view of
+the same stored decision. Lost alerts and expired publications are reconciled from
+the retained approval, without starting a model turn or executing the command.
+Desktop also refreshes questions when a followed conversation grows, including work
+started in another window. A failed listing leaves previously read requests visible
+and does not hide requests successfully read from another scope. Use **Check command
+approvals** to retry discovery; failures remain visible beside that control.
+
+Before sending chat text, Desktop checks that conversation's pending command approvals.
+Chat text, including `yes` or `no`, is held while a command request is pending.
+Use that request's **Approve** or **Deny** control; discovery cannot authorize a
+command the person has not seen. A decision that overtakes the check causes a fresh
+read and leaves the chat text unsent. Approval continuation includes the exact command argument array
+and directory so embedded spaces and literal quote characters remain distinct.
 
 The inbox holds durable deliveries and read receipts. Opening the application or
 seeing an unread count is not proof that an item was read. Open the item to read

@@ -1329,16 +1329,23 @@ function refreshProjection(measure: boolean) {
 function renderApprovals() {
   const approvals = state.approvals.filter((row) => row.state === 'asked');
   const bar = $('#approval-bar');
-  bar.hidden = !approvals.length;
-  bar.innerHTML = approvals
-    .map((row) =>
-      approvalControls.prompt(
-        row,
-        row.conversation === selected ? '' : title(row.conversation),
-      ),
-    )
-    .join('');
+  bar.hidden = !approvals.length && !state.approvalError && !selected;
+  bar.innerHTML =
+    `<button id="retry-command-approvals" ${!state.connected ? 'disabled' : ''}>Check command approvals</button>${state.approvalError ? `<p role="alert">${esc(state.approvalError)}</p>` : ''}` +
+    approvals
+      .map((row) =>
+        approvalControls.prompt(
+          row,
+          row.conversation === selected ? '' : title(row.conversation),
+        ),
+      )
+      .join('');
 }
+
+$('#approval-bar').addEventListener('click', (event) => {
+  if ((event.target as HTMLElement).closest('#retry-command-approvals'))
+    action({ action: 'approvals-refresh' });
+});
 
 $('#usage-open').addEventListener('click', () => action({ action: 'usage' }));
 $('#connection-usage').addEventListener('click', () => {

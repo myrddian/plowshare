@@ -25,6 +25,11 @@ public final class RelayMaintenance
   private final Supplier<Instant> clock;
   private final ScheduledExecutorService executor;
   private final AtomicBoolean started = new AtomicBoolean();
+  private RelayApprovalInboxRepository approvalInbox;
+
+  public void useApprovalInbox(RelayApprovalInboxRepository repository) {
+    approvalInbox = Objects.requireNonNull(repository);
+  }
 
   public RelayMaintenance(
       RelayRepository repository,
@@ -60,6 +65,9 @@ public final class RelayMaintenance
     operations.prune(properties.getOperatorRetention(), properties.getDeliveryBatchSize());
     int deleted =
         nativeInboxes.prune(properties.getOperatorRetention(), properties.getDeliveryBatchSize());
+    if (approvalInbox != null)
+      deleted +=
+          approvalInbox.prune(properties.getOperatorRetention(), properties.getDeliveryBatchSize());
     for (var topic : repository.topicsToPrune(now, properties.getTopicBatchSize())) {
       deleted += repository.prune(topic, now, properties.getPublicationBatchSize());
     }

@@ -59,6 +59,93 @@ class InboxStoreTest {
   }
 
   @Test
+  void human_approvals_do_not_starve_older_agent_inbox_pages_or_get_marked_read() {
+    var news = store.deliver("enzo", null, "cnv_old", "ANSWERED", "Older result", T0);
+    for (int i = 0; i < 21; i++)
+      store.notice(
+          "enzo", "approval", "Review command", "approval:pending-" + i, T0.plusSeconds(i + 1));
+    store.deliver("sam", null, "cnv_other", "ANSWERED", "Other account", T0.plusSeconds(30));
+    var page = store.unreadForAgent("enzo", 0, 21);
+    assertEquals(List.of(news), page);
+    store.markRead("enzo", page.stream().map(InboxItem::id).toList(), T0.plusSeconds(60));
+    assertEquals(List.of(), store.unreadForAgent("enzo", 0, 21));
+    assertEquals(21, store.unread("enzo"));
+  }
+
+  @Test
+  void alert_attempts_are_account_scoped_atomic_and_stop_after_read_or_settlement()
+      throws Exception {
+    var retry = java.time.Duration.ofSeconds(30);
+    var item =
+        store.noticeOnceFromLog(
+            "enzo", "approval", "Review command", "cnv_fixture", "approval:alert", T0);
+    assertEquals(false, store.claimQuestionAlert("sam", item.id(), T0, retry));
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+      for (int i = 0; i < 8; i++)
+        calls.add(pool.submit(() -> store.claimQuestionAlert("enzo", item.id(), T0, retry)));
+      int claimed = 0;
+      for (var call : calls) if (call.get()) claimed++;
+      assertEquals(1, claimed);
+    }
+    assertEquals(false, store.claimQuestionAlert("enzo", item.id(), T0.plusSeconds(29), retry));
+    assertEquals(true, store.claimQuestionAlert("enzo", item.id(), T0.plusSeconds(30), retry));
+    store.markRead("enzo", List.of(item.id()), T0.plusSeconds(31));
+    assertEquals(false, store.claimQuestionAlert("enzo", item.id(), T0.plusSeconds(60), retry));
+    var settled =
+        store.noticeOnceFromLog(
+            "enzo", "approval", "Review another", "cnv_fixture", "approval:settled", T0);
+    store.settle("approval:settled", T0.plusSeconds(1));
+    assertEquals(false, store.claimQuestionAlert("enzo", settled.id(), T0.plusSeconds(60), retry));
+    assertEquals(0, store.unread("enzo"));
+  }
+
+  @Test
+  void concurrent_question_delivery_is_idempotent_and_does_not_revive_read_or_settled_items()
+      throws Exception {
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new java.util.ArrayList<java.util.concurrent.Future<InboxItem>>();
+      for (int i = 0; i < 8; i++)
+        calls.add(
+            pool.submit(
+                () ->
+                    store.noticeOnceFromLog(
+                        "enzo",
+                        "approval",
+                        "Review command",
+                        "cnv_fixture",
+                        "approval:apr_fixture",
+                        T0)));
+      var ids = new java.util.HashSet<String>();
+      for (var call : calls) ids.add(call.get().id());
+      assertEquals(1, ids.size());
+      assertEquals(1, store.unread("enzo"));
+      store.markRead("enzo", List.copyOf(ids), T0.plusSeconds(1));
+      store.noticeOnceFromLog(
+          "enzo",
+          "approval",
+          "Review command",
+          "cnv_fixture",
+          "approval:apr_fixture",
+          T0.plusSeconds(2));
+      assertEquals(0, store.unread("enzo"));
+      store.settle("approval:apr_fixture", T0.plusSeconds(3));
+      store.noticeOnceFromLog(
+          "enzo",
+          "approval",
+          "Review command",
+          "cnv_fixture",
+          "approval:apr_fixture",
+          T0.plusSeconds(4));
+      assertEquals(0, store.list("enzo", false, 0, 50).size());
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM user_inbox WHERE about='approval:apr_fixture'", Integer.class));
+    }
+  }
+
+  @Test
   void marking_read_touches_only_the_callers_rows() {
     InboxItem mine = store.deliver("enzo", null, "cnv_1", "ANSWERED", "a", T0);
     InboxItem theirs = store.deliver("sam", null, "cnv_2", "ANSWERED", "b", T0);

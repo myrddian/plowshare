@@ -74,13 +74,15 @@ public class EventsConfig {
   }
 
   @Bean
-  public Inbox inbox(InboxStore store, ObjectProvider<AccountPushes> pushes) {
+  public Inbox inbox(
+      InboxStore store, ObjectProvider<AccountPushes> pushes, EventsProperties properties) {
     // Lazy: the push side is the event channel, which is built after the frame router,
     // which needs this. Resolved on the first delivery, not at wiring.
     return new Inbox(
         store,
         (handle, body) -> pushes.getIfAvailable(() -> AccountPushes.NONE).push(handle, body),
-        Instant::now);
+        Instant::now,
+        properties.getQuestionAlertRetryInterval());
   }
 
   /**

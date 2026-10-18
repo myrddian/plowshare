@@ -95,7 +95,7 @@ import org.slf4j.LoggerFactory;
  * nothing. What the beat <em>says</em> about the run's progress is still not this class's to know:
  * the two counts are read off {@link JobWatch}, which has seen every one that was ever published.
  */
-public final class JobStore implements AutoCloseable, EventRuns {
+public final class JobStore implements AutoCloseable, EventRuns, RunningConversations {
 
   private static final Logger log = LoggerFactory.getLogger(JobStore.class);
 
@@ -1511,6 +1511,14 @@ public final class JobStore implements AutoCloseable, EventRuns {
     // a sort on the id would put them in an order that means nothing. See
     // Job.sequence, which is the second key V6 gets from `created_at`.
     return byId.values().stream().sorted(Comparator.comparingLong(Job::sequence)).toList();
+  }
+
+  @Override
+  public boolean hasRunningJob(String conversation) {
+    Objects.requireNonNull(conversation, "conversation");
+    return byId.values().stream()
+        .anyMatch(
+            job -> conversation.equals(job.conversation()) && job.state() == Job.State.RUNNING);
   }
 
   private List<String> ids() {

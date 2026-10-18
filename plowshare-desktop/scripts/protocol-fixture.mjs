@@ -688,14 +688,16 @@ export async function protocolFixture(options = {}) {
       // No Inbox notification: the durable ending must trigger discovery itself.
       finish(job, 'AWAITING', `Approve running echo fixture in /fixture on the local side? [${id}]`);
     },
-    queueApproval(id, conversation = 'fixture-first', legacy = false) {
+    queueApproval(id, conversation = 'fixture-first', legacy = false, notifyInbox = true) {
       const row = approvalWire({ id, conversation, agent: 'fixture-bot', command: ['echo', id], cwd: '/fixture', reason: 'Review this exact request.' });
       approvals.push(row);
       const answer = `Approve running echo ${id} in /fixture on the server side? [${id}]`;
-      inbox.unshift({ id: `inbox-${id}`, kind: 'approval', answer, ...(legacy ? {} : { about: `approval:${id}` }), arrivedAt: '2026-10-02T00:00:00Z' });
+      if (notifyInbox) inbox.unshift({ id: `inbox-${id}`, kind: 'approval', answer, ...(legacy ? {} : { about: `approval:${id}` }), arrivedAt: '2026-10-02T00:00:00Z' });
+      else conversationOnlyApprovals.add(id);
       const log = entries.get(conversation); const ordinal = (log.at(-1)?.ordinal ?? 0) + 1;
       log.push({ ordinal, turnOrdinal: ordinal, kind: 'answer', state: 'stands', excerpt: answer });
-      grew(conversation); push({ kind: 'inbox.changed', unread: unreadInbox().length });
+      grew(conversation);
+      if (notifyInbox) push({ kind: 'inbox.changed', unread: unreadInbox().length });
     },
     // Abrupt loss must reach the peer even when the logical packet owner has pending frames.
     disconnectProject(name) { const id = fileSockets.get(name)?.claim.session; eventSockets.get(id)?.socket.terminate(); },
