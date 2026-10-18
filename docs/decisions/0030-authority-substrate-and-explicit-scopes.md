@@ -574,7 +574,7 @@ to switch to unlimited or another source.
 
 | Operation | Configured budget source |
 | --- | --- |
-| Conversation compaction | The conversation's configured budget |
+| Conversation compaction and skill-context summary | Their own SYSTEM service-operation allowance, unlimited unless service policy limits/disables it |
 | Project/Application document processing | That scope's configured processing budget |
 | Global knowledge preparation or deployment maintenance | A configured deployment budget for the operation |
 | Read-side inference, including query embedding/reranking | The search service's configured operation budget |
@@ -582,12 +582,19 @@ to switch to unlimited or another source.
 Different operations can use explicitly configured shared budget sources; this
 does not require a new spending pool or ledger for every task. Budget assignment
 uses the authorized operation contract, not an arbitrary caller-supplied payer.
+Such sharing does not make a conversation's task allowance available to SYSTEM
+maintenance.
 Queueing, continuation and recovery retain that budget binding and recorded usage;
 they do not silently switch to SYSTEM, the creator or another available pool.
 Any budget change needs an explicit authorized lifecycle action. Missing,
 exhausted or invalid spending authority prevents additional inference under the
 budget policy; existing receipts/checkpoints and incurred costs remain recorded.
 Creator access removal alone does not change the operation's budget binding.
+
+Compaction and other SYSTEM services do not consume the source conversation's
+task allowance. Linking usage to that conversation is provenance, not a debit.
+Compaction may proceed with an exhausted task allowance when its own service
+policy and operation/source validity permit it; the task itself remains capped.
 
 Keep executor, initiator/subject, creator provenance, operation identity, budget
 source and accounting attribution distinct. Retain inference attempt/cost records

@@ -293,7 +293,7 @@ public final class SkillRuntime {
       }
       AgentDefinition route = caller.withCalls(List.of(executor.name()));
       SkillContexts.Prepared context =
-          contexts == null ? null : contexts.prepare(mode, parent, account, budget, cancelled);
+          contexts == null ? null : contexts.prepare(mode, parent, account, cancelled);
       if (contexts != null) contexts.pin(account, id, context);
       var delegate =
           new AgentRunTool(

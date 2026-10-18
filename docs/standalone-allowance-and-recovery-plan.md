@@ -1,8 +1,14 @@
 # Standalone allowances and execution recovery
 
-Status: proposed implementation plan, 19 October 2026. **Documentation only.**
+Status: proposed implementation plan, 19 October 2026; the separately authorized
+SYSTEM summary spending correction is implemented as recorded below.
 Source baseline: `1a075d51a87108ecfd8c927542a5a27c663a13cf`.
 Findings below describe this checkout, not an inspected live deployment.
+
+Implementation update, 19 October 2026: the SYSTEM compaction/skill-summary
+spending separation below is implemented and locally tested. The remaining
+standalone-row migration, swarm recovery and other work packages are still
+proposed; this document is not a claim that the full plan has been implemented.
 
 This follows the authority-substrate work and the
 [slice 18 inventory](authority-substrate-slices/18-deferred-scope-and-cutover.md).
@@ -78,14 +84,34 @@ SYSTEM operation may share its selected operation allowance, as processing and
 embedding already do. Retry/recovery retains that service source and spent;
 it must not mint another allowance simply to escape an applicable finite limit.
 
-This corrects a current runtime dependency, not merely terminology: compaction
-presently selects the conversation-owned/supplied allowance in
-`Compaction.summarisingCall`, and skill-context summarisation claims from the
-budget supplied through `SkillContexts`. `SystemOperations.authorize` additionally
-requires a conversation-backed claim for compaction/skill-summary purposes. The
-plan must remove these spending dependencies, while preserving actual input,
-cancellation and operation-validity fences. Moving the same conversation budget
-into a new table without changing those bindings would leave the error intact.
+The source audit found an actual runtime dependency introduced in `a3eb771`:
+compaction selected the conversation-owned/supplied allowance in
+`Compaction.summarisingCall`, and skill-context summarisation claimed the budget
+supplied through `SkillContexts`. SYSTEM admission additionally required a
+conversation-backed claim. The correction now selects a separate allowance for
+each summary operation using the existing `Budget`/`SpendingPolicy` and SYSTEM
+admission. The caller-budget transcript/handoff plumbing and conversation-backed
+spending requirement are removed. Actual input, cancellation and operation
+validity fences remain; usage attribution is unchanged.
+Skill context preparation consumes the narrow internal `SkillSummaries` contract,
+which accepts source/provenance and cancellation, with no task-budget parameter.
+
+Local acceptance: `format`, `formatCheck` and repository `check` passed. The
+16 focused summary/context/SYSTEM-authority tests cover independent claims,
+finite/exhausted/unlimited/no-call source allowances, asynchronous and in-turn
+folding, disabled service policy retaining full history, cancellation and late
+source invalidation. Repositories are mocked; no SQL/schema changed and no
+full-db tests or live deployment were run. Python bytecode generation was
+disabled during final checks to keep generated cache files out of the existing
+source-text guard.
+
+The deployment policy is `plowshare.agents.compaction-budget` (environment:
+`PLOWSHARE_COMPACTION_BUDGET`): `unlimited` by default, `0` disabled, or a positive
+call ceiling per summary operation. Each existing summary operation makes one
+model call, with no automatic replay. Its claim/source is retained in existing
+inference admission records. This correction does not implement a general mutable
+standalone allowance row or a new summary-resume API. Moving the original task
+budget into a new table alone would not have corrected the spending selection.
 
 ## Current storage and execution map
 
@@ -101,7 +127,7 @@ still need an adapter to the shared foundation.
 | Delegated children and acting work | Synchronous children can share a live `Budget`, but durable lookup still depends on conversation lineage. Personal acting work creates a subject conversation and finite allowance. | Persist the applicable allowance reference through existing execution/recovery records. Preserve acting proof intersection, subject identity and revocation. This does not repair the separate retained-agent capability-copy limitation. |
 | Turn continuation and operator limits | `Turn` resolves conductor/delegated allowances through `allowanceFor`, can receive a board lease, and grants finite increases before resumption. Job/conversation limit controls and their comments assume spending is stored on a conversation. | Adapt continuation, grant and usage inspection together. Preserve allowed endings, active-turn exclusion and distinctions between an owning allowance and a temporary lease. Changing a wake lease must not mutate an unrelated root allowance. |
 | Automatic increases | `AutomaticLimits` walks conversation/delegation parents to locate an owner and persists an increase on that conversation. Orchestration continuation has separate policy handling. | Keep owning lifecycle and policy decisions; target the same allowance row atomically. Resolve policy from retained operation context, not from whichever conversation happens to carry a counter. |
-| Compaction and skill summaries | Compaction selects the conversation-owned/supplied allowance; skill summary claims the budget passed through `SkillContexts`. SYSTEM admission also requires a conversation-backed claim. This currently couples service spending to task spending. | Select a separate SYSTEM service-operation allowance, unlimited by default or bounded by its applicable service policy. Stop debiting the conversation/task allowance. Retain the real conversation input and purpose restrictions as separate evidence; remove the conversation-backed spending requirement. |
+| Compaction and skill summaries | Audit baseline: compaction/skill summary borrowed task spending and required a conversation-backed claim. Correction implemented 19 October: separate SYSTEM allowances selected by service policy; no task Budget in transcript/handoff. | Preserve that separation through the standalone storage migration. Actual source conversation and purpose restrictions remain evidence, never a reason to debit task spending. |
 | Swarm topic trees | `BoardPot` uses the root topic's `pot_total`/`pot_spent`, local leases and opener reserve. Member logs do not own the common pot. Full exhaustion closes the tree. | One root allowance row shared by all member/subtopic work; retain swarm lease/reserve policy and per-wake attribution. Change exhaustion recovery as specified below. |
 | Board messaging | Each newly committed incoming message adds the recipient definition's allowance to its message-instance pot. `BoardMessaging` leases `BoardPot`; `JdbcBoardMessagingRepository` increments `pot_total`. | Reference the instance's allowance row. Preserve committed-message idempotency, delivery, approval, deadlines and continuation. Do not mint another allowance on poll, retry or recovery, or apply swarm closing rules to messaging. |
 | Document processing | `information_revisions` stores `processing_budget_id`, `allowance_total`, `allowance_spent`. The processing repository mirrors usage into its processing conversation; catalogue allowance changes update both. | Processing revision/operation references one allowance. Remove counter mirroring; project usage from the canonical row. Existing preparation, hooks and embeddings continue sharing the selected processing allowance. |

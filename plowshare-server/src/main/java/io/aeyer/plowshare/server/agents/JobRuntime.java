@@ -1744,7 +1744,6 @@ public final class JobRuntime {
     if (operation != null) operations.requireTargets(operation, home, List.of());
     if (confined) RetainedAgent.require(definition);
     String owner = ownerOf(callerHandle, sessionId, transcript.conversationId());
-    transcript.spending(budget);
     RunUsage tracking = runUsage;
     Transcript ownedTranscript =
         tracking == RunUsage.NONE

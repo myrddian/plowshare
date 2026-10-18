@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.archive.CompactionRecord;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.ConversationLifecycle;
@@ -18,6 +19,7 @@ import io.aeyer.plowshare.server.hooks.Summarised;
 import io.aeyer.plowshare.server.llm.FoldThresholds;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
+import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
@@ -38,6 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,11 +92,11 @@ import org.slf4j.LoggerFactory;
  * {@link #folding} is the separate guard, and a fold that finds one in flight is dropped rather
  * than queued — the reach only moves forward, so the next fold's span is simply wider.
  *
- * <p>Folds execute under bounded SYSTEM authority and spend the conversation's retained shared
- * allowance. Claims are persisted before dispatch, including asynchronous folds. Missing or
- * exhausted allowance refuses the fold and retains the full history. SYSTEM and creator provenance
- * never supply a replacement budget. At most one fold per conversation remains the concurrency
- * bound; it is independent of the spending limit.
+ * <p>Folds execute under bounded SYSTEM authority with their own operation allowance, unlimited
+ * unless the service spending policy limits/disables them. Usage retains the source conversation as
+ * provenance without debiting its task allowance. Claims are persisted before dispatch, including
+ * asynchronous folds. An unavailable service retains the full history. At most one fold per
+ * conversation remains the concurrency bound, independently of spending policy.
  *
  * <h2>Inside a turn, when the turn itself is what outgrew the window</h2>
  *
@@ -290,7 +293,7 @@ import org.slf4j.LoggerFactory;
  * reaches. A conversation with one turn therefore cannot be compacted at all — there is nothing
  * older — and that is said rather than worked around.
  */
-public final class Compaction {
+public final class Compaction implements SkillSummaries {
 
   private static final Logger log = LoggerFactory.getLogger(Compaction.class);
 
@@ -1134,9 +1137,13 @@ public final class Compaction {
    */
   private volatile Tokenizer tokenizer;
 
-  private io.aeyer.plowshare.server.access.SystemOperations system;
+  private SystemOperations system;
 
-  /** Production compaction retains SYSTEM authority and the conversation's shared allowance. */
+  private Supplier<Budget> summaryAllowances = Budget::none;
+
+  /**
+   * Production wiring selects a fresh service-operation allowance independently of task spending.
+   */
   public Compaction(
       LlmDispatcher models,
       Supplier<AgentDefinition> folder,
@@ -1147,7 +1154,8 @@ public final class Compaction {
       ConversationStore conversations,
       Learning learning,
       Citing citing,
-      io.aeyer.plowshare.server.access.SystemOperations system) {
+      SystemOperations system,
+      Supplier<Budget> summaryAllowances) {
     this(
         models,
         folder,
@@ -1159,6 +1167,7 @@ public final class Compaction {
         learning,
         citing);
     this.system = Objects.requireNonNull(system);
+    this.summaryAllowances = Objects.requireNonNull(summaryAllowances);
   }
 
   public Compaction(
@@ -1395,9 +1404,8 @@ public final class Compaction {
    * this is called — {@link TurnTranscript#before()} reads the log when the run starts, and {@link
    * TurnTranscript#foldWhenTheTurnIsOver()} takes the fold decision when it ends.
    *
-   * <p>The runtime attaches its actual shared allowance through {@link Transcript#spending}.
-   * Compaction retains that object across the ending callback and any asynchronous fold. The
-   * allowance's repository binding prevents stale readers from spending an ordinal twice.
+   * <p>Compaction selects its own SYSTEM operation allowance at the fold boundary. A source
+   * conversation is retained for inputs and usage attribution, never as the spending source.
    *
    * @param conversationId the conversation this turn is being spoken into
    * @param definition the agent answering; its context length bounds the projected history. The
@@ -2106,15 +2114,6 @@ public final class Compaction {
      * {@link Transcript#NONE} for a fixture with no store and never reaches this constructor.
      */
     private final Budget owned;
-
-    private Budget operationBudget;
-
-    @Override
-    public synchronized void spending(Budget budget) {
-      if (operationBudget != null && operationBudget != budget)
-        throw new IllegalStateException("Compaction cannot change operation allowance");
-      operationBudget = Objects.requireNonNull(budget);
-    }
 
     private final Speaker speaker;
 
@@ -2991,33 +2990,20 @@ public final class Compaction {
       if (confined)
         throw new IllegalStateException("Acting turns do not admit background model work");
       retainedAuthority.run();
-      var request = JobRuntime.requestFor(folding, asked).withAttribution(foldUsage(folding));
-      if (system != null) {
-        Budget budget = owned == null ? operationBudget : owned;
-        if (budget == null)
-          throw new IllegalStateException("Compaction has no retained conversation allowance");
-        var source = conversations.find(conversationId).orElseThrow();
-        request =
-            system.authorize(
-                io.aeyer.plowshare.server.access.SystemOperations.Purpose.CONVERSATION_COMPACTION,
-                source.home(),
-                folding,
-                request,
-                budget,
-                () -> {
-                  if (conversations.find(conversationId).isEmpty()
-                      || conversations.lifecycleOf(conversationId).orElseThrow()
-                          == ConversationLifecycle.EJECTED)
-                    throw new IllegalStateException("Compaction source unavailable");
-                });
-      }
+      ChatRequest request =
+          summaryRequest(
+              SystemOperations.Purpose.CONVERSATION_COMPACTION,
+              conversationId,
+              folding,
+              JobRuntime.requestFor(folding, asked).withAttribution(foldUsage(folding)),
+              () -> false);
       return models.streamFold(request, Deltas.DISCARDING);
     }
 
     /**
      * One model call, as the folder, over the work so far: {@link #summarise}'s shape — the
      * folder's prompt in the system slot and the span as data in one user message, spending the
-     * retained conversation allowance. It streams under the pool's inactivity and whole-call
+     * separate SYSTEM service allowance. It streams under the pool's inactivity and whole-call
      * bounds, as the between-turn fold does. A failure throws to the caller, so its reason reaches
      * the diagnostic.
      */
@@ -4413,20 +4399,12 @@ public final class Compaction {
   /**
    * A separate summary for a skill handoff: no fold, entry mutation, or parent projection change.
    */
-  public String summaryForSkill(
-      String source,
-      Transcript parent,
-      Budget budget,
-      java.util.function.BooleanSupplier cancelled) {
+  @Override
+  public String summaryForSkill(String source, Transcript parent, BooleanSupplier cancelled) {
     AgentDefinition folding = folder.get();
     if (cancelled.getAsBoolean())
       throw new IllegalStateException("The skill summary was cancelled before dispatch");
-    var claim =
-        budget
-            .tryClaim()
-            .orElseThrow(
-                () -> new IllegalStateException("The skill summary has no model budget remaining"));
-    var asked =
+    ChatRequest asked =
         JobRuntime.requestFor(
                 folding,
                 List.of(
@@ -4438,27 +4416,58 @@ public final class Compaction {
                             + source)))
             .withAttribution(
                 parent.usage().forOperation(UsageAttribution.Operation.FOLD, folding.name()));
-    if (system != null) {
-      var sourceRecord = conversations.find(parent.conversationId()).orElseThrow();
-      var work =
-          system.admit(
-              io.aeyer.plowshare.server.access.SystemOperations.Purpose.SKILL_SUMMARY,
-              sourceRecord.home(),
-              folding,
-              source,
-              () -> {
-                if (conversations.find(parent.conversationId()).isEmpty()
-                    || conversations.lifecycleOf(parent.conversationId()).orElseThrow()
-                        == ConversationLifecycle.EJECTED)
-                  throw new IllegalStateException("Skill source unavailable");
-              });
-      asked = asked.withAuthorization(work.claimed(asked, claim));
-    }
+    asked =
+        summaryRequest(
+            SystemOperations.Purpose.SKILL_SUMMARY,
+            parent.conversationId(),
+            folding,
+            asked,
+            cancelled);
     Completion completion = models.streamFold(asked, Deltas.DISCARDING, cancelled);
     String text = completion.content() == null ? "" : completion.content().strip();
     if (text.isEmpty())
       throw new IllegalStateException("The skill context summary came back empty");
     return text;
+  }
+
+  /**
+   * One model-only summary is one SYSTEM operation. Its claim is retained by inference admission,
+   * not by mutating the input conversation. Failed/uncertain attempts retain their claims and are
+   * never retried here. The source and cancellation fence is rechecked at dispatch.
+   */
+  private ChatRequest summaryRequest(
+      SystemOperations.Purpose purpose,
+      String conversation,
+      AgentDefinition worker,
+      ChatRequest request,
+      BooleanSupplier cancelled) {
+    Budget allowance = Objects.requireNonNull(summaryAllowances.get());
+    if (system == null) {
+      // Fixtures without retained SYSTEM admission still exercise the selected spending policy.
+      allowance
+          .tryClaim()
+          .orElseThrow(() -> new IllegalStateException("SYSTEM summary allowance exhausted"));
+      return request;
+    }
+    ConversationRecord source = conversations.find(conversation).orElseThrow();
+    return system.authorize(
+        purpose,
+        source.home(),
+        worker,
+        request,
+        allowance,
+        () -> {
+          if (cancelled.getAsBoolean())
+            throw new IllegalStateException("SYSTEM summary cancelled before dispatch");
+          ConversationRecord current =
+              conversations
+                  .find(conversation)
+                  .orElseThrow(() -> new IllegalStateException("Summary source unavailable"));
+          if (!source.home().equals(current.home())
+              || conversations.lifecycleOf(conversation).orElseThrow()
+                  == ConversationLifecycle.EJECTED)
+            throw new IllegalStateException("Summary source unavailable");
+        });
   }
 
   /**

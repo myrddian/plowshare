@@ -52,6 +52,15 @@ work. They are not synonyms for starting a new task. Use the current pending
 identity and current effective state so an old UI selection cannot answer a newer
 request. The server remains authoritative if a client view is stale.
 
+Compaction and skill-context summaries do not consume the conversation's task
+allowance. They run as bounded SYSTEM operations with their own spending policy:
+`plowshare.agents.compaction-budget` (`PLOWSHARE_COMPACTION_BUDGET`) accepts
+`unlimited` (default), `0` to disable summaries, or a positive call ceiling per
+summary operation. Each summary currently makes one model call. Usage can name
+the source conversation without reducing its remaining calls. If summaries are
+disabled/unavailable, compaction keeps the full history; a required skill summary
+refuses the handoff instead of silently changing its context mode.
+
 ## Offline command discovery
 
 The CLI can list current command families and validate payloads offline:

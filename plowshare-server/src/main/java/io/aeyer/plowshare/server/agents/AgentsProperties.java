@@ -24,14 +24,33 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Path}, which Task 6's {@code ClasspathDefinitions} fixes; left in place it would have loaded the
  * same shipped definitions twice, from two sources.
  *
- * <p>What survives is {@link #curatorBudget}, which has nothing to do with where definitions live
- * and was never a candidate for retiring alongside it.
+ * <p>Operation spending policies have nothing to do with where definitions live. Curator passes and
+ * SYSTEM compaction/skill-summary operations each select their own allowance here; neither borrows
+ * spending authority from the source conversation.
  */
 @ConfigurationProperties(prefix = "plowshare.agents")
 public class AgentsProperties {
 
   /** Selected whole-pass policy: unlimited by default, zero disabled, positive limited. */
   private String curatorBudget = "unlimited";
+
+  /** Per SYSTEM compaction/skill-summary operation; never charged to the source conversation. */
+  private String compactionBudget = "unlimited";
+
+  public String getCompactionBudget() {
+    return compactionBudget;
+  }
+
+  public void setCompactionBudget(String value) {
+    io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(value, "compaction-budget");
+    compactionBudget = value;
+  }
+
+  public Budget compactionAllowance() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+        io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+            compactionBudget, "compaction-budget"));
+  }
 
   public String getCuratorBudget() {
     return curatorBudget;

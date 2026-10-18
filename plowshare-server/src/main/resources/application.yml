@@ -225,6 +225,9 @@ plowshare:
     # Whole-pass spending policy: unlimited by default, 0 disabled, positive finite cap.
     # An explicit maxModelCalls request selects its own finite policy.
     curator-budget: ${PLOWSHARE_CURATOR_BUDGET:unlimited}
+    # Each SYSTEM compaction/skill summary has its own policy, never the task's allowance.
+    # unlimited (default), 0 disabled, or a positive model-call ceiling per summary operation.
+    compaction-budget: ${PLOWSHARE_COMPACTION_BUDGET:unlimited}
   # What a conversation is opened with when whoever opened it did not say.
   #
   # WHY THIS KEY EXISTS, given that this server spent several slices refusing to

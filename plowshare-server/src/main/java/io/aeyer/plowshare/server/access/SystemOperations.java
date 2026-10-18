@@ -74,10 +74,6 @@ public interface SystemOperations {
         budget
             .tryClaim()
             .orElseThrow(() -> new IllegalStateException("SYSTEM operation allowance exhausted"));
-    if ((purpose == Purpose.CONVERSATION_COMPACTION || purpose == Purpose.SKILL_SUMMARY)
-        && claim.conversation() == null)
-      throw new IllegalStateException(
-          "Compaction requires the retained durable conversation allowance");
     return request.withAuthorization(work.claimed(request, claim));
   }
 }

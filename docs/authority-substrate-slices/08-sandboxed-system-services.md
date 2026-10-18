@@ -96,11 +96,16 @@ caller disclosure gates. Internal pipeline logs use explicit SYSTEM CREATE proof
 while retaining original private custody and input selections. Former-creator log
 reads remain refused. Paid checkpoints still require a valid operation.
 
-Compaction and skill handoff retain the actual shared conversation allowance.
-Conversation claims persist before dispatch with a conditional ordinal update; a
-stale recovered reader cannot spend twice. Budget-source identity is retained in
-inference records. Receipt identifiers survive source deletion without blocking
-that lifecycle, and a recreated project name cannot repair old authority.
+Correction, 19 October 2026: compaction and skill-context summaries use their own
+SYSTEM service-operation allowances, unlimited by default. They no longer debit
+the source conversation or receive its Budget through the transcript/handoff.
+`plowshare.agents.compaction-budget` selects unlimited, disabled (`0`) or a positive
+finite ceiling for each summary operation. Source validity, cancellation and
+retained SYSTEM authority remain enforced. Claims and budget-source identity
+are retained in inference records; usage may reference the source conversation
+without charging its allowance. Receipt identifiers survive source deletion
+without blocking that lifecycle, and a recreated project name cannot repair old
+authority. The separate standalone allowance storage/recovery plan remains open.
 
 Existing Scribe, Learner, digest/navigation, curation, advisor, validator, command
 judge and schedule-reader calls use explicit bounded SYSTEM service authority and

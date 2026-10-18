@@ -19,21 +19,17 @@ public final class SkillContexts {
   }
 
   private final EntryStore entries;
-  private final Compaction compaction;
+  private final SkillSummaries summaries;
   private final SkillExecutions executions;
 
-  public SkillContexts(EntryStore entries, Compaction compaction, SkillExecutions executions) {
+  public SkillContexts(EntryStore entries, SkillSummaries summaries, SkillExecutions executions) {
     this.entries = entries;
-    this.compaction = compaction;
+    this.summaries = summaries;
     this.executions = executions;
   }
 
   public Prepared prepare(
-      SkillDefinition.Mode mode,
-      Transcript parent,
-      String account,
-      Budget budget,
-      BooleanSupplier cancelled) {
+      SkillDefinition.Mode mode, Transcript parent, String account, BooleanSupplier cancelled) {
     if (mode == SkillDefinition.Mode.NEW || mode == SkillDefinition.Mode.DIRECT) return null;
     SkillContextLog snapshot =
         entries.forAccount(account).snapshotForSkill(parent.conversationId());
@@ -45,7 +41,7 @@ public final class SkillContexts {
     String context =
         mode == SkillDefinition.Mode.INHERITED
             ? rendered
-            : compaction.summaryForSkill(rendered, parent, budget, cancelled);
+            : summaries.summaryForSkill(rendered, parent, cancelled);
     String prompt =
         "Parent context "
             + mode

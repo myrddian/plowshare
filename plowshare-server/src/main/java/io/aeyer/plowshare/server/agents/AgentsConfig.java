@@ -1882,6 +1882,7 @@ public class AgentsConfig {
   @Bean(destroyMethod = "close")
   public Compaction compaction(
       LlmDispatcher models,
+      AgentsProperties properties,
       TurnStore turns,
       CompactionStore compactions,
       EntryStore entries,
@@ -1922,7 +1923,8 @@ public class AgentsConfig {
             // deployment with no corpus configuration is a running server,
             // and one whose turns close as they always did.
             citing.getIfAvailable(() -> Citing.NONE),
-            system);
+            system,
+            properties::compactionAllowance);
     // What counts a step's results when a fold inside a turn is decided: the server's one
     // Tokenizer (spec 2026-09-30-fold-at-60-and-80 §1). LlmConfig always defines one.
     tokenizer.ifAvailable(compaction::useTokenizer);
