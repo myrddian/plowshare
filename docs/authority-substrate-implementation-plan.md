@@ -19,7 +19,10 @@ The implemented [slice 17](authority-substrate-slices/17-memory-writes-and-scrib
 connects existing memory writes and Scribe to that foundation, including the
 Learner filing hook. Its explicit write policy defaults to unlimited operation
 spending; disabled/limited configuration applies only to the filing pipeline.
-Curator/promotion and independent repair remain separate.
+Curator/promotion and independent repair remain separate. The consolidated
+[slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md) is planned,
+not implemented: it records the known remaining runtime, migration and optional
+capability gap, why it was deferred and the impact of leaving it unfinished.
 
 ## Count and scope
 
@@ -27,14 +30,15 @@ The original roadmap defined **14 implementation slices: the first documented sl
 13 follow-on slices**. Each has its own scope document. These are reviewable
 planning units, not a promise of one PR per slice, an effort estimate or a request
 to execute all work. Revalidate concrete scope and source dependencies before a
-later implementation instruction; split a unit further if evidence requires it.
+later implementation instruction. Slice 18 consolidates the remaining work in
+one scope document as requested.
 
-That original sequence is complete for its documented supported paths. Slice 15
-and slice 16 are additional implemented follow-ons, bringing the inventory to 16
-documents with their supported paths implemented. Slice 17 is an additional
-implemented slice, bringing the inventory to 17 documents, with 01–17 implemented
-for their supported paths. These follow-ons do not expand the original slice 14
-outcome retroactively.
+That original sequence is complete for its documented supported paths. Slices
+15–17 are additional implemented follow-ons. The single consolidated deferred
+scope is slice 18, bringing the inventory to **18 slices: 01–17 implemented for
+their supported paths, and 18 planned**. Its internal work packages are not more
+numbered slices, and its optional capabilities register is not implementation
+scope. These follow-ons do not expand the original slice 14 outcome retroactively.
 
 [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md) defines the
 settled architecture. The [impact report](authority-substrate-impact-report.md)
@@ -80,6 +84,7 @@ it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 | 15 | [SYSTEM embedding foundation and initial search consumers](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Share scoped SYSTEM embedding execution across existing preparation and initial document-search consumers. Each operation supplies its scope, validity and spending policy; search defaults to unlimited, with disabled/limited configuration available. Readers gain no embedding permission. Memory/repair/ask activation and other deferred consumers remain separate. |
 | 16 | [Memory query embedding and recall](authority-substrate-slices/16-memory-query-embedding-and-recall.md) | 04–08, 13, 15 | Connect existing recall and automatic Reminder query embeddings to the shared SYSTEM foundation with current read tiers, retained sandbox/lifetime and policy-selected spending. Reuse read-side disabled/limited/unlimited policy, default unlimited; a nearby finite budget does not automatically apply. Writes/Scribe/curation/repair and broader targets stay separate. |
 | 17 | [Memory writes and Scribe](authority-substrate-slices/17-memory-writes-and-scribe.md) | 04–08, 13, 15, 16 | Admit existing write/Scribe/Learner-filing consumers with same-home candidates, shared SYSTEM inference, atomic content/provenance and fenced write-time vector publication. One write operation policy defaults to unlimited; optional disabled/limited configuration explicitly applies. Curator/promotion and independent repair remain deferred. |
+| 18 | [Deferred scope and remaining cutover](authority-substrate-slices/18-deferred-scope-and-cutover.md) | 01–17 | Planned only. Consolidate remaining existing-consumer bindings, lineage/recovery and target decisions, compatibility and deployment proof. Record each deferral's reason and impact; keep optional new capabilities explicitly outside implementation scope. |
 
 The existing first-slice document remains authoritative for slice 01; it is not
 duplicated in the slice directory. Slice 14 depends transitively on 01–13
@@ -175,13 +180,14 @@ The slice 01–13 documents record implementation checks. The original roadmap
 planning task ran no Java, PostgreSQL, SDK or live integration tests; its
 documentation checks are distinct from implementation verification.
 
-## Deferred capabilities and stop conditions
+## Consolidated deferred scope and stop conditions
 
-The count excludes first-class tenant rollout, arbitrary ACL deny/group engines,
-new ACL or billing-management UIs, a Global type/schema registry, general project
-acting runtime, public SYSTEM-work continuation, new lifecycle controls and
-SDK/client feature parity. General curation grant-versus-copy-versus-transfer
-product behavior and a full search presentation redesign also remain deferred.
+[Slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md) is the single
+current inventory. It separates existing runtime gaps (R1–R7), migration and
+acceptance requirements (M1–M3), and optional capabilities/decisions (D1–D12).
+Every item records why it was deferred and what happens if it stays unfinished.
+Optional capabilities are recorded there for completeness, not added to the
+implementation commitment. Earlier slice exclusions remain historical evidence.
 Existing dangerous release/fallback paths must still be fenced by the adopted
 rules; deferral does not authorize their continued bypass during migration.
 
@@ -212,9 +218,10 @@ selected memory recall and Reminder reads, reusing the existing read-side spendi
 policy without applying a nearby finite budget automatically. Retained reads
 exclude Global tiers outside their parent sandbox. Slice 17 connects memory
 writes/Scribe and the existing Learner filing step with explicit write-policy
-configuration, source/claim retention and fenced vector publication. All 17
-currently documented slices are implemented for their supported paths. This does
-not activate curation/promotion, ask/repair or the other deferred consumers.
-Each later implementation request determines which further slices to execute; no migration
+configuration, source/claim retention and fenced vector publication. Slices 01–17
+are implemented for their supported paths; the consolidated slice 18 remains
+planned. This does not activate curation/promotion, ask/repair or the other
+deferred consumers. A later implementation request must respect slice 18's
+distinction between existing-consumer closure and optional new capabilities; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

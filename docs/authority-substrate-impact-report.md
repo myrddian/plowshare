@@ -27,6 +27,14 @@ contract selectors are now cut over only where the current operation can safely 
 now intersects scoped actions with its retained proof; additional Global sources
 and general project acting execution remain unsupported.
 
+The single current deferred inventory and follow-on plan is
+[slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md). It records
+each deferral's reason, current behavior, impact if unfinished and closure
+requirement. There are 18 documented slices: 01–17 implemented for their supported
+paths and 18 planned. Optional capability decisions are recorded separately from
+existing-consumer migration and deployment acceptance requirements within that
+one document.
+
 Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
 ownerOnly reconciliation, live filtering for every revision, and explicit general
 reads for active authenticated human, Application and service principals. Existing
@@ -571,65 +579,36 @@ not every log, prompt, receipt or accounting row sharing a scope.
 
 ## Deferred gaps
 
-These are optional behavior, capability gaps or separately scoped design, not
-requirements to finish a new feature before the core permission mapping can
-proceed. A later slice must resolve the relevant gap before exposing that behavior.
+The authoritative current inventory is now the single
+[slice 18 deferred-scope document](authority-substrate-slices/18-deferred-scope-and-cutover.md).
+It consolidates the previous lists with the post-slice-17 source findings:
 
-| Topic | What stays deferred |
-| --- | --- |
-| First-class tenant model | Tenant/Personal membership and existing account/project mappings. Deployment-wide GLOBAL_READ and private-scope isolation are settled; do not infer tenant identity from project names. |
-| Generic Application defaults | New omitted-target convenience for multi-project service contexts. Explicit targets remain usable and ambiguous omission refuses; choosing the first token project is not a fallback. |
-| Search aggregation presentation | Paging/ranking/coverage, duplicate/current revisions, reference-only hits and optional project-plus-general-read selection. All-readable unscoped selection remains bounded by admission; no hidden fallback. |
-| Global type/schema authoring | Existing type management is Personal/Project-scoped. A Global registry or new API/SDK authoring surface is not inferred. |
-| General curation outcome | Choose audience grant, copy or home/control transfer, with ID/supersession/approval consequences, before changing promotion. MANAGER audience authority and human Global ADMIN destination control remain fixed. |
-| Broader acting consumers/read targets | Existing retained turns are Personal-scoped and operation-whitelisted. General project work or new Global read targets require an explicit supported contract; never discard acting proof to make them work. |
-| Public SYSTEM-work continuation | Existing public Global conversation refusal can remain; internal processing needs no new public create/resume API. |
-| SDK/client coverage and missing controls | Inventory existing interfaces only. No feature-parity mandate, new APIs/methods, generic job pause/resume/cancel service, operation ACL registry or restartable closure runtime is implied. |
-| Advanced ACL facilities | Resource-specific ACLs fit the substrate, but arbitrary denies, nested groups and new management interfaces are not assumed or required. RBAC helpers remain the routine path, and GLOBAL_READ has no individual exclusions. |
-| Detailed spending-pool mechanics | Operation sponsorship is settled. Pool configuration, reservation/settlement races and migration remain separate technical work under ADR 0025. |
+- **Existing runtime gaps (R1–R7):** Curator/promotion, ask/deliberation,
+  independent repair/rebuild, digest/navigation embeddings, nested orchestration
+  lineage, non-conversation child recovery and broader retained read targets.
+  Some paths refuse; others retain explicit degraded fallbacks. The document
+  identifies which behavior applies and the impact of leaving each unfinished.
+- **Migration and acceptance requirements (M1–M3):** compatibility readers/writers,
+  reviewed real-data/manual adoption and deployment restart/restore/rollback proof.
+  Synthetic migration and repository reconstruction do not establish live adoption.
+- **Optional capabilities/decisions (D1–D12):** tenant rollout, Application default
+  convenience, search presentation, Global schema authoring, general curation
+  outcomes, wider acting, public SYSTEM continuation, SDK/client parity, new
+  controls, advanced ACL facilities and spending-pool/UI work. Recording these
+  does not require or authorize building them to complete the supported migration.
 
-Current activation limits after the bounded slice 14 completion:
+Slices 15–17 already supply the shared SYSTEM foundation and their selected
+preparation, document-query, recall/Reminder and memory-write/Scribe/Learner-filing
+bindings. Those are no longer blanket missing-budget items. Spending defaults to
+unlimited; disabled/limited policies apply only when selected for that operation.
+A nearby finite budget is not automatically applicable. Independent Relay roots
+already retain lineage. Neither these completions nor GLOBAL_READ enlarge the
+exact-home sandbox of ordinary retained runs.
 
-The implemented [follow-on slice 15](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md)
-scopes a shared SYSTEM embedding foundation, retaining preparation's existing
-source and adding the first search consumers with their search-operation budget.
-It adds no embedding role or per-consumer permission system. Selected document
-search consumers now have retained authority and spending policy. Search spending
-defaults to unlimited; explicit disabled/limited policies remain configurable.
-The implemented [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
-connects existing recall and automatic Reminder reads with typed memory admission,
-tier/sandbox intersection, disclosure and the applicable read-side spending policy.
-It defaults to unlimited; another finite budget does not automatically apply.
-Curation/promotion, ask/deliberation and independent maintenance remain deferred.
-These consumers need their own operation contracts before activation.
-The implemented [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
-connects memory writes, Scribe candidates/consult and the existing Learner filing
-hook. It reuses shared SYSTEM dispatch, retained claims and source-version
-publication, with one write-operation spending policy: unlimited by default,
-explicitly disabled/limited through `plowshare.archive.write-budget`. Search policy
-and nearby conversation budgets are not implicitly applied. V164 retains closed
-write-source classification and zero-call invocation evidence without changing
-historical query claims. Curator/promotion, independent repair, ask/deliberation
-and broader read/acting targets remain separate.
-
-- Document-preparation embedding now carries bounded SYSTEM authorization and
-  claims against the retained processing allowance, shared with chat preparation.
-  Slice 15 supplies configured search-operation allowances for selected document
-  query consumers. Independent background repair/rebuild and other unclassified
-  consumers still need their own explicit operation contracts and remain deferred. Unclassified calls
-  continue to refuse; this is not deployment-wide activation of those paths.
-- Independent Relay orchestration roots now retain authority. Nested/model-started
-  orchestration allowances still require a supported parent-budget contract, and
-  non-conversation child leases cannot be replaced on resume. Existing caller-log
-  launch shapes are conservatively refused where that distinction is absent.
-  Original receipts are reconciliation evidence, never a reason to repeat a start.
-- Slice 06's ordinary retained target envelope admits only its exact execution
-  home. Explicit Global/cross-project memory tool references refuse under
-  `PinnedOperationAuthority.requireTargets`; slice 05's standalone knowledge
-  GLOBAL_READ policy does not widen that sandbox. Broader model-tool read targets
-  need an explicit supported envelope in later contract/cutover work.
-  Slice 16 also excludes implicit Global fallback from retained recall/reminder
-  ranking, counts and telemetry, while preserving permitted standalone tier reads.
+Earlier scope documents remain historical evidence; use slice 18 for the current
+reason, impact, remaining decision, source owner and verification requirement of
+each deferral. No runtime activation or new capability is included in this
+consolidation.
 
 ## Suggested implementation order and future proof
 
