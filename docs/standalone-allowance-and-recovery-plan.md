@@ -17,11 +17,12 @@ runs, swarm trees and other operations reference it. The existing `Budget` objec
 remains the runtime interface to that allowance. A conversation is an execution
 record and history source; it need not be the storage owner of spending state.
 
-If a parent has a finite allowance of 240 calls, spends 10 and starts a child
-which spends 30, both see 200 remaining. They share one row, not copied ceilings
-or two counters. An unlimited allowance has the same identity and claim/recovery
-rules, with no finite ceiling. Independent operations keep their independently
-selected allowance; SYSTEM is not a common wallet.
+If a parent has a finite allowance of 240 calls, spends 10 and delegates task
+execution to a child which spends 30, both see 200 remaining. They share one row,
+not copied ceilings or two counters. This example concerns delegated task work,
+not compaction or SYSTEM services. An unlimited allowance has the same identity
+and claim/recovery rules, with no finite ceiling. Independent operations keep
+their independently selected allowance; SYSTEM is not a common wallet.
 
 Budget exhaustion must not accidentally destroy an otherwise recoverable swarm.
 An authorized operator should be able to raise its existing allowance and use
@@ -40,6 +41,10 @@ Explicitly resolved/closed topics remain terminal.
   step/call distinction. An increase changes the ceiling without resetting spent.
   An unlimited allowance needs no automatic increase; a disabled allowance must
   not be activated by an increase callback.
+- Compaction, skill-context summarisation and other SYSTEM service work do not
+  consume the conversation's allowance or a swarm/member task allowance. Each
+  uses its own service-operation allowance and applicable policy, unlimited by
+  default. The conversation is an input/provenance reference, not the payer.
 - Keep authorization, operation validity, inference admission and allowance
   availability separate. Having a row does not confer RUN_MODEL or resource
   access. Unlimited does not bypass cancellation, sandbox limits or tools.
@@ -51,6 +56,36 @@ Explicitly resolved/closed topics remain terminal.
 - Use explicit types at changed system boundaries, including allowance identity
   and policy selection. Avoid `var` where it obscures those relationships; an
   unrelated repository-wide style rewrite is outside this plan.
+
+### Conversation spending versus SYSTEM service spending
+
+Recording that a SYSTEM call processed a conversation is usage attribution. It
+does **not** mean subtracting a call from that conversation's allowance. Keep
+these three identities distinct: the input/provenance conversation, the SYSTEM
+operation performing the work, and the allowance selected for that operation.
+They can be linked for diagnosis without sharing a spending counter.
+
+For example, a conversation with 200 calls remaining still has 200 after a
+compaction call. The compaction operation records its own call against its own
+allowance. It can run when the conversation's allowance is exhausted, provided
+its own policy, source validity and operation fences permit it. That does not
+allow the user's task execution to resume without its applicable allowance.
+
+SYSTEM service limits, when configured, apply to the service operation; they do
+not borrow from the triggering conversation. A disabled/exhausted service policy
+does not fall back to that conversation's remaining calls. Other stages of one
+SYSTEM operation may share its selected operation allowance, as processing and
+embedding already do. Retry/recovery retains that service source and spent;
+it must not mint another allowance simply to escape an applicable finite limit.
+
+This corrects a current runtime dependency, not merely terminology: compaction
+presently selects the conversation-owned/supplied allowance in
+`Compaction.summarisingCall`, and skill-context summarisation claims from the
+budget supplied through `SkillContexts`. `SystemOperations.authorize` additionally
+requires a conversation-backed claim for compaction/skill-summary purposes. The
+plan must remove these spending dependencies, while preserving actual input,
+cancellation and operation-validity fences. Moving the same conversation budget
+into a new table without changing those bindings would leave the error intact.
 
 ## Current storage and execution map
 
@@ -66,7 +101,7 @@ still need an adapter to the shared foundation.
 | Delegated children and acting work | Synchronous children can share a live `Budget`, but durable lookup still depends on conversation lineage. Personal acting work creates a subject conversation and finite allowance. | Persist the applicable allowance reference through existing execution/recovery records. Preserve acting proof intersection, subject identity and revocation. This does not repair the separate retained-agent capability-copy limitation. |
 | Turn continuation and operator limits | `Turn` resolves conductor/delegated allowances through `allowanceFor`, can receive a board lease, and grants finite increases before resumption. Job/conversation limit controls and their comments assume spending is stored on a conversation. | Adapt continuation, grant and usage inspection together. Preserve allowed endings, active-turn exclusion and distinctions between an owning allowance and a temporary lease. Changing a wake lease must not mutate an unrelated root allowance. |
 | Automatic increases | `AutomaticLimits` walks conversation/delegation parents to locate an owner and persists an increase on that conversation. Orchestration continuation has separate policy handling. | Keep owning lifecycle and policy decisions; target the same allowance row atomically. Resolve policy from retained operation context, not from whichever conversation happens to carry a counter. |
-| Compaction and skill summaries | SYSTEM admission for these purposes requires a claim with a durable conversation reference. `Budget.reference()` and retained operation records conflate conversation IDs and `budget:` references. | Bind SYSTEM inference to the operation and standalone allowance. Retain the actual conversation input and purpose restrictions without requiring the allowance itself to live in a conversation. |
+| Compaction and skill summaries | Compaction selects the conversation-owned/supplied allowance; skill summary claims the budget passed through `SkillContexts`. SYSTEM admission also requires a conversation-backed claim. This currently couples service spending to task spending. | Select a separate SYSTEM service-operation allowance, unlimited by default or bounded by its applicable service policy. Stop debiting the conversation/task allowance. Retain the real conversation input and purpose restrictions as separate evidence; remove the conversation-backed spending requirement. |
 | Swarm topic trees | `BoardPot` uses the root topic's `pot_total`/`pot_spent`, local leases and opener reserve. Member logs do not own the common pot. Full exhaustion closes the tree. | One root allowance row shared by all member/subtopic work; retain swarm lease/reserve policy and per-wake attribution. Change exhaustion recovery as specified below. |
 | Board messaging | Each newly committed incoming message adds the recipient definition's allowance to its message-instance pot. `BoardMessaging` leases `BoardPot`; `JdbcBoardMessagingRepository` increments `pot_total`. | Reference the instance's allowance row. Preserve committed-message idempotency, delivery, approval, deadlines and continuation. Do not mint another allowance on poll, retry or recovery, or apply swarm closing rules to messaging. |
 | Document processing | `information_revisions` stores `processing_budget_id`, `allowance_total`, `allowance_spent`. The processing repository mirrors usage into its processing conversation; catalogue allowance changes update both. | Processing revision/operation references one allowance. Remove counter mirroring; project usage from the canonical row. Existing preparation, hooks and embeddings continue sharing the selected processing allowance. |
@@ -265,7 +300,7 @@ eighteen authority slices. They are not authorized for implementation by this do
 | Package | Changes | Completion gate |
 | --- | --- | --- |
 | A — Contract and conversation-backed foundation | Typed allowance repository, canonical row/claims and conversation adapter; preserve existing `Budget` behavior and initial migration evidence. | Finite/unlimited/no-call reconstruction and concurrent claims work without conversation-owned counters. No active double writer. |
-| B — Execution lineage and recovery | Orchestration/delegation references, root factories, automatic increases, compaction/summary source checks and retained target separation. | Parent/child/restart share the same applicable allowance; SYSTEM input fences and current executor checks survive. Missing durable conversation storage no longer causes the quoted orchestration refusal when a valid allowance is retained. |
+| B — Execution lineage and recovery | Orchestration/delegation references, root factories, automatic increases, separate SYSTEM compaction/summary allowances and retained target separation. | Parent/child task execution shares its applicable allowance across restart; compaction/summary never debit it. SYSTEM input/operation fences survive. Missing durable conversation storage no longer causes the quoted orchestration refusal when a valid allowance is retained. |
 | C — Swarms and messaging | Canonical pots, finite/unlimited contracts, distinct wake limits, recoverable exhaustion, scoped operator retry/top-up and affected client controls. | Exhaust → top-up → retry works without a new conversation, lost usage or authority substitution. Explicit close stays terminal. Messaging retains its distinct committed-message lifecycle. This package is required, not optional UI polish. |
 | D — Other operation sources | Processing/acquisition, query/write sources, ask, digest/Curator/maintenance and internal consultations; remove mirrored counters and storage-dependent lookups. | Every affected consumer selects policy once and retains/reuses the correct source. No fresh allowance on stage transition, retry or reconstruction. |
 | E — Complete cutover evidence | Remove remaining active legacy counter paths, update generated contracts/manuals and verify cross-consumer migration/restart behavior. | Source inventory has no unexplained allowance factories, claim writers or conversation-only recovery assumptions. Supported public controls and typed decoders pass. |
@@ -289,6 +324,7 @@ No database, build or runtime tests are needed to approve this documentation.
 | Recovery and evidence | Reopen after restart with unchanged usage and source. Lost responses/duplicate receipts cannot mint a second allowance or duplicate provider submission. Unknown submissions remain reconciled, not replayed. |
 | Automatic increases | Enabled finite policy increases once at its existing boundary and resumes eligible work; disabled/overridden policy refuses; unlimited requires no increase. Step increases do not silently change call policy. |
 | Authority separation | Having/mutating a budget never grants resource access. Revoked executor, cancelled operation and invalid source still block inference under finite and unlimited policy. A manager's control does not replace executor identity. |
+| SYSTEM spending isolation | Run compaction/skill summary with the conversation finite, exhausted and unlimited: its spent remains unchanged. The service claims only its own allowance, defaulting to unlimited. A finite/disabled service policy is enforced without borrowing conversation calls; service retry/restart retains its own source. Invalid source/cancelled service still refuses. Usage attribution to a conversation must not change its spending counter. |
 | Swarm finite recovery | Spend the last call with concurrent member work; root remains recoverable. Top-up retains spent, then retry continues the same member conversation. Cover a call-exhausted opener through the existing alert/reply route too. Reserve exhaustion and full exhaustion are covered separately; failed and merely owed seats behave differently. |
 | Swarm limits and leases | Test a small pot with overlapping leases, lease release/restart, top-up during a wake and stale work after close. Temporary capacity held by another lease must not be mistaken for spent exhaustion. `maxTurns`, call ceiling and slot unavailability have distinct observable outcomes. |
 | Swarm control authorization | Opening account and authorized scoped operator can perform permitted controls; reader/unrelated account cannot. Existing agent/token/acting ceilings still apply. Invalid retry state/opener retry and explicitly closed roots remain refused. |
@@ -343,6 +379,8 @@ impact must not be described as fixed by a new budget row.
   [AutomaticLimits](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AutomaticLimits.java),
   [RequestedBudget](../plowshare-server/src/main/java/io/aeyer/plowshare/server/requests/RequestedBudget.java).
 - [Turn continuation/grants](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Turn.java),
+  [compaction and skill summary](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java),
+  [skill context preparation](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/SkillContexts.java),
   [job root admission](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobStore.java),
   [acting work](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/JdbcActingWorkRepository.java),
   [document ingest](../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/IngestService.java),
