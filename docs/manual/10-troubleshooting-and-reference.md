@@ -59,7 +59,7 @@ The CLI can list current command families and validate payloads offline:
 ```sh
 bin/plowshare-cli --help
 bin/plowshare-cli information list --help
-bin/plowshare-cli --validate information list '{"scope":{"kind":"shared"},"filter":{"tags":["plowshare-manual"]},"limit":100}'
+bin/plowshare-cli --validate information list '{"scope":{"kind":"global_read"},"filter":{"tags":["plowshare-manual"]},"limit":100}'
 ```
 
 Use command help for exact required fields and supported aliases. The operation
@@ -88,13 +88,13 @@ when model summaries are unavailable. A long manual may have more versions than
 one page because exclusion and audience are revision lifecycle choices.
 
 ```json
-{"scope":{"kind":"shared"},"filter":{"tags":["plowshare-manual"],"search":"WebSocket"},"offset":0,"limit":100}
+{"scope":{"kind":"global_read"},"filter":{"tags":["plowshare-manual"],"search":"WebSocket"},"offset":0,"limit":100}
 ```
 
 Read a selected revision using the returned ID:
 
 ```json
-{"scope":{"kind":"shared"},"revision":"<revision-uuid>","offset":0,"limit":8192}
+{"scope":{"kind":"global_read"},"revision":"<revision-uuid>","offset":0,"limit":8192}
 ```
 
 For agents, `information_read` uses `operation` plus these read/discovery fields,

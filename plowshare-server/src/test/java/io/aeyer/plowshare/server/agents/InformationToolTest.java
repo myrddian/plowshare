@@ -24,7 +24,10 @@ class InformationToolTest {
   private final InformationCatalogue catalogue = mock(InformationCatalogue.class);
   private final RetrievalService retrieval = mock(RetrievalService.class);
   private final InformationContext context =
-      new InformationContext("alice", InformationContext.Selection.personal());
+      new InformationContext("alice", InformationContext.Selection.personal())
+          .within(
+              new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+                  Home.of(io.aeyer.plowshare.server.personal.PersonalSpaces.name("alice")), true));
   private final List<UUID> read = new ArrayList<>();
 
   private InformationTool reader() {
@@ -59,7 +62,8 @@ class InformationToolTest {
             UUID.randomUUID(), root, locked, null, "runbook", 1, false);
     when(navigation.execute(
             eq("alice"),
-            isA(io.aeyer.plowshare.protocol.InformationRequest.RelationshipList.class)))
+            isA(io.aeyer.plowshare.protocol.InformationRequest.RelationshipList.class),
+            eq(context.readBoundary())))
         .thenReturn(
             new io.aeyer.plowshare.protocol.InformationResponse.NavigationConnections(
                 new io.aeyer.plowshare.protocol.InformationNavigation.Connections(
@@ -71,7 +75,9 @@ class InformationToolTest {
                     50,
                     0)));
     when(navigation.execute(
-            eq("alice"), isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentGet.class)))
+            eq("alice"),
+            isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentGet.class),
+            eq(context.readBoundary())))
         .thenReturn(
             new io.aeyer.plowshare.protocol.InformationResponse.NavigationSelection(
                 new io.aeyer.plowshare.protocol.InformationNavigation.Readable(doc)));
@@ -92,7 +98,9 @@ class InformationToolTest {
 
     // The source can be revoked after the graph snapshot but before its input ledger is bound.
     when(navigation.execute(
-            eq("alice"), isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentGet.class)))
+            eq("alice"),
+            isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentGet.class),
+            eq(context.readBoundary())))
         .thenReturn(
             new io.aeyer.plowshare.protocol.InformationResponse.NavigationSelection(
                 new io.aeyer.plowshare.protocol.InformationNavigation.Unavailable()));

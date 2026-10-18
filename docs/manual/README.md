@@ -74,13 +74,13 @@ shared revision UUID. A personal installation is visible in **Library → Docume
 In the TUI, list the shared chapters with:
 
 ```text
-/information list --scope shared {"filter":{"tags":["plowshare-manual"]},"limit":100}
+/information list --scope global_read {"filter":{"tags":["plowshare-manual"]},"limit":100}
 ```
 
 Read a returned revision with:
 
 ```text
-/information read --scope shared {"revision":"<revision-uuid>","offset":0,"limit":8192}
+/information read --scope global_read {"revision":"<revision-uuid>","offset":0,"limit":8192}
 ```
 
 Continue with the returned end offset to read the rest of a long chapter. The

@@ -75,19 +75,24 @@ link does not delete evidence or widen an audience.
 
 ## Share intentionally and preserve evidence
 
-Personal, project and shared are information selections. A project selection
-requires current scoped READ. A resource's current root policy governs all of its
-revisions, including pinned history. The existing share command lets a Manager
-choose GLOBAL_READ: every active authenticated account, Application and service
-credential can read it through Shared/includeShared selections. Unshare removes
-that audience from every revision. Consistent old Shared histories retain their
-previous human audience until explicitly reviewed through share; mixed histories
-narrow for review. Project Contributors can write in their area but cannot change
-permissions. Tags and finalisation do not grant an audience. Private inputs,
-retained references and mandatory restrictions still constrain disclosure.
+Personal, project and `global_read` are information selections. A project selection
+requires current scoped READ. Personal and project searches include generally readable
+knowledge by default; set `includeGlobal:false` to narrow to the selected home.
+`global_read` selects only resources with the current GLOBAL_READ audience, wherever
+they are held. The explicit Global account selection instead selects Global custody.
 
-Service credentials can select Shared for these reads; they cannot select Personal.
-Their existing internal project-only default stays project-only. Global-account
+A resource's current root policy governs all revisions, including pinned history.
+The existing share command lets a Manager choose GLOBAL_READ: every active
+authenticated account, Application and service credential is eligible to read it.
+Unshare removes that audience from every revision. Old Shared flags grant no access;
+formerly compatible Shared roots narrow to HOME for deliberate review. Project
+Contributors can write in their area but cannot change permissions. Tags and
+finalisation do not grant an audience. Private inputs, retained references and
+mandatory restrictions still constrain disclosure.
+
+Service credentials use the same general-read defaults; they cannot select Personal.
+Retained runs also intersect every read with their captured home/Global READ ceiling.
+Global-account
 policy management requires a human Global Admin. This does not add Global creation
 or execution operations.
 

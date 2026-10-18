@@ -3410,26 +3410,13 @@
         },
         "additionalProperties": false
       },
-      "shape108": {
-        "const": "personal"
-      },
-      "shape109": {
-        "const": "shared"
-      },
       "shape107": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/shape108"
-          },
-          {
-            "$ref": "#/$defs/shape109"
-          }
-        ]
+        "const": "personal"
       },
       "shape106": {
         "type": "object",
         "properties": {
-          "includeShared": {
+          "includeGlobal": {
             "$ref": "#/$defs/shape8"
           },
           "kind": {
@@ -3441,10 +3428,25 @@
         ],
         "additionalProperties": false
       },
+      "shape109": {
+        "const": "global_read"
+      },
+      "shape108": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/shape109"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
       "shape110": {
         "type": "object",
         "properties": {
-          "includeShared": {
+          "includeGlobal": {
             "$ref": "#/$defs/shape8"
           },
           "kind": {
@@ -3486,6 +3488,9 @@
         "anyOf": [
           {
             "$ref": "#/$defs/shape106"
+          },
+          {
+            "$ref": "#/$defs/shape108"
           },
           {
             "$ref": "#/$defs/shape110"

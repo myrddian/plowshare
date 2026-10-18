@@ -43,7 +43,7 @@ class RootDocumentPolicyMigrationTest {
         "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy:unknown','unmapped','source')",
         unknown);
     Flyway.configure().dataSource(source).load().migrate();
-    assertEquals("LEGACY_SHARED", audience(jdbc, consistent));
+    assertEquals("HOME", audience(jdbc, consistent));
     assertEquals("HOME", audience(jdbc, mixed));
     assertEquals("QUARANTINED", audience(jdbc, conflict));
     assertEquals("QUARANTINED", audience(jdbc, unknown));
@@ -54,9 +54,10 @@ class RootDocumentPolicyMigrationTest {
             mixed));
     var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
     var human =
-        new InformationContext("outside", InformationContext.Selection.shared()).withView(true);
-    var app = new InformationContext("app", InformationContext.Selection.shared()).withView(true);
-    assertTrue(records.readable(human, shared));
+        new InformationContext("outside", InformationContext.Selection.globalRead()).withView(true);
+    var app =
+        new InformationContext("app", InformationContext.Selection.globalRead()).withView(true);
+    assertFalse(records.readable(human, shared));
     assertFalse(records.readable(app, shared));
     assertFalse(records.readable(human, old));
     var work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
@@ -78,7 +79,7 @@ class RootDocumentPolicyMigrationTest {
             String.class,
             shared));
     assertEquals(
-        2,
+        3,
         jdbc.queryForObject(
             "SELECT count(*) FROM information_resource_policy_history WHERE resource_id=?",
             Integer.class,
@@ -101,12 +102,14 @@ class RootDocumentPolicyMigrationTest {
     jdbc.update(
         "INSERT INTO information_document_policies(document_id,owner_handle,visibility,assigned_at) VALUES(?,'manager','shared',now())",
         raw);
-    assertTrue(
-        jdbc.queryForObject(
-            "SELECT information_readable(?,'outside','shared',NULL,false)", Boolean.class, raw));
     assertFalse(
         jdbc.queryForObject(
-            "SELECT information_readable(?,'app','shared',NULL,false)", Boolean.class, raw));
+            "SELECT information_readable(?,'outside','global_read',NULL,false)",
+            Boolean.class,
+            raw));
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_readable(?,'app','global_read',NULL,false)", Boolean.class, raw));
     // Idempotent startup leaves the reviewed root and immutable evidence intact.
     Flyway.configure().dataSource(source).load().migrate();
     assertEquals("GLOBAL_READ", audience(jdbc, consistent));

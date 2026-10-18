@@ -1133,7 +1133,7 @@ class GlobalPreparationPersistenceTest {
                 UUID.randomUUID().toString(),
                 "information.search",
                 Envelope.CURRENT_VERSION,
-                Map.of("query", "deployment knowledge", "scope", Map.of("kind", "shared"))),
+                Map.of("query", "deployment knowledge", "scope", Map.of("kind", "global_read"))),
             new Asking("acceptance", actor));
   }
 
@@ -1491,7 +1491,7 @@ class GlobalPreparationPersistenceTest {
       }
       var scoped =
           reader
-              .scoped(access, access.resolve("reader", InformationContext.Selection.shared()))
+              .scoped(access, access.resolve("reader", InformationContext.Selection.globalRead()))
               .forQueries(QueryEmbeddings.Origin.request(() -> {}));
       assertFalse(scoped.rank("deployment knowledge", 5).documents().isEmpty());
       assertTrue(scoped.stance(revision, "deployment knowledge").isPresent());
@@ -1516,7 +1516,7 @@ class GlobalPreparationPersistenceTest {
   @ValueSource(ints = {1})
   void querySourceClaimsAreRetainedAndKnownToolCallsNeverAcquireReplacementAllowances(
       Integer limit) {
-    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var context = access.resolve("reader", InformationContext.Selection.globalRead());
     var query = new QueryEmbeddings.Query(QueryEmbeddings.Kind.SEARCH, "query", null, 5, "HYBRID");
     var origin = new QueryEmbeddings.Origin("retained-log:call-1", () -> {});
     var request = EmbeddingRequest.of("model", List.of("query"));
@@ -1583,9 +1583,11 @@ class GlobalPreparationPersistenceTest {
               authority,
               new JdbcProjectMembers(jdbc),
               new JdbcOperationRecords(jdbc),
-              new JdbcResourceScopeRepository(jdbc));
+              new JdbcResourceScopeRepository(jdbc),
+              new LiveAccountKnowledgePermissions(identities, grants, authority));
       var home = Home.of("reader-project");
       var parent = operations.admit("reader", home, Set.of(AuthorityAction.READ));
+      assertTrue(parent.globalRead());
       var log =
           new ConversationStore(jdbc)
               .log(
@@ -1602,7 +1604,7 @@ class GlobalPreparationPersistenceTest {
       var tool =
           new io.aeyer.plowshare.server.agents.InformationTool(false, () -> catalogue)
               .withRetrieval(queryReader(dispatcher, false))
-              .forRun(access, inputs, "reader", log)
+              .forRun(access.within(KnowledgeReadScope.retained(parent)), inputs, "reader", log)
               .withQueryValidity(
                   () -> {
                     if (cancelled.get()) throw new IllegalStateException("run ended");
@@ -1638,7 +1640,7 @@ class GlobalPreparationPersistenceTest {
   @ValueSource(ints = {1})
   void concurrentQueryClaimsRespectPolicyAndClosedSourcesCannotBeReopened(Integer limit)
       throws Exception {
-    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var context = access.resolve("reader", InformationContext.Selection.globalRead());
     var records = new JdbcQueryEmbeddingRepository(jdbc);
     var source =
         work.inTransaction(
@@ -1684,7 +1686,7 @@ class GlobalPreparationPersistenceTest {
 
   @Test
   void unlimitedQueryClaimsStillRequireTheExactChargedSourceAndTask() {
-    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var context = access.resolve("reader", InformationContext.Selection.globalRead());
     var records = new JdbcQueryEmbeddingRepository(jdbc);
     assertThrows(
         IllegalArgumentException.class,
@@ -1781,7 +1783,7 @@ class GlobalPreparationPersistenceTest {
     try (var dispatcher = dispatcher()) {
       var reader =
           queryReader(dispatcher, false)
-              .scoped(access, access.resolve("reader", InformationContext.Selection.shared()))
+              .scoped(access, access.resolve("reader", InformationContext.Selection.globalRead()))
               .forQueries(QueryEmbeddings.Origin.request(() -> {}));
       assertThrows(RuntimeException.class, () -> reader.retrieve("query", revision, 5));
       assertEquals(1, embedded.get());
@@ -1800,7 +1802,7 @@ class GlobalPreparationPersistenceTest {
   @Test
   void finalReadFenceOrdersWithdrawalAndRefusesFollowingDisclosure() throws Exception {
     var revision = upload(UUID.randomUUID());
-    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var context = access.resolve("reader", InformationContext.Selection.globalRead());
     var read =
         queries(1)
             .open(

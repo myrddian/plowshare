@@ -287,7 +287,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             c.account(),
             c.selection().scope().name().toLowerCase(Locale.ROOT),
             c.selection().project(),
-            c.selection().includeShared()));
+            c.selection().includeGlobal()));
   }
 
   private static final String HEADS =
@@ -309,6 +309,9 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             + " AND r.document_type='document' AND NOT r.excluded AND "
             + filter.sql();
     a.addAll(filter.arguments());
+    var boundary = InformationSql.boundary(c, "r.id");
+    sql += " AND " + boundary.sql();
+    a.addAll(boundary.arguments());
     if (relatedTo != null) {
       boolean outgoing = !"backlinks".equals(direction);
       sql +=
@@ -323,11 +326,15 @@ public final class JdbcInformationNavigationRepository implements InformationNav
       a.addAll(args(c));
       a.add(relatedTo);
       if (relation != null) a.add(relation);
+      var sourceBoundary = InformationSql.boundary(c, "information_navigation_head(?)");
+      sql += " AND " + sourceBoundary.sql();
+      if (c.readBoundary() != null) a.add(relatedTo);
+      a.addAll(sourceBoundary.arguments());
     }
     return new InformationSql.Filter(sql, a);
   }
 
-  private static Document document(java.sql.ResultSet rs, boolean includeShared)
+  private static Document document(java.sql.ResultSet rs, boolean includeGlobal)
       throws java.sql.SQLException {
     return new Document(
         rs.getObject("resource", UUID.class),
@@ -337,15 +344,15 @@ public final class JdbcInformationNavigationRepository implements InformationNav
         List.of(decode(rs.getString("tags"), String[].class)),
         new io.aeyer.plowshare.protocol.InformationRequest.Scope(
             rs.getString("visibility").equals("shared")
-                ? "shared"
+                ? "global_read"
                 : rs.getString("project_name") == null ? "personal" : "project",
             rs.getString("visibility").equals("shared") ? null : rs.getString("project_name"),
-            includeShared && !rs.getString("visibility").equals("shared")),
+            rs.getString("visibility").equals("shared") ? null : includeGlobal),
         rs.getString("owner"));
   }
 
   private static final String DOCUMENT =
-      "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT CASE WHEN audience IN ('GLOBAL_READ','LEGACY_SHARED') THEN 'shared' ELSE 'home' END FROM information_resource_policies WHERE resource_id=q.id),'pending') AS visibility";
+      "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT CASE WHEN audience='GLOBAL_READ' THEN 'shared' ELSE 'home' END FROM information_resource_policies WHERE resource_id=q.id),'pending') AS visibility";
 
   public Documents documents(
       InformationContext c,
@@ -365,9 +372,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
                 + " WHERE "
                 + f.sql()
                 + " ORDER BY r.created_at DESC,q.id LIMIT ? OFFSET ?",
-            (rs, n) ->
-                document(
-                    rs, !io.aeyer.plowshare.server.auth.ServiceCredentials.principal(c.account())),
+            (rs, n) -> document(rs, c.selection().includeGlobal()),
             a.toArray()),
         limit,
         offset);
@@ -431,7 +436,8 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   }
 
   public Selection select(InformationContext c, Target target) {
-    var a = args(c);
+    var filter = InformationSql.read(c, "r");
+    var a = new ArrayList<Object>(filter.arguments());
     a.add(target.resource());
     if (target.revision() != null) a.add(target.revision());
     String from =
@@ -444,53 +450,65 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     }
     var rows =
         jdbc.query(
-            DOCUMENT + from + " WHERE information_readable(r.id,?,?,?,?) AND q.id=?",
-            (rs, n) ->
-                document(
-                    rs, !io.aeyer.plowshare.server.auth.ServiceCredentials.principal(c.account())),
+            DOCUMENT + from + " WHERE " + filter.sql() + " AND q.id=?",
+            (rs, n) -> document(rs, c.selection().includeGlobal()),
             a.toArray());
     return rows.isEmpty() ? new Unavailable() : new Readable(rows.getFirst());
   }
 
   private boolean ownReadable(InformationContext c, Target target) {
+    var revision = "coalesce(?,information_navigation_head(?))";
+    var boundary = InformationSql.boundary(c, revision);
+    var a =
+        new ArrayList<Object>(
+            Arrays.asList(
+                target.revision(), target.resource(), c.account(), c.selection().project()));
+    if (c.readBoundary() != null) {
+      a.add(target.revision());
+      a.add(target.resource());
+    }
+    a.addAll(boundary.arguments());
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT coalesce(information_navigation_own_readable(coalesce(?,information_navigation_head(?)),?,?) AND information_reference_readable(coalesce(?,information_navigation_head(?)),?,?),false)",
+            "SELECT coalesce(information_navigation_own_readable("
+                + revision
+                + ",?,?),false) AND "
+                + boundary.sql(),
             Boolean.class,
-            target.revision(),
-            target.resource(),
-            c.account(),
-            c.selection().project(),
-            target.revision(),
-            target.resource(),
-            c.account(),
-            c.selection().project()));
+            a.toArray()));
   }
 
   private boolean referenceVisible(InformationContext c, UUID target) {
+    var boundary = InformationSql.boundary(c, "information_navigation_head(?)");
+    var a = new ArrayList<Object>(Arrays.asList(target, c.account(), c.selection().project()));
+    if (c.readBoundary() != null) a.add(target);
+    a.addAll(boundary.arguments());
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT information_navigation_reference_visible(?,?,?)",
+            "SELECT information_navigation_reference_visible(?,?,?) AND " + boundary.sql(),
             Boolean.class,
-            target,
-            c.account(),
-            c.selection().project()));
+            a.toArray()));
   }
 
   private Selection relatedSelection(InformationContext c, UUID resource, UUID revision) {
+    var boundary = InformationSql.boundary(c, "r.id");
+    var a =
+        new ArrayList<Object>(
+            Arrays.asList(
+                revision,
+                resource,
+                c.account(),
+                c.selection().project(),
+                c.account(),
+                c.selection().project()));
+    a.addAll(boundary.arguments());
     var rows =
         jdbc.query(
             DOCUMENT
-                + " FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id AND r.id=coalesce(?,information_navigation_head(q.id)) WHERE q.id=? AND information_navigation_own_readable(r.id,?,?) AND information_reference_readable(r.id,?,?)",
-            (rs, n) ->
-                document(
-                    rs, !io.aeyer.plowshare.server.auth.ServiceCredentials.principal(c.account())),
-            revision,
-            resource,
-            c.account(),
-            c.selection().project(),
-            c.account(),
-            c.selection().project());
+                + " FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id AND r.id=coalesce(?,information_navigation_head(q.id)) WHERE q.id=? AND information_navigation_own_readable(r.id,?,?) AND information_reference_readable(r.id,?,?) AND "
+                + boundary.sql(),
+            (rs, n) -> document(rs, c.selection().includeGlobal()),
+            a.toArray());
     if (!rows.isEmpty()) return new Readable(rows.getFirst());
     if (!referenceVisible(c, resource)) return new Unavailable();
     String label =

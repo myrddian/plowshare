@@ -38,9 +38,9 @@ public final class DocumentNavigation implements InformationNavigationService {
                 new InformationContext.Selection(
                     InformationContext.Scope.valueOf(scope.kind().toUpperCase(Locale.ROOT)),
                     scope.project(),
-                    scope.includeShared() == null
-                        ? !scope.kind().equals("shared")
-                        : scope.includeShared()))
+                    scope.includeGlobal() == null
+                        ? !scope.kind().equals("global_read")
+                        : scope.includeGlobal()))
             .withView(true);
     var f = selection.filter();
     if (f != null)
@@ -68,6 +68,15 @@ public final class DocumentNavigation implements InformationNavigationService {
 
   private static int offset(Integer n) {
     return n == null ? 0 : n;
+  }
+
+  public InformationResponse execute(
+      String account,
+      InformationRequest request,
+      io.aeyer.plowshare.server.access.KnowledgeReadScope readBoundary) {
+    Objects.requireNonNull(readBoundary);
+    return new DocumentNavigation(repository, access.within(readBoundary), work, writesEnabled)
+        .execute(account, request);
   }
 
   public InformationResponse execute(String account, InformationRequest request) {

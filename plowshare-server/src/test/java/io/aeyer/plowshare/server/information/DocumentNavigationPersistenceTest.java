@@ -442,20 +442,21 @@ class DocumentNavigationPersistenceTest {
         "INSERT INTO information_inputs(derived_revision,input_revision) SELECT ?,id FROM information_revisions WHERE resource_id IN (SELECT id FROM information_resources WHERE namespace='project:operations') AND id<>?",
         root,
         root);
-    assertTrue(
-        Boolean.TRUE.equals(
-            jdbc.queryForObject(
-                "SELECT information_legacy_readable(?,'alice','project','operations',true)",
-                Boolean.class,
-                root)));
-    assertTrue(
+    assertFalse(
         Boolean.TRUE.equals(
             jdbc.queryForObject(
                 "SELECT information_readable(?,'alice','project','operations',true)",
                 Boolean.class,
                 root)));
     UUID referencing = resource("alice", "operations", "bounded-reference");
-    link(referencing, root);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.NotFoundFault.class, () -> link(referencing, root));
+    // An existing edge cannot make an oversized dependency closure readable either.
+    jdbc.update(
+        "INSERT INTO information_relationships(id,source,target,relation,actor) VALUES(?,?,?,'runbook','alice')",
+        UUID.randomUUID(),
+        referencing,
+        root);
     assertFalse(readable(referencing, "alice", "operations"));
     UUID hidden = resource("bob", "restricted", "hidden");
     String known =
@@ -490,7 +491,7 @@ class DocumentNavigationPersistenceTest {
   }
 
   @Test
-  void relatedDocumentSetsUseTargetScopeAndRetainServiceProjectCeilings() {
+  void relatedDocumentsUseLiveTargetReadForHumansAndServices() {
     set(new PolicyTarget("project", "operations", null), 0, permissive());
     UUID a = resource("alice", "operations", "service"),
         b = resource("bob", "restricted", "secret");
@@ -526,9 +527,18 @@ class DocumentNavigationPersistenceTest {
             .documents()
             .getFirst()
             .scope()
-            .includeShared());
+            .includeGlobal());
+    assertEquals(
+        List.of(b),
+        repository.documents(machine, a, "runbook", "outgoing", 50, 0).documents().stream()
+            .map(Document::resource)
+            .toList());
+    var confined =
+        machine.within(
+            new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+                io.aeyer.plowshare.protocol.Home.of("operations"), false));
     assertTrue(
-        repository.documents(machine, a, "runbook", "outgoing", 50, 0).documents().isEmpty());
+        repository.documents(confined, a, "runbook", "outgoing", 50, 0).documents().isEmpty());
     assertTrue(
         Boolean.TRUE.equals(
             jdbc.queryForObject(
@@ -536,7 +546,7 @@ class DocumentNavigationPersistenceTest {
                 Boolean.class,
                 head(b),
                 "@service/fixture")));
-    assertFalse(
+    assertTrue(
         Boolean.TRUE.equals(
             jdbc.queryForObject(
                 "SELECT information_navigation_own_readable(?,?,'operations')",
@@ -592,8 +602,8 @@ class DocumentNavigationPersistenceTest {
         b = resource("bob", "restricted", "quarantined");
     set(new PolicyTarget("document", null, b), 0, permissive());
     jdbc.update(
-        "UPDATE information_document_policies SET visibility='quarantined',owner_handle=NULL,project_id=NULL,assigned_at=NULL WHERE document_id=?",
-        head(b));
+        "UPDATE information_resource_policies SET version=version+1,audience='QUARANTINED',reason='AUDIENCE',actor=(SELECT id FROM authority_accounts WHERE legacy_handle='admin') WHERE resource_id=?",
+        b);
     assertThrows(io.aeyer.plowshare.server.faults.NotFoundFault.class, () -> link(a, b));
     assertEquals(
         0, jdbc.queryForObject("SELECT count(*) FROM information_relationships", Integer.class));

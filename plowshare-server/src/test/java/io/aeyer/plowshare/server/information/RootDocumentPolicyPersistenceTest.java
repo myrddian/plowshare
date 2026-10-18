@@ -87,7 +87,7 @@ class RootDocumentPolicyPersistenceTest {
   }
 
   InformationContext general(String actor) {
-    return new InformationContext(actor, InformationContext.Selection.shared()).withView(true);
+    return new InformationContext(actor, InformationContext.Selection.globalRead()).withView(true);
   }
 
   InformationCatalogue.Admission admit(
@@ -140,6 +140,84 @@ class RootDocumentPolicyPersistenceTest {
         "SELECT version FROM information_resource_policies WHERE resource_id=?",
         Long.class,
         resource);
+  }
+
+  @Test
+  void retainedAndStandaloneSelectionsUseLiveSubstrateForAllPrincipalKinds() {
+    var own = original();
+    var global =
+        admit(
+            new InformationContext(
+                "admin",
+                InformationContext.Selection.account(
+                    io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value())),
+            "global.md",
+            null,
+            List.of());
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'manager','MANAGER' FROM projects WHERE name='two'");
+    var otherContext =
+        new InformationContext("manager", InformationContext.Selection.project("two"));
+    var publicOther = admit(otherContext, "public.md", null, List.of());
+    var privateOther = admit(otherContext, "private.md", null, List.of());
+    share(otherContext, publicOther.revision(), true);
+    for (String actor : List.of("reader", "app", service)) {
+      var grantStore = new io.aeyer.plowshare.server.access.JdbcScopedGrantRepository(jdbc);
+      var actorId =
+          new io.aeyer.plowshare.server.access.JdbcIdentityRepository(jdbc).account(actor).id();
+      assertTrue(grantStore.globalReadEligible(actorId));
+      var selected = project(actor);
+      for (UUID revision : List.of(own.revision(), global.revision(), publicOther.revision()))
+        assertTrue(records.readable(selected, revision), actor + " " + revision);
+      assertFalse(records.readable(selected, privateOther.revision()));
+      assertEquals(3, navigation.facets(selected).total());
+      var homeOnly =
+          new InformationContext(
+              actor,
+              new InformationContext.Selection(InformationContext.Scope.PROJECT, "one", false));
+      assertEquals(1, navigation.facets(homeOnly).total());
+      assertEquals(2, navigation.facets(general(actor)).total());
+      var ceiling = new io.aeyer.plowshare.server.access.KnowledgeReadScope(Home.of("one"), false);
+      var retained = selected.within(ceiling);
+      assertTrue(records.readable(retained, own.revision()));
+      assertFalse(records.readable(retained, global.revision()));
+      assertEquals(1, navigation.facets(retained).total());
+      assertInstanceOf(
+          InformationNavigation.Unavailable.class,
+          navigation.select(retained, new InformationNavigation.Target(global.resource(), null)));
+      assertEquals(
+          3,
+          navigation
+              .facets(
+                  selected.within(
+                      new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+                          Home.of("one"), true)))
+              .total());
+    }
+    share(otherContext, publicOther.revision(), false);
+    assertFalse(records.readable(project(service), publicOther.revision()));
+    assertEquals(2, navigation.facets(project(service)).total());
+  }
+
+  @Test
+  void rootlessCompatibilityRowsAndOldSelectorCannotAuthorizeReads() {
+    UUID raw = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO documents(id,source_name,title,content_hash,text_hash,byte_size,ingested_at,ingested_by) VALUES(?,?,'Raw','raw','raw',1,now(),'manager')",
+        raw,
+        raw.toString());
+    jdbc.update(
+        "INSERT INTO information_document_policies(document_id,owner_handle,visibility,assigned_at) VALUES(?,'manager','shared',now())",
+        raw);
+    for (String actor : List.of("manager", "outside", "app", service))
+      assertFalse(records.readable(general(actor), raw));
+    var current = original();
+    share(project("manager"), current.revision(), true);
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_readable(?,'outside','shared',NULL,false)",
+            Boolean.class,
+            current.revision()));
   }
 
   @Test

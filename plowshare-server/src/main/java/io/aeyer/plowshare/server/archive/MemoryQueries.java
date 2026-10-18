@@ -24,6 +24,11 @@ public interface MemoryQueries {
       int limit,
       boolean runBound,
       QueryEmbeddings.Origin origin) {
+    public io.aeyer.plowshare.server.access.KnowledgeReadScope readScope() {
+      return new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+          home, !runBound || origin.globalRead());
+    }
+
     public Request {
       if (account == null || account.isBlank() || text == null || text.isBlank())
         throw new IllegalArgumentException("Authenticated memory query required");

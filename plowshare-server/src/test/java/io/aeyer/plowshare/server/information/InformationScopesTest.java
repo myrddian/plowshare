@@ -30,7 +30,7 @@ class InformationScopesTest {
         List.of(
             Map.of("kind", "account"),
             Map.of("kind", "account", "account", UUID.randomUUID().toString()),
-            Map.of("kind", "account", "account", global.toString(), "includeShared", false),
+            Map.of("kind", "account", "account", global.toString(), "includeGlobal", false),
             Map.of("kind", "personal", "account", global.toString()),
             Map.of("kind", "account", "account", "GLOBAL")))
       assertThrows(CallerFault.class, () -> InformationScopes.from(Map.of("scope", fields)));
@@ -54,7 +54,7 @@ class InformationScopesTest {
       var selected = access.resolve("@service/application", InformationScopes.from(payload));
       assertEquals(InformationContext.Scope.PROJECT, selected.selection().scope());
       assertEquals("app", selected.selection().project());
-      assertFalse(selected.selection().includeShared());
+      assertTrue(selected.selection().includeGlobal());
       var command =
           InformationContentInputs.command(
               "types.list", Map.of("view", "content-types-v1"), selected.selection());
@@ -64,9 +64,9 @@ class InformationScopesTest {
 
   @Test
   void explicitGeneralReadDoesNotNeedApplicationContextOrGrantExecution() {
-    var selection = InformationScopes.from(Map.of("scope", Map.of("kind", "shared")));
+    var selection = InformationScopes.from(Map.of("scope", Map.of("kind", "global_read")));
     var context = access.resolve("@service/reader", selection);
-    assertEquals(InformationContext.Selection.shared(), context.selection());
+    assertEquals(InformationContext.Selection.globalRead(), context.selection());
     assertThrows(CallerFault.class, () -> access.requireWork(context));
     assertThrows(CallerFault.class, () -> access.forRun("human", Home.global()));
     verifyNoInteractions(defaults, permissions);
@@ -79,11 +79,14 @@ class InformationScopesTest {
             Map.<String, Object>of("project", ""),
             Map.<String, Object>of("project", " app "),
             Map.<String, Object>of("scope", Map.of("kind", "global")),
+            Map.<String, Object>of("scope", Map.of("kind", "shared")),
+            Map.<String, Object>of("scope", Map.of("kind", "personal", "includeShared", true)),
+            Map.<String, Object>of("scope", Map.of("kind", "global_read", "includeGlobal", false)),
             Map.<String, Object>of(
                 "scope", Map.of("kind", "personal", "account", UUID.randomUUID().toString())),
-            Map.<String, Object>of("scope", Map.of("kind", "shared", "includeShared", true)),
+            Map.<String, Object>of("scope", Map.of("kind", "global_read", "includeGlobal", true)),
             Map.<String, Object>of("scope", Map.of("kind", "project", "project", "")),
-            Map.<String, Object>of("scope", Map.of("kind", "shared"), "project", "app"))) {
+            Map.<String, Object>of("scope", Map.of("kind", "global_read"), "project", "app"))) {
       assertThrows(CallerFault.class, () -> InformationScopes.from(payload));
     }
     verifyNoInteractions(defaults, permissions);

@@ -14,6 +14,7 @@ import java.util.Objects;
  */
 public final class InformationAccess {
   private final ScopedPermissions permissions;
+  private final io.aeyer.plowshare.server.access.KnowledgeReadScope boundary;
   private final AccountKnowledgePermissions accounts;
   private final io.aeyer.plowshare.server.requests.RequestProjects projects;
 
@@ -30,9 +31,29 @@ public final class InformationAccess {
       ScopedPermissions permissions,
       io.aeyer.plowshare.server.requests.RequestProjects projects,
       AccountKnowledgePermissions accounts) {
+    this(permissions, projects, accounts, null);
+  }
+
+  private InformationAccess(
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.requests.RequestProjects projects,
+      AccountKnowledgePermissions accounts,
+      io.aeyer.plowshare.server.access.KnowledgeReadScope boundary) {
+    this.boundary = boundary;
     this.accounts = Objects.requireNonNull(accounts);
     this.permissions = Objects.requireNonNull(permissions, "permissions");
     this.projects = Objects.requireNonNull(projects, "projects");
+  }
+
+  /**
+   * Bind the existing information service to one retained read ceiling, never fresh ambient grants.
+   */
+  public InformationAccess within(io.aeyer.plowshare.server.access.KnowledgeReadScope scope) {
+    return new InformationAccess(
+        permissions,
+        projects,
+        accounts,
+        boundary == null ? Objects.requireNonNull(scope) : boundary.intersect(scope));
   }
 
   public InformationContext resolve(String account, InformationContext.Selection selection) {
@@ -47,7 +68,7 @@ public final class InformationAccess {
               .orElseGet(InformationContext.Selection::personal);
     InformationContext context = new InformationContext(account, selection);
     requireSelection(context);
-    return context;
+    return boundary == null ? context : context.within(boundary);
   }
 
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
@@ -58,18 +79,24 @@ public final class InformationAccess {
     String project = PersonalSpaces.resolveAddress(home.project(), account);
     PersonalSpaces.requireOwn(project, account);
     boolean personal = PersonalSpaces.name(account).equals(project);
+    var retained =
+        boundary == null
+            ? io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(home)
+            : boundary;
+    retained.requireHome(home);
     return resolve(
             account,
-            personal ? InformationContext.Selection.personal() : projectSelection(account, project))
-        .withView(true);
+            new InformationContext.Selection(
+                personal ? InformationContext.Scope.PERSONAL : InformationContext.Scope.PROJECT,
+                personal ? null : project,
+                retained.globalRead()))
+        .withView(true)
+        .within(retained);
   }
 
-  /** Internal project contexts must not accidentally include the server's shared catalogue. */
+  /** Ordinary discovery includes Global READ for every authenticated principal type. */
   public static InformationContext.Selection projectSelection(String account, String project) {
-    return new InformationContext.Selection(
-        InformationContext.Scope.PROJECT,
-        project,
-        !io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account));
+    return InformationContext.Selection.project(project);
   }
 
   /** Check every operation again; an earlier context is not a membership lease. */
@@ -93,8 +120,8 @@ public final class InformationAccess {
   public void requireWork(InformationContext context) {
     requireSelection(context);
     requireAccountAction(context, io.aeyer.plowshare.server.access.AuthorityAction.WRITE);
-    if (context.selection().scope() == InformationContext.Scope.SHARED)
-      throw new CallerFault("Shared information is a read selection; select a writable home");
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
+      throw new CallerFault("Global READ is a read selection; select a writable home");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
         && !permissions.allows(
             new Principal(context.account()),

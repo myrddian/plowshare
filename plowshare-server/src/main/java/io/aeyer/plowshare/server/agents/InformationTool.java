@@ -383,18 +383,18 @@ public final class InformationTool implements AgentTool {
                 context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
                 "project",
                 context.selection().project() == null ? "" : context.selection().project(),
-                "includeShared",
-                context.selection().includeShared()));
+                "includeGlobal",
+                context.selection().includeGlobal()));
         if (context.selection().project() == null)
           fields.put(
               "scope",
               Map.of(
                   "kind",
                   context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-                  "includeShared",
-                  context.selection().includeShared()));
+                  "includeGlobal",
+                  context.selection().includeGlobal()));
         var command = InformationNavigationInputs.command(operation, fields);
-        var result = navigation.get().execute(owner, command);
+        var result = navigation.get().execute(owner, command, context.readBoundary());
         if (!writing) recordNavigationReads(context, result, command);
         inputs.requireLog(log, owner);
         return JSON.writeValueAsString(result);
@@ -629,11 +629,11 @@ public final class InformationTool implements AgentTool {
       io.aeyer.plowshare.protocol.InformationRequest command) {
     switch (result) {
       case io.aeyer.plowshare.protocol.InformationResponse.NavigationDocuments value ->
-          value.value().documents().forEach(this::recordNavigationDocument);
+          value.value().documents().forEach(doc -> recordNavigationDocument(doc, context));
       case io.aeyer.plowshare.protocol.InformationResponse.NavigationSelection value -> {
         if (value.value()
             instanceof io.aeyer.plowshare.protocol.InformationNavigation.Readable readable)
-          recordNavigationDocument(readable.document());
+          recordNavigationDocument(readable.document(), context);
       }
       case io.aeyer.plowshare.protocol.InformationResponse.NavigationConnections value -> {
         var source =
@@ -650,21 +650,22 @@ public final class InformationTool implements AgentTool {
                                     .name()
                                     .toLowerCase(java.util.Locale.ROOT),
                                 context.selection().project(),
-                                context.selection().includeShared()),
+                                context.selection().includeGlobal()),
                             "documents",
                             null),
                         new io.aeyer.plowshare.protocol.InformationNavigation.Target(
                             ((io.aeyer.plowshare.protocol.InformationRequest.RelationshipList)
                                     command)
                                 .resource(),
-                            null)));
+                            null)),
+                    context.readBoundary());
         if (source
                 instanceof
                 io.aeyer.plowshare.protocol.InformationResponse.NavigationSelection selection
             && selection.value()
                 instanceof
                 io.aeyer.plowshare.protocol.InformationNavigation.Readable sourceDocument) {
-          recordNavigationDocument(sourceDocument.document());
+          recordNavigationDocument(sourceDocument.document(), context);
         } else {
           // Graph results consume their source even when every neighbour is only a locked label.
           // A revocation between the snapshot and ledger binding must prevent disclosure.
@@ -673,26 +674,14 @@ public final class InformationTool implements AgentTool {
         for (var edge : value.value().connections())
           if (edge.selection()
               instanceof io.aeyer.plowshare.protocol.InformationNavigation.Readable readable)
-            recordNavigationDocument(readable.document());
+            recordNavigationDocument(readable.document(), context);
       }
       default -> throw new IllegalStateException("unexpected navigation read result");
     }
   }
 
   private void recordNavigationDocument(
-      io.aeyer.plowshare.protocol.InformationNavigation.Document doc) {
-    var selected = doc.scope();
-    var context =
-        access
-            .resolve(
-                owner,
-                new InformationContext.Selection(
-                    InformationContext.Scope.valueOf(
-                        selected.kind().toUpperCase(java.util.Locale.ROOT)),
-                    selected.project(),
-                    !io.aeyer.plowshare.server.auth.ServiceCredentials.principal(owner)
-                        && !selected.kind().equals("shared")))
-            .withView(true);
+      io.aeyer.plowshare.protocol.InformationNavigation.Document doc, InformationContext context) {
     inputs.reads(log, context).accept(doc.revision());
   }
 

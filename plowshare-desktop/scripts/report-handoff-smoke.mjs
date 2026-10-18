@@ -26,7 +26,7 @@ try {
  await expect(library.locator('#library-source-panel [data-passage]')).toHaveValue(/A retained claim\./);
  await expect(library.locator('#library-source-panel [data-detail]')).toContainText('draft report');
  const read=fixture.frames.find(frame=>frame.type==='information.read'&&frame.payload.revision===revision);
- assert.ok(read);assert.deepEqual(read.payload.scope,{kind:'project',project:'Other project',includeShared:true});
+ assert.ok(read);assert.deepEqual(read.payload.scope,{kind:'project',project:'Other project',includeGlobal:true});
  assert.equal(fixture.frames.filter(frame=>['information.finalise','information.share','information.ask','information.retry'].includes(frame.type)).length,0);
  await library.screenshot({path:'build/smoke/report-handoff.png'});
  // Reusing the existing Library window must reopen the exact revision.

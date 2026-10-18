@@ -178,28 +178,35 @@ public sealed record SelectionDtoScope {
  public static SelectionDtoScope FromVariant2(SelectionDtoScopeVariant2Dto value)=>new() {Variant2=new(value)};
  public Optional<SelectionDtoScopeVariant3Dto> Variant3 {get; private init;}
  public static SelectionDtoScope FromVariant3(SelectionDtoScopeVariant3Dto value)=>new() {Variant3=new(value)};
+ public Optional<SelectionDtoScopeVariant4Dto> Variant4 {get; private init;}
+ public static SelectionDtoScope FromVariant4(SelectionDtoScopeVariant4Dto value)=>new() {Variant4=new(value)};
 }
 internal sealed class SelectionDtoScopeConverter : JsonConverter<SelectionDtoScope> {
  public override bool HandleNull => true;
- public override SelectionDtoScope Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape106",value))return SelectionDtoScope.FromVariant1(value.Deserialize<SelectionDtoScopeVariant1Dto>(options)!);if(Codec.Matches("shape110",value))return SelectionDtoScope.FromVariant2(value.Deserialize<SelectionDtoScopeVariant2Dto>(options)!);if(Codec.Matches("shape111",value))return SelectionDtoScope.FromVariant3(value.Deserialize<SelectionDtoScopeVariant3Dto>(options)!);throw new JsonException("Invalid union");}
- public override void Write(Utf8JsonWriter writer,SelectionDtoScope value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}throw new JsonException("Select a union variant");}
+ public override SelectionDtoScope Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape106",value))return SelectionDtoScope.FromVariant1(value.Deserialize<SelectionDtoScopeVariant1Dto>(options)!);if(Codec.Matches("shape108",value))return SelectionDtoScope.FromVariant2(value.Deserialize<SelectionDtoScopeVariant2Dto>(options)!);if(Codec.Matches("shape110",value))return SelectionDtoScope.FromVariant3(value.Deserialize<SelectionDtoScopeVariant3Dto>(options)!);if(Codec.Matches("shape111",value))return SelectionDtoScope.FromVariant4(value.Deserialize<SelectionDtoScopeVariant4Dto>(options)!);throw new JsonException("Invalid union");}
+ public override void Write(Utf8JsonWriter writer,SelectionDtoScope value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
 /// <summary>Fields of the SelectionDtoScopeVariant1Dto protocol contract.</summary>
 public sealed record SelectionDtoScopeVariant1Dto {
- [JsonPropertyName("includeShared")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> IncludeShared { get; init; }
+ [JsonPropertyName("includeGlobal")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> IncludeGlobal { get; init; }
  [JsonPropertyName("kind")] public required string Kind { get; init; }
 }
 
 /// <summary>Fields of the SelectionDtoScopeVariant2Dto protocol contract.</summary>
 public sealed record SelectionDtoScopeVariant2Dto {
- [JsonPropertyName("includeShared")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> IncludeShared { get; init; }
  [JsonPropertyName("kind")] public required string Kind { get; init; }
- [JsonPropertyName("project")] public required string Project { get; init; }
 }
 
 /// <summary>Fields of the SelectionDtoScopeVariant3Dto protocol contract.</summary>
 public sealed record SelectionDtoScopeVariant3Dto {
+ [JsonPropertyName("includeGlobal")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> IncludeGlobal { get; init; }
+ [JsonPropertyName("kind")] public required string Kind { get; init; }
+ [JsonPropertyName("project")] public required string Project { get; init; }
+}
+
+/// <summary>Fields of the SelectionDtoScopeVariant4Dto protocol contract.</summary>
+public sealed record SelectionDtoScopeVariant4Dto {
  [JsonPropertyName("account")] public required string Account { get; init; }
  [JsonPropertyName("kind")] public required string Kind { get; init; }
 }

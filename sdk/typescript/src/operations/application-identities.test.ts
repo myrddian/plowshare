@@ -82,7 +82,7 @@ describe('Application-owned credential lifecycle', () => {
     expect(() => decodePayload('schedule.list', { project: null })).toThrow();
     const selected = {
       document: requestId,
-      scope: { kind: 'project', project: 'app', includeShared: false },
+      scope: { kind: 'project', project: 'app', includeGlobal: false },
     };
     expect(decodePayload('document.detail', selected)).toEqual(selected);
     expect(() =>

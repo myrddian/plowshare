@@ -111,7 +111,7 @@ public final class JdbcDocumentPolicyRepository implements DocumentPolicyReposit
             required(owner, "owner"),
             selection.scope().name().toLowerCase(java.util.Locale.ROOT),
             selection.project(),
-            selection.includeShared())))
+            selection.includeGlobal())))
       throw new CallerFault(
           "adopt and authorise every reviewed source before releasing its payload");
   }

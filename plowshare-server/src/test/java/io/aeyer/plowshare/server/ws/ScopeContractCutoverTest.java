@@ -57,7 +57,7 @@ class ScopeContractCutoverTest {
 
   @Test
   void globalAudienceControlUsesTheAccountAndOwningPolicyAcrossClientLabels() {
-    var shared = InformationContext.Selection.shared();
+    var shared = InformationContext.Selection.globalRead();
     var row =
         new InformationCatalogueRepository.Resource(
             UUID.randomUUID(),
@@ -91,7 +91,7 @@ class ScopeContractCutoverTest {
               client,
               Map.of(
                   "scope",
-                  Map.of("kind", "shared"),
+                  Map.of("kind", "global_read"),
                   "revision",
                   revision.toString(),
                   "requestId",
@@ -107,7 +107,7 @@ class ScopeContractCutoverTest {
               "gui",
               Map.of(
                   "scope",
-                  Map.of("kind", "shared"),
+                  Map.of("kind", "global_read"),
                   "revision",
                   revision.toString(),
                   "requestId",
@@ -126,7 +126,7 @@ class ScopeContractCutoverTest {
             call -> {
               InformationContext context = call.getArgument(0);
               assertEquals("@service/reader", context.account());
-              assertEquals(InformationContext.Selection.shared(), context.selection());
+              assertEquals(InformationContext.Selection.globalRead(), context.selection());
               return List.of();
             });
     var answer =
@@ -135,7 +135,7 @@ class ScopeContractCutoverTest {
             "information.list",
             "@service/reader",
             "sdk",
-            Map.of("scope", Map.of("kind", "shared")));
+            Map.of("scope", Map.of("kind", "global_read")));
     assertEquals(Code.OK, answer.code());
     verify(records).list(any(), eq(20), eq(0), isNull());
     verify(members, never()).requireRole(any(), any(), any());
@@ -150,7 +150,7 @@ class ScopeContractCutoverTest {
         List.of(
             Map.of("kind", "global"),
             Map.of("kind", "project", "project", " app "),
-            Map.of("kind", "shared"))) {
+            Map.of("kind", "global_read"))) {
       var result =
           request(
               router,
@@ -180,7 +180,7 @@ class ScopeContractCutoverTest {
             call -> {
               InformationContext context = call.getArgument(1);
               assertEquals("@service/reader", context.account());
-              assertEquals(InformationContext.Selection.shared(), context.selection());
+              assertEquals(InformationContext.Selection.globalRead(), context.selection());
               return scoped;
             });
     var frames =
@@ -203,7 +203,7 @@ class ScopeContractCutoverTest {
             "document.list",
             "@service/reader",
             "sdk",
-            Map.of("scope", Map.of("kind", "shared")));
+            Map.of("scope", Map.of("kind", "global_read")));
     assertEquals(Code.OK, answer.code());
     var listed =
         assertInstanceOf(

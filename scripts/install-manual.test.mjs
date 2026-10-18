@@ -45,7 +45,7 @@ function catalogue() {
           { stage: 'derive', state: derivation, generation: 1, attempt: 1 },
           { stage: 'embed', state: 'failed', generation: 1, attempt: 1 }] };
       else if (operation === 'read') {
-        if (scope === 'shared' && !row.shared) throw new Error('unavailable in Shared');
+        if (scope === 'global_read' && !row.shared) throw new Error('unavailable in Shared');
         const start = payload.offset ?? 0, text = row.text.slice(start, start + payload.limit);
         result = { revision: payload.revision, start, end: start + text.length, total: row.text.length, text };
       } else if (operation === 'share') { row.shared = true; result = { changed: true }; }
@@ -56,7 +56,7 @@ function catalogue() {
     if (operation === 'upload' && drop) throw new Error('reply lost after admission');
     return result;
   }
-  return { calls, rows, call, client: { call }, sharedClient: { call: (op, payload) => call(op, payload, 'shared') },
+  return { calls, rows, call, client: { call }, sharedClient: { call: (op, payload) => call(op, payload, 'global_read') },
     drop(value) { drop = value; }, stage(value) { derivation = value; } };
 }
 
@@ -102,7 +102,7 @@ test('personal installation never shares; a later shared installation verifies t
   assert.equal(Object.values(opts.snapshots[0].operations)[0].state, 'pending');
   await publishManual(plan('# First\n'), server.client, { ...opts, share: true });
   assert.equal(server.rows.size, 1); assert.equal(server.calls.filter(row => row.operation === 'share').length, 1);
-  assert.ok(server.calls.some(row => row.operation === 'read' && row.scope === 'shared'));
+  assert.ok(server.calls.some(row => row.operation === 'read' && row.scope === 'global_read'));
 });
 
 test('replacement becomes shared/readable before old discovery is excluded; old evidence keeps its text', async () => {
@@ -113,7 +113,7 @@ test('replacement becomes shared/readable before old discovery is excluded; old 
   assert.equal(server.rows.size, 2); assert.equal(server.rows.get(old).excluded, true);
   assert.equal(server.rows.get(old).text, '# Before\n');
   const index = server.calls.findIndex(row => row.operation === 'exclude');
-  assert.equal(server.calls[index - 1].scope, 'shared');
+  assert.equal(server.calls[index - 1].scope, 'global_read');
   const count = server.calls.length;
   await publishManual(plan('# After\n'), server.client, opts);
   assert.ok(server.calls.slice(count).every(row => ['status', 'read'].includes(row.operation)));
@@ -230,7 +230,7 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 37 chapters/);
     assert.equal(server.rows.size, 37);
     assert.ok([...server.rows.values()].every(row => row.shared && row.tags.includes('plowshare-manual') && row.tags.includes(`manual-chapter-${row.name.split('/ ')[1].slice(0, -3)}`)));
-    assert.ok(frames.some(frame => frame.type === 'information.read' && frame.payload.scope.kind === 'shared'));
+    assert.ok(frames.some(frame => frame.type === 'information.read' && frame.payload.scope.kind === 'global_read'));
     assert.ok(paths.every(path => ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path)));
     const journal = await readFile(state, 'utf8');
     assert.ok(!journal.includes('fixture-password') && !journal.includes('refresh') && !journal.includes('access'));

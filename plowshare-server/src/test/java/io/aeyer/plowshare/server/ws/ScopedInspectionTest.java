@@ -72,7 +72,7 @@ class ScopedInspectionTest {
             "document",
             document,
             "scope",
-            Map.of("kind", "project", "project", "app", "includeShared", false)));
+            Map.of("kind", "project", "project", "app", "includeGlobal", false)));
     for (Map<String, Object> scope :
         List.<Map<String, Object>>of(
             Map.of("kind", "project"),
@@ -86,6 +86,6 @@ class ScopedInspectionTest {
         RuntimeException.class,
         () ->
             DocumentDetailHandler.validate(
-                Map.of("document", "invalid", "scope", Map.of("kind", "shared"))));
+                Map.of("document", "invalid", "scope", Map.of("kind", "global_read"))));
   }
 }

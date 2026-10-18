@@ -7,9 +7,9 @@ REST endpoints. PostgreSQL and its existing pgvector extension hold the domain.
 
 ## Scope and access
 
-For humans, omitted scope means Personal plus explicitly shared knowledge. Select
+For humans, omitted scope means Personal plus generally readable knowledge. Select
 a project only with current scoped READ; selecting one never creates membership.
-`scope: {kind: "project", project: "research", includeShared: false}` limits
+`scope: {kind: "project", project: "research", includeGlobal: false}` limits
 discovery to that project. Scoped Contributors can write in their area; Managers
 can change resource audiences through existing share/unshare commands.
 
@@ -17,28 +17,34 @@ V155 stores immutable versions of each resource's current root audience. All
 revisions, including pinned history and later content revisions, use that policy.
 An explicit share grants GLOBAL_READ to every active authenticated human,
 Application/service account and service credential; unshare restores HOME.
-Consistent legacy Shared histories retain human-only LEGACY_SHARED until an
-explicit Manager review through share. Mixed histories narrow to HOME for review;
-conflicting privacy subjects and unclassified homes stay quarantined. Original
-per-revision flags remain historical evidence and cannot change the root policy.
+V169 retires human-only LEGACY_SHARED: those roots narrow to HOME for deliberate
+Manager publication. Conflicting privacy subjects and unclassified homes stay
+quarantined. Original per-revision flags remain historical evidence and grant no
+access; rootless compatibility rows have no read fallback.
 
-Service credentials may select Shared/includeShared for general reads; Personal
-remains unavailable. Omitted scope on an active Application-owned credential selects
-its exact single registered project, with includeShared disabled; generic service
-tokens and ambiguous/missing Application context require an explicit scope. Internal
-retained runs keep their exact project-only selection. Invalid explicit names,
-conflicting selectors and unknown scope members refuse without falling back.
+The `global_read` selector chooses current GLOBAL_READ resources, regardless of
+custody. Personal/project discovery includes them by default (`includeGlobal`);
+false narrows to the selected home. Service credentials use the same general-read
+rules; Personal remains unavailable. Omitted scope on an active Application-owned
+credential selects its exact single registered project plus generally readable
+knowledge; generic service tokens and ambiguous/missing Application context require
+an explicit scope. Retained runs intersect reads with their captured home and
+Global-read ceiling. Invalid explicit names, retired `shared`/`includeShared` fields,
+conflicting selectors and unknown members refuse without falling back.
+See the [read contract](global-knowledge-read-contract.md) for the API cutover and
+internal interfaces.
 These selectors grant no project membership, content WRITE, processing-log access
 or execution. Global-account policy control requires human Global Admin authority.
 Existing share/unshare can manage the audience of an already scoped Global resource
-through its owning Admin check, independent of client label. Shared is not a writable
+through its owning Admin check, independent of client label. General READ is not a writable
 Global destination. An explicit documents-only account selector,
 `scope: {kind: "account", account: "00000000-0000-0000-0000-000000000004"}`,
 selects Global custody on the supported information upload and maintenance path.
 Human ADMIN WRITE is checked live in Java and under repository locks; the human
 remains `created_by`. Authenticated readers use current root policy. Project names
-never decode account UUIDs. Other account targets, type registries, interchange,
-semantic search and unsupported consumers refuse this target. No new endpoint,
+never decode account UUIDs. Other account targets, type registries, interchange
+and unsupported consumers refuse this target. Existing account-target semantic
+search/rank use their account READ gate. No new endpoint,
 general transfer or ordinary Global conversation/run capability is added. The
 [root-policy specification](authority-substrate-slices/05-root-policy-specification.md)
 records migration, privacy and concurrency behavior.
@@ -51,9 +57,9 @@ positive model-call limit per query, or `0` to disable this inference without
 affecting preparation. Omitted, empty or `unlimited` configuration selects
 unlimited, the default; usage and claims are still recorded. Reader permissions still determine the
 selected corpus and all returned content, counts and metadata. No caller gains
-RUN_MODEL or an embedding role. Global-held general-readable documents use the
-existing Shared/includeShared selection; the account selector above does not
-become a search target. See [embedding authority and configuration](embedding-evolution.md#implemented-sql-foundation).
+RUN_MODEL or an embedding role. Generally readable documents use `global_read`/`includeGlobal` selections.
+Existing explicit Global account search/rank use account READ and the same root
+policy. See [embedding authority and configuration](embedding-evolution.md#implemented-sql-foundation).
 
 Filters apply before ranking, counts, title matching and paging. Direct guessed
 IDs receive the same refusal as absent IDs. Excluded revisions disappear from
@@ -318,7 +324,7 @@ Example payload for `information.acquire`:
 
 ```json
 {
-  "scope": {"kind": "project", "project": "research", "includeShared": false},
+  "scope": {"kind": "project", "project": "research", "includeGlobal": false},
   "name": "source-paper",
   "url": "https://example.org/paper",
   "requestId": "c5b6d3e4-4e40-471e-906e-1da8382602d3"
@@ -404,7 +410,7 @@ the run's project scope; reading leaves the report as a draft until explicitly f
 ## Project document structure over WebSocket
 
 `document.detail` accepts an optional Information scope, for example
-`{document: "<revision UUID>", scope: {kind: "project", project: "mychatbot", includeShared: false}}`.
+`{document: "<revision UUID>", scope: {kind: "project", project: "mychatbot", includeGlobal: false}}`.
 It returns the authorized document's metadata and hierarchy/outline; it does not
 return document text. Accounts need live VIEWER access and the document must be
 visible in that scope. Service tokens must select an explicitly granted project;

@@ -1,3 +1,4 @@
+import { informationPayloadProblem } from './information-validation.ts';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { Outcome } from '../binding/envelope.ts';
@@ -30,6 +31,36 @@ const asked = (type: InformationFrame): Request =>
   }) as Request;
 
 describe('scoped information request and receipt integration', () => {
+  it('rejects retired selectors and separates general READ from Global custody', () => {
+    for (const scope of [
+      { kind: 'shared' },
+      { kind: 'project', project: 'research', includeShared: true },
+      { kind: 'global_read', includeGlobal: false },
+      { kind: 'global_read', project: 'research' },
+    ])
+      expect(
+        informationPayloadProblem('information.list', { scope }, []),
+      ).toBeDefined();
+    expect(
+      informationPayloadProblem(
+        'information.list',
+        {
+          scope: { kind: 'global_read' },
+        },
+        [],
+      ),
+    ).toBeUndefined();
+    expect(
+      informationPayloadProblem(
+        'information.list',
+        {
+          scope: { kind: 'project', project: 'research', includeGlobal: false },
+        },
+        [],
+      ),
+    ).toBeUndefined();
+  });
+
   it('decodes scoped search ancestry through the public client', async () => {
     const outcome = fixtures['information.search'];
     const expected = decodeReply('information.search', outcome.payload);
@@ -43,7 +74,7 @@ describe('scoped information request and receipt integration', () => {
           return { code: 'OK', payload: expected };
         },
       },
-      { kind: 'shared' },
+      { kind: 'global_read' },
     );
     expect(
       await client.call('search', { query: 'question', limit: 10 }),
@@ -281,7 +312,7 @@ describe('scoped information request and receipt integration', () => {
   });
   it('preserves explicit scope, mutation identity, exact offsets and report metadata', () => {
     const payload = {
-      scope: { kind: 'project', project: 'research', includeShared: false },
+      scope: { kind: 'project', project: 'research', includeGlobal: false },
       revision: 'r',
       requestId: 'stable',
       start: 0,
@@ -483,7 +514,7 @@ it('Global account scope is explicit and rejects unsupported information command
   ).not.toBe('usage');
   expect(() =>
     decodePayload('information.list', {
-      scope: { ...scope, includeShared: false },
+      scope: { ...scope, includeGlobal: false },
     }),
   ).toThrow();
   expect(() =>

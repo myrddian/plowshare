@@ -44,8 +44,10 @@ public final class JdbcInformationInterchangeRepository
     args.add(context.account());
     args.add(context.selection().scope().name().toLowerCase(Locale.ROOT));
     args.add(context.selection().project());
-    args.add(context.selection().includeShared());
+    args.add(context.selection().includeGlobal());
     args.addAll(visible.arguments());
+    var sourceBoundary = InformationSql.boundary(context, "information_navigation_head(e.source)");
+    args.addAll(sourceBoundary.arguments());
     // Historical bytes do not grant access to a resource's current relationships. Use the same
     // source/current-head and neighbour disclosure predicates as ordinary outgoing navigation.
     return jdbc
@@ -58,6 +60,8 @@ public final class JdbcInformationInterchangeRepository
                 + slots
                 + ")) AND information_readable(information_navigation_head(e.source),?,?,?,?) AND "
                 + visible.sql()
+                + " AND "
+                + sourceBoundary.sql()
                 + " ORDER BY e.source,e.target,e.relation,e.pinned_revision LIMIT 65",
             (r, n) ->
                 new Link(

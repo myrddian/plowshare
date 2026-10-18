@@ -38,7 +38,8 @@ class ServiceInformationAuthorizationTest {
           () ->
               access.require(
                   operation,
-                  AccessRequestDecoder.decode(operation, Map.of("scope", Map.of("kind", "shared"))),
+                  AccessRequestDecoder.decode(
+                      operation, Map.of("scope", Map.of("kind", "global_read"))),
                   account));
     verifyNoInteractions(members, resources);
     for (String operation :
@@ -55,7 +56,8 @@ class ServiceInformationAuthorizationTest {
           () ->
               access.require(
                   operation,
-                  AccessRequestDecoder.decode(operation, Map.of("scope", Map.of("kind", "shared"))),
+                  AccessRequestDecoder.decode(
+                      operation, Map.of("scope", Map.of("kind", "global_read"))),
                   account),
           operation);
   }

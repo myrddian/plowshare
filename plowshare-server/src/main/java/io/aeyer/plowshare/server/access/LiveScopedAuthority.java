@@ -30,6 +30,12 @@ public final class LiveScopedAuthority implements ScopedAuthority {
     Objects.requireNonNull(target);
     Objects.requireNonNull(action);
     if (!target.equals(identities.scope(target.id()))) return false;
+    // Universal role eligibility is not an issuable grant. It can admit knowledge READ, but
+    // cannot support allowsUsing, grant issuance, project membership or execution authority.
+    if (action == AuthorityAction.READ
+        && target.id().equals(BuiltInIdentities.GLOBAL_KNOWLEDGE)
+        && recipient.agent().isEmpty()
+        && grants.globalReadEligible(recipient.account())) return true;
     return grants.live(recipient).stream()
         .anyMatch(
             binding ->

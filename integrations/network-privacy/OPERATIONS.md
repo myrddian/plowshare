@@ -286,7 +286,7 @@ Each profile has a stable Application-assigned UUID and a named Markdown resourc
 Application service account owns the document. Project/document authorization also
 covers its chapters and sections; there are no device-specific permission scopes.
 The collector submits only scoped public Information SDK requests, with
-`includeShared:false`. Existing source-processing allowances apply to admissions;
+`includeGlobal:false`. Existing source-processing allowances apply to admissions;
 a saved revision is not proof that extraction or model processing has finished.
 
 Edits create immutable revisions under the same resource. The editor checks that

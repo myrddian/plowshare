@@ -97,24 +97,29 @@ class SelectionDto:
     scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
-SelectionDtoScope: TypeAlias = "SelectionDtoScopeVariant1Dto | SelectionDtoScopeVariant2Dto | SelectionDtoScopeVariant3Dto"
+SelectionDtoScope: TypeAlias = "SelectionDtoScopeVariant1Dto | SelectionDtoScopeVariant2Dto | SelectionDtoScopeVariant3Dto | SelectionDtoScopeVariant4Dto"
 
 @dataclass(frozen=True, kw_only=True)
 class SelectionDtoScopeVariant1Dto:
     """Validated fields of the SelectionDtoScopeVariant1Dto protocol contract."""
-    include_shared: bool | Unset = UNSET
-    kind: Literal["personal", "shared"]
+    include_global: bool | Unset = UNSET
+    kind: Literal["personal"]
 
 @dataclass(frozen=True, kw_only=True)
 class SelectionDtoScopeVariant2Dto:
     """Validated fields of the SelectionDtoScopeVariant2Dto protocol contract."""
-    include_shared: bool | Unset = UNSET
-    kind: Literal["project"]
-    project: str
+    kind: Literal["global_read"]
 
 @dataclass(frozen=True, kw_only=True)
 class SelectionDtoScopeVariant3Dto:
     """Validated fields of the SelectionDtoScopeVariant3Dto protocol contract."""
+    include_global: bool | Unset = UNSET
+    kind: Literal["project"]
+    project: str
+
+@dataclass(frozen=True, kw_only=True)
+class SelectionDtoScopeVariant4Dto:
+    """Validated fields of the SelectionDtoScopeVariant4Dto protocol contract."""
     account: Literal["00000000-0000-0000-0000-000000000004"]
     kind: Literal["account"]
 
@@ -8508,8 +8513,9 @@ _MODELS = {
     "shape174": DocumentTargetDto,
     "shape182": SelectionDto,
     "shape106": SelectionDtoScopeVariant1Dto,
-    "shape110": SelectionDtoScopeVariant2Dto,
-    "shape111": SelectionDtoScopeVariant3Dto,
+    "shape108": SelectionDtoScopeVariant2Dto,
+    "shape110": SelectionDtoScopeVariant3Dto,
+    "shape111": SelectionDtoScopeVariant4Dto,
     "shape193": SchemaDefinitionDto,
     "shape191": InformationTypeContractDto,
     "shape190": InformationContentBindingDto,
@@ -9463,9 +9469,10 @@ _FIELDS = {
     InformationFilterDto: {"author": "author", "autoTag": "auto_tag", "contentType": "content_type", "contentTypeVersion": "content_type_version", "documentAuthor": "document_author", "kind": "kind", "search": "search", "subtype": "subtype", "tagGroup": "tag_group", "tags": "tags", "untyped": "untyped", "when": "when"},
     DocumentTargetDto: {"resource": "resource", "revision": "revision"},
     SelectionDto: {"corpus": "corpus", "scope": "scope", "view": "view"},
-    SelectionDtoScopeVariant1Dto: {"includeShared": "include_shared", "kind": "kind"},
-    SelectionDtoScopeVariant2Dto: {"includeShared": "include_shared", "kind": "kind", "project": "project"},
-    SelectionDtoScopeVariant3Dto: {"account": "account", "kind": "kind"},
+    SelectionDtoScopeVariant1Dto: {"includeGlobal": "include_global", "kind": "kind"},
+    SelectionDtoScopeVariant2Dto: {"kind": "kind"},
+    SelectionDtoScopeVariant3Dto: {"includeGlobal": "include_global", "kind": "kind", "project": "project"},
+    SelectionDtoScopeVariant4Dto: {"account": "account", "kind": "kind"},
     SchemaDefinitionDto: {"$anchor": "_anchor", "$defs": "_defs", "$id": "_id", "$ref": "_ref", "$schema": "_schema", "additionalProperties": "additional_properties", "allOf": "all_of", "anyOf": "any_of", "const": "const", "contains": "contains", "default": "default", "deprecated": "deprecated", "description": "description", "else": "else_", "enum": "enum", "examples": "examples", "exclusiveMaximum": "exclusive_maximum", "exclusiveMinimum": "exclusive_minimum", "format": "format", "if": "if_", "items": "items", "maximum": "maximum", "maxItems": "max_items", "maxLength": "max_length", "maxProperties": "max_properties", "minimum": "minimum", "minItems": "min_items", "minLength": "min_length", "minProperties": "min_properties", "multipleOf": "multiple_of", "not": "not_", "oneOf": "one_of", "pattern": "pattern", "patternProperties": "pattern_properties", "prefixItems": "prefix_items", "properties": "properties", "readOnly": "read_only", "required": "required", "then": "then", "title": "title", "type": "type_", "uniqueItems": "unique_items", "writeOnly": "write_only"},
     InformationTypeContractDto: {"definitionHash": "definition_hash", "description": "description", "label": "label", "ordinal": "ordinal", "presentation": "presentation", "profile": "profile", "schema": "schema", "slug": "slug", "type": "type_", "version": "version"},
     InformationContentBindingDto: {"contract": "contract", "metadata": "metadata", "metadataHash": "metadata_hash"},

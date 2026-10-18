@@ -75,7 +75,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             context.account(),
             context.selection().scope().name().toLowerCase(Locale.ROOT),
             context.selection().project(),
-            context.selection().includeShared(),
+            context.selection().includeGlobal(),
             audience ? "SET_AUDIENCE" : "WRITE"))) throw absent();
     return jdbc.queryForObject(
         "SELECT q.id,q.namespace,q.source_name,q.owner_handle,q.project_id,p.name,q.home_scope_id,q.created_by FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id LEFT JOIN projects p ON p.id=q.project_id WHERE r.id=?",
@@ -332,7 +332,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (limit < 1 || limit > 100 || offset < 0)
       throw new CallerFault("inventory needs limit 1..100 and nonnegative offset");
     String project = context.selection().project();
-    if (context.selection().scope() == InformationContext.Scope.SHARED) return List.of();
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ) return List.of();
     return jdbc
         .queryForList(
             SELECT
@@ -343,7 +343,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             context.account(),
             context.selection().scope().name().toLowerCase(Locale.ROOT),
             project,
-            context.selection().includeShared(),
+            context.selection().includeGlobal(),
             context.corpus().documentType(),
             context.typedView(),
             offset,
@@ -581,16 +581,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   private static List<Object> selectionArgs(InformationContext context) {
-    return java.util.Arrays.asList(
-        context.account(),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().project(),
-        context.selection().includeShared(),
-        context.typedView());
+    return InformationSql.read(context, "r").arguments();
   }
 
   private static String readableSql(InformationContext context) {
-    return READABLE + " AND " + InformationSql.content(context, "r").sql();
+    return "r.availability='active' AND " + InformationSql.read(context, "r").sql();
   }
 
   private static final String SELECT =
@@ -606,10 +601,6 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           + " AS \"tagGroups\",CASE WHEN q.tag_groups_manual THEN 'manual' ELSE 'automatic' END AS \"tagGroupsSource\","
           + "(SELECT jsonb_build_object('type',v.type_id,'version',v.id,'ordinal',v.ordinal,'slug',t.slug,'label',t.label,'definitionHash',v.definition_hash) FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version JOIN information_content_types t ON t.id=v.type_id WHERE c.revision_id=r.id) AS \"contentType\",CASE WHEN r.processing_policy='explicit_only' THEN r.processing_policy END AS \"processingPolicy\","
           + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id";
-  // Current root policy also governs pending sources and historical revisions. A separate owner
-  // fallback would bypass audience revocation and retained reference obligations.
-  private static final String READABLE =
-      "r.availability='active' AND information_readable(r.id,?,?,?,?)";
 
   public void event(
       UUID revision, long generation, String actor, String stage, String action, String detail) {
@@ -635,7 +626,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             action,
             detail == null ? "" : detail);
     jdbc.update(
-        "INSERT INTO information_event_recipients(sequence,account) SELECT ?,a.handle FROM admins a WHERE information_readable(?,a.handle,'shared',NULL,false) OR information_readable(?,a.handle,'personal',NULL,true)"
+        "INSERT INTO information_event_recipients(sequence,account) SELECT ?,a.handle FROM admins a WHERE information_readable(?,a.handle,'global_read',NULL,false) OR information_readable(?,a.handle,'personal',NULL,true)"
             + " OR EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.handle=a.handle AND information_readable(?,a.handle,'project',p.name,true)) ON CONFLICT DO NOTHING",
         sequence,
         revision,
@@ -671,7 +662,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             context.account(),
             context.selection().scope().name().toLowerCase(Locale.ROOT),
             context.selection().project(),
-            context.selection().includeShared()))) throw absent();
+            context.selection().includeGlobal()))) throw absent();
   }
 
   public Admission admit(InformationContext context, UUID request, AdmissionWrite write) {
@@ -691,7 +682,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     DocumentType documentType = write.documentType();
     String fingerprint = write.fingerprint();
     String namespace = context.namespace();
-    if (context.selection().scope() == InformationContext.Scope.SHARED)
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault("shared namespace cannot admit source bytes");
 
     requireDestination(context);
@@ -888,7 +879,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             context.account(),
             context.selection().scope().name().toLowerCase(Locale.ROOT),
             context.selection().project(),
-            context.selection().includeShared(),
+            context.selection().includeGlobal(),
             shared);
     if (version == null)
       throw new IllegalStateException("Root policy transition returned no version");

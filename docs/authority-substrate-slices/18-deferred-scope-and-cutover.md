@@ -251,3 +251,13 @@ restore or old-binary rollback was verified. M2–M3 remain the required deploym
 acceptance work. General non-conversation closure reconstruction and async
 orchestration starts without a durable conversation allowance remain refused;
 the supported board wake lease path does not invent such a recovery mechanism.
+
+## Follow-up: consistent Global knowledge reads
+
+[Global knowledge read contract](../global-knowledge-read-contract.md) supersedes
+the remaining Shared/includeShared read compatibility described above. The active
+read chain uses current-root GLOBAL_READ and live scoped READ for humans and service
+accounts, intersected with retained operation ceilings across memory and documents.
+The API selectors are `global_read` and `includeGlobal`; legacy Shared roots narrow
+to HOME pending deliberate publication. This does not close the separate
+[delegated runtime composition TODO](../delegated-runtime-authority-todo.md).

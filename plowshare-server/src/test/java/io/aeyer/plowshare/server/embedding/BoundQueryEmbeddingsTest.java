@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 
 class BoundQueryEmbeddingsTest {
   final InformationContext context =
-      new InformationContext("reader", InformationContext.Selection.shared());
+      new InformationContext("reader", InformationContext.Selection.globalRead());
   final QueryEmbeddingRepository records = mock(QueryEmbeddingRepository.class);
   final InformationAccess access = mock(InformationAccess.class);
   final SemanticEmbedding foundation = mock(SemanticEmbedding.class);

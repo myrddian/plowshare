@@ -35,6 +35,24 @@ class ScopedRolePolicyTest {
   private final AuthorityScope.Project project = new AuthorityScope.Project(scope, 42);
 
   @Test
+  void universalReadIsLiveEligibilityAndNeverAnIssuingGrantOrProjectPermission() {
+    var global =
+        new AuthorityScope.AccountKnowledge(
+            BuiltInIdentities.GLOBAL_KNOWLEDGE, BuiltInIdentities.GLOBAL);
+    when(identities.scope(global.id())).thenReturn(global);
+    when(repository.globalReadEligible(account)).thenReturn(true);
+    assertTrue(authority.allows(human, global, AuthorityAction.READ));
+    assertFalse(authority.allows(human, project, AuthorityAction.READ));
+    for (var action : AuthorityAction.values())
+      if (action != AuthorityAction.READ) assertFalse(authority.allows(human, global, action));
+    assertFalse(authority.allowsUsing(human, global, AuthorityAction.READ, UUID.randomUUID()));
+    assertFalse(
+        authority.allows(GrantRecipient.agent(account, "worker"), global, AuthorityAction.READ));
+    when(repository.globalReadEligible(account)).thenReturn(false);
+    assertFalse(authority.allows(human, global, AuthorityAction.READ));
+  }
+
+  @Test
   void agent_manager_is_narrowed_unless_human_explicitly_forces_and_children_get_no_exception() {
     assertEquals(
         StandardRole.CONTRIBUTOR,

@@ -86,7 +86,7 @@ class AuthorityCutoverRehearsalTest {
         2,
         jdbc.queryForObject(
             "SELECT count(*) FROM authority_accounts WHERE builtin IS NOT NULL", Integer.class));
-    assertEquals("LEGACY_SHARED", audience(shared));
+    assertEquals("HOME", audience(shared));
     assertEquals("HOME", audience(mixed));
     assertEquals("HOME", audience(privateRoot));
     assertEquals("HOME", audience(personal));
@@ -134,7 +134,7 @@ class AuthorityCutoverRehearsalTest {
     var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
     var catalogue = InformationFixtures.catalogue(jdbc, work, access, Clock.systemUTC());
     var router = router(catalogue, access, members);
-    assertEquals(Set.copyOf(shared.revisions()), listed(router, "reader"));
+    assertTrue(listed(router, "reader").isEmpty());
     assertTrue(listed(router, "app").isEmpty());
     // A contributor's creation evidence never supplies audience control.
     assertNotEquals(
@@ -149,17 +149,17 @@ class AuthorityCutoverRehearsalTest {
             "SELECT home_scope_id FROM information_resources WHERE id=?",
             UUID.class,
             shared.root()));
-    assertEquals(2, policyVersions(shared));
+    assertEquals(3, policyVersions(shared));
     // Known receipt is recovered without making a second audience mutation.
     assertEquals(Code.OK, audienceFrame(router, "manager", "share", shared, publish).code());
-    assertEquals(2, policyVersions(shared));
+    assertEquals(3, policyVersions(shared));
     members.remove("global", "creator");
     assertEquals(Set.copyOf(shared.revisions()), listed(router, "app"));
     assertEquals(
         Code.OK, audienceFrame(router, "manager", "unshare", shared, UUID.randomUUID()).code());
     assertTrue(listed(router, "reader").isEmpty());
     assertTrue(listed(router, "app").isEmpty());
-    assertEquals(3, policyVersions(shared));
+    assertEquals(4, policyVersions(shared));
 
     // Unsupported Global intake remains a refusal even for a human deployment administrator.
     jdbc.update("UPDATE admins SET server_admin=true WHERE handle='manager'");
@@ -207,7 +207,7 @@ class AuthorityCutoverRehearsalTest {
     assertEquals("QUARANTINED", audience(unknownManual));
     assertFalse(
         records.readable(
-            new InformationContext("app", InformationContext.Selection.shared()).withView(true),
+            new InformationContext("app", InformationContext.Selection.globalRead()).withView(true),
             shared.revisions().getFirst()));
   }
 
@@ -322,7 +322,7 @@ class AuthorityCutoverRehearsalTest {
             "information.list",
             Map.of(
                 "scope",
-                Map.of("kind", "shared"),
+                Map.of("kind", "global_read"),
                 "view",
                 io.aeyer.plowshare.protocol.InformationContent.VIEW));
     assertEquals(Code.OK, result.code(), result.said());

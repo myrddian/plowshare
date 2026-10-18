@@ -290,7 +290,7 @@ export function constrain(graph) {
       field(s,'revisions',{minItems:1,maxItems:16,uniqueItems:true,element:canonicalUuid});
       field(s,'revision',canonicalUuid); field(s,'requestId',canonicalUuid);
       add(s,{maxJsonBytes:8388608});
-      if(op==='information.interchange.import') rules(s,not(eq('scope.kind','shared')));
+      if(op==='information.interchange.import') rules(s,not(eq('scope.kind','global_read')));
     }
     if (op.startsWith('information.')) {
       const accountOperations = ['upload','list','status','await','read','tags','tags.groups','exclude','unexclude','withdraw','restore','delete','retry','rebuild','allowance','share','unshare'];

@@ -23,7 +23,7 @@ public final class InformationScopes {
     }
     if (!(scope instanceof Map<?, ?> fields))
       throw new CallerFault("information scope must be an object");
-    if (!java.util.Set.of("kind", "project", "includeShared", "account")
+    if (!java.util.Set.of("kind", "project", "includeGlobal", "account")
         .containsAll(fields.keySet())) throw new CallerFault("Unsupported information scope field");
     if (payload.get("project") != null)
       throw new CallerFault("Use either scope or project, not both");
@@ -31,7 +31,7 @@ public final class InformationScopes {
     if (!(kind instanceof String name)) throw new CallerFault("information scope needs a kind");
     if (name.equalsIgnoreCase("account")) {
       if (fields.containsKey("project")
-          || fields.containsKey("includeShared")
+          || fields.containsKey("includeGlobal")
           || !(fields.get("account") instanceof String id))
         throw new CallerFault("Account scope requires only its explicit account UUID");
       try {
@@ -47,19 +47,20 @@ public final class InformationScopes {
     Object project = fields.get("project");
     if (project != null && !(project instanceof String))
       throw new CallerFault("scope project must be a name");
-    Object shared = fields.get("includeShared");
-    if (fields.containsKey("includeShared") && !(shared instanceof Boolean))
-      throw new CallerFault("includeShared must be boolean");
+    Object shared = fields.get("includeGlobal");
+    if (fields.containsKey("includeGlobal") && !(shared instanceof Boolean))
+      throw new CallerFault("includeGlobal must be boolean");
     try {
       var type = InformationContext.Scope.valueOf(name.toUpperCase(java.util.Locale.ROOT));
-      if (type == InformationContext.Scope.SHARED && Boolean.TRUE.equals(shared))
-        throw new IllegalArgumentException("Shared cannot include another audience");
+      if (type == InformationContext.Scope.GLOBAL_READ && fields.containsKey("includeGlobal"))
+        throw new IllegalArgumentException("global_read does not take includeGlobal");
       return new InformationContext.Selection(
           type,
           (String) project,
-          type != InformationContext.Scope.SHARED && (shared == null || (Boolean) shared));
+          type != InformationContext.Scope.GLOBAL_READ && (shared == null || (Boolean) shared));
     } catch (IllegalArgumentException invalid) {
-      throw new CallerFault("information scope must be personal, project with a name, or shared");
+      throw new CallerFault(
+          "information scope must be personal, project with a name, or global_read");
     }
   }
 }

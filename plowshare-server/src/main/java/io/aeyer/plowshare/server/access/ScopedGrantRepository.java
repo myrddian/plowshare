@@ -61,6 +61,9 @@ public interface ScopedGrantRepository {
     }
   }
 
+  /** Live universal GLOBAL_READ membership; no stored grant, issuer or project membership. */
+  boolean globalReadEligible(io.aeyer.plowshare.server.access.AuthorityIds.AccountId account);
+
   /** Returns current effective chains only, never direct-account bindings for an agent. */
   List<Binding> live(GrantRecipient recipient);
 

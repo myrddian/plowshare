@@ -47,7 +47,7 @@ try {
     return tags.top >= text.bottom;
   }), true, 'Tag metadata belongs below the document text.');
   assert.ok(fixture.frames.filter(frame => frame.type === 'information.read' && frame.payload.revision === hooks.id).length >= 2);
-  await expect(panel.locator('[data-scope]')).toHaveValue('shared');
+  await expect(panel.locator('[data-scope]')).toHaveValue('global_read');
   await expect(panel.locator('[data-scope]')).toBeDisabled();
   await library.screenshot({ path: join(tmpdir(), 'plowshare-manual-reader.png') });
   const updated = { ...index, id: 'cccccccc-0000-0000-0000-000000000003', text: '# Updated manual\n\n[Hooks](plowshare-manual:12-hooks)' };

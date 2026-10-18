@@ -164,15 +164,15 @@ the server does not upload these documents automatically at startup.
 CLI listing:
 
 ```sh
-bin/plowshare-cli information list '{"scope":{"kind":"shared"},"filter":{"tags":["plowshare-manual"]},"limit":100}'
-bin/plowshare-cli information read '{"scope":{"kind":"shared"},"revision":"<revision-uuid>","offset":0,"limit":8192}'
+bin/plowshare-cli information list '{"scope":{"kind":"global_read"},"filter":{"tags":["plowshare-manual"]},"limit":100}'
+bin/plowshare-cli information read '{"scope":{"kind":"global_read"},"revision":"<revision-uuid>","offset":0,"limit":8192}'
 ```
 
 In the TUI:
 
 ```text
-/information list --scope shared {"filter":{"tags":["plowshare-manual"]},"limit":100}
-/information read --scope shared {"revision":"<revision-uuid>","offset":0,"limit":8192}
+/information list --scope global_read {"filter":{"tags":["plowshare-manual"]},"limit":100}
+/information read --scope global_read {"revision":"<revision-uuid>","offset":0,"limit":8192}
 ```
 
 Use the returned end offset to continue a long chapter. Reading source text does

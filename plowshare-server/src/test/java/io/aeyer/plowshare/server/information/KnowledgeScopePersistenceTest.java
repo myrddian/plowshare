@@ -160,7 +160,7 @@ class KnowledgeScopePersistenceTest {
             project("outsider"),
             personal("creator"),
             new InformationContext("writer", InformationContext.Selection.project("two")),
-            new InformationContext("creator", InformationContext.Selection.shared()))) {
+            new InformationContext("creator", InformationContext.Selection.globalRead()))) {
       assertThrows(
           NotFoundFault.class,
           () -> work.inTransaction(() -> records.lockResource(context, first.revision(), false)));

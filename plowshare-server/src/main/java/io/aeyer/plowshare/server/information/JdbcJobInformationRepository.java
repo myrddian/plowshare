@@ -39,7 +39,7 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
           revision,
           context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
           context.selection().project(),
-          context.selection().includeShared());
+          context.selection().includeGlobal());
   }
 
   public void inherit(String source, String target) {
@@ -92,6 +92,6 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
             account,
             selection.scope().name().toLowerCase(Locale.ROOT),
             selection.project(),
-            selection.includeShared()));
+            selection.includeGlobal()));
   }
 }

@@ -18,7 +18,7 @@ export function scopeKey(scope: InformationScope): string {
   return JSON.stringify([
     scope.kind,
     scope.kind === 'project' ? scope.project : null,
-    scope.includeShared ?? scope.kind !== 'shared',
+    scope.kind === 'global_read' ? false : (scope.includeGlobal ?? true),
   ]);
 }
 export function recoveryContext(

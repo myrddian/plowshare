@@ -371,6 +371,7 @@ type SelectionDtoScope struct {
 	Variant1 *SelectionDtoScopeVariant1Dto
 	Variant2 *SelectionDtoScopeVariant2Dto
 	Variant3 *SelectionDtoScopeVariant3Dto
+	Variant4 *SelectionDtoScopeVariant4Dto
 }
 
 func (v SelectionDtoScope) MarshalJSON() ([]byte, error) {
@@ -388,6 +389,10 @@ func (v SelectionDtoScope) MarshalJSON() ([]byte, error) {
 		chosen = v.Variant3
 		count++
 	}
+	if v.Variant4 != nil {
+		chosen = v.Variant4
+		count++
+	}
 	if count != 1 {
 		return nil, errors.New("select exactly one union variant")
 	}
@@ -403,7 +408,7 @@ func (v *SelectionDtoScope) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape110", data) {
+	if matches("shape108", data) {
 		var chosen SelectionDtoScopeVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -411,7 +416,7 @@ func (v *SelectionDtoScope) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape111", data) {
+	if matches("shape110", data) {
 		var chosen SelectionDtoScopeVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -419,24 +424,37 @@ func (v *SelectionDtoScope) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
+	if matches("shape111", data) {
+		var chosen SelectionDtoScopeVariant4Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant4 = &chosen
+		return nil
+	}
 	return errors.New("invalid union")
 }
 
 // SelectionDtoScopeVariant1Dto is the explicit SelectionDtoScopeVariant1Dto protocol shape.
 type SelectionDtoScopeVariant1Dto struct {
-	IncludeShared *bool  `json:"includeShared,omitempty"`
+	IncludeGlobal *bool  `json:"includeGlobal,omitempty"`
 	Kind          string `json:"kind"`
 }
 
 // SelectionDtoScopeVariant2Dto is the explicit SelectionDtoScopeVariant2Dto protocol shape.
 type SelectionDtoScopeVariant2Dto struct {
-	IncludeShared *bool  `json:"includeShared,omitempty"`
-	Kind          string `json:"kind"`
-	Project       string `json:"project"`
+	Kind string `json:"kind"`
 }
 
 // SelectionDtoScopeVariant3Dto is the explicit SelectionDtoScopeVariant3Dto protocol shape.
 type SelectionDtoScopeVariant3Dto struct {
+	IncludeGlobal *bool  `json:"includeGlobal,omitempty"`
+	Kind          string `json:"kind"`
+	Project       string `json:"project"`
+}
+
+// SelectionDtoScopeVariant4Dto is the explicit SelectionDtoScopeVariant4Dto protocol shape.
+type SelectionDtoScopeVariant4Dto struct {
 	Account string `json:"account"`
 	Kind    string `json:"kind"`
 }

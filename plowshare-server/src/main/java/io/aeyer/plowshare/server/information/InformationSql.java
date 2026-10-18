@@ -15,18 +15,45 @@ public final class InformationSql {
     if (!java.util.Set.of("d", "r", "information_row")
         .contains(documentAlias == null ? "" : documentAlias))
       throw new IllegalArgumentException("document alias must belong to the repository vocabulary");
-    return new Filter(
-        "information_readable("
-            + documentAlias
-            + ".id, ?, ?, ?, ?) AND "
-            + content(context, documentAlias).sql(),
-        java.util.Collections.unmodifiableList(
+    var args =
+        new java.util.ArrayList<Object>(
             java.util.Arrays.asList(
                 context.account(),
                 context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
                 context.selection().project(),
-                context.selection().includeShared(),
-                context.typedView())));
+                context.selection().includeGlobal(),
+                context.typedView()));
+    String predicate =
+        "information_readable("
+            + documentAlias
+            + ".id, ?, ?, ?, ?) AND "
+            + content(context, documentAlias).sql();
+    var boundary = boundary(context, documentAlias + ".id");
+    predicate += " AND " + boundary.sql();
+    args.addAll(boundary.arguments());
+    return new Filter(predicate, args);
+  }
+
+  /** Intersect every read path with the operation ceiling, including dependency closure. */
+  public static Filter boundary(InformationContext context, String revision) {
+    if (!java.util.Set.of(
+            "d.id",
+            "r.id",
+            "information_row.id",
+            "coalesce(?,information_navigation_head(?))",
+            "information_navigation_head(?)",
+            "information_navigation_head(e.source)",
+            "coalesce(e.pinned_revision,information_navigation_head(e.target))",
+            "coalesce(NULL::uuid,information_navigation_head(e.source))")
+        .contains(revision == null ? "" : revision))
+      throw new IllegalArgumentException("revision must belong to the repository vocabulary");
+    if (context.readBoundary() == null) return new Filter("true", List.of());
+    return new Filter(
+        "knowledge_document_in_boundary(" + revision + ",?,?,?)",
+        java.util.Arrays.asList(
+            context.account(),
+            context.readBoundary().home().project(),
+            context.readBoundary().globalRead()));
   }
 
   /** Legacy readers omit every typed or explicit-only revision before discovery and paging. */
@@ -50,22 +77,28 @@ public final class InformationSql {
   public static Filter relationshipNeighbour(InformationContext context, boolean outgoing) {
     String neighbour = outgoing ? "e.target" : "e.source";
     String pin = outgoing ? "e.pinned_revision" : "NULL::uuid";
-    return new Filter(
-        "(information_navigation_own_readable(coalesce("
-            + pin
-            + ",information_navigation_head("
-            + neighbour
-            + ")),?,?) AND information_reference_readable(coalesce("
-            + pin
-            + ",information_navigation_head("
-            + neighbour
-            + ")),?,?) OR information_navigation_reference_visible("
-            + neighbour
-            + ",?,?))",
-        java.util.Arrays.asList(
-            context.account(), context.selection().project(),
-            context.account(), context.selection().project(),
-            context.account(), context.selection().project()));
+    var visible =
+        new Filter(
+            "(information_navigation_own_readable(coalesce("
+                + pin
+                + ",information_navigation_head("
+                + neighbour
+                + ")),?,?) AND information_reference_readable(coalesce("
+                + pin
+                + ",information_navigation_head("
+                + neighbour
+                + ")),?,?) OR information_navigation_reference_visible("
+                + neighbour
+                + ",?,?))",
+            java.util.Arrays.asList(
+                context.account(), context.selection().project(),
+                context.account(), context.selection().project(),
+                context.account(), context.selection().project()));
+    var boundary =
+        boundary(context, "coalesce(" + pin + ",information_navigation_head(" + neighbour + "))");
+    var args = new java.util.ArrayList<Object>(visible.arguments());
+    args.addAll(boundary.arguments());
+    return new Filter("(" + visible.sql() + ") AND " + boundary.sql(), args);
   }
 
   public record Filter(String sql, List<Object> arguments) {

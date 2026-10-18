@@ -232,7 +232,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID expectedRevision,
       InformationContent.Typing typing) {
     access.requireWork(context);
-    if (context.selection().scope() == InformationContext.Scope.SHARED)
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault(
           "create in a personal or project namespace, then explicitly share a revision");
     if (request == null

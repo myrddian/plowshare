@@ -3762,6 +3762,14 @@ public final class JobRuntime {
       RunHooks runHooks,
       Home toolHome,
       io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+    var runInformation =
+        informationAccess == null
+            ? null
+            : informationAccess.within(
+                operation == null
+                    ? io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(toolHome)
+                    : new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+                        operation.home(), operation.globalRead() && !confined));
     Map<String, AgentTool> live = new java.util.HashMap<>();
     scopedTools
         .tools(toolHome, definition.name(), sessionId, cancelled, callerHandle)
@@ -3800,7 +3808,7 @@ public final class JobRuntime {
               definition.name(),
               sessionId,
               ownerOf(callerHandle, sessionId, transcript.conversationId())));
-    if (codeMap != null && informationInputs != null && informationAccess != null) {
+    if (codeMap != null && informationInputs != null && runInformation != null) {
       String codeOwner = ownerOf(callerHandle, sessionId, transcript.conversationId());
       if (codeOwner != null)
         codeMap.onRevisionRead(
@@ -3808,7 +3816,7 @@ public final class JobRuntime {
                 informationInputs
                     .reads(
                         transcript.conversationId(),
-                        informationAccess
+                        runInformation
                             .forRun(codeOwner, home)
                             .withCorpus(
                                 io.aeyer.plowshare.server.information.InformationContext.Corpus
@@ -4024,7 +4032,7 @@ public final class JobRuntime {
             informationAccess == null
                 ? shared.forRun(cancelled)
                 : shared
-                    .forRun(cancelled, informationAccess, callerHandle, budget, sessionId)
+                    .forRun(cancelled, runInformation, callerHandle, budget, sessionId)
                     .withInputs(informationInputs, transcript.conversationId());
       }
       if (tool instanceof MemoryTools.Write write)
@@ -4053,7 +4061,7 @@ public final class JobRuntime {
         tool =
             information
                 .forRun(
-                    informationAccess,
+                    runInformation,
                     informationInputs,
                     callerHandle,
                     transcript.conversationId(),
@@ -4065,10 +4073,10 @@ public final class JobRuntime {
                       operations.require(operation);
                     });
       }
-      if (informationAccess != null && tool instanceof DocumentTools.Search search) {
+      if (runInformation != null && tool instanceof DocumentTools.Search search) {
         tool =
             search.forRun(
-                informationAccess,
+                runInformation,
                 callerHandle,
                 informationInputs,
                 transcript.conversationId(),
@@ -4078,10 +4086,10 @@ public final class JobRuntime {
                   operations.require(operation);
                 });
       }
-      if (informationAccess != null && tool instanceof DocumentTools.AgentList listing) {
+      if (runInformation != null && tool instanceof DocumentTools.AgentList listing) {
         tool =
             listing.forRun(
-                informationAccess, callerHandle, informationInputs, transcript.conversationId());
+                runInformation, callerHandle, informationInputs, transcript.conversationId());
       }
       offered.put(name, tool);
     }

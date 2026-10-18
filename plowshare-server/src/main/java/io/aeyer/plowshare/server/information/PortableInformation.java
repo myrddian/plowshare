@@ -63,9 +63,9 @@ public final class PortableInformation implements InformationInterchangeService 
                 new InformationContext.Selection(
                     InformationContext.Scope.valueOf(scope.kind().toUpperCase(Locale.ROOT)),
                     scope.project(),
-                    scope.includeShared() == null
-                        ? !scope.kind().equals("shared")
-                        : scope.includeShared()))
+                    scope.includeGlobal() == null
+                        ? !scope.kind().equals("global_read")
+                        : scope.includeGlobal()))
             .withView(true);
     if (request instanceof InformationRequest.InterchangeImport q)
       return new InformationResponse.InterchangeImported(importBundle(context, q, session));

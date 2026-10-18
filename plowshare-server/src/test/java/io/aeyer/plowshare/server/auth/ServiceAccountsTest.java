@@ -179,7 +179,7 @@ class ServiceAccountsTest {
         new io.aeyer.plowshare.server.information.InformationAccess(
             new EffectiveProjectPermissions(members));
     var context = information.forRun(principal, Home.of("automation"));
-    assertFalse(context.selection().includeShared());
+    assertFalse(context.selection().includeGlobal());
     information.requireSelection(context);
     assertThrows(CallerFault.class, () -> information.resolve(principal, null));
     assertThrows(

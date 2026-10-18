@@ -56,7 +56,7 @@ public final class JdbcInformationContentRepository implements InformationConten
             context.account(),
             context.selection().scope().name().toLowerCase(Locale.ROOT),
             context.selection().project(),
-            context.selection().includeShared()))) throw InformationContentTypeService.absent();
+            context.selection().includeGlobal()))) throw InformationContentTypeService.absent();
   }
 
   @Override

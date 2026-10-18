@@ -134,7 +134,7 @@ class DocumentPoliciesTest {
     document("e-quarantined");
     assign(hidden, "bob", InformationContext.Scope.PERSONAL, null);
     assign(personal, "alice", InformationContext.Scope.PERSONAL, null);
-    assign(shared, "bob", InformationContext.Scope.SHARED, null);
+    assign(shared, "bob", InformationContext.Scope.GLOBAL_READ, null);
     assign(project, "alice", InformationContext.Scope.PROJECT, "research");
 
     var personalFilter =
@@ -156,7 +156,7 @@ class DocumentPoliciesTest {
     assertEquals(List.of(shared, project), read(projectFilter, ""));
     var sharedFilter =
         io.aeyer.plowshare.server.information.InformationSql.read(
-            access.admitted(access.resolve("bob", InformationContext.Selection.shared())), "d");
+            access.admitted(access.resolve("bob", InformationContext.Selection.globalRead())), "d");
     assertEquals(List.of(shared), read(sharedFilter, ""));
     var noShared = new InformationContext.Selection(InformationContext.Scope.PERSONAL, null, false);
     assertEquals(
@@ -203,7 +203,12 @@ class DocumentPoliciesTest {
         CallerFault.class,
         () ->
             assignments.assign(
-                "alice", id, "alice", InformationContext.Scope.SHARED, null, "self appointment"));
+                "alice",
+                id,
+                "alice",
+                InformationContext.Scope.GLOBAL_READ,
+                null,
+                "self appointment"));
     var disabled =
         new DocumentPolicyAssignments(
             new JdbcDocumentPolicyRepository(jdbc),
@@ -242,7 +247,7 @@ class DocumentPoliciesTest {
             String.class,
             id));
     assertThrows(
-        NotFoundFault.class, () -> assign(id, "alice", InformationContext.Scope.SHARED, null));
+        NotFoundFault.class, () -> assign(id, "alice", InformationContext.Scope.GLOBAL_READ, null));
     assertEquals(
         1,
         jdbc.queryForObject("SELECT count(*) FROM information_policy_assignments", Integer.class));
@@ -1940,7 +1945,7 @@ class DocumentPoliciesTest {
     assertTrue(
         io.aeyer.plowshare.server.information.InformationFixtures.views(
                 catalogue.list(
-                    access.resolve("alice", InformationContext.Selection.shared()), 20, 0))
+                    access.resolve("alice", InformationContext.Selection.globalRead()), 20, 0))
             .isEmpty());
     assertThrows(
         CallerFault.class,

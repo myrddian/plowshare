@@ -132,7 +132,7 @@ public final class PassageIndex implements UsageAware {
       throw new IllegalStateException("Passage query requires its authenticated reader");
     var selection =
         home.isGlobal()
-            ? io.aeyer.plowshare.server.information.InformationContext.Selection.shared()
+            ? io.aeyer.plowshare.server.information.InformationContext.Selection.globalRead()
             : io.aeyer.plowshare.server.information.InformationAccess.projectSelection(
                 scope.account(), home.project());
     var context = access.resolve(scope.account(), selection);

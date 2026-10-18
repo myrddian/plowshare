@@ -118,7 +118,9 @@ public final class InformationContentInputs {
             ? new InformationRequest.Scope(
                 admitted.scope().name().toLowerCase(java.util.Locale.ROOT),
                 admitted.project(),
-                admitted.includeShared())
+                admitted.scope() == InformationContext.Scope.GLOBAL_READ
+                    ? null
+                    : admitted.includeGlobal())
             : scope);
     selection.put("corpus", corpus);
     selection.put("view", view);

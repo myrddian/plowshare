@@ -131,7 +131,7 @@ class InformationCollectionsTest {
     assertTrue(
         io.aeyer.plowshare.server.information.InformationFixtures.views(
                 catalogue.list(
-                    new InformationContext("reader", InformationContext.Selection.shared()),
+                    new InformationContext("reader", InformationContext.Selection.globalRead()),
                     100,
                     0,
                     "report"))

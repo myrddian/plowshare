@@ -26,6 +26,16 @@ public final class JdbcScopedGrantRepository implements ScopedGrantRepository {
   }
 
   @Override
+  public boolean globalReadEligible(AccountId account) {
+    Objects.requireNonNull(account);
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM authority_accounts a WHERE a.id=? AND information_global_read_member(a.legacy_handle))",
+            Boolean.class,
+            account.value()));
+  }
+
+  @Override
   public List<Binding> live(GrantRecipient recipient) {
     Objects.requireNonNull(recipient);
     return List.copyOf(

@@ -2119,26 +2119,13 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       },
       "additionalProperties": false
     },
-    "shape184": {
-      "const": "personal"
-    },
-    "shape185": {
-      "const": "shared"
-    },
     "shape183": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/shape184"
-        },
-        {
-          "$ref": "#/$defs/shape185"
-        }
-      ]
+      "const": "personal"
     },
     "shape182": {
       "type": "object",
       "properties": {
-        "includeShared": {
+        "includeGlobal": {
           "$ref": "#/$defs/shape29"
         },
         "kind": {
@@ -2150,10 +2137,25 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
+    "shape185": {
+      "const": "global_read"
+    },
+    "shape184": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/shape185"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
     "shape186": {
       "type": "object",
       "properties": {
-        "includeShared": {
+        "includeGlobal": {
           "$ref": "#/$defs/shape29"
         },
         "kind": {
@@ -2195,6 +2197,9 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       "anyOf": [
         {
           "$ref": "#/$defs/shape182"
+        },
+        {
+          "$ref": "#/$defs/shape184"
         },
         {
           "$ref": "#/$defs/shape186"

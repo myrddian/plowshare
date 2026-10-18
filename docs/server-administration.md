@@ -178,12 +178,13 @@ Existing workspace `writePaths` restrictions still apply.
 
 These limits follow work into queued jobs, information tasks and internal message
 routing. Supply an explicit server project or a resource ID belonging to an allowed
-project. Service tokens cannot fall back to Personal or global work, read the shared
-information catalogue, administer the server, or root/sync a local client checkout.
-For information requests, select the project without shared catalogue inclusion:
+project. Service tokens cannot fall back to Personal or Global execution, administer the
+server, or root/sync a local client checkout. Authenticated service credentials
+can read knowledge whose current root audience is GLOBAL_READ. Project searches
+include that knowledge by default. To narrow information discovery to one project:
 
 ```json
-{"scope":{"kind":"project","project":"automation","includeShared":false}}
+{"scope":{"kind":"project","project":"automation","includeGlobal":false}}
 ```
 
 Each token has a durable execution identity, shown as `principal` in its metadata:

@@ -308,7 +308,7 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                         {
                             "kind": "project",
                             "project": config.project,
-                            "includeShared": False,
+                            "includeGlobal": False,
                         },
                     )
                     content = row["text"]
@@ -347,7 +347,7 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                         {
                             "kind": "project",
                             "project": config.project,
-                            "includeShared": False,
+                            "includeGlobal": False,
                         },
                     )
                     # The second character occupies two UTF-16 units. Follow

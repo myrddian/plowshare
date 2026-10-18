@@ -329,7 +329,7 @@ export class LibraryClient {
       const row = await this.checked(
         request('information.read', {
           revision: id,
-          scope: { kind: 'personal', includeShared: true },
+          scope: { kind: 'personal', includeGlobal: true },
           offset,
           limit: 8192,
         }),

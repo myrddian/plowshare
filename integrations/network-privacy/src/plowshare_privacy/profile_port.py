@@ -7,11 +7,11 @@ from typing import Protocol
 
 from plowshare import Client
 from plowshare.contracts import (
-    InformationAcquirePayloadDtoScopeVariant2Dto,
     InformationFilterDto,
     InformationListRequest,
     InformationReviseRequest,
     InformationUploadRequest,
+    SelectionDtoScopeVariant3Dto,
 )
 
 from .contracts import Configuration, integer, text, timestamp, uuid
@@ -29,8 +29,8 @@ class SdkProfilePort:
         self, client: Client, config: Configuration, reader: RetainedSourceReader
     ):
         self.client, self.reader = client, reader
-        self.scope = InformationAcquirePayloadDtoScopeVariant2Dto(
-            kind="project", project=config.project, include_shared=False
+        self.scope = SelectionDtoScopeVariant3Dto(
+            kind="project", project=config.project, include_global=False
         )
 
     async def versions(self) -> tuple[ProfileVersion, ...]:

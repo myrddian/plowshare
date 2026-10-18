@@ -287,7 +287,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     try { session = await authenticateConfigured(opts.url, env, abort.signal, text => process.stderr.write(text + '\n')); }
     finally { clearTimeout(authTimeout); }
     const destination = opts.global ? GLOBAL_ACCOUNT : 'personal';
-    const scope = opts.global ? { kind: 'account', account: GLOBAL_ACCOUNT } : { kind: 'personal', includeShared: true };
+    const scope = opts.global ? { kind: 'account', account: GLOBAL_ACCOUNT } : { kind: 'personal', includeGlobal: true };
     const filename = hash(JSON.stringify(opts.global ? [opts.url, session.handle, destination] : [opts.url, session.handle])) + '.json';
     const state = opts.state ?? join(dirname(credentialDirectory(env)), 'manual', filename);
     if (inside(ROOT, resolve(state))) throw new Error('Keep the private manual journal outside the source checkout.');
@@ -311,7 +311,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     } };
     await publishManual(plan, new InformationClient(transport, scope), {
       journal, destination, persist: value => saveJournal(state, value),
-      sharedClient: new InformationClient(transport, { kind: 'shared' }),
+      sharedClient: new InformationClient(transport, { kind: 'global_read' }),
       share: opts.share, resume: opts.resume, readinessMs: opts.readinessMs, signal: abort.signal,
       progress: row => process.stdout.write(`${row.id}\t${row.revision}\t${row.shared ? 'shared' : 'readable (sharing not requested)'}\n`),
     });

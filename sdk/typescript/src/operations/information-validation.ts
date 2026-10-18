@@ -223,7 +223,7 @@ export function informationPayloadProblem(
         return 'corpus must be documents or code';
     } else if (key === 'scope') {
       if (!value || typeof value !== 'object' || isList(value))
-        return 'scope must be a personal, project or shared selection';
+        return 'scope must be a personal, project or global_read selection';
       const scope = value as Record<string, unknown>;
       if (
         scope['kind'] === 'account' &&
@@ -254,7 +254,7 @@ export function informationPayloadProblem(
       )
         return 'this operation does not support account knowledge targets';
       if (
-        !['personal', 'project', 'shared', 'account'].includes(
+        !['personal', 'project', 'global_read', 'account'].includes(
           String(scope['kind']),
         ) ||
         (scope['kind'] === 'project' &&
@@ -264,15 +264,16 @@ export function informationPayloadProblem(
       if (
         Object.keys(scope).some(
           (key) =>
-            !['kind', 'project', 'includeShared', 'account'].includes(key),
+            !['kind', 'project', 'includeGlobal', 'account'].includes(key),
         ) ||
-        ('includeShared' in scope &&
-          typeof scope['includeShared'] !== 'boolean') ||
+        ('includeGlobal' in scope &&
+          typeof scope['includeGlobal'] !== 'boolean') ||
+        (scope['kind'] === 'global_read' && 'includeGlobal' in scope) ||
         (scope['kind'] !== 'project' && 'project' in scope) ||
         (scope['kind'] !== 'account' && 'account' in scope) ||
         (scope['kind'] === 'account' &&
           (scope['account'] !== '00000000-0000-0000-0000-000000000004' ||
-            'includeShared' in scope))
+            'includeGlobal' in scope))
       )
         return 'invalid information scope fields';
     } else if (

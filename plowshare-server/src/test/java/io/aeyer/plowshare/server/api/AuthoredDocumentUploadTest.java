@@ -119,7 +119,7 @@ class AuthoredDocumentUploadTest {
               assertEquals(actor, context.account());
               assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
               assertEquals("app", context.selection().project());
-              assertFalse(context.selection().includeShared());
+              assertTrue(context.selection().includeGlobal());
               return new InformationCatalogue.Admission(revision, UUID.randomUUID(), true);
             });
     when(jobs.submitInformation(anyString(), any(), any(), anyList(), any()))
