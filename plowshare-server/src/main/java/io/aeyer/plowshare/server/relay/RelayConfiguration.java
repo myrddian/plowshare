@@ -99,16 +99,36 @@ public class RelayConfiguration {
       RelayPublicationSignals signals,
       io.aeyer.plowshare.server.events.Dispatcher dispatcher,
       RelayWorkerProperties properties,
-      RelayProperties internal) {
-    return new RelayInternalWorkers(
-        sources,
-        inboxes,
-        consumers,
-        relay,
-        signals,
-        dispatcher,
-        properties,
-        internal.isInternalEnabled());
+      RelayProperties internal,
+      org.springframework.beans.factory.ObjectProvider<RelayApprovalInbox> approvals) {
+    var workers =
+        new RelayInternalWorkers(
+            sources,
+            inboxes,
+            consumers,
+            relay,
+            signals,
+            dispatcher,
+            properties,
+            internal.isInternalEnabled());
+    workers.useApprovalInbox(approvals::getObject);
+    return workers;
+  }
+
+  @Bean
+  @DependsOnDatabaseInitialization
+  public RelayApprovalInboxRepository relayApprovalInboxRepository(
+      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, RelayConsumerRepository consumers) {
+    return new JdbcRelayApprovalInboxRepository(jdbc, transactions, relay, consumers);
+  }
+
+  @Bean
+  public RelayApprovalInbox relayApprovalInbox(
+      Relay relay,
+      RelayConsumerRepository consumers,
+      RelayApprovalInboxRepository repository,
+      io.aeyer.plowshare.server.approvals.ApprovalNotifications notifications) {
+    return new DurableRelayApprovalInbox(relay, consumers, repository, notifications);
   }
 
   @Bean
@@ -415,8 +435,18 @@ public class RelayConfiguration {
       RelayExecutions executions,
       RelayProperties properties,
       RelayOperationRepository operations,
-      RelayNativeRepository nativeInboxes) {
-    return new RelayMaintenance(
-        repository, deliveries, executions, properties, Instant::now, operations, nativeInboxes);
+      RelayNativeRepository nativeInboxes,
+      RelayApprovalInboxRepository approvals) {
+    var maintenance =
+        new RelayMaintenance(
+            repository,
+            deliveries,
+            executions,
+            properties,
+            Instant::now,
+            operations,
+            nativeInboxes);
+    maintenance.useApprovalInbox(approvals);
+    return maintenance;
   }
 }

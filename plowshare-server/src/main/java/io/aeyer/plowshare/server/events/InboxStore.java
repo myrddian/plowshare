@@ -28,6 +28,10 @@ public interface InboxStore {
   InboxItem noticeFromLog(
       String handle, String kind, String text, String log, String about, Instant at);
 
+  /** One retained notification per account/question, including repeated or concurrent delivery. */
+  InboxItem noticeOnceFromLog(
+      String handle, String kind, String text, String log, String about, Instant at);
+
   List<String> settle(String about, Instant at);
 
   List<InboxItem> list(String handle, boolean unreadOnly, int offset, int limit);

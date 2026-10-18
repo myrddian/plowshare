@@ -34,6 +34,14 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Semaphore capacity;
+  private boolean approvalDiscoveryFailed;
+  private java.util.function.Supplier<RelayApprovalInbox> approvalInboxes =
+      () -> RelayApprovalInbox.NONE;
+
+  /** Lazy composition avoids resolving agent/runtime dependencies while the broker is built. */
+  public void useApprovalInbox(java.util.function.Supplier<RelayApprovalInbox> adapter) {
+    approvalInboxes = Objects.requireNonNull(adapter);
+  }
 
   public RelayInternalWorkers(
       RelaySourceRepository sources,
@@ -78,7 +86,7 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
   }
 
   private void watch() {
-    String sourceCursor = null, nativeCursor = null;
+    String sourceCursor = null, nativeCursor = null, approvalCursor = null;
     boolean failed = false;
     boolean nativeFirst = false;
     try {
@@ -91,6 +99,14 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
           sourceCursor =
               topics.size() < pageSize ? null : RelaySourceRepository.cursor(topics.getLast());
           var bindings = inboxes.ready(nativeCursor, pageSize);
+          var approvalDiscovery = approvalWork(approvalCursor, pageSize);
+          var approvalAdapter = approvalDiscovery.adapter();
+          var approvalTopics = approvalDiscovery.topics();
+          if (nativeFirst)
+            for (var topic : approvalTopics)
+              launch(
+                  "approval/" + RelaySourceRepository.cursor(topic),
+                  () -> consumeApproval(approvalAdapter, topic));
           if (nativeFirst)
             for (var binding : bindings)
               launch("native/" + binding.cursor(), () -> consume(binding));
@@ -99,8 +115,17 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
           if (!nativeFirst)
             for (var binding : bindings)
               launch("native/" + binding.cursor(), () -> consume(binding));
-          nativeFirst = !nativeFirst;
           nativeCursor = bindings.size() < pageSize ? null : bindings.getLast().cursor();
+          if (!nativeFirst)
+            for (var topic : approvalTopics)
+              launch(
+                  "approval/" + RelaySourceRepository.cursor(topic),
+                  () -> consumeApproval(approvalAdapter, topic));
+          approvalCursor =
+              approvalTopics.size() < pageSize
+                  ? null
+                  : RelaySourceRepository.cursor(approvalTopics.getLast());
+          nativeFirst = !nativeFirst;
           failed = false;
         } catch (RuntimeException failure) {
           if (!failed)
@@ -145,6 +170,24 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
     }
   }
 
+  private record ApprovalDiscovery(
+      RelayApprovalInbox adapter, java.util.List<Relay.TopicKey> topics) {}
+
+  private ApprovalDiscovery approvalWork(String cursor, int limit) {
+    try {
+      var adapter = approvalInboxes.get();
+      var topics = adapter.ready(cursor, limit);
+      approvalDiscoveryFailed = false;
+      return new ApprovalDiscovery(adapter, topics);
+    } catch (RuntimeException failure) {
+      if (!approvalDiscoveryFailed)
+        LOG.warn(
+            "Approval Inbox discovery paused; pending decisions retained and other Relay work continues");
+      approvalDiscoveryFailed = true;
+      return new ApprovalDiscovery(RelayApprovalInbox.NONE, java.util.List.of());
+    }
+  }
+
   private void publish(Relay.TopicKey topic) {
     try {
       capacity.acquire();
@@ -154,6 +197,20 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
                 && !closed.get()
                 && !Thread.currentThread().isInterrupted();
             i++) if (!sources.publishNext(topic)) return;
+      } finally {
+        capacity.release();
+      }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private void consumeApproval(RelayApprovalInbox adapter, Relay.TopicKey topic) {
+    try {
+      capacity.acquire();
+      try {
+        if (!closed.get() && !Thread.currentThread().isInterrupted())
+          adapter.consume(topic, properties.getBatchSize());
       } finally {
         capacity.release();
       }

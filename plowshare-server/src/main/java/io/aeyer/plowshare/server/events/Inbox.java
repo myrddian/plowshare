@@ -67,6 +67,12 @@ public class Inbox {
     pushes.push(handle, changed(store.unread(handle)));
   }
 
+  /** A retried durable question must not create another Inbox item or revive a settled one. */
+  public void notifyOnceFromLog(String handle, String kind, String text, String log, String about) {
+    store.noticeOnceFromLog(handle, kind, text, log, about, clock.get());
+    pushes.push(handle, changed(store.unread(handle)));
+  }
+
   /**
    * The question {@code about} names is settled — answered, withdrawn, or no longer asked — so its
    * notices leave the inbox, and each account one left is told its new count at once, the way a new

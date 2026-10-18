@@ -10,12 +10,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Delivers durable approval questions through the shared person-delivery last mile. */
-public final class ApprovalDelivery {
+public final class ApprovalDelivery implements ApprovalNotifications {
 
   public static final String INBOX_KIND = "approval";
   private static final Logger log = LoggerFactory.getLogger(ApprovalDelivery.class);
 
-  private final RunApprovalStore store;
+  private final ApprovalNotificationStore store;
   private final PersonDelivery people;
   private final Consumer<String> settle;
 
@@ -23,7 +23,7 @@ public final class ApprovalDelivery {
     people.useInformationInputs(inputs);
   }
 
-  public ApprovalDelivery(RunApprovalStore store, PersonDelivery people) {
+  public ApprovalDelivery(ApprovalNotificationStore store, PersonDelivery people) {
     this(store, people, about -> {});
   }
 
@@ -31,7 +31,8 @@ public final class ApprovalDelivery {
    * @param settle takes a settled question's notices out of the inbox, by what they are {@link
    *     #about} — {@code events.Inbox.settle} (V68)
    */
-  public ApprovalDelivery(RunApprovalStore store, PersonDelivery people, Consumer<String> settle) {
+  public ApprovalDelivery(
+      ApprovalNotificationStore store, PersonDelivery people, Consumer<String> settle) {
     this.store = Objects.requireNonNull(store, "store");
     this.people = Objects.requireNonNull(people, "people");
     this.settle = Objects.requireNonNull(settle, "settle");
@@ -58,7 +59,7 @@ public final class ApprovalDelivery {
 
   /** Questions raised anywhere under the root run that has just been durably closed. */
   public void drain(String conversation) {
-    if (conversation == null) {
+    if (relayDelivery || conversation == null) {
       return;
     }
     guarded(() -> store.undelivered(conversation).forEach(this::deliver));
@@ -66,7 +67,43 @@ public final class ApprovalDelivery {
 
   /** Every question a restart found before its inbox delivery completed. */
   public void drainAll() {
+    if (relayDelivery) return;
     guarded(() -> store.undelivered().forEach(this::deliver));
+  }
+
+  private boolean relayDelivery;
+  private java.util.function.Predicate<String> notificationReady = ignored -> true;
+
+  /** Keep answers from racing the requesting root's transcript close and speaking claim. */
+  public void whenNotificationReady(java.util.function.Predicate<String> ready) {
+    notificationReady = Objects.requireNonNull(ready);
+  }
+
+  /** Relay owns request notifications in production; direct drains are a configured fallback. */
+  public void useRelayDelivery(boolean enabled) {
+    relayDelivery = enabled;
+  }
+
+  @Override
+  public boolean requested(String id, long projectId) {
+    var found = store.find(id);
+    if (found.isEmpty()) return true;
+    RunApproval approval = found.get();
+    if (approval.projectId() != projectId)
+      throw new IllegalArgumentException("Approval notification belongs to another project");
+    if (!RunApproval.ASKED.equals(approval.state())) return true;
+    if (!notificationReady.test(approval.conversation())) return false;
+    return deliver(approval);
+  }
+
+  @Override
+  public void resolved(String id, long projectId) {
+    var found = store.find(id);
+    if (found.isEmpty()) return;
+    var approval = found.get();
+    if (approval.projectId() != projectId)
+      throw new IllegalArgumentException("Approval notification belongs to another project");
+    if (!RunApproval.ASKED.equals(approval.state())) settled(id);
   }
 
   /**
@@ -114,16 +151,14 @@ public final class ApprovalDelivery {
                 approval.askedIn()));
   }
 
-  private void deliver(RunApproval approval) {
+  private boolean deliver(RunApproval approval) {
     Result result =
         people
-            .sendFromLog(
+            .sendQuestionFromLog(
                 approval.conversation(),
-                approval.agent(),
                 approval.handle(),
                 INBOX_KIND,
                 question(approval),
-                Speaker.approval(approval.id()),
                 about(approval.id()),
                 approval.askedIn())
             .result();
@@ -140,6 +175,7 @@ public final class ApprovalDelivery {
     } else if (result == Result.NOWHERE) {
       log.warn("approval {} has no conversation or account to tell", approval.id());
     }
+    return result == Result.DELIVERED;
   }
 
   private static void guarded(Runnable delivery) {

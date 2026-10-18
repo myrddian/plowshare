@@ -17,6 +17,68 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class RelayInternalWorkersTest {
+  @Test
+  void broken_approval_discovery_does_not_swallow_other_relay_publication() throws Exception {
+    var sources = mock(RelaySourceRepository.class);
+    var approvals = mock(RelayApprovalInbox.class);
+    var topic = new Relay.TopicKey(7, "job.started");
+    when(sources.pendingTopics(any(), anyInt())).thenReturn(List.of(topic));
+    when(approvals.ready(any(), anyInt()))
+        .thenThrow(new IllegalStateException("Inbox unavailable"));
+    var published = new CountDownLatch(1);
+    when(sources.publishNext(topic))
+        .thenAnswer(
+            call -> {
+              published.countDown();
+              return false;
+            });
+    try (var workers =
+        new RelayInternalWorkers(
+            sources,
+            mock(RelayNativeRepository.class),
+            mock(RelayConsumerRepository.class),
+            mock(Relay.class),
+            new LocalRelayPublicationSignals(),
+            mock(Dispatcher.class),
+            properties(),
+            true)) {
+      workers.useApprovalInbox(() -> approvals);
+      workers.start();
+      assertTrue(published.await(3, TimeUnit.SECONDS));
+    }
+  }
+
+  @Test
+  void approval_inboxes_are_polled_even_without_a_local_publication_signal() throws Exception {
+    var sources = mock(RelaySourceRepository.class);
+    var inboxes = mock(RelayNativeRepository.class);
+    var approvals = mock(RelayApprovalInbox.class);
+    var topic = new Relay.TopicKey(7, "approval.requested");
+    when(approvals.ready(any(), anyInt())).thenReturn(List.of(topic));
+    var delivered = new CountDownLatch(1);
+    doAnswer(
+            call -> {
+              delivered.countDown();
+              return null;
+            })
+        .when(approvals)
+        .consume(eq(topic), anyInt());
+    try (var workers =
+        new RelayInternalWorkers(
+            sources,
+            inboxes,
+            mock(RelayConsumerRepository.class),
+            mock(Relay.class),
+            new LocalRelayPublicationSignals(),
+            mock(Dispatcher.class),
+            properties(),
+            true)) {
+      workers.useApprovalInbox(() -> approvals);
+      workers.start();
+      assertTrue(delivered.await(3, TimeUnit.SECONDS));
+    }
+  }
+
   private RelayWorkerProperties properties() {
     var properties = new RelayWorkerProperties();
     properties.setIdleInterval(Duration.ofSeconds(1));

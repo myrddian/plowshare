@@ -59,6 +59,51 @@ class InboxStoreTest {
   }
 
   @Test
+  void concurrent_question_delivery_is_idempotent_and_does_not_revive_read_or_settled_items()
+      throws Exception {
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new java.util.ArrayList<java.util.concurrent.Future<InboxItem>>();
+      for (int i = 0; i < 8; i++)
+        calls.add(
+            pool.submit(
+                () ->
+                    store.noticeOnceFromLog(
+                        "enzo",
+                        "approval",
+                        "Review command",
+                        "cnv_fixture",
+                        "approval:apr_fixture",
+                        T0)));
+      var ids = new java.util.HashSet<String>();
+      for (var call : calls) ids.add(call.get().id());
+      assertEquals(1, ids.size());
+      assertEquals(1, store.unread("enzo"));
+      store.markRead("enzo", List.copyOf(ids), T0.plusSeconds(1));
+      store.noticeOnceFromLog(
+          "enzo",
+          "approval",
+          "Review command",
+          "cnv_fixture",
+          "approval:apr_fixture",
+          T0.plusSeconds(2));
+      assertEquals(0, store.unread("enzo"));
+      store.settle("approval:apr_fixture", T0.plusSeconds(3));
+      store.noticeOnceFromLog(
+          "enzo",
+          "approval",
+          "Review command",
+          "cnv_fixture",
+          "approval:apr_fixture",
+          T0.plusSeconds(4));
+      assertEquals(0, store.list("enzo", false, 0, 50).size());
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM user_inbox WHERE about='approval:apr_fixture'", Integer.class));
+    }
+  }
+
+  @Test
   void marking_read_touches_only_the_callers_rows() {
     InboxItem mine = store.deliver("enzo", null, "cnv_1", "ANSWERED", "a", T0);
     InboxItem theirs = store.deliver("sam", null, "cnv_2", "ANSWERED", "b", T0);

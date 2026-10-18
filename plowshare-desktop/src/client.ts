@@ -632,6 +632,8 @@ export class DesktopClient {
         promise: Promise<void>;
       }
     | undefined;
+  private approvalSnapshots = new Map<string, readonly Approval[]>();
+  private approvalRevision = 0;
   private contextReads = new Map<string, number>();
   private views = new Map<string, string>();
   private followed = '';
@@ -1369,6 +1371,7 @@ export class DesktopClient {
         ) {
           await this.usage.close();
           this.views.clear();
+          this.approvalSnapshots.clear();
           this.activity.reset(true);
         }
         this.state =
@@ -1731,7 +1734,7 @@ export class DesktopClient {
         notice = await this.startWorkflow(request);
         break;
       case 'run':
-        await this.run(
+        notice = await this.run(
           text(request.conversation, 'conversation', 512),
           text(request.agent, 'agent', 512),
           text(request.text, 'message'),
@@ -1895,6 +1898,11 @@ export class DesktopClient {
         this.dirtyHistories.has(id) &&
         [...this.views.values()].includes(id)
       );
+      // Another client or a harness continuation can end a turn whose job this window never
+      // submitted. Its log push is sufficient to refresh structured decisions; no Inbox push
+      // or locally tracked job handle is required.
+      await this.refresh();
+      this.emit();
     };
     const flight = work();
     this.catchups.set(id, flight);
@@ -1947,6 +1955,12 @@ export class DesktopClient {
       this.state.approvals = this.state.approvals.filter(
         (row) => row.id !== id,
       );
+      this.approvalRevision++;
+      for (const [source, rows] of this.approvalSnapshots)
+        this.approvalSnapshots.set(
+          source,
+          rows.filter((row) => row.id !== id),
+        );
       if (answer.job) {
         const held = this.lifecycle.accept(ticket, answer.job).events;
         job.id = answer.job;
@@ -2295,6 +2309,40 @@ export class DesktopClient {
       throw new Error(
         'This conversation already has an active or uncertain job.',
       );
+    if (this.state.mode === 'live') {
+      // A chat reply must not create a competing turn while a command is waiting. Read the
+      // owning API even if the notification/control was missed, then bind a narrow answer to
+      // exactly one stored request. Ambiguous replies leave every decision untouched.
+      const listed = approvalsOf(ok(await this.send(listingAsked(id))));
+      if (!listed)
+        throw new Error(
+          'Could not read command approvals. Refresh approvals before sending your message.',
+        );
+      this.state.approvals = [
+        ...this.state.approvals.filter((row) => row.conversation !== id),
+        ...listed,
+      ];
+      this.approvalSnapshots.set(`conversation:${id}`, listed);
+      this.emit();
+      const pending = this.state.approvals.filter(
+        (row) => row.state === 'asked' && row.conversation === id,
+      );
+      if (pending.length) {
+        const answer = task.trim().toLowerCase();
+        const decision = ['yes', 'approve', 'once'].includes(answer)
+          ? 'once'
+          : ['no', 'deny'].includes(answer)
+            ? 'deny'
+            : undefined;
+        const only = pending.length === 1 ? pending[0] : undefined;
+        if (only && decision) {
+          return await this.answerApproval(only.id, decision);
+        }
+        throw new Error(
+          `This conversation is waiting for ${pending.length} command approval${pending.length === 1 ? '' : 's'}. Use Approve or Deny on the pending request${pending.length === 1 ? '' : 's'} (${pending.map((row) => row.id).join(', ')}). Your message was not sent to the agent.`,
+        );
+      }
+    }
     const roster = this.state.agents[homeKey(conversation.project)] ?? [];
     if (
       !roster.some(
@@ -2535,9 +2583,9 @@ export class DesktopClient {
     flight.promise = (async () => {
       do {
         flight.dirty = false;
-        // Attended command questions belong to their conversation and have no
-        // pinned account recipient. Account-only reads find background questions
-        // but omit those foreground requests. Read both through their owning APIs.
+        const revision = this.approvalRevision;
+        // Read both scopes for older servers whose account listing omits foreground
+        // questions, and for conversations the person is authorized to inspect.
         const conversations = new Set([
           ...this.views.values(),
           ...this.state.jobs
@@ -2548,23 +2596,59 @@ export class DesktopClient {
             )
             .map((job) => job.conversation),
         ]);
-        const pages = await Promise.all(
-          [listingMyApprovals(), ...[...conversations].map(listingAsked)].map(
-            async (request) => {
-              const rows = approvalsOf(ok(await this.send(request)));
-              if (!rows)
-                throw new Error(
-                  'The server returned an unreadable approval listing.',
-                );
-              return rows;
-            },
-          ),
+        const requests = [
+          listingMyApprovals(),
+          ...[...conversations].map(listingAsked),
+        ];
+        const sources = [
+          'account',
+          ...[...conversations].map((id) => `conversation:${id}`),
+        ];
+        const pages = await Promise.allSettled(
+          requests.map(async (request) => {
+            const rows = approvalsOf(ok(await this.send(request)));
+            if (!rows)
+              throw new Error(
+                'The server returned an unreadable approval listing.',
+              );
+            return rows;
+          }),
         );
+        const failures: string[] = [];
+        if (generation !== this.generation || !this.state.connected) return;
+        if (revision !== this.approvalRevision) {
+          // An answer overtook this read. Reconcile rather than resurrect its old pending row.
+          flight.dirty = true;
+          continue;
+        }
+        for (const [index, page] of pages.entries()) {
+          const source = sources[index];
+          if (source === undefined)
+            throw new Error('Approval listing lost its scope.');
+          if (page.status === 'fulfilled') {
+            this.approvalSnapshots.set(source, page.value);
+          } else {
+            failures.push(errorMessage(page.reason));
+            // A failed scope must neither hide successful scopes nor erase previously read
+            // requests in that scope. They are still revalidated by approval.answer.
+          }
+        }
+        for (const source of this.approvalSnapshots.keys())
+          if (!sources.includes(source)) this.approvalSnapshots.delete(source);
         const listed = new Map<string, Approval>();
-        for (const rows of pages)
+        for (const rows of this.approvalSnapshots.values())
           for (const row of rows) listed.set(row.id, row);
-        if (generation === this.generation && this.state.connected)
+        if (generation === this.generation && this.state.connected) {
           this.state.approvals = [...listed.values()];
+          const previousError = this.state.approvalError;
+          this.state.approvalError = failures.length
+            ? `Could not refresh command approvals. Retry approvals before continuing. ${failures.join(' ')}`
+            : undefined;
+          if (this.state.approvalError)
+            this.state.backgroundError = this.state.approvalError;
+          else if (this.state.backgroundError === previousError)
+            delete this.state.backgroundError;
+        }
       } while (
         flight.dirty &&
         generation === this.generation &&
