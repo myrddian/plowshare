@@ -15,6 +15,11 @@ public interface DualEmbeddings {
     throw new UnsupportedOperationException("Document embedding authorization is unavailable");
   }
 
+  /** Binds query dispatch only; this cannot authorize repair or publication. */
+  default DualEmbeddings forQuery(EmbeddingPermit permit) {
+    throw new UnsupportedOperationException("Query embedding authorization unavailable");
+  }
+
   EmbeddingProfile active(EmbeddingSlot slot);
 
   /**

@@ -100,6 +100,61 @@ public final class RetrievalService implements UsageAware {
     store.useDualEmbeddings(embeddings);
   }
 
+  private QueryEmbeddings queries;
+  private QueryEmbeddings.Origin queryOrigin;
+  private QueryEmbeddings.Read queryRead;
+
+  /** Mandatory production admission capability; scope alone never creates query authority. */
+  public void useQueries(QueryEmbeddings queries) {
+    this.queries = Objects.requireNonNull(queries);
+  }
+
+  public boolean queriesEnabled() {
+    return queries != null;
+  }
+
+  /** Trusted adapter binds request/run validity independently of model or wire arguments. */
+  public RetrievalService forQueries(QueryEmbeddings.Origin origin) {
+    var copy = scopedCopy(store);
+    copy.queryOrigin = Objects.requireNonNull(origin);
+    return copy;
+  }
+
+  private RetrievalService scopedCopy(DocumentStore view) {
+    var copy = new RetrievalService(view, embeddings, model, expectedDim);
+    copy.dualEmbeddings = dualEmbeddings;
+    copy.usageOwners = usageOwners;
+    copy.usageContext = usageContext;
+    copy.queries = queries;
+    copy.queryOrigin = queryOrigin;
+    copy.queryRead = queryRead;
+    return copy;
+  }
+
+  private <T> T execute(
+      QueryEmbeddings.Query query, java.util.function.Function<RetrievalService, T> call) {
+    if (queryOrigin == null || usageContext == null)
+      throw new IllegalStateException("Query needs an admitted request or retained run");
+    try (var read = queries.open(usageContext, query, queryOrigin)) {
+      var reader = new RetrievalService(store, embeddings.forOperation(read), model, expectedDim);
+      reader.dualEmbeddings = dualEmbeddings == null ? null : dualEmbeddings.forQuery(read);
+      reader.queries = queries;
+      reader.queryRead = read;
+      reader.usageContext = usageContext;
+      reader.usageOwners = usageOwners;
+      return call.apply(reader);
+    }
+  }
+
+  private UsageAttribution systemQueryOwner() {
+    return UsageAttribution.system(
+        usageContext.selection().project(), UsageAttribution.Operation.EMBEDDING_QUERY);
+  }
+
+  private <T> T disclose(java.util.function.Supplier<T> read) {
+    return queryRead == null ? read.get() : queryRead.disclose(read);
+  }
+
   private UsageOwners usageOwners = UsageOwners.NONE;
   private InformationContext usageContext;
 
@@ -258,31 +313,17 @@ public final class RetrievalService implements UsageAware {
   }
 
   public RetrievalService audited(java.util.function.Consumer<UUID> audit) {
-    RetrievalService copy =
-        new RetrievalService(store.audited(audit), embeddings, model, expectedDim);
-    copy.dualEmbeddings = dualEmbeddings;
-    copy.usageOwners = usageOwners;
-    copy.usageContext = usageContext;
-    return copy;
+    return scopedCopy(store.audited(audit));
   }
 
   public RetrievalService scoped(InformationAccess access, InformationContext context) {
-    RetrievalService copy =
-        new RetrievalService(store.scoped(access, context), embeddings, model, expectedDim);
-    copy.dualEmbeddings = dualEmbeddings;
-    copy.usageOwners = usageOwners;
+    var copy = scopedCopy(store.scoped(access, context));
     copy.usageContext = context;
     return copy;
   }
 
   public RetrievalService checkingConfiguration() {
-    RetrievalService copy =
-        new RetrievalService(
-            store.embeddingSpace(model, expectedDim), embeddings, model, expectedDim);
-    copy.dualEmbeddings = dualEmbeddings;
-    copy.usageOwners = usageOwners;
-    copy.usageContext = usageContext;
-    return copy;
+    return scopedCopy(store.embeddingSpace(model, expectedDim));
   }
 
   /**
@@ -333,6 +374,11 @@ public final class RetrievalService implements UsageAware {
   }
 
   public Found search(String query, int limit, Mode mode, UsageAttribution owner) {
+    if (queries != null && queryRead == null)
+      return execute(
+          new QueryEmbeddings.Query(
+              QueryEmbeddings.Kind.SEARCH, query, null, limit, mode == null ? null : mode.name()),
+          r -> r.search(query, limit, mode, systemQueryOwner()));
     Objects.requireNonNull(mode, "mode");
     Objects.requireNonNull(query, "query");
     if (query.isBlank()) {
@@ -352,7 +398,8 @@ public final class RetrievalService implements UsageAware {
       var profile = dualEmbeddings.active(querySlot());
       var coverage = dualEmbeddings.read(profile, () -> store.profiled(profile).coverage());
       if (coverage.searchable() == 0)
-        return new Found(query, limit, Math.min(limit, MAX_HITS), mode, List.of(), coverage);
+        return disclose(
+            () -> new Found(query, limit, Math.min(limit, MAX_HITS), mode, List.of(), coverage));
       return dualRead(
           profile, owner, List.of(query), reader -> reader.search(query, limit, mode, owner));
     }
@@ -360,7 +407,7 @@ public final class RetrievalService implements UsageAware {
 
     DocumentStore.Coverage coverage = store.coverage();
     if (coverage.searchable() == 0) {
-      return new Found(query, limit, applied, mode, List.of(), coverage);
+      return disclose(() -> new Found(query, limit, applied, mode, List.of(), coverage));
     }
 
     float[] vector =
@@ -391,7 +438,15 @@ public final class RetrievalService implements UsageAware {
               + " worse ranking, it is no ranking at all. Changing the embedding"
               + " model is a re-embed of the corpus, not a setting");
     }
-    return new Found(query, limit, applied, mode, read(query, vector, applied, mode), coverage);
+    return disclose(
+        () ->
+            new Found(
+                query,
+                limit,
+                applied,
+                mode,
+                read(query, vector, applied, mode),
+                queryRead == null ? coverage : store.coverage()));
   }
 
   /**
@@ -436,6 +491,8 @@ public final class RetrievalService implements UsageAware {
 
   public List<DocumentStore.Passage> within(
       UUID documentId, String query, int limit, UsageAttribution owner) {
+    if (queries != null)
+      throw new IllegalStateException("Ask retrieval has no supported query operation binding");
     Objects.requireNonNull(documentId, "documentId");
     Objects.requireNonNull(query, "query");
     if (query.isBlank()) {
@@ -479,7 +536,7 @@ public final class RetrievalService implements UsageAware {
               + " worse ranking, it is no ranking at all. Changing the embedding"
               + " model is a re-embed of the corpus, not a setting");
     }
-    return store.searchWithinDocument(documentId, vector, limit);
+    return disclose(() -> store.searchWithinDocument(documentId, vector, limit));
   }
 
   /**
@@ -532,6 +589,10 @@ public final class RetrievalService implements UsageAware {
 
   public List<DocumentStore.Retrieved> retrieve(
       String query, UUID documentId, int limit, UsageAttribution owner) {
+    if (queries != null && queryRead == null)
+      return execute(
+          new QueryEmbeddings.Query(QueryEmbeddings.Kind.RETRIEVE, query, documentId, limit, null),
+          r -> r.retrieve(query, documentId, limit, systemQueryOwner()));
     Objects.requireNonNull(query, "query");
     if (query.isBlank()) {
       throw new IllegalArgumentException(
@@ -573,7 +634,7 @@ public final class RetrievalService implements UsageAware {
               + " worse ranking, it is no ranking at all. Changing the embedding"
               + " model is a re-embed of the corpus, not a setting");
     }
-    return store.retrieve(documentId, vector, limit);
+    return disclose(() -> store.retrieve(documentId, vector, limit));
   }
 
   /**
@@ -607,6 +668,10 @@ public final class RetrievalService implements UsageAware {
   }
 
   public Ranking rank(String query, int limit, UsageAttribution owner) {
+    if (queries != null && queryRead == null)
+      return execute(
+          new QueryEmbeddings.Query(QueryEmbeddings.Kind.RANK, query, null, limit, null),
+          r -> r.rank(query, limit, systemQueryOwner()));
     Objects.requireNonNull(query, "query");
     if (query.isBlank()) {
       throw new IllegalArgumentException(
@@ -622,8 +687,8 @@ public final class RetrievalService implements UsageAware {
     }
     if (dualEmbeddings != null)
       return dualRead(query, owner, List.of(query), reader -> reader.rank(query, limit, owner));
-    return new Ranking(
-        store.rankBySummary(embedded(query, "ranked", owner), limit), store.ranking());
+    var vector = embedded(query, "ranked", owner);
+    return disclose(() -> new Ranking(store.rankBySummary(vector, limit), store.ranking()));
   }
 
   /**
@@ -677,6 +742,10 @@ public final class RetrievalService implements UsageAware {
 
   public Optional<DocumentStore.Stance> stance(
       UUID documentId, String query, UsageAttribution owner) {
+    if (queries != null && queryRead == null)
+      return execute(
+          new QueryEmbeddings.Query(QueryEmbeddings.Kind.STANCE, query, documentId, 1, null),
+          r -> r.stance(documentId, query, systemQueryOwner()));
     Objects.requireNonNull(documentId, "documentId");
     Objects.requireNonNull(query, "query");
     if (query.isBlank()) {
@@ -713,7 +782,7 @@ public final class RetrievalService implements UsageAware {
         throw new EmbeddingException(widthRefusal(vector.length, "scored"));
       }
     }
-    return store.stanceOf(documentId, both.get(0), both.get(1));
+    return disclose(() -> store.stanceOf(documentId, both.get(0), both.get(1)));
   }
 
   /** Captures one slot before dispatch; the fenced read rejects a concurrent activation. */
@@ -760,6 +829,7 @@ public final class RetrievalService implements UsageAware {
             profile.space().definition().dimensions());
     reader.usageOwners = usageOwners;
     reader.usageContext = usageContext;
+    reader.queryRead = queryRead;
     return dualEmbeddings.read(profile, () -> work.apply(reader));
   }
 

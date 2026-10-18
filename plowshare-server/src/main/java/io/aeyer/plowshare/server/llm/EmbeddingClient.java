@@ -34,6 +34,11 @@ public interface EmbeddingClient {
   float[] embed(String text);
 
   /** Bind only document preparation; unsupported clients fail rather than discard authority. */
+  /** An already admitted operation; independent callers cannot mint a permit. */
+  default EmbeddingClient forOperation(io.aeyer.plowshare.server.embedding.EmbeddingPermit permit) {
+    throw new UnsupportedOperationException("Embedding operation binding is unavailable");
+  }
+
   default EmbeddingClient forPreparation(
       io.aeyer.plowshare.server.embedding.EmbeddingAuthorization permit) {
     throw new UnsupportedOperationException("Document embedding authorization is unavailable");

@@ -3952,17 +3952,32 @@ public final class JobRuntime {
         tool = write.forRun(informationInputs, transcript.conversationId());
       if (tool instanceof InformationTool information) {
         tool =
-            information.forRun(
-                informationAccess,
-                informationInputs,
-                callerHandle,
-                transcript.conversationId(),
-                sessionId);
+            information
+                .forRun(
+                    informationAccess,
+                    informationInputs,
+                    callerHandle,
+                    transcript.conversationId(),
+                    sessionId)
+                .withQueryValidity(
+                    () -> {
+                      if (operation == null || cancelled.getAsBoolean())
+                        throw new IllegalStateException("Query run is unavailable");
+                      operations.require(operation);
+                    });
       }
       if (informationAccess != null && tool instanceof DocumentTools.Search search) {
         tool =
             search.forRun(
-                informationAccess, callerHandle, informationInputs, transcript.conversationId());
+                informationAccess,
+                callerHandle,
+                informationInputs,
+                transcript.conversationId(),
+                () -> {
+                  if (operation == null || cancelled.getAsBoolean())
+                    throw new IllegalStateException("Query run is unavailable");
+                  operations.require(operation);
+                });
       }
       if (informationAccess != null && tool instanceof DocumentTools.AgentList listing) {
         tool =

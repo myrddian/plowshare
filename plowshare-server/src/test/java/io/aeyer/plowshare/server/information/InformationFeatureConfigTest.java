@@ -59,6 +59,10 @@ class InformationFeatureConfigTest {
         .withBean(JdbcTemplate.class, () -> jdbc)
         .withBean(UnitOfWork.class, () -> UnitOfWork.NONE)
         .withBean(AccountKnowledgePermissions.class, () -> AccountKnowledgePermissions.DENY)
+        .withBean(
+            io.aeyer.plowshare.server.embedding.QueryEmbeddings.class,
+            () ->
+                org.mockito.Mockito.mock(io.aeyer.plowshare.server.embedding.QueryEmbeddings.class))
         .withBean(EmbeddingClient.class, () -> mock(EmbeddingClient.class))
         .withBean(LlmProperties.class, () -> llm)
         .withBean(Tokenizer.class, () -> mock(Tokenizer.class))

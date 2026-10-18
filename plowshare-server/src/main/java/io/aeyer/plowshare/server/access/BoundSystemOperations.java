@@ -54,7 +54,8 @@ public final class BoundSystemOperations implements SystemOperations {
       throw new CallerFault("SYSTEM model purpose cannot execute a script");
     boolean deployment =
         switch (purpose) {
-          case STUCK_ADVISOR, CALL_VALIDATOR, COMMAND_JUDGE, SCHEDULE_READER -> true;
+          case STUCK_ADVISOR, CALL_VALIDATOR, COMMAND_JUDGE, SCHEDULE_READER, SEMANTIC_QUERY ->
+              true;
           default -> false;
         };
     var scope =
@@ -136,7 +137,7 @@ public final class BoundSystemOperations implements SystemOperations {
       }
 
       public CallAuthorization claimed(EmbeddingRequest request, Budget.Claim claim) {
-        if (purpose != Purpose.DOCUMENT_PREPARATION
+        if ((purpose != Purpose.DOCUMENT_PREPARATION && purpose != Purpose.SEMANTIC_QUERY)
             || !request.specifier().equals(envelope.model())) throw denied();
         require();
         var captured = calls.claimed(id(), claim, this::require);
@@ -159,8 +160,9 @@ public final class BoundSystemOperations implements SystemOperations {
       }
 
       public CallAuthorization claimed(ChatRequest request, Budget.Claim claim) {
-        if (!request.tools().isEmpty() || !request.specifier().equals(envelope.model()))
-          throw denied();
+        if (purpose == Purpose.SEMANTIC_QUERY
+            || !request.tools().isEmpty()
+            || !request.specifier().equals(envelope.model())) throw denied();
         require();
         var captured = calls.claimed(id(), claim, this::require);
         var inputHash = hash(request.messages().toString());

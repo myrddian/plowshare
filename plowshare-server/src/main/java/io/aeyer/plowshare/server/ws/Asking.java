@@ -45,6 +45,7 @@ import io.aeyer.plowshare.server.faults.CallerFault;
  *     refusing it here would turn a channel-level wiring fault into an exception on the inbound
  *     thread, and {@code EventChannelHandler} already closes a socket that named no session before
  *     any frame on it is read
+ * @param queryValidity the transport-owned live request fence, never supplied by a payload
  * @param relayBudget the server-selected encoded batch allowance from the negotiated transport;
  *     this is capacity metadata and grants no Relay authority
  * @param handle the account this socket's upgrade carried, or {@code null} for one that carried
@@ -55,9 +56,19 @@ public record Asking(
     String sessionId,
     String handle,
     String connectionId,
-    io.aeyer.plowshare.server.relay.RelayReadBudget relayBudget) {
+    io.aeyer.plowshare.server.relay.RelayReadBudget relayBudget,
+    Runnable queryValidity) {
   public Asking {
     java.util.Objects.requireNonNull(relayBudget);
+    java.util.Objects.requireNonNull(queryValidity);
+  }
+
+  public Asking(
+      String sessionId,
+      String handle,
+      String connectionId,
+      io.aeyer.plowshare.server.relay.RelayReadBudget relayBudget) {
+    this(sessionId, handle, connectionId, relayBudget, () -> {});
   }
 
   public Asking(String sessionId, String handle, String connectionId) {

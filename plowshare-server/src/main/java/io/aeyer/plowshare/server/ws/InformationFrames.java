@@ -398,16 +398,14 @@ public final class InformationFrames implements FrameArea {
                   number(payload, "limit", 20));
       case "search" ->
           result =
-              retrieval
-                  .scoped(access, context)
+              queryReader(context, asking)
                   .retrieve(
                       required(payload, "query"),
                       payload.containsKey("revision") ? uuid(payload, "revision") : null,
                       number(payload, "limit", 10));
       case "rank" ->
           result =
-              retrieval
-                  .scoped(access, context)
+              queryReader(context, asking)
                   .rank(required(payload, "query"), number(payload, "limit", 10));
       case "ask" -> {
         UUID revision = uuid(payload, "revision");
@@ -524,6 +522,15 @@ public final class InformationFrames implements FrameArea {
       default -> throw new IllegalStateException("unregistered information operation");
     }
     return Outcome.ok(result);
+  }
+
+  private RetrievalService queryReader(InformationContext context, Asking asking) {
+    var reader = retrieval.scoped(access, context);
+    return reader.queriesEnabled()
+        ? reader.forQueries(
+            io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                asking.queryValidity()))
+        : reader;
   }
 
   private static List<String> stages(Map<String, Object> payload) {

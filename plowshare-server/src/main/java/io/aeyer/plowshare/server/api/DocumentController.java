@@ -125,9 +125,16 @@ public class DocumentController {
   }
 
   private RetrievalService retrievalReads() {
-    return informationAccess == null
-        ? retrieval
-        : retrieval.scoped(informationAccess, informationContext());
+    if (informationAccess == null) return retrieval;
+    var reader = retrieval.scoped(informationAccess, informationContext());
+    return reader.queriesEnabled()
+        ? reader.forQueries(
+            io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                () -> {
+                  if (Thread.currentThread().isInterrupted())
+                    throw new io.aeyer.plowshare.server.faults.CallerFault("Request ended");
+                }))
+        : reader;
   }
 
   private CitationStore citationReads() {

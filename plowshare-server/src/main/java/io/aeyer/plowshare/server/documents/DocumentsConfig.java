@@ -206,6 +206,17 @@ public class DocumentsConfig {
    */
   @Bean
   public RetrievalService retrievalService(
+      DocumentStore store,
+      EmbeddingClient embeddings,
+      LlmProperties llm,
+      io.aeyer.plowshare.server.embedding.QueryEmbeddings queries) {
+    var reader = retrievalService(store, embeddings, llm);
+    reader.useQueries(queries);
+    return reader;
+  }
+
+  /** Isolated legacy fixtures do not admit production query execution. */
+  public RetrievalService retrievalService(
       DocumentStore store, EmbeddingClient embeddings, LlmProperties llm) {
     return new RetrievalService(store, embeddings, llm.getEmbeddingModel(), llm.getEmbeddingDim())
         .checkingConfiguration();

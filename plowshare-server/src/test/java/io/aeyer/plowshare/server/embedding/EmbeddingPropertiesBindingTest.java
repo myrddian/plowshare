@@ -62,4 +62,20 @@ class EmbeddingPropertiesBindingTest {
         .withPropertyValues("plowshare.embeddings.code.raw-json=invalid")
         .run(context -> assertNotNull(context.getStartupFailure()));
   }
+
+  @Test
+  void legacySearchBudgetBindsExplicitlyAndInvalidLimitsFail() {
+    runner
+        .withPropertyValues(
+            "plowshare.embeddings.enabled=false", "plowshare.embeddings.search-budget=1")
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertEquals(1, context.getBean(EmbeddingProperties.class).searchBudget());
+            });
+    for (String invalid : new String[] {"-1", "unlimited"})
+      runner
+          .withPropertyValues("plowshare.embeddings.search-budget=" + invalid)
+          .run(context -> assertNotNull(context.getStartupFailure()));
+  }
 }

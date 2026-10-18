@@ -12,6 +12,7 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   private final EmbeddingDispatch dispatcher;
   private final EmbeddingTokenizers tokenizers;
   private final EmbeddingAuthorization preparation;
+  private final EmbeddingPermit permit;
 
   public DispatchingDualEmbeddings(
       EmbeddingWorkRepository repository,
@@ -24,8 +25,9 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
       EmbeddingWorkRepository repository,
       EmbeddingDispatch dispatcher,
       EmbeddingTokenizers tokenizers,
-      EmbeddingAuthorization preparation) {
-    this.preparation = preparation;
+      EmbeddingPermit permit) {
+    this.permit = permit;
+    this.preparation = permit instanceof EmbeddingAuthorization p ? p : null;
     this.repository = Objects.requireNonNull(repository);
     this.dispatcher = Objects.requireNonNull(dispatcher);
     this.tokenizers = Objects.requireNonNull(tokenizers);
@@ -35,6 +37,13 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   public DualEmbeddings forPreparation(EmbeddingAuthorization permit) {
     return new DispatchingDualEmbeddings(
         repository, dispatcher, tokenizers, Objects.requireNonNull(permit));
+  }
+
+  @Override
+  public DualEmbeddings forQuery(EmbeddingPermit permit) {
+    if (permit.mode() != EmbeddingPermit.Mode.QUERY)
+      throw new IllegalArgumentException("Query permit required");
+    return new DispatchingDualEmbeddings(repository, dispatcher, tokenizers, permit);
   }
 
   @Override
@@ -115,9 +124,31 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     try {
       submitted.run();
       var request = EmbeddingRequest.of(definition.modelId(), inputs).withAttribution(owner);
-      if (preparation != null) request = request.withAuthorization(preparation.authorize(request));
+      if (permit != null)
+        request =
+            request.withAuthorization(
+                permit.authorize(
+                    new EmbeddingPermit.Task(
+                        query ? EmbeddingPermit.Mode.QUERY : EmbeddingPermit.Mode.DOCUMENT,
+                        profile.toString(),
+                        texts,
+                        request)));
+      if (query && permit != null) {
+        // A queued query cannot follow an activation to a different encoder. Keep the original
+        // exact-input/claim evidence while adding this read-profile validity fence.
+        request =
+            request.withAuthorization(
+                request
+                    .authorization()
+                    .and(
+                        () -> {
+                          if (!profile.equals(repository.active(profile.slot()).orElse(null)))
+                            throw new EmbeddingException(
+                                "embedding configuration changed during this query; submit a new search");
+                        }));
+      }
       output = dispatcher.embed(request).vectors();
-      if (preparation != null) preparation.require();
+      if (permit != null) permit.require();
     } catch (LlmException failed) {
       throw new EmbeddingException(failed.getMessage(), failed);
     }
@@ -155,6 +186,8 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
 
   @Override
   public RepairResult repairAll(List<EmbeddingWorkRepository.Key> keys, UsageAttribution owner) {
+    if (permit != null && preparation == null)
+      throw new IllegalStateException("Query cannot publish embeddings");
     Objects.requireNonNull(owner);
     if (keys == null || keys.size() > 100 || new HashSet<>(keys).size() != keys.size())
       throw new IllegalArgumentException("invalid embedding repair batch");
@@ -218,8 +251,8 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
 
   /** One bounded pass; staged vectors and retry timestamps are the persisted rebuild checkpoint. */
   public int tick() {
-    if (preparation != null)
-      throw new IllegalStateException("Document preparation cannot authorize maintenance");
+    if (permit != null)
+      throw new IllegalStateException("Bound embedding operation cannot authorize maintenance");
     int published = 0;
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
       for (EmbeddingProfile target : writeProfiles(slot)) {

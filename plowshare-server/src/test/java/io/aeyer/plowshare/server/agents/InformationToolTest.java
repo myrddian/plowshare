@@ -143,6 +143,36 @@ class InformationToolTest {
   }
 
   @Test
+  void searchAdmissionUsesTheRetainedCallAndCannotBorrowAStandaloneRequest() {
+    when(retrieval.queriesEnabled()).thenReturn(true);
+    when(retrieval.forQueries(any())).thenReturn(retrieval);
+    when(retrieval.rank("query", 10))
+        .thenReturn(new RetrievalService.Ranking(List.of(), new DocumentStore.Ranking(0, 0)));
+    var valid = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var tool =
+        reader()
+            .withQueryValidity(
+                () -> {
+                  if (!valid.get()) throw new IllegalStateException("run ended");
+                });
+    assertTrue(
+        tool.run("{\"operation\":\"rank\",\"query\":\"query\"}", Home.global())
+            .startsWith("Information request refused:"));
+    verify(retrieval, never()).forQueries(any());
+    tool.calledAs("call-1");
+    assertTrue(
+        tool.run("{\"operation\":\"rank\",\"query\":\"query\"}", Home.global()).startsWith("{"));
+    var origin =
+        org.mockito.ArgumentCaptor.forClass(
+            io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.class);
+    verify(retrieval).forQueries(origin.capture());
+    assertEquals("cnv_reader:information_read:call-1", origin.getValue().invocation());
+    origin.getValue().validity().run();
+    valid.set(false);
+    assertThrows(IllegalStateException.class, origin.getValue().validity()::run);
+  }
+
+  @Test
   void search_reuses_generated_summaries_without_replacing_exact_evidence() throws Exception {
     var chunk =
         new DocumentStore.ChunkWithAncestors(

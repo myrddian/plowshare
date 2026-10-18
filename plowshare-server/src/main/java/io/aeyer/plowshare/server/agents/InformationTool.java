@@ -102,6 +102,31 @@ public final class InformationTool implements AgentTool {
     return bound;
   }
 
+  private Runnable queryValidity;
+  private String queryCall;
+
+  /** Runtime-supplied operation fence; a read tool cannot forge a standalone search. */
+  public InformationTool withQueryValidity(Runnable validity) {
+    this.queryValidity = java.util.Objects.requireNonNull(validity);
+    return this;
+  }
+
+  @Override
+  public void calledAs(String id) {
+    queryCall = id;
+  }
+
+  private io.aeyer.plowshare.server.documents.RetrievalService queryReader(
+      InformationContext context) {
+    var reader = retrieval.scoped(access, context);
+    if (!reader.queriesEnabled()) return reader;
+    if (queryValidity == null || queryCall == null || log == null)
+      throw new CallerFault("Query needs retained run and call identity");
+    return reader.forQueries(
+        new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
+            log + ":information_read:" + queryCall, queryValidity));
+  }
+
   @Override
   public ToolSchema schema() {
     Map<String, Object> fields = new LinkedHashMap<>();
@@ -496,8 +521,7 @@ public final class InformationTool implements AgentTool {
           case "search" -> {
             if (retrieval == null) throw new CallerFault("information retrieval is unavailable");
             var found =
-                retrieval
-                    .scoped(access, context)
+                queryReader(context)
                     .retrieve(
                         required(args, "query"),
                         args.containsKey("revision") ? id(args, "revision") : null,
@@ -537,9 +561,7 @@ public final class InformationTool implements AgentTool {
           case "rank" -> {
             if (retrieval == null) throw new CallerFault("information ranking is unavailable");
             var ranked =
-                retrieval
-                    .scoped(access, context)
-                    .rank(required(args, "query"), number(args, "limit", 10));
+                queryReader(context).rank(required(args, "query"), number(args, "limit", 10));
             for (var row : ranked.documents())
               inputs.reads(log, context).accept(row.document().id());
             result = ranked;

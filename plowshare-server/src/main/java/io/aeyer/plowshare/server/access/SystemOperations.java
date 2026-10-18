@@ -11,6 +11,7 @@ import java.util.UUID;
  */
 public interface SystemOperations {
   enum Purpose {
+    SEMANTIC_QUERY,
     DOCUMENT_PREPARATION,
     CONVERSATION_COMPACTION,
     SKILL_SUMMARY,
@@ -37,7 +38,7 @@ public interface SystemOperations {
 
     CallAuthorization claimed(ChatRequest request, Budget.Claim claim);
 
-    /** Closed preparation-only embedding; other purposes cannot acquire this dispatch lane. */
+    /** Closed embedding purposes; this carriage never grants tools or caller execution. */
     default CallAuthorization claimed(EmbeddingRequest request, Budget.Claim claim) {
       throw new IllegalStateException("This SYSTEM purpose does not support embedding");
     }

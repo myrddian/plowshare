@@ -565,7 +565,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
                       socket.getId(),
                       delivery.transport instanceof PacketEventTransport
                           ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
-                          : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY));
+                          : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
+                      () -> {
+                        if (!socket.isOpen())
+                          throw new io.aeyer.plowshare.server.faults.CallerFault(
+                              "Query connection ended");
+                      }));
     } catch (RuntimeException unexpected) {
       // A SAFETY NET, NOT A SECOND MAPPING. FrameRouter already turns
       // everything a handler throws into an Outcome, so nothing is

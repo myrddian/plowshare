@@ -320,6 +320,7 @@ public class InformationConfig {
       ObjectProvider<GlobalAgentDefinitions> globals,
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
+      io.aeyer.plowshare.server.embedding.SemanticEmbedding embeddingFoundation,
       ObjectProvider<io.aeyer.plowshare.server.embedding.DualEmbeddings> dualProvider,
       ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers,
       io.aeyer.plowshare.server.access.SystemOperations system) {
@@ -355,7 +356,7 @@ public class InformationConfig {
             usageOwners.getIfAvailable(
                 () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE),
             dual,
-            new BoundPreparationEmbeddings(processing, work, system));
+            new BoundPreparationEmbeddings(processing, work, embeddingFoundation));
     var gates =
         new InformationStageHooks(
             new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),

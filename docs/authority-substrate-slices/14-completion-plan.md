@@ -117,7 +117,7 @@ the same configured total may leave fewer chat calls and may exhaust earlier.
 Preserve visible progress and the existing explicit allowance-increase/retry path.
 Do not automatically increase limits, reset spending or change historical costs.
 
-## Deferred budget gaps
+## Deferred budget gaps at slice 14 completion
 
 | Consumer | Missing contract | Treatment after bounded slice 14 completion |
 | --- | --- | --- |
@@ -129,10 +129,11 @@ Do not automatically increase limits, reset spending or change historical costs.
 These gaps do not block the bounded Global document path. They still prevent a
 claim that all affected platform consumers are available or fully cut over.
 
-The shared SYSTEM embedding foundation and initial search adoption are scoped in proposed
+The shared SYSTEM embedding foundation and initial search adoption are implemented in
 [follow-on slice 15](15-semantic-query-budgets-and-read-authority.md). That plan
-reuses preparation's current operation budget and fences; it does not activate
-a consumer or change slice 14's completed outcome. Memory recall, ask/deliberation,
+reuses preparation's current operation budget and fences while adding the selected
+search consumers with their separately configured search source. It does not
+change slice 14's completed outcome. Memory recall, ask/deliberation,
 independent repair and the other budget gaps remain outside its initial consumer
 rollout, although they can reuse the shared foundation with supported bindings.
 

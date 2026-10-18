@@ -44,6 +44,11 @@ class DocumentsConfigTest {
               io.aeyer.plowshare.server.archive.ProjectMembers.class,
               () -> Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class))
           .withBean(JdbcTemplate.class, () -> Mockito.mock(JdbcTemplate.class))
+          .withBean(
+              io.aeyer.plowshare.server.embedding.QueryEmbeddings.class,
+              () ->
+                  org.mockito.Mockito.mock(
+                      io.aeyer.plowshare.server.embedding.QueryEmbeddings.class))
           .withBean(EmbeddingClient.class, () -> Mockito.mock(EmbeddingClient.class))
           .withBean(LlmProperties.class, DocumentsConfigTest::llm)
           .withBean(

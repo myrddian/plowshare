@@ -9,7 +9,23 @@ public record EmbeddingProperties(
     Model code,
     Model prose,
     boolean paused,
-    java.util.List<TokenizerBinding> retainedTokenizers) {
+    java.util.List<TokenizerBinding> retainedTokenizers,
+    int searchBudget) {
+  public EmbeddingProperties(
+      boolean enabled,
+      Model code,
+      Model prose,
+      boolean paused,
+      java.util.List<TokenizerBinding> retainedTokenizers) {
+    this(enabled, code, prose, paused, retainedTokenizers, 0);
+  }
+
+  @org.springframework.boot.context.properties.bind.ConstructorBinding
+  public EmbeddingProperties {
+    if (searchBudget < 0)
+      throw new IllegalArgumentException("plowshare.embeddings.search-budget must be nonnegative");
+  }
+
   public void validate() {
     if (!enabled) return;
     if (retainedTokenizers != null && retainedTokenizers.size() > 16)

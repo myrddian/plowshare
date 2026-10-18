@@ -182,6 +182,11 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
   @Override
   public EmbeddingClient forPreparation(
       io.aeyer.plowshare.server.embedding.EmbeddingAuthorization permit) {
+    return forOperation(permit);
+  }
+
+  @Override
+  public EmbeddingClient forOperation(io.aeyer.plowshare.server.embedding.EmbeddingPermit permit) {
     Objects.requireNonNull(permit);
     return new EmbeddingClient() {
       public float[] embed(String text) {
@@ -210,7 +215,7 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
   private List<float[]> embedAll(
       List<String> texts,
       UsageAttribution owner,
-      io.aeyer.plowshare.server.embedding.EmbeddingAuthorization permit) {
+      io.aeyer.plowshare.server.embedding.EmbeddingPermit permit) {
     Objects.requireNonNull(owner, "owner");
     Objects.requireNonNull(texts, "embedAll(null): there is no batch to embed");
     if (texts.isEmpty()) {
@@ -249,7 +254,12 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
     Embeddings embeddings;
     try {
       var request = EmbeddingRequest.of(model, texts).withAttribution(owner);
-      if (permit != null) request = request.withAuthorization(permit.authorize(request));
+      if (permit != null)
+        request =
+            request.withAuthorization(
+                permit.authorize(
+                    new io.aeyer.plowshare.server.embedding.EmbeddingPermit.Task(
+                        permit.mode(), request.specifier(), texts, request)));
       embeddings = dispatcher.embed(request);
       if (permit != null) permit.require();
     } catch (LlmException e) {

@@ -6,8 +6,10 @@ import java.util.List;
 /**
  * A single document lease's exact output set, claim carriage and durable publication checkpoint.
  */
-public interface EmbeddingAuthorization {
-  void require();
+public interface EmbeddingAuthorization extends EmbeddingPermit {
+  default Mode mode() {
+    return Mode.DOCUMENT;
+  }
 
   void sources(List<EmbeddingWorkRepository.Key> sources);
 

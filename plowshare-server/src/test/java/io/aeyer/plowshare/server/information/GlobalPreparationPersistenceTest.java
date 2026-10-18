@@ -59,6 +59,7 @@ class GlobalPreparationPersistenceTest {
   DocumentStore documents;
   FrameRouter router;
   final AtomicInteger embedded = new AtomicInteger(), chatted = new AtomicInteger();
+  Runnable afterEmbedding = () -> {};
   final Tokenizer tokenizer =
       new Tokenizer() {
         public TokenCount count(String text) {
@@ -82,7 +83,7 @@ class GlobalPreparationPersistenceTest {
   void setup() {
     jdbc = new JdbcTemplate(source);
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE projects,admins CASCADE");
+        jdbc, "TRUNCATE documents,information_resources,embedding_queries,projects,admins CASCADE");
     jdbc.update(
         "UPDATE embedding_slots SET active_space_id=NULL,target_space_id=NULL,active_mode=NULL,target_mode=NULL,active_distance=NULL,target_distance=NULL");
     jdbc.update(
@@ -148,7 +149,8 @@ class GlobalPreparationPersistenceTest {
             new JdbcSystemOperationRecords(jdbc),
             new OperationInference(
                 mock(OperationAuthority.class), new JdbcInferenceAdmissions(jdbc)));
-    preparation = new BoundPreparationEmbeddings(processing, work, system);
+    preparation =
+        new BoundPreparationEmbeddings(processing, work, new BoundSemanticEmbedding(system));
     var frames =
         new InformationFrames(
             catalogue,
@@ -167,6 +169,60 @@ class GlobalPreparationPersistenceTest {
     router.useAuthorization(
         new ProjectAuthorization(
             new JdbcResourceScopeRepository(jdbc), members, mock(AdminStore.class)));
+  }
+
+  QueryEmbeddings queries(int limit) {
+    return new BoundQueryEmbeddings(
+        new JdbcQueryEmbeddingRepository(jdbc),
+        access,
+        work,
+        new BoundSemanticEmbedding(system),
+        () -> limit);
+  }
+
+  RetrievalService queryReader(LlmDispatcher dispatcher, boolean dual) {
+    var props = new LlmProperties();
+    props.setEmbeddingModel("model");
+    props.setEmbeddingDim(768);
+    props.setEmbeddingMaxInputTokens(2048);
+    var reader =
+        new RetrievalService(
+            documents, new DispatchingEmbeddingClient(dispatcher, props, tokenizer), "model", 768);
+    reader.useQueries(queries(1));
+    if (dual) {
+      var records =
+          new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+      for (var slot : EmbeddingSlot.values()) assertTrue(records.active(slot).isPresent());
+      var counters = mock(EmbeddingTokenizers.class);
+      when(counters.model(any())).thenReturn(tokenizer);
+      reader.useDualEmbeddings(new DispatchingDualEmbeddings(records, dispatcher::embed, counters));
+    }
+    return reader;
+  }
+
+  Outcome searchFrame(RetrievalService reader, String actor) {
+    var frames =
+        new InformationFrames(
+            catalogue,
+            access,
+            documents,
+            reader,
+            mock(Deliberation.class),
+            mock(JobStore.class),
+            new DocumentsProperties(),
+            mock(PageFetcher.class),
+            mock(InformationContentTypes.class),
+            mock(InformationContentSettings.class),
+            mock(InformationNavigationService.class),
+            mock(InformationInterchangeService.class));
+    return new FrameRouter(frames.frames())
+        .route(
+            new Envelope(
+                UUID.randomUUID().toString(),
+                "information.search",
+                Envelope.CURRENT_VERSION,
+                Map.of("query", "deployment knowledge", "scope", Map.of("kind", "shared"))),
+            new Asking("acceptance", actor));
   }
 
   Outcome call(String actor, String verb, Map<String, Object> payload) {
@@ -314,6 +370,7 @@ class GlobalPreparationPersistenceTest {
           public Embeddings embed(String model, List<String> texts) {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             embedded.incrementAndGet();
+            afterEmbedding.run();
             return new Embeddings(
                 texts.stream()
                     .map(
@@ -409,6 +466,20 @@ class GlobalPreparationPersistenceTest {
             space,
             new EmbeddingSearchPolicy(
                 EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+        // Match startup: activate the empty serving corpus before this admission derives chunks.
+        assertTrue(
+            records.activate(records.target(slot).orElseThrow()),
+            () ->
+                java.util.Arrays.stream(EmbeddingWorkRepository.Store.values())
+                    .map(
+                        store ->
+                            store
+                                + ":"
+                                + records
+                                    .pending(records.target(slot).orElseThrow(), store, 100)
+                                    .size())
+                    .toList()
+                    .toString());
       }
       var counters = mock(EmbeddingTokenizers.class);
       when(counters.model(any())).thenReturn(tokenizer);
@@ -498,7 +569,257 @@ class GlobalPreparationPersistenceTest {
       assertEquals(source, reopened.budgetSource(revision));
       assertTrue(ready(revision));
       assertEquals(chatted.get() + embedded.get(), reopened.budgetSource(revision).spent());
+      var reader = queryReader(dispatcher, dual);
+      int preparedCalls = embedded.get();
+      for (String actor : List.of("reader", "app")) {
+        var result = searchFrame(reader, actor);
+        assertEquals(Code.OK, result.code(), result.said());
+        assertFalse(assertInstanceOf(List.class, result.payload()).isEmpty());
+      }
+      var scoped =
+          reader
+              .scoped(access, access.resolve("reader", InformationContext.Selection.shared()))
+              .forQueries(QueryEmbeddings.Origin.request(() -> {}));
+      assertFalse(scoped.rank("deployment knowledge", 5).documents().isEmpty());
+      assertTrue(scoped.stance(revision, "deployment knowledge").isPresent());
+      assertEquals(preparedCalls + 4, embedded.get());
+      assertEquals(
+          4,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE budget_id=?",
+              Integer.class,
+              source.id()));
+      assertEquals(source.spent(), reopened.budgetSource(revision).spent());
     }
+  }
+
+  @Test
+  void querySourceClaimsAreRetainedAndKnownToolCallsNeverAcquireReplacementAllowances() {
+    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var query = new QueryEmbeddings.Query(QueryEmbeddings.Kind.SEARCH, "query", null, 5, "HYBRID");
+    var origin = new QueryEmbeddings.Origin("retained-log:call-1", () -> {});
+    var request = EmbeddingRequest.of("model", List.of("query"));
+    var disabled = queries(0).open(context, query, origin);
+    assertThrows(RuntimeException.class, () -> disabled.authorize(request));
+    disabled.close();
+    assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM embedding_queries", Integer.class));
+    var read = queries(1).open(context, query, origin);
+    var permit = read.authorize(request);
+    new RetainedInferenceBoundary(new JdbcInferenceAdmissions(jdbc)).submitted(permit);
+    assertThrows(RuntimeException.class, () -> read.authorize(request));
+    try (var reopened = queries(1).open(context, query, origin)) {
+      assertThrows(RuntimeException.class, () -> reopened.authorize(request));
+    }
+    assertEquals(1, jdbc.queryForObject("SELECT sum(spent) FROM embedding_queries", Integer.class));
+    read.close();
+    assertThrows(RuntimeException.class, permit::require);
+    assertThrows(
+        DataAccessException.class, () -> jdbc.update("UPDATE embedding_queries SET spent=0"));
+    assertThrows(DataAccessException.class, () -> jdbc.update("DELETE FROM embedding_queries"));
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbc.update(
+                "UPDATE inference_admissions SET query_task_hash=? WHERE query_id IS NOT NULL",
+                "a".repeat(64)));
+  }
+
+  @Test
+  void retainedReaderToolUsesSystemSearchAndKeepsItsParentAndInputLedger() {
+    var revision = upload(UUID.randomUUID());
+    try (var dispatcher = dispatcher();
+        var lifecycle = lifecycle(dispatcher, false)) {
+      for (int i = 0; i < 8 && !ready(revision); i++) lifecycle.drainOne(revision);
+      assertTrue(ready(revision));
+      jdbc.update("INSERT INTO projects(name) VALUES('reader-project')");
+      jdbc.update(
+          "INSERT INTO project_members(project_id,handle,role) SELECT id,'reader','VIEWER' FROM projects WHERE name='reader-project'");
+      var identities = new JdbcIdentityRepository(jdbc);
+      var grants = new JdbcScopedGrantRepository(jdbc);
+      ApplicationPolicy applications =
+          ignored -> new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of());
+      var authority =
+          new LiveScopedAuthority(
+              grants, applications, new ApplicationGrantLineage(grants, applications), identities);
+      var operations =
+          new PinnedOperationAuthority(
+              identities,
+              grants,
+              authority,
+              new JdbcProjectMembers(jdbc),
+              new JdbcOperationRecords(jdbc),
+              new JdbcResourceScopeRepository(jdbc));
+      var home = Home.of("reader-project");
+      var parent = operations.admit("reader", home, Set.of(AuthorityAction.READ));
+      var log =
+          new ConversationStore(jdbc)
+              .log(
+                  Origin.SUBMISSION,
+                  home,
+                  "reader_tool",
+                  null,
+                  io.aeyer.plowshare.server.agents.Budget.of(1),
+                  "reader",
+                  null)
+              .id();
+      var inputs = new InformationJobs(new JdbcJobInformationRepository(jdbc), access, catalogue);
+      var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+      var tool =
+          new io.aeyer.plowshare.server.agents.InformationTool(false, () -> catalogue)
+              .withRetrieval(queryReader(dispatcher, false))
+              .forRun(access, inputs, "reader", log)
+              .withQueryValidity(
+                  () -> {
+                    if (cancelled.get()) throw new IllegalStateException("run ended");
+                    operations.require(parent);
+                  });
+      tool.calledAs("call-1");
+      int before = embedded.get();
+      assertTrue(
+          tool.run("{\"operation\":\"rank\",\"query\":\"deployment knowledge\"}", home)
+              .startsWith("{"));
+      assertEquals(before + 1, embedded.get());
+      assertEquals(List.of(revision), inputs.inputsOf(log, "reader"));
+      assertThrows(
+          RuntimeException.class,
+          () -> tool.run("{\"operation\":\"rank\",\"query\":\"deployment knowledge\"}", home));
+      assertEquals(before + 1, embedded.get());
+      cancelled.set(true);
+      tool.calledAs("call-2");
+      assertThrows(
+          RuntimeException.class,
+          () -> tool.run("{\"operation\":\"rank\",\"query\":\"deployment knowledge\"}", home));
+      assertEquals(before + 1, embedded.get());
+      assertFalse(parent.actions().contains(AuthorityAction.RUN_MODEL));
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT budget_spent FROM conversations WHERE id=?", Integer.class, log));
+    }
+  }
+
+  @Test
+  void concurrentQueryClaimsCannotOverdrawAndClosedSourcesCannotBeReopened() throws Exception {
+    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var records = new JdbcQueryEmbeddingRepository(jdbc);
+    var source =
+        work.inTransaction(
+            () -> records.open(context, records.pin(context), "a".repeat(64), null, 1));
+    var start = new CountDownLatch(1);
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = new ArrayList<Future<Boolean>>();
+      for (int i = 0; i < 2; i++)
+        futures.add(
+            workers.submit(
+                () -> {
+                  start.await();
+                  try {
+                    work.inTransaction(() -> records.claim(source));
+                    return true;
+                  } catch (IllegalStateException exhausted) {
+                    return false;
+                  }
+                }));
+      start.countDown();
+      int won = 0;
+      for (var future : futures) if (future.get(10, TimeUnit.SECONDS)) won++;
+      assertEquals(1, won);
+    }
+    work.inTransaction(
+        () -> {
+          records.close(source);
+          return null;
+        });
+    assertThrows(RuntimeException.class, () -> work.inTransaction(() -> records.claim(source)));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT spent FROM embedding_queries WHERE id=?", Integer.class, source.id()));
+  }
+
+  @Test
+  void withdrawalDuringProviderExecutionStopsTargetDisclosureAndKeepsItsClaim() {
+    var revision = upload(UUID.randomUUID());
+    afterEmbedding =
+        () ->
+            call(
+                "operator",
+                "withdraw",
+                Map.of("revision", revision.toString(), "requestId", UUID.randomUUID().toString()));
+    try (var dispatcher = dispatcher()) {
+      var reader =
+          queryReader(dispatcher, false)
+              .scoped(access, access.resolve("reader", InformationContext.Selection.shared()))
+              .forQueries(QueryEmbeddings.Origin.request(() -> {}));
+      assertThrows(RuntimeException.class, () -> reader.retrieve("query", revision, 5));
+      assertEquals(1, embedded.get());
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM inference_admissions WHERE query_id IS NOT NULL AND submitted",
+              Integer.class));
+    }
+  }
+
+  @Test
+  void finalReadFenceOrdersWithdrawalAndRefusesFollowingDisclosure() throws Exception {
+    var revision = upload(UUID.randomUUID());
+    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var read =
+        queries(1)
+            .open(
+                context,
+                new QueryEmbeddings.Query(
+                    QueryEmbeddings.Kind.RETRIEVE, "query", revision, 5, null),
+                QueryEmbeddings.Origin.request(() -> {}));
+    var admitted = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var result =
+          workers.submit(
+              () ->
+                  read.disclose(
+                      () -> {
+                        admitted.countDown();
+                        try {
+                          if (!release.await(10, TimeUnit.SECONDS))
+                            throw new IllegalStateException("timeout");
+                        } catch (InterruptedException e) {
+                          Thread.currentThread().interrupt();
+                          throw new IllegalStateException(e);
+                        }
+                        return "visible";
+                      }));
+      assertTrue(admitted.await(10, TimeUnit.SECONDS));
+      var withdraw =
+          workers.submit(
+              () ->
+                  call(
+                      "operator",
+                      "withdraw",
+                      Map.of(
+                          "revision",
+                          revision.toString(),
+                          "requestId",
+                          UUID.randomUUID().toString())));
+      try {
+        assertThrows(TimeoutException.class, () -> withdraw.get(200, TimeUnit.MILLISECONDS));
+      } finally {
+        release.countDown();
+      }
+      assertEquals("visible", result.get(10, TimeUnit.SECONDS));
+      assertEquals(Code.OK, withdraw.get(10, TimeUnit.SECONDS).code());
+    }
+    assertThrows(RuntimeException.class, () -> read.disclose(() -> "must not disclose"));
+    read.close();
   }
 
   boolean ready(UUID revision) {
@@ -628,7 +949,8 @@ class GlobalPreparationPersistenceTest {
                 () -> {
                   start.await();
                   try {
-                    new BoundPreparationEmbeddings(processing, work, system)
+                    new BoundPreparationEmbeddings(
+                            processing, work, new BoundSemanticEmbedding(system))
                         .forSources(lease, List.of(key))
                         .authorize(EmbeddingRequest.of("model", List.of("retained summary")));
                     return true;
@@ -641,7 +963,8 @@ class GlobalPreparationPersistenceTest {
       for (var future : futures) if (future.get(10, TimeUnit.SECONDS)) winners++;
       assertEquals(1, winners);
     }
-    var reopened = new BoundPreparationEmbeddings(processing, work, system);
+    var reopened =
+        new BoundPreparationEmbeddings(processing, work, new BoundSemanticEmbedding(system));
     assertTrue(reopened.budget(lease).tryClaim().isEmpty());
     assertEquals(1, processing.budgetSource(revision).spent());
     assertEquals(
@@ -676,7 +999,7 @@ class GlobalPreparationPersistenceTest {
             new JdbcInformationProcessingRepository(
                 jdbc, Clock.systemUTC(), new JdbcProjectMembers(jdbc)),
             work,
-            system);
+            new BoundSemanticEmbedding(system));
     assertThrows(
         IllegalStateException.class,
         () -> reopened.forSources(lease, List.of(key)).authorize(request));

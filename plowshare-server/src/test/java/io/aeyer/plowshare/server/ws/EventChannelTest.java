@@ -1122,7 +1122,14 @@ class EventChannelTest {
     attachAs(handler, own, "s-console", "enzo", socket);
     handler.handleMessage(socket, new TextMessage(request("r1", "test.who")));
     assertTrue(socket.awaitFrameContaining("\"r1\"", 2_000));
-    assertEquals(new Asking("s-console", "enzo", socket.getId()), asked.get());
+    assertEquals("s-console", asked.get().sessionId());
+    assertEquals("enzo", asked.get().handle());
+    assertEquals(socket.getId(), asked.get().connectionId());
+    assertEquals(io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY, asked.get().relayBudget());
+    asked.get().queryValidity().run();
+    socket.close();
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class, asked.get().queryValidity()::run);
   }
 
   @Test

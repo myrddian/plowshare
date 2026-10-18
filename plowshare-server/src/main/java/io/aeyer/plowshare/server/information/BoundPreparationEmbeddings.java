@@ -6,20 +6,21 @@ import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.dispatch.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /** No model call occurs inside a transaction. A pending claim fences ambiguous batch replay. */
 public final class BoundPreparationEmbeddings implements PreparationEmbeddings {
   private final InformationProcessingRepository records;
   private final UnitOfWork transactions;
-  private final SystemOperations system;
+  private final SemanticEmbedding embedding;
 
   public BoundPreparationEmbeddings(
-      InformationProcessingRepository records, UnitOfWork transactions, SystemOperations system) {
+      InformationProcessingRepository records,
+      UnitOfWork transactions,
+      SemanticEmbedding embedding) {
     this.records = Objects.requireNonNull(records);
     this.transactions = Objects.requireNonNull(transactions);
-    this.system = Objects.requireNonNull(system);
+    this.embedding = Objects.requireNonNull(embedding);
   }
 
   public Budget budget(InformationLifecycle.Lease lease) {
@@ -67,43 +68,29 @@ public final class BoundPreparationEmbeddings implements PreparationEmbeddings {
       }
 
       public CallAuthorization authorize(EmbeddingRequest request) {
+        return authorize(new Task(Mode.DOCUMENT, request.specifier(), request));
+      }
+
+      public CallAuthorization authorize(Task task) {
         return transactions.inTransaction(
             () -> {
               fence.run();
               records.requireEmbeddingClear(lease, targets);
               String project = records.projectName(lease.project());
               var home = project == null ? Home.global() : Home.of(project);
-              var definition =
-                  new AgentDefinition(
-                      "document_embedding",
-                      "Document embedding",
-                      request.specifier(),
-                      List.of(),
-                      List.of(),
-                      List.of(),
-                      1,
-                      1,
-                      "Embed admitted document inputs");
               String binding =
-                  InformationCatalogue.sha256(
-                      InformationJson.json(
-                              List.of(
-                                  lease.revision(),
-                                  lease.generation(),
-                                  lease.stage(),
-                                  targets,
-                                  request.specifier(),
-                                  request.input()))
-                          .getBytes(StandardCharsets.UTF_8));
-              var work =
-                  system.admit(
-                      SystemOperations.Purpose.DOCUMENT_PREPARATION,
-                      home,
-                      records.home(lease.revision()),
-                      definition,
-                      binding,
-                      fence);
-              var captured = work.claimed(request, records.claimEmbedding(lease));
+                  InformationJson.json(
+                      List.of(lease.revision(), lease.generation(), lease.stage(), targets));
+              var captured =
+                  embedding.authorize(
+                      new SemanticEmbedding.Operation(
+                          SystemOperations.Purpose.DOCUMENT_PREPARATION,
+                          home,
+                          records.home(lease.revision()),
+                          binding,
+                          fence),
+                      task,
+                      () -> records.claimEmbedding(lease));
               records.bindEmbedding(lease, captured.binding(), targets);
               pending.add(captured.binding());
               return captured;

@@ -112,6 +112,26 @@ class BoundSystemOperationsTest {
   }
 
   @Test
+  void queryUsesSystemEmbeddingAuthorityButCannotAcquireChatOrStreamCarriage() {
+    var work =
+        service.admit(
+            SystemOperations.Purpose.SEMANTIC_QUERY,
+            Home.global(),
+            BuiltInIdentities.GLOBAL_KNOWLEDGE,
+            definition,
+            "query",
+            () -> {});
+    var request = EmbeddingRequest.of("model", List.of("query"));
+    work.claimed(request, Budget.of(1).tryClaim().orElseThrow()).requireRequest(request);
+    assertThrows(
+        CallerFault.class,
+        () ->
+            work.claimed(
+                ChatRequest.of("model", null, "chat"), Budget.of(1).tryClaim().orElseThrow()));
+    verify(identities, never()).account(any());
+  }
+
+  @Test
   void systemRuntimePreservesWorkerHooksWithoutBorrowingCreatorAuthority() {
     var work =
         service.admit(

@@ -1,8 +1,8 @@
 # Follow-on slice 15: SYSTEM embedding foundation and initial search consumers
 
-Status: proposed implementation scope, 18 October 2026. Planning only, requested
-after the bounded slice 14 completion. No runtime, configuration, schema, SDK or
-deployment changes are implemented by this document. Source baseline:
+Status: implemented under the subsequent explicit instruction, 18 October 2026.
+This records the revised shared foundation and initial consumer boundary after
+slice 14. No new public API or deployment is included. Planning source baseline:
 `dc9db60e18d3566c57ded528a64a012da7e2be09`.
 
 The original [roadmap](../authority-substrate-implementation-plan.md) contained
@@ -35,8 +35,8 @@ empty search or an automatic redispatch.
 **Depends on:** implemented slices 07–08, 13 and the
 [slice 14 completion](14-completion-plan.md). Reuse their dispatch/claim and
 embedding validation contracts. Sharing execution machinery does not allow a
-claim from one operation to be reused by another. Implementation needs a
-subsequent explicit instruction.
+claim from one operation to be reused by another. Implementation and verification
+are recorded below.
 
 ## Source findings
 
@@ -93,10 +93,10 @@ slot choice and filters where the requested operation is supported; do not add
 new code navigation or infer prose summary/stance support for code. Existing
 syntax outline/symbol reads remain independent of query inference.
 
-## Initial search consumer's proposed budget contract
+## Initial search consumer's budget contract
 
-Add one explicit configuration for the admitted semantic-search operation,
-provisionally `plowshare.embeddings.search-budget` (environment spelling
+The admitted semantic-search operation uses explicit configuration,
+`plowshare.embeddings.search-budget` (environment spelling
 `PLOWSHARE_SEMANTIC_SEARCH_BUDGET`). The search admission adapter reads it;
 the foundation does not. This replaces the draft's document-specific key and
 applies consistently across the initial frame/HTTP/tool search consumers.
@@ -133,7 +133,7 @@ bind their own supported operation source rather than inherit this setting.
 ## Authority, targets and disclosure
 
 Extend existing SYSTEM operation evidence with a closed read-query purpose,
-provisionally `SEMANTIC_QUERY`, used by admitted search consumers. Preserve
+`SEMANTIC_QUERY`, used by admitted search consumers. Preserve
 DOCUMENT_PREPARATION evidence for that operation; both use the same embedding
 foundation. Purpose identifies and constrains the operation, not a separate
 permission to embed. SYSTEM retains its intrinsic authority; no agent receives the
@@ -328,10 +328,87 @@ new search inference without disabling the foundation, preparation or deleting
 prior evidence. No data move, credential issuance, deployment, old-binary rollback
 or live schema migration is authorized here.
 
-## Planning verification
+## Initial planning verification
 
-Source and existing architecture records were inspected at the baseline above.
-This task changes documentation only. No Java, database, SDK, provider or live
-integration tests were run for this plan; the acceptance checks above are future
-implementation requirements.
-Changed documentation file links and `git diff --check` passed.
+The original planning task inspected the baseline above and checked documentation
+links/whitespace. It ran no implementation tests. The subsequent implementation
+record below supplies separate evidence; prior slice 14 counts do not verify the
+new behavior.
+
+## Implementation record, 18 October 2026
+
+- `SemanticEmbedding` and `BoundSemanticEmbedding` share closed SYSTEM embedding
+  claim carriage across preparation and semantic queries. Typed tasks bind mode,
+  profile and exact final inputs. Length-delimited hashes prevent batch-shape
+  aliases. Preparation retains its revision allowance, generation/lease, exact
+  output set, unresolved-claim fence and atomic publication adapter.
+- Search admission is mandatory in production composition and explicit at the
+  supported information/document frame, existing HTTP and retained tool entry
+  points. Scope alone creates no allowance. Tools retain the parent validity,
+  cancellation, original call identity and consumed-input ledger. Socket query
+  validity follows the originating connection; live query capabilities close at
+  their owning operation boundary and cannot be rebuilt from historical rows.
+- V162 extends the closed SYSTEM purpose allowlist and adds only the missing
+  retained query source/counter and task binding on `inference_admissions`.
+  Accounting and one-submission evidence remain in their existing stores.
+  Counters/identity cannot be reset, rebound or deleted; known repeated tool
+  calls refuse redispatch. Public unkeyed resubmissions remain new queries.
+- Both embedding modes use the common binding. Dual queries retain the active
+  profile through queued dispatch and the fenced read, with no silent re-embed.
+  SEMANTIC_QUERY cannot acquire chat/stream carriage, preparation publication or
+  independent maintenance. Unsupported consumers remain unbound.
+- Result assembly uses the existing navigation policy advisory fence, scoped
+  authority locks and short SHARE locks on information resources/revisions/inputs.
+  These order withdrawal and policy changes with the final read. The table locks
+  briefly delay concurrent information writes during assembly; no provider IO
+  runs in this transaction. Current root/input/privacy filters still apply before
+  ranking, paging, counts and returned content.
+
+Configuration is `plowshare.embeddings.search-budget`, with environment override
+`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`. The shipped default is zero (query inference
+inactive); positive finite values are captured once per logical query. Invalid
+negative/non-integer values refuse binding. This does not alter preparation's
+existing source or enable other embedding consumers.
+
+The public request/response graphs, operation names, roles and SDK methods are
+unchanged. Tests use deterministic providers and controlled PostgreSQL fixtures;
+no production data, real provider acceptance, live process restart, credentials,
+API extension, deployment or broader consumer activation is claimed.
+
+### Performed verification
+
+- `./gradlew format formatCheck check sdkCheck` passed. The default server run
+  passed 5,849 tests with zero failures/errors/skips; the root client,
+  architecture, Javadoc and configuration checks passed. Node, Python, .NET and
+  Go SDK conformance passed using installed toolchain overrides and cached Go
+  dependencies. Shared contracts remain at 276 operations, 17 outcome codes and
+  483 canonical DTO cases; no public graph regeneration/change was needed.
+- Selected PostgreSQL verification passed 27 cases across two invocations:
+  `GlobalPreparationPersistenceTest` (12 cases including the subsequent retained
+  reader-tool acceptance), `RootDocumentPolicyPersistenceTest` (13), and
+  `InferenceAdmissionPersistenceTest` (2). These used `-PfullDb --tests` because
+  the new migration, source/claim constraints, atomic counters, real policy SQL
+  and withdrawal/read locking require PostgreSQL. No full database suite or
+  database-backed deployment smoke test ran.
+- The Global acceptance uses real public information frames, policy/repositories,
+  retained SYSTEM inference boundaries and deterministic providers. Human and
+  service readers search Global-held knowledge in both embedding modes, then
+  rank/stance through the same query source contract. Preparation and query
+  spending stay separate. Other cases cover exhaustion/concurrency, closed or
+  repeated tool claims, withdrawal during provider IO, source immutability,
+  private processing logs and final disclosure ordering.
+- The retained reader-tool acceptance uses a real READ-only parent admission,
+  query source, SYSTEM dispatcher and durable consumed-input ledger. The parent
+  has no RUN_MODEL action and its conversation allowance is not spent. Repeated
+  call identity and cancellation cannot dispatch another embedding request.
+  Mocked boundary tests additionally cover exact task/profile binding, queued
+  profile invalidation, consumer-copy propagation, invalid configuration and
+  denial of chat/stream or publication through query authority.
+- Formatting passed again after the final tagged acceptance test. Changed
+  documentation file/section links and diff whitespace were checked separately.
+
+Verification repaired isolated fixtures for the mandatory query dependency,
+Spring's canonical configuration constructor selection and transport-owned
+request lifetime. The database fixture now explicitly clears Global-owned corpus
+state and activates empty serving profiles before preparation, matching startup;
+it does not bypass coverage or enable independent repair to make queries pass.

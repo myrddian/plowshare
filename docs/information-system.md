@@ -43,6 +43,16 @@ general transfer or ordinary Global conversation/run capability is added. The
 [root-policy specification](authority-substrate-slices/05-root-policy-specification.md)
 records migration, privacy and concurrency behavior.
 
+Supported information search/rank and document search/retrieve/rank/stance use
+bounded SYSTEM query embedding with the search operation's configured allowance.
+Set `plowshare.embeddings.search-budget` (`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`) to a
+positive model-call limit per query; its default `0` leaves this inference
+disabled without affecting preparation. Reader permissions still determine the
+selected corpus and all returned content, counts and metadata. No caller gains
+RUN_MODEL or an embedding role. Global-held general-readable documents use the
+existing Shared/includeShared selection; the account selector above does not
+become a search target. See [embedding authority and configuration](embedding-evolution.md#implemented-sql-foundation).
+
 Filters apply before ranking, counts, title matching and paging. Direct guessed
 IDs receive the same refusal as absent IDs. Excluded revisions disappear from
 ordinary discovery but remain available for authorized direct evidence reads.

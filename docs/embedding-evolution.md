@@ -61,6 +61,30 @@ never falls back to the chat ratio estimate. The dual configuration example is
 
 ## Implemented SQL foundation
 
+Semantic embedding executes through the shared internal SYSTEM foundation.
+Preparation supplies its retained revision allowance, lease and publication
+fences. Supported document search/retrieve/rank/stance operations supply a
+separate retained search-operation allowance and current reader context. An
+account needs the existing read permission for the operation, not an embedding
+role or its own RUN_MODEL grant. SYSTEM is the executor, not a spending wallet.
+
+Configure `plowshare.embeddings.search-budget`, or
+`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`, explicitly to a positive number of model calls
+per logical query to enable these query consumers. The default `0` leaves search
+inference disabled in both legacy and dual modes; negative values fail binding.
+Current single-query and batched stance requests each consume one dispatcher
+call. This does not enable memory recall, independent repair or ask/deliberation,
+or change preparation's allowance. Existing lexical-mode document search still
+embeds its query and therefore also needs the search allowance.
+
+Each query captures its source and limit once. Completion, failure or cancellation
+closes the live capability while preserving its source, claims and accounting
+correlations. A known repeated tool invocation refuses redispatch; unkeyed new
+public reads remain new operations. Missing authority or failed inference is not
+an empty result, and no alternate model or lexical fallback is attempted.
+Active profile changes during a query refuse the stale read without another
+embedding call. Existing slot activation/coverage requirements still apply.
+
 All five embedding stores now have unconstrained `code_embedding` and
 `prose_embedding` columns, with space IDs and source revisions. An immutable
 registry fingerprints model ID/revision, dimensions, query/document prefixes,
