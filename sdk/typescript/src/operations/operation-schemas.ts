@@ -631,7 +631,7 @@ export const OPERATION_SCHEMAS: { inputs: Record<string, Schema>; results: Recor
     "shape71": {"const":"project"},
     "shape72": {"const":"deny"},
     "shape68": {"anyOf":[{"$ref":"#/$defs/shape69"},{"$ref":"#/$defs/shape70"},{"$ref":"#/$defs/shape71"},{"$ref":"#/$defs/shape72"}]},
-    "shape67": {"type":"object","properties":{"decision":{"$ref":"#/$defs/shape68"},"id":{"$ref":"#/$defs/shape1"},"prefix":{"$ref":"#/$defs/shape47"}},"required":["decision","id"],"additionalProperties":false},
+    "shape67": {"type":"object","properties":{"decision":{"$ref":"#/$defs/shape68"},"id":{"$ref":"#/$defs/shape1"},"prefix":{"$ref":"#/$defs/shape47"},"reason":{"$ref":"#/$defs/shape1"}},"required":["decision","id"],"additionalProperties":false},
     "shape73": {"type":"object","properties":{"conversation":{"$ref":"#/$defs/shape43"},"mine":{"$ref":"#/$defs/shape8"},"project":{"$ref":"#/$defs/shape43"}},"additionalProperties":false},
     "shape74": {"type":"object","properties":{"id":{"$ref":"#/$defs/shape1"}},"required":["id"],"additionalProperties":false,"title":"Id"},
     "shape75": {"type":"object","properties":{"topic":{"$ref":"#/$defs/shape1"}},"required":["topic"],"additionalProperties":false},

@@ -775,7 +775,10 @@ export const SHAPES: Record<
   'project.member.add': [['project', 'handle'], ['role']],
   'project.member.remove': [['project', 'handle'], []],
   'approval.list': [[], ['conversation', 'project', 'mine']],
-  'approval.answer': [['id', 'decision'], ['prefix']],
+  'approval.answer': [
+    ['id', 'decision'],
+    ['prefix', 'reason'],
+  ],
   'approval.revoke': [['id'], []],
   'message.instances': [['project'], ['archived', 'offset', 'limit']],
   'message.instance': [['instance'], []],
@@ -1346,6 +1349,15 @@ export function commandProblem(
   )
     return 'approval.list needs exactly one of conversation, project, mine:true';
   if (type === 'approval.answer') {
+    if (
+      body['reason'] !== undefined &&
+      (body['decision'] !== 'deny' ||
+        typeof body['reason'] !== 'string' ||
+        !body['reason'].trim() ||
+        body['reason'].length > 4000 ||
+        body['reason'].includes('\0'))
+    )
+      return 'reason must be nonblank text of at most 4000 characters, only for deny';
     if (
       !['once', 'conversation', 'project', 'deny'].includes(
         String(body['decision']),

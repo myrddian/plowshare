@@ -13,6 +13,19 @@ import org.junit.jupiter.api.Test;
  * a finish — is one a person or a caller has to see, so it takes the ending instead.
  */
 class TurnEndTest {
+  @Test
+  void approval_resumption_uses_identity_and_never_clears_another_tools_ending() {
+    TurnEnd end = new TurnEnd();
+    assertTrue(end.requestApproval("apr_1", "Display text without an approval ID"));
+    end.approvalResumed("apr_2");
+    assertTrue(end.requested().isPresent());
+    end.approvalResumed("apr_1");
+    assertTrue(end.requested().isEmpty());
+    assertTrue(end.request(Outcome.Ending.AWAITING, "A different question [apr_1]"));
+    end.approvalResumed("apr_1");
+    assertTrue(
+        end.requested().isPresent(), "Matching prose must never clear an unrelated question");
+  }
 
   @Test
   void a_hard_request_after_a_soft_one_replaces_it() {

@@ -327,13 +327,24 @@ public class RunApprovalStore implements ApprovalNotificationStore {
 
   /** Deny a question. {@code false} when it was not {@code asked} any more. */
   public boolean deny(String id, String by) {
+    return deny(id, by, null);
+  }
+
+  /** Deny with the person's optional explanation; never substitute the original request reason. */
+  public boolean deny(String id, String by, String reason) {
+    Objects.requireNonNull(id, "id");
+    Objects.requireNonNull(by, "by");
+    if (reason != null && (reason.isBlank() || reason.length() > 4000 || reason.indexOf('\0') >= 0))
+      throw new IllegalArgumentException(
+          "A denial reason must be nonblank text of at most 4000 characters");
     boolean won =
         jdbc.update(
-                "UPDATE run_approvals SET state = ?, answered_by = ?, answered_at = ?"
+                "UPDATE run_approvals SET state = ?, answered_by = ?, answered_at = ?, denial_reason = ?"
                     + " WHERE id = ? AND state = ?",
                 RunApproval.DENIED,
                 by,
                 Timestamp.from(clock.get()),
+                reason,
                 id,
                 RunApproval.ASKED)
             == 1;

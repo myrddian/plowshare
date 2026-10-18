@@ -5099,6 +5099,7 @@ public sealed record ApprovalAnswerPayloadDto {
  [JsonPropertyName("decision")] public required string Decision { get; init; }
  [JsonPropertyName("id")] public required string Id { get; init; }
  [JsonPropertyName("prefix")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<IReadOnlyList<string>> Prefix { get; init; }
+ [JsonPropertyName("reason")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Reason { get; init; }
 }
 
 /// <summary>Fields of the ApprovalListPayloadDto protocol contract.</summary>
@@ -7601,6 +7602,7 @@ public sealed record ApprovalAnswerRequest {
  [JsonPropertyName("decision")] public required string Decision { get; init; }
  [JsonPropertyName("id")] public required string Id { get; init; }
  [JsonPropertyName("prefix")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<IReadOnlyList<string>> Prefix { get; init; }
+ [JsonPropertyName("reason")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Reason { get; init; }
 }
 public static partial class Operations { public static Task<Reply<ApprovalAnsweredDto>> ApprovalAnswerAsync(this Client client,ApprovalAnswerRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ApprovalAnswerRequest,ApprovalAnsweredDto>("approval.answer",request,cancellationToken,options); }
 

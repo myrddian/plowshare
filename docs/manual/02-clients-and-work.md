@@ -105,6 +105,17 @@ that displayed request; do not reuse another run's approval key. Declining,
 leaving an approval for later and granting a request have different effects.
 Hooks and access checks can still deny work that a person approved.
 
+Command approvals suspend the original tool call in the harness. Approving resumes that
+retained call with its original arguments, input, timeout and client session; the model
+does not submit `run` again. The model receives the command's result afterward. Denying
+returns the answering identity and optional denial reason as the tool result. Approval
+requests and decisions remain visible in the trajectory and Inbox, without retry
+instructions entering the model conversation. If execution was interrupted after its
+durable start fence, recovery reports an unknown outcome and does not replay the command.
+Recovery keeps the original execution owner and client session. If a delegated run's
+owner cannot restore its execution lease, the owning account receives an Inbox notice;
+the harness does not restart the root model to reconstruct the delegation.
+
 Desktop reads pending approvals from both the signed-in account and each open
 conversation. Account discovery includes foreground questions in conversations owned
 by that account, even when no view is open, as well as pinned background requests.

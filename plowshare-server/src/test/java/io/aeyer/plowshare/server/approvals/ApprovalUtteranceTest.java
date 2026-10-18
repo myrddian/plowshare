@@ -1,66 +1,37 @@
 package io.aeyer.plowshare.server.approvals;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ApprovalUtteranceTest {
-  private static final ObjectMapper JSON = new ObjectMapper();
-
-  private static RunApproval approval(List<String> command) {
-    return new RunApproval(
-        "apr_fixture",
-        7L,
-        "cnv_fixture",
-        "cnv_fixture",
-        "coder",
-        "local",
-        command,
-        "/fixture folder",
-        null,
-        RunApproval.ALLOWED,
-        RunApproval.ONCE,
-        null,
-        "person",
-        Instant.now(),
-        Instant.now());
-  }
-
   @Test
-  void continuation_keeps_argument_boundaries_instead_of_requiring_shell_reconstruction()
-      throws Exception {
-    List<String> command =
-        List.of(
-            "python3",
-            "connect.py",
-            "post",
-            "Hello from Professor Farnsworth!",
-            "--topic",
-            "welcome",
-            "",
-            "literal \"quotes\"",
-            "back\\slash",
-            "line\nbreak");
-    RunApproval approval = approval(command);
-    for (String decision :
-        List.of(RunApproval.ONCE, RunApproval.CONVERSATION, RunApproval.PROJECT)) {
-      String utterance = ApprovalUtterance.forAnswer(approval, decision, List.of("python3"));
-      var fields = JSON.readTree(utterance.substring(utterance.indexOf('{')));
-      assertEquals(JSON.valueToTree(command), fields.get("command"));
-      assertEquals("/fixture folder", fields.get("cwd").asText());
-      assertTrue(utterance.contains("Preserve the original stdin and timeout"));
+  void trajectory_text_never_instructs_the_model_to_repeat_a_call() {
+    RunApproval approval =
+        new RunApproval(
+            "apr_fixture",
+            7,
+            "cnv_fixture",
+            "cnv_fixture",
+            "coder",
+            "local",
+            List.of("python3", "connect.py", "Hello with spaces"),
+            "/fixture folder",
+            null,
+            RunApproval.ASKED,
+            null,
+            null,
+            null,
+            null,
+            Instant.now());
+    for (String decision : List.of("once", "conversation", "project", "deny")) {
+      String text = ApprovalUtterance.forAnswer(approval, decision, List.of("python3"));
+      assertFalse(text.contains("Run it again"));
+      assertFalse(text.contains("connect.py"));
+      assertFalse(text.contains("Use these exact"));
+      assertTrue(text.contains("harness"));
     }
-  }
-
-  @Test
-  void denial_does_not_supply_retry_instructions() {
-    String utterance = ApprovalUtterance.forAnswer(approval(List.of("python3")), "deny", null);
-    assertTrue(utterance.contains("Do not run it"));
-    assertFalse(utterance.contains("Use these exact"));
   }
 }

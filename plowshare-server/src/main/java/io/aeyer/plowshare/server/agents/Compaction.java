@@ -1741,6 +1741,11 @@ public final class Compaction {
     }
 
     @Override
+    public void recordDurably(LoggedEntry entry) {
+      turn.recordDurably(entry);
+    }
+
+    @Override
     public void promptMeasured(int promptTokens) {
       turn.promptMeasured(promptTokens);
     }
@@ -2538,6 +2543,12 @@ public final class Compaction {
       }
     }
 
+    @Override
+    public void recordDurably(LoggedEntry entry) {
+      retainedAuthority.run();
+      entries.append(conversationId, turnOrdinal(), entry, job);
+    }
+
     /**
      * {@inheritDoc}
      *
@@ -3238,11 +3249,13 @@ public final class Compaction {
               JobRuntime.describe(notRecorded));
         }
       } else if (outcome.ending() == Outcome.Ending.AWAITING) {
-        // A question put to a person, and not a failed attempt: the turn ended where it
-        // meant to, so no attempt_failed goes with it. The question is recorded as the
-        // turn's answer, untimed for the reason the branch below gives -- the loop records
-        // no answer for this ending, since the text is a tool's and not a model's reply.
-        record(LoggedEntry.answer(outcome.text(), List.of()));
+        // An ordinary question remains the turn's answer. A pre-inference recovery blocked on
+        // consent is only a harness status: it must not become another model-visible question.
+        // Never classify a model/tool-requested question merely by its display wording.
+        record(
+            !outcome.requested() && outcome.text().startsWith("Waiting for command approval [")
+                ? LoggedEntry.diagnostic(outcome.text())
+                : LoggedEntry.answer(outcome.text(), List.of()));
       } else if (outcome.ending() != Outcome.Ending.ANSWERED) {
         record(LoggedEntry.attemptFailed(outcome.ending(), outcome.failureText()));
         // The runtime's own sentence, and it is deliberately untimed: it
@@ -4759,6 +4772,7 @@ public final class Compaction {
    */
   private static List<EntryRecord> whatWasSaidAndWhatCameBack(
       List<EntryRecord> log, boolean canRedeem) {
+    log = ApprovalProjection.settledResults(log);
     return canRedeem ? withResultsReferenced(log) : withTheWorkingDropped(log);
   }
 
