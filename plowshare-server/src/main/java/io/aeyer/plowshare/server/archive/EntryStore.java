@@ -356,7 +356,14 @@ public final class EntryStore {
    * is already sub-millisecond and the sort fits in 51 kB of memory. It would
    * be added on a guess.
    */
-  private static final String THAT_PROJECT = " AND superseded_by IS NULL AND role IS NOT NULL";
+  private static final String THAT_PROJECT =
+      " AND superseded_by IS NULL AND role IS NOT NULL"
+          // Legacy granted-approval utterances are audit, not instructions for another model call.
+          // Speaker provenance is mandatory: matching text alone must never hide a person's
+          // message.
+          + " AND NOT COALESCE((kind = 'utterance' AND speaker = 'harness' AND speaker_name LIKE 'approval %'"
+          + " AND content NOT LIKE '[approval] The person denied %'), FALSE)"
+          + " AND NOT (kind = 'answer' AND invocation IS NULL AND content LIKE 'Approve running % [apr_%]')";
 
   /*
    * WHEN A TURN'S PROMPT WAS ASSEMBLED, which is the number the read below is

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -78,6 +79,10 @@ class RunGateWiringTest {
   /** The cancel the last command was run under. */
   private volatile BooleanSupplier lastCancel;
 
+  private String executedInput;
+  private Duration executedTimeout;
+  private Path executedCwd;
+
   private Function<String, Optional<ConversationRecord>> approvalRoots =
       ignored -> Optional.empty();
 
@@ -107,9 +112,23 @@ class RunGateWiringTest {
         EnvironmentFile.Side side,
         Duration timeout,
         BooleanSupplier cancelled) {
+      executedTimeout = timeout;
+      executedCwd = cwd;
       ran.add(argv);
       lastCancel = cancelled;
       return new CommandRunner.Outcome(0, false, false, "built", 0, "", 0, 5);
+    }
+
+    @Override
+    public CommandRunner.Outcome run(
+        Path cwd,
+        List<String> argv,
+        EnvironmentFile.Side side,
+        Duration timeout,
+        String stdin,
+        BooleanSupplier cancelled) {
+      executedInput = stdin;
+      return run(cwd, argv, side, timeout, cancelled);
     }
 
     @Override
@@ -205,9 +224,25 @@ class RunGateWiringTest {
   /** A conversation, for a run a person is in. */
   private static final class InConversation implements Transcript {
     final List<LoggedEntry> entries = Collections.synchronizedList(new ArrayList<>());
+    private final boolean failResult;
+
+    InConversation() {
+      this(false);
+    }
+
+    InConversation(boolean failResult) {
+      this.failResult = failResult;
+    }
 
     @Override
     public void record(LoggedEntry entry) {
+      entries.add(entry);
+    }
+
+    @Override
+    public void recordDurably(LoggedEntry entry) {
+      if (failResult && entry.kind() == EntryKind.TOOL_RESULT)
+        throw new IllegalStateException("Simulated result persistence failure");
       entries.add(entry);
     }
 
@@ -228,6 +263,11 @@ class RunGateWiringTest {
   private RunApprovalStore approvals = mock(RunApprovalStore.class);
   private ApprovalDelivery delivery = mock(ApprovalDelivery.class);
   private Outcome last;
+  private io.aeyer.plowshare.server.approvals.SuspendedRunCalls suspendedCalls;
+  private List<List<ChatMessage>> lastSent;
+  private List<LoggedEntry> lastEntries;
+  private volatile Scripted activeModel;
+  private boolean failRetainedResult;
 
   /** The run call the model makes. */
   private String runCall = "{\"command\": [\"./gradlew\", \"test\"]}";
@@ -247,6 +287,7 @@ class RunGateWiringTest {
 
   private String runAs(Hooks hooks, String session, String callerHandle) throws Exception {
     Scripted model = new Scripted(runCall);
+    activeModel = model;
     JobRuntime runtime =
         new JobRuntime(
             new LlmDispatcher(
@@ -265,6 +306,7 @@ class RunGateWiringTest {
             (home, grants, sessionId, owner) -> List.of(new Machine()));
     runtime.useEnvironments(new Environments(name -> 7L, id -> environment, null));
     runtime.useApprovals(approvals);
+    if (suspendedCalls != null) runtime.useSuspendedRunCalls(suspendedCalls);
     runtime.useApprovalRoots(approvalRoots);
     runtime.useApprovalDelivery(delivery);
     runtime.useHooks(hooks);
@@ -284,7 +326,7 @@ class RunGateWiringTest {
                 You run the build.
                 """);
     AgentDefinition coder = AgentRegistry.of(agents, runtime.knownTools()).get("coder");
-    InConversation conversation = new InConversation();
+    InConversation conversation = new InConversation(failRetainedResult);
     last =
         session == null && callerHandle == null
             ? runtime.run(
@@ -301,6 +343,8 @@ class RunGateWiringTest {
                 TurnCap.from(coder),
                 List.of(),
                 callerHandle);
+    lastSent = List.copyOf(model.sent);
+    lastEntries = List.copyOf(conversation.entries);
     if (model.sent.size() < 2) {
       // The turn ended after the batch, so the model never saw its result; the log did.
       return conversation.entries.stream()
@@ -355,6 +399,199 @@ class RunGateWiringTest {
     assertEquals(Outcome.Ending.AWAITING, last.ending());
     assertTrue(last.text().contains("Approve running ./gradlew test"), last.text());
     assertTrue(last.text().contains("[apr_1]"), last.text());
+  }
+
+  @Test
+  void retained_calls_allow_equivalent_encoding_but_refuse_changed_execution_fields()
+      throws Exception {
+    Files.writeString(environment, "server:\n  mode: open\n");
+    Environments configured = new Environments(name -> 7L, id -> environment, null);
+    RunTool run =
+        new RunTool(
+            new io.aeyer.plowshare.server.files.ProviderRouter(home -> List.of(new Machine())),
+            () -> configured,
+            () -> false);
+    Home home = Home.of("payments");
+    HookContext context =
+        new HookContext(
+            "coder", false, java.util.Set.of("run"), "payments", "cnv_asked", HookContext.SERVER);
+    String retained =
+        run.retainedArguments(
+            "{\"command\":[\"program\"],\"stdin\":\"same\",\"timeout_seconds\":17}", home);
+    String formatted =
+        new com.fasterxml.jackson.databind.ObjectMapper().readTree(retained).toPrettyString();
+    ToolPre allowed =
+        run.gateRetained(
+            retained,
+            "server",
+            home,
+            context,
+            (at, arguments) -> new ToolPre(formatted, null, List.of()));
+    assertFalse(allowed.isDenied());
+    run.run(allowed.arguments(), home);
+    assertEquals(1, ran.size());
+    for (String changed :
+        List.of(
+            retained.replace("\"program\"", "\"other\""),
+            retained.replace("\"same\"", "\"different\""),
+            retained.replace(":17", ":18"))) {
+      assertTrue(
+          run.gateRetained(
+                  retained,
+                  "server",
+                  home,
+                  context,
+                  (at, arguments) -> new ToolPre(changed, null, List.of()))
+              .isDenied());
+    }
+    assertEquals(1, ran.size(), "Rechecking changed fields must not execute another command");
+    Files.writeString(environment, "server:\n  mode: open\n  timeout: 5s\n");
+    assertTrue(
+        run.gateRetained(
+                retained,
+                "server",
+                home,
+                context,
+                (at, arguments) -> new ToolPre(arguments, null, List.of()))
+            .isDenied(),
+        "A changed environment must refuse, not silently shorten the approved timeout");
+    Files.writeString(environment, "server:\n  mode: open\n  timeout: 30s\n");
+    ToolPre checked =
+        run.gateRetained(
+            retained,
+            "server",
+            home,
+            context,
+            (at, arguments) -> new ToolPre(arguments, null, List.of()));
+    assertFalse(checked.isDenied());
+    Files.writeString(environment, "server:\n  mode: open\n  timeout: 5s\n");
+    assertTrue(run.run(checked.arguments(), home).contains("timeout"));
+    assertEquals(1, ran.size(), "A limit change after the gate must still preserve the exact call");
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2})
+  void approval_resumes_the_original_call_without_another_model_request_for_run(int scenario)
+      throws Exception {
+    boolean denied = scenario == 1;
+    failRetainedResult = scenario == 2;
+    Files.writeString(environment, "server:\n  mode: ask\n");
+    var retained =
+        new java.util.concurrent.atomic.AtomicReference<
+            io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call>();
+    var consent = new java.util.concurrent.atomic.AtomicReference<>("asked");
+    var entered = new java.util.concurrent.CountDownLatch(1);
+    suspendedCalls = mock(io.aeyer.plowshare.server.approvals.SuspendedRunCalls.class);
+    when(suspendedCalls.pending(any())).thenReturn(List.of());
+    org.mockito.Mockito.doAnswer(
+            invocation -> {
+              retained.set(
+                  new io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call(
+                      invocation.getArgument(0),
+                      invocation.getArgument(1),
+                      invocation.getArgument(2),
+                      invocation.getArgument(3),
+                      invocation.getArgument(5),
+                      "waiting",
+                      "allowed",
+                      "reviewer",
+                      null,
+                      null,
+                      invocation.getArgument(4)));
+              entered.countDown();
+              return null;
+            })
+        .when(suspendedCalls)
+        .retain(any(), any(), any(), any(), any(), any());
+    when(suspendedCalls.find(any()))
+        .thenAnswer(
+            invocation -> {
+              var call = retained.get();
+              return call == null
+                  ? Optional.empty()
+                  : Optional.of(
+                      new io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call(
+                          call.approval(),
+                          call.conversation(),
+                          call.session(),
+                          call.side(),
+                          call.tool(),
+                          call.state(),
+                          consent.get(),
+                          "reviewer",
+                          denied ? "Publishing is unnecessary" : null,
+                          null));
+            });
+    when(suspendedCalls.claim(any())).thenReturn(true);
+    when(approvals.find("apr_1")).thenReturn(Optional.of(question("apr_1")));
+    when(approvals.consume(anyLong(), any(), any(), any(), any(), any()))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(question("apr_1")));
+    when(approvals.ask(anyLong(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(question("apr_1"));
+    runCall =
+        "{\"command\":[\"python3\",\"connect.py\",\"Hello from Professor Farnsworth!\",\"\"],\"timeout_seconds\":17,\"stdin\":\"first line\\nquoted \\\"data\\\"\\n\"}";
+
+    String result;
+    try (var jobs = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var running = jobs.submit(() -> runAs(Hooks.NONE, "original-session"));
+      assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      assertTrue(ran.isEmpty(), "A pending approval must not execute anything");
+      assertEquals(1, activeModel.sent.size(), "No inference is needed while a person decides");
+      consent.set(denied ? "denied" : "allowed");
+      result = running.get(10, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    if (failRetainedResult) {
+      assertEquals(Outcome.Ending.UNAVAILABLE, last.ending());
+      assertEquals(
+          1,
+          last.modelCalls(),
+          "A failed result append must not erase the original inference count");
+      assertEquals(
+          1, activeModel.sent.size(), "No model is asked to reconstruct a completed command");
+      assertEquals(1, ran.size());
+      verify(suspendedCalls).complete(org.mockito.ArgumentMatchers.eq("apr_1"), any());
+      verify(suspendedCalls, never()).acknowledged(any());
+      return;
+    }
+    if (denied) {
+      assertTrue(result.contains("denied by reviewer"), result);
+      assertTrue(result.contains("Publishing is unnecessary"), result);
+      assertTrue(ran.isEmpty());
+      verify(suspendedCalls, never()).claim("apr_1");
+    } else {
+      assertTrue(result.contains("built"), result);
+      assertEquals(1, ran.size());
+      assertEquals(
+          List.of("python3", "connect.py", "Hello from Professor Farnsworth!", ""), ran.getFirst());
+      assertEquals(Duration.ofSeconds(17), executedTimeout);
+      assertEquals(repo, executedCwd);
+      assertEquals("first line\nquoted \"data\"\n", executedInput);
+      verify(suspendedCalls).claim("apr_1");
+    }
+    assertEquals(Outcome.Ending.ANSWERED, last.ending());
+    assertEquals(
+        2, last.modelCalls(), "One request for run, followed by one response to its real result");
+    assertTrue(retained.get().tool().arguments().contains("\"timeout_seconds\":17"));
+    assertEquals("original-session", retained.get().session());
+    assertEquals(
+        1,
+        lastEntries.stream()
+            .filter(e -> e.kind() == EntryKind.ANSWER && !e.toolCalls().isEmpty())
+            .count());
+    assertEquals(1, lastEntries.stream().filter(e -> e.kind() == EntryKind.TOOL_RESULT).count());
+    assertTrue(
+        lastSent.stream()
+            .flatMap(List::stream)
+            .noneMatch(
+                m ->
+                    m.content().contains("Run it again")
+                        || m.content().contains("[approval]")
+                        || m.content().contains("Waiting for a person")));
+    verify(approvals, org.mockito.Mockito.times(1))
+        .ask(anyLong(), any(), any(), any(), any(), any(), any(), any());
+    verify(suspendedCalls).acknowledged("apr_1");
   }
 
   @Test

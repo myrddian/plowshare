@@ -76,6 +76,78 @@ class RunApprovalStoreTest {
   }
 
   @Test
+  void suspended_calls_survive_recovery_and_only_one_dispatch_can_claim_consent() throws Exception {
+    String conversation =
+        new io.aeyer.plowshare.server.archive.ConversationStore(jdbc)
+            .open(
+                io.aeyer.plowshare.protocol.Home.of("payments"),
+                io.aeyer.plowshare.server.agents.Budget.of(20))
+            .id();
+    RunApproval question = asked(conversation, "local", TEST);
+    SuspendedRunCalls retained = new JdbcSuspendedRunCalls(jdbc);
+    String arguments =
+        "{\"command\":[\"program\",\"one argument\",\"\"],\"stdin\":\"line\\n\",\"timeout_seconds\":17}";
+    retained.retain(
+        question.id(),
+        conversation,
+        "original-session",
+        "local",
+        "original-owner",
+        new io.aeyer.plowshare.protocol.ToolCall("call_original", "run", arguments));
+    assertFalse(retained.claim(question.id()));
+    assertEquals(arguments, retained.pending(conversation).getFirst().tool().arguments());
+    assertTrue(store.allow(question.id(), RunApproval.ONCE, null, "reviewer"));
+    assertEquals(
+        List.of(question.id()),
+        retained.recoverable().stream().map(SuspendedRunCalls.Call::approval).toList());
+    assertFalse(retained.claim(question.id()), "approval.post must release the call first");
+    retained.release(question.id());
+    try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      List<java.util.concurrent.Future<Boolean>> claims = new ArrayList<>();
+      for (int i = 0; i < 8; i++) claims.add(workers.submit(() -> retained.claim(question.id())));
+      int won = 0;
+      for (var claim : claims) if (claim.get()) won++;
+      assertEquals(1, won);
+    }
+    SuspendedRunCalls recovered = new JdbcSuspendedRunCalls(jdbc);
+    var pending = recovered.pending(conversation).getFirst();
+    assertEquals("original-session", pending.session());
+    assertEquals("original-owner", pending.owner());
+    assertEquals("started", pending.state());
+    new RunCallResumption(recovered)
+        .resume(
+            pending,
+            call -> {
+              throw new AssertionError("An uncertain command must never replay");
+            },
+            result -> assertTrue(result.contains("outcome is unknown")));
+    assertTrue(recovered.pending(conversation).isEmpty());
+    assertTrue(recovered.recoverable().isEmpty());
+    assertTrue(recovered.find(question.id()).orElseThrow().result().contains("outcome is unknown"));
+
+    RunApproval denied = asked(conversation, "local", TEST);
+    recovered.retain(
+        denied.id(),
+        conversation,
+        "original-session",
+        "local",
+        new io.aeyer.plowshare.protocol.ToolCall("call_denied", "run", arguments));
+    assertTrue(store.deny(denied.id(), "reviewer", "Publishing is not needed"));
+    recovered.release(denied.id());
+    new RunCallResumption(recovered)
+        .resume(
+            recovered.find(denied.id()).orElseThrow(),
+            call -> {
+              throw new AssertionError("A denial must never execute");
+            },
+            result -> {
+              assertTrue(result.contains("reviewer"));
+              assertTrue(result.contains("Publishing is not needed"));
+            });
+    assertTrue(recovered.pending(conversation).isEmpty());
+  }
+
+  @Test
   void a_question_is_open_until_it_is_answered_and_is_answered_at_most_once() {
     RunApproval question = asked("cnv_1", "local", TEST);
 

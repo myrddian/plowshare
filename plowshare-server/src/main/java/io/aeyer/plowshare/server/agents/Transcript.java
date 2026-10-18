@@ -195,6 +195,15 @@ public interface Transcript {
   }
 
   /**
+   * Confirm a retained execution record before the harness acknowledges it. Unlike best-effort
+   * {@link #record}, failure must throw: losing this row could erase a completed effect from the
+   * model's history. Implementations without durable storage cannot accept this contract.
+   */
+  default void recordDurably(LoggedEntry entry) {
+    throw new IllegalStateException("This transcript cannot confirm durable execution records");
+  }
+
+  /**
    * The conversation this run is writing into, or {@code null} for a run in none.
    *
    * <h2>Why this is not {@link #spokenIn}</h2>

@@ -76,6 +76,7 @@ public final class TurnEnd {
       Set.of(Outcome.Ending.AWAITING, Outcome.Ending.ANSWERED);
 
   private Requested requested;
+  private String approval;
 
   /** Whether {@link #requested} came from {@link #requestSoftly}, and so yields to any other. */
   private boolean soft;
@@ -93,6 +94,7 @@ public final class TurnEnd {
       return false;
     }
     requested = new Requested(ending, text);
+    approval = null;
     soft = false;
     return true;
   }
@@ -110,6 +112,7 @@ public final class TurnEnd {
       return false;
     }
     requested = new Requested(ending, text);
+    approval = null;
     soft = true;
     return true;
   }
@@ -131,5 +134,26 @@ public final class TurnEnd {
   /** The request that stands, or empty when no tool has asked. */
   public synchronized Optional<Requested> requested() {
     return Optional.ofNullable(requested);
+  }
+
+  /**
+   * Typed ownership of the run gate's wait; the displayed question carries no control authority.
+   */
+  public synchronized boolean requestApproval(String id, String text) {
+    Objects.requireNonNull(id);
+    if (!request(Outcome.Ending.AWAITING, text)) return false;
+    approval = id;
+    return true;
+  }
+
+  /**
+   * Remove only this run gate's wait when its retained call resumes; never clear another ending.
+   */
+  public synchronized void approvalResumed(String approval) {
+    if (requested != null && approval.equals(this.approval)) {
+      requested = null;
+      this.approval = null;
+      soft = false;
+    }
   }
 }

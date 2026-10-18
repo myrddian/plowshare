@@ -4064,6 +4064,7 @@ class ApprovalAnswerPayloadDto:
     decision: Literal["once", "conversation", "project", "deny"]
     id: str
     prefix: tuple[str, ...] | Unset = UNSET
+    reason: str | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
 class ApprovalListPayloadDto:
@@ -6333,6 +6334,7 @@ class ApprovalAnswerRequest(Request[ApprovalAnsweredDto]):
     decision: Literal["once", "conversation", "project", "deny"]
     id: str
     prefix: tuple[str, ...] | Unset = UNSET
+    reason: str | Unset = UNSET
     operation: ClassVar[str] = "approval.answer"
 
 @dataclass(frozen=True, kw_only=True)
@@ -9877,7 +9879,7 @@ _FIELDS = {
     ApplicationStorageSetPayloadDto: {"applicationRoot": "application_root", "project": "project", "writableAreas": "writable_areas"},
     ApplicationTokenIssuePayloadDto: {"expiresInDays": "expires_in_days", "project": "project", "requestId": "request_id", "rotate": "rotate"},
     ApplicationTokenReceiptPayloadDto: {"project": "project", "requestId": "request_id"},
-    ApprovalAnswerPayloadDto: {"decision": "decision", "id": "id", "prefix": "prefix"},
+    ApprovalAnswerPayloadDto: {"decision": "decision", "id": "id", "prefix": "prefix", "reason": "reason"},
     ApprovalListPayloadDto: {"conversation": "conversation", "mine": "mine", "project": "project"},
     BoardMessagesPayloadDto: {"topic": "topic"},
     BoardOpenPayloadDto: {"body": "body", "label": "label", "maxModelCalls": "max_model_calls", "project": "project", "requestId": "request_id", "swarm": "swarm", "title": "title"},
@@ -10158,7 +10160,7 @@ _FIELDS = {
     ApplicationStorageSetRequest: {"applicationRoot": "application_root", "project": "project", "writableAreas": "writable_areas"},
     ApplicationTokenIssueRequest: {"expiresInDays": "expires_in_days", "project": "project", "requestId": "request_id", "rotate": "rotate"},
     ApplicationTokenReceiptRequest: {"project": "project", "requestId": "request_id"},
-    ApprovalAnswerRequest: {"decision": "decision", "id": "id", "prefix": "prefix"},
+    ApprovalAnswerRequest: {"decision": "decision", "id": "id", "prefix": "prefix", "reason": "reason"},
     ApprovalListRequest: {"conversation": "conversation", "mine": "mine", "project": "project"},
     ApprovalRevokeRequest: {"id": "id"},
     BoardMessagesRequest: {"topic": "topic"},

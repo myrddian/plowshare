@@ -69,6 +69,7 @@ import { answeredEach, type Answering } from './questions.ts';
 import { DEFAULT_COLUMNS, wrapText } from './wrap.ts';
 import {
   callStanding,
+  modelContextOf,
   cutLines,
   failureCut,
   outcomeClass,
@@ -4458,7 +4459,7 @@ function rowLine(
         : 'text';
   const text =
     step.kind === 'note'
-      ? `${step.entry.kind}: ${firstLine(step.entry.text)}`
+      ? `${step.entry.kind} [${modelContextOf(step.entry.kind, step.entry.supersededBy).label}]: ${firstLine(step.entry.text)}`
       : firstLine(step.entry.text);
   return fitTinted([...left, tint(text, role)], width);
 }
@@ -4539,6 +4540,12 @@ function inspectorLines(
       : row.kind === 'entry'
         ? row.entry
         : undefined;
+  if (entry !== undefined && step?.kind !== 'call') {
+    const visibility = modelContextOf(entry.kind, entry.supersededBy);
+    text(visibility.label, 'muted');
+    text(visibility.detail, 'muted');
+    body.push([]);
+  }
   /** A call's arguments, pretty-printed when they parse, and said as cut when they were. */
   const argumentsOf = (asked: {
     readonly arguments: string;
@@ -4646,7 +4653,13 @@ function inspectorLines(
       );
     if (step?.kind === 'call') {
       for (const hook of step.hooks)
-        body.push(field('hook', firstLine(hook.text), 'badgeHook'));
+        body.push(
+          field(
+            'hook',
+            `${modelContextOf(hook.kind).label}: ${firstLine(hook.text)}`,
+            'badgeHook',
+          ),
+        );
       if (step.opened !== undefined) {
         const child = extras.children.get(step.opened.conversation);
         body.push(

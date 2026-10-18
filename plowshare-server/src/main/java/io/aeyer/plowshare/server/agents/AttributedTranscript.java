@@ -45,6 +45,11 @@ public record AttributedTranscript(
   }
 
   @Override
+  public void recordDurably(LoggedEntry entry) {
+    delegate.recordDurably(entry);
+  }
+
+  @Override
   public String conversationId() {
     return delegate.conversationId();
   }

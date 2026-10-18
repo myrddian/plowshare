@@ -252,8 +252,11 @@ export function constrain(graph) {
       rules(s, { atMostOne: ['after', 'before', 'tail'] });
     if (op === 'approval.list')
       rules(s, exactlyOne('conversation', 'project', 'mine'));
-    if (op === 'approval.answer')
+    if (op === 'approval.answer') {
       rules(s, implies(eq('decision', 'project'), present('prefix')));
+      rules(s, implies(present('reason'), eq('decision', 'deny')));
+      field(s, 'reason', { ...text(4000, 1), nonblank: true });
+    }
     if (op === 'orchestration.answer')
       rules(s, or(present('choices'), present('answer')));
     for (const k of ['roots', 'items', 'prefix'])

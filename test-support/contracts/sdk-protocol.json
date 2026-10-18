@@ -2887,6 +2887,9 @@
           },
           "prefix": {
             "$ref": "#/$defs/shape47"
+          },
+          "reason": {
+            "$ref": "#/$defs/shape1"
           }
         },
         "required": [

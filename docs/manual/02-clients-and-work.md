@@ -46,6 +46,13 @@ inference. Each tool has its own execution time. Missing usage is shown as not r
 and a recorded zero remains zero. These counts describe past inference calls; the
 Context panel constructs the next request and its separate token count.
 
+Trajectory entries also explain their model-context policy. Approval diagnostics say
+“Not sent to model”; runtime notes say “Active run only” because they were delivered
+in that run and are not replayed later. Hook records stay outside model context,
+although their transformations may affect the request. Folded entries identify their
+replacement summary. “Model context eligible” describes the entry kind and current
+compaction state; it is not proof that a specific inference received that entry.
+
 ## Follow work and read its result
 
 For explicit CLI work, choose a project with `--project NAME` and use the command
@@ -104,6 +111,17 @@ An approval presents the particular pending operation and its identity. Answer
 that displayed request; do not reuse another run's approval key. Declining,
 leaving an approval for later and granting a request have different effects.
 Hooks and access checks can still deny work that a person approved.
+
+Command approvals suspend the original tool call in the harness. Approving resumes that
+retained call with its original arguments, input, timeout and client session; the model
+does not submit `run` again. The model receives the command's result afterward. Denying
+returns the answering identity and optional denial reason as the tool result. Approval
+requests and decisions remain visible in the trajectory and Inbox, without retry
+instructions entering the model conversation. If execution was interrupted after its
+durable start fence, recovery reports an unknown outcome and does not replay the command.
+Recovery keeps the original execution owner and client session. If a delegated run's
+owner cannot restore its execution lease, the owning account receives an Inbox notice;
+the harness does not restart the root model to reconstruct the delegation.
 
 Desktop reads pending approvals from both the signed-in account and each open
 conversation. Account discovery includes foreground questions in conversations owned

@@ -2815,6 +2815,30 @@ describe('the explorer, laid out', () => {
     );
   });
 
+  it('labels harness approval audit in the listing and inspector', () => {
+    const audit = row(5, 2, 'diagnostic', {
+      text: 'Command approved. The harness will resume the retained tool call.',
+    });
+    const ex = explorerOpened(
+      levelOf(
+        'cnv_1',
+        'plowshare',
+        { entries: [audit], through: 5, more: false, total: 1 },
+        'trajectory',
+        'failure',
+      ),
+      'trajectory',
+    );
+    expect(describeExplorerListing(ex, 180).join('\n')).toContain(
+      '[Not sent to model]',
+    );
+    expect(
+      describeExplorer(ex, { rows: 30, columns: 180 }, extras)
+        .map(plainOf)
+        .join('\n'),
+    ).toContain('Recorded for inspection only');
+  });
+
   it('prints the same rows for a surface with no keys', () => {
     expect(describeExplorerListing(open(), 100)).toEqual([
       '   1 USER  run the tests',

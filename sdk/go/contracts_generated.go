@@ -7684,6 +7684,7 @@ type ApprovalAnswerPayloadDto struct {
 	Decision string    `json:"decision"`
 	Id       string    `json:"id"`
 	Prefix   *[]string `json:"prefix,omitempty"`
+	Reason   *string   `json:"reason,omitempty"`
 }
 
 // ApprovalListPayloadDto is the explicit ApprovalListPayloadDto protocol shape.
@@ -10918,6 +10919,7 @@ type ApprovalAnswerRequest struct {
 	Decision string    `json:"decision"`
 	Id       string    `json:"id"`
 	Prefix   *[]string `json:"prefix,omitempty"`
+	Reason   *string   `json:"reason,omitempty"`
 }
 
 // ApprovalAnswer validates before submission and returns the paired result DTO.
