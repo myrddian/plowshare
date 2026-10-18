@@ -69,13 +69,18 @@ account needs the existing read permission for the operation, not an embedding
 role or its own RUN_MODEL grant. SYSTEM is the executor, not a spending wallet.
 
 Configure `plowshare.embeddings.search-budget`, or
-`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`, explicitly to a positive number of model calls
-per logical query to enable these query consumers. The default `0` leaves search
-inference disabled in both legacy and dual modes; negative values fail binding.
+`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`, to select spending policy per logical query.
+Omitted, empty or `unlimited` means **unlimited**, the default in both legacy and
+dual modes.
+Set `0` to disable search inference or a positive integer to limit model calls.
+For YAML, `search-budget: unlimited` (or no value) explicitly selects unlimited.
+Negative, non-integer and out-of-range values fail binding. Unlimited uses the existing
+nullable budget ceiling and still retains every admitted call and usage count;
+scope, lifetime, input/profile and result disclosure checks remain enforced.
 Current single-query and batched stance requests each consume one dispatcher
 call. This does not enable memory recall, independent repair or ask/deliberation,
 or change preparation's allowance. Existing lexical-mode document search still
-embeds its query and therefore also needs the search allowance.
+embeds its query and therefore also follows the search spending policy.
 
 Each query captures its source and limit once. Completion, failure or cancellation
 closes the live capability while preserving its source, claims and accounting

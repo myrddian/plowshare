@@ -9,14 +9,17 @@ import java.util.UUID;
 public interface QueryEmbeddingRepository {
   record Pin(UUID account, UUID scope) {}
 
-  record Source(UUID id, UUID budget, int limit) {}
+  /**
+   * A null ceiling uses the existing unlimited Budget.Claim contract, with usage still retained.
+   */
+  record Source(UUID id, UUID budget, Integer limit) {}
 
   Pin pin(InformationContext context);
 
   void require(InformationContext context, Pin pin, UUID target);
 
   Source open(
-      InformationContext context, Pin pin, String fingerprint, String invocation, int limit);
+      InformationContext context, Pin pin, String fingerprint, String invocation, Integer limit);
 
   Budget.Claim claim(Source source);
 

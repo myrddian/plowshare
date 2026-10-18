@@ -14,14 +14,14 @@ public final class BoundQueryEmbeddings implements QueryEmbeddings {
   private final InformationAccess access;
   private final UnitOfWork transactions;
   private final SemanticEmbedding foundation;
-  private final IntSupplier allowance;
+  private final Supplier<Integer> allowance;
 
   public BoundQueryEmbeddings(
       QueryEmbeddingRepository records,
       InformationAccess access,
       UnitOfWork transactions,
       SemanticEmbedding foundation,
-      IntSupplier allowance) {
+      Supplier<Integer> allowance) {
     this.records = Objects.requireNonNull(records);
     this.access = Objects.requireNonNull(access);
     this.transactions = Objects.requireNonNull(transactions);
@@ -35,7 +35,7 @@ public final class BoundQueryEmbeddings implements QueryEmbeddings {
           "Account query targets are unsupported");
     access.requireSelection(context);
     var pin = records.pin(context);
-    int limit = allowance.getAsInt();
+    Integer limit = allowance.get();
     var fingerprint =
         EmbeddingEvidence.digest(
             List.of(InformationJson.json(context), InformationJson.json(query)));

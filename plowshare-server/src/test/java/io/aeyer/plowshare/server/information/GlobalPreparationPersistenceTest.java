@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -171,7 +172,7 @@ class GlobalPreparationPersistenceTest {
             new JdbcResourceScopeRepository(jdbc), members, mock(AdminStore.class)));
   }
 
-  QueryEmbeddings queries(int limit) {
+  QueryEmbeddings queries(Integer limit) {
     return new BoundQueryEmbeddings(
         new JdbcQueryEmbeddingRepository(jdbc),
         access,
@@ -188,7 +189,8 @@ class GlobalPreparationPersistenceTest {
     var reader =
         new RetrievalService(
             documents, new DispatchingEmbeddingClient(dispatcher, props, tokenizer), "model", 768);
-    reader.useQueries(queries(1));
+    reader.useQueries(
+        queries(new EmbeddingProperties(false, null, null, false, null).searchLimit()));
     if (dual) {
       var records =
           new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
@@ -586,7 +588,8 @@ class GlobalPreparationPersistenceTest {
       assertEquals(
           4,
           jdbc.queryForObject(
-              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND closed", Integer.class));
+              "SELECT count(*) FROM embedding_queries WHERE spent=1 AND call_limit IS NULL AND closed",
+              Integer.class));
       assertEquals(
           0,
           jdbc.queryForObject(
@@ -597,8 +600,11 @@ class GlobalPreparationPersistenceTest {
     }
   }
 
-  @Test
-  void querySourceClaimsAreRetainedAndKnownToolCallsNeverAcquireReplacementAllowances() {
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(ints = {1})
+  void querySourceClaimsAreRetainedAndKnownToolCallsNeverAcquireReplacementAllowances(
+      Integer limit) {
     var context = access.resolve("reader", InformationContext.Selection.shared());
     var query = new QueryEmbeddings.Query(QueryEmbeddings.Kind.SEARCH, "query", null, 5, "HYBRID");
     var origin = new QueryEmbeddings.Origin("retained-log:call-1", () -> {});
@@ -607,11 +613,11 @@ class GlobalPreparationPersistenceTest {
     assertThrows(RuntimeException.class, () -> disabled.authorize(request));
     disabled.close();
     assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM embedding_queries", Integer.class));
-    var read = queries(1).open(context, query, origin);
+    var read = queries(limit).open(context, query, origin);
     var permit = read.authorize(request);
     new RetainedInferenceBoundary(new JdbcInferenceAdmissions(jdbc)).submitted(permit);
     assertThrows(RuntimeException.class, () -> read.authorize(request));
-    try (var reopened = queries(1).open(context, query, origin)) {
+    try (var reopened = queries(limit == null ? 1 : null).open(context, query, origin)) {
       assertThrows(RuntimeException.class, () -> reopened.authorize(request));
     }
     assertEquals(1, jdbc.queryForObject("SELECT sum(spent) FROM embedding_queries", Integer.class));
@@ -626,6 +632,20 @@ class GlobalPreparationPersistenceTest {
             jdbc.update(
                 "UPDATE inference_admissions SET query_task_hash=? WHERE query_id IS NOT NULL",
                 "a".repeat(64)));
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbc.update(
+                limit == null
+                    ? "UPDATE embedding_queries SET call_limit=5"
+                    : "UPDATE embedding_queries SET call_limit=NULL"));
+    assertEquals(
+        limit, jdbc.queryForObject("SELECT call_limit FROM embedding_queries", Integer.class));
+    assertEquals(
+        limit,
+        jdbc.queryForObject(
+            "SELECT call_limit FROM inference_admissions WHERE query_id IS NOT NULL",
+            Integer.class));
   }
 
   @Test
@@ -702,13 +722,17 @@ class GlobalPreparationPersistenceTest {
     }
   }
 
-  @Test
-  void concurrentQueryClaimsCannotOverdrawAndClosedSourcesCannotBeReopened() throws Exception {
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(ints = {1})
+  void concurrentQueryClaimsRespectPolicyAndClosedSourcesCannotBeReopened(Integer limit)
+      throws Exception {
     var context = access.resolve("reader", InformationContext.Selection.shared());
     var records = new JdbcQueryEmbeddingRepository(jdbc);
     var source =
         work.inTransaction(
-            () -> records.open(context, records.pin(context), "a".repeat(64), null, 1));
+            () -> records.open(context, records.pin(context), "a".repeat(64), null, limit));
+    int expected = limit == null ? 2 : 1;
     var start = new CountDownLatch(1);
     try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
       var futures = new ArrayList<Future<Boolean>>();
@@ -727,8 +751,14 @@ class GlobalPreparationPersistenceTest {
       start.countDown();
       int won = 0;
       for (var future : futures) if (future.get(10, TimeUnit.SECONDS)) won++;
-      assertEquals(1, won);
+      assertEquals(expected, won);
     }
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            records.claim(
+                new QueryEmbeddingRepository.Source(
+                    source.id(), source.budget(), limit == null ? 1 : null)));
     work.inTransaction(
         () -> {
           records.close(source);
@@ -736,9 +766,96 @@ class GlobalPreparationPersistenceTest {
         });
     assertThrows(RuntimeException.class, () -> work.inTransaction(() -> records.claim(source)));
     assertEquals(
-        1,
+        expected,
         jdbc.queryForObject(
             "SELECT spent FROM embedding_queries WHERE id=?", Integer.class, source.id()));
+  }
+
+  @Test
+  void unlimitedQueryClaimsStillRequireTheExactChargedSourceAndTask() {
+    var context = access.resolve("reader", InformationContext.Selection.shared());
+    var records = new JdbcQueryEmbeddingRepository(jdbc);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> records.open(context, records.pin(context), "a".repeat(64), null, -1));
+    var source =
+        work.inTransaction(
+            () -> records.open(context, records.pin(context), "a".repeat(64), null, null));
+    var claim = work.inTransaction(() -> records.claim(source));
+    assertNull(claim.limit());
+    var ledger = new JdbcInferenceAdmissions(jdbc);
+    var forged =
+        new InferenceBinding(
+            UUID.randomUUID(), UUID.randomUUID(), source.budget(), claim.ordinal(), 5);
+    ledger.retain(forged);
+    assertThrows(DataAccessException.class, () -> records.bind(source, forged, "b".repeat(64)));
+    var second = work.inTransaction(() -> records.claim(source));
+    var actual =
+        new InferenceBinding(
+            UUID.randomUUID(), UUID.randomUUID(), source.budget(), second.ordinal(), null);
+    ledger.retain(actual);
+    records.bind(source, actual, "c".repeat(64));
+    ledger.submitted(actual);
+    assertThrows(IllegalStateException.class, () -> ledger.submitted(actual));
+    assertThrows(
+        DataAccessException.class,
+        () -> jdbc.update("UPDATE embedding_queries SET spent=-1 WHERE id=?", source.id()));
+    assertThrows(
+        DataAccessException.class,
+        () -> jdbc.update("UPDATE embedding_queries SET call_limit=0 WHERE id=?", source.id()));
+    assertEquals(
+        2,
+        jdbc.queryForObject(
+            "SELECT spent FROM embedding_queries WHERE id=?", Integer.class, source.id()));
+  }
+
+  @Test
+  void spendingPolicyMigrationPreservesExistingFiniteSourcesAndClaims() {
+    String schema = "query_policy_" + UUID.randomUUID().toString().replace("-", "");
+    var upgrade = new DriverManagerDataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword());
+    new JdbcTemplate(upgrade).execute("CREATE SCHEMA " + schema);
+    var properties = new Properties();
+    properties.setProperty("currentSchema", schema + ",public");
+    upgrade.setConnectionProperties(properties);
+    Flyway.configure()
+        .dataSource(upgrade)
+        .schemas(schema)
+        .defaultSchema(schema)
+        .target("162")
+        .load()
+        .migrate();
+    var old = new JdbcTemplate(upgrade);
+    var query = UUID.randomUUID();
+    var budget = UUID.randomUUID();
+    var binding = new InferenceBinding(UUID.randomUUID(), UUID.randomUUID(), budget, 1, 3);
+    old.update(
+        "INSERT INTO embedding_queries(id,budget_id,account_id,scope_id,fingerprint,call_limit,spent) VALUES(?,?,?,?,?,3,1)",
+        query,
+        budget,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        "a".repeat(64));
+    var records = new JdbcQueryEmbeddingRepository(old);
+    var ledger = new JdbcInferenceAdmissions(old);
+    ledger.retain(binding);
+    records.bind(new QueryEmbeddingRepository.Source(query, budget, 3), binding, "b".repeat(64));
+    ledger.submitted(binding);
+    Flyway.configure().dataSource(upgrade).schemas(schema).defaultSchema(schema).load().migrate();
+    ledger.require(binding);
+    assertEquals(
+        3,
+        old.queryForObject(
+            "SELECT call_limit FROM embedding_queries WHERE id=?", Integer.class, query));
+    assertEquals(
+        1,
+        old.queryForObject("SELECT spent FROM embedding_queries WHERE id=?", Integer.class, query));
+    var retained = new QueryEmbeddingRepository.Source(query, budget, 3);
+    assertEquals(2, records.claim(retained).ordinal());
+    assertEquals(3, records.claim(retained).ordinal());
+    assertThrows(IllegalStateException.class, () -> records.claim(retained));
+    assertThrows(
+        DataAccessException.class,
+        () -> old.update("UPDATE embedding_queries SET call_limit=NULL WHERE id=?", query));
   }
 
   @Test

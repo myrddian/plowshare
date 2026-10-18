@@ -2,7 +2,10 @@ package io.aeyer.plowshare.server.embedding;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Explicit two-slot configuration. Legacy deployments remain opt-out until both are declared. */
+/**
+ * Explicit two-slot configuration. Legacy deployments remain opt-out until both are declared.
+ * Search spending is independent: unlimited is the default, zero disables, positive caps calls.
+ */
 @ConfigurationProperties(prefix = "plowshare.embeddings", ignoreUnknownFields = false)
 public record EmbeddingProperties(
     boolean enabled,
@@ -10,20 +13,49 @@ public record EmbeddingProperties(
     Model prose,
     boolean paused,
     java.util.List<TokenizerBinding> retainedTokenizers,
-    int searchBudget) {
+    String searchBudget) {
   public EmbeddingProperties(
       boolean enabled,
       Model code,
       Model prose,
       boolean paused,
       java.util.List<TokenizerBinding> retainedTokenizers) {
-    this(enabled, code, prose, paused, retainedTokenizers, 0);
+    this(enabled, code, prose, paused, retainedTokenizers, "unlimited");
+  }
+
+  public EmbeddingProperties(
+      boolean enabled,
+      Model code,
+      Model prose,
+      boolean paused,
+      java.util.List<TokenizerBinding> retainedTokenizers,
+      int searchBudget) {
+    this(enabled, code, prose, paused, retainedTokenizers, Integer.toString(searchBudget));
   }
 
   @org.springframework.boot.context.properties.bind.ConstructorBinding
   public EmbeddingProperties {
-    if (searchBudget < 0)
-      throw new IllegalArgumentException("plowshare.embeddings.search-budget must be nonnegative");
+    searchBudget =
+        searchBudget == null || searchBudget.isBlank() ? "unlimited" : searchBudget.strip();
+    searchCeiling(searchBudget);
+  }
+
+  /** Converts configuration to the existing nullable Budget.Claim ceiling; null is unlimited. */
+  public Integer searchLimit() {
+    return searchCeiling(searchBudget);
+  }
+
+  private static Integer searchCeiling(String policy) {
+    if (policy.equalsIgnoreCase("unlimited")) return null;
+    try {
+      int limit = Integer.parseInt(policy);
+      if (limit >= 0) return limit;
+    } catch (NumberFormatException invalid) {
+      throw new IllegalArgumentException(
+          "plowshare.embeddings.search-budget must be unlimited or a nonnegative integer", invalid);
+    }
+    throw new IllegalArgumentException(
+        "plowshare.embeddings.search-budget must be unlimited or a nonnegative integer");
   }
 
   public void validate() {

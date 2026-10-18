@@ -561,6 +561,12 @@ not an implicit payer, and `created_by`/the initiating user is not a default deb
 target. The server resolves the operation's configured budget source at admission
 and retains its identity and applicable limits with that operation.
 
+Spending policy is distinct from execution authority: an admitted policy may
+disable inference, impose a finite call limit or permit unlimited calls. Unlimited
+removes the spending ceiling; it retains usage/accounting, operation validity,
+scope, sandbox and single-attempt checks. The initial semantic-search consumer
+defaults to unlimited; operators may configure disabled or limited spending.
+
 | Operation | Configured budget source |
 | --- | --- |
 | Conversation compaction | The conversation's configured budget |

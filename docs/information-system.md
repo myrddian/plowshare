@@ -44,10 +44,12 @@ general transfer or ordinary Global conversation/run capability is added. The
 records migration, privacy and concurrency behavior.
 
 Supported information search/rank and document search/retrieve/rank/stance use
-bounded SYSTEM query embedding with the search operation's configured allowance.
+scoped SYSTEM query embedding with the search operation's configured spending
+policy.
 Set `plowshare.embeddings.search-budget` (`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`) to a
-positive model-call limit per query; its default `0` leaves this inference
-disabled without affecting preparation. Reader permissions still determine the
+positive model-call limit per query, or `0` to disable this inference without
+affecting preparation. Omitted, empty or `unlimited` configuration selects
+unlimited, the default; usage and claims are still recorded. Reader permissions still determine the
 selected corpus and all returned content, counts and metadata. No caller gains
 RUN_MODEL or an embedding role. Global-held general-readable documents use the
 existing Shared/includeShared selection; the account selector above does not

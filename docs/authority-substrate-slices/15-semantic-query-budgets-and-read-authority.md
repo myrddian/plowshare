@@ -93,31 +93,37 @@ slot choice and filters where the requested operation is supported; do not add
 new code navigation or infer prose summary/stance support for code. Existing
 syntax outline/symbol reads remain independent of query inference.
 
-## Initial search consumer's budget contract
+## Initial search consumer's spending policy
 
 The admitted semantic-search operation uses explicit configuration,
 `plowshare.embeddings.search-budget` (environment spelling
 `PLOWSHARE_SEMANTIC_SEARCH_BUDGET`). The search admission adapter reads it;
 the foundation does not. This replaces the draft's document-specific key and
 applies consistently across the initial frame/HTTP/tool search consumers.
-It is a model-call allowance per admitted logical query, not a monetary pool,
-a universal embedding allowance or an allowance per document/vector/result.
+It selects disabled, limited or unlimited model calls per admitted logical query,
+not a monetary pool, a universal embedding allowance or an allowance per
+document/vector/result. Unlimited is the deployment default. Spending is policy
+owned by the consumer; a finite ceiling is not a condition of embedding authority.
 Preparation continues using its existing source; later consumers must explicitly
 bind their own supported operation source rather than inherit this setting.
 
-- Absent/zero means query inference is disabled with a clear configuration
-  refusal when search dispatch would be required. It does not disable preparation
-  or another independently admitted consumer. Negative or malformed values fail
-  configuration validation. No implicit one-call fallback or unlimited value.
-- A positive configured integer is captured once at query admission. Current
+- Omitted, empty or `unlimited` configuration means unlimited, using the existing
+  nullable `Budget.Claim` ceiling. The environment variable may be unset or empty; a YAML
+  `search-budget:` with no value expresses the same policy. Usage, immutable
+  source identity and per-attempt claims remain recorded.
+- `0` explicitly disables query inference with a clear refusal when dispatch
+  would be required. It does not disable preparation or another independently
+  admitted consumer. Negative, non-integer and out-of-range values fail binding;
+  no numeric sentinel or public request field is introduced.
+- A positive integer limits calls and is captured once at query admission. Current
   successful single-query and batched-stance paths need one actual embedding
-  request; an operator may explicitly configure `1`. The plan does not select an
-  enabled production value or add a caller `maxModelCalls` parameter.
-- Retain one source UUID, configured total and monotonic spent count for the
-  logical query. All internal helper calls share it. Actual requests consume
+  request; an operator may explicitly configure `1`. Deployment operators choose
+  the policy; no caller `maxModelCalls` parameter is added.
+- Retain one source UUID, configured nullable ceiling and monotonic spent count
+  for the logical query. All internal helper calls share it. Actual requests consume
   claims, including a failed/uncertain attempt once charged; vector count, hits,
   lexical ranking and local reuse of captured vectors do not create new charges.
-- Snapshot configuration for the query. Later configuration changes affect new
+- Snapshot the policy for the query. Later configuration changes affect new
   admissions, not in-flight counters. No live per-query limit-edit endpoint,
   automatic increase/refund, document allowance borrowing or wallet for SYSTEM.
 - Agent-invoked search is the same declared read service and uses this search
@@ -258,7 +264,9 @@ Use mocks/fakes by default for the new policy service and both embedding clients
 - Human and service READER/GLOBAL_READ can use supported reads without their own
   RUN_MODEL. Invalid/expired recipients, wrong targets, scopes or parent bindings
   cannot dispatch. No client label or accounting actor can supply authority.
-- Missing/zero/invalid configuration, exhausted allowance, changed model/input,
+- Omitted/empty/`unlimited` configuration permits unlimited spending in legacy and dual
+  modes; claims and usage remain retained. Explicit zero/invalid configuration,
+  exhausted limited allowance, changed model/input,
   closed attempt and invalid SYSTEM purpose refuse before provider IO. Test the
   last valid claim, one charge per actual batch, helper/copy propagation and
   stance's two vectors in one request. Existing empty-corpus shortcuts cost zero;
@@ -276,7 +284,7 @@ Use mocks/fakes by default for the new policy service and both embedding clients
   reuse a claim; the foundation cannot mint a budget or publish stored vectors.
   Retain slice 14's preparation success, exhaustion, creator-independent work,
   withdrawal, uncertain replay and publication-race coverage in both embedding
-  modes. Missing search configuration must not disable valid preparation.
+  modes. Search policy must not change valid preparation's independent allowance.
 - Queue revocation, withdrawal, profile activation races and provider failures
   preserve incurred spending, refuse stale output and never repeat dispatch.
   New records/logs expose no raw private query/source text.
@@ -322,8 +330,8 @@ no new role or per-tool RBAC layer.
 
 Keep other inference consumers fenced until their own declared purpose/source
 contracts exist. Existing compatibility and curation gates remain. Ship configuration
-documentation with an explicit enablement choice; do not silently activate query
-spending for every existing deployment. Setting the search budget to zero fences
+documentation stating that search spending defaults to unlimited; deployment
+operators may choose disabled or limited spending. Setting the search budget to zero fences
 new search inference without disabling the foundation, preparation or deleting
 prior evidence. No data move, credential issuance, deployment, old-binary rollback
 or live schema migration is authorized here.
@@ -365,9 +373,13 @@ new behavior.
   ranking, paging, counts and returned content.
 
 Configuration is `plowshare.embeddings.search-budget`, with environment override
-`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`. The shipped default is zero (query inference
-inactive); positive finite values are captured once per logical query. Invalid
-negative/non-integer values refuse binding. This does not alter preparation's
+`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`. The shipped default is `unlimited` (also unset/empty),
+`0` disables query inference, and positive integers limit calls per logical query.
+Each query captures its policy once; unlimited still has retained claims and a
+monotonic usage count. Invalid negative/non-integer values refuse binding. V163
+permits the ledger's existing nullable ceiling on query sources and uses null-safe
+checks for immutable policies and exact claim binding. Existing finite sources
+and claims are preserved; V162 is unchanged. This does not alter preparation's
 existing source or enable other embedding consumers.
 
 The public request/response graphs, operation names, roles and SDK methods are
@@ -412,3 +424,27 @@ Spring's canonical configuration constructor selection and transport-owned
 request lifetime. The database fixture now explicitly clears Global-owned corpus
 state and activates empty serving profiles before preparation, matching startup;
 it does not bypass coverage or enable independent repair to make queries pass.
+
+### Spending-policy correction verification
+
+- `./gradlew format formatCheck check` passed after the policy correction. The
+  default server suite passed 5,852 tests with no failures, errors or skips.
+- Focused configuration/service tests passed 10 cases. They verify default and
+  explicit unlimited configuration, the shipped environment placeholder and an
+  empty override, disabled/limited settings, invalid values, captured policy and
+  retained usage/lifetime checks. Production admission receives the existing
+  nullable claim ceiling after configuration conversion.
+- Selected PostgreSQL tests passed 18 cases with `-PfullDb --tests`:
+  `GlobalPreparationPersistenceTest` (16) and
+  `InferenceAdmissionPersistenceTest` (2). PostgreSQL is required for V163's
+  upgrade, null-safe immutable source/claim constraints, atomic concurrent claims
+  and real disclosure fences. The upgrade case migrates a V162 database with a
+  submitted finite claim and proves its original limit and usage survive V163.
+- The existing legacy/dual read and retained reader-tool acceptances now use the
+  default unlimited policy. Finite/unlimited variants both retain claims, refuse
+  known invocation replay and forbid rebinding the ceiling; concurrency permits
+  both unlimited claims while preserving finite exhaustion. Forged finite claims
+  cannot bind to an unlimited source, and a submitted claim cannot be replayed.
+- No existing migration, public contract or SDK changed. Duplicate Flyway version
+  and changed documentation file-link checks passed. No full database suite,
+  live provider test or deployment ran for this correction.

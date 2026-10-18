@@ -17,6 +17,6 @@ public class SemanticEmbeddingConfig {
       SemanticEmbedding foundation,
       EmbeddingProperties properties) {
     return new BoundQueryEmbeddings(
-        records, access, transactions, foundation, properties::searchBudget);
+        records, access, transactions, foundation, properties::searchLimit);
   }
 }

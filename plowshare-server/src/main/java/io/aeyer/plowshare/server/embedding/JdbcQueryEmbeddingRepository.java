@@ -68,9 +68,13 @@ public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingReposit
   }
 
   public Source open(
-      InformationContext context, Pin pin, String fingerprint, String invocation, int limit) {
-    if (limit < 1)
-      throw new CallerFault("Configure plowshare.embeddings.search-budget before semantic search");
+      InformationContext context, Pin pin, String fingerprint, String invocation, Integer limit) {
+    if (limit != null && limit < 0)
+      throw new IllegalArgumentException(
+          "Semantic search allowance must be nonnegative or unlimited");
+    if (Integer.valueOf(0).equals(limit))
+      throw new CallerFault(
+          "Semantic search inference is disabled by plowshare.embeddings.search-budget=0");
     var source = new Source(UUID.randomUUID(), UUID.randomUUID(), limit);
     int count =
         jdbc.update(
@@ -91,7 +95,7 @@ public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingReposit
   public Budget.Claim claim(Source source) {
     var rows =
         jdbc.query(
-            "UPDATE embedding_queries SET spent=spent+1 WHERE id=? AND budget_id=? AND NOT closed AND spent<call_limit AND call_limit=? RETURNING spent",
+            "UPDATE embedding_queries SET spent=spent+1 WHERE id=? AND budget_id=? AND NOT closed AND (call_limit IS NULL OR spent<call_limit) AND call_limit IS NOT DISTINCT FROM ?::integer RETURNING spent",
             (r, n) -> r.getInt(1),
             source.id(),
             source.budget(),

@@ -6,8 +6,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
 
 class EmbeddingPropertiesBindingTest {
   @Configuration(proxyBeanMethods = false)
@@ -64,16 +66,61 @@ class EmbeddingPropertiesBindingTest {
   }
 
   @Test
-  void legacySearchBudgetBindsExplicitlyAndInvalidLimitsFail() {
+  void searchPolicyDefaultsToUnlimitedInBothEncoderModes() {
+    for (var mode :
+        new ApplicationContextRunner[] {
+          runner,
+          configured(),
+          runner.withPropertyValues("plowshare.embeddings.search-budget=unlimited"),
+          configured().withPropertyValues("plowshare.embeddings.search-budget=UNLIMITED")
+        })
+      mode.run(
+          context -> {
+            assertNull(context.getStartupFailure());
+            assertNull(context.getBean(EmbeddingProperties.class).searchLimit());
+          });
+  }
+
+  @Test
+  void shippedDefaultAndExplicitEmptyOverrideBindUnlimited() throws java.io.IOException {
+    var defaults =
+        new YamlPropertySourceLoader()
+            .load("application", new ClassPathResource("application.yml"))
+            .getFirst();
+    for (var mode :
+        new ApplicationContextRunner[] {
+          runner, runner.withPropertyValues("PLOWSHARE_SEMANTIC_SEARCH_BUDGET=")
+        })
+      mode.withInitializer(
+              context -> context.getEnvironment().getPropertySources().addLast(defaults))
+          .run(
+              context -> {
+                if (context.getStartupFailure() != null)
+                  throw new AssertionError(
+                      "Shipped embedding configuration must bind", context.getStartupFailure());
+                assertNull(context.getBean(EmbeddingProperties.class).searchLimit());
+              });
     runner
-        .withPropertyValues(
-            "plowshare.embeddings.enabled=false", "plowshare.embeddings.search-budget=1")
+        .withPropertyValues("plowshare.embeddings.search-budget=")
         .run(
             context -> {
               assertNull(context.getStartupFailure());
-              assertEquals(1, context.getBean(EmbeddingProperties.class).searchBudget());
+              assertNull(context.getBean(EmbeddingProperties.class).searchLimit());
             });
-    for (String invalid : new String[] {"-1", "unlimited"})
+  }
+
+  @Test
+  void searchPolicyBindsDisabledAndLimitedAndRejectsInvalidLimits() {
+    for (int limit : new int[] {0, 1, 50})
+      runner
+          .withPropertyValues(
+              "plowshare.embeddings.enabled=false", "plowshare.embeddings.search-budget=" + limit)
+          .run(
+              context -> {
+                assertNull(context.getStartupFailure());
+                assertEquals(limit, context.getBean(EmbeddingProperties.class).searchLimit());
+              });
+    for (String invalid : new String[] {"-1", "unknown", "1.5", "2147483648"})
       runner
           .withPropertyValues("plowshare.embeddings.search-budget=" + invalid)
           .run(context -> assertNotNull(context.getStartupFailure()));

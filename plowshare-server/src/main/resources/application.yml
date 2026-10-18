@@ -69,9 +69,10 @@ plowshare:
   # declarations described in docs/embedding-evolution.md. No model identity,
   # endpoint or preprocessing convention is inferred from the legacy settings.
   embeddings:
-    # Finite allowance per admitted semantic search; zero leaves search inference disabled.
+    # Model calls per semantic search: unlimited (the default), 0 disables,
+    # and a positive integer limits calls. Unlimited still records usage and checks authority.
     # Preparation retains its independent revision allowance.
-    search-budget: ${PLOWSHARE_SEMANTIC_SEARCH_BUDGET:0}
+    search-budget: ${PLOWSHARE_SEMANTIC_SEARCH_BUDGET:unlimited}
     enabled: ${PLOWSHARE_DUAL_EMBEDDINGS_ENABLED:false}
     paused: ${PLOWSHARE_EMBEDDING_REPAIR_PAUSED:false}
   llm:

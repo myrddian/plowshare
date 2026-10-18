@@ -11,6 +11,7 @@ import io.aeyer.plowshare.server.information.*;
 import io.aeyer.plowshare.server.llm.dispatch.*;
 import java.util.*;
 import java.util.concurrent.atomic.*;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 class BoundQueryEmbeddingsTest {
@@ -24,7 +25,7 @@ class BoundQueryEmbeddingsTest {
   final QueryEmbeddingRepository.Source source =
       new QueryEmbeddingRepository.Source(UUID.randomUUID(), UUID.randomUUID(), 1);
 
-  BoundQueryEmbeddings service(int allowance) {
+  BoundQueryEmbeddings service(Integer allowance) {
     when(records.pin(context)).thenReturn(pin);
     when(records.open(eq(context), eq(pin), anyString(), isNull(), eq(allowance)))
         .thenReturn(source);
@@ -48,7 +49,7 @@ class BoundQueryEmbeddingsTest {
     assertEquals("empty", read.disclose(() -> "empty"));
     read.close();
     assertThrows(IllegalStateException.class, read::require);
-    verify(records, never()).open(any(), any(), anyString(), any(), anyInt());
+    verify(records, never()).open(any(), any(), anyString(), any(), any());
     verifyNoInteractions(foundation);
   }
 
@@ -126,11 +127,54 @@ class BoundQueryEmbeddingsTest {
   }
 
   @Test
-  void searchConfigurationIsIndependentOfEncoderModeAndRefusesNegativeLimits() {
-    assertEquals(0, new EmbeddingProperties(false, null, null, false, null).searchBudget());
-    assertEquals(1, new EmbeddingProperties(false, null, null, false, null, 1).searchBudget());
+  void searchConfigurationDefaultsToUnlimitedAndSupportsDisabledOrLimited() {
+    assertNull(new EmbeddingProperties(false, null, null, false, null).searchLimit());
+    assertEquals(0, new EmbeddingProperties(false, null, null, false, null, 0).searchLimit());
+    assertEquals(1, new EmbeddingProperties(false, null, null, false, null, 1).searchLimit());
     assertThrows(
         IllegalArgumentException.class,
         () -> new EmbeddingProperties(false, null, null, false, null, -1));
+  }
+
+  @Test
+  void unlimitedPolicyIsCapturedAndChargedWithoutWeakeningLifetimeChecks() {
+    var policy = new AtomicReference<Integer>();
+    var unlimited = new QueryEmbeddingRepository.Source(source.id(), source.budget(), null);
+    var claim = new Budget.Claim(source.budget(), 1, null);
+    var authorization = mock(CallAuthorization.class);
+    when(authorization.binding())
+        .thenReturn(
+            new InferenceBinding(
+                UUID.randomUUID(), UUID.randomUUID(), source.budget(), 1, null, null));
+    when(records.pin(context)).thenReturn(pin);
+    when(records.open(eq(context), eq(pin), anyString(), isNull(), isNull())).thenReturn(unlimited);
+    when(records.claim(unlimited)).thenReturn(claim);
+    when(foundation.authorize(any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              Supplier<Budget.Claim> charge = invocation.getArgument(2);
+              assertSame(claim, charge.get());
+              return authorization;
+            });
+    var service =
+        new BoundQueryEmbeddings(records, access, UnitOfWork.NONE, foundation, policy::get);
+    var alive = new AtomicBoolean(true);
+    var read =
+        service.open(
+            context,
+            new QueryEmbeddings.Query(QueryEmbeddings.Kind.SEARCH, "query", null, 5, "HYBRID"),
+            QueryEmbeddings.Origin.request(
+                () -> {
+                  if (!alive.get()) throw new IllegalStateException("ended");
+                }));
+    policy.set(0);
+    read.authorize(EmbeddingRequest.of("model", List.of("query")));
+    verify(records).claim(unlimited);
+    verify(records).bind(eq(unlimited), any(), anyString());
+    alive.set(false);
+    assertThrows(IllegalStateException.class, read::require);
+    read.close();
+    assertThrows(IllegalStateException.class, read::require);
+    verify(records).close(unlimited);
   }
 }
