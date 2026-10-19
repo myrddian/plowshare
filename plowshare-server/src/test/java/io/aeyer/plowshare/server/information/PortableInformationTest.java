@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.*;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.*;
 import java.nio.charset.StandardCharsets;
@@ -36,7 +37,7 @@ class PortableInformationTest {
           repository,
           navigation,
           mock(InformationNavigationService.class),
-          new InformationAccess(mock(ProjectMembers.class)),
+          new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class))),
           work,
           mock(InformationTransitions.class));
   final UUID revision = UUID.randomUUID(), resource = UUID.randomUUID();
@@ -133,5 +134,130 @@ class PortableInformationTest {
             service.execute(
                 "owner", new InformationRequest.InterchangeOrigin(selected, revision), null));
     verify(repository, never()).origin(any());
+  }
+
+  private static final InformationTransitions INLINE =
+      new InformationTransitions() {
+        @Override
+        public <T extends InformationGateResult> T execute(
+            InformationContext context,
+            UUID request,
+            String operation,
+            InformationGateIdentity identity,
+            List<UUID> sources,
+            String session,
+            Class<T> resultType,
+            Supplier<T> transition) {
+          return transition.get();
+        }
+
+        @Override
+        public <T extends InformationGateResult> T executePrepared(
+            InformationContext context,
+            UUID request,
+            String operation,
+            InformationGateIdentity identity,
+            List<UUID> sources,
+            String session,
+            Class<T> resultType,
+            Supplier<Prepared<T>> prepare) {
+          return prepare.get().transition().get();
+        }
+      };
+
+  @Test
+  void project_import_revises_another_creators_document_but_rechecks_mandatory_write_fences() {
+    var members = mock(ProjectMembers.class);
+    when(members.role("one", "writer")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+    var importing =
+        new PortableInformation(
+            catalogue,
+            records,
+            content,
+            mock(InformationContentTypes.class),
+            new InformationContentSettings(true),
+            repository,
+            navigation,
+            mock(InformationNavigationService.class),
+            new InformationAccess(new EffectiveProjectPermissions(members)),
+            work,
+            INLINE);
+    var context =
+        new InformationContext("writer", InformationContext.Selection.project("one"))
+            .withView(true);
+    when(content.head("project:one", "shared.md", true))
+        .thenReturn(
+            Optional.of(
+                new InformationContentRepository.Head(
+                    resource, revision, "creator", "source", "active")));
+    byte[] bytes = "imported body".getBytes(StandardCharsets.UTF_8);
+    UUID foreignResource = UUID.randomUUID(),
+        foreignRevision = UUID.randomUUID(),
+        next = UUID.randomUUID();
+    var descriptor =
+        new InformationInterchange.Descriptor(
+            foreignResource,
+            foreignRevision,
+            1,
+            "foreign.md",
+            "Foreign",
+            "documents/foreign.md",
+            "text/markdown",
+            InformationInterchange.hash(bytes),
+            List.of("imported"),
+            null,
+            new InformationInterchange.Provenance(
+                "foreign-creator",
+                "source",
+                "2026-10-16T00:00:00Z",
+                InformationInterchange.hash(bytes),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null));
+    var bundle =
+        new InformationInterchange.Bundle(
+            InformationInterchange.FORMAT,
+            UUID.randomUUID(),
+            List.of(
+                new InformationInterchange.Document(
+                    descriptor, Base64.getEncoder().encodeToString(bytes))),
+            List.of(),
+            InformationInterchange.COVERAGE);
+    var request =
+        new InformationRequest.InterchangeImport(
+            new InformationRequest.Selection(
+                new InformationRequest.Scope("project", "one", true),
+                "documents",
+                null,
+                InformationContent.VIEW),
+            UUID.randomUUID(),
+            new InformationInterchange.ImportPlan(
+                bundle,
+                List.of(
+                    new InformationInterchange.Destination(
+                        foreignResource, "shared.md", "revise", revision)),
+                List.of()));
+    when(records.admit(eq(context), any(), any()))
+        .thenReturn(new InformationCatalogue.Admission(next, resource, true));
+    var result =
+        assertInstanceOf(
+            InformationResponse.InterchangeImported.class,
+            importing.execute("writer", request, null));
+    assertEquals(next, result.value().mappings().getFirst().revision());
+    verify(content).requireWrite(context, revision);
+    verify(records).tags(context, next, List.of("imported"));
+    verify(records, never()).share(any(), any(), anyBoolean());
+
+    clearInvocations(records);
+    doThrow(new NotFoundFault("mandatory restriction"))
+        .when(content)
+        .requireWrite(context, revision);
+    assertThrows(NotFoundFault.class, () -> importing.execute("writer", request, null));
+    verify(records, never()).admit(any(), any(), any());
+    when(members.role("one", "writer")).thenReturn(Optional.of(ProjectRole.VIEWER));
+    assertThrows(CallerFault.class, () -> importing.execute("writer", request, null));
+    verify(records, never()).admit(any(), any(), any());
   }
 }

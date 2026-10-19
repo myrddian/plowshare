@@ -774,7 +774,9 @@ public class AgentsConfig {
       ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messaging,
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolProperties> relayTools,
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations,
-      ObjectProvider<ScopedTools> scopedTools) {
+      ObjectProvider<ScopedTools> scopedTools,
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
@@ -836,8 +838,7 @@ public class AgentsConfig {
                         informationTypes::getObject,
                         informationNavigation::getObject),
                     new MemoryNavigateTool(
-                        navigator::getObject,
-                        () -> memoryProperties.getObject().getNavigationBudget()),
+                        navigator::getObject, () -> memoryProperties.getObject().navigationLimit()),
                     new DocumentTools.AgentList(documents),
                     new AskTool(asking(deliberation), corpus, () -> askBudget(props)),
                     new GetDateTool(Instant::now, ZoneId.systemDefault()),
@@ -888,7 +889,9 @@ public class AgentsConfig {
                   Home home, String session, String account, String name) {
                 return contextCallers.getObject().find(home, session, account, name);
               }
-            });
+            },
+            operations,
+            inferenceCalls);
     // Before the registry reads knownTools(): see JobRuntime.useTodos. REQUIRED, not optional:
     // a todo list is how any agent keeps a task of several steps across turns and compactions,
     // so every boot binds todo_read and todo_write and a shipped definition may declare them.
@@ -970,9 +973,9 @@ public class AgentsConfig {
    * because this is read inside a tool call, where a failure to find a property would end
    * somebody's run over a bean that was never going to be asked.
    */
-  private static int askBudget(ObjectProvider<DocumentsProperties> documents) {
+  private static Integer askBudget(ObjectProvider<DocumentsProperties> documents) {
     DocumentsProperties props = documents.getIfAvailable();
-    return props == null ? Deliberation.A_PASS : props.getAskBudget();
+    return props == null ? null : props.askLimit();
   }
 
   /**
@@ -1739,8 +1742,9 @@ public class AgentsConfig {
       LlmDispatcher dispatcher,
       Archive archive,
       ObjectProvider<AgentRegistry> agents,
-      ObjectProvider<GlobalAgentDefinitions> globals) {
-    return new Scribe(dispatcher, archive, GlobalAgentSnapshots.supply(globals, agents));
+      ObjectProvider<GlobalAgentDefinitions> globals,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    return new Scribe(dispatcher, archive, GlobalAgentSnapshots.supply(globals, agents), system);
   }
 
   /**
@@ -1759,14 +1763,16 @@ public class AgentsConfig {
       JobRuntime runtime,
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
-      Compaction compaction) {
+      Compaction compaction,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new Curator(
         archive,
         proposals,
         queue,
         runtime,
         GlobalAgentSnapshots.supply(globals, agents),
-        compaction);
+        compaction,
+        system);
   }
 
   /**
@@ -1807,14 +1813,16 @@ public class AgentsConfig {
       JobLog jobs,
       JobsProperties properties,
       ObjectProvider<RunEnds> runEnds,
-      io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess) {
+      io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess,
+      io.aeyer.plowshare.server.access.OperationAuthority operations) {
     JobStore store =
         new JobStore(
             runtime,
             events.getIfAvailable(() -> JobEvents.NONE),
             compaction,
             jobs,
-            properties.getHeartbeat());
+            properties.getHeartbeat(),
+            operations);
     store.useProjectAccess(projectAccess);
     store.onRunEnded(runEnds.getIfAvailable(() -> RunEnds.NONE));
     return store;
@@ -1874,6 +1882,7 @@ public class AgentsConfig {
   @Bean(destroyMethod = "close")
   public Compaction compaction(
       LlmDispatcher models,
+      AgentsProperties properties,
       TurnStore turns,
       CompactionStore compactions,
       EntryStore entries,
@@ -1884,7 +1893,8 @@ public class AgentsConfig {
       ObjectProvider<Learning> learning,
       ObjectProvider<Citing> citing,
       ObjectProvider<io.aeyer.plowshare.server.agents.digests.Digester> digester,
-      ObjectProvider<io.aeyer.plowshare.server.llm.tokens.Tokenizer> tokenizer) {
+      ObjectProvider<io.aeyer.plowshare.server.llm.tokens.Tokenizer> tokenizer,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     Compaction compaction =
         new Compaction(
             models,
@@ -1912,7 +1922,9 @@ public class AgentsConfig {
             // Through a provider for `learning`'s reason exactly: a
             // deployment with no corpus configuration is a running server,
             // and one whose turns close as they always did.
-            citing.getIfAvailable(() -> Citing.NONE));
+            citing.getIfAvailable(() -> Citing.NONE),
+            system,
+            properties::compactionAllowance);
     // What counts a step's results when a fold inside a turn is decided: the server's one
     // Tokenizer (spec 2026-09-30-fold-at-60-and-80 §1). LlmConfig always defines one.
     tokenizer.ifAvailable(compaction::useTokenizer);
@@ -1941,14 +1953,16 @@ public class AgentsConfig {
       Scribe scribe,
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
-      ObjectProvider<io.aeyer.plowshare.server.archive.DigestStore> digests) {
+      ObjectProvider<io.aeyer.plowshare.server.archive.DigestStore> digests,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new Learner(
             models,
             entries,
             conversations,
             archive,
             scribe,
-            GlobalAgentSnapshots.supply(globals, agents))
+            GlobalAgentSnapshots.supply(globals, agents),
+            system)
         .withProvenance(digests.getIfAvailable());
   }
 }

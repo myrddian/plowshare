@@ -284,7 +284,7 @@ class DeviceProfilesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(upload, InformationUploadRequest)
         self.assertEqual(upload.scope.kind, "project")
         self.assertEqual(upload.scope.project, self.config.project)
-        self.assertFalse(upload.scope.include_shared)
+        self.assertFalse(upload.scope.include_global)
         self.assertEqual(upload.name, source_name(self.identity))
         await port.save(profile, revision)
         self.assertIsInstance(
@@ -305,7 +305,7 @@ class DeviceProfilesTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((await port.versions())[0].profile_id, self.identity)
         self.assertIsInstance(client.request.call_args.args[0], InformationListRequest)
-        self.assertFalse(client.request.call_args.args[0].scope.include_shared)
+        self.assertFalse(client.request.call_args.args[0].scope.include_global)
 
     async def test_not_submitted_write_is_retained_as_refused(self) -> None:
         with patch.object(

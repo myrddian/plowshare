@@ -24,33 +24,49 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Path}, which Task 6's {@code ClasspathDefinitions} fixes; left in place it would have loaded the
  * same shipped definitions twice, from two sources.
  *
- * <p>What survives is {@link #curatorBudget}, which has nothing to do with where definitions live
- * and was never a candidate for retiring alongside it.
+ * <p>Operation spending policies have nothing to do with where definitions live. Curator passes and
+ * SYSTEM compaction/skill-summary operations each select their own allowance here; neither borrows
+ * spending authority from the source conversation.
  */
 @ConfigurationProperties(prefix = "plowshare.agents")
 public class AgentsProperties {
 
-  /**
-   * How many model calls one curator pass may spend when the caller names no number of its own.
-   *
-   * <p>200, and the reason is Task 9's own arithmetic rather than a round number. A ruling is
-   * <b>two</b> model calls — {@code promotion_judge.md} tells the judge to read the memory first,
-   * so an ordinary ruling is a tool turn and an answer turn — so this is about a hundred candidates
-   * settled per pass. A first pass over a 200-memory project therefore takes two nights rather than
-   * one, and every later pass costs only what has been written since, because a settled memory
-   * never comes back: {@code ProposalStore.ruledOn} is subtracted before the loop.
-   *
-   * <p>Spending it is not a failure. {@code CALL_BUDGET} is a designed ending — the pass stops,
-   * says so, and keeps every promotion and proposal it already made — which is what makes a
-   * conservative default the safe one.
-   */
-  private int curatorBudget = 200;
+  /** Selected whole-pass policy: unlimited by default, zero disabled, positive limited. */
+  private String curatorBudget = "unlimited";
 
-  public int getCuratorBudget() {
+  /** Per SYSTEM compaction/skill-summary operation; never charged to the source conversation. */
+  private String compactionBudget = "unlimited";
+
+  public String getCompactionBudget() {
+    return compactionBudget;
+  }
+
+  public void setCompactionBudget(String value) {
+    io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(value, "compaction-budget");
+    compactionBudget = value;
+  }
+
+  public Budget compactionAllowance() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+        io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+            compactionBudget, "compaction-budget"));
+  }
+
+  public String getCuratorBudget() {
     return curatorBudget;
   }
 
-  public void setCuratorBudget(int curatorBudget) {
-    this.curatorBudget = curatorBudget;
+  public void setCuratorBudget(String value) {
+    io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(value, "curator-budget");
+    curatorBudget = value;
+  }
+
+  public void setCuratorBudget(int value) {
+    setCuratorBudget(Integer.toString(value));
+  }
+
+  public Budget curatorAllowance() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+        io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(curatorBudget, "curator-budget"));
   }
 }

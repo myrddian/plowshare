@@ -3,8 +3,61 @@ import { describe, expect, it } from 'vitest';
 import { CLI_OPERATIONS } from './catalog.ts';
 import { isPayloadCommand, parseCommand, withSession } from './commands.ts';
 import { dispatch, parseDirect, request } from './direct.ts';
+import { commandProblem } from './payload-validation.ts';
 
 describe('operator WS boundaries', () => {
+  it('accepts an optional denial explanation and rejects reasons on grants', () => {
+    expect(
+      commandProblem('approval.answer', {
+        id: 'approval',
+        decision: 'deny',
+        reason: 'Publishing is unnecessary',
+      }),
+    ).toBeUndefined();
+    for (const reason of [
+      '',
+      '   ',
+      5,
+      null,
+      'x'.repeat(4001),
+      'bad\0reason',
+    ]) {
+      expect(
+        commandProblem('approval.answer', {
+          id: 'approval',
+          decision: 'deny',
+          reason,
+        }),
+      ).toBeDefined();
+    }
+    expect(
+      commandProblem('approval.answer', {
+        id: 'approval',
+        decision: 'once',
+        reason: 'anything',
+      }),
+    ).toBeDefined();
+  });
+  it('accepts explicit context preview and counting flags without treating them as text', () => {
+    for (const measure of [false, true]) {
+      expect(
+        commandProblem('conversation.context.snapshot', {
+          conversation: 'conversation',
+          agent: 'agent',
+          measure,
+        }),
+      ).toBeUndefined();
+    }
+    for (const measure of ['false', 'true', null, 0, {}]) {
+      expect(
+        commandProblem('conversation.context.snapshot', {
+          conversation: 'conversation',
+          agent: 'agent',
+          measure,
+        }),
+      ).toBe('measure must be boolean');
+    }
+  });
   it('keeps standalone runs separate from conversations and preserves conversation-owned scope', () => {
     expect(
       parseCommand('agent run {"agent":"a","task":"work"}', 'repo'),

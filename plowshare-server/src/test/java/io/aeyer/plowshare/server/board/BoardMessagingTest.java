@@ -131,6 +131,8 @@ class BoardMessagingTest {
     String conversation =
         fixture.conversations.open(Home.of("payments"), Budget.of(20), TurnCap.of(4), "enzo").id();
     caller = context("sender", conversation);
+    fixture.jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'enzo','CONTRIBUTOR' FROM projects WHERE name='payments' ON CONFLICT(project_id,handle) DO UPDATE SET role='CONTRIBUTOR'");
   }
 
   private RunExtras.Context context(String agent, String conversation) {
@@ -319,6 +321,10 @@ class BoardMessagingTest {
               new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)));
     }
     routeProjects.define(project, root, List.of(), "enzo");
+    // A fixture workspace grants no data authority merely because its creator is an admin.
+    fixture.jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'enzo','CONTRIBUTOR' FROM projects WHERE name=? ON CONFLICT(project_id,handle) DO UPDATE SET role='CONTRIBUTOR'",
+        project);
     return root;
   }
 
@@ -1053,6 +1059,7 @@ class BoardMessagingTest {
     var members = new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc);
     members.add("payments", "other");
     members.add("notifications", "other");
+    fixture.jdbc.update("UPDATE project_members SET role='CONTRIBUTOR' WHERE handle='other'");
     String otherConversation =
         fixture.conversations.open(Home.of("payments"), Budget.of(20), TurnCap.of(4), "other").id();
     var other =
@@ -1962,7 +1969,7 @@ class BoardMessagingTest {
             fixture.store, fixture.board(BoardFixture.TWO), fixture.conversations, messages);
     List<String> names =
         extras.forRun(recipient(receipt)).tools().stream().map(t -> t.schema().name()).toList();
-    assertEquals(List.of("send_message", "board_open"), names);
+    assertEquals(List.of("send_message", "board_open", "board_swarm_types"), names);
     assertFalse(names.contains("board_read"));
     assertFalse(names.contains("board_post"));
   }

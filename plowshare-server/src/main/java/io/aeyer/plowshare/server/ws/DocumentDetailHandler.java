@@ -45,10 +45,10 @@ public final class DocumentDetailHandler implements FrameHandler {
             payload, "document", FrameTypes.DOCUMENT_DETAIL, "the document identifier"));
     if (payload.containsKey("scope")) {
       if (!(payload.get("scope") instanceof Map<?, ?> scope)
-          || !java.util.Set.of("kind", "project", "includeShared").containsAll(scope.keySet())
+          || !java.util.Set.of("kind", "project", "includeGlobal").containsAll(scope.keySet())
           || !(scope.get("kind") instanceof String kind)
           || !java.util.Set.of("personal", "project", "shared").contains(kind)
-          || scope.containsKey("includeShared") && !(scope.get("includeShared") instanceof Boolean)
+          || scope.containsKey("includeGlobal") && !(scope.get("includeGlobal") instanceof Boolean)
           || !kind.equals("project") && scope.containsKey("project"))
         throw new io.aeyer.plowshare.server.faults.CallerFault("Invalid document detail scope");
       if (kind.equals("project")

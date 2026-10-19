@@ -9,7 +9,16 @@ import java.util.List;
  * mean; they mean the same thing here.
  */
 public record EmbeddingRequest(
-    String specifier, List<String> input, Duration submitTimeout, UsageAttribution attribution) {
+    String specifier,
+    List<String> input,
+    Duration submitTimeout,
+    UsageAttribution attribution,
+    CallAuthorization authorization) {
+
+  public EmbeddingRequest(
+      String specifier, List<String> input, Duration submitTimeout, UsageAttribution attribution) {
+    this(specifier, input, submitTimeout, attribution, CallAuthorization.DIRECT);
+  }
 
   public EmbeddingRequest(String specifier, List<String> input, Duration submitTimeout) {
     this(specifier, input, submitTimeout, UsageAttribution.LEGACY);
@@ -17,6 +26,7 @@ public record EmbeddingRequest(
 
   public EmbeddingRequest {
     java.util.Objects.requireNonNull(attribution, "attribution");
+    java.util.Objects.requireNonNull(authorization, "authorization");
     Specifiers.require(specifier);
     // Null and empty answered with one type and one message, ahead of the
     // copy: List.copyOf reports a null batch as NullPointerException, which
@@ -47,11 +57,15 @@ public record EmbeddingRequest(
     return new EmbeddingRequest(specifier, input, null);
   }
 
+  public EmbeddingRequest withAuthorization(CallAuthorization check) {
+    return new EmbeddingRequest(specifier, input, submitTimeout, attribution, check);
+  }
+
   public EmbeddingRequest withBudget(Duration budget) {
-    return new EmbeddingRequest(specifier, input, budget, attribution);
+    return new EmbeddingRequest(specifier, input, budget, attribution, authorization);
   }
 
   public EmbeddingRequest withAttribution(UsageAttribution owner) {
-    return new EmbeddingRequest(specifier, input, submitTimeout, owner);
+    return new EmbeddingRequest(specifier, input, submitTimeout, owner, authorization);
   }
 }

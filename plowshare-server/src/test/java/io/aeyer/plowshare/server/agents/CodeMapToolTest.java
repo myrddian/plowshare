@@ -155,7 +155,7 @@ class CodeMapToolTest {
             tool.run(
                 "{\"operation\":\"symbols\",\"query\":\"a\",\"offset\":1,\"limit\":1}",
                 Home.global()));
-    assertEquals(3, page.path("total").asInt());
+    assertEquals(3, page.path("total").asInt(), page::toPrettyString);
     assertTrue(page.path("has_more").asBoolean());
     var symbol = page.path("results").get(0);
     assertEquals("alpha", symbol.path("name").asText());

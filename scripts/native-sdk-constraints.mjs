@@ -64,13 +64,25 @@ export function constrain(graph) {
     );
   };
   for (const [op, ref] of Object.entries(graph.inputs)) {
-    const s = resolve(graph, ref),
+    // Inspect alone requires a selector. Its TypeScript field shape is shared with the list
+    // reads, so keep this operation's rules on a private copy of the root schema.
+    if (op === 'proc.inspect') graph.inputs[op] = structuredClone(resolve(graph, ref));
+    const s = resolve(graph, graph.inputs[op]),
       extended = SHAPES[op];
     // Project/system Relay requests are unions; constrain each concrete topic field.
     if (op.startsWith('relay.'))
       for (const variant of s.anyOf ?? [ref])
         field(resolve(graph, variant), 'topic', { ...portName, maxLength: 1024 });
     if (s.anyOf) continue;
+    if (op.startsWith('proc.')) {
+      for (const key of ['project','conversation','root','causation','after'])
+        field(s,key,{...identity,maxLength:256});
+      field(s,'limit',integer(1,100));
+      if(op==='proc.inspect')rules(s,or(present('conversation'),present('root'),present('causation')));
+      // PROC uses opaque string cursors and stricter selector bounds; generic numeric-after
+      // and identifier defaults below belong to other operations.
+      continue;
+    }
     if (op==='acting.context.open') {
       field(s,'application',providerProject);
       field(s,'grant',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'});
@@ -252,8 +264,11 @@ export function constrain(graph) {
       rules(s, { atMostOne: ['after', 'before', 'tail'] });
     if (op === 'approval.list')
       rules(s, exactlyOne('conversation', 'project', 'mine'));
-    if (op === 'approval.answer')
+    if (op === 'approval.answer') {
       rules(s, implies(eq('decision', 'project'), present('prefix')));
+      rules(s, implies(present('reason'), eq('decision', 'deny')));
+      field(s, 'reason', { ...text(4000, 1), nonblank: true });
+    }
     if (op === 'orchestration.answer')
       rules(s, or(present('choices'), present('answer')));
     for (const k of ['roots', 'items', 'prefix'])
@@ -290,9 +305,12 @@ export function constrain(graph) {
       field(s,'revisions',{minItems:1,maxItems:16,uniqueItems:true,element:canonicalUuid});
       field(s,'revision',canonicalUuid); field(s,'requestId',canonicalUuid);
       add(s,{maxJsonBytes:8388608});
-      if(op==='information.interchange.import') rules(s,not(eq('scope.kind','shared')));
+      if(op==='information.interchange.import') rules(s,not(eq('scope.kind','global_read')));
     }
     if (op.startsWith('information.')) {
+      const accountOperations = ['upload','list','status','await','read','tags','tags.groups','exclude','unexclude','withdraw','restore','delete','retry','rebuild','allowance','share','unshare'];
+      if (!accountOperations.includes(op.slice('information.'.length))) rules(s,not(eq('scope.kind','account')));
+      else rules(s,implies(eq('scope.kind','account'),and(absent('typing','expectedRevision'),or(absent('corpus'),eq('corpus','documents')))));
       field(s, 'waitMs', { maximum: 30000 });
       for (const key of ['expectedRevision', 'version', 'type', 'attachedRevision']) field(s, key, canonicalUuid);
       field(s, 'expectedControlRevision', integer(1,9007199254740991));
@@ -397,6 +415,16 @@ export function constrain(graph) {
   field(actingOpened,'expiresAt',instant);
   for (const shape of Object.values(graph.$defs)) {
     const title = shape.title ?? '';
+    if(title.startsWith('Proc')) {
+      for(const key of ['total','completed','pending','running','blocked','failed','skipped','children','calls','attempts','activeCalls','repeatedCalls','causationDepth','queued','capacity'])field(shape,key,integer(0,9007199254740991));
+      for(const key of ['snapshotAt','createdAt','lastTurnAt','endedAt','startedAt','recordedAt','oldestPendingAt','leaseUntil'])field(shape,key,instant);
+      for(const key of ['conversations','calls','queues','summaries','observations','tools'])field(shape,key,{maxItems:100});
+      field(shape,'signals',{maxItems:200});field(shape,'pools',{maxItems:200});
+      if(title==='ProcAttempt') {
+        field(shape,'number',integer(1));field(shape,'httpStatus',integer(100,599));
+        field(shape,'inputTokens',decimal);field(shape,'outputTokens',decimal);
+      }
+    }
     if (shape.properties?.mode && shape.properties?.metadata && !shape.properties?.scope) field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});
     if (title === 'InformationTypeContract') {
       for(const key of ['type','version'])field(shape,key,canonicalUuid);
@@ -560,7 +588,11 @@ export function constrain(graph) {
       field(s, 'reference', { minLength: 1, nonblank: true });
       rules(s, { eq: [eq('kind', 'unknown'), eq('reference', null)] });
     }
-    if (title === 'EntryView') field(s, 'job', { minLength: 1, nonblank: true });
+    if (title === 'EntryView') {
+      field(s, 'job', { minLength: 1, nonblank: true });
+      for (const key of ['promptTokens', 'completionTokens', 'reasoningTokens'])
+        field(s, key, integer(0, 9007199254740991));
+    }
     if (title === 'MessageDelivery') {
       for (const k of ['conversation', 'sourceConversation']) field(s, k, { minLength: 1, nonblank: true });
     }

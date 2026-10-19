@@ -12,6 +12,21 @@ import java.util.*;
 /** Committed-source queue, shared by retained entries and durable digest summaries. */
 public final class PassageIndex implements UsageAware {
   private DualEmbeddings dualEmbeddings;
+  private QueryEmbeddings queries;
+  private io.aeyer.plowshare.server.information.InformationAccess access;
+  private OperationEmbeddings operations;
+  private java.util.function.Supplier<io.aeyer.plowshare.server.agents.Budget> maintenancePolicy;
+
+  public void useOperations(
+      QueryEmbeddings queries,
+      io.aeyer.plowshare.server.information.InformationAccess access,
+      OperationEmbeddings operations,
+      java.util.function.Supplier<io.aeyer.plowshare.server.agents.Budget> maintenancePolicy) {
+    this.queries = Objects.requireNonNull(queries);
+    this.access = Objects.requireNonNull(access);
+    this.operations = Objects.requireNonNull(operations);
+    this.maintenancePolicy = Objects.requireNonNull(maintenancePolicy);
+  }
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
     dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
@@ -66,6 +81,19 @@ public final class PassageIndex implements UsageAware {
     copy.scope = new PassageRepository.ReadScope(true, account);
     copy.usageOwners = usageOwners;
     copy.dualEmbeddings = dualEmbeddings;
+    copy.queries = queries;
+    copy.access = access;
+    copy.operations = operations;
+    copy.maintenancePolicy = maintenancePolicy;
+    return copy;
+  }
+
+  /**
+   * Digest navigation filters protected inputs before ranking/counting; Global excludes log trees.
+   */
+  public PassageIndex forDigestKnowledge(boolean global) {
+    var copy = forAccount(scope.account());
+    copy.scope = new PassageRepository.ReadScope(true, scope.account(), global);
     return copy;
   }
 
@@ -86,7 +114,54 @@ public final class PassageIndex implements UsageAware {
   }
 
   /** A captured query can safely be reused across home tiers, never across activation versions. */
-  public record Query(float[] legacy, EmbeddingQuery typed) {}
+  public record Query(float[] legacy, EmbeddingQuery typed, QueryEmbeddings.Read admission)
+      implements AutoCloseable {
+    public Query(float[] legacy, EmbeddingQuery typed) {
+      this(legacy, typed, null);
+    }
+
+    public void close() {
+      if (admission != null) admission.close();
+    }
+  }
+
+  /** Existing authenticated conversation search shares the normal read-operation admission. */
+  public Query capture(String text, UsageAttribution owner, Home home) {
+    if (queries == null) return capture(text, owner);
+    if (!scope.constrained() || scope.account() == null)
+      throw new IllegalStateException("Passage query requires its authenticated reader");
+    var selection =
+        home.isGlobal()
+            ? io.aeyer.plowshare.server.information.InformationContext.Selection.globalRead()
+            : io.aeyer.plowshare.server.information.InformationAccess.projectSelection(
+                scope.account(), home.project());
+    var context = access.resolve(scope.account(), selection);
+    var read =
+        queries.open(
+            context,
+            new QueryEmbeddings.Query(QueryEmbeddings.Kind.SEARCH, text, null, 201, "passages"),
+            QueryEmbeddings.Origin.request(
+                () -> {
+                  if (Thread.currentThread().isInterrupted())
+                    throw new IllegalStateException("Passage query ended");
+                }));
+    try {
+      var captured = capture(text, owner, read);
+      return new Query(captured.legacy(), captured.typed(), read);
+    } catch (RuntimeException failed) {
+      read.close();
+      throw failed;
+    }
+  }
+
+  /** Trusted existing operation owns this query's source and spending policy. */
+  public Query capture(String text, UsageAttribution owner, EmbeddingPermit permit) {
+    permit.require();
+    if (dualEmbeddings == null)
+      return new Query(checked(embeddings.forOperation(permit).embed(text, owner)), null);
+    var bound = dualEmbeddings.forQuery(permit);
+    return new Query(null, bound.query(bound.active(EmbeddingSlot.PROSE), text, owner));
+  }
 
   public Query capture(String text, UsageAttribution owner) {
     if (dualEmbeddings == null) return new Query(query(text, owner), null);
@@ -95,6 +170,10 @@ public final class PassageIndex implements UsageAware {
   }
 
   public List<Match> rank(Home home, String type, Query query, int most) {
+    if (query.admission() != null)
+      return query
+          .admission()
+          .disclose(() -> rank(home, type, new Query(query.legacy(), query.typed()), most));
     if (query.typed() == null) return rank(home, type, query.legacy(), most);
     return dualEmbeddings.read(
         query.typed().profile(),
@@ -129,9 +208,11 @@ public final class PassageIndex implements UsageAware {
   /** At most eight sources per pass; successes survive restart, failures back off. */
   public int repair() {
     List<Source> pending = repository.pending(generation);
+    var allowance = maintenancePolicy == null ? null : maintenancePolicy.get();
     int written = 0;
     for (Source source : pending) {
       if (source.text() == null || source.text().isBlank()) continue;
+      boolean repairInFlight = false;
       try {
         var chunks = passages(source.text());
         if (dualEmbeddings != null) {
@@ -155,16 +236,40 @@ public final class PassageIndex implements UsageAware {
         int start = source.next(), end = Math.min(start + 16, chunks.size());
         var texts = chunks.subList(start, end);
         UsageAttribution owner = repairOwner(source);
-        var batch = EmbeddingClient.owned(embeddings, texts, owner);
-        if (batch.size() != texts.size())
-          throw new EmbeddingException("Embedding batch count mismatch");
-        List<float[]> vectors = new ArrayList<>();
-        for (var v : batch) vectors.add(checked(v));
-        if (publish(source, texts, vectors, end == chunks.size())) written++;
+        if (operations == null) {
+          var batch = EmbeddingClient.owned(embeddings, texts, owner);
+          if (batch.size() != texts.size())
+            throw new EmbeddingException("Embedding batch count mismatch");
+          if (publish(
+              source, texts, batch.stream().map(this::checked).toList(), end == chunks.size()))
+            written++;
+        } else {
+          if (allowance.exhausted()) break;
+          var home =
+              repository
+                  .sourceHome(source)
+                  .orElseThrow(() -> new IllegalStateException("Passage source home unavailable"));
+          try (var permit =
+              operations.maintenanceBatch(
+                  home, texts, allowance, () -> repository.requireSource(source, generation))) {
+            if (!repository.beginRepair(source, generation)) continue;
+            repairInFlight = true;
+            var batch = embeddings.forOperation(permit).embedAll(texts, owner);
+            if (batch.size() != texts.size())
+              throw new EmbeddingException("Embedding batch count mismatch");
+            if (repository.publish(
+                source,
+                texts,
+                batch.stream().map(this::checked).toList(),
+                end == chunks.size(),
+                generation,
+                permit::require)) written++;
+          }
+        }
 
       } catch (RuntimeException failure) {
         // A source changed/ejected during dispatch is not resurrected, even as a failure.
-        repository.failed(source, failure.getClass().getSimpleName());
+        if (!repairInFlight) repository.failed(source, failure.getClass().getSimpleName());
       }
     }
     return written;

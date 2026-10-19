@@ -60,7 +60,7 @@ import {
 const client = await connectPlowshare({ origin, token });
 try {
   const bundle = requirePayload(await client.request('information.interchange.export', {
-    scope: { kind: 'project', project: projectId, includeShared: false },
+    scope: { kind: 'project', project: projectId, includeGlobal: false },
     revisions: [selectedRevision],
   }));
   const { manifest, files } = await unpackPortableBundle(bundle, portableCodec);
@@ -170,7 +170,7 @@ projection, allowance or lifecycle state is restored. Imported revisions use
 `explicit_only`, spend zero processing allowance at admission and remain
 unprocessed. Use existing allowance and selected-stage processing operations when
 processing is wanted. Existing local policies and retained dependencies still
-apply. Service credentials require their named project and `includeShared:false`;
+apply. Service credentials require their named project and `includeGlobal:false`;
 they cannot route work into Personal space.
 
 `origin.manifestHash` is a versioned server fingerprint of the validated bundle,

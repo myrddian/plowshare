@@ -92,12 +92,8 @@ public final class Passes {
               + " project's memory into global, so a pass over global would have"
               + " nowhere to promote to");
     }
-    int allowance = maxModelCalls == null ? props.getCuratorBudget() : maxModelCalls;
-    // Budget.of raises faults.CallerFault itself for a non-positive
-    // allowance -- there used to be a catch at the surface restating it as
-    // that surface's own BadRequestException, and it is gone rather than
-    // moved: the domain check already happened inside Budget.of.
-    Budget budget = Budget.of(allowance);
+    // A caller's explicit finite cap selects that policy; otherwise use the deployment policy.
+    Budget budget = maxModelCalls == null ? props.curatorAllowance() : Budget.of(maxModelCalls);
 
     // The project on the job's own row as well as inside the pass: a curator
     // pass is a job with no conversation of its own, so the row written by

@@ -70,15 +70,23 @@ public final class BoardPot {
     lock.lock();
     try {
       BoardTopic pot = rootTopic(root);
-      int available =
-          pot.potTotal() - pot.potSpent() - leased.getOrDefault(root, 0) - floor(pot, forOpener);
-      int size = Math.min(wakeCap, available);
+      if (pot.isClosed()) return Optional.empty();
+      long available =
+          pot.potTotal() == null
+              ? wakeCap
+              : (long) pot.potTotal()
+                  - pot.potSpent()
+                  - leased.getOrDefault(root, 0)
+                  - floor(pot, forOpener);
+      int size = (int) Math.max(0, Math.min(wakeCap, available));
       if (size < 1) {
         return Optional.empty();
       }
-      leased.merge(root, size, Integer::sum);
+      leased.merge(root, size, Math::addExact);
       Grant grant = new Grant(root, size);
-      Budget lease = Budget.of(size, () -> charge(grant));
+      Budget lease =
+          Budget.boardLease(
+              store.allowance(root).id().value(), size, () -> charge(grant, forOpener));
       granted.put(lease, grant);
       return Optional.of(lease);
     } finally {
@@ -91,17 +99,20 @@ public final class BoardPot {
    * untouched and the caller cannot send the model request. The budget serializes its shared
    * claims; this lock serializes charging against leasing and settlement of the root.
    */
-  private void charge(Grant grant) {
+  private Optional<Budget.Claim> charge(Grant grant, boolean forOpener) {
     lock.lock();
     try {
       if (!grant.active) {
         throw new IllegalStateException("this board lease has already settled");
       }
-      store.spend(grant.root, 1);
+      BoardTopic current = rootTopic(grant.root);
+      Optional<Budget.Claim> claim = store.claim(grant.root, floor(current, forOpener));
+      if (claim.isEmpty()) return claim;
       if (grant.unused() > 0) {
         release(grant.root, 1);
       }
       grant.charged++;
+      return claim;
     } finally {
       lock.unlock();
     }
@@ -153,7 +164,7 @@ public final class BoardPot {
    */
   public boolean spent(String root, boolean forOpener) {
     BoardTopic pot = rootTopic(root);
-    return pot.potTotal() - pot.potSpent() - floor(pot, forOpener) < 1;
+    return pot.isClosed() || pot.exhausted(forOpener);
   }
 
   /**
@@ -169,8 +180,13 @@ public final class BoardPot {
     lock.lock();
     try {
       BoardTopic pot = rootTopic(root);
-      return pot.potTotal() - pot.potSpent() - leased.getOrDefault(root, 0) - floor(pot, forOpener)
-          >= 1;
+      return !pot.isClosed()
+          && (pot.potTotal() == null
+              || (long) pot.potTotal()
+                      - pot.potSpent()
+                      - leased.getOrDefault(root, 0)
+                      - floor(pot, forOpener)
+                  >= 1);
     } finally {
       lock.unlock();
     }

@@ -56,10 +56,8 @@ public class JdbcProjectMembers implements ProjectMembers {
         () ->
             !jdbc.queryForList(
                     "SELECT 1 FROM project_members m JOIN projects p"
-                        + " ON p.id = m.project_id JOIN admins a ON a.handle=m.handle AND a.enabled WHERE p.name = ? AND m.handle = ?",
-                    Integer.class,
-                    project,
-                    handle)
+                        + " ON p.id = m.project_id JOIN admins a ON a.handle=m.handle AND a.enabled WHERE p.name = ? AND m.handle = ? AND (p.name LIKE 'client:%' OR authority_project_role(p.name,m.handle) IS NOT NULL)",
+                    Integer.class, project, handle)
                 .isEmpty());
   }
 
@@ -83,6 +81,7 @@ public class JdbcProjectMembers implements ProjectMembers {
 
   public void add(String project, String handle) {
     ordinary(project);
+    io.aeyer.plowshare.server.access.BuiltInIdentities.requireOrdinaryAccount(handle);
     ArchiveUnavailableException.translating(
         "add a project member",
         () ->
@@ -138,13 +137,11 @@ public class JdbcProjectMembers implements ProjectMembers {
     if (project.startsWith("personal:")
         && !project.equals(io.aeyer.plowshare.server.personal.PersonalSpaces.name(handle)))
       return java.util.Optional.empty();
-    if (!project.startsWith("personal:")
-        && !ClientProjects.privateProject(project)
-        && isServerAdmin(handle)) return java.util.Optional.of(ProjectRole.MANAGER);
     var roles =
         jdbc.queryForList(
-            "SELECT m.role FROM project_members m JOIN projects p ON p.id=m.project_id"
-                + " JOIN admins a ON a.handle=m.handle AND a.enabled WHERE p.name=? AND m.handle=?",
+            ClientProjects.privateProject(project)
+                ? "SELECT m.role FROM project_members m JOIN projects p ON p.id=m.project_id JOIN admins a ON a.handle=m.handle AND a.enabled WHERE p.name=? AND m.handle=?"
+                : "SELECT role FROM (SELECT authority_project_role(?,?) AS role) effective WHERE role IS NOT NULL",
             String.class,
             project,
             handle);
@@ -169,11 +166,36 @@ public class JdbcProjectMembers implements ProjectMembers {
           "This account needs " + required + " access to project '" + project + "'");
   }
 
+  @Override
+  public boolean mayAdminister(String project, String actor) {
+    if (project == null || actor == null) return false;
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM authority_grants g JOIN authority_roles r ON r.id=g.role_id "
+                + "WHERE g.id=authority_project_management_grant(?,?) AND r.name='ADMIN')",
+            Boolean.class,
+            project,
+            actor));
+  }
+
+  @Override
+  public Access managementAccess(String project, String actor) {
+    if (!mayAdminister(project, actor)) return access(project, actor);
+    Access result = projectAccess(project, ProjectRole.MANAGER);
+    return new Access(
+        project, ProjectRole.MANAGER, List.of("manage"), result.members(), result.history());
+  }
+
   public Access access(String project, String handle) {
+    if (mayAdminister(project, handle)) return managementAccess(project, handle);
     if (ProjectIds.toRead(jdbc, Home.of(project)) == ProjectIds.NONE)
       throw new ArchiveRefusedException("No project has that name");
     requireRole(project, handle, ProjectRole.VIEWER);
     ProjectRole effective = role(project, handle).orElseThrow();
+    return projectAccess(project, effective);
+  }
+
+  private Access projectAccess(String project, ProjectRole effective) {
     var grants =
         jdbc.query(
             "SELECT m.handle,m.role FROM project_members m JOIN projects p ON p.id=m.project_id WHERE p.name=? ORDER BY m.handle",
@@ -212,9 +234,9 @@ public class JdbcProjectMembers implements ProjectMembers {
           Long id = ProjectIds.toRead(jdbc, Home.of(project));
           if (id == ProjectIds.NONE) throw new ArchiveRefusedException("No project has that name");
           lock(id);
-          requireRole(project, actor, ProjectRole.MANAGER);
+          if (!mayAdminister(project, actor)) requireRole(project, actor, ProjectRole.MANAGER);
           if (jdbc.queryForList(
-                  "SELECT 1 FROM admins WHERE handle=? AND NOT bootstrap AND account_kind<>'SERVICE_TOKEN'",
+                  "SELECT 1 FROM admins WHERE handle=? AND NOT bootstrap AND account_kind IN ('USER','SERVICE')",
                   Integer.class,
                   handle)
               .isEmpty()) throw new ArchiveRefusedException("No permanent account has that handle");
@@ -230,6 +252,13 @@ public class JdbcProjectMembers implements ProjectMembers {
             throw new ArchiveRefusedException(
                 "That account is already a member; use project.member.role to change its role");
           protectManager(id, actor, previous, role);
+          jdbc.queryForObject(
+              "SELECT authority_issue_membership(?,?,?,?)",
+              java.util.UUID.class,
+              project,
+              handle,
+              actor,
+              role.name());
           if (add)
             jdbc.update(
                 "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,?)",
@@ -249,6 +278,7 @@ public class JdbcProjectMembers implements ProjectMembers {
               handle,
               add ? "member.add" : "member.role",
               role.name());
+          protectResultingManagers(id, project, actor, previous, role);
           return null;
         });
   }
@@ -260,7 +290,7 @@ public class JdbcProjectMembers implements ProjectMembers {
           Long id = ProjectIds.toRead(jdbc, Home.of(project));
           if (id == ProjectIds.NONE) throw new ArchiveRefusedException("No project has that name");
           lock(id);
-          requireRole(project, actor, ProjectRole.MANAGER);
+          if (!mayAdminister(project, actor)) requireRole(project, actor, ProjectRole.MANAGER);
           var previous =
               jdbc.queryForList(
                   "SELECT role FROM project_members WHERE project_id=? AND handle=?",
@@ -268,6 +298,16 @@ public class JdbcProjectMembers implements ProjectMembers {
                   id,
                   handle);
           protectManager(id, actor, previous, null);
+          jdbc.update(
+              "UPDATE authority_grants SET revoked_at=now(),version=version+1,"
+                  + "revoked_by=(SELECT id FROM authority_accounts WHERE legacy_handle=?),"
+                  + "revoking_grant=authority_membership_authority(?,?) WHERE scope_id=(SELECT id FROM authority_scopes WHERE project_id=?) "
+                  + "AND subject_account=(SELECT id FROM authority_accounts WHERE legacy_handle=?) AND provenance='MEMBERSHIP' AND revoked_at IS NULL",
+              actor,
+              project,
+              actor,
+              id,
+              handle);
           if (jdbc.update("DELETE FROM project_members WHERE project_id=? AND handle=?", id, handle)
               > 0)
             jdbc.update(
@@ -276,16 +316,17 @@ public class JdbcProjectMembers implements ProjectMembers {
                 actor,
                 handle,
                 "member.remove");
+          protectResultingManagers(id, project, actor, previous, null);
           return null;
         });
   }
 
   private void protectManager(Long id, String actor, List<String> previous, ProjectRole next) {
-    if (!isServerAdmin(actor)
+    if (!mayAdminister(projectName(id), actor)
         && previous.contains("MANAGER")
         && next != ProjectRole.MANAGER
         && jdbc.queryForObject(
-                "SELECT count(*) FROM project_members m JOIN admins a ON a.handle=m.handle AND a.enabled WHERE project_id=? AND role='MANAGER'",
+                "SELECT authority_project_manager_count(id) FROM authority_scopes WHERE project_id=?",
                 Long.class,
                 id)
             <= 1)
@@ -293,7 +334,25 @@ public class JdbcProjectMembers implements ProjectMembers {
           "Keep an enabled project manager before removing the last manager");
   }
 
-  /** Administrators may use ordinary projects; other accounts need an explicit membership. */
+  private String projectName(Long id) {
+    return jdbc.queryForObject("SELECT name FROM projects WHERE id=?", String.class, id);
+  }
+
+  private void protectResultingManagers(
+      Long id, String project, String actor, List<String> previous, ProjectRole next) {
+    if (mayAdminister(project, actor)
+        || !previous.contains("MANAGER")
+        || next == ProjectRole.MANAGER) return;
+    if (jdbc.queryForObject(
+            "SELECT authority_project_manager_count(id) FROM authority_scopes WHERE project_id=?",
+            Long.class,
+            id)
+        == 0)
+      throw new ArchiveRefusedException(
+          "Keep an enabled project manager before removing the last manager");
+  }
+
+  /** Data use follows explicit live grants; administrative control is checked separately. */
   public boolean mayUse(String project, String handle) {
     return role(project, handle).isPresent();
   }

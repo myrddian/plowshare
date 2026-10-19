@@ -19,6 +19,15 @@
 - [Information and evidence](information-system.md)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
+- [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled policy and implementation boundaries)
+- [Global knowledge read contract](global-knowledge-read-contract.md) (implemented read boundaries and selector cutover)
+- [Standalone allowances and execution recovery](standalone-allowance-and-recovery-plan.md) (standalone Budget storage, policy preservation, swarm/operator recovery and cutover verification)
+- [Post–slice 18 follow-up TODOs](post-slice-18-follow-up-todos.md) (deferred account-delegated runtime capabilities and Desktop Global administration)
+- [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)
+- [Role and scope permissions](role-scope-permissions-proposal.md) (RBAC helpers, default role profiles and proposed action matrices)
+- [Authority substrate impact report](authority-substrate-impact-report.md) (settled policy, migration requirements, reuse and deferred gaps; source evidence)
+- [Authority substrate first implementation slice](authority-substrate-first-slice-plan.md) (implemented project READ/WRITE foundation, reuse and verification)
+- [Authority substrate implementation roadmap](authority-substrate-implementation-plan.md) (18 slices with local implementation evidence and deferred follow-ups)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Excalibur: lightweight agile Application](lightweight-agile-application-design.md) (design, CLI, web board and Docker packaging)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
@@ -27,6 +36,7 @@
 - [Document navigation and reference policy](decisions/0028-document-navigation-and-reference-policy.md) — implemented locally; release is separate.
 - [Authored navigation implementation plan](authored-navigation-implementation.md)
 - [Model usage and pricing configuration](model-usage-accounting.md)
+- [Processes, queues and conversation audit](proc-audit.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
 - [MCP tool grants, hooks and invocation evidence](mcp-tool-authority.md)
 - [MCP cancellation and recovery](mcp-recovery.md)

@@ -47,13 +47,25 @@ public final class MemoryRecallHandler implements FrameHandler {
     int limit = request.limitOrDefault();
 
     Archive.Recall recalled =
-        archive.accountingEnabled()
+        archive.querying()
             ? archive.recall(
-                question,
-                home,
-                limit,
-                archive.usage(home, asking.handle(), UsageAttribution.Operation.EMBEDDING_QUERY))
-            : archive.recall(question, home, limit);
+                new io.aeyer.plowshare.server.archive.MemoryQueries.Request(
+                    asking.requireHandle(FrameTypes.MEMORY_RECALL),
+                    home,
+                    io.aeyer.plowshare.server.archive.MemoryQueries.Kind.RECALL,
+                    question,
+                    limit,
+                    false,
+                    io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                        asking.queryValidity())))
+            : archive.accountingEnabled()
+                ? archive.recall(
+                    question,
+                    home,
+                    limit,
+                    archive.usage(
+                        home, asking.handle(), UsageAttribution.Operation.EMBEDDING_QUERY))
+                : archive.recall(question, home, limit);
     return Outcome.ok(
         new RecallResponse(question, limit, recalled.memories(), recalled.unsearchable()));
   }

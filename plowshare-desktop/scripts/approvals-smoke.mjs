@@ -44,6 +44,22 @@ try {
   await expect(prompt(page.locator('#transcript'), 'inline-request')).toHaveCount(0);
   assert.deepEqual(decisions().at(-1).payload, { id: 'inline-request', decision: 'deny' });
 
+  // Work not submitted by this window needs neither a tracked job nor an Inbox wake.
+  fixture.queueApproval('log-only-request', 'fixture-first', false, false);
+  await expect(prompt(page.locator('#approval-bar'), 'log-only-request')).toBeVisible();
+  await page.getByRole('button', { name: 'Check command approvals', exact: true }).click();
+  await expect(prompt(page.locator('#approval-bar'), 'log-only-request')).toBeVisible();
+  const beforeYes = decisions().length;
+  const blocked = await page.evaluate(async () => {
+    try { await window.plowshare.request({ action: 'run', conversation: 'fixture-first', agent: 'fixture-bot', text: 'Yes' }); }
+    catch (error) { return error.message; }
+  });
+  assert.match(blocked, /Use Approve or Deny/);
+  assert.equal(decisions().length, beforeYes);
+  await prompt(page.locator('#approval-bar'), 'log-only-request').getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(prompt(page.locator('#approval-bar'), 'log-only-request')).toHaveCount(0);
+  assert.deepEqual(decisions().at(-1).payload, { id: 'log-only-request', decision: 'once' });
+
   const newWindow = app.waitForEvent('window'); await page.locator('#inbox-open').click();
   const inbox = await newWindow; inbox.on('pageerror', error => errors.push(error.message));
   fixture.queueApproval('inbox-request');
@@ -73,7 +89,7 @@ try {
   await expect(prompt(trajectory, 'trajectory-request')).toHaveCount(0);
   assert.deepEqual(decisions().at(-1).payload, { id: 'trajectory-request', decision: 'once' });
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 1, 'Decisions continue their original request, never submit another agent turn');
-  assert.equal(decisions().length, 6, 'Each click answers exactly one approval');
+  assert.equal(decisions().length, 7, 'Each explicit click answers exactly one approval');
   assert.deepEqual(errors, []);
   console.log('Approval smoke passed: direct Approve/Deny in command prompts, chat, Inbox and trajectory; live discovery, legacy notices and no replay.');
 } finally {

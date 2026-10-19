@@ -40,16 +40,17 @@ public final class AutomaticLimits {
     while (conversation != null && visited.size() < 128 && visited.add(conversation)) {
       var record = conversations.apply(conversation).orElse(null);
       if (record == null) return null;
-      if (record.budget() != null) return record;
-      if (record.origin() != Origin.DELEGATION) return null;
+      if (record.origin() != Origin.DELEGATION) return record;
       conversation = record.parentId();
     }
     return null;
   }
 
   private ProjectCaps policy(ConversationRecord owner, String session) {
-    if (owner == null || owner.origin() == Origin.ORCHESTRATION || owner.home().isGlobal())
-      return ProjectCaps.NONE;
+    if (owner == null
+        || owner.origin() == Origin.ORCHESTRATION
+        || owner.origin() == Origin.BOARD
+        || owner.home().isGlobal()) return ProjectCaps.NONE;
     return caps.apply(owner.home().project(), session);
   }
 

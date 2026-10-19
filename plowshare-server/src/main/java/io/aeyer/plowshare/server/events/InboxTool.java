@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** A bot reading its speaker's unread user-inbox items, and marking them read by reading them. */
+/** Reads the speaker's Inbox; command approvals retain their human read receipt and alert. */
 public final class InboxTool implements AgentTool {
 
   public static final String NAME = "inbox_read";
@@ -16,7 +16,8 @@ public final class InboxTool implements AgentTool {
       ToolSchema.from(
           NAME,
           "Read the unread items in the user-inbox of the person you are talking to: what"
-              + " scheduled and event-started runs left for them. Reading marks them read.",
+              + " scheduled and event-started runs left for them. Reading marks ordinary items read;"
+              + " command approvals remain unread until the person reads or answers them.",
           Map.of("type", "object", "properties", Map.of(), "required", List.of()));
 
   private final Inbox inbox;
@@ -37,9 +38,9 @@ public final class InboxTool implements AgentTool {
 
   @Override
   public String run(String argumentsJson, Home home) {
-    List<InboxItem> asked = inbox.list(handle, true, 0, SHOWN + 1);
+    List<InboxItem> asked = inbox.unreadForAgent(handle, 0, SHOWN + 1);
     if (asked.isEmpty()) {
-      return "The user-inbox has nothing unread.";
+      return "The user-inbox has no unread ordinary items. Command approvals stay in the person's Inbox.";
     }
     boolean more = asked.size() > SHOWN;
     List<InboxItem> unread = more ? asked.subList(0, SHOWN) : asked;
@@ -55,6 +56,8 @@ public final class InboxTool implements AgentTool {
       }
       out.append('\n').append("  ").append(item.answer().replace("\n", "\n  ")).append('\n');
     }
+    // The repository excludes human command approvals before pagination. Consuming ordinary
+    // deliveries cannot silence an approval alert or let pending requests starve older results.
     inbox.read(handle, unread.stream().map(InboxItem::id).toList());
     // The state it left: what it just marked read, and whether anything is still unread.
     out.append(

@@ -2,11 +2,14 @@ package io.aeyer.plowshare.server.agents.digests;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.MemoryState;
+import io.aeyer.plowshare.server.access.AccessRequest.Resource;
+import io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.util.*;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /** A fresh model context chooses each descent. The engine enforces decreasing depth. */
 public final class Navigator {
@@ -39,6 +42,7 @@ public final class Navigator {
     String fallback;
     String seedMode = "tree";
     int queryCalls;
+    final List<Runnable> disclosure = new ArrayList<>();
   }
 
   private PassageIndex index;
@@ -77,15 +81,34 @@ public final class Navigator {
       Budget budget,
       BooleanSupplier cancelled,
       UsageAttribution owner) {
+    return navigate(home, question, budget, cancelled, owner, true, ignored -> {});
+  }
+
+  /** Retained runs select their captured tiers and recheck exact evidence before disclosure. */
+  public Result navigate(
+      Home home,
+      String question,
+      Budget budget,
+      BooleanSupplier cancelled,
+      UsageAttribution owner,
+      boolean globalRead,
+      Consumer<List<Resource>> fence) {
+    fence.accept(List.of());
     if (question == null || question.isBlank())
       throw new ValidationException("A navigation needs a question");
     try (var operation =
         owner == null
             ? model.operation("memory_navigator", home, budget)
             : model.operation("memory_navigator", home, budget, owner)) {
+      if (operation != null)
+        operation.withValidity(
+            () -> {
+              if (cancelled.getAsBoolean()) throw new IllegalStateException("Navigation cancelled");
+              fence.accept(List.of());
+            });
       Trace trace = new Trace();
       trace.tier = home;
-      Result result = walk(home, question, budget, cancelled, trace, operation);
+      Result result = walk(home, question, budget, cancelled, trace, operation, globalRead, fence);
       if (index != null)
         result =
             new Result(
@@ -102,10 +125,17 @@ public final class Navigator {
                     trace.fallback,
                     trace.queryCalls,
                     index.generation()));
+      if (cancelled.getAsBoolean()) {
+        if (operation != null) operation.cancelled();
+        return new Result("digest", List.of(), "Navigation cancelled", false, budget.spent());
+      }
+      trace.disclosure.forEach(Runnable::run);
       if (operation != null) {
+        operation.require();
         operation.result(result.text(), result.complete());
         if (cancelled.getAsBoolean()) operation.cancelled();
       }
+      fence.accept(List.of());
       return result;
     }
   }
@@ -116,21 +146,28 @@ public final class Navigator {
       Budget budget,
       BooleanSupplier cancelled,
       Trace trace,
-      DigestModel.Operation operation) {
+      DigestModel.Operation operation,
+      boolean globalRead,
+      Consumer<List<Resource>> fence) {
     if (question == null || question.isBlank())
       throw new ValidationException("A navigation needs a question");
     if (cancelled.getAsBoolean()) return fallback(null, List.of(), "Navigation cancelled", budget);
-    if (budget.remaining() == 0)
+    if (budget.exhausted())
       return fallback(null, List.of(), "System navigation allowance exhausted", budget);
     // Project precedes global. An explicit no-match allows trying the global tree.
-    List<Home> homes = home.isGlobal() ? List.of(home) : List.of(home, Home.global());
+    List<Home> homes =
+        home.isGlobal() || !globalRead ? List.of(home) : List.of(home, Home.global());
     Result fallback = null;
     Home fallbackTier = null;
     PassageIndex.Query query = null;
     if (index != null) {
       trace.queryCalls++;
       try {
-        query = index.capture(question, operation.usage());
+        query =
+            operation == null
+                ? index.capture(
+                    question, io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY)
+                : operation.query(index, question);
       } catch (io.aeyer.plowshare.server.llm.EmbeddingException unavailable) {
         trace.fallback = "Query embedding unavailable; bounded tree navigation used";
       }
@@ -139,22 +176,26 @@ public final class Navigator {
       trace.tier = tier;
       trace.seedMode = "tree";
       store.captureUnfolded(tier);
-      List<DigestStore.Node> roots = store.roots(tier);
+      List<DigestStore.Node> roots =
+          store.roots(tier).stream().filter(n -> readable(tier, n, fence)).toList();
+      for (var root : roots) trace.disclosure.add(() -> requireUnchanged(tier, root, fence));
       List<List<DigestStore.Node>> attempts = new ArrayList<>();
       if (index != null) {
-        trace.coverage = index.coverage(tier, "digest");
+        var tierIndex = index.forDigestKnowledge(tier.isGlobal());
+        trace.coverage = tierIndex.coverage(tier, "digest");
         if (!trace.coverage.complete())
           trace.fallback = "Reduced digest seed coverage; structural alternatives remain available";
         if (query != null) {
           // Validate every candidate against today's home and revision; only database IDs are
           // selectable.
           List<DigestStore.Node> seeds = new ArrayList<>();
-          for (var match : index.rank(tier, "digest", query, 32)) {
+          for (var match : tierIndex.rank(tier, "digest", query, 32)) {
             if (seeds.stream().anyMatch(n -> n.id().equals(match.id()))) continue;
             try {
               var node = store.get(tier, match.id());
-              if (node.staleAt() == null && match.revision().equals(digestHash(node)))
-                seeds.add(node);
+              if (node.staleAt() == null
+                  && match.revision().equals(digestHash(node))
+                  && readable(tier, node, fence)) seeds.add(node);
             } catch (ValidationException moved) {
               continue;
             }
@@ -197,10 +238,19 @@ public final class Navigator {
         while (!options.isEmpty()) {
           if (cancelled.getAsBoolean())
             return fallback(current, options, "Navigation cancelled", budget);
-          if (budget.remaining() == 0)
+          if (budget.exhausted())
             return fallback(current, options, "System navigation allowance exhausted", budget);
           String selected;
           try {
+            var pinned = List.copyOf(options);
+            operation.inputs(
+                () -> {
+                  for (var node : pinned) {
+                    if (!node.equals(store.get(tier, node.id())) || !readable(tier, node, fence))
+                      throw new IllegalStateException(
+                          "Navigation input changed or is no longer readable");
+                  }
+                });
             selected =
                 operation.call(
                     "memory_navigator",
@@ -251,7 +301,9 @@ public final class Navigator {
               return fallback(
                   current, options, "Digest changed during selection; retry navigation", budget);
             List<DigestStore.Node> children = store.children(tier, current.id());
-            if (children.isEmpty()) return evidence(tier, current, budget);
+            if (!readable(tier, current, fence))
+              throw new IllegalStateException("Navigation source is no longer readable");
+            if (children.isEmpty()) return evidence(tier, current, budget, fence);
             if (children.size() > Digester.FANOUT)
               return fallback(
                   current,
@@ -267,7 +319,9 @@ public final class Navigator {
     }
     if (fallbackTier != null) {
       trace.tier = fallbackTier;
-      if (index != null) trace.coverage = index.coverage(fallbackTier, "digest");
+      if (index != null)
+        trace.coverage =
+            index.forDigestKnowledge(fallbackTier.isGlobal()).coverage(fallbackTier, "digest");
     }
     return fallback != null
         ? fallback
@@ -277,6 +331,23 @@ public final class Navigator {
             "This home and its global fallback have no digests.",
             true,
             budget.spent());
+  }
+
+  private void requireUnchanged(Home home, DigestStore.Node node, Consumer<List<Resource>> fence) {
+    if (!node.equals(store.get(home, node.id())) || !readable(home, node, fence))
+      throw new IllegalStateException("Navigation evidence changed before disclosure");
+  }
+
+  private boolean readable(Home home, DigestStore.Node node, Consumer<List<Resource>> fence) {
+    try {
+      var targets = store.readTargets(home, node.id());
+      for (int start = 0; start < targets.size(); start += 256)
+        fence.accept(targets.subList(start, Math.min(targets.size(), start + 256)));
+      fence.accept(List.of());
+      return true;
+    } catch (io.aeyer.plowshare.server.faults.CallerFault denied) {
+      return false;
+    }
   }
 
   private static String digestHash(DigestStore.Node node) {
@@ -292,14 +363,21 @@ public final class Navigator {
     }
   }
 
-  private Result evidence(Home home, DigestStore.Node node, Budget budget) {
+  private Result evidence(
+      Home home, DigestStore.Node node, Budget budget, Consumer<List<Resource>> fence) {
     String memoryId = store.memory(node.id());
     if (memoryId != null) {
+      fence.accept(List.of(new Resource(Kind.MEMORY, memoryId)));
       var m = archive.get(memoryId);
       if (!m.home().equals(home))
         throw new ValidationException("Memory moved out of this digest's home");
       if (m.state() == MemoryState.ACTIVE || m.state() == MemoryState.COLD) {
-        m = archive.read(List.of(memoryId)).get(0); // Exactly the returned memory counts one use.
+        m =
+            archive
+                .read(
+                    List.of(memoryId),
+                    () -> fence.accept(List.of(new Resource(Kind.MEMORY, memoryId))))
+                .get(0); // Exactly the returned memory counts one use.
         String text =
             "LESSON "
                 + m.id()
@@ -329,6 +407,7 @@ public final class Navigator {
             node,
             sources.get(0),
             budget,
+            fence,
             "Memory "
                 + memoryId
                 + " is "
@@ -349,11 +428,17 @@ public final class Navigator {
     DigestStore.Span span = store.span(node.id());
     return span == null
         ? fallback(node, List.of(), "No deeper source survives", budget)
-        : span(home, node, span, budget, "");
+        : span(home, node, span, budget, fence, "");
   }
 
   private Result span(
-      Home home, DigestStore.Node node, DigestStore.Span span, Budget budget, String prefix) {
+      Home home,
+      DigestStore.Node node,
+      DigestStore.Span span,
+      Budget budget,
+      Consumer<List<Resource>> fence,
+      String prefix) {
+    fence.accept(List.of(new Resource(Kind.CONVERSATION, span.conversation())));
     List<DigestStore.Source> source = store.source(home, span);
     DigestStore.ArchivedSpan archived = store.archiveFor(home, span);
     DigestStore.Node surviving = archived == null ? node : archived.node();

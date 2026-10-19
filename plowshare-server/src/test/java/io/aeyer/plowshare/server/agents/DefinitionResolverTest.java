@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ch.qos.logback.classic.Level;
@@ -272,12 +273,11 @@ class DefinitionResolverTest {
    * file was refused -- but {@code broken} is never added to the merged map, because only {@code
    * loaded.enabled()} is merged and {@code broken} was never enabled. So the promise is broken
    * exactly at the merge, {@code helper -> broken} becomes a genuinely unreachable callee only
-   * then, and building the merged registry throws. One project's typo must not surface as an
-   * exception out of {@code forCaller} mid-run: the whole project falls back to the unmodified boot
-   * set, and the fault is named in {@code refusalsFor} rather than swallowed.
+   * then, and building the merged registry throws. A broken merged graph must refuse lookup rather
+   * than substitute a deployment definition. The fault remains named in {@code refusalsFor}.
    */
   @Test
-  void a_callee_unreachable_only_after_the_merge_falls_back_and_is_named(@TempDir Path data)
+  void a_callee_unreachable_only_after_the_merge_refuses_and_is_named(@TempDir Path data)
       throws Exception {
     DataLayout layout = new DataLayout(data).initialise();
     write(
@@ -289,12 +289,9 @@ class DefinitionResolverTest {
 
     DefinitionResolver resolver = resolverOver(layout);
 
-    AgentRegistry seven = resolver.forCaller(new DefinitionResolver.Caller(7L, null));
-
-    assertEquals(
-        resolver.bootSet().names(),
-        seven.names(),
-        "a set-level fault must fall the whole project back to the boot set, not throw");
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> resolver.forCaller(new DefinitionResolver.Caller(7L, null)));
     DefinitionResolver.Caller sevenNoSession = new DefinitionResolver.Caller(7L, null);
     String failure = String.join(" ", resolver.refusalsFor(sevenNoSession).values());
     assertTrue(
@@ -369,8 +366,9 @@ class DefinitionResolverTest {
 
     DefinitionResolver resolver = resolverOver(layout, id -> id != 7L);
 
-    assertFalse(
-        resolver.forCaller(new DefinitionResolver.Caller(7L, null)).find("ghost").isPresent());
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> resolver.forCaller(new DefinitionResolver.Caller(7L, null)));
   }
 
   /**
@@ -400,10 +398,10 @@ class DefinitionResolverTest {
    * for project 7 would have {@code Files.list} throw on the unreadable directory, and {@code
    * DefinitionResolver.readProject}'s own catch would record that fault under {@code
    * refusalsFor(7L)}, keyed on {@code "(the project tier)"} -- see {@code
-   * a_callee_unreachable_only_after_the_merge_falls_back_and_is_named} for the same mechanism
-   * measured on a different fault. An empty {@code refusalsFor(7L)} here is therefore not silence
-   * about a read that succeeded; {@link #the_same_directory_resolves_once_the_project_exists}
-   * already covers a directory that can be read. It is the absence of the one event a filesystem
+   * a_callee_unreachable_only_after_the_merge_refuses_and_is_named} for the same mechanism measured
+   * on a different fault. An empty {@code refusalsFor(7L)} here is therefore not silence about a
+   * read that succeeded; {@link #the_same_directory_resolves_once_the_project_exists} already
+   * covers a directory that can be read. It is the absence of the one event a filesystem
    * consultation of this directory could not avoid leaving behind.
    *
    * <p><b>{@link #assertTheSealHolds} is checked first, inside the {@code try}, on {@code
@@ -428,8 +426,9 @@ class DefinitionResolverTest {
 
       DefinitionResolver resolver = resolverOver(layout, id -> id != 7L);
 
-      assertFalse(
-          resolver.forCaller(new DefinitionResolver.Caller(7L, null)).find("ghost").isPresent());
+      assertThrows(
+          io.aeyer.plowshare.server.faults.CallerFault.class,
+          () -> resolver.forCaller(new DefinitionResolver.Caller(7L, null)));
       DefinitionResolver.Caller sevenNoSession = new DefinitionResolver.Caller(7L, null);
       assertTrue(
           resolver.refusalsFor(sevenNoSession).isEmpty(),
@@ -728,7 +727,9 @@ class DefinitionResolverTest {
         whileCapturing(
             () -> {
               DefinitionResolver resolver = resolverOver(layout);
-              resolver.forCaller(new DefinitionResolver.Caller(7L, null));
+              assertThrows(
+                  io.aeyer.plowshare.server.faults.CallerFault.class,
+                  () -> resolver.forCaller(new DefinitionResolver.Caller(7L, null)));
             });
 
     String said = rendered(warnings);
@@ -777,14 +778,9 @@ class DefinitionResolverTest {
             + sources);
   }
 
-  /**
-   * A definition the checks disable must not take the tier with it. Nothing hot-loaded may abort a
-   * resolution, and a check that threw would otherwise cost the project every override it has
-   * rather than the one definition the fleet cannot answer for.
-   */
+  /** A throwing validator invalidates its authoritative tier, without changing other projects. */
   @Test
-  void a_tier_check_that_throws_never_escapes_and_costs_only_that_project(@TempDir Path data)
-      throws Exception {
+  void a_tier_check_failure_refuses_only_that_project(@TempDir Path data) throws Exception {
     DataLayout layout = new DataLayout(data).initialise();
     write(layout.botsFor(7L), "mine", "a perfectly good definition");
 
@@ -798,12 +794,8 @@ class DefinitionResolverTest {
             });
     DefinitionResolver.Caller seven = new DefinitionResolver.Caller(7L, null);
 
-    AgentRegistry registry = resolver.forCaller(seven);
-
-    assertEquals(
-        resolver.bootSet().names(),
-        registry.names(),
-        "a throwing check must fall this project back to the boot set, not out of" + " forCaller");
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class, () -> resolver.forCaller(seven));
     assertTrue(
         String.join(" ", resolver.refusalsFor(seven).values()).contains("blew up"),
         "the failure was swallowed rather than named: " + resolver.refusalsFor(seven));

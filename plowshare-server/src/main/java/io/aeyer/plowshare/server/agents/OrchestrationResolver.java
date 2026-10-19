@@ -142,7 +142,10 @@ public final class OrchestrationResolver implements SessionCloseListener {
 
   public Map<String, OrchestrationDefinition> forCaller(Caller caller) {
     var inherited = globalSet();
-    return resolve(caller, inherited).map(Cached::merged).orElse(inherited.enabled());
+    var resolved = resolve(caller, inherited);
+    if (resolved.isPresent() && resolved.orElseThrow().tier().disabled().containsKey(BROKEN_TIER))
+      throw new io.aeyer.plowshare.server.faults.CallerFault("Project procedures are unavailable");
+    return resolved.map(Cached::merged).orElse(inherited.enabled());
   }
 
   public Optional<OrchestrationDefinition> find(Caller caller, String name) {
@@ -175,8 +178,10 @@ public final class OrchestrationResolver implements SessionCloseListener {
       projectId = personalIds.apply(caller);
       caller = new Caller(projectId, caller.sessionId(), caller.handle());
     }
+    if (projectId != null && !projectExists.test(projectId))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "The selected procedure project is unavailable");
     if (projectId == null
-        || !projectExists.test(projectId)
         || (!data.keepsAnything() && applicationResources.root(projectId).isEmpty())) {
       return Optional.empty();
     }
@@ -224,13 +229,12 @@ public final class OrchestrationResolver implements SessionCloseListener {
               OrchestrationRegistry.read(
                   List.copyOf(layers), knownTools(projectId), agents, checks));
     } catch (RuntimeException brokenTier) {
-      // Cached like DefinitionResolver's own fallback: warned once per stamp and agents,
-      // and rebuilt when either changes.
+      // Retain diagnostics once per stamp, but execution cannot substitute inherited procedures.
       String warning =
           "The orchestrations of "
               + tierDescribe
               + " could not be read, so"
-              + " only the boot set is offered there: "
+              + " procedure lookup is refused there: "
               + brokenTier.getMessage();
       log.warn("{}", warning);
       built =
@@ -239,7 +243,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
               agents,
               inherited,
               new OrchestrationRegistry.Loaded(Map.of(), Map.of(BROKEN_TIER, warning)),
-              inherited.enabled());
+              Map.of());
     }
     byProject.put(key, built);
     if (key.sessionId() != null && !sessionLive.test(key.sessionId())) {

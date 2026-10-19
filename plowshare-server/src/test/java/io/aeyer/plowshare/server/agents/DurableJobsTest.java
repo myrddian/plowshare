@@ -6,8 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.agents.digests.Digester;
+import io.aeyer.plowshare.server.agents.digests.Digests;
+import io.aeyer.plowshare.server.agents.digests.MemoryProperties;
+import io.aeyer.plowshare.server.agents.digests.Navigator;
 import io.aeyer.plowshare.server.archive.JdbcJobLog;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.JobRecord;
@@ -123,7 +129,8 @@ class DurableJobsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, jobs, projects CASCADE");
     rows = new JdbcJobLog(jdbc);
   }
@@ -159,6 +166,30 @@ class DurableJobsTest {
   }
 
   // --- the row -----------------------------------------------------------------
+
+  @Test
+  void digest_job_keeps_its_selected_home_after_the_worker_closure_is_gone() {
+    var before = storeWithARecord();
+    var digester = mock(Digester.class);
+    when(digester.pass(any(), any(), any())).thenReturn("Built 0 digests");
+    var digests = new Digests(mock(Navigator.class), digester, new MemoryProperties(), before);
+    String project = digests.start("payments").id();
+    String ordinaryGlobal = digests.start("global").id();
+    String global = digests.start(null).id();
+    for (String id : List.of(project, ordinaryGlobal, global)) awaitDone(before, id);
+    before.close();
+
+    var reopened = new JdbcJobLog(jdbc);
+    assertEquals(Home.of("payments"), reopened.find(project).orElseThrow().home());
+    assertEquals(Home.of("global"), reopened.find(ordinaryGlobal).orElseThrow().home());
+    assertEquals(Home.global(), reopened.find(global).orElseThrow().home());
+    var after = storeWithARecord();
+    for (String id : List.of(project, ordinaryGlobal, global)) {
+      assertThrows(NotFoundFault.class, () -> after.get(id));
+      assertEquals(0, reopened.find(id).orElseThrow().modelCalls());
+    }
+    verify(digester, times(3)).pass(any(), any(), any());
+  }
 
   /**
    * The row exists while the run is going, which is the case this whole change is for: an ingest is

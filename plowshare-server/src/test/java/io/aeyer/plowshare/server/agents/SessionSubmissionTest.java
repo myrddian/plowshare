@@ -679,16 +679,13 @@ class SessionSubmissionTest {
                     "You do one thing.",
                     true,
                     true)));
-    // DataLayout.NONE and an always-false projectExists: no request built
-    // in this file names a project a row exists for, so every Caller
-    // resolves with a null project id and DefinitionResolver.forCaller
-    // answers `registry` before either is ever consulted -- AgentController
-    // Test's own javadoc argues the same shape at length.
+    // This registered fixture project has no definition directory. Its valid context
+    // uses deployment definitions; unknown explicit names must not become root lookups.
     DefinitionResolver resolver =
         new DefinitionResolver(
             registry,
             DataLayout.NONE,
-            id -> false,
+            id -> true,
             Set.of(),
             Set.of(),
             mock(SessionChannel.class),
@@ -697,6 +694,7 @@ class SessionSubmissionTest {
     // The services wired as the container wires them: one Callers, shared
     // by the two services that take one. The controller builds none of them.
     ProjectStore projects = mock(ProjectStore.class);
+    when(projects.id("payments")).thenReturn(9L);
     Turn turns = mock(Turn.class);
     Callers callers =
         new Callers(

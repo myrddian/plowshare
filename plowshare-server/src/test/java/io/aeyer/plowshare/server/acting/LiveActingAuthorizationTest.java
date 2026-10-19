@@ -7,17 +7,23 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.ApplicationIdentity;
+import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.*;
+import io.aeyer.plowshare.server.access.AuthorityIds.*;
 import io.aeyer.plowshare.server.acting.ActingPolicySource.Grant;
 import io.aeyer.plowshare.server.acting.ActingPolicySource.ProofKind;
 import io.aeyer.plowshare.server.acting.ActingPolicySource.Token;
+import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.llm.dispatch.*;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -40,8 +46,17 @@ class LiveActingAuthorizationTest {
   private final UUID proof = UUID.randomUUID();
   private final ActingPolicySource source = mock(ActingPolicySource.class);
   private final ProjectMembers members = mock(ProjectMembers.class);
+  private final IdentityRepository identities = mock(IdentityRepository.class);
+  private final ScopedAuthority actions = mock(ScopedAuthority.class);
+  private final AccountId subjectId = new AccountId(UUID.randomUUID());
+  private final AccountId actorId = new AccountId(UUID.randomUUID());
+  private final AuthorityScope projectScope =
+      new AuthorityScope.Project(new ScopeId(UUID.randomUUID()), 1);
+  private final AuthorityScope personalScope =
+      new AuthorityScope.Personal(new ScopeId(UUID.randomUUID()), subjectId, 2);
   private final ActingAuthorization policy =
-      new LiveActingAuthorization(source, members, Clock.fixed(NOW, ZoneOffset.UTC));
+      new LiveActingAuthorization(
+          source, members, Clock.fixed(NOW, ZoneOffset.UTC), identities, actions);
   private final ActingTarget project = new ActingTarget.Project(PROJECT);
   private final ActingTarget personal = new ActingTarget.Personal(SUBJECT);
   private final ActingScope full = scope(CONTRIBUTOR, true);
@@ -49,6 +64,19 @@ class LiveActingAuthorizationTest {
 
   @BeforeEach
   void currentAuthority() {
+    when(identities.account(SUBJECT))
+        .thenReturn(
+            new IdentityRepository.Account(
+                subjectId, SUBJECT, IdentityRepository.AccountKind.USER, false));
+    when(identities.account(ACTOR))
+        .thenReturn(
+            new IdentityRepository.Account(
+                actorId, ACTOR, IdentityRepository.AccountKind.SERVICE_TOKEN, false));
+    when(identities.project(PROJECT)).thenReturn(projectScope);
+    when(identities.project(PersonalSpaces.name(SUBJECT))).thenReturn(personalScope);
+    when(members.authorityAccount(anyString()))
+        .thenAnswer(call -> Optional.of(call.getArgument(0)));
+    when(actions.allows(any(), any(), any())).thenReturn(true);
     when(source.enabled()).thenReturn(true);
     when(source.accountActive(ACTOR)).thenReturn(true);
     when(source.subjectActive(SUBJECT)).thenReturn(true);
@@ -124,8 +152,9 @@ class LiveActingAuthorizationTest {
 
   @ParameterizedTest
   @EnumSource(ActingPermission.class)
-  void onlyReviewedReadAndWorkCapabilitiesCanBeAdmitted(ActingPermission permission) {
-    if (permission == READ || permission == WORK) {
+  void onlyReviewedActionsCanBeAdmitted(ActingPermission permission) {
+    if (Set.of(READ, WORK, ActingPermission.CONVERSATION_CREATE, ActingPermission.RUN_MODEL)
+        .contains(permission)) {
       assertEquals(CONTRIBUTOR, policy.require(authority, permission, project));
     } else {
       assertThrows(CallerFault.class, () -> policy.require(authority, permission, project));
@@ -188,6 +217,65 @@ class LiveActingAuthorizationTest {
     assertThrows(CallerFault.class, () -> policy.require(authority, WORK, personal));
     when(members.role(PersonalSpaces.name(SUBJECT), SUBJECT)).thenReturn(Optional.empty());
     assertThrows(CallerFault.class, () -> policy.require(authority, READ, personal));
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = AuthorityAction.class,
+      names = {"READ", "WRITE", "CONVERSATION_CREATE", "RUN_MODEL"})
+  void eachProjectActionRequiresBothScopedAccounts(AuthorityAction action) {
+    ActingPermission permission = permission(action);
+    for (var account : Set.of(subjectId, actorId)) {
+      when(actions.allows(GrantRecipient.account(account), projectScope, action)).thenReturn(false);
+      assertThrows(CallerFault.class, () -> policy.require(authority, permission, project));
+      when(actions.allows(GrantRecipient.account(account), projectScope, action)).thenReturn(true);
+    }
+    assertEquals(CONTRIBUTOR, policy.require(authority, permission, project));
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = AuthorityAction.class,
+      names = {"READ", "WRITE", "CONVERSATION_CREATE", "RUN_MODEL"})
+  void personalUsesOnlySubjectScopedAuthorityAndNeverCreatesMembership(AuthorityAction action) {
+    var permission = permission(action);
+    assertEquals(CONTRIBUTOR, policy.require(authority, permission, personal));
+    verify(actions).allows(GrantRecipient.account(subjectId), personalScope, action);
+    verify(actions, never()).allows(eq(GrantRecipient.account(actorId)), any(), any());
+    verify(members, never()).authorityAccount(ACTOR);
+    verify(members, never()).assign(anyString(), anyString(), any(), anyString(), anyBoolean());
+    when(actions.allows(GrantRecipient.account(subjectId), personalScope, action))
+        .thenReturn(false);
+    assertThrows(CallerFault.class, () -> policy.require(authority, permission, personal));
+  }
+
+  @Test
+  void serviceTokenChecksItsOwningGrantWithoutLosingTheActorCeiling() {
+    when(members.authorityAccount(ACTOR)).thenReturn(Optional.of(SUBJECT));
+    assertEquals(CONTRIBUTOR, policy.require(authority, WORK, project));
+    verify(actions, times(2))
+        .allows(GrantRecipient.account(subjectId), projectScope, AuthorityAction.WRITE);
+    when(members.role(PROJECT, ACTOR)).thenReturn(Optional.of(VIEWER));
+    assertThrows(CallerFault.class, () -> policy.require(authority, WORK, project));
+  }
+
+  @Test
+  void foreignPersonalIdentityAndUnavailableSubstrateCannotFallBackToConsent() {
+    when(identities.project(PersonalSpaces.name(SUBJECT)))
+        .thenReturn(new AuthorityScope.Personal(new ScopeId(UUID.randomUUID()), actorId, 3));
+    assertThrows(CallerFault.class, () -> policy.require(authority, READ, personal));
+    when(actions.allows(any(), any(), any())).thenThrow(new IllegalStateException("unavailable"));
+    assertThrows(IllegalStateException.class, () -> policy.require(authority, READ, project));
+  }
+
+  private static ActingPermission permission(AuthorityAction action) {
+    return switch (action) {
+      case READ -> READ;
+      case WRITE -> WORK;
+      case CONVERSATION_CREATE -> ActingPermission.CONVERSATION_CREATE;
+      case RUN_MODEL -> ActingPermission.RUN_MODEL;
+      default -> throw new IllegalArgumentException("unsupported test action");
+    };
   }
 
   enum MissingRecord {
@@ -352,6 +440,14 @@ class LiveActingAuthorizationTest {
   @Test
   void interleavedSubjectsKeepTheirOwnPersonalAuthorityAndTheSameApplicationActor() {
     UUID bobProof = UUID.randomUUID();
+    var bobId = new AuthorityIds.AccountId(UUID.randomUUID());
+    when(identities.account("bob"))
+        .thenReturn(
+            new IdentityRepository.Account(
+                bobId, "bob", IdentityRepository.AccountKind.USER, false));
+    when(identities.project(PersonalSpaces.name("bob")))
+        .thenReturn(
+            new AuthorityScope.Personal(new AuthorityIds.ScopeId(UUID.randomUUID()), bobId, 3));
     var bob =
         new RequestAuthority.Delegated(
             ACTOR, "bob", new RequestAuthority.Delegation(APP, GRANT, bobProof, full));
@@ -380,5 +476,141 @@ class LiveActingAuthorizationTest {
         outage,
         assertThrows(IllegalStateException.class, () -> policy.require(authority, WORK, project)));
     verifyNoInteractions(members);
+  }
+
+  enum Withdrawal {
+    ACTOR,
+    SUBJECT,
+    PROOF,
+    EXPIRY,
+    ELIGIBILITY,
+    MANIFEST,
+    ADMITTED_CEILING,
+    SUBJECT_ACTION
+  }
+
+  @ParameterizedTest
+  @EnumSource(Withdrawal.class)
+  void liveActingChecksRemainAdditionalToOrdinaryOperationAuthority(Withdrawal withdrawal) {
+    var home = Home.of(PersonalSpaces.name(SUBJECT));
+    var definition =
+        new AgentDefinition(
+            "chat", "chat", "fast", List.of(), List.of(), List.of(), 4, 8, "Answer", true, false);
+    var operations = mock(OperationAuthority.class);
+    var operation =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            SUBJECT,
+            subjectId,
+            personalScope.id(),
+            home,
+            GrantRecipient.account(subjectId),
+            OperationExecution.actions(definition).stream()
+                .map(action -> new OperationAuthority.Support(action, UUID.randomUUID()))
+                .toList());
+    when(operations.admit(SUBJECT, home, OperationExecution.actions(definition)))
+        .thenReturn(operation);
+    var dispatcher = mock(LlmDispatcher.class);
+    var transcript = mock(Transcript.class, CALLS_REAL_METHODS);
+    when(transcript.conversationId()).thenReturn("cnv_ROOT");
+    var resources = mock(ResourceScopeRepository.class);
+    when(resources.projects(any())).thenReturn(List.of(home.project()));
+    var admitted =
+        withdrawal == Withdrawal.ADMITTED_CEILING ? authority(scope(VIEWER, true)) : authority;
+    Runnable check =
+        () -> {
+          policy.require(admitted, READ, personal);
+          policy.require(admitted, WORK, personal);
+          policy.require(admitted, ActingPermission.RUN_MODEL, personal);
+        };
+    var runtime =
+        new JobRuntime(operations, dispatcher, List.of())
+            .forAdmittedTurn(
+                new RunAdmission(
+                    check,
+                    job -> {},
+                    () -> {},
+                    SUBJECT,
+                    new PersonalRunAuthority(SUBJECT, check, resources)));
+    when(dispatcher.stream(any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              switch (withdrawal) {
+                case ACTOR -> when(source.accountActive(ACTOR)).thenReturn(false);
+                case SUBJECT -> when(source.subjectActive(SUBJECT)).thenReturn(false);
+                case PROOF ->
+                    when(source.token(proof))
+                        .thenReturn(
+                            Optional.of(
+                                new Token(
+                                    proof,
+                                    APP,
+                                    ACTOR,
+                                    GRANT,
+                                    SUBJECT,
+                                    full,
+                                    NOW.plusSeconds(3600),
+                                    true)));
+                case EXPIRY ->
+                    when(source.token(proof))
+                        .thenReturn(
+                            Optional.of(
+                                new Token(proof, APP, ACTOR, GRANT, SUBJECT, full, NOW, false)));
+                case ELIGIBILITY -> when(source.eligible(APP, GRANT, SUBJECT)).thenReturn(false);
+                case MANIFEST ->
+                    when(source.grant(APP, GRANT)).thenReturn(Optional.of(grant(VIEWER, true)));
+                case SUBJECT_ACTION ->
+                    when(actions.allows(
+                            GrantRecipient.account(subjectId),
+                            personalScope,
+                            AuthorityAction.RUN_MODEL))
+                        .thenReturn(false);
+                case ADMITTED_CEILING -> fail("An admitted READER must never dispatch");
+              }
+              return new Completion("private model answer", "stop", TokenUsage.UNKNOWN, List.of());
+            });
+    var budget = Budget.of(4);
+    if (withdrawal == Withdrawal.ADMITTED_CEILING) {
+      assertThrows(
+          CallerFault.class,
+          () ->
+              runtime.run(
+                  definition,
+                  "Hello",
+                  home,
+                  budget,
+                  () -> false,
+                  null,
+                  JobWatch.UNWATCHED,
+                  transcript,
+                  TurnCap.of(8),
+                  List.of(),
+                  SUBJECT,
+                  false));
+      verifyNoInteractions(dispatcher);
+      assertEquals(0, budget.spent());
+    } else {
+      var outcome =
+          runtime.run(
+              definition,
+              "Hello",
+              home,
+              budget,
+              () -> false,
+              null,
+              JobWatch.UNWATCHED,
+              transcript,
+              TurnCap.of(8),
+              List.of(),
+              SUBJECT,
+              false);
+      assertEquals(Outcome.Ending.UNAVAILABLE, outcome.ending());
+      assertFalse(outcome.text().contains("private model answer"));
+      assertEquals(1, outcome.modelCalls());
+      assertEquals(1, budget.spent());
+      verify(operations, atLeastOnce()).require(operation);
+    }
+    verify(members, never()).authorityAccount(ACTOR);
+    verify(operations, never()).admit(eq(ACTOR), any(), any());
   }
 }

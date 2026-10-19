@@ -15,7 +15,7 @@ public sealed interface ActingTarget permits ActingTarget.Project, ActingTarget.
   /** The actual owner of the resolved Personal resource, not an account selected by the caller. */
   record Personal(String owner) implements ActingTarget {
     public Personal {
-      owner = ActingValues.account(owner);
+      owner = ActingValues.subject(owner);
     }
   }
 }

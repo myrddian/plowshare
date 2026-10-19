@@ -45,6 +45,20 @@ public class ApprovalFrames implements FrameArea {
   private final ApprovalDelivery delivery;
   private final ObjectProvider<ConductorContinuation> conductors;
 
+  private io.aeyer.plowshare.server.approvals.SuspendedRunCalls suspendedCalls;
+  private io.aeyer.plowshare.server.approvals.RunApprovalContinuations continuations;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useContinuations(
+      io.aeyer.plowshare.server.approvals.RunApprovalContinuations continuations) {
+    this.continuations = continuations;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useSuspendedCalls(io.aeyer.plowshare.server.approvals.SuspendedRunCalls calls) {
+    suspendedCalls = calls;
+  }
+
   public ApprovalFrames(
       RunApprovalStore store,
       ProjectStore projects,
@@ -166,7 +180,7 @@ public class ApprovalFrames implements FrameArea {
    */
   record ListBody(String conversation, String project, Boolean mine) {}
 
-  record AnswerBody(String id, String decision, List<String> prefix) {}
+  record AnswerBody(String id, String decision, List<String> prefix, String reason) {}
 
   record RevokeBody(String id) {}
 
@@ -184,9 +198,8 @@ public class ApprovalFrames implements FrameArea {
               + " open question on this account).");
     }
     if (Boolean.TRUE.equals(body.mine())) {
-      // THE ACCOUNT'S, WHEREVER THEY WERE RAISED. A question raised under an orchestration is
-      // written against a conductor's conversation, which no person has open; listing by
-      // conversation could never show it to them.
+      // Include pinned background recipients and owned foreground roots. Neither requires an
+      // open client view: closing a tab must not make its pending decision undiscoverable.
       String handle = asking.requireHandle(FrameTypes.APPROVAL_LIST);
       return Outcome.ok(
           new Listed(
@@ -215,6 +228,12 @@ public class ApprovalFrames implements FrameArea {
   }
 
   Outcome answer(Map<String, Object> payload, Asking asking) {
+    if (payload != null
+        && payload.containsKey("reason")
+        && !(payload.get("reason") instanceof String)) {
+      throw new CallerFault(
+          "An approval denial reason must be text, not null or another value type.");
+    }
     AnswerBody body = Payloads.as(payload, AnswerBody.class, FrameTypes.APPROVAL_ANSWER);
     if (body.id() == null || body.decision() == null || !DECISIONS.contains(body.decision())) {
       throw new CallerFault(
@@ -233,9 +252,20 @@ public class ApprovalFrames implements FrameArea {
     callers.requireConversationProject(approval.conversation(), asking.handle());
     String by = asking.handle() != null ? asking.handle() : asking.sessionId();
     boolean deny = "deny".equals(body.decision());
+    if (body.reason() != null
+        && (!deny
+            || body.reason().isBlank()
+            || body.reason().length() > 4000
+            || body.reason().indexOf('\0') >= 0)) {
+      throw new CallerFault(
+          "An approval reason must be nonblank text of at most 4000 characters, and is only valid for deny.");
+    }
     boolean answered;
     if (deny) {
-      answered = store.deny(approval.id(), by);
+      answered =
+          body.reason() == null
+              ? store.deny(approval.id(), by)
+              : store.deny(approval.id(), by, body.reason());
     } else {
       if (RunApproval.PROJECT.equals(body.decision()) && approval.isSet()) {
         // A set is many commands, and a standing approval covers one prefix: allowing the
@@ -294,6 +324,18 @@ public class ApprovalFrames implements FrameArea {
     // hooks are told before anything is continued. They can notify; they cannot undo it.
     toldApprovalPost(
         approval, deny ? ApprovalAnswer.DENY : ApprovalAnswer.ALLOW, deny ? null : body.decision());
+    if (suspendedCalls != null) suspendedCalls.release(approval.id());
+    if (continuations != null) {
+      var resumed = continuations.resume(approval.id());
+      if (resumed.isPresent())
+        return Outcome.ok(
+            new Answered(
+                approval.id(),
+                state,
+                resumed.get().job(),
+                resumed.get().busy(),
+                resumed.get().note()));
+    }
     try {
       // The approval as this answer left it, not as it was read before: the engine speaks
       // an answer to a run's own check in words of its own, which differ by the decision.
@@ -305,6 +347,15 @@ public class ApprovalFrames implements FrameArea {
           .getIfAvailable(() -> ConductorContinuation.NONE)
           .continueApproved(answered(approval, state), utterance)) {
         return Outcome.ok(new Answered(approval.id(), state, null, false, null));
+      }
+      if (suspendedCalls != null && !approval.isSet()) {
+        return Outcome.ok(
+            new Answered(
+                approval.id(),
+                state,
+                null,
+                true,
+                "The decision is recorded, but no exact suspended call is retained. Nothing was executed or sent to a model. Submit a new request explicitly if it is still needed."));
       }
       Runs.Started started =
           approval.handle() == null

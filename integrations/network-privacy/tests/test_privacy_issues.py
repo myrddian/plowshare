@@ -536,7 +536,7 @@ class PrivacyIssuesTest(unittest.IsolatedAsyncioTestCase):
         upload = client.request.call_args.args[0]
         self.assertIsInstance(upload, InformationUploadRequest)
         self.assertEqual(upload.scope.project, self.config.project)
-        self.assertFalse(upload.scope.include_shared)
+        self.assertFalse(upload.scope.include_global)
         self.assertEqual(upload.name, source_name(self.identity))
         await port.save(issue, revision)
         self.assertIsInstance(
@@ -559,7 +559,7 @@ class PrivacyIssuesTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((await port.versions())[0].issue_id, self.identity)
         self.assertIsInstance(client.request.call_args.args[0], InformationListRequest)
-        self.assertFalse(client.request.call_args.args[0].scope.include_shared)
+        self.assertFalse(client.request.call_args.args[0].scope.include_global)
         await port.read(revision)
         reader.read_source.assert_awaited_once_with(revision)
 

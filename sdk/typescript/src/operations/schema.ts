@@ -1,4 +1,5 @@
 import { interchangeProblem } from './interchange-validation.ts';
+import { validateProcReply } from './proc.ts';
 import { validateHostedReply } from './hosted-tool-scopes.ts';
 import { validateProviderCredentialReply } from './provider-credentials.ts';
 import {
@@ -11,7 +12,7 @@ import { validateDeploymentReply } from './application-deployments.ts';
 import { validateSwarmReply } from './swarm-types.ts';
 import { validateRelayReply } from './relay.ts';
 import {
-  validateEntryOrigins,
+  validateEntryMetadata,
   validateFileStoreReplies,
 } from './conversation-replies.ts';
 import { validateMessagingOrigins } from './messaging.ts';
@@ -273,7 +274,8 @@ export function decodeReply<K extends keyof Replies>(
     (type === 'application.token.issue' && !applicationCredentialCheck(decoded))
   )
     throw new Error('Invalid Application identity reply');
-  validateEntryOrigins(type, decoded);
+  validateEntryMetadata(type, decoded);
+  validateProcReply(type, decoded);
   validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);
   validateExternalResponse({ type, payload: decoded } as Parameters<

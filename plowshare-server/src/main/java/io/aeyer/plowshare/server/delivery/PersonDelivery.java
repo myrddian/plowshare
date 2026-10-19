@@ -26,7 +26,16 @@ public final class PersonDelivery {
   public interface Voice {
     boolean isSpeaking(String conversation);
 
-    void speak(String conversation, String agent, String text, Speaker speaker);
+    /** Legacy fixture seam; production delivery requires the explicit recipient overload. */
+    default void speak(String conversation, String agent, String text, Speaker speaker) {
+      throw new Turn.Refused("Recipient authority is required for a model delivery");
+    }
+
+    /** Carries authority separately from the source speaker and conversation custodian. */
+    default void speakForAccount(
+        String conversation, String agent, String text, Speaker speaker, String account) {
+      speak(conversation, agent, text, speaker);
+    }
   }
 
   @FunctionalInterface
@@ -40,11 +49,34 @@ public final class PersonDelivery {
         String handle, String kind, String text, String about, String source) {
       notify(handle, kind, text, about);
     }
+
+    /** Production inboxes deduplicate this durable question by account and about identity. */
+    default void notifyOnceFromLog(
+        String handle, String kind, String text, String about, String source) {
+      throw new UnsupportedOperationException(
+          "This Inbox does not support durable question delivery");
+    }
   }
 
   private final ConversationStore conversations;
   private final Voice voice;
   private final Inbox inbox;
+
+  /**
+   * Human questions always land in the account Inbox, including foreground conversations. The
+   * pinned recipient wins; otherwise use the retained root owner. Never speak into the
+   * conversation: that would start model work before the person decided. A missing recipient leaves
+   * the owning request pending rather than acknowledging a notification nobody received.
+   */
+  public Sent sendQuestionFromLog(
+      String conversation, String handle, String kind, String text, String about, String source) {
+    Objects.requireNonNull(about, "question identity");
+    String recipient = handle != null ? handle : conversations.ownerOf(conversation).orElse(null);
+    if (recipient == null) return new Sent(Result.NOWHERE, Handover.NOWHERE);
+    if (information != null && source != null) information.requireLog(source, recipient);
+    inbox.notifyOnceFromLog(recipient, kind, text, about, source);
+    return new Sent(Result.DELIVERED, Handover.INBOX);
+  }
 
   public PersonDelivery(ConversationStore conversations, Voice voice, Inbox inbox) {
     this.conversations = Objects.requireNonNull(conversations, "conversations");
@@ -115,12 +147,12 @@ public final class PersonDelivery {
       String about,
       String source) {
     if (information != null && source != null) information.requireLog(source, handle);
-    if (conversation != null && isTurn(conversation)) {
+    if (handle != null && conversation != null && isTurn(conversation)) {
       if (voice.isSpeaking(conversation)) {
         return new Sent(Result.BUSY, Handover.CONVERSATION);
       }
       try {
-        voice.speak(conversation, agent, text, speaker);
+        voice.speakForAccount(conversation, agent, text, speaker, handle);
         return new Sent(Result.DELIVERED, Handover.CONVERSATION);
       } catch (Turn.Refused | ArchiveException refused) {
         // The durable caller decides whether and how to log this fallback.
@@ -141,7 +173,7 @@ public final class PersonDelivery {
    * 2026-09-28-hooks-reach-the-log §3).
    */
   public String routeFor(String conversation, String handle) {
-    if (conversation != null && isTurn(conversation)) {
+    if (handle != null && conversation != null && isTurn(conversation)) {
       return Handover.CONVERSATION;
     }
     return handle != null ? Handover.INBOX : Handover.NOWHERE;

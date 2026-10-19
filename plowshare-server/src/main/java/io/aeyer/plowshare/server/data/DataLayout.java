@@ -21,6 +21,10 @@ import java.util.stream.Stream;
  * The tree under {@code plowshare.data.dir}: what is in it, what is reserved in it, and what this
  * server refuses to start on top of.
  *
+ * <p>The physical {@code global/} directory is a compatibility layout, not the Global knowledge
+ * account. It holds deployment definitions and private exports as well as images. Its location
+ * grants neither a public audience nor SYSTEM execution authority; callers retain those checks.
+ *
  * <h2>The tree</h2>
  *
  * <pre>

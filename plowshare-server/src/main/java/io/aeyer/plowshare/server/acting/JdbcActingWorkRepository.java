@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.acting;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
@@ -40,10 +39,14 @@ public final class JdbcActingWorkRepository implements ActingWorkRepository {
   }
 
   @Override
-  public String open(String subject, int budget) {
+  public String open(String subject, Integer budget) {
     transaction();
     return conversations
-        .open(Home.of(PersonalSpaces.name(subject)), Budget.of(budget), null, subject)
+        .open(
+            Home.of(PersonalSpaces.name(subject)),
+            io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(budget),
+            null,
+            subject)
         .id();
   }
 

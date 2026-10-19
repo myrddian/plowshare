@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.information;
 
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
-import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.documents.Extracted;
 import io.aeyer.plowshare.server.information.InformationLifecycle.*;
 import java.time.*;
@@ -11,23 +13,19 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** Owns leases and committed checkpoints. Callers keep a fence and its write in one transaction. */
 public final class JdbcInformationProcessingRepository implements InformationProcessingRepository {
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
   private final Clock clock;
-  private final ProjectMembers members;
 
-  // Token principals retain ownership; their owner's membership and credential ceiling determine
-  // authority. Ordinary processing retains the existing explicit-membership requirement.
-  private static final String OWNER_AUTHORIZED =
-      "account_active(q.owner_handle) AND ((q.project_id IS NULL AND q.owner_handle NOT LIKE '@service/%')"
-          + " OR (q.project_id IS NOT NULL AND ((q.owner_handle LIKE '@service/%' AND"
-          + " service_project_role((SELECT name FROM projects WHERE id=q.project_id),q.owner_handle) IS NOT NULL)"
-          + " OR (q.owner_handle NOT LIKE '@service/%' AND EXISTS(SELECT 1 FROM project_members m"
-          + " WHERE m.project_id=q.project_id AND m.handle=q.owner_handle)))))"
-          + " AND information_reference_readable(r.id,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id))";
+  // Independent SYSTEM processing uses live intrinsic authority and retained input validity.
+  // The creator is retained for provenance/private log custody, never as execution authority.
+  private static final String SYSTEM_OPERATION_VALID = "information_system_processing_valid(r.id)";
 
   private record Authority(String owner, String project) {}
 
   private boolean authorized(Authority authority) {
-    return authority.project() == null || members.mayUse(authority.project(), authority.owner());
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT information_system_scope_valid(?)", Boolean.class, authority.project()));
   }
 
   private Authority authority(Lease lease) {
@@ -36,9 +34,15 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   public JdbcInformationProcessingRepository(
       JdbcTemplate jdbc, Clock clock, ProjectMembers members) {
+    this(jdbc, clock, members, new JdbcAllowanceRepository(jdbc));
+  }
+
+  public JdbcInformationProcessingRepository(
+      JdbcTemplate jdbc, Clock clock, ProjectMembers members, AllowanceRepository allowances) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
-    this.members = Objects.requireNonNull(members);
+    Objects.requireNonNull(members);
+    this.allowances = Objects.requireNonNull(allowances);
   }
 
   private OffsetDateTime now() {
@@ -60,23 +64,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
     var candidates =
         sweepCandidates(
-            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r"
+            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revision_allowances r"
                 + " JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='autoTag'"
-                + " WHERE r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL"
-                + " AND jsonb_array_length(q.tags)=0 AND jsonb_array_length(r.auto_tag)=0 AND NOT r.auto_tag_generated"
-                + " AND r.allowance_spent<r.allowance_total AND r.extracted_text IS NOT NULL AND btrim(r.extracted_text)<>''"
-                + " AND s.state IN ('skipped','ready')"
-                + " AND (SELECT count(*) FROM information_steps prior WHERE prior.revision_id=r.id AND prior.generation=r.generation"
-                + " AND prior.stage IN ('extract','derive') AND prior.state IN ('ready','skipped'))=2"
-                + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-                + " AND "
-                + OWNER_AUTHORIZED
-                + " AND ((q.namespace<>'legacy' AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id))"
-                + " OR information_readable(r.id,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
-                + " (SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
-                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id AND NOT information_readable(i.input_revision,"
-                + " q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))");
+                + " WHERE "
+                + InformationQueueSql.tagging());
     for (var candidate : candidates) {
       jdbc.update(
           "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='autoTag'",
@@ -88,27 +80,12 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   public List<Queued> sweepTagGroups() {
 
-    String tags = InformationFacetSql.visibleTags("r", "q");
     var candidates =
         sweepCandidates(
-            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id"
+            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='tagGroups'"
-                + " WHERE r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL AND NOT q.tag_groups_manual"
-                + " AND jsonb_array_length("
-                + tags
-                + ")>0 AND (s.state='skipped' OR NOT r.tag_groups_generated OR r.tag_groups_input_tags<>"
-                + tags
-                + ")"
-                + " AND (r.allowance_spent<r.allowance_total OR (r.tag_groups_generated AND r.tag_groups_input_tags="
-                + tags
-                + ")) AND s.state IN ('skipped','ready')"
-                + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-                + " AND "
-                + OWNER_AUTHORIZED
-                + " AND ((q.namespace<>'legacy' AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id)) OR information_readable(r.id,q.owner_handle,"
-                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
-                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id AND NOT information_readable(i.input_revision,q.owner_handle,"
-                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))");
+                + " WHERE "
+                + InformationQueueSql.grouping());
     for (var candidate : candidates) {
       jdbc.update(
           "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='tagGroups'",
@@ -170,11 +147,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       var rows =
           jdbc.query(
               "SELECT s.*,r.resource_id,q.owner_handle,q.project_id,p.name AS project_name FROM information_steps s"
-                  + " JOIN information_revisions r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
+                  + " JOIN information_revision_allowances r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
                   + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
                   + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                   + " AND "
-                  + OWNER_AUTHORIZED
+                  + SYSTEM_OPERATION_VALID
                   + " AND "
                   + PROCESSING_AUTHORIZED
                   + " AND (s.state='pending' OR (s.state='running' AND s.lease_until<?))"
@@ -239,14 +216,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public boolean renew(Lease lease) {
     if (!authorized(authority(lease))) return false;
     return jdbc.update(
-            "UPDATE information_steps s SET lease_until=? FROM information_revisions r,information_resources q"
+            "UPDATE information_steps s SET lease_until=? FROM information_revision_allowances r,information_resources q"
                 + " WHERE r.id=s.revision_id AND q.id=r.resource_id AND "
-                + OWNER_AUTHORIZED
+                + SYSTEM_OPERATION_VALID
                 + " AND "
                 + PROCESSING_AUTHORIZED
-                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id"
-                + " AND NOT information_readable(i.input_revision,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
-                + " (SELECT name FROM projects WHERE id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
                 + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
                 + " AND r.availability='active' AND r.generation=s.generation AND s.revision_id=?"
                 + " AND s.generation=? AND s.stage=? AND s.lease_token=? AND s.state='running' AND s.lease_until>=?",
@@ -264,21 +238,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public void requireLease(Lease lease) {
 
     if (!authorized(authority(lease))) throw new StaleLease();
-    String selectedProject = projectName(lease.project());
-    if (jdbc.queryForObject(
-            "SELECT count(*) FROM information_inputs WHERE derived_revision=? AND NOT information_readable(input_revision,?,?,?,?)",
-            Integer.class,
-            lease.revision(),
-            lease.owner(),
-            selectedProject == null ? "personal" : "project",
-            selectedProject,
-            !ServiceCredentials.principal(lease.owner()))
-        != 0) throw new StaleLease();
     List<UUID> valid =
         jdbc.query(
-            "SELECT r.id FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
+            "SELECT r.id FROM information_revision_allowances r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
-                + OWNER_AUTHORIZED
+                + SYSTEM_OPERATION_VALID
                 + " AND "
                 + PROCESSING_AUTHORIZED
                 + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
@@ -293,6 +257,17 @@ public final class JdbcInformationProcessingRepository implements InformationPro
             lease.token(),
             now());
     if (valid.isEmpty()) throw new StaleLease();
+  }
+
+  @Override
+  public io.aeyer.plowshare.server.access.AuthorityIds.ScopeId home(UUID revision) {
+    var id =
+        jdbc.queryForObject(
+            "SELECT q.home_scope_id FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id WHERE r.id=?",
+            UUID.class,
+            revision);
+    if (id == null) throw new StaleLease();
+    return new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(id);
   }
 
   public void finish(Lease lease, String state, String detail) {
@@ -313,7 +288,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
     Boolean eligible =
         jdbc.queryForObject(
             "SELECT r.auto_tag_requested OR r.auto_tag_generated OR (NOT r.excluded AND jsonb_array_length(q.tags)=0 AND jsonb_array_length(r.auto_tag)=0)"
-                + " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+                + " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             Boolean.class,
             revision);
 
@@ -323,14 +298,14 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public boolean groupingEligible(UUID revision) {
     return !Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT q.tag_groups_manual OR r.excluded FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+            "SELECT q.tag_groups_manual OR r.excluded FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             Boolean.class,
             revision));
   }
 
   public Revision readRevision(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT r.*,q.source_name,q.kind FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+        "SELECT r.*,q.source_name,q.kind FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
         (r, n) ->
             new Revision(
                 r.getString("source_name"),
@@ -394,15 +369,116 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   }
 
   public void spend(UUID revision) {
-    if (jdbc.update(
-            "UPDATE information_revisions SET allowance_spent=allowance_spent+1 WHERE id=? AND allowance_spent<allowance_total",
-            revision)
-        != 1)
-      throw new IllegalStateException(
-          "processing allowance exhausted; increase it explicitly before retrying");
-    jdbc.update(
-        "UPDATE conversations c SET budget_total=r.allowance_total,budget_spent=r.allowance_spent FROM information_revisions r WHERE r.id=? AND c.id=r.processing_log",
+    BudgetSource source = budgetSource(revision);
+    allowances
+        .claim(new AllowanceId(source.id()), 0)
+        .orElseThrow(() -> new IllegalStateException("Processing allowance exhausted"));
+  }
+
+  public BudgetSource budgetSource(UUID revision) {
+    return jdbc.queryForObject(
+        "SELECT processing_budget_id,allowance_total,allowance_spent,processing_log FROM information_revision_allowances WHERE id=?",
+        (r, n) ->
+            new BudgetSource(r.getObject(1, UUID.class), r.getInt(2), r.getInt(3), r.getString(4)),
         revision);
+  }
+
+  public void spend(InformationLifecycle.Lease lease, int expectedSpent) {
+    requireLease(lease);
+    BudgetSource source = budgetSource(lease.revision());
+    allowances
+        .claim(new AllowanceId(source.id()), 0, expectedSpent)
+        .orElseThrow(() -> new IllegalStateException("Processing allowance exhausted or changed"));
+  }
+
+  public io.aeyer.plowshare.server.agents.Budget.Claim claimEmbedding(
+      InformationLifecycle.Lease lease) {
+    return claim(lease)
+        .orElseThrow(() -> new IllegalStateException("Processing allowance exhausted or changed"));
+  }
+
+  public Optional<io.aeyer.plowshare.server.agents.Budget.Claim> claim(
+      InformationLifecycle.Lease lease) {
+    requireLease(lease);
+    BudgetSource source = budgetSource(lease.revision());
+    return allowances.claim(new AllowanceId(source.id()), 0, source.spent());
+  }
+
+  private static String targetKey(
+      io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key key) {
+    if (key.store() != io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.CHUNKS
+        && key.store()
+            != io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.DOCUMENTS)
+      throw new IllegalArgumentException("Only document preparation targets are supported");
+    return key.store().name() + ":" + key.id();
+  }
+
+  public void requireEmbeddingTargets(
+      InformationLifecycle.Lease lease,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    for (var key : targets) {
+      targetKey(key);
+      boolean valid =
+          switch (key.store()) {
+            case DOCUMENTS ->
+                lease.stage().equals("summary_embed")
+                    && lease.revision().toString().equals(key.id());
+            case CHUNKS ->
+                lease.stage().equals("embed")
+                    && Boolean.TRUE.equals(
+                        jdbc.queryForObject(
+                            "SELECT EXISTS(SELECT 1 FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE c.id=? AND p.document_id=?)",
+                            Boolean.class,
+                            UUID.fromString(key.id()),
+                            lease.revision()));
+            default -> false;
+          };
+      if (!valid)
+        throw new IllegalStateException("Embedding target is outside this preparation operation");
+    }
+  }
+
+  public void requireEmbeddingClear(
+      InformationLifecycle.Lease lease,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    for (var target : targets)
+      if (Boolean.TRUE.equals(
+          jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM inference_admissions WHERE preparation_revision=? AND preparation_generation=? AND NOT preparation_published AND ?=ANY(preparation_targets))",
+              Boolean.class,
+              lease.revision(),
+              lease.generation(),
+              targetKey(target))))
+        throw new IllegalStateException(
+            "Embedding outcome is unresolved; reconcile the original attempt without replay");
+  }
+
+  public void bindEmbedding(
+      InformationLifecycle.Lease lease,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    String encoded =
+        InformationJson.json(
+            targets.stream().map(JdbcInformationProcessingRepository::targetKey).toList());
+    if (jdbc.update(
+            "UPDATE inference_admissions SET preparation_revision=?,preparation_generation=?,preparation_targets=ARRAY(SELECT jsonb_array_elements_text(?::jsonb)) WHERE id=? AND preparation_revision IS NULL AND budget_id=(SELECT processing_budget_id FROM information_revision_allowances WHERE id=?)",
+            lease.revision(),
+            lease.generation(),
+            encoded,
+            binding.id(),
+            lease.revision())
+        != 1) throw new IllegalStateException("Preparation claim binding refused");
+  }
+
+  public void embeddingPublished(
+      InformationLifecycle.Lease lease,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding) {
+    if (jdbc.update(
+            "UPDATE inference_admissions SET preparation_published=true WHERE id=? AND preparation_revision=? AND preparation_generation=? AND submitted",
+            binding.id(),
+            lease.revision(),
+            lease.generation())
+        != 1) throw new IllegalStateException("Preparation publication has no submitted claim");
   }
 
   public void autoTags(UUID revision, InformationMetadata metadata) {
@@ -425,14 +501,14 @@ public final class JdbcInformationProcessingRepository implements InformationPro
         jdbc.queryForObject(
             "SELECT "
                 + InformationFacetSql.visibleTags("r", "q")
-                + " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+                + " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
             String.class,
             revision);
     List<String> tags = InformationFacets.tags(strings(encoded));
     boolean generated =
         Boolean.TRUE.equals(
             jdbc.queryForObject(
-                "SELECT tag_groups_generated AND tag_groups_input_tags=CAST(? AS jsonb) FROM information_revisions WHERE id=?",
+                "SELECT tag_groups_generated AND tag_groups_input_tags=CAST(? AS jsonb) FROM information_revision_allowances WHERE id=?",
                 Boolean.class,
                 encoded,
                 revision));

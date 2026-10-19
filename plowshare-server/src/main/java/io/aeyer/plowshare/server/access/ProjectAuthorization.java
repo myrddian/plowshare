@@ -14,6 +14,17 @@ public class ProjectAuthorization {
   private final ResourceScopeRepository resources;
   private final ProjectMembers members;
   private final AdminStore accounts;
+  private io.aeyer.plowshare.server.requests.RequestProjects requestProjects =
+      io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useRequestProjects(io.aeyer.plowshare.server.requests.RequestProjects projects) {
+    requestProjects = Objects.requireNonNull(projects);
+  }
+
+  // Only consumers verified to resolve the same trusted default in their owning service.
+  private static final Set<String> APPLICATION_DEFAULT =
+      Set.of("agent.run", "conversation.open", "orchestration.start", "image.upload");
 
   public ProjectAuthorization(
       ResourceScopeRepository resources, ProjectMembers members, AdminStore accounts) {
@@ -37,6 +48,11 @@ public class ProjectAuthorization {
   // Reads are named explicitly. New operations require work until their policy is reviewed.
   private static final Set<String> READ =
       Set.of(
+          "proc.list",
+          "proc.inspect",
+          "proc.calls",
+          "proc.queues",
+          "proc.tools",
           "project.list",
           "project.access",
           "tool.scope.host.list",
@@ -161,6 +177,39 @@ public class ProjectAuthorization {
           "outgoing.cancel",
           "image.upload");
   private static final Set<String> ACCOUNT_OWNED = Set.of("schedule.pause", "schedule.forget");
+  // These existing typed read handlers enforce current root policy and selection in SQL. Public
+  // source UUIDs may belong to a foreign project; that home's membership is not GLOBAL_READ.
+  // Writes, processing, private receipts and permission changes do not use this admission path.
+  private static final Set<String> GENERAL_INFORMATION_READ =
+      Set.of(
+          "document.list",
+          "document.detail",
+          "document.chunk",
+          "document.retrieve",
+          "document.rank",
+          "document.stance",
+          "document.search",
+          "document.citations",
+          "information.navigation.capabilities",
+          "information.documents.list",
+          "information.documents.facets",
+          "information.documents.get",
+          "information.relationships.list",
+          "information.list",
+          "information.status",
+          "information.read",
+          "information.search",
+          "information.rank",
+          "information.facets",
+          "information.outline",
+          "information.symbols",
+          "information.evidence.read",
+          "information.content.get",
+          "information.events",
+          "information.interchange.capabilities",
+          "information.interchange.export",
+          "information.interchange.readable",
+          "information.interchange.origin");
   private static final Set<String> SERVER =
       Set.of(
           "provider.deregister",
@@ -182,7 +231,8 @@ public class ProjectAuthorization {
           "firing.list");
 
   private static boolean serviceOperation(String operation) {
-    return operation.startsWith("tool.scope.host.")
+    return GENERAL_INFORMATION_READ.contains(operation)
+        || operation.startsWith("tool.scope.host.")
         || operation.startsWith("provider.credential.")
         || Set.of(
                 "provider.connection.list",
@@ -296,6 +346,14 @@ public class ProjectAuthorization {
       return;
     }
     boolean service = io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account);
+    if (Set.of("proc.list", "proc.inspect", "proc.calls", "proc.tools", "proc.queues")
+        .contains(operation)) {
+      // These are metadata inventory filters, not content/execution targets. The specialist
+      // repository rechecks custody/membership or explicit fleet authority on every bounded read.
+      if (service || !accounts.isEnabled(account))
+        throw new CallerFault("PROC needs an active human account");
+      return;
+    }
     if (operation.equals("information.policy.set") || operation.equals("information.policy.get")) {
       // Typed navigation service resolves the durable target; payload scope is not policy
       // authority.
@@ -332,8 +390,13 @@ public class ProjectAuthorization {
       accounts.requireServerAdmin(account);
       return;
     }
-    // Administrative membership management does not grant ordinary Application use.
-    if (operation.startsWith("project.member.") && members.isServerAdmin(account)) return;
+    // Only the existing membership/access-metadata surfaces consume administrative control.
+    // Other legacy MANAGER gates retain their data-role semantics until explicitly migrated.
+    if (operation.equals("project.access") || operation.startsWith("project.member.")) {
+      var managed = scopes(payload, account);
+      if (!managed.isEmpty()
+          && managed.stream().allMatch(project -> members.mayAdminister(project, account))) return;
+    }
     if (ACCOUNT_OWNED.contains(operation)) {
       if (operation.equals("schedule.pause")) {
         // Only schedule provenance supplies this scope. An unrelated explicit project or
@@ -358,8 +421,21 @@ public class ProjectAuthorization {
       }
       return;
     }
+    if (service && GENERAL_INFORMATION_READ.contains(operation)) return;
     ProjectRole permission = required(operation);
     Set<String> projects = scopes(payload, account);
+    if (service
+        && projects.isEmpty()
+        && payload.resources().isEmpty()
+        && !payload.projectScope()
+        && (APPLICATION_DEFAULT.contains(operation) || operation.startsWith("information."))) {
+      // The owning handler resolves again and checks the actual selected scope before effects.
+      // Existing Application metadata is the source; arbitrary/multi-project tokens refuse.
+      projects.add(
+          requestProjects
+              .implicit(account)
+              .orElseThrow(() -> new CallerFault("Supply an explicit project")));
+    }
     if (service && projects.isEmpty() && !SERVICE_LISTS.contains(operation))
       throw new CallerFault(
           "Service tokens require an explicit project or a resource in a granted project");

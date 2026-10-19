@@ -35,20 +35,14 @@ import java.time.Duration;
  *
  * <h2>Neither of the two that remain has a shipped default</h2>
  *
- * <p>This server ships numbers when it has arithmetic for them — {@code curator-budget} is 200
- * because a ruling is two model calls and that settles about a hundred candidates, and {@code
- * default-budget} is 240 because a turn of the interlocutor measured about twelve calls. There is
- * no comparable arithmetic for "how many days a curator trace is worth keeping": it depends on what
- * the operator debugs, how often, and what their disk costs.
+ * <p>Retention is an independent operator policy. Spending may be unlimited or explicitly bounded;
+ * neither choice determines how long a curator trace is worth keeping. That depends on what the
+ * operator debugs, how often, and what their storage costs.
  *
- * <p><b>And the two directions of being wrong are not symmetric, which is the argument that decides
- * it.</b> {@code ConversationsProperties} can ship 240 because both ways of being wrong there are
- * recoverable — too small stops a person mid-thought, too large costs some inference budget, and
- * spending a budget is a designed ending. Here, too large costs disk, and <b>too small deletes a
- * file body</b>. A default that deletes is a default that has to be right, and this one cannot be
- * derived. So it is unset, a server that nobody has configured ejects nothing however often a sweep
- * is run, and an operator who wants retention says how long in the file where every other bound
- * this server takes is said.
+ * <p>A short spending allowance stops work without deleting its history. A short retention interval
+ * can delete an exported file body. An unconfigured server therefore ejects nothing however often a
+ * sweep is run, and an operator who wants retention says how long in the file where every other
+ * bound this server takes is said.
  *
  * <p><b>The design's ordering is honoured rather than enforced.</b> §5 says a curator's trace is
  * trimmed soonest and a submission is looser by policy, and both keys are independent numbers an

@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.acting;
 
+import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.OperationExecution;
 import io.aeyer.plowshare.server.agents.RetainedAgent;
 import io.aeyer.plowshare.server.agents.RunAdmission;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
@@ -26,7 +28,7 @@ public final class PersonalActingWork implements ActingWork {
   private final ActingAgents agents;
   private final ActingTurns turns;
   private final UnitOfWork transactions;
-  private final int budget;
+  private final Integer budget;
   private final ResourceScopeRepository resources;
 
   public PersonalActingWork(
@@ -35,9 +37,10 @@ public final class PersonalActingWork implements ActingWork {
       ActingAgents agents,
       ActingTurns turns,
       UnitOfWork transactions,
-      int budget,
+      Integer budget,
       ResourceScopeRepository resources) {
-    if (budget < 1) throw new IllegalArgumentException("finite positive budget required");
+    if (budget != null && budget < 1)
+      throw new IllegalArgumentException("finite positive budget required");
     this.repository = repository;
     this.policy = policy;
     this.agents = agents;
@@ -66,9 +69,11 @@ public final class PersonalActingWork implements ActingWork {
               }
               var definition = agents.resolve(authority.subject(), request.agent());
               RetainedAgent.requireRoot(definition);
+              requireExecution(authority, OperationExecution.actions(definition));
               String conversation = request.conversation();
               ActingWorkRepository.Binding binding;
               if (conversation == null) {
+                require(authority, ActingPermission.CONVERSATION_CREATE);
                 conversation = repository.open(authority.subject(), budget);
                 binding = new ActingWorkRepository.Binding(conversation, authority);
                 repository.bind(binding);
@@ -97,9 +102,11 @@ public final class PersonalActingWork implements ActingWork {
       var definition = agents.resolve(authority.subject(), admitted.receipt().agent());
       RetainedAgent.requireRoot(definition);
       if (!definition.equals(prepared.definition())) throw refused();
+      var actions = OperationExecution.actions(prepared.definition());
       Runnable check =
           () -> {
             require(admitted.binding(), ActingPermission.WORK);
+            requireExecution(authority, actions);
             if (!definition.equals(agents.resolve(authority.subject(), definition.name())))
               throw refused();
           };
@@ -162,6 +169,23 @@ public final class PersonalActingWork implements ActingWork {
 
   private void require(RequestAuthority.Delegated authority, ActingPermission permission) {
     policy.require(authority, permission, new ActingTarget.Personal(authority.subject()));
+  }
+
+  private void requireExecution(
+      RequestAuthority.Delegated authority, Set<AuthorityAction> actions) {
+    // Capture the admitted definition's requirements, not a later role's ambient authority.
+    // Common operation admission independently retains exact supporting subject grants.
+    for (var action : actions) {
+      var permission =
+          switch (action) {
+            case READ -> ActingPermission.READ;
+            case WRITE -> ActingPermission.WORK;
+            case CONVERSATION_CREATE -> ActingPermission.CONVERSATION_CREATE;
+            case RUN_MODEL -> ActingPermission.RUN_MODEL;
+            default -> throw refused();
+          };
+      require(authority, permission);
+    }
   }
 
   private static RequestAuthority.Delegated personal(RequestAuthority.Delegated authority) {

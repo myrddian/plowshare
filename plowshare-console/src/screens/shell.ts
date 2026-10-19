@@ -1,6 +1,7 @@
 import { socketTransport } from '../transport';
 import { background } from '../background.ts';
 import { createUsage } from './usage';
+import { createProc } from './proc';
 import {
   openEventStream,
   type EventStream,
@@ -94,6 +95,7 @@ export const VIEWS = [
   'documents',
   'information',
   'usage',
+  'proc',
   'jobs',
   'proposals',
   'memory',
@@ -111,6 +113,7 @@ const LABELS: Readonly<Record<ViewName, string>> = Object.freeze({
   documents: 'documents',
   information: 'information',
   usage: 'usage',
+  proc: 'processes',
   jobs: 'jobs',
   schedules: 'schedules',
   proposals: 'proposals',
@@ -133,6 +136,7 @@ const GROUPS: Readonly<Record<ViewName, 'work' | 'system'>> = Object.freeze({
   documents: 'work',
   information: 'work',
   usage: 'work',
+  proc: 'work',
   jobs: 'work',
   schedules: 'system',
   proposals: 'work',
@@ -419,6 +423,13 @@ export function createShell(options: ShellOptions): Shell {
     }
     if (name === 'usage')
       return createUsage({
+        root: host,
+        openStream: shared.open,
+        session,
+        project,
+      });
+    if (name === 'proc')
+      return createProc({
         root: host,
         openStream: shared.open,
         session,

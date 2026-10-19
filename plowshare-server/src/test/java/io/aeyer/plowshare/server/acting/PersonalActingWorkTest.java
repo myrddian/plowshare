@@ -204,6 +204,69 @@ class PersonalActingWorkTest {
     assertEquals(0, submissions);
   }
 
+  @ParameterizedTest
+  @org.junit.jupiter.params.provider.EnumSource(
+      value = ActingPermission.class,
+      names = {"READ", "WORK", "CONVERSATION_CREATE", "RUN_MODEL"})
+  void eachActualActionIsCheckedBeforeOpeningOrRecordingWork(ActingPermission permission) {
+    doThrow(new CallerFault("denied")).when(policy).require(any(), eq(permission), any());
+    assertThrows(CallerFault.class, () -> service().start(authority, request()));
+    assertTrue(store.rows.isEmpty());
+    assertTrue(store.bindings.isEmpty());
+    assertNull(store.owner);
+    assertEquals(0, submissions);
+  }
+
+  @Test
+  void existingTurnNeedsNoCreationAndCancellationNeedsNoInference() {
+    var original = service().start(authority, request());
+    clearInvocations(policy);
+    doThrow(new CallerFault("no creation"))
+        .when(policy)
+        .require(any(), eq(ActingPermission.CONVERSATION_CREATE), any());
+    turns =
+        (conversation, definition, task, admission) -> {
+          submissions++;
+          queued.set(admission);
+          admission.check().run();
+          admission.started().accept("job_SECOND");
+        };
+    var next =
+        service()
+            .start(
+                authority,
+                new ActingWork.Start(UUID.randomUUID(), "chat", "Next", original.conversation()));
+    assertEquals(original.conversation(), next.conversation());
+    verify(policy, never()).require(any(), eq(ActingPermission.CONVERSATION_CREATE), any());
+    doThrow(new CallerFault("no inference"))
+        .when(policy)
+        .require(any(), eq(ActingPermission.RUN_MODEL), any());
+    clearInvocations(policy);
+    service().requireJob(authority, "job_ABC123", ActingPermission.WORK);
+    assertNotNull(service().receipt(authority, original.requestId()));
+    verify(policy, never()).require(any(), eq(ActingPermission.RUN_MODEL), any());
+    assertThrows(CallerFault.class, () -> queued.get().check().run());
+  }
+
+  @Test
+  void childCreatingAgentRequiresCreationEvenInAnExistingConversation() {
+    var original = service().start(authority, request());
+    when(agents.resolve("alice", "chat")).thenReturn(agent.withTools(List.of("agent_run")));
+    doThrow(new CallerFault("no children"))
+        .when(policy)
+        .require(any(), eq(ActingPermission.CONVERSATION_CREATE), any());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            service()
+                .start(
+                    authority,
+                    new ActingWork.Start(
+                        UUID.randomUUID(), "chat", "Child", original.conversation())));
+    assertEquals(1, store.rows.size());
+    assertEquals(1, submissions);
+  }
+
   @Test
   void archiving_stops_work_but_does_not_hide_its_receipt() {
     var request = request();
@@ -295,7 +358,7 @@ class PersonalActingWorkTest {
     boolean transaction;
     String owner;
     String nextJob;
-    int budget;
+    Integer budget;
     final UnitOfWork transactions =
         new UnitOfWork() {
           @Override
@@ -315,7 +378,7 @@ class PersonalActingWorkTest {
     }
 
     @Override
-    public String open(String subject, int allowance) {
+    public String open(String subject, Integer allowance) {
       owner = subject;
       budget = allowance;
       return "cnv_" + (bindings.size() + 1);

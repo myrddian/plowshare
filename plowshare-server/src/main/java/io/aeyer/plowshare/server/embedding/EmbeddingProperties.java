@@ -2,14 +2,78 @@ package io.aeyer.plowshare.server.embedding;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Explicit two-slot configuration. Legacy deployments remain opt-out until both are declared. */
+/**
+ * Explicit two-slot configuration. Legacy deployments remain opt-out until both are declared.
+ * Search spending is independent: unlimited is the default, zero disables, positive caps calls.
+ */
 @ConfigurationProperties(prefix = "plowshare.embeddings", ignoreUnknownFields = false)
 public record EmbeddingProperties(
     boolean enabled,
     Model code,
     Model prose,
     boolean paused,
-    java.util.List<TokenizerBinding> retainedTokenizers) {
+    java.util.List<TokenizerBinding> retainedTokenizers,
+    String searchBudget,
+    String maintenanceBudget) {
+  public EmbeddingProperties(
+      boolean enabled,
+      Model code,
+      Model prose,
+      boolean paused,
+      java.util.List<TokenizerBinding> retainedTokenizers) {
+    this(enabled, code, prose, paused, retainedTokenizers, "unlimited");
+  }
+
+  public EmbeddingProperties(
+      boolean enabled,
+      Model code,
+      Model prose,
+      boolean paused,
+      java.util.List<TokenizerBinding> retainedTokenizers,
+      int searchBudget) {
+    this(enabled, code, prose, paused, retainedTokenizers, Integer.toString(searchBudget));
+  }
+
+  public EmbeddingProperties(
+      boolean enabled,
+      Model code,
+      Model prose,
+      boolean paused,
+      java.util.List<TokenizerBinding> retainedTokenizers,
+      String searchBudget) {
+    this(enabled, code, prose, paused, retainedTokenizers, searchBudget, "unlimited");
+  }
+
+  /** Maintenance selects its own policy; query/write policies and nearby budgets do not apply. */
+  public Integer maintenanceLimit() {
+    return SpendingPolicy.limit(maintenanceBudget, "plowshare.embeddings.maintenance-budget");
+  }
+
+  public io.aeyer.plowshare.server.agents.Budget maintenanceAllowance() {
+    return SpendingPolicy.budget(maintenanceLimit());
+  }
+
+  @org.springframework.boot.context.properties.bind.ConstructorBinding
+  public EmbeddingProperties {
+    searchBudget =
+        searchBudget == null || searchBudget.isBlank() ? "unlimited" : searchBudget.strip();
+    searchCeiling(searchBudget);
+    maintenanceBudget =
+        maintenanceBudget == null || maintenanceBudget.isBlank()
+            ? "unlimited"
+            : maintenanceBudget.strip();
+    SpendingPolicy.limit(maintenanceBudget, "plowshare.embeddings.maintenance-budget");
+  }
+
+  /** Converts configuration to the existing nullable Budget.Claim ceiling; null is unlimited. */
+  public Integer searchLimit() {
+    return searchCeiling(searchBudget);
+  }
+
+  private static Integer searchCeiling(String policy) {
+    return SpendingPolicy.limit(policy, "plowshare.embeddings.search-budget");
+  }
+
   public void validate() {
     if (!enabled) return;
     if (retainedTokenizers != null && retainedTokenizers.size() > 16)

@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /** Immutable topic-owned definition. It identifies participants, never confers tool authority. */
 public record SwarmSelection(
-    String name, String revision, String description, List<String> members, int budget) {
+    String name, String revision, String description, List<String> members, Integer budget) {
   public SwarmSelection {
     requireName(name);
     if (revision == null || !revision.matches("[a-f0-9]{64}"))
@@ -23,7 +23,7 @@ public record SwarmSelection(
         || members.stream()
             .anyMatch(
                 member -> member.isBlank() || member.length() > 128 || member.indexOf('\0') >= 0)
-        || budget < 2)
+        || budget != null && budget < 2)
       throw new IllegalArgumentException(
           "Swarm needs unique bounded members and a budget of at least two");
   }

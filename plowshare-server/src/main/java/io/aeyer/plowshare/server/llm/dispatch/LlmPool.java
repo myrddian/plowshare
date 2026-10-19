@@ -408,6 +408,15 @@ public final class LlmPool implements AutoCloseable {
     return executor(lane).getQueue().size();
   }
 
+  /** Approximate executor occupancy, sampled without blocking submission or provider requests. */
+  public record Occupancy(int queued, int running, int capacity) {}
+
+  public Occupancy occupancy(Lane lane) {
+    var executor = executor(lane);
+    return new Occupancy(
+        executor.getQueue().size(), executor.getActiveCount(), executor.getMaximumPoolSize());
+  }
+
   /**
    * How busy {@code lane} is as a fraction of its own capacity: everything running plus everything
    * queued, over the number of slots.

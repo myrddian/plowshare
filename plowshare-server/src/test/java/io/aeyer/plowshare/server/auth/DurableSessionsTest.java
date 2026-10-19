@@ -41,7 +41,7 @@ class DurableSessionsTest {
 
   @BeforeEach
   void clean() {
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     new AdminStore(jdbc).create("operator", "password-hash");
   }
 

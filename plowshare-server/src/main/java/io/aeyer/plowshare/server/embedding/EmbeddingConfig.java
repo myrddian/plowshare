@@ -10,7 +10,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Composition for the opt-in transition. Both models are required; no deployment defaults. */
 @Configuration
@@ -18,18 +17,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @ConditionalOnProperty(name = "plowshare.embeddings.enabled", havingValue = "true")
 public class EmbeddingConfig {
   @Bean
-  public EmbeddingWorkRepository embeddingWorkRepository(
-      JdbcTemplate jdbc, UnitOfWork work, EmbeddingSpaceRepository spaces) {
-    return new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
-  }
-
-  @Bean
   public DispatchingDualEmbeddings dualEmbeddings(
       EmbeddingProperties properties,
       EmbeddingSpaceRepository spaces,
       EmbeddingWorkRepository work,
       LlmDispatcher dispatcher,
-      EmbeddingTokenizers tokenizers) {
+      EmbeddingTokenizers tokenizers,
+      OperationEmbeddings operations) {
     properties.validate();
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
       var model = properties.model(slot);
@@ -52,14 +46,16 @@ public class EmbeddingConfig {
       work.inputLimit(space, model.maxInputTokens());
       work.configure(slot, space, model.policy());
     }
-    return new DispatchingDualEmbeddings(work, dispatcher::embed, tokenizers);
+    var dual = new DispatchingDualEmbeddings(work, dispatcher::embed, tokenizers);
+    dual.useOperations(operations, properties::maintenanceAllowance);
+    return dual;
   }
 
   @Bean
   public SmartInitializingSingleton dualEmbeddingBinding(
       DualEmbeddings dual,
       Archive archive,
-      MemoryStore memories,
+      MemoryRepository memories,
       DocumentStore documents,
       RetrievalService retrieval,
       IngestService ingest,

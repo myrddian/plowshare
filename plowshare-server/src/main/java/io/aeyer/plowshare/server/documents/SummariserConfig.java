@@ -56,7 +56,8 @@ public class SummariserConfig {
       ObjectProvider<GlobalAgentDefinitions> globals,
       Compaction compaction,
       DocumentsProperties props,
-      SummaryEmbeddings summaryVectors) {
+      SummaryEmbeddings summaryVectors,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     if (props.getSpanSize() < 2) {
       throw new IllegalStateException(
           "plowshare.documents.span-size is "
@@ -72,6 +73,7 @@ public class SummariserConfig {
         GlobalAgentSnapshots.supply(globals, agents),
         props.getSpanSize(),
         compaction,
-        summaryVectors);
+        summaryVectors,
+        system);
   }
 }

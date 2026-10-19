@@ -180,7 +180,42 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
   }
 
   @Override
+  public EmbeddingClient forPreparation(
+      io.aeyer.plowshare.server.embedding.EmbeddingAuthorization permit) {
+    return forOperation(permit);
+  }
+
+  @Override
+  public EmbeddingClient forOperation(io.aeyer.plowshare.server.embedding.EmbeddingPermit permit) {
+    Objects.requireNonNull(permit);
+    return new EmbeddingClient() {
+      public float[] embed(String text) {
+        return embedAll(List.of(text)).getFirst();
+      }
+
+      public List<float[]> embedAll(List<String> texts) {
+        throw new IllegalStateException("Preparation requires attribution");
+      }
+
+      public float[] embed(String text, UsageAttribution owner) {
+        return embedAll(List.of(text), owner).getFirst();
+      }
+
+      public List<float[]> embedAll(List<String> texts, UsageAttribution owner) {
+        return DispatchingEmbeddingClient.this.embedAll(texts, owner, permit);
+      }
+    };
+  }
+
+  @Override
   public List<float[]> embedAll(List<String> texts, UsageAttribution owner) {
+    return embedAll(texts, owner, null);
+  }
+
+  private List<float[]> embedAll(
+      List<String> texts,
+      UsageAttribution owner,
+      io.aeyer.plowshare.server.embedding.EmbeddingPermit permit) {
     Objects.requireNonNull(owner, "owner");
     Objects.requireNonNull(texts, "embedAll(null): there is no batch to embed");
     if (texts.isEmpty()) {
@@ -218,7 +253,15 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
 
     Embeddings embeddings;
     try {
-      embeddings = dispatcher.embed(EmbeddingRequest.of(model, texts).withAttribution(owner));
+      var request = EmbeddingRequest.of(model, texts).withAttribution(owner);
+      if (permit != null)
+        request =
+            request.withAuthorization(
+                permit.authorize(
+                    new io.aeyer.plowshare.server.embedding.EmbeddingPermit.Task(
+                        permit.mode(), request.specifier(), texts, request)));
+      embeddings = dispatcher.embed(request);
+      if (permit != null) permit.require();
     } catch (LlmException e) {
       // getMessage() and not the cause chain — see the class javadoc. A
       // null message is survivable rather than handled here: it would

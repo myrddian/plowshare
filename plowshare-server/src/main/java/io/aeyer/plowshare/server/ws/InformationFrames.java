@@ -97,6 +97,36 @@ public final class InformationFrames implements FrameArea {
   }
 
   private Outcome handle(String verb, Map<String, Object> payload, Asking asking) {
+    // Validate the original selector before typed DTO construction can normalize an identity.
+    // Navigation/interchange still require their own explicit scope and command contracts.
+    var selection = verb.startsWith("migration.") ? null : InformationScopes.from(payload);
+    if (selection != null
+        && selection.scope() == InformationContext.Scope.ACCOUNT
+        && (!java.util.Set.of(
+                    "upload",
+                    "list",
+                    "status",
+                    "await",
+                    "read",
+                    "search",
+                    "rank",
+                    "tags",
+                    "tags.groups",
+                    "exclude",
+                    "unexclude",
+                    "withdraw",
+                    "restore",
+                    "delete",
+                    "retry",
+                    "rebuild",
+                    "allowance",
+                    "share",
+                    "unshare")
+                .contains(verb)
+            || payload.containsKey("typing")
+            || payload.containsKey("expectedRevision")))
+      throw new CallerFault(
+          "This information operation does not support account knowledge targets");
     if (verb.startsWith("interchange.")) {
       return Outcome.ok(
           interchange.execute(
@@ -113,9 +143,7 @@ public final class InformationFrames implements FrameArea {
 
     InformationContext context =
         access
-            .resolve(
-                asking.requireHandle("information." + verb),
-                verb.startsWith("migration.") ? null : InformationScopes.from(payload))
+            .resolve(asking.requireHandle("information." + verb), selection)
             .withCorpus(
                 io.aeyer.plowshare.server.information.InformationInputs.corpus(
                     payload.get("corpus")))
@@ -129,7 +157,8 @@ public final class InformationFrames implements FrameArea {
         && (context.facets().contentType() != null
             || context.facets().contentTypeVersion() != null
             || context.facets().untyped() != null)) throw new CallerFault("unsupported-view");
-    if (io.aeyer.plowshare.server.access.ProjectAuthorization.required("information." + verb)
+    if (verb.equals("share") || verb.equals("unshare")) access.requireAudience(context);
+    else if (io.aeyer.plowshare.server.access.ProjectAuthorization.required("information." + verb)
             != io.aeyer.plowshare.server.archive.ProjectRole.VIEWER
         && !verb.startsWith("migration.")) access.requireWork(context);
     Object result;
@@ -141,7 +170,7 @@ public final class InformationFrames implements FrameArea {
               io.aeyer.plowshare.protocol.DocumentMetadata.PROFILE,
               contentSettings.writesEnabled()));
     if (verb.startsWith("types.") || verb.startsWith("content.")) {
-      var command = InformationContentInputs.command(verb, payload);
+      var command = InformationContentInputs.command(verb, payload, context.selection());
       return Outcome.ok(
           switch (command) {
             case io.aeyer.plowshare.protocol.InformationRequest.TypeList q ->
@@ -209,7 +238,7 @@ public final class InformationFrames implements FrameArea {
             context.account(),
             required(payload, "payload"),
             required(payload, "owner"),
-            InformationScopes.from(payload),
+            access.resolve(context.account(), InformationScopes.from(payload)).selection(),
             uuids(payload, "inputs"),
             required(payload, "reason"),
             uuid(payload, "requestId"),
@@ -371,16 +400,14 @@ public final class InformationFrames implements FrameArea {
                   number(payload, "limit", 20));
       case "search" ->
           result =
-              retrieval
-                  .scoped(access, context)
+              queryReader(context, asking)
                   .retrieve(
                       required(payload, "query"),
                       payload.containsKey("revision") ? uuid(payload, "revision") : null,
                       number(payload, "limit", 10));
       case "rank" ->
           result =
-              retrieval
-                  .scoped(access, context)
+              queryReader(context, asking)
                   .rank(required(payload, "query"), number(payload, "limit", 10));
       case "ask" -> {
         UUID revision = uuid(payload, "revision");
@@ -388,7 +415,10 @@ public final class InformationFrames implements FrameArea {
         Corpus.theOneToAsk(documents.scoped(access, context), revision);
         String question = required(payload, "question");
         var pass = deliberation.scoped(access, context, asking.sessionId());
-        Budget budget = Budget.of(number(payload, "maxModelCalls", properties.getAskBudget()));
+        Budget budget =
+            payload.containsKey("maxModelCalls")
+                ? Budget.of(number(payload, "maxModelCalls", 1))
+                : properties.askAllowance();
         Home home =
             context.selection().project() == null
                 ? Home.global()
@@ -497,6 +527,15 @@ public final class InformationFrames implements FrameArea {
       default -> throw new IllegalStateException("unregistered information operation");
     }
     return Outcome.ok(result);
+  }
+
+  private RetrievalService queryReader(InformationContext context, Asking asking) {
+    var reader = retrieval.scoped(access, context);
+    return reader.queriesEnabled()
+        ? reader.forQueries(
+            io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                asking.queryValidity()))
+        : reader;
   }
 
   private static List<String> stages(Map<String, Object> payload) {

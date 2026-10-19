@@ -52,7 +52,8 @@ class RunApprovalStoreTest {
 
   @BeforeEach
   void fresh() throws IOException {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE run_approvals, digests, digest_children, digest_memories, digest_spans,"
             + " digest_revisions, memory_provenance, projects CASCADE");
     Path real = tmp.toRealPath();
@@ -73,6 +74,78 @@ class RunApprovalStoreTest {
 
   private RunApproval asked(String conversation, String side, List<String> argv) {
     return store.ask(project, conversation, conversation, "coder", side, argv, "/repo", null);
+  }
+
+  @Test
+  void suspended_calls_survive_recovery_and_only_one_dispatch_can_claim_consent() throws Exception {
+    String conversation =
+        new io.aeyer.plowshare.server.archive.ConversationStore(jdbc)
+            .open(
+                io.aeyer.plowshare.protocol.Home.of("payments"),
+                io.aeyer.plowshare.server.agents.Budget.of(20))
+            .id();
+    RunApproval question = asked(conversation, "local", TEST);
+    SuspendedRunCalls retained = new JdbcSuspendedRunCalls(jdbc);
+    String arguments =
+        "{\"command\":[\"program\",\"one argument\",\"\"],\"stdin\":\"line\\n\",\"timeout_seconds\":17}";
+    retained.retain(
+        question.id(),
+        conversation,
+        "original-session",
+        "local",
+        "original-owner",
+        new io.aeyer.plowshare.protocol.ToolCall("call_original", "run", arguments));
+    assertFalse(retained.claim(question.id()));
+    assertEquals(arguments, retained.pending(conversation).getFirst().tool().arguments());
+    assertTrue(store.allow(question.id(), RunApproval.ONCE, null, "reviewer"));
+    assertEquals(
+        List.of(question.id()),
+        retained.recoverable().stream().map(SuspendedRunCalls.Call::approval).toList());
+    assertFalse(retained.claim(question.id()), "approval.post must release the call first");
+    retained.release(question.id());
+    try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      List<java.util.concurrent.Future<Boolean>> claims = new ArrayList<>();
+      for (int i = 0; i < 8; i++) claims.add(workers.submit(() -> retained.claim(question.id())));
+      int won = 0;
+      for (var claim : claims) if (claim.get()) won++;
+      assertEquals(1, won);
+    }
+    SuspendedRunCalls recovered = new JdbcSuspendedRunCalls(jdbc);
+    var pending = recovered.pending(conversation).getFirst();
+    assertEquals("original-session", pending.session());
+    assertEquals("original-owner", pending.owner());
+    assertEquals("started", pending.state());
+    new RunCallResumption(recovered)
+        .resume(
+            pending,
+            call -> {
+              throw new AssertionError("An uncertain command must never replay");
+            },
+            result -> assertTrue(result.contains("outcome is unknown")));
+    assertTrue(recovered.pending(conversation).isEmpty());
+    assertTrue(recovered.recoverable().isEmpty());
+    assertTrue(recovered.find(question.id()).orElseThrow().result().contains("outcome is unknown"));
+
+    RunApproval denied = asked(conversation, "local", TEST);
+    recovered.retain(
+        denied.id(),
+        conversation,
+        "original-session",
+        "local",
+        new io.aeyer.plowshare.protocol.ToolCall("call_denied", "run", arguments));
+    assertTrue(store.deny(denied.id(), "reviewer", "Publishing is not needed"));
+    recovered.release(denied.id());
+    new RunCallResumption(recovered)
+        .resume(
+            recovered.find(denied.id()).orElseThrow(),
+            call -> {
+              throw new AssertionError("A denial must never execute");
+            },
+            result -> {
+              assertTrue(result.contains("reviewer"));
+              assertTrue(result.contains("Publishing is not needed"));
+            });
+    assertTrue(recovered.pending(conversation).isEmpty());
   }
 
   @Test
@@ -130,6 +203,41 @@ class RunApprovalStoreTest {
     store.delivered(question.id());
     assertTrue(store.undelivered("cnv_event").isEmpty());
     assertTrue(store.find(question.id()).orElseThrow().deliveredAt() != null);
+  }
+
+  @Test
+  void account_discovery_recovers_owned_foreground_questions_without_exposing_other_owners() {
+    for (String owner : List.of("enzo", "mara")) {
+      jdbc.update(
+          "INSERT INTO conversations (id, project_id, origin, lifecycle, created_at,"
+              + " budget_total, budget_spent, owner_handle) VALUES (?, ?, 'turn', 'active', ?, 20, 0, ?)",
+          "cnv_" + owner,
+          project,
+          java.sql.Timestamp.from(Instant.now()),
+          owner);
+    }
+    RunApproval foreground = asked("cnv_enzo", "local", TEST);
+    RunApproval foreign = asked("cnv_mara", "local", TEST);
+    // A pinned recipient takes precedence over the conversation's owner.
+    RunApproval pinned =
+        store.ask(project, "cnv_enzo", "cnv_enzo", "mara", "coder", "local", TEST, "/repo", null);
+    RunApproval ownerless = asked("cnv_no_owner", "local", TEST);
+
+    assertEquals(
+        List.of(foreground.id()), store.openFor("enzo").stream().map(RunApproval::id).toList());
+    assertEquals(
+        java.util.Set.of(foreign.id(), pinned.id()),
+        store.openFor("mara").stream()
+            .map(RunApproval::id)
+            .collect(java.util.stream.Collectors.toSet()));
+    store.delivered(foreground.id());
+    assertEquals(
+        foreground.id(),
+        store.openFor("enzo").getFirst().id(),
+        "notification delivery does not settle the decision");
+    store.deny(foreground.id(), "enzo");
+    assertTrue(store.openFor("enzo").isEmpty());
+    assertTrue(store.find(ownerless.id()).isPresent());
   }
 
   /**

@@ -62,7 +62,8 @@ class RunAttributionTest {
   @BeforeEach
   void fresh() {
     jdbc = new JdbcTemplate(database);
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE conversations, projects, admins, inference_run_ownership, inference_accounting_events, inference_attempts, inference_calls, inference_pricing_versions, inference_accounting_instances, inference_accounting_journals CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle, password_hash) VALUES ('alice', 'fixture-only'), ('bob', 'fixture-only')");

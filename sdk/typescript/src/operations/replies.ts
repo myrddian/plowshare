@@ -1,4 +1,5 @@
 import type { ToolScopeReplies } from './tool-scopes.ts';
+import type { ProcReplies } from './proc.ts';
 import type { RelayReplies } from './relay.ts';
 import type { IncomingSource, IncomingCommand, AgentCard } from './external.ts';
 import type { OutgoingWork } from './outgoing.ts';
@@ -62,6 +63,7 @@ export interface ActingTurnReceipt {
 
 export interface Replies
   extends
+    ProcReplies,
     MessagingReplies,
     ToolScopeReplies,
     RelayReplies,

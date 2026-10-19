@@ -74,7 +74,90 @@ import org.slf4j.LoggerFactory;
  * code afterwards. There is no {@code Librarian} class here and there is not meant to be one; the
  * only thing a model still does is turn text into a vector.
  */
-public class Archive implements UsageAware {
+public class Archive implements UsageAware, MemoryFiling {
+  private EmbeddingRepairs repairs;
+  private java.util.function.Supplier<io.aeyer.plowshare.server.agents.Budget> repairBudget;
+
+  /** Independent repair/promotion indexing must not borrow a completed write's permit. */
+  public void useRepairs(
+      EmbeddingRepairs repairs,
+      java.util.function.Supplier<io.aeyer.plowshare.server.agents.Budget> policy) {
+    this.repairs = java.util.Objects.requireNonNull(repairs);
+    this.repairBudget = java.util.Objects.requireNonNull(policy);
+  }
+
+  private java.util.function.Supplier<MemoryWrites> writes;
+
+  public void useWrites(java.util.function.Supplier<MemoryWrites> writes) {
+    this.writes = java.util.Objects.requireNonNull(writes);
+  }
+
+  public boolean writing() {
+    return writes != null;
+  }
+
+  public WriteResult write(MemoryWrites.Request request) {
+    if (writes == null) throw new IllegalStateException("Memory write admission unavailable");
+    return writes.get().write(request);
+  }
+
+  /** The admitted consumer owns live mutation/provenance and exact post-commit indexing. */
+  public interface WriteBinding {
+    void mutation(Verdict verdict);
+
+    void provenance(String id);
+
+    void embed(Memory memory);
+  }
+
+  public WriteResult applyAdmitted(
+      MemoryProposal proposal, Verdict verdict, Home home, WriteBinding binding) {
+    return file(
+        proposal,
+        verdict,
+        home,
+        null,
+        binding::provenance,
+        UsageAttribution.LEGACY,
+        java.util.Objects.requireNonNull(binding));
+  }
+
+  private MemoryQueries queries;
+
+  /** Required by production composition; legacy constructors remain isolated test fixtures. */
+  public void useQueries(MemoryQueries queries) {
+    this.queries = java.util.Objects.requireNonNull(queries);
+  }
+
+  public boolean querying() {
+    return queries != null;
+  }
+
+  public Recall recall(MemoryQueries.Request request) {
+    if (request.kind() != MemoryQueries.Kind.RECALL)
+      throw new IllegalArgumentException("Recall operation required");
+    var result =
+        java.util.Objects.requireNonNull(queries, "Memory query admission required").read(request);
+    return new Recall(result.memories(), result.unsearchable());
+  }
+
+  public Survey survey(MemoryQueries.Request request) {
+    if (request.kind() != MemoryQueries.Kind.REMINDER)
+      throw new IllegalArgumentException("Reminder operation required");
+    var result =
+        java.util.Objects.requireNonNull(queries, "Memory query admission required").read(request);
+    return new Survey(
+        result.memories().stream()
+            .map(memory -> new TocEntry(memory.id(), memory.summary(), memory.scope(), false))
+            .toList(),
+        result.unsearchable());
+  }
+
+  private void requireUnboundFixture() {
+    if (queries != null)
+      throw new IllegalStateException("Memory read needs an admitted query operation");
+  }
+
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
@@ -99,7 +182,7 @@ public class Archive implements UsageAware {
 
   private static final Logger log = LoggerFactory.getLogger(Archive.class);
 
-  private final MemoryStore store;
+  private final MemoryRepository store;
   private final ReasonLog reasons;
   private final EmbeddingClient embeddings;
   private final UnitOfWork unitOfWork;
@@ -119,7 +202,7 @@ public class Archive implements UsageAware {
    * Spring context and applies no proxy.
    */
   public Archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
@@ -146,7 +229,7 @@ public class Archive implements UsageAware {
    * real transaction manager is, in {@code TransactionBoundaryTest}.
    */
   public Archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       int maxBodyChars,
@@ -191,7 +274,7 @@ public class Archive implements UsageAware {
    *     ordering it chose rather than on random hex.
    */
   public Archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
@@ -260,8 +343,14 @@ public class Archive implements UsageAware {
    *     counts no uses at all rather than counting the ids that happened to sort before it.
    */
   public List<Memory> read(List<String> ids) {
+    return read(ids, () -> {});
+  }
+
+  /** Runtime reads recheck their retained target envelope in the same telemetry transaction. */
+  public List<Memory> read(List<String> ids, Runnable fence) {
     return unitOfWork.inTransaction(
         () -> {
+          fence.run();
           // One instant for the whole batch: two memories read together were
           // used together, and stamping them a millisecond apart would let
           // decay rank them against each other for no reason.
@@ -278,7 +367,9 @@ public class Archive implements UsageAware {
           for (String id : ids) {
             found.add(get(id));
           }
-          return countUses(found, at);
+          var used = countUses(found, at);
+          fence.run();
+          return used;
         });
   }
 
@@ -356,6 +447,7 @@ public class Archive implements UsageAware {
   }
 
   public Recall recall(String question, Home home, int limit, UsageAttribution owner) {
+    requireUnboundFixture();
     if (limit <= 0) {
       // Ahead of the embedding, and that is the whole of what this clause
       // buys: a caller paginating to the end must not pay a model call to
@@ -382,6 +474,7 @@ public class Archive implements UsageAware {
    *     drift away from what it means.
    */
   public Recall recall(Precomputed query, Home home, int limit) {
+    requireUnboundFixture();
     if (limit <= 0) {
       return new Recall(List.of(), 0);
     }
@@ -446,6 +539,7 @@ public class Archive implements UsageAware {
   }
 
   public Precomputed embedding(String text, UsageAttribution owner) {
+    requireUnboundFixture();
     // Embedded before any unit of work opens, and the order is the point:
     // this is a call to a model that can take a connect-plus-read timeout
     // to answer, and inside a transaction it would hold a pooled database
@@ -503,7 +597,46 @@ public class Archive implements UsageAware {
         usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY));
   }
 
+  /** Trusted curation reads only the Global candidate index, with no use-counter mutation. */
+  public Survey surveyGlobal(String question, int limit, EmbeddingPermit permit) {
+    if (limit < 1 || permit.mode() != EmbeddingPermit.Mode.QUERY)
+      throw new IllegalArgumentException("Admitted Global curation query required");
+    permit.require();
+    var owner = UsageAttribution.system(null, UsageAttribution.Operation.EMBEDDING_QUERY);
+    if (dualEmbeddings != null) {
+      var bound = dualEmbeddings.forQuery(permit);
+      var query = bound.query(bound.active(EmbeddingSlot.PROSE), question, owner);
+      return bound.read(
+          query.profile(),
+          () ->
+              unitOfWork.inTransaction(
+                  () -> {
+                    permit.require();
+                    var found = search(query, Home.global(), limit);
+                    permit.require();
+                    return new Survey(
+                        found.memories().stream()
+                            .map(m -> new TocEntry(m.id(), m.summary(), m.scope(), false))
+                            .toList(),
+                        found.unsearchable());
+                  }));
+    }
+    var vector = embeddings.forOperation(permit).embed(question, owner);
+    return unitOfWork.inTransaction(
+        () -> {
+          permit.require();
+          var found = search(vector, Home.global(), limit);
+          permit.require();
+          return new Survey(
+              found.memories().stream()
+                  .map(m -> new TocEntry(m.id(), m.summary(), m.scope(), false))
+                  .toList(),
+              found.unsearchable());
+        });
+  }
+
   public Survey survey(String question, Home home, int limit, UsageAttribution owner) {
+    requireUnboundFixture();
     if (limit <= 0) {
       return new Survey(List.of(), 0);
     }
@@ -625,13 +758,16 @@ public class Archive implements UsageAware {
 
   public Repair reembed(Home home, UsageAttribution owner) {
     List<Memory> owed = store.unsearchable(home);
+    var budget = repairs == null ? null : repairBudget.get();
     List<String> repaired = new ArrayList<>(owed.size());
     List<String> failed = new ArrayList<>();
     for (Memory memory : owed) {
-      if (embed(
-          memory,
-          null,
-          owner.forOperation(UsageAttribution.Operation.EMBEDDING_REPAIR, owner.agentName()))) {
+      if (repairs != null
+          ? repairStored(memory, budget)
+          : embed(
+              memory,
+              null,
+              owner.forOperation(UsageAttribution.Operation.EMBEDDING_REPAIR, owner.agentName()))) {
         repaired.add(memory.id());
       } else {
         failed.add(memory.id());
@@ -781,6 +917,18 @@ public class Archive implements UsageAware {
       Precomputed precomputed,
       java.util.function.Consumer<String> provenance,
       UsageAttribution owner) {
+    if (writing()) throw new IllegalStateException("Admitted memory write required");
+    return file(proposal, verdict, home, precomputed, provenance, owner, null);
+  }
+
+  private WriteResult file(
+      MemoryProposal proposal,
+      Verdict verdict,
+      Home home,
+      Precomputed precomputed,
+      java.util.function.Consumer<String> provenance,
+      UsageAttribution owner,
+      WriteBinding binding) {
     // Outside the transaction: a malformed proposal is refused before a
     // connection is taken at all, and this reads nothing.
     Validation.check(proposal, maxBodyChars);
@@ -792,6 +940,7 @@ public class Archive implements UsageAware {
               // fallback: adding a fourth verdict kind would fail this to compile
               // rather than fall through to a runtime "unknown verdict" nobody
               // sees until a caller sends one.
+              if (binding != null) binding.mutation(verdict);
               Filed filed =
                   switch (verdict.kind()) {
                     case NEW -> create(proposal, home);
@@ -822,7 +971,9 @@ public class Archive implements UsageAware {
     // javadoc — "the row is already committed by the time this runs" —
     // actually true. It was not, while the boundary was an annotation
     // around this whole method.
-    if (committed.toEmbed() != null) {
+    if (committed.toEmbed() != null && binding != null) {
+      binding.embed(committed.toEmbed());
+    } else if (committed.toEmbed() != null) {
       embed(
           committed.toEmbed(),
           precomputed,
@@ -1290,8 +1441,28 @@ public class Archive implements UsageAware {
         usageOwners.in(memory.home(), null, UsageAttribution.Operation.EMBEDDING_WRITE));
   }
 
+  private boolean repairStored(Memory memory, io.aeyer.plowshare.server.agents.Budget budget) {
+    try {
+      return repairs.repair(
+          EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, memory.id()),
+          budget,
+          () -> {});
+    } catch (RuntimeException failed) {
+      log.warn(
+          "Memory {} repair remains incomplete: {}",
+          memory.id(),
+          failed.getClass().getSimpleName());
+      return false;
+    }
+  }
+
   private boolean embed(Memory memory, Precomputed precomputed, UsageAttribution owner) {
     try {
+      if (repairs != null)
+        return repairs.repair(
+            EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, memory.id()),
+            repairBudget.get(),
+            () -> {});
       if (dualEmbeddings != null)
         return dualEmbeddings.repair(
             EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, memory.id()),

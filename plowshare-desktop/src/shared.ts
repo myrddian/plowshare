@@ -1,6 +1,10 @@
 import type { ImportRecovery } from './import-recovery-contract.ts';
 import type { NativeCommandResult } from 'plowshare-mcp-integration';
 import type {
+  ProcRequest,
+  ProcReplies,
+} from 'plowshare-client-ts/operations/proc';
+import type {
   ManagementOperation,
   ManagementValue,
   ManagementIntent,
@@ -121,6 +125,7 @@ export interface WorkspaceRoute {
     | 'memories'
     | 'manage'
     | 'usage'
+    | 'proc'
     | 'relay';
   label: string;
   project?: string;
@@ -178,6 +183,8 @@ export interface DesktopState {
     uncertain?: boolean;
   };
   backgroundError?: string;
+  /** Pending decisions remain visible while a read fails; the user can retry discovery. */
+  approvalError?: string | undefined;
   usage?: UsageViewState;
   mode: 'demo' | 'live';
   connected: boolean;
@@ -411,6 +418,9 @@ export type Request =
       revision: string;
     }
   | { action: 'usage' }
+  | { action: 'proc' }
+  | (ProcRequest & { action: 'proc-read' })
+  | { action: 'proc-trajectory'; conversation: string }
   | {
       action: 'context-snapshot';
       conversation: string;
@@ -531,6 +541,11 @@ export type Request =
       body: string;
       requestId: string;
       maxModelCalls?: number;
+    }
+  | {
+      action: 'board-topup';
+      topic: string;
+      maxModelCalls: number;
     }
   | {
       action: 'board-retry';
@@ -720,6 +735,7 @@ export interface Reply {
   relayControl?: RelayReplies['relay.operate'];
   administration?: Replies[ServerAdminOperation | ProjectAccessOperation];
   usage?: Replies[UsageOperation];
+  proc?: ProcReplies[keyof ProcReplies];
   information?: Replies[`information.${InformationOperation}`];
   state: DesktopState;
   conversation?: string;

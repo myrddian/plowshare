@@ -147,6 +147,21 @@ class EntryStoreTest {
     conversation = conversations.open(PAYMENTS, Budget.of(20)).id();
   }
 
+  @Test
+  void approval_audit_does_not_project_but_person_text_and_denials_are_preserved() {
+    String allowed = "[approval] The person allowed `program`, this once. Run it again.";
+    String denied = "[approval] The person denied `program`. Do not run it.";
+    entries.append(conversation, 1, LoggedEntry.utterance(allowed, Speaker.approval("apr_1")));
+    entries.append(conversation, 2, LoggedEntry.utterance(allowed, Speaker.person(null)));
+    entries.append(conversation, 3, LoggedEntry.utterance(denied, Speaker.approval("apr_2")));
+    entries.append(conversation, 4, LoggedEntry.diagnostic("Command approved"));
+    assertEquals(
+        List.of(allowed, denied),
+        entries.thatProjectFor(conversation).stream().map(EntryRecord::content).toList());
+    assertEquals(
+        4, entries.forConversation(conversation).size(), "The trajectory remains complete");
+  }
+
   /**
    * Every kind this server can write is a kind this table holds.
    *
@@ -2070,6 +2085,12 @@ class EntryStoreTest {
         "every field of the call a fallback made has to come back as it was written,"
             + " so nothing can attribute its words to another model");
     assertTrue(entries.invocationOf(conversation, 1).isEmpty(), "an utterance is not a model call");
+    var page = entries.pageOfLog(conversation, 0, 10).listed();
+    assertNull(page.get(0).promptTokens());
+    assertEquals(812, page.get(1).promptTokens());
+    assertEquals(14, page.get(1).completionTokens());
+    assertEquals(40, page.get(1).reasoningTokens());
+    assertEquals(900L, page.get(1).tookMillis());
   }
 
   @Test

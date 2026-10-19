@@ -77,14 +77,46 @@ class AgentRunnerTest {
         "go",
         (conversation, outcome) -> {});
     verify(turns)
-        .speak(
+        .speakForExecutor(
             eq("cnv_talk"),
             any(),
             anyString(),
             isNull(),
             isNull(),
             eq(Speaker.event("aimed")),
-            any());
+            any(),
+            eq("enzo"));
+    verify(callers).requireConversationWork("cnv_talk", "enzo");
+  }
+
+  @Test
+  void a_read_only_or_revoked_trigger_executor_cannot_write_someone_elses_conversation() {
+    var callers = mock(Callers.class);
+    var turns = mock(Turn.class);
+    var jobs = mock(JobStore.class);
+    org.mockito.Mockito.doThrow(new io.aeyer.plowshare.server.faults.CallerFault("WRITE required"))
+        .when(callers)
+        .requireConversationWork("private-conversation", "service-executor");
+    var runner = new AgentRunner(callers, jobs, turns);
+    org.junit.jupiter.api.Assertions.assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () ->
+            runner.start(
+                new TriggerRecord(
+                    "daily",
+                    "daily",
+                    null,
+                    "private-conversation",
+                    "worker",
+                    "task",
+                    null,
+                    null,
+                    1,
+                    false,
+                    "service-executor"),
+                "task",
+                (c, o) -> {}));
+    verifyNoInteractions(turns, jobs);
   }
 
   @Test
@@ -162,6 +194,45 @@ class AgentRunnerTest {
             eq("owner"),
             any(),
             any());
+  }
+
+  @Test
+  void a_managed_schedule_cannot_replace_its_registered_execution_account() {
+    var definitions = mock(ScheduleDefinitions.class);
+    var authority = mock(ScheduleDefinitions.Authority.class);
+    var file = mock(io.aeyer.plowshare.protocol.ScheduledWork.File.class);
+    var definition = mock(io.aeyer.plowshare.protocol.ScheduledWork.class);
+    when(file.status()).thenReturn("active");
+    when(file.definition()).thenReturn(definition);
+    when(definitions.managed("daily", "executor")).thenReturn(java.util.Optional.of(file));
+    when(definitions.sourceOf("daily", "executor"))
+        .thenReturn(
+            java.util.Optional.of(
+                new ScheduleDefinitionStore.Source(1, "other-account", 7L, "project", "server")));
+    var jobs = mock(JobStore.class);
+    var turns = mock(Turn.class);
+    var runner = new AgentRunner(mock(Callers.class), jobs, turns);
+    runner.useSchedules(() -> definitions, () -> authority, () -> null);
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException.class,
+        () ->
+            runner.start(
+                new TriggerRecord(
+                    "daily",
+                    "daily",
+                    "project",
+                    null,
+                    "worker",
+                    "task",
+                    null,
+                    null,
+                    1,
+                    false,
+                    "executor"),
+                mock(FiringRecord.class),
+                "task",
+                (c, o) -> {}));
+    verifyNoInteractions(jobs, turns, authority);
   }
 
   @Test

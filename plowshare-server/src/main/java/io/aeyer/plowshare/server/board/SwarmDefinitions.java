@@ -32,7 +32,7 @@ public final class SwarmDefinitions implements SwarmCatalog {
   public static final String FILE = "swarm definition";
 
   /** Model calls per root topic when the file names none. */
-  public static final int DEFAULT_BUDGET = 100;
+  public static final Integer DEFAULT_BUDGET = null;
 
   private static final Set<String> KEYS = Set.of("members", "budget");
 
@@ -46,7 +46,7 @@ public final class SwarmDefinitions implements SwarmCatalog {
   public record SwarmDefinition(
       String name,
       List<String> members,
-      int budget,
+      Integer budget,
       Map<String, String> refused,
       String origin,
       SwarmSelection selection) {
@@ -56,12 +56,12 @@ public final class SwarmDefinitions implements SwarmCatalog {
       refused = Map.copyOf(refused);
       SwarmSelection.requireName(name);
       Objects.requireNonNull(origin, "origin");
-      if (budget < 2
+      if (budget != null && budget < 2
           || members.size() > 64
           || (selection == null && !members.isEmpty())
           || (selection != null
               && (!name.equals(selection.name())
-                  || budget != selection.budget()
+                  || !Objects.equals(budget, selection.budget())
                   || !members.equals(selection.members()))))
         throw new IllegalArgumentException("Swarm catalog and retained selection must agree");
     }
@@ -70,7 +70,7 @@ public final class SwarmDefinitions implements SwarmCatalog {
      * Programmatically supplied default definitions retain their canonical participant identity.
      */
     public SwarmDefinition(
-        List<String> members, int budget, Map<String, String> refused, String origin) {
+        List<String> members, Integer budget, Map<String, String> refused, String origin) {
       this(
           "default",
           members,
@@ -143,7 +143,7 @@ public final class SwarmDefinitions implements SwarmCatalog {
   private SwarmDefinition resolve(String project, SwarmSources.Source source) {
     String origin = source.origin();
     List<String> names;
-    int budget;
+    Integer budget;
     String description;
     try {
       Map<String, Object> front;
@@ -275,9 +275,11 @@ public final class SwarmDefinitions implements SwarmCatalog {
           result.put("members", members);
         }
         case "budget" -> {
-          if (!value.isIntegralNumber() || !value.canConvertToInt())
+          if (value.isTextual() && value.textValue().equals("unlimited")) {
+            result.put("budget", "unlimited");
+          } else if (!value.isIntegralNumber() || !value.canConvertToInt())
             throw new IllegalStateException("Swarm budget must be a whole number");
-          result.put("budget", value.intValue());
+          else result.put("budget", value.intValue());
         }
         case "description" -> {
           if (!value.isTextual()) throw new IllegalStateException("Swarm description must be text");
@@ -360,8 +362,8 @@ public final class SwarmDefinitions implements SwarmCatalog {
     return List.copyOf(names);
   }
 
-  private static int budget(Object budget) {
-    if (budget == null) {
+  private static Integer budget(Object budget) {
+    if (budget == null || "unlimited".equals(budget)) {
       return DEFAULT_BUDGET;
     }
     if (!(budget instanceof Integer calls) || calls < 2) {

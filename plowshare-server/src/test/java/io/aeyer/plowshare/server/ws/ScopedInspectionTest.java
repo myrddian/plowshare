@@ -20,7 +20,7 @@ class ScopedInspectionTest {
         new ProjectAuthorization(
             mock(ResourceScopeRepository.class), members, mock(AdminStore.class));
     String principal = "@service/fixture";
-    for (String operation : List.of("schedule.files", "schedule.list", "document.detail")) {
+    for (String operation : List.of("schedule.files", "schedule.list")) {
       assertThrows(
           CallerFault.class,
           () -> authorizer.require(operation, AccessRequest.project(null), principal));
@@ -72,7 +72,7 @@ class ScopedInspectionTest {
             "document",
             document,
             "scope",
-            Map.of("kind", "project", "project", "app", "includeShared", false)));
+            Map.of("kind", "project", "project", "app", "includeGlobal", false)));
     for (Map<String, Object> scope :
         List.<Map<String, Object>>of(
             Map.of("kind", "project"),
@@ -86,6 +86,6 @@ class ScopedInspectionTest {
         RuntimeException.class,
         () ->
             DocumentDetailHandler.validate(
-                Map.of("document", "invalid", "scope", Map.of("kind", "shared"))));
+                Map.of("document", "invalid", "scope", Map.of("kind", "global_read"))));
   }
 }

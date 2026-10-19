@@ -28,7 +28,7 @@ class InboxToolTest {
             "three PRs",
             Instant.parse("2026-09-13T09:02:00Z"),
             null);
-    when(inbox.list("enzo", true, 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
+    when(inbox.unreadForAgent("enzo", 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
 
     String out = tool.run("{}", null);
 
@@ -50,7 +50,7 @@ class InboxToolTest {
             "ledger: src/a.ts conflicted",
             Instant.parse("2026-09-14T10:00:00Z"),
             null);
-    when(inbox.list("enzo", true, 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
+    when(inbox.unreadForAgent("enzo", 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
 
     String out = tool.run("{}", null);
 
@@ -80,7 +80,7 @@ class InboxToolTest {
               Instant.parse("2026-09-13T09:02:00Z"),
               null));
     }
-    when(inbox.list("enzo", true, 0, InboxTool.SHOWN + 1)).thenReturn(many);
+    when(inbox.unreadForAgent("enzo", 0, InboxTool.SHOWN + 1)).thenReturn(many);
 
     String out = tool.run("{}", null);
 
@@ -109,8 +109,25 @@ class InboxToolTest {
             "done",
             Instant.parse("2026-09-13T09:02:00Z"),
             null);
-    when(inbox.list("enzo", true, 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
+    when(inbox.unreadForAgent("enzo", 0, InboxTool.SHOWN + 1)).thenReturn(List.of(item));
 
     assertTrue(tool.run("{}", null).endsWith("This one is marked read now."));
+  }
+
+  @Test
+  void a_model_read_does_not_acknowledge_a_human_approval_alert() {
+    var at = Instant.parse("2026-09-13T09:02:00Z");
+    var news =
+        new InboxItem("inb_news", "enzo", "run", null, "cnv_fixture", "ANSWERED", "Done", at, null);
+    when(inbox.unreadForAgent("enzo", 0, InboxTool.SHOWN + 1)).thenReturn(List.of(news));
+    var out = tool.run("{}", null);
+    org.mockito.Mockito.verify(inbox).read("enzo", List.of("inb_news"));
+    org.mockito.Mockito.verify(inbox, org.mockito.Mockito.never())
+        .list(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyBoolean(),
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyInt());
+    assertTrue(out.contains("marked read"), out);
   }
 }

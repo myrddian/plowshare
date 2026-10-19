@@ -272,14 +272,14 @@ export function installInformation(
     dialog.querySelector<HTMLElement>('.information-report')!.hidden = true;
   }
   const scope = (): InformationScope =>
-    select.value === 'shared'
-      ? { kind: 'shared' }
+    select.value === 'global_read'
+      ? { kind: 'global_read' }
       : select.value === 'personal'
-        ? { kind: 'personal', includeShared: true }
+        ? { kind: 'personal', includeGlobal: true }
         : {
             kind: 'project',
             project: select.value.slice(8),
-            includeShared: true,
+            includeGlobal: true,
           };
   const showError = (reason: unknown) => {
     error.hidden = false;
@@ -391,7 +391,7 @@ export function installInformation(
       if (authored && typeIdentity !== registryIdentity) {
         typeIdentity = registryIdentity;
         availableTypes =
-          scope().kind === 'shared'
+          scope().kind === 'global_read'
             ? []
             : (await call('types.list', { view: authored.view, limit: 100 }))
                 .results;
@@ -404,7 +404,8 @@ export function installInformation(
                 project.name === registryScope.project &&
                 project.role === 'MANAGER',
             ));
-        authoredControls.hidden = !!options.manual || scope().kind === 'shared';
+        authoredControls.hidden =
+          !!options.manual || scope().kind === 'global_read';
         authoredControls.querySelector<HTMLElement>(
           '[data-type-manager]',
         )!.hidden = !manager || !authored.typedWrites;
@@ -439,7 +440,7 @@ export function installInformation(
         )) {
           fieldset.hidden =
             !authored.typedWrites ||
-            scope().kind === 'shared' ||
+            scope().kind === 'global_read' ||
             !!options.manual;
           fieldset.querySelector<HTMLSelectElement>('select')!.innerHTML =
             '<option value="">Untyped</option>' + typeOptions(availableTypes);
@@ -1258,9 +1259,9 @@ export function installInformation(
   const collectionNote = () => {
     dialog.querySelector<HTMLElement>('[data-scope-note]')!.textContent =
       select.value === 'personal'
-        ? 'Your personal sources, plus sources shared with you.'
-        : select.value === 'shared'
-          ? 'Sources shared with you.'
+        ? 'Your personal sources, plus knowledge available to every signed-in account.'
+        : select.value === 'global_read'
+          ? 'Knowledge available to every signed-in account.'
           : `Sources available in ${select.selectedOptions[0]?.textContent}.`;
   };
   const resetSelection = () => {
@@ -1673,7 +1674,7 @@ export function installInformation(
       if (options.filterHost) options.filterHost.hidden = false;
       const project = activeProject();
       select.innerHTML =
-        `<option value="personal">${options.kind === 'report' ? 'My + shared' : 'My collection + shared'}</option><option value="shared">Shared with me</option>` +
+        `<option value="personal">${options.kind === 'report' ? 'My + generally available' : 'My collection + generally available'}</option><option value="global_read">Available to everyone</option>` +
         state()
           .projects.map(
             (row) =>
@@ -1681,7 +1682,7 @@ export function installInformation(
           )
           .join('');
       select.value = options.manual
-        ? 'shared'
+        ? 'global_read'
         : project
           ? `project:${project}`
           : 'personal';

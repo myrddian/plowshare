@@ -55,7 +55,7 @@ public sealed interface InformationRequest {
       interchangeSelection(selection);
       Objects.requireNonNull(requestId);
       Objects.requireNonNull(plan);
-      if (selection.scope().kind().equals("shared"))
+      if (selection.scope().kind().equals("global_read"))
         throw new IllegalArgumentException("Import requires an owned destination scope");
     }
 
@@ -83,16 +83,16 @@ public sealed interface InformationRequest {
 
   @com.fasterxml.jackson.annotation.JsonInclude(
       com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-  record Scope(String kind, String project, Boolean includeShared) {
+  record Scope(String kind, String project, Boolean includeGlobal) {
     public Scope {
-      if (!Set.of("personal", "project", "shared").contains(kind))
+      if (!Set.of("personal", "project", "global_read").contains(kind))
         throw new IllegalArgumentException("unsupported information scope");
       project = ContractValues.optionalIdentity(project, "scope project", 1024);
       if ("project".equals(kind) != (project != null))
         throw new IllegalArgumentException(
             "project scope requires a project; other scopes forbid it");
-      if ("shared".equals(kind) && Boolean.TRUE.equals(includeShared))
-        throw new IllegalArgumentException("shared scope cannot include another shared audience");
+      if ("global_read".equals(kind) && includeGlobal != null)
+        throw new IllegalArgumentException("global_read scope does not take includeGlobal");
     }
 
     public static Scope personal() {
@@ -899,7 +899,7 @@ public sealed interface InformationRequest {
       reason = ContractValues.text(reason, "reason", 4096, true);
       collectionProject =
           ContractValues.optionalIdentity(collectionProject, "collectionProject", 1024);
-      if (!Set.of("personal", "project", "shared").contains(visibility)
+      if (!Set.of("personal", "project", "global_read").contains(visibility)
           || "project".equals(visibility) != (collectionProject != null))
         throw new IllegalArgumentException("invalid adoption destination");
     }

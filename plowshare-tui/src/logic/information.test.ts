@@ -22,7 +22,7 @@ describe('information over WebSocket', () => {
           };
         },
       },
-      { kind: 'project', project: 'research', includeShared: true },
+      { kind: 'project', project: 'research', includeGlobal: true },
     );
     const payload = {
       name: 'source',
@@ -43,7 +43,7 @@ describe('information over WebSocket', () => {
       'information.upload',
       {
         ...payload,
-        scope: { kind: 'project', project: 'research', includeShared: true },
+        scope: { kind: 'project', project: 'research', includeGlobal: true },
       },
     ]);
   });
@@ -94,9 +94,9 @@ describe('information commands', () => {
       informationCommand('information inventory --scope personal', 'research')
         .scope,
     ).toEqual({ kind: 'personal' });
-    expect(informationCommand('information list --scope shared').scope).toEqual(
-      { kind: 'shared' },
-    );
+    expect(
+      informationCommand('information list --scope global_read').scope,
+    ).toEqual({ kind: 'global_read' });
     expect(() =>
       informationCommand('information list --scope project'),
     ).toThrow('Select a project');

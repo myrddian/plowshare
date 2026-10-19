@@ -263,7 +263,7 @@ human Personal workspace and a named Application project. In the external case,
 the manager deploys a manifest declaring a CONTRIBUTOR service identity through
 `ApplicationClient.deploy`, obtains its credential through `application.token.issue`,
 and configures/activates the type. The external client uses only that issued
-credential and project scope with `includeShared:false` for admission, agent work
+credential and project scope with `includeGlobal:false` for admission, agent work
 and reconnect recovery. No service principal or token is manufactured by SQL.
 
 Independent persistence checks assert that the producer belongs to the issued

@@ -11,14 +11,54 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   private final EmbeddingWorkRepository repository;
   private final EmbeddingDispatch dispatcher;
   private final EmbeddingTokenizers tokenizers;
+  private final EmbeddingAuthorization preparation;
+  private final EmbeddingPermit permit;
+  private OperationEmbeddings operations;
+  private Supplier<io.aeyer.plowshare.server.agents.Budget> maintenancePolicy;
+
+  /** Only the maintenance composition selects an independent operation spending policy. */
+  public void useOperations(
+      OperationEmbeddings operations, Supplier<io.aeyer.plowshare.server.agents.Budget> policy) {
+    this.operations = Objects.requireNonNull(operations);
+    this.maintenancePolicy = Objects.requireNonNull(policy);
+  }
 
   public DispatchingDualEmbeddings(
       EmbeddingWorkRepository repository,
       EmbeddingDispatch dispatcher,
       EmbeddingTokenizers tokenizers) {
+    this(repository, dispatcher, tokenizers, null);
+  }
+
+  private DispatchingDualEmbeddings(
+      EmbeddingWorkRepository repository,
+      EmbeddingDispatch dispatcher,
+      EmbeddingTokenizers tokenizers,
+      EmbeddingPermit permit) {
+    this.permit = permit;
+    this.preparation = permit instanceof EmbeddingAuthorization p ? p : null;
     this.repository = Objects.requireNonNull(repository);
     this.dispatcher = Objects.requireNonNull(dispatcher);
     this.tokenizers = Objects.requireNonNull(tokenizers);
+  }
+
+  @Override
+  public DualEmbeddings forPreparation(EmbeddingAuthorization permit) {
+    return new DispatchingDualEmbeddings(
+        repository, dispatcher, tokenizers, Objects.requireNonNull(permit));
+  }
+
+  @Override
+  public DualEmbeddings forWrite(EmbeddingAuthorization permit) {
+    return new DispatchingDualEmbeddings(
+        repository, dispatcher, tokenizers, Objects.requireNonNull(permit));
+  }
+
+  @Override
+  public DualEmbeddings forQuery(EmbeddingPermit permit) {
+    if (permit.mode() != EmbeddingPermit.Mode.QUERY)
+      throw new IllegalArgumentException("Query permit required");
+    return new DispatchingDualEmbeddings(repository, dispatcher, tokenizers, permit);
   }
 
   @Override
@@ -49,6 +89,8 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   @Override
   public List<EmbeddingQuery> queries(
       EmbeddingProfile profile, List<String> texts, UsageAttribution owner) {
+    if (preparation != null)
+      throw new IllegalStateException("Document preparation cannot authorize search queries");
     return vectors(
             profile,
             texts,
@@ -95,11 +137,33 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     }
     List<float[]> output;
     try {
+      var request = EmbeddingRequest.of(definition.modelId(), inputs).withAttribution(owner);
+      if (permit != null)
+        request =
+            request.withAuthorization(
+                permit.authorize(
+                    new EmbeddingPermit.Task(
+                        query ? EmbeddingPermit.Mode.QUERY : EmbeddingPermit.Mode.DOCUMENT,
+                        profile.toString(),
+                        texts,
+                        request)));
+      if (query && permit != null) {
+        // A queued query cannot follow an activation to a different encoder. Keep the original
+        // exact-input/claim evidence while adding this read-profile validity fence.
+        request =
+            request.withAuthorization(
+                request
+                    .authorization()
+                    .and(
+                        () -> {
+                          if (!profile.equals(repository.active(profile.slot()).orElse(null)))
+                            throw new EmbeddingException(
+                                "embedding configuration changed during this query; submit a new search");
+                        }));
+      }
       submitted.run();
-      output =
-          dispatcher
-              .embed(EmbeddingRequest.of(definition.modelId(), inputs).withAttribution(owner))
-              .vectors();
+      output = dispatcher.embed(request).vectors();
+      if (permit != null) permit.require();
     } catch (LlmException failed) {
       throw new EmbeddingException(failed.getMessage(), failed);
     }
@@ -137,9 +201,12 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
 
   @Override
   public RepairResult repairAll(List<EmbeddingWorkRepository.Key> keys, UsageAttribution owner) {
+    if (permit != null && preparation == null)
+      throw new IllegalStateException("Query cannot publish embeddings");
     Objects.requireNonNull(owner);
     if (keys == null || keys.size() > 100 || new HashSet<>(keys).size() != keys.size())
       throw new IllegalArgumentException("invalid embedding repair batch");
+    if (preparation != null) preparation.sources(keys);
     var sources = keys.stream().map(repository::source).flatMap(Optional::stream).toList();
     if (sources.size() != keys.size()) return new RepairResult(0, 0);
     var completed = new HashSet<>(keys);
@@ -158,9 +225,18 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
                   false,
                   owner,
                   calls::incrementAndGet);
-          for (int i = 0; i < missing.size(); i++)
-            if (!repository.publish(target, missing.get(i), output.get(i)))
+          for (int i = 0; i < missing.size(); i++) {
+            if (preparation != null) preparation.require();
+            if (!(preparation == null
+                ? repository.publish(target, missing.get(i), output.get(i))
+                : repository.publish(
+                    target, missing.get(i), output.get(i), preparation::publicationFence))) {
+              if (preparation != null)
+                throw new IllegalStateException("Preparation output changed");
               completed.remove(missing.get(i).key());
+            }
+          }
+          if (preparation != null) preparation.published();
         } catch (EmbeddingException failed) {
           for (var source : missing)
             repository.failed(target, source, failed.getClass().getSimpleName());
@@ -184,26 +260,71 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   boolean repair(
       EmbeddingProfile target, EmbeddingWorkRepository.Source source, UsageAttribution owner) {
     if (repository.ready(target, source)) return true;
-    return repository.publish(
-        target, source, vectors(target, List.of(source.text()), false, owner).getFirst());
+    var vector = vectors(target, List.of(source.text()), false, owner).getFirst();
+    return preparation == null
+        ? repository.publish(target, source, vector)
+        : repository.publish(target, source, vector, preparation::publicationFence);
+  }
+
+  private boolean repairRetained(
+      EmbeddingProfile target, EmbeddingWorkRepository.Source source, UsageAttribution owner) {
+    if (repository.ready(target, source)) return true;
+    boolean[] retained = {false};
+    try {
+      var vector =
+          vectors(
+                  target,
+                  List.of(source.text()),
+                  false,
+                  owner,
+                  () -> {
+                    if (!repository.beginRepair(target, source))
+                      throw new EmbeddingWorkRepository.UnreconciledRepair(null);
+                    retained[0] = true;
+                  })
+              .getFirst();
+      return repository.publish(target, source, vector, preparation::publicationFence);
+    } catch (RuntimeException failed) {
+      if (retained[0]) throw new EmbeddingWorkRepository.UnreconciledRepair(failed);
+      throw failed;
+    }
   }
 
   /** One bounded pass; staged vectors and retry timestamps are the persisted rebuild checkpoint. */
   public int tick() {
+    if (permit != null)
+      throw new IllegalStateException("Bound embedding operation cannot authorize maintenance");
     int published = 0;
+    var budget = operations == null ? null : maintenancePolicy.get();
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
       for (EmbeddingProfile target : writeProfiles(slot)) {
         for (EmbeddingWorkRepository.Store store : EmbeddingWorkRepository.Store.values()) {
           for (var source : repository.pending(target, store, 4)) {
             if (Thread.currentThread().isInterrupted()) return published;
+            if (budget != null && budget.exhausted()) break;
             try {
-              if (repair(
-                  target,
-                  source,
+              var owner =
                   UsageAttribution.system(
-                      source.project(), UsageAttribution.Operation.EMBEDDING_REPAIR))) published++;
+                      source.project(), UsageAttribution.Operation.EMBEDDING_REPAIR);
+              boolean repaired;
+              if (operations == null) {
+                repaired = repair(target, source, owner);
+              } else {
+                var home =
+                    source.project() == null
+                        ? io.aeyer.plowshare.protocol.Home.global()
+                        : io.aeyer.plowshare.protocol.Home.of(source.project());
+                try (var binding =
+                    operations.publication(home, List.of(source), budget, () -> {})) {
+                  repaired =
+                      new DispatchingDualEmbeddings(repository, dispatcher, tokenizers, binding)
+                          .repairRetained(target, source, owner);
+                }
+              }
+              if (repaired) published++;
             } catch (EmbeddingException failed) {
-              repository.failed(target, source, failed.getClass().getSimpleName());
+              if (!(failed instanceof EmbeddingWorkRepository.UnreconciledRepair))
+                repository.failed(target, source, failed.getClass().getSimpleName());
             }
           }
         }

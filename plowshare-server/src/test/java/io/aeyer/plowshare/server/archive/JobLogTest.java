@@ -97,7 +97,8 @@ class JobLogTest {
     // fixture that empties a table nobody in this file knows about hides its
     // own blast radius. `projects` is here because a job names one and this
     // file writes them by writing jobs.
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, jobs, projects CASCADE");
     jobs = new JdbcJobLog(jdbc);
   }

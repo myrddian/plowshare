@@ -117,6 +117,9 @@ class LlmConfigTest {
 
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
+          .withBean(
+              io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.class,
+              () -> io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE)
           // This configuration-only fixture has no durable storage.
           .withPropertyValues("plowshare.llm.accounting.enabled=false")
           .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))

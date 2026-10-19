@@ -203,6 +203,27 @@ public final class DigestStore {
         .orElseThrow(() -> new ValidationException("No digest " + id + " in this home"));
   }
 
+  /** Exact underlying resources, so a retained reader cannot disclose a mixed-scope tree. */
+  public List<io.aeyer.plowshare.server.access.AccessRequest.Resource> readTargets(
+      Home home, String id) {
+    get(home, id);
+    return jdbc.query(
+        """
+        WITH RECURSIVE tree(id) AS (
+          SELECT id FROM digests WHERE id=?
+          UNION SELECT e.child_id FROM digest_children e JOIN tree t ON e.parent_id=t.id
+        )
+        SELECT 'MEMORY' AS kind,m.memory_id AS id FROM digest_memories m JOIN tree t ON m.digest_id=t.id
+        UNION SELECT 'CONVERSATION',s.conversation_id FROM digest_spans s JOIN tree t ON s.digest_id=t.id
+        """,
+        (r, n) ->
+            new io.aeyer.plowshare.server.access.AccessRequest.Resource(
+                io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.valueOf(
+                    r.getString("kind")),
+                r.getString("id")),
+        id);
+  }
+
   public List<Node> children(Home home, String id) {
     get(home, id);
     return jdbc.query(

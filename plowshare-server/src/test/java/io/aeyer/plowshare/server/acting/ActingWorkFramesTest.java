@@ -97,6 +97,53 @@ class ActingWorkFramesTest {
   }
 
   @Test
+  void cancellationNeedsWriteAndReadButNoCreationOrInference() {
+    var job = mock(io.aeyer.plowshare.server.agents.Job.class);
+    when(job.state()).thenReturn(io.aeyer.plowshare.server.agents.Job.State.RUNNING);
+    when(jobs.getFor("job_ABC123", "alice")).thenReturn(job);
+    requests.route(FrameTypes.JOB_CANCEL, Map.of("job", "job_ABC123"), selection, asking);
+    var ordered = inOrder(work, jobs);
+    ordered.verify(work).requireJob(authority, "job_ABC123", ActingPermission.WORK);
+    ordered.verify(work).requireJob(authority, "job_ABC123", ActingPermission.READ);
+    ordered.verify(jobs).getFor("job_ABC123", "alice");
+    ordered.verify(jobs).cancel("job_ABC123");
+    ordered.verify(work).requireJob(authority, "job_ABC123", ActingPermission.WORK);
+    ordered.verify(work).requireJob(authority, "job_ABC123", ActingPermission.READ);
+    verify(work, never()).requireJob(any(), anyString(), eq(ActingPermission.CONVERSATION_CREATE));
+    verify(work, never()).requireJob(any(), anyString(), eq(ActingPermission.RUN_MODEL));
+  }
+
+  @Test
+  void missingReadPreventsCancellationAndRevocationDuringCancelWithholdsTheView() {
+    doThrow(new CallerFault("no read"))
+        .when(work)
+        .requireJob(authority, "job_ABC123", ActingPermission.READ);
+    assertThrows(
+        CallerFault.class,
+        () ->
+            requests.route(FrameTypes.JOB_CANCEL, Map.of("job", "job_ABC123"), selection, asking));
+    verifyNoInteractions(jobs);
+    reset(work);
+    when(jobs.getFor("job_ABC123", "alice"))
+        .thenReturn(mock(io.aeyer.plowshare.server.agents.Job.class));
+    doAnswer(
+            call -> {
+              doThrow(new CallerFault("read revoked"))
+                  .when(work)
+                  .requireJob(authority, "job_ABC123", ActingPermission.READ);
+              return null;
+            })
+        .when(jobs)
+        .cancel("job_ABC123");
+    assertThrows(
+        CallerFault.class,
+        () ->
+            requests.route(FrameTypes.JOB_CANCEL, Map.of("job", "job_ABC123"), selection, asking));
+    verify(jobs).cancel("job_ABC123");
+    verify(jobs).getFor("job_ABC123", "alice");
+  }
+
+  @Test
   void unsupported_mutations_never_resolve_or_downgrade_selection() {
     clearInvocations(contexts);
     assertThrows(

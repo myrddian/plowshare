@@ -1329,17 +1329,25 @@ function refreshProjection(measure: boolean) {
 function renderApprovals() {
   const approvals = state.approvals.filter((row) => row.state === 'asked');
   const bar = $('#approval-bar');
-  bar.hidden = !approvals.length;
-  bar.innerHTML = approvals
-    .map((row) =>
-      approvalControls.prompt(
-        row,
-        row.conversation === selected ? '' : title(row.conversation),
-      ),
-    )
-    .join('');
+  bar.hidden = !approvals.length && !state.approvalError && !selected;
+  bar.innerHTML =
+    `<button id="retry-command-approvals" ${!state.connected ? 'disabled' : ''}>Check command approvals</button>${state.approvalError ? `<p role="alert">${esc(state.approvalError)}</p>` : ''}` +
+    approvals
+      .map((row) =>
+        approvalControls.prompt(
+          row,
+          row.conversation === selected ? '' : title(row.conversation),
+        ),
+      )
+      .join('');
 }
 
+$('#approval-bar').addEventListener('click', (event) => {
+  if ((event.target as HTMLElement).closest('#retry-command-approvals'))
+    action({ action: 'approvals-refresh' });
+});
+
+$('#proc-open').addEventListener('click', () => action({ action: 'proc' }));
 $('#usage-open').addEventListener('click', () => action({ action: 'usage' }));
 $('#connection-usage').addEventListener('click', () => {
   dialog.close();
@@ -1775,6 +1783,7 @@ async function runWorkspaceCommand(name: string, argument: string) {
       '/memory': '#memories-open',
       '/board': '#board-open',
       '/swarm': '#swarm-open',
+      '/proc': '#proc-open',
       '/usage': '#usage-open',
       '/approvals': '#controls-button',
     } as Record<string, string>
@@ -2111,6 +2120,14 @@ const navigation = installNavigation((): NavigationItem[] => {
       icon: 'route',
       disabled: !selected,
       run: () => action({ action: 'trajectory', conversation: selected }),
+    },
+    {
+      id: 'proc',
+      title: 'Processes',
+      detail: 'Audit conversations, calls and queues',
+      group: 'Actions',
+      icon: 'activity',
+      run: () => action({ action: 'proc' }),
     },
     {
       id: 'usage',
@@ -2583,6 +2600,7 @@ function renderBreadcrumb() {
           'Scheduled work': 'schedules-open',
           Memories: 'memories-open',
           Library: 'library-open',
+          Processes: 'proc-open',
           Usage: 'usage-open',
           Board: 'board-open',
           Swarm: 'swarm-open',

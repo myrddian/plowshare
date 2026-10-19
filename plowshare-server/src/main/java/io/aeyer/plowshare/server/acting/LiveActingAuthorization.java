@@ -1,6 +1,11 @@
 package io.aeyer.plowshare.server.acting;
 
 import io.aeyer.plowshare.protocol.ApplicationIdentity.State;
+import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.AuthorityScope;
+import io.aeyer.plowshare.server.access.GrantRecipient;
+import io.aeyer.plowshare.server.access.IdentityRepository;
+import io.aeyer.plowshare.server.access.ScopedAuthority;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -17,11 +22,20 @@ public final class LiveActingAuthorization implements ActingAuthorization {
   private final ActingPolicySource source;
   private final ProjectMembers members;
   private final Clock clock;
+  private final IdentityRepository identities;
+  private final ScopedAuthority actions;
 
-  public LiveActingAuthorization(ActingPolicySource source, ProjectMembers members, Clock clock) {
+  public LiveActingAuthorization(
+      ActingPolicySource source,
+      ProjectMembers members,
+      Clock clock,
+      IdentityRepository identities,
+      ScopedAuthority actions) {
     this.source = Objects.requireNonNull(source);
     this.members = Objects.requireNonNull(members);
     this.clock = Objects.requireNonNull(clock);
+    this.identities = Objects.requireNonNull(identities);
+    this.actions = Objects.requireNonNull(actions);
   }
 
   @Override
@@ -31,6 +45,7 @@ public final class LiveActingAuthorization implements ActingAuthorization {
     Objects.requireNonNull(permission);
     Objects.requireNonNull(target);
     ProjectRole required = required(permission);
+    AuthorityAction action = action(permission);
     if (!source.enabled()) throw refused();
     var now = clock.instant();
     var delegation = authority.delegation();
@@ -69,6 +84,10 @@ public final class LiveActingAuthorization implements ActingAuthorization {
             || !delegation.scope().projects().contains(project.name())) throw refused();
         effective = narrow(effective, role(project.name(), authority.subject()));
         effective = narrow(effective, role(project.name(), authority.actor()));
+        var scope = identities.project(project.name());
+        if (!(scope instanceof AuthorityScope.Project)) throw refused();
+        requireAction(authority.subject(), scope, action);
+        requireAction(authority.actor(), scope, action);
       }
       case ActingTarget.Personal personal -> {
         if (!personal.owner().equals(authority.subject())
@@ -79,6 +98,11 @@ public final class LiveActingAuthorization implements ActingAuthorization {
         // prevent delegation or widen the Application into a human's private space.
         effective =
             narrow(effective, role(PersonalSpaces.name(personal.owner()), authority.subject()));
+        var subject = identities.account(authority.subject());
+        var scope = identities.project(PersonalSpaces.name(personal.owner()));
+        if (!(scope instanceof AuthorityScope.Personal own) || !own.account().equals(subject.id()))
+          throw refused();
+        requireAction(authority.subject(), scope, action);
       }
     }
     if (!effective.allows(required)) throw refused();
@@ -89,6 +113,14 @@ public final class LiveActingAuthorization implements ActingAuthorization {
     return members.role(project, account).orElseThrow(this::refused);
   }
 
+  private void requireAction(String principal, AuthorityScope scope, AuthorityAction action) {
+    // Service-token authentication and its current role ceiling were checked above. The
+    // supporting account grant is an additional intersection, never a Personal actor grant.
+    String account = members.authorityAccount(principal).orElseThrow(this::refused);
+    if (!actions.allows(GrantRecipient.account(identities.account(account).id()), scope, action))
+      throw refused();
+  }
+
   private static ProjectRole narrow(ProjectRole left, ProjectRole right) {
     return left.allows(right) ? right : left;
   }
@@ -96,7 +128,17 @@ public final class LiveActingAuthorization implements ActingAuthorization {
   private ProjectRole required(ActingPermission permission) {
     return switch (permission) {
       case READ -> ProjectRole.VIEWER;
-      case WORK -> ProjectRole.CONTRIBUTOR;
+      case WORK, CONVERSATION_CREATE, RUN_MODEL -> ProjectRole.CONTRIBUTOR;
+      default -> throw refused();
+    };
+  }
+
+  private AuthorityAction action(ActingPermission permission) {
+    return switch (permission) {
+      case READ -> AuthorityAction.READ;
+      case WORK -> AuthorityAction.WRITE;
+      case CONVERSATION_CREATE -> AuthorityAction.CONVERSATION_CREATE;
+      case RUN_MODEL -> AuthorityAction.RUN_MODEL;
       default -> throw refused();
     };
   }

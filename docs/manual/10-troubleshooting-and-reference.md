@@ -52,6 +52,15 @@ work. They are not synonyms for starting a new task. Use the current pending
 identity and current effective state so an old UI selection cannot answer a newer
 request. The server remains authoritative if a client view is stale.
 
+Compaction and skill-context summaries do not consume the conversation's task
+allowance. They run as bounded SYSTEM operations with their own spending policy:
+`plowshare.agents.compaction-budget` (`PLOWSHARE_COMPACTION_BUDGET`) accepts
+`unlimited` (default), `0` to disable summaries, or a positive call ceiling per
+summary operation. Each summary currently makes one model call. Usage can name
+the source conversation without reducing its remaining calls. If summaries are
+disabled/unavailable, compaction keeps the full history; a required skill summary
+refuses the handoff instead of silently changing its context mode.
+
 ## Offline command discovery
 
 The CLI can list current command families and validate payloads offline:
@@ -59,7 +68,7 @@ The CLI can list current command families and validate payloads offline:
 ```sh
 bin/plowshare-cli --help
 bin/plowshare-cli information list --help
-bin/plowshare-cli --validate information list '{"scope":{"kind":"shared"},"filter":{"tags":["plowshare-manual"]},"limit":100}'
+bin/plowshare-cli --validate information list '{"scope":{"kind":"global_read"},"filter":{"tags":["plowshare-manual"]},"limit":100}'
 ```
 
 Use command help for exact required fields and supported aliases. The operation
@@ -88,13 +97,13 @@ when model summaries are unavailable. A long manual may have more versions than
 one page because exclusion and audience are revision lifecycle choices.
 
 ```json
-{"scope":{"kind":"shared"},"filter":{"tags":["plowshare-manual"],"search":"WebSocket"},"offset":0,"limit":100}
+{"scope":{"kind":"global_read"},"filter":{"tags":["plowshare-manual"],"search":"WebSocket"},"offset":0,"limit":100}
 ```
 
 Read a selected revision using the returned ID:
 
 ```json
-{"scope":{"kind":"shared"},"revision":"<revision-uuid>","offset":0,"limit":8192}
+{"scope":{"kind":"global_read"},"revision":"<revision-uuid>","offset":0,"limit":8192}
 ```
 
 For agents, `information_read` uses `operation` plus these read/discovery fields,

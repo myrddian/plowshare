@@ -1,0 +1,18 @@
+.proc-panel {padding:1rem;font-size:.9rem;line-height:1.6;}
+.proc-panel .proc-controls {display:flex;flex-wrap:wrap;align-items:center;gap:.65rem;margin:1rem 0;}
+.proc-panel input,.proc-panel select,.proc-panel button {font:inherit;color:inherit;max-width:100%;padding:.4rem .6rem;border:1px solid #8886;border-radius:5px;background:#8881;}
+.proc-panel option {color:CanvasText;background:Canvas;}
+.proc-panel .proc-controls label {display:flex;align-items:center;gap:.35rem;}
+.proc-panel table {width:100%;border-collapse:collapse;text-align:left;}
+.proc-panel th,.proc-panel td {padding:.7rem;border-bottom:1px solid #8884;vertical-align:top;overflow-wrap:anywhere;}
+.proc-panel th {font-weight:500;}
+.proc-panel p {margin:.35rem 0;}
+.proc-panel pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;}
+.proc-panel code {display:block;overflow-wrap:anywhere;}
+.proc-panel .proc-detail {margin:1rem 0;padding-top:1rem;border-top:1px solid #8884;}
+.proc-panel .proc-results {overflow-x:auto;}
+.proc-panel .proc-totals {display:flex;flex-wrap:wrap;gap:.75rem;}
+.proc-panel .proc-totals>div {border:1px solid #8884;border-radius:6px;padding:.75rem;}
+.proc-panel .proc-detail>button {display:block;margin:.3rem 0;}
+.proc-panel h3 {font-size:1rem;margin:1rem 0 .5rem;}
+@media(max-width:620px){.proc-panel{padding:.5rem;}.proc-panel th,.proc-panel td{padding:.4rem;}}

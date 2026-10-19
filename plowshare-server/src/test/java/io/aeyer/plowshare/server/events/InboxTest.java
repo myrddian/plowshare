@@ -89,4 +89,53 @@ class InboxTest {
 
     assertEquals(List.of(), pushed);
   }
+
+  @Test
+  void durable_question_push_requires_an_atomic_alert_attempt() {
+    InboxStore store = mock(InboxStore.class);
+    var item =
+        new InboxItem(
+            "inb_fixture",
+            "owner",
+            "approval",
+            null,
+            "cnv_fixture",
+            null,
+            "Review command",
+            T0,
+            null,
+            "approval:fixture");
+    when(store.noticeOnceFromLog(
+            "owner", "approval", "Review command", "cnv_fixture", "approval:fixture", T0))
+        .thenReturn(item);
+    when(store.claimQuestionAlert(
+            "owner", item.id(), T0, EventsProperties.DEFAULT_QUESTION_ALERT_RETRY))
+        .thenReturn(true, false);
+    when(store.unread("owner")).thenReturn(1);
+    List<Object> pushed = new ArrayList<>();
+    var inbox = new Inbox(store, (handle, body) -> pushed.add(body), () -> T0);
+    inbox.notifyOnceFromLog(
+        "owner", "approval", "Review command", "cnv_fixture", "approval:fixture");
+    inbox.notifyOnceFromLog(
+        "owner", "approval", "Review command", "cnv_fixture", "approval:fixture");
+    assertEquals(List.of(new AccountEvent.InboxChanged(1)), pushed);
+  }
+
+  @Test
+  void alert_retry_configuration_rejects_invalid_or_unbounded_intervals() {
+    var properties = new EventsProperties();
+    assertEquals(java.time.Duration.ofSeconds(30), properties.getQuestionAlertRetryInterval());
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> properties.setQuestionAlertRetryInterval(null));
+    for (var invalid :
+        List.of(
+            java.time.Duration.ZERO,
+            java.time.Duration.ofSeconds(-1),
+            java.time.Duration.ofMillis(999),
+            java.time.Duration.ofHours(2)))
+      org.junit.jupiter.api.Assertions.assertThrows(
+          IllegalArgumentException.class, () -> properties.setQuestionAlertRetryInterval(invalid));
+    properties.setQuestionAlertRetryInterval(java.time.Duration.ofSeconds(1));
+    assertEquals(java.time.Duration.ofSeconds(1), properties.getQuestionAlertRetryInterval());
+  }
 }

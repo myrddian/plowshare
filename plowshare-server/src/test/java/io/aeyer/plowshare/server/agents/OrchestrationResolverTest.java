@@ -536,7 +536,8 @@ class OrchestrationResolverTest {
   }
 
   @Test
-  void a_broken_tier_falls_back_once_per_change(@TempDir Path data) throws Exception {
+  void a_broken_tier_refuses_and_records_diagnostics_once_per_change(@TempDir Path data)
+      throws Exception {
     DataLayout layout = new DataLayout(data).initialise();
     Path broken = layout.orchestrationsFor(7L);
     Files.createDirectories(broken.getParent());
@@ -555,8 +556,12 @@ class OrchestrationResolverTest {
     warnings.start();
     log.addAppender(warnings);
     try {
-      assertEquals(Map.of(), resolver.forCaller(new Caller(7L, null)));
-      assertEquals(Map.of(), resolver.forCaller(new Caller(7L, null)));
+      assertThrows(
+          io.aeyer.plowshare.server.faults.CallerFault.class,
+          () -> resolver.forCaller(new Caller(7L, null)));
+      assertThrows(
+          io.aeyer.plowshare.server.faults.CallerFault.class,
+          () -> resolver.forCaller(new Caller(7L, null)));
       assertEquals(1, warnings.list.size());
       assertTrue(
           resolver

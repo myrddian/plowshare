@@ -7,12 +7,59 @@ REST endpoints. PostgreSQL and its existing pgvector extension hold the domain.
 
 ## Scope and access
 
-Omitted scope means personal plus explicitly shared revisions. Select a project
-only when the authenticated account is currently a member; selecting one never
-creates membership. `scope: {kind: "project", project: "research", includeShared:
-false}` limits discovery to that project. Shared is an explicit revision grant,
-not an unowned global corpus. Owner controls require the resource owner; project
-membership grants reading, not editing another owner's source.
+For humans, omitted scope means Personal plus generally readable knowledge. Select
+a project only with current scoped READ; selecting one never creates membership.
+`scope: {kind: "project", project: "research", includeGlobal: false}` limits
+discovery to that project. Scoped Contributors can write in their area; Managers
+can change resource audiences through existing share/unshare commands.
+
+V158 stores immutable versions of each resource's current root audience. All
+revisions, including pinned history and later content revisions, use that policy.
+An explicit share grants GLOBAL_READ to every active authenticated human,
+Application/service account and service credential; unshare restores HOME.
+V172 retires human-only LEGACY_SHARED: those roots narrow to HOME for deliberate
+Manager publication. Conflicting privacy subjects and unclassified homes stay
+quarantined. Original per-revision flags remain historical evidence and grant no
+access; rootless compatibility rows have no read fallback.
+
+The `global_read` selector chooses current GLOBAL_READ resources, regardless of
+custody. Personal/project discovery includes them by default (`includeGlobal`);
+false narrows to the selected home. Service credentials use the same general-read
+rules; Personal remains unavailable. Omitted scope on an active Application-owned
+credential selects its exact single registered project plus generally readable
+knowledge; generic service tokens and ambiguous/missing Application context require
+an explicit scope. Retained runs intersect reads with their captured home and
+Global-read ceiling. Invalid explicit names, retired `shared`/`includeShared` fields,
+conflicting selectors and unknown members refuse without falling back.
+See the [read contract](global-knowledge-read-contract.md) for the API cutover and
+internal interfaces.
+These selectors grant no project membership, content WRITE, processing-log access
+or execution. Global-account policy control requires human Global Admin authority.
+Existing share/unshare can manage the audience of an already scoped Global resource
+through its owning Admin check, independent of client label. General READ is not a writable
+Global destination. An explicit documents-only account selector,
+`scope: {kind: "account", account: "00000000-0000-0000-0000-000000000004"}`,
+selects Global custody on the supported information upload and maintenance path.
+Human ADMIN WRITE is checked live in Java and under repository locks; the human
+remains `created_by`. Authenticated readers use current root policy. Project names
+never decode account UUIDs. Other account targets, type registries, interchange
+and unsupported consumers refuse this target. Existing account-target semantic
+search/rank use their account READ gate. No new endpoint,
+general transfer or ordinary Global conversation/run capability is added. The
+[root-policy specification](authority-substrate-slices/05-root-policy-specification.md)
+records migration, privacy and concurrency behavior.
+
+Supported information search/rank and document search/retrieve/rank/stance use
+scoped SYSTEM query embedding with the search operation's configured spending
+policy.
+Set `plowshare.embeddings.search-budget` (`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`) to a
+positive model-call limit per query, or `0` to disable this inference without
+affecting preparation. Omitted, empty or `unlimited` configuration selects
+unlimited, the default; usage and claims are still recorded. Reader permissions still determine the
+selected corpus and all returned content, counts and metadata. No caller gains
+RUN_MODEL or an embedding role. Generally readable documents use `global_read`/`includeGlobal` selections.
+Existing explicit Global account search/rank use account READ and the same root
+policy. See [embedding authority and configuration](embedding-evolution.md#implemented-sql-foundation).
 
 Filters apply before ranking, counts, title matching and paging. Direct guessed
 IDs receive the same refusal as absent IDs. Excluded revisions disappear from
@@ -152,7 +199,8 @@ with a control to return to automatic grouping.
 
 ## Retention and lifecycle
 
-A source name identifies a resource in its personal or project namespace. Content
+A source name identifies a resource in its Personal, project or supported Global
+account-knowledge namespace. Content
 creates immutable UUID revisions under that resource; evidence names a revision,
 exact UTF-16 extraction offsets and a quote. URLs and paragraph IDs alone cannot
 create new evidence. The original bytes, extraction and content hash survive fetch
@@ -168,8 +216,17 @@ projection was built with a different configuration, so semantic retrieval ignor
 it until explicit repair. Changed embedding model identity matters even at the
 same vector width. Actual counts are not estimated completion percentages.
 
+The captured processing allowance pays for every preparation chat or embedding
+request, including each dual-model/active-or-staging lane. Compatible cached
+vectors cost no call. One retained budget identity and atomic counter survive
+stages/restart; counting embeddings can exhaust the same configured total sooner.
+Completed checkpoints and spending remain retained. Pending embedding claims
+block replay of unresolved outputs, including overlapping batches after partial
+publication. Query embedding and independent background repair budgets remain
+unsupported and cannot borrow this source.
+
 `information.retry` resumes missing/failed work using the captured allowance;
-`information.allowance` raises/changes the owner's allowance without moving below
+`information.allowance` raises/changes the document's allowance without moving below
 spending. `information.rebuild` accepts `embed`, `summarise`, `summary_embed`, `autoTag` or `tagGroups`.
 Embedding rebuild keeps paid summaries; summary rebuild clears downstream summary
 vectors. Source refresh/replacement creates a new revision. Extraction/structure
@@ -267,7 +324,7 @@ Example payload for `information.acquire`:
 
 ```json
 {
-  "scope": {"kind": "project", "project": "research", "includeShared": false},
+  "scope": {"kind": "project", "project": "research", "includeGlobal": false},
   "name": "source-paper",
   "url": "https://example.org/paper",
   "requestId": "c5b6d3e4-4e40-471e-906e-1da8382602d3"
@@ -353,7 +410,7 @@ the run's project scope; reading leaves the report as a draft until explicitly f
 ## Project document structure over WebSocket
 
 `document.detail` accepts an optional Information scope, for example
-`{document: "<revision UUID>", scope: {kind: "project", project: "mychatbot", includeShared: false}}`.
+`{document: "<revision UUID>", scope: {kind: "project", project: "mychatbot", includeGlobal: false}}`.
 It returns the authorized document's metadata and hierarchy/outline; it does not
 return document text. Accounts need live VIEWER access and the document must be
 visible in that scope. Service tokens must select an explicitly granted project;

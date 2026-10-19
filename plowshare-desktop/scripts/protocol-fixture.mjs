@@ -272,22 +272,22 @@ export async function protocolFixture(options = {}) {
               hasMore: Object.fromEntries(names.map(name => [name, false])), tagGraph: {edges: [], hasMore: false} };
             break;
           }
-          const matching=payload.scope.kind!=='shared' && (!filter.tags || filter.tags.every(tag=>informationTags.includes(tag))) && (!filter.autoTag || filter.autoTag.every(tag=>['postgresql'].includes(tag))) && (!filter.tagGroup || filter.tagGroup in currentGroups()) && (!filter.documentAuthor || filter.documentAuthor==='Ada Lovelace') && (!filter.search || 'A retained claim'.toLowerCase().includes(filter.search.toLowerCase()));
+          const matching=payload.scope.kind!=='global_read' && (!filter.tags || filter.tags.every(tag=>informationTags.includes(tag))) && (!filter.autoTag || filter.autoTag.every(tag=>['postgresql'].includes(tag))) && (!filter.tagGroup || filter.tagGroup in currentGroups()) && (!filter.documentAuthor || filter.documentAuthor==='Ada Lovelace') && (!filter.search || 'A retained claim'.toLowerCase().includes(filter.search.toLowerCase()));
           result.payload={total:matching?1:0,facets:Object.fromEntries(names.map(name=>[name,matching?({kind:[{value:payload.kind??'source',count:1}],tags:informationTags.map(value=>({value,count:1})),autoTag:[{value:'postgresql',count:1}],tagGroup:Object.keys(currentGroups()).map(value=>({value,count:1})),author:[{value:'fixture',count:1}],documentAuthor:[{value:'Ada Lovelace',count:1}],when:[{value:'2024-10',count:1}],subtype:[{value:'text',count:1}]}[name]):[]])),hasMore:Object.fromEntries(names.map(name=>[name,false])),tagGraph:{edges:matching?Object.entries(currentGroups()).flatMap(([group,tags])=>tags.map(tag=>({group,tag,count:1}))):[],hasMore:false}};break;
         }
         case 'information.tags.groups': informationGroups=payload.groups;result.payload={changed:true};break;
         case 'information.tags': informationTags=payload.tags;result.payload={changed:true};break;
         case 'information.list': case 'information.inventory':
           if (payload.filter?.tags?.includes('plowshare-manual')) {
-            assert.equal(payload.scope.kind, 'shared');
+            assert.equal(payload.scope.kind, 'global_read');
             result.payload = manualRows(payload.filter).slice(payload.offset ?? 0, (payload.offset ?? 0) + (payload.limit ?? 20)).map(({text, ...row}) => row);
             break;
           }
-          result.payload=(payload.scope.kind==='shared'||payload.filter?.tags?.some(tag=>!informationTags.includes(tag))||payload.filter?.autoTag?.some(tag=>tag!=='postgresql')||payload.filter?.tagGroup&&!(payload.filter.tagGroup in currentGroups())||payload.filter?.documentAuthor&&payload.filter.documentAuthor!=='Ada Lovelace'||payload.filter?.search&&!('A retained claim'.toLowerCase().includes(payload.filter.search.toLowerCase())))?[]:[{id:'aaaaaaaa-0000-0000-0000-000000000001',title:payload.kind==='report'?'Generated research report':'Retained research source',source_name:'source.txt',tags:informationTags,autoTag:['postgresql'],kind:payload.kind ?? 'source',...(payload.kind==='report'?{report_status:'draft'}:{}),ordinal:1,availability:'active'}];break;
+          result.payload=(payload.scope.kind==='global_read'||payload.filter?.tags?.some(tag=>!informationTags.includes(tag))||payload.filter?.autoTag?.some(tag=>tag!=='postgresql')||payload.filter?.tagGroup&&!(payload.filter.tagGroup in currentGroups())||payload.filter?.documentAuthor&&payload.filter.documentAuthor!=='Ada Lovelace'||payload.filter?.search&&!('A retained claim'.toLowerCase().includes(payload.filter.search.toLowerCase())))?[]:[{id:'aaaaaaaa-0000-0000-0000-000000000001',title:payload.kind==='report'?'Generated research report':'Retained research source',source_name:'source.txt',tags:informationTags,autoTag:['postgresql'],kind:payload.kind ?? 'source',...(payload.kind==='report'?{report_status:'draft'}:{}),ordinal:1,availability:'active'}];break;
         case 'information.status': {
           const chapter = manualChapters.find(row => row.id === payload.revision);
           if (chapter) {
-            assert.equal(payload.scope.kind, 'shared');
+            assert.equal(payload.scope.kind, 'global_read');
             const {text, ...row} = chapter;
             result.payload = {...row, generation: 1, can_manage: false, inputs: [], citations: [], steps: ['extract','derive'].map(stage => ({stage, state:'ready', attempt:1, generation:1, compatible:true}))};
             break;
@@ -297,7 +297,7 @@ export async function protocolFixture(options = {}) {
         case 'information.read': {
           const chapter = manualChapters.find(row => row.id === payload.revision);
           if (chapter) {
-            assert.equal(payload.scope.kind, 'shared');
+            assert.equal(payload.scope.kind, 'global_read');
             const start = Math.min(payload.offset ?? 0, chapter.text.length), end = Math.min(start + (payload.limit ?? 8192), chapter.text.length);
             result.payload = {revision: chapter.id, start, end, total: chapter.text.length, text: chapter.text.slice(start, end)};
             break;
@@ -688,14 +688,16 @@ export async function protocolFixture(options = {}) {
       // No Inbox notification: the durable ending must trigger discovery itself.
       finish(job, 'AWAITING', `Approve running echo fixture in /fixture on the local side? [${id}]`);
     },
-    queueApproval(id, conversation = 'fixture-first', legacy = false) {
+    queueApproval(id, conversation = 'fixture-first', legacy = false, notifyInbox = true) {
       const row = approvalWire({ id, conversation, agent: 'fixture-bot', command: ['echo', id], cwd: '/fixture', reason: 'Review this exact request.' });
       approvals.push(row);
       const answer = `Approve running echo ${id} in /fixture on the server side? [${id}]`;
-      inbox.unshift({ id: `inbox-${id}`, kind: 'approval', answer, ...(legacy ? {} : { about: `approval:${id}` }), arrivedAt: '2026-10-02T00:00:00Z' });
+      if (notifyInbox) inbox.unshift({ id: `inbox-${id}`, kind: 'approval', answer, ...(legacy ? {} : { about: `approval:${id}` }), arrivedAt: '2026-10-02T00:00:00Z' });
+      else conversationOnlyApprovals.add(id);
       const log = entries.get(conversation); const ordinal = (log.at(-1)?.ordinal ?? 0) + 1;
       log.push({ ordinal, turnOrdinal: ordinal, kind: 'answer', state: 'stands', excerpt: answer });
-      grew(conversation); push({ kind: 'inbox.changed', unread: unreadInbox().length });
+      grew(conversation);
+      if (notifyInbox) push({ kind: 'inbox.changed', unread: unreadInbox().length });
     },
     // Abrupt loss must reach the peer even when the logical packet owner has pending frames.
     disconnectProject(name) { const id = fileSockets.get(name)?.claim.session; eventSockets.get(id)?.socket.terminate(); },

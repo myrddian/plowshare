@@ -53,62 +53,27 @@ import org.slf4j.LoggerFactory;
  * nothing here. {@code a_definition_that_declares_tools_is_still_offered_none} is what holds that
  * line.
  *
- * <h2>Never throws, and every failure is a distinguishable {@code NEW}</h2>
+ * <h2>Optional judgement, with mandatory operation validity</h2>
  *
- * <p>A write must not be lost because the thing that judges its shape was down. Eleven {@code
- * flat(...)} sites therefore end in {@code NEW}, and <b>each files under its own reason</b>: a year
- * later a maintainer has to be able to tell "no scribe is deployed" from "the scribe was busy",
- * because those have opposite fixes. <b>Seventeen reason strings, not eleven</b> — {@link
- * Unreadable} fans one site out into seven sentences saying what about the answer could not be
- * read. Eleven is the number to change; seventeen is the number to grep. Every fallback reason
- * opens {@code "filed flat: "} and a judged verdict's is stripped of it by {@link #judgedReason},
- * so that prefix is a grep rather than a convention a model can break by emitting it.
+ * <p>Absent definitions, unavailable optional inference and unreadable verdicts file a valid
+ * proposal flat, under distinguishable bounded reasons. Production supplies an admitted consult
+ * whose validity is rechecked before a fallback: lost authority or cancellation must escape to the
+ * owning write instead of becoming permission to file NEW. The request has no turn loop or
+ * capability acquisition. Its queue timeout is independent of spending policy.
  *
- * <p>The reason travels back to the writing agent through {@code memory_write}'s output, and that
- * is why <b>no failure's own message is put in it</b>: only the exception's type. A transport-layer
- * message can carry a URL, a header or a request body, and a reason is prose a model reads and a
- * person may paste somewhere. The full throwable goes to the log instead, where {@code
- * LlmException}'s family is already documented as naming neither a base URL nor a key.
+ * <h2>Embedding reuse belongs to the admitted write</h2>
  *
- * <h2>What it is not</h2>
+ * <p>Candidate retrieval uses canonical stripped summary and scope in the exact destination home.
+ * Production supplies the query binding, candidates and chat claim through {@link Consult}. The
+ * write operation owns one policy-selected source, default unlimited, and captures completed legacy
+ * vectors for compatible local publication. Dual DOCUMENT vectors use their own prefixes and
+ * profiles. An uncertain equivalent batch is never retried as indexing; failure preserves the
+ * committed memory without inventing a successful searchable representation.
  *
- * <p>Not a job. It makes exactly one model call and has no turn loop, so {@link
- * AgentDefinition#maxTurns()} and {@link AgentDefinition#maxModelCalls()} are not read here; the
- * file carries {@code 1} for each because that is what is true of it. Running it through {@code
- * JobRuntime} would give it a tool layer, which is the one thing it must not have.
- *
- * <h2>The cost, which is one embedding call and used to be two</h2>
- *
- * <p>{@link #judge} retrieves candidates by vector, so a write that reaches this class has to have
- * its proposal embedded. <b>It embeds it exactly once, and the archive stores that same vector
- * rather than computing it again</b>: the candidate query and the memory are embedded for the
- * identical text, so {@link Judgement} carries the vector out and {@code Archive.applyVerdict(…,
- * Precomputed)} takes it.
- *
- * <p><b>It was two, and on more writes than it looks.</b> The retrieval happens before the
- * empty-candidate short circuit — it has to, since the short circuit is a fact about what the
- * retrieval found — so it was never only the writes a model rules on: past the three guards above
- * it (no registry, no {@code scribe} definition, a blank summary) <em>every</em> write was 2×. That
- * is why the saving is on the common path rather than the rare one, and why every fallback taken
- * after the query hands the vector on too — the commonest of them is the empty-candidate one.
- *
- * <p><b>A write whose endpoint is down still costs two</b>, and the number is a fact about that
- * case rather than about writes in general: the query throws, so there is no vector to hand on,
- * this class files flat without one, and the archive asks again for the memory. {@code
- * EndToEndTest.MarkerEmbeddings} carries that as the reason its failure knob is a count and not a
- * flag — a single-shot failure was consumed by the query, leaving the memory perfectly searchable
- * under a test asserting it was not.
- *
- * <p>Retrieval in code is still the design, and the alternative the spec rejected — giving the
- * scribe {@code memory_recall} and letting it retrieve — still costs a model call instead, against
- * a model measured calling a tool <b>3/3</b> times when asked merely to say one word. What changed
- * is the size of the bill, not who pays it.
- *
- * <p><b>The identity the saving rests on is incidental, and the archive checks it rather than
- * trusting it.</b> Two expressions in two classes that happen to agree; reused, a drift stores a
- * wrong vector against a right memory, which no search would ever report. {@link #question} and
- * {@code Archive.embeddedText} are the pair, and {@code Archive.applyVerdict(…, Precomputed)} owns
- * the argument and the refusal — it is not repeated here.
+ * <p>{@link Judgement#embedding()} remains the existing fixture/result carriage. Neither it nor
+ * {@code Archive.Precomputed} conveys publication authority. Production commits through its typed
+ * write service; bare Scribe/Archive helpers are refused there. Fixture helpers retain their text
+ * agreement checks and legacy behavior.
  *
  * <h2>The reason is durable, and reading it back is {@link
  * io.aeyer.plowshare.server.archive.ReasonLog}</h2>
@@ -134,7 +99,7 @@ import org.slf4j.LoggerFactory;
  * V4__proposals_proposed_by.sql} for exactly that reason: one file carrying both {@code ALTER
  * TABLE}s would have tied a decided change to an undecided one.
  */
-public final class Scribe implements UsageAware {
+public final class Scribe implements UsageAware, MemoryJudgements {
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -180,7 +145,7 @@ public final class Scribe implements UsageAware {
    * does not belong to it.
    *
    * @param verdict how this proposal should be filed. Never null.
-   * @param embedding the query vector and its text, or {@code null} when the scribe never got as
+   * @param embedding the completed query and its text, or {@code null} when the scribe never got as
    *     far as embedding anything — no registry, no scribe defined, a blank summary, an endpoint
    *     that could not be reached, or the outer catch. Every fallback taken <em>after</em> the
    *     query carries it, which matters: the commonest of them is the empty-candidate short
@@ -188,6 +153,17 @@ public final class Scribe implements UsageAware {
    *     writes 3a measured as the expensive case.
    */
   public record Judgement(Verdict verdict, Archive.Precomputed embedding) {}
+
+  /** Only the admitted write supplies candidates and a claim; models cannot supply this. */
+  public interface Consult {
+    void require();
+
+    Archive.Precomputed embedding(String text);
+
+    List<Memory> candidates(Archive.Precomputed query, int limit);
+
+    ChatRequest authorize(AgentDefinition definition, ChatRequest request);
+  }
 
   private final LlmDispatcher dispatcher;
   private final Archive archive;
@@ -201,6 +177,33 @@ public final class Scribe implements UsageAware {
    *     this in yet must file writes flat rather than fail them. A supplier that yields null is
    *     that state, and {@code no_registry_wired_falls_back_to_new} is what pins it.
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public Scribe(
+      LlmDispatcher dispatcher,
+      Archive archive,
+      Supplier<AgentRegistry> agents,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, archive, agents);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.SCRIBE,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public Scribe(LlmDispatcher dispatcher, Archive archive, Supplier<AgentRegistry> agents) {
     this(dispatcher, archive, agents, BUDGET);
   }
@@ -241,11 +244,25 @@ public final class Scribe implements UsageAware {
   }
 
   public Judgement judge(MemoryProposal proposal, Home home, UsageAttribution owner) {
+    if (archive.writing()) throw new IllegalStateException("Admitted Scribe consult required");
+    return judge(proposal, home, owner, null);
+  }
+
+  public Judgement judge(
+      MemoryProposal proposal, Home home, UsageAttribution owner, Consult consult) {
+    if (archive.writing() && consult == null)
+      throw new IllegalStateException("Admitted Scribe consult required");
     Objects.requireNonNull(proposal, "proposal");
     Objects.requireNonNull(home, "home");
+    if (consult != null) consult.require();
     try {
-      return judged(proposal, home, owner);
+      var result = judged(proposal, home, owner, consult);
+      if (consult != null) consult.require();
+      return result;
     } catch (RuntimeException broken) {
+      if (consult != null) consult.require();
+      if (broken instanceof io.aeyer.plowshare.server.archive.MemoryWrites.InferenceUnavailable)
+        return flat(broken.getMessage());
       // Everything the model, the endpoint and the archive can do is
       // handled below and returns a verdict rather than reaching here.
       // What reaches here is this server being wrong — a supplier that
@@ -257,7 +274,15 @@ public final class Scribe implements UsageAware {
     }
   }
 
-  private Judgement judged(MemoryProposal proposal, Home home, UsageAttribution owner) {
+  private ChatRequest authorizeConsult(
+      Consult consult, AgentDefinition definition, Home home, ChatRequest request) {
+    return consult == null
+        ? authorize(definition, home, request)
+        : consult.authorize(definition, request);
+  }
+
+  private Judgement judged(
+      MemoryProposal proposal, Home home, UsageAttribution owner, Consult consult) {
     AgentRegistry registry = agents.get();
     if (registry == null) {
       // Separate from the miss below, and the separation is what keeps a
@@ -289,11 +314,20 @@ public final class Scribe implements UsageAware {
     List<Memory> candidates;
     try {
       query =
-          owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-              ? archive.embedding(question(proposal))
-              : archive.embedding(question(proposal), owner);
-      candidates = nameable(archive.recall(query, home, CANDIDATES).memories(), home);
+          consult != null
+              ? consult.embedding(question(proposal))
+              : owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                  ? archive.embedding(question(proposal))
+                  : archive.embedding(question(proposal), owner);
+      candidates =
+          consult != null
+              ? consult.candidates(query, CANDIDATES)
+              : nameable(archive.recall(query, home, CANDIDATES).memories(), home);
     } catch (RuntimeException unsearchable) {
+      if (consult != null) consult.require();
+      if (unsearchable
+          instanceof io.aeyer.plowshare.server.archive.MemoryWrites.InferenceUnavailable)
+        return flat(unsearchable.getMessage(), query);
       // Archive.recall throws rather than returning empty when the
       // question cannot be embedded, precisely so "nothing is held" and
       // "the search never ran" stay different facts. Collapsing them here
@@ -318,11 +352,16 @@ public final class Scribe implements UsageAware {
     try {
       completion =
           dispatcher.complete(
-              JobRuntime.requestFor(
-                      definition, conversation(definition, proposal, home, candidates))
-                  .withBudget(budget)
-                  .withAttribution(
-                      owner.forOperation(UsageAttribution.Operation.REVIEW, definition.name())));
+              authorizeConsult(
+                  consult,
+                  definition,
+                  home,
+                  JobRuntime.requestFor(
+                          definition, conversation(definition, proposal, home, candidates))
+                      .withBudget(budget)
+                      .withAttribution(
+                          owner.forOperation(
+                              UsageAttribution.Operation.REVIEW, definition.name()))));
     } catch (LlmSaturatedException busy) {
       // Ahead of LlmException, which it extends. Saturation is the one
       // failure here that is about load rather than about the box, and it
@@ -339,6 +378,9 @@ public final class Scribe implements UsageAware {
       log.warn("The scribe could not be reached; filing flat.", unreachable);
       return flat("the scribe could not be reached", query);
     } catch (RuntimeException broken) {
+      if (consult != null) consult.require();
+      if (broken instanceof io.aeyer.plowshare.server.archive.MemoryWrites.InferenceUnavailable)
+        return flat(broken.getMessage(), query);
       // Wider than LlmException on purpose, and the sentence says which
       // one it is: an IllegalArgumentException out of ChatRequest for a
       // definition whose model: is misconfigured is not the endpoint being

@@ -49,7 +49,8 @@ class ScheduleFilesDatabaseTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE user_inbox,firings,triggers,schedules,projects,admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE user_inbox,firings,triggers,schedules,projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES ('owner','fixture',FALSE),('other','fixture',TRUE)");
     Long project =
@@ -126,7 +127,7 @@ class ScheduleFilesDatabaseTest {
 
   @Test
   void theSharedGlobalFolderCanHaveOnlyOneRegisteredOwner() {
-    jdbc.update("UPDATE admins SET server_admin=TRUE");
+    jdbc.update("UPDATE admins SET server_admin=TRUE WHERE account_kind='USER'");
     var global = store.register("owner", null, "server");
     assertEquals(global, store.register("owner", null, "server"));
     assertThrows(RuntimeException.class, () -> store.register("other", null, "server"));

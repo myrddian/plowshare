@@ -85,7 +85,7 @@ function topicBody(d: TopicDetail, width: number): Tinted[] {
     line(`${d.topic.project} · ${d.topic.label} · ${d.topic.state}`, 'accent'),
     line(`${d.topic.id} · opened by ${d.topic.opener}`, 'muted'),
     line(
-      `${d.root.potSpent ?? 0}/${d.root.potTotal ?? 0} model calls spent · ${d.root.reserve ?? 0} closing reserve${d.topic.parent ? ' · shared root budget' : ''}`,
+      `${d.root.potTotal === null ? `${d.root.potSpent ?? 0} model calls spent · unlimited allowance` : `${d.root.potSpent ?? 0}/${d.root.potTotal} model calls spent`} · ${d.root.reserve ?? 0} closing reserve${d.topic.parent ? ' · shared root budget' : ''}`,
       'waiting',
     ),
     line(''),

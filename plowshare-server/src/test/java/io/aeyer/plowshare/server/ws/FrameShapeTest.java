@@ -125,6 +125,9 @@ class FrameShapeTest {
       FrameAreas.servicesNeeded().forEach(service -> mockBean(context, service));
       mockBean(context, io.aeyer.plowshare.server.access.ProjectAuthorization.class);
       mockBean(context, ActingRequests.class);
+      context.registerBean(
+          io.aeyer.plowshare.server.requests.RequestProjects.class,
+          () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY);
       FrameAreas.declared().forEach(context::register);
       context.register(FrameRoutingConfig.class);
       context

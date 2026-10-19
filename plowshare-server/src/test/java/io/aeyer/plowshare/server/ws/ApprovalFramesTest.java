@@ -101,6 +101,16 @@ class ApprovalFramesTest {
     when(store.find("apr_1")).thenReturn(Optional.of(ASKED));
   }
 
+  private void useRetainedContinuation() {
+    var continuation = mock(io.aeyer.plowshare.server.approvals.RunApprovalContinuations.class);
+    when(continuation.resume("apr_1"))
+        .thenReturn(
+            Optional.of(
+                new io.aeyer.plowshare.server.approvals.RunApprovalContinuations.Resumed(
+                    null, false, null)));
+    frames.useContinuations(continuation);
+  }
+
   @Test
   void message_approvals_use_the_transport_continuation_instead_of_an_ordinary_run() {
     var messaging = mock(io.aeyer.plowshare.server.agents.Messaging.class);
@@ -113,6 +123,70 @@ class ApprovalFramesTest {
     assertEquals(Code.OK, answered.code());
     verify(messaging).continueApproved(any(), anyString());
     verify(runs, never()).continueApproved(anyString(), anyString(), anyString(), any(), any());
+  }
+
+  @Test
+  void a_live_retained_call_is_answered_without_starting_or_prompting_any_agent() {
+    var suspended = mock(io.aeyer.plowshare.server.approvals.SuspendedRunCalls.class);
+    var active = new io.aeyer.plowshare.server.approvals.ActiveRunApprovals();
+    active.entered("apr_1", "cnv_1");
+    frames.useSuspendedCalls(suspended);
+    useRetainedContinuation();
+    when(suspended.find("apr_1"))
+        .thenReturn(
+            Optional.of(
+                new io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call(
+                    "apr_1",
+                    "cnv_1",
+                    "original-session",
+                    "local",
+                    new io.aeyer.plowshare.protocol.ToolCall("call_1", "run", "{}"),
+                    "waiting",
+                    "asked",
+                    null,
+                    null,
+                    null)));
+    when(store.allow(eq("apr_1"), eq("once"), any(), any())).thenReturn(true);
+    when(store.deny("apr_1", "enzo", "Not needed")).thenReturn(true);
+    assertEquals(
+        Code.OK,
+        route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"once\"}").code());
+    assertEquals(
+        Code.OK,
+        route(
+                FrameTypes.APPROVAL_ANSWER,
+                "{\"id\":\"apr_1\",\"decision\":\"deny\",\"reason\":\"Not needed\"}")
+            .code());
+    verify(store).deny("apr_1", "enzo", "Not needed");
+    verify(runs, never()).start(any(), any());
+    verify(runs, never()).continueApproved(anyString(), anyString(), anyString(), any(), any());
+    assertTrue(continuedByTheEngine.isEmpty());
+  }
+
+  @Test
+  void a_call_completed_before_the_answer_handler_returns_does_not_start_a_second_turn() {
+    var suspended = mock(io.aeyer.plowshare.server.approvals.SuspendedRunCalls.class);
+    frames.useSuspendedCalls(suspended);
+    useRetainedContinuation();
+    when(suspended.find("apr_1"))
+        .thenReturn(
+            Optional.of(
+                new io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call(
+                    "apr_1",
+                    "cnv_1",
+                    "original-session",
+                    "local",
+                    new io.aeyer.plowshare.protocol.ToolCall("call_1", "run", "{}"),
+                    "completed",
+                    "used",
+                    "enzo",
+                    null,
+                    "exit 0")));
+    when(store.allow(eq("apr_1"), eq("once"), any(), any())).thenReturn(true);
+    assertEquals(
+        Code.OK,
+        route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"once\"}").code());
+    verify(runs, never()).start(any(), any());
   }
 
   @Test
@@ -154,8 +228,7 @@ class ApprovalFramesTest {
     assertEquals(
         "tab-1", asked.getValue().session(), "the answering socket's files are the ones reached");
     assertTrue(
-        asked.getValue().task().startsWith("[approval] The person allowed"),
-        asked.getValue().task());
+        asked.getValue().task().startsWith("[approval] Command approved"), asked.getValue().task());
     assertEquals(Speaker.approval("apr_1"), asked.getValue().speaker());
     assertEquals("enzo", asked.getValue().callerHandle());
   }
@@ -269,7 +342,7 @@ class ApprovalFramesTest {
 
     assertEquals(Code.OK, outcome.code());
     assertEquals("cnv_conductor", continuedByTheEngine.get(0));
-    assertTrue(continuedByTheEngine.get(1).startsWith("[approval] The person allowed"));
+    assertTrue(continuedByTheEngine.get(1).startsWith("[approval] Command approved"));
     verify(runs, never())
         .continueApproved(anyString(), anyString(), anyString(), any(Speaker.class), any());
     verify(runs, never()).start(any(), any());
@@ -488,6 +561,21 @@ class ApprovalFramesTest {
     assertEquals(
         Code.BAD_REQUEST,
         route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"always\"}").code());
+  }
+
+  @Test
+  void a_denial_reason_is_strict_text_and_invalid_values_change_nothing() {
+    for (String reason : List.of("null", "5", "true", "[]", "{}", "\"   \"")) {
+      assertEquals(
+          Code.BAD_REQUEST,
+          route(
+                  FrameTypes.APPROVAL_ANSWER,
+                  "{\"id\":\"apr_1\",\"decision\":\"deny\",\"reason\":" + reason + "}")
+              .code());
+    }
+    verify(store, never()).deny(anyString(), anyString(), any());
+    verify(store, never()).deny(anyString(), anyString());
+    verify(runs, never()).start(any(), any());
   }
 
   @Test

@@ -92,6 +92,7 @@ public final class Board {
   /** A seat conversation created in a transaction, told to the log stages after it commits. */
   private record Seated(String conversation, Home home, String agent, boolean bot) {}
 
+  private final io.aeyer.plowshare.server.archive.ProjectMembers members;
   private final BoardStore store;
   private final SwarmCatalog swarms;
   private final ConversationStore conversations;
@@ -132,7 +133,9 @@ public final class Board {
       Consumer<String> drain,
       UnitOfWork work,
       IntSupplier closingReserve,
-      Supplier<Instant> clock) {
+      Supplier<Instant> clock,
+      io.aeyer.plowshare.server.archive.ProjectMembers members) {
+    this.members = Objects.requireNonNull(members);
     this.store = Objects.requireNonNull(store, "store");
     this.swarms = Objects.requireNonNull(swarms, "swarms");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
@@ -186,16 +189,20 @@ public final class Board {
     if (swarm.members().isEmpty()) {
       throw new Refused("this project's swarm has no members to wake — " + swarm.why());
     }
-    int total =
-        request.budget() == null ? swarm.budget() : Math.min(request.budget(), swarm.budget());
-    if (total < 2) {
+    Integer total =
+        request.budget() == null
+            ? swarm.budget()
+            : swarm.budget() == null
+                ? request.budget()
+                : Math.min(request.budget(), swarm.budget());
+    if (total != null && total < 2) {
       throw new Refused(
           "a topic's budget is at least 2 model calls — one for a member and"
               + " one kept for closing it; "
               + total
               + " was asked for");
     }
-    int reserve = reserveOf(total, closingReserve.getAsInt());
+    int reserve = total == null ? 0 : reserveOf(total, closingReserve.getAsInt());
     List<Seated> seated = new ArrayList<>();
     Set<String> targets = new LinkedHashSet<>();
     Opened opened =
@@ -392,9 +399,12 @@ public final class Board {
         work.inTransaction(
             () -> {
               BoardTopic topic = lockedOpenTopic(topicId);
-              if (!Objects.equals(account, topic.account())) {
-                throw new Refused("Choose a topic owned by this account.");
-              }
+              if (store.messagingTopic(topic.id()))
+                throw new Refused("Private message instances use their own lifecycle controls");
+              members.requireRole(
+                  topic.project(),
+                  account,
+                  io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR);
               if (!members(topic).contains(member)) {
                 throw new Refused("Choose a member of this project's swarm.");
               }
@@ -409,7 +419,7 @@ public final class Board {
                     "Only a stopped, failed member can be retried; refresh its state.");
               }
               BoardTopic root = store.topic(topic.root()).orElseThrow();
-              if (root.isClosed() || root.potSpent() >= root.potTotal() - root.reserve()) {
+              if (root.isClosed() || root.exhausted(false)) {
                 throw new Refused(
                     "The topic has no member allowance left; raise its total before retrying.");
               }
@@ -983,32 +993,41 @@ public final class Board {
   }
 
   /** An operator raises the tree's absolute model-call ceiling, then recovers owed members. */
-  public BoardTopic topup(String topicId, Integer total) {
-    if (total == null) {
-      throw new Refused("a top-up requires maxModelCalls, the new total");
-    }
-    BoardTopic topic = openTopic(topicId);
-    String rootId = topic.root();
+  public BoardTopic topup(String topicId, Integer total, String account) {
+    if (total == null) throw new Refused("A top-up requires maxModelCalls, the new absolute total");
+    BoardTopic selected = openTopic(topicId);
+    if (store.messagingTopic(selected.id()))
+      throw new Refused("Private message instances use their own lifecycle controls");
+    members.requireRole(
+        selected.project(), account, io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR);
+    String rootId = selected.root();
+    List<Seated> seated = new ArrayList<>();
+    Set<String> targets = new LinkedHashSet<>();
     BoardTopic topped =
         work.inTransaction(
             () -> {
               BoardTopic root = lockedOpenTopic(rootId);
-              if (total <= root.potTotal()) {
-                throw new Refused(
-                    "a top-up raises maxModelCalls above the current total " + root.potTotal());
-              }
+              if (root.potTotal() == null || total <= root.potTotal())
+                throw new Refused("A top-up raises the current finite absolute total");
               store.topup(rootId, total, reserveOf(total, closingReserve.getAsInt()));
+              for (BoardTopic open : store.openTree(rootId)) {
+                if (!BoardTopic.BY_PERSON.equals(open.openerKind()))
+                  notifyOpener(
+                      open,
+                      "exhausted",
+                      "The operation allowance was raised; continue the existing topic.",
+                      WakeRules.Reason.EXHAUSTED,
+                      seated,
+                      targets);
+              }
               return store.topic(rootId).orElseThrow();
             });
+    afterCommit(seated, targets);
     work.afterCommit(
         () -> {
-          for (BoardTopic open : store.openTree(rootId)) {
-            for (BoardSeat seat : store.seats(open.id())) {
-              if (!seat.isOpener()) {
-                reowe(open.id(), seat.occupant());
-              }
-            }
-          }
+          for (BoardTopic open : store.openTree(rootId))
+            for (BoardSeat seat : store.seats(open.id()))
+              if (!seat.isOpener()) reowe(open.id(), seat.occupant());
         });
     return topped;
   }
@@ -1028,19 +1047,7 @@ public final class Board {
           if (root.isClosed()) {
             return null;
           }
-          if (root.potSpent() >= root.potTotal()) {
-            for (BoardTopic open : store.openTree(rootId)) {
-              finishClose(
-                  open,
-                  BoardMessage.BY_HARNESS,
-                  "harness",
-                  null,
-                  documents(open, "closed by the harness: budget exhausted"),
-                  closedIds,
-                  seated,
-                  targets);
-            }
-          } else if (root.potTotal() - root.potSpent() <= root.reserve()) {
+          if (root.exhausted(false)) {
             if (store.exhaust(rootId)) {
               for (BoardTopic open : store.openTree(rootId)) {
                 store.refuseMemberWakes(open.id(), "the root's budget is exhausted");

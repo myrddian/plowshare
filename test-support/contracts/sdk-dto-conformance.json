@@ -225,6 +225,86 @@
   },
   {
     "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": "Publishing is unnecessary"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": "  "
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": 5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "deny",
+      "reason": "bad\u0000reason"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "approval.answer",
+    "value": {
+      "id": "approval-fixture",
+      "decision": "once",
+      "reason": "not a denial"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "information.interchange.import",
     "value": {
       "scope": {
@@ -1985,7 +2065,7 @@
     "operation": "information.interchange.import",
     "value": {
       "scope": {
-        "kind": "shared"
+        "kind": "global_read"
       },
       "requestId": "11111111-1111-1111-1111-111111111111",
       "plan": {
@@ -5674,6 +5754,516 @@
   },
   {
     "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "promptTokens": null,
+          "completionTokens": null,
+          "reasoningTokens": null
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "reasoningTokens": 0
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "promptTokens": 1200,
+          "completionTokens": 1200,
+          "reasoningTokens": 1200
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "promptTokens": -1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "promptTokens": 1.5
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "promptTokens": "12"
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "completionTokens": -1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "completionTokens": 1.5
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "completionTokens": "12"
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "reasoningTokens": -1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "reasoningTokens": 1.5
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          },
+          "reasoningTokens": "12"
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
     "operation": "message.delivery",
     "value": {
       "message": "msg_fixture",
@@ -6213,7 +6803,7 @@
       "scope": {
         "kind": "project",
         "project": "fixture",
-        "includeShared": false
+        "includeGlobal": false
       }
     },
     "valid": true
@@ -10124,6 +10714,62 @@
     "operation": "swarm.types",
     "value": {
       "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": null,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": null
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": null,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
       "types": []
     },
     "valid": true
@@ -11313,6 +11959,525 @@
       "project": "fixture",
       "scope": "linear",
       "disconnected": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {},
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {
+      "root": "cnv_fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {
+      "causation": "chain-fixture",
+      "visibility": "server"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.list",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "conversations": [],
+      "total": 0,
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.list",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "conversations": [],
+      "total": -1,
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.list",
+    "value": {
+      "snapshotAt": "yesterday",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "conversations": [],
+      "total": 0,
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.tools",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "tools": [],
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.calls",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "calls": [],
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.queues",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "queues": [],
+      "summaries": [],
+      "pools": [],
+      "cursor": null,
+      "coverage": []
     },
     "valid": true
   }

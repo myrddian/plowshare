@@ -28,7 +28,9 @@ public class BoardFrames implements FrameArea {
                   "the topic whose root pot is to be raised");
           BoardController.Topup request =
               Payloads.as(payload, BoardController.Topup.class, FrameTypes.BOARD_TOPUP);
-          return Outcome.ok(board.topup(topic, request.maxModelCalls()));
+          return Outcome.ok(
+              board.topup(
+                  topic, request.maxModelCalls(), asking.requireHandle(FrameTypes.BOARD_TOPUP)));
         });
   }
 }

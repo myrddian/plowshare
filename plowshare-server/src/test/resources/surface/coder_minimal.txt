@@ -110,6 +110,8 @@ parameters:
 === tool: run ===
 Run one command in a directory this job can reach, and read its exit status and output. The command is a list — the program, then each argument as its own item — and it runs with no shell, so pipes, redirects, globs, && and $VARIABLES mean nothing; run two commands as two calls.
 
+Submit each operation once. The harness handles any approval and suspends this exact call until the person decides. Do not ask for approval in chat or submit the call again after approval. You receive the command result, or a denial naming who declined it and why.
+
 Its input is `stdin` when you give one — the whole text, written to it as if typed and then ended — and otherwise nothing, so anything that waits for you to type reads the end of its input at once. A heredoc or a redirect written as an argument is refused, since it would reach the program as an argument. It is killed at its timeout. Output that is too long keeps its end, because that is where a build says what failed.
 
 Whether commands may run at all, whether a shell such as bash may be the program, the timeout, and which variables the command sees are set by the project's environment, separately for the server and for the machine the files are on. A refusal says which setting stopped it; no turn of yours can change one.

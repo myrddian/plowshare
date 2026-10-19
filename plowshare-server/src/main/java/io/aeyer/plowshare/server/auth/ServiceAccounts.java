@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
@@ -54,6 +55,7 @@ public class ServiceAccounts {
   }
 
   private Account account(String handle, boolean lock) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     return repository.account(handle, lock);
   }
 
@@ -67,6 +69,7 @@ public class ServiceAccounts {
   }
 
   public Account create(String actor, String handle) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     accounts.requireServerAdmin(actor);
     if (handle == null || !handle.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"))
       throw new CallerFault("Supply a valid account handle");

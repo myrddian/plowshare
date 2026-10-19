@@ -1,3 +1,4 @@
+import { modelContextOf } from '../../../sdk/typescript/src/operations/trajectory.ts';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import { isList } from '../../../sdk/typescript/src/binding/values.ts';
@@ -1011,6 +1012,11 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
         'meta',
         `recorded ${moment(entry.recordedAt)}  ·  ${duration(entry.tookMillis)}`,
       ),
+    );
+
+    const visibility = modelContextOf(entry.kind, entry.supersededBy);
+    node.append(
+      el('div', 'meta', `${visibility.label} · ${visibility.detail}`),
     );
 
     if (entry.job) node.append(el('div', 'meta', `Job ${entry.job}`));

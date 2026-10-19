@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -38,13 +39,13 @@ class InformationCollectionsTest {
   @BeforeEach
   void fresh() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('reader','h'),('other','h')");
     catalogue =
         io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
             jdbc,
             new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source)),
-            new InformationAccess(new JdbcProjectMembers(jdbc)),
+            new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))),
             Clock.systemUTC());
   }
 
@@ -130,7 +131,7 @@ class InformationCollectionsTest {
     assertTrue(
         io.aeyer.plowshare.server.information.InformationFixtures.views(
                 catalogue.list(
-                    new InformationContext("reader", InformationContext.Selection.shared()),
+                    new InformationContext("reader", InformationContext.Selection.globalRead()),
                     100,
                     0,
                     "report"))

@@ -33,6 +33,11 @@ import java.util.regex.Pattern;
  * now, both readings ask through it, and the constant below names a handler that really exists.
  */
 public final class FrameTypes {
+  public static final String PROC_LIST = "proc.list";
+  public static final String PROC_INSPECT = "proc.inspect";
+  public static final String PROC_CALLS = "proc.calls";
+  public static final String PROC_QUEUES = "proc.queues";
+  public static final String PROC_TOOLS = "proc.tools";
   public static final String PROVIDER_CONNECTION_LIST = "provider.connection.list";
   public static final String PROVIDER_CONNECTION_STATUS = "provider.connection.status";
   public static final String PROVIDER_CONNECTION_SAVE = "provider.connection.save";

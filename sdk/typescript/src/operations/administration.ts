@@ -34,6 +34,7 @@ export interface AdministrativePayloads {
   'approval.answer': Id & {
     readonly decision: 'once' | 'conversation' | 'project' | 'deny';
     readonly prefix?: readonly string[];
+    readonly reason?: string;
   };
   'approval.revoke': Id;
   'board.topup': { readonly topic: string; readonly maxModelCalls: number };

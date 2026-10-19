@@ -56,7 +56,8 @@ class AdminSetupTest {
 
   @BeforeEach
   void reset() {
-    jdbc.execute("TRUNCATE admins, projects CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE admins, projects CASCADE");
     accounts = new AdminStore(jdbc);
     hasher = new PasswordHasher();
     var auth = new AuthProperties();
@@ -177,7 +178,15 @@ class AdminSetupTest {
               () ->
                   accounts.finishSetup("admin", bootstrap.passwordHash(), "second", "hash-second"));
       assertNotEquals(first.get(), second.get());
-      assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM admins", Integer.class));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM admins WHERE account_kind='USER'", Integer.class));
+      assertEquals(
+          2,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM authority_grants WHERE provenance='ADMIN_CONTROL' AND revoked_at IS NULL",
+              Integer.class));
     }
   }
 

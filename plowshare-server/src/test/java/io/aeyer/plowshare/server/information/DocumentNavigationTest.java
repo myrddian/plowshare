@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.*;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -13,10 +14,42 @@ import org.junit.jupiter.api.Test;
 class DocumentNavigationTest {
   final InformationNavigationRepository repository = mock(InformationNavigationRepository.class);
   final ProjectMembers members = mock(ProjectMembers.class);
-  final InformationAccess access = new InformationAccess(members);
+  final InformationAccess access = new InformationAccess(new EffectiveProjectPermissions(members));
   final DocumentNavigation service =
       new DocumentNavigation(repository, access, UnitOfWork.NONE, true);
   final InformationRequest.Selection selection = InformationRequest.Selection.personal();
+
+  @Test
+  void unavailableAuthorityStopsBeforeAnyResourceReadOrMutation() {
+    var failure = new IllegalStateException("authority unavailable");
+    when(members.role("research", "author")).thenThrow(failure);
+    var project =
+        new InformationRequest.Selection(
+            new InformationRequest.Scope("project", "research", false), "documents", null);
+    assertSame(
+        failure,
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                service.execute(
+                    "author",
+                    new InformationRequest.DocumentList(project, null, null, null, 20, 0))));
+    assertSame(
+        failure,
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                service.execute(
+                    "author",
+                    new InformationRequest.NavigationViewDelete(
+                        project, UUID.randomUUID(), UUID.randomUUID(), 1L))));
+    // Existing transaction/account fences precede admission; content and effects remain blocked.
+    verify(repository).snapshot();
+    verify(repository).requireActive("author");
+    verify(repository).lock();
+    verify(repository).lockAccount("author");
+    verifyNoMoreInteractions(repository);
+  }
 
   @Test
   void disabledWritesPerformNoMutationOrReceiptLookup() {
@@ -63,7 +96,7 @@ class DocumentNavigationTest {
 
   @Test
   void roleAndScopeAreCheckedOnEveryReadAndSavedScopeCannotEscapeServiceCeiling() {
-    when(members.mayUse("private", "author")).thenReturn(false);
+    when(members.role("private", "author")).thenReturn(Optional.empty());
     var selection =
         new InformationRequest.Selection(
             new InformationRequest.Scope("project", "private", false), "documents", null);
@@ -77,7 +110,8 @@ class DocumentNavigationTest {
     var command =
         new InformationRequest.NavigationViewSave(
             selection, UUID.randomUUID(), UUID.randomUUID(), 0L, "Saved", path);
-    when(members.mayUse("private", "@service/fixture")).thenReturn(true);
+    when(members.role("private", "@service/fixture"))
+        .thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
     assertThrows(RuntimeException.class, () -> service.execute("@service/fixture", command));
     verify(repository, never()).save(any(), any(), anyLong(), any(), any());
   }

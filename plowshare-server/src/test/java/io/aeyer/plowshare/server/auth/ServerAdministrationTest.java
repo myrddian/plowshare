@@ -63,7 +63,8 @@ class ServerAdministrationTest {
 
   @BeforeEach
   void setup() {
-    jdbc.execute("TRUNCATE admins,admin_audit CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE admins,admin_audit CASCADE");
     context = new AnnotationConfigApplicationContext();
     context.registerBean(JdbcTemplate.class, () -> jdbc);
     context.registerBean(

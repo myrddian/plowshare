@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.archive.ConversationStore;
@@ -34,6 +35,26 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
   private final Supplier<AgentRegistry> agents;
   private final Map<UUID, HarnessRun> runs = new ConcurrentHashMap<>();
 
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+  private InformationProcessingRepository processing;
+
+  /** Production queue gates retain independent SYSTEM execution and exact knowledge homes. */
+  public InformationStageHooks(
+      InformationStageRepository stages,
+      InformationCatalogue catalogue,
+      ConversationStore conversations,
+      LogStages logStages,
+      InformationJobs inputs,
+      Hooks configured,
+      Harness harness,
+      java.util.function.Supplier<AgentRegistry> agents,
+      io.aeyer.plowshare.server.access.SystemOperations system,
+      InformationProcessingRepository processing) {
+    this(stages, catalogue, conversations, logStages, inputs, configured, harness, agents);
+    this.system = java.util.Objects.requireNonNull(system);
+    this.processing = java.util.Objects.requireNonNull(processing);
+  }
+
   public InformationStageHooks(
       InformationStageRepository stages,
       InformationCatalogue catalogue,
@@ -60,12 +81,54 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
     String log = state.log();
     if (log == null || !state.systemCompatible()) {
       String previous = log;
-      var budget =
-          io.aeyer.plowshare.server.agents.Budget.resumed(state.allowance(), state.spent());
-      log =
-          conversations
-              .log(Origin.SUBMISSION, home, "document_pipeline", null, budget, lease.owner(), null)
-              .id();
+      io.aeyer.plowshare.server.agents.Budget budget;
+      if (processing != null) {
+        InformationProcessingRepository.BudgetSource selected =
+            processing.budgetSource(lease.revision());
+        budget =
+            io.aeyer.plowshare.server.agents.Budget.restored(
+                selected.id(), selected.limit(), selected.spent());
+      } else
+        budget = io.aeyer.plowshare.server.agents.Budget.resumed(state.allowance(), state.spent());
+      if (system == null) {
+        log =
+            conversations
+                .log(
+                    Origin.SUBMISSION, home, "document_pipeline", null, budget, lease.owner(), null)
+                .id();
+      } else {
+        var definition =
+            new AgentDefinition(
+                "document_pipeline",
+                "Internal processing log",
+                "system",
+                List.of(),
+                List.of(),
+                List.of(),
+                1,
+                Math.max(1, state.allowance()),
+                "Processing log");
+        var work =
+            system.admit(
+                io.aeyer.plowshare.server.access.SystemOperations.Purpose.DOCUMENT_PREPARATION,
+                home,
+                processing.home(lease.revision()),
+                definition,
+                lease.revision() + ":" + lease.generation() + ":" + lease.stage(),
+                () -> processing.requireLease(lease));
+        log =
+            conversations
+                .logSystem(
+                    Origin.SUBMISSION,
+                    home,
+                    "document_pipeline",
+                    null,
+                    budget,
+                    lease.owner(),
+                    null,
+                    work)
+                .id();
+      }
       inputs.bind(
           log,
           new InformationContext(

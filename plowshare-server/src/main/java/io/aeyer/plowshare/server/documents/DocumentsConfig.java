@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.documents;
 
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
+import io.aeyer.plowshare.server.access.ScopedPermissions;
 import io.aeyer.plowshare.server.agents.Citing;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
@@ -24,10 +26,20 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @EnableConfigurationProperties(DocumentsProperties.class)
 public class DocumentsConfig {
 
+  /** The unqualified source is the primary, Application-aware effective role resolver. */
+  @Bean
+  public ScopedPermissions scopedPermissions(
+      io.aeyer.plowshare.server.archive.ProjectMembers members) {
+    return new EffectiveProjectPermissions(members);
+  }
+
   @Bean
   public io.aeyer.plowshare.server.information.InformationAccess informationAccess(
-      io.aeyer.plowshare.server.archive.ProjectMembers members) {
-    return new io.aeyer.plowshare.server.information.InformationAccess(members);
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.requests.RequestProjects projects,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions accounts) {
+    return new io.aeyer.plowshare.server.information.InformationAccess(
+        permissions, projects, accounts);
   }
 
   @Bean
@@ -193,6 +205,17 @@ public class DocumentsConfig {
    * that fired earlier.
    */
   @Bean
+  public RetrievalService retrievalService(
+      DocumentStore store,
+      EmbeddingClient embeddings,
+      LlmProperties llm,
+      io.aeyer.plowshare.server.embedding.QueryEmbeddings queries) {
+    var reader = retrievalService(store, embeddings, llm);
+    reader.useQueries(queries);
+    return reader;
+  }
+
+  /** Isolated legacy fixtures do not admit production query execution. */
   public RetrievalService retrievalService(
       DocumentStore store, EmbeddingClient embeddings, LlmProperties llm) {
     return new RetrievalService(store, embeddings, llm.getEmbeddingModel(), llm.getEmbeddingDim())

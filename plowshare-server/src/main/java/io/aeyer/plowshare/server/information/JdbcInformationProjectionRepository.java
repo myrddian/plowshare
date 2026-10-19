@@ -29,34 +29,31 @@ public final class JdbcInformationProjectionRepository implements InformationPro
     this.content = Objects.requireNonNull(content);
   }
 
-  private record Header(
-      UUID resource, long generation, String name, String kind, String namespace) {}
+  private record Header(UUID resource, long generation, String name, String kind) {}
 
   private Header lock(InformationContext context, UUID revision) {
     // Embedding publication/activation locks slots before corpus rows. Follow that order here.
     jdbc.query(
         "SELECT slot FROM embedding_slots ORDER BY slot FOR SHARE",
         (row, index) -> row.getString(1));
+    content.requireWrite(context, revision);
     var rows =
         jdbc.query(
-            "SELECT q.id,r.generation,q.source_name,q.kind,q.namespace FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id"
-                + " WHERE r.id=? AND q.owner_handle=? AND q.namespace=? AND r.availability='active' AND r.document_type='document' AND r.source_bytes IS NOT NULL FOR UPDATE OF q,r",
+            "SELECT q.id,r.generation,q.source_name,q.kind FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id"
+                + " WHERE r.id=? AND r.availability='active' AND r.document_type='document' AND r.source_bytes IS NOT NULL FOR UPDATE OF q,r",
             (row, index) ->
                 new Header(
                     row.getObject(1, UUID.class),
                     row.getLong(2),
                     row.getString(3),
-                    row.getString(4),
-                    row.getString(5)),
-            revision,
-            context.account(),
-            InformationContentTypeService.namespace(context));
+                    row.getString(4)),
+            revision);
     if (rows.isEmpty())
       throw new CallerFault("Retained source is unavailable for metadata revision");
     var header = rows.getFirst();
     UUID head =
         jdbc.queryForObject(
-            "SELECT id FROM information_revisions WHERE resource_id=? ORDER BY ordinal DESC LIMIT 1",
+            "SELECT id FROM information_revision_allowances WHERE resource_id=? ORDER BY ordinal DESC LIMIT 1",
             UUID.class,
             header.resource());
     if (!revision.equals(head)) throw new CallerFault("INFORMATION_REVISION_CONFLICT");
@@ -90,7 +87,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
     hashes.add(
         hashRows(
             "SELECT jsonb_build_object('content',r.content_hash,'text',r.text_hash,'media',r.media_type,'title',r.title,'converter',r.converter,'outline',r.outline_top_level,"
-                + "'extraction',encode(sha256(convert_to(coalesce(r.extracted_text,''),'UTF8')),'hex')) content FROM information_revisions r WHERE r.id=?",
+                + "'extraction',encode(sha256(convert_to(coalesce(r.extracted_text,''),'UTF8')),'hex')) content FROM information_revision_allowances r WHERE r.id=?",
             revision));
     hashes.add(
         hashRows(
@@ -144,7 +141,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
       case "extract" ->
           Boolean.TRUE.equals(
               jdbc.queryForObject(
-                  "SELECT extracted_text IS NOT NULL AND text_hash IS NOT NULL FROM information_revisions WHERE id=?",
+                  "SELECT extracted_text IS NOT NULL AND text_hash IS NOT NULL FROM information_revision_allowances WHERE id=?",
                   Boolean.class,
                   revision));
       case "derive" -> boundedCorpus(revision);
@@ -411,7 +408,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
         target,
         origin);
     jdbc.update(
-        "INSERT INTO information_document_policies(document_id,owner_handle,visibility,project_id,assigned_at) SELECT ?,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,q.project_id,now() FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id WHERE r.id=?",
+        "INSERT INTO information_document_policies(document_id,owner_handle,visibility,project_id,assigned_at) SELECT ?,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,q.project_id,now() FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id WHERE r.id=?",
         target,
         origin);
     if (stages.contains("embed")) copyVectors("chunks", chunks);
@@ -469,15 +466,16 @@ public final class JdbcInformationProjectionRepository implements InformationPro
     if (!current.equals(manifest)) throw new CallerFault("INFORMATION_REVISION_CONFLICT");
     UUID target = UUID.randomUUID();
     jdbc.update(
-        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,source_uri,content_hash,text_hash,byte_size,source_bytes,extracted_text,converter,outline_top_level,document_type,document_subtype,allowance_total,processing_policy,starting_revision,revised_by)"
-            + " SELECT ?,old.resource_id,(SELECT max(ordinal)+1 FROM information_revisions WHERE resource_id=old.resource_id),old.title,old.media_type,old.source_uri,old.content_hash,"
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,source_uri,content_hash,text_hash,byte_size,source_bytes,extracted_text,converter,outline_top_level,document_type,document_subtype,allowance_total,processing_policy,starting_revision,revised_by,created_by,creator_evidence)"
+            + " SELECT ?,old.resource_id,(SELECT max(ordinal)+1 FROM information_revision_allowances WHERE resource_id=old.resource_id),old.title,old.media_type,old.source_uri,old.content_hash,"
             + (manifest.reusable().contains("extract") ? "old.text_hash" : "NULL")
             + ",old.byte_size,old.source_bytes,"
             + (manifest.reusable().contains("extract")
                 ? "old.extracted_text,old.converter,old.outline_top_level"
                 : "NULL,NULL,'[]'::jsonb")
-            + ",old.document_type,old.document_subtype,0,'explicit_only',old.id,? FROM information_revisions old WHERE old.id=?",
+            + ",old.document_type,old.document_subtype,0,'explicit_only',old.id,?,(SELECT id FROM authority_accounts WHERE legacy_handle=?),'authenticated_admission' FROM information_revision_allowances old WHERE old.id=?",
         target,
+        context.account(),
         context.account(),
         manifest.revision());
     if (prepared.binding() != null) content.attach(target, prepared.binding());

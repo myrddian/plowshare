@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
@@ -68,6 +69,7 @@ public class ServerAdministration {
   public record SessionsRevoked(String handle) {}
 
   private Account account(String handle) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     return repository.account(handle);
   }
 
@@ -91,6 +93,7 @@ public class ServerAdministration {
   }
 
   public Credential create(String actor, String handle, boolean serverAdmin) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     accounts.requireServerAdmin(actor);
     if (!handle.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"))
       throw new CallerFault(
@@ -147,6 +150,7 @@ public class ServerAdministration {
   }
 
   public Credential reset(String actor, String handle) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     accounts.requireServerAdmin(actor);
     if (actor.equals(handle))
       throw new CallerFault("Change your own password through the authenticated password command");

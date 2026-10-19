@@ -155,7 +155,8 @@ class DispatcherTest {
 
   @BeforeEach
   void wire() {
-    jdbc.execute("TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     firings = new JdbcFiringStore(jdbc);
     triggers = new JdbcTriggerStore(jdbc);

@@ -53,5 +53,13 @@
     <p id="retry-error" role="alert" hidden></p><p id="retry-notice" role="status"></p>
     <button id="retry-submit" class="primary-button" type="submit">Retry member</button>
   </form></dialog>
+  <dialog id="board-topup-dialog" aria-labelledby="board-topup-title"><form id="board-topup-form">
+    <header class="dialog-header"><h2 id="board-topup-title">Raise model call allowance</h2><button id="board-topup-close" type="button">Close</button></header>
+    <p id="topup-description"></p>
+    <label>New total call ceiling<input id="topup-limit" type="number" min="2" max="2147483647" step="1" required></label>
+    <p>Calls already spent stay counted. Failed members can then be retried in their existing conversations. Project write access is required.</p>
+    <p id="topup-error" role="alert" hidden></p>
+    <button id="topup-submit" class="primary-button" type="submit">Raise allowance</button>
+  </form></dialog>
 </body>
 </html>

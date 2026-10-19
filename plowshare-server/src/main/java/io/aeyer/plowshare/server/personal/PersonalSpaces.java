@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.personal;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -33,6 +34,13 @@ public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspac
   private final PersonalSpaceRepository repository;
   private final DataLayout data;
   private final UnitOfWork transactions;
+  private io.aeyer.plowshare.server.requests.RequestProjects requestProjects =
+      io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useRequestProjects(io.aeyer.plowshare.server.requests.RequestProjects projects) {
+    requestProjects = java.util.Objects.requireNonNull(projects);
+  }
 
   public PersonalSpaces(
       PersonalSpaceRepository repository, UnitOfWork transactions, DataLayout data) {
@@ -85,6 +93,8 @@ public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspac
   public Home home(String requested, String handle) {
     requireOwn(requested, handle);
     if (requested != null) return io.aeyer.plowshare.server.requests.RequestedHome.in(requested);
+    var project = requestProjects.implicit(handle);
+    if (project.isPresent()) return Home.of(project.orElseThrow());
     ensure(handle);
     return Home.of(name(handle));
   }
@@ -100,6 +110,7 @@ public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspac
   }
 
   public void ensure(String handle) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     if (repository.serviceAccount(handle))
       throw new CallerFault("Service accounts have no Personal space; supply a project");
     String name = name(handle);

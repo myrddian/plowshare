@@ -210,7 +210,23 @@ public final class DocumentTools {
         String owner,
         io.aeyer.plowshare.server.information.InformationJobs policies,
         String log) {
+      return forRun(access, owner, policies, log, null);
+    }
+
+    AgentTool forRun(
+        io.aeyer.plowshare.server.information.InformationAccess access,
+        String owner,
+        io.aeyer.plowshare.server.information.InformationJobs policies,
+        String log,
+        Runnable queryValidity) {
       return new AgentTool() {
+        private String queryCall;
+
+        @Override
+        public void calledAs(String id) {
+          queryCall = id;
+        }
+
         @Override
         public ToolSchema schema() {
           return Search.this.schema;
@@ -220,6 +236,15 @@ public final class DocumentTools {
         public String run(String arguments, Home home) {
           var context = access.forRun(owner, home);
           var reader = retrieval.scoped(access, context);
+          if (reader.queriesEnabled()) {
+            if (queryValidity == null || queryCall == null || log == null)
+              throw new io.aeyer.plowshare.server.faults.CallerFault(
+                  "Query needs retained run and call identity");
+            reader =
+                reader.forQueries(
+                    new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
+                        log + ":document_search:" + queryCall, queryValidity));
+          }
           if (policies != null) reader = reader.audited(policies.reads(log, context));
           return new Search(reader).run(arguments, home);
         }

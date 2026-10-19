@@ -932,6 +932,11 @@ class SessionEndToEndTest {
   })
   static class Wiring {
     @Bean
+    io.aeyer.plowshare.server.requests.RequestProjects requestProjects() {
+      return io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+    }
+
+    @Bean
     io.aeyer.plowshare.server.access.ProjectAuthorization projectAuthorization() {
       var authorization =
           org.mockito.Mockito.mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);
@@ -954,6 +959,8 @@ class SessionEndToEndTest {
     @Bean
     ProjectStore projects() {
       ProjectStore projects = mock(ProjectStore.class);
+      when(projects.id(PROJECT)).thenReturn(9L);
+      when(projects.exists(9L)).thenReturn(true);
       when(projects.find(PROJECT))
           .thenReturn(Optional.of(new ProjectRecord(PROJECT, onTheServer, List.of(), List.of())));
       when(projects.effectiveExclusions(any(ProjectRecord.class)))
@@ -1019,9 +1026,8 @@ class SessionEndToEndTest {
     }
 
     /**
-     * The production seam over the fixture registry above: no project named in this file has a row
-     * {@code projects.exists} would answer true for, so {@code forCaller} always falls back to the
-     * boot set -- matching what a raw {@code AgentRegistry} gave this controller before task 10.
+     * The registered fixture project keeps its explicit context while using the deployment
+     * definitions: this isolated server has no project definition directory.
      */
     @Bean
     DefinitionResolver definitionResolver(

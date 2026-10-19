@@ -108,17 +108,28 @@ class DigestsTest {
     // The ordering DigestControllerTest pins as a status: resolution on the
     // calling thread, so a blank project fails fast instead of becoming a
     // job that fails quietly on a worker.
-    verify(jobs, never()).submit(anyString(), any());
+    verify(jobs, never()).submit(anyString(), any(Home.class), any());
   }
 
   @Test
   void a_digest_is_submitted_under_the_digester_name_and_answers_its_id() {
-    when(jobs.submit(eq(Digests.AGENT), any())).thenReturn("job_9");
+    when(jobs.submit(eq(Digests.AGENT), any(Home.class), any())).thenReturn("job_9");
 
     Digests.Started started = digests.start("payments");
 
     assertEquals("job_9", started.id());
     assertEquals(Digests.AGENT, started.agent());
+    verify(jobs).submit(eq(Digests.AGENT), eq(Home.of("payments")), any());
+  }
+
+  @Test
+  void global_tier_is_retained_explicitly_without_reinterpreting_an_ordinary_global_project() {
+    digests.start(null);
+    digests.start("global");
+
+    verify(jobs).submit(eq(Digests.AGENT), eq(Home.global()), any());
+    verify(jobs).submit(eq(Digests.AGENT), eq(Home.of("global")), any());
+    verify(jobs, never()).submit(anyString(), any());
   }
 
   /** A pass that built something ended by answering. */
@@ -192,7 +203,7 @@ class DigestsTest {
   private Function<BooleanSupplier, Outcome> submittedPass() {
     digests.start("payments");
     ArgumentCaptor<Function<BooleanSupplier, Outcome>> work = ArgumentCaptor.captor();
-    verify(jobs).submit(eq(Digests.AGENT), work.capture());
+    verify(jobs).submit(eq(Digests.AGENT), eq(Home.of("payments")), work.capture());
     return work.getValue();
   }
 

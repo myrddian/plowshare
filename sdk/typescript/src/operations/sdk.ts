@@ -305,6 +305,15 @@ export type {
   SchemaType,
   SchemaLiteral,
 } from './schema-definition.ts';
+export { ProcClient } from './proc.ts';
+export type {
+  ProcQuery,
+  ProcConversation,
+  ProcConversations,
+  ProcQueues,
+  ProcCalls,
+  ProcInspection,
+} from './proc.ts';
 export {
   decodeToolSchema,
   validateToolSchema,

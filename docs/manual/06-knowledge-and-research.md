@@ -75,10 +75,26 @@ link does not delete evidence or widen an audience.
 
 ## Share intentionally and preserve evidence
 
-Personal, project and shared are information selections. A project selection
-requires current membership. Shared means an explicit grant on a revision;
-it is not an unowned global corpus. A project member's read access does not make
-them the owner who may mutate another person's source.
+Personal, project and `global_read` are information selections. A project selection
+requires current scoped READ. Personal and project searches include generally readable
+knowledge by default; set `includeGlobal:false` to narrow to the selected home.
+`global_read` selects only resources with the current GLOBAL_READ audience, wherever
+they are held. The explicit Global account selection instead selects Global custody.
+
+A resource's current root policy governs all revisions, including pinned history.
+The existing share command lets a Manager choose GLOBAL_READ: every active
+authenticated account, Application and service credential is eligible to read it.
+Unshare removes that audience from every revision. Old Shared flags grant no access;
+formerly compatible Shared roots narrow to HOME for deliberate review. Project
+Contributors can write in their area but cannot change permissions. Tags and
+finalisation do not grant an audience. Private inputs, retained references and
+mandatory restrictions still constrain disclosure.
+
+Service credentials use the same general-read defaults; they cannot select Personal.
+Retained runs also intersect every read with their captured home/Global READ ceiling.
+Global-account
+policy management requires a human Global Admin. This does not add Global creation
+or execution operations.
 
 Exclusion removes a revision from normal discovery while preserving authorized
 direct evidence reads. Withdrawal blocks content and dependent output reads.
@@ -87,7 +103,8 @@ policy. Neither action is interchangeable with unsharing or unlinking.
 
 The manual installer uses these ordinary operations. It does not introduce an
 exception to document authorization. Its `--share` publishes intentionally
-non-private manual chapters; the publishing account remains their owner.
+non-private manual chapters through the same root-audience checks; their home and
+creator provenance stay separate from that audience.
 
 ## Deep research
 
@@ -112,8 +129,10 @@ not a substitute for the audit or counter-evidence.
 
 Memory recall retrieves useful retained items; memory read fetches an actual item.
 Writing or resolving proposals and curating knowledge have their own ownership
-and model-work contracts. Memories carry formation provenance and lifecycle
-status. Historical or invalidated knowledge should be labelled rather than
+and model-work contracts. Confident curator recommendations remain pending
+proposals. Existing acceptance checks the authenticated caller's source Manager
+release and human Global Admin destination authority; the supplied `by` label is
+provenance. Memories carry formation provenance and lifecycle status. Historical or invalidated knowledge should be labelled rather than
 returned as current advice.
 
 Conversation retrieval searches retained history with bounded coverage. Digest

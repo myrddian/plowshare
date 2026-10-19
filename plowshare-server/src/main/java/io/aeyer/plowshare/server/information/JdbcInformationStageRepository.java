@@ -28,7 +28,7 @@ public class JdbcInformationStageRepository implements InformationStageRepositor
     return jdbc.queryForObject(
         "SELECT processing_log,allowance_total,allowance_spent,caller_session,"
             + " NOT EXISTS (SELECT 1 FROM inference_run_ownership o WHERE o.conversation_id=r.processing_log"
-            + " AND o.attribution->>'status' IS DISTINCT FROM 'SYSTEM') FROM information_revisions r WHERE id=?",
+            + " AND o.attribution->>'status' IS DISTINCT FROM 'SYSTEM') FROM information_revision_allowances r WHERE id=?",
         (row, n) ->
             new LogState(
                 name,
@@ -69,7 +69,7 @@ public class JdbcInformationStageRepository implements InformationStageRepositor
   @Override
   public UUID resource(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT resource_id FROM information_revisions WHERE id=?",
+        "SELECT resource_id FROM information_revision_allowances WHERE id=?",
         UUID.class,
         Objects.requireNonNull(revision));
   }

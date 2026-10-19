@@ -1053,7 +1053,9 @@ class ScribeTest {
     assertThrows(NullPointerException.class, () -> new Scribe(null, archive, agents));
     assertThrows(NullPointerException.class, () -> new Scribe(dispatcher, null, agents));
     assertThrows(NullPointerException.class, () -> new Scribe(dispatcher, archive, null));
-    assertThrows(NullPointerException.class, () -> new Scribe(dispatcher, archive, agents, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new Scribe(dispatcher, archive, agents, (java.time.Duration) null));
   }
 
   /**

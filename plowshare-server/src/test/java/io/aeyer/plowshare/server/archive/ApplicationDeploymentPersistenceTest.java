@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.ApplicationDeployment.*;
 import io.aeyer.plowshare.protocol.FileStoreReference;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.*;
 import io.aeyer.plowshare.server.acting.*;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.applications.SourceApplicationDeployments;
@@ -40,6 +41,21 @@ class ApplicationDeploymentPersistenceTest {
   ApplicationDeploymentStore store;
   SourceApplicationDeployments deployments;
   String name;
+
+  private ActingAuthorization actingPolicy(ActingRepository repository) {
+    var identities = new JdbcIdentityRepository(jdbc);
+    var grants = new JdbcScopedGrantRepository(jdbc);
+    var applications =
+        new io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy(
+            projects, new JdbcApplicationRegistrations(jdbc));
+    var lineage = new ApplicationGrantLineage(grants, applications);
+    return new LiveActingAuthorization(
+        repository,
+        new JdbcProjectMembers(jdbc),
+        java.time.Clock.systemUTC(),
+        identities,
+        new LiveScopedAuthority(grants, applications, lineage, identities));
+  }
 
   @BeforeAll
   static void migrate() {
@@ -378,9 +394,7 @@ class ApplicationDeploymentPersistenceTest {
     var repository =
         new JdbcActingWorkRepository(
             jdbc, new ConversationStore(jdbc), consent, new DataSourceTransactionManager(source));
-    var policy =
-        new LiveActingAuthorization(
-            consent, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var policy = actingPolicy(consent);
     var definition =
         new io.aeyer.plowshare.server.agents.AgentDefinition(
             "chat", "chat", "fast", List.of(), List.of(), List.of(), 4, 8, "Answer", true, false);
@@ -477,9 +491,7 @@ class ApplicationDeploymentPersistenceTest {
             new ConversationStore(jdbc),
             actingRepository(),
             new DataSourceTransactionManager(source));
-    var policy =
-        new LiveActingAuthorization(
-            actingRepository(), new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var policy = actingPolicy(actingRepository());
     var definition =
         new io.aeyer.plowshare.server.agents.AgentDefinition(
             "chat", "chat", "fast", List.of(), List.of(), List.of(), 4, 8, "Answer", true, false);
@@ -549,9 +561,7 @@ class ApplicationDeploymentPersistenceTest {
         repository
             .proof(io.aeyer.plowshare.server.auth.Tokens.hash(credential.credential()))
             .orElseThrow());
-    var policy =
-        new LiveActingAuthorization(
-            repository, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var policy = actingPolicy(repository);
     var contexts = new BoundActingContexts(repository, policy, java.time.Clock.systemUTC());
     var connection =
         new ActingContexts.Connection(
@@ -604,9 +614,7 @@ class ApplicationDeploymentPersistenceTest {
             "deployer",
             new RequestAuthority.Delegation(
                 name, "users", issued.token().id(), issued.token().scope()));
-    var policy =
-        new LiveActingAuthorization(
-            repository, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var policy = actingPolicy(repository);
     assertEquals(
         ProjectRole.CONTRIBUTOR,
         policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(name)));
@@ -657,9 +665,7 @@ class ApplicationDeploymentPersistenceTest {
             "deployer",
             new RequestAuthority.Delegation(
                 name, "users", credential.token().id(), credential.token().scope()));
-    var policy =
-        new LiveActingAuthorization(
-            repository, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var policy = actingPolicy(repository);
     assertEquals(
         ProjectRole.CONTRIBUTOR,
         policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(name)));
@@ -783,9 +789,7 @@ class ApplicationDeploymentPersistenceTest {
             binding.principal(),
             "deployer",
             new RequestAuthority.Delegation(name, "users", credential.token().id(), issue.scope()));
-    var policy =
-        new LiveActingAuthorization(
-            actingRepository(), new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var policy = actingPolicy(actingRepository());
     assertEquals(
         ProjectRole.CONTRIBUTOR,
         policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(scopeProject)));

@@ -76,7 +76,7 @@ public interface ActingPolicySource {
       application = ActingValues.application(application);
       actor = ActingValues.serviceActor(actor);
       grant = ActingValues.account(grant);
-      subject = ActingValues.account(subject);
+      subject = ActingValues.subject(subject);
       Objects.requireNonNull(scope, "scope");
       Objects.requireNonNull(expiresAt, "expiresAt");
     }

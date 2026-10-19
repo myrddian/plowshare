@@ -94,6 +94,23 @@ class SwarmDefinitionsTest {
   }
 
   @Test
+  void omitted_and_explicit_unlimited_policies_have_no_finite_fallback() throws Exception {
+    setUp();
+    Path file = new DataLayout(root).swarmFor(7L);
+    for (String policy : List.of("", "budget: unlimited\n")) {
+      swarm(file, "---\nmembers: [critic]\n" + policy + "---\nReview\n");
+      SwarmDefinitions.SwarmDefinition selected = definitions().forProject(7L);
+      org.junit.jupiter.api.Assertions.assertNull(selected.budget());
+      org.junit.jupiter.api.Assertions.assertNull(selected.selection().budget());
+      assertTrue(selected.refused().isEmpty(), selected.why());
+    }
+    Files.delete(file);
+    swarm(
+        file.resolveSibling("default.json"), "{\"members\":[\"critic\"],\"budget\":\"unlimited\"}");
+    org.junit.jupiter.api.Assertions.assertNull(definitions().forProject(7L).budget());
+  }
+
+  @Test
   void manual_example_resolves_its_members_and_bounds_the_shared_topic_budget() throws Exception {
     setUp();
     Path destination = new DataLayout(root).swarmFor(7L);

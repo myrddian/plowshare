@@ -224,6 +224,50 @@ public final class Summariser implements UsageAware {
    */
   private final SummaryEmbeddings summaryVectors;
 
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+  private java.util.function.Supplier<io.aeyer.plowshare.server.access.AuthorityIds.ScopeId>
+      systemScope = () -> null;
+
+  public Summariser withSystemScope(
+      java.util.function.Supplier<io.aeyer.plowshare.server.access.AuthorityIds.ScopeId> scope) {
+    this.systemScope = Objects.requireNonNull(scope);
+    return this;
+  }
+
+  private Runnable systemValidity = () -> {};
+
+  /** Production service composition requires the bounded SYSTEM capability. */
+  public Summariser(
+      DocumentStore store,
+      JobRuntime runtime,
+      Supplier<AgentRegistry> agents,
+      int spanSize,
+      Compaction logs,
+      SummaryEmbeddings vectors,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(store, runtime, agents, spanSize, logs, vectors);
+    this.system = Objects.requireNonNull(system);
+  }
+
+  /** Carries the existing generation/lease fence, independently of creator permissions. */
+  public Summariser withSystemValidity(Runnable validity) {
+    this.systemValidity = Objects.requireNonNull(validity);
+    return this;
+  }
+
+  private JobRuntime systemRuntime(AgentDefinition definition, String task) {
+    return system == null
+        ? runtime
+        : runtime.forSystemWork(
+            system.admit(
+                io.aeyer.plowshare.server.access.SystemOperations.Purpose.DOCUMENT_PREPARATION,
+                home,
+                systemScope.get(),
+                definition,
+                task,
+                systemValidity));
+  }
+
   public Summariser(
       DocumentStore store, JobRuntime runtime, Supplier<AgentRegistry> agents, int spanSize) {
     this(store, runtime, agents, spanSize, null);
@@ -316,6 +360,9 @@ public final class Summariser implements UsageAware {
     if (parent != null)
       copy.parentUsage =
           usageOwners.processing(parent, UsageAttribution.Operation.DOCUMENT_SUMMARY);
+    copy.system = system;
+    copy.systemValidity = systemValidity;
+    copy.systemScope = systemScope;
     copy.stages = stages;
     copy.usageOwners = usageOwners;
     return copy;
@@ -366,15 +413,16 @@ public final class Summariser implements UsageAware {
             home,
             owner,
             asked ->
-                runtime.run(
-                    definition,
-                    asked,
-                    home,
-                    budget,
-                    cancelled,
-                    null,
-                    JobWatch.UNWATCHED,
-                    conversation));
+                systemRuntime(definition, asked)
+                    .run(
+                        definition,
+                        asked,
+                        home,
+                        budget,
+                        cancelled,
+                        null,
+                        JobWatch.UNWATCHED,
+                        conversation));
     conversation.closed(task, outcome);
     if (outcome.ending() != Ending.ANSWERED)
       throw new IllegalStateException(outcome.ending() + ": " + outcome.text());
@@ -762,15 +810,16 @@ public final class Summariser implements UsageAware {
               home,
               owner,
               stageTask ->
-                  runtime.run(
-                      level,
-                      stageTask,
-                      home,
-                      budget,
-                      cancelled,
-                      null,
-                      JobWatch.UNWATCHED,
-                      conversation));
+                  systemRuntime(level, stageTask)
+                      .run(
+                          level,
+                          stageTask,
+                          home,
+                          budget,
+                          cancelled,
+                          null,
+                          JobWatch.UNWATCHED,
+                          conversation));
     } catch (DocumentStages.Blocked blocked) {
       tally.calls += blocked.modelCalls();
       Outcome stopped =

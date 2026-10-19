@@ -520,7 +520,7 @@ await test('document reader pages saved text and rejects foreign or malformed te
   assert.equal(f.state.library!.reader!.value!.text.length, 8192);
   assert.deepEqual(field(f.calls.at(-1)!.payload, ['scope']), {
     kind: 'personal',
-    includeShared: true,
+    includeGlobal: true,
   });
   await f.client.sourceText(id, 8192);
   assert.equal(f.state.library!.reader!.value!.text, 'Second page');

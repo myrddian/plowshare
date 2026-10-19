@@ -267,6 +267,8 @@ public final class RunTool implements AgentTool {
       Home home,
       HookContext context,
       java.util.function.BiFunction<HookContext, String, ToolPre> chain) {
+    waitingApproval = null;
+    waitingPlan = null;
     Plan plan;
     try {
       plan = plan(argumentsJson, home);
@@ -441,6 +443,78 @@ public final class RunTool implements AgentTool {
    */
   private final Map<String, Place> judgedPlaces = new ConcurrentHashMap<>();
 
+  private final Map<String, Duration> retainedTimeouts = new ConcurrentHashMap<>();
+
+  private boolean resuming;
+  private RunApproval waitingApproval;
+  private Plan waitingPlan;
+
+  /** The question this gate actually stored, never an identity parsed from a hook's prose. */
+  Optional<RunApproval> waitingApproval() {
+    return Optional.ofNullable(waitingApproval);
+  }
+
+  /** A suspended call rechecks current fences, but may never open a second approval question. */
+  ToolPre gateRetained(
+      String arguments,
+      String side,
+      Home home,
+      HookContext context,
+      java.util.function.BiFunction<HookContext, String, ToolPre> chain) {
+    Plan retained = plan(arguments, home);
+    JsonNode frozen = ToolArguments.parse(arguments, NAME, "retained run arguments");
+    if (!frozen.path("cwd").isTextual()
+        || !frozen.path("timeout_seconds").isIntegralNumber()
+        || frozen.path("timeout_seconds").longValue() != retained.timeout().toSeconds())
+      return new ToolPre(
+          arguments,
+          "The original directory and timeout cannot be preserved under the current environment; nothing ran.",
+          List.of());
+    if (!side.equals(retained.side()))
+      return new ToolPre(
+          arguments, "The approved command's execution side changed; nothing ran.", List.of());
+    resuming = true;
+    try {
+      ToolPre checked = gate(arguments, home, context, chain);
+      if (checked.isDenied()) return checked;
+      Plan current = plan(checked.arguments(), home);
+      // Compare effective values, not JSON formatting. A hook may re-encode identical fields,
+      // but may not change the operation the person approved.
+      if (!retained.argv().equals(current.argv())
+          || !retained.cwd().equals(current.cwd())
+          || !Objects.equals(retained.stdin(), current.stdin())
+          || !retained.timeout().equals(current.timeout())
+          || moved(retained.environment(), current.environment()) != null)
+        return new ToolPre(
+            arguments, "A hook changed the retained command; nothing ran.", checked.records());
+      retainedTimeouts.put(checked.arguments(), retained.timeout());
+      return checked;
+    } finally {
+      resuming = false;
+    }
+  }
+
+  /** Freeze resolved defaults too: a later environment must not silently change cwd or timeout. */
+  String retainedArguments(String arguments, Home home) {
+    Plan p = waitingPlan == null ? plan(arguments, home) : waitingPlan;
+    try {
+      return new com.fasterxml.jackson.databind.ObjectMapper()
+          .writeValueAsString(
+              new RetainedArguments(
+                  p.argv(), p.cwd().toString(), p.stdin(), p.timeout().toSeconds()));
+    } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+      throw new IllegalStateException("Could not retain the run call", failed);
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  private record RetainedArguments(
+      List<String> command,
+      String cwd,
+      String stdin,
+      @com.fasterxml.jackson.annotation.JsonProperty("timeout_seconds") long timeoutSeconds) {}
+
   private ToolPre placed(Plan plan, ToolPre through) {
     judgedPlaces.put(through.arguments(), Place.of(plan));
     return through;
@@ -468,15 +542,12 @@ public final class RunTool implements AgentTool {
     return null;
   }
 
-  /** What the model is shown for a call a person was asked about. {@link #isWaiting} reads it. */
+  /**
+   * Legacy waiting result for runtimes without retained-call support; never parsed as authority.
+   */
   static final String WAITING =
       "Waiting for a person to approve this command, so it did not run"
           + " and your turn ends here. They will answer, and you will be told what they decided.";
-
-  /** Whether a gate's refusal is a question put to a person rather than a refusal. */
-  static boolean isWaiting(ToolPre pre) {
-    return pre.isDenied() && pre.denied().startsWith(WAITING);
-  }
 
   /**
    * 4. Put the call to a person: a stored question, and the turn ended to wait for it — or a
@@ -493,6 +564,12 @@ public final class RunTool implements AgentTool {
       RunApprovalStore store,
       ApprovalTarget target,
       String reason) {
+    if (resuming) {
+      return new ToolPre(
+          judged.arguments(),
+          "The retained command's approval no longer applies; nothing ran.",
+          records);
+    }
     String nobody = null;
     if (target == null
         || (!target.attended() && target.handle() == null)
@@ -552,7 +629,9 @@ public final class RunTool implements AgentTool {
                 plan.argv(),
                 plan.cwd().toString(),
                 asked);
-    end.request(Outcome.Ending.AWAITING, ApprovalDelivery.question(question));
+    waitingApproval = question;
+    waitingPlan = plan;
+    end.requestApproval(question.id(), ApprovalDelivery.question(question));
     records.add(
         record(
             HookRecord.ASK,
@@ -820,8 +899,11 @@ public final class RunTool implements AgentTool {
     // only where it was judged to (Task 7 fix round 2). A call no gate saw — a fixture's —
     // is judged by refusal alone, as before.
     Place judged = judgedPlaces.remove(argumentsJson);
+    Duration retainedTimeout = retainedTimeouts.remove(argumentsJson);
     try {
       Plan plan = plan(argumentsJson, home);
+      if (retainedTimeout != null && !retainedTimeout.equals(plan.timeout()))
+        return "The approved timeout can no longer be preserved; nothing ran.";
       if (judged != null && !judged.equals(Place.of(plan))) {
         return PLACE_CHANGED;
       }
@@ -899,6 +981,11 @@ public final class RunTool implements AgentTool {
             argument as its own item — and it runs with no shell, so pipes, \
             redirects, globs, && and $VARIABLES mean nothing; run two commands as \
             two calls.
+
+            Submit each operation once. The harness handles any approval and \
+            suspends this exact call until the person decides. Do not ask for \
+            approval in chat or submit the call again after approval. You receive \
+            the command result, or a denial naming who declined it and why.
 
             Its input is `stdin` when you give one — the whole text, written to \
             it as if typed and then ended — and otherwise nothing, so anything \

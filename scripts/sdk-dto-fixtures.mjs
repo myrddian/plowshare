@@ -17,6 +17,10 @@ const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
 const approvalQuestion = {id:'approval-fixture',conversation:'conversation-fixture',askedIn:'conversation-fixture',agent:'worker',side:'local',command:['echo','fixture'],cwd:'/fixture',reason:null,state:'asked',scope:null,prefix:null,defaultPrefix:['echo'],createdAt:'2026-10-17T00:00:00Z',answeredAt:null,commands:null,judged:null};
 for (const reason of [null, '', 'Review the command']) result('approval.list',{approvals:[{...approvalQuestion,reason}]},true);
 for (const reason of [false, 1, [], {}]) result('approval.list',{approvals:[{...approvalQuestion,reason}]},false);
+input('approval.answer', {id:'approval-fixture',decision:'deny',reason:'Publishing is unnecessary'}, true);
+for (const reason of ['', '  ', null, 5, 'x'.repeat(4001), 'bad\0reason'])
+  input('approval.answer', {id:'approval-fixture',decision:'deny',reason}, false);
+input('approval.answer', {id:'approval-fixture',decision:'once',reason:'not a denial'}, false);
 
 const receipt = '11111111-1111-1111-1111-111111111111';
 
@@ -49,7 +53,7 @@ for(const revisions of [[],['bad'],Array(17).fill(receipt),[receipt,receipt]]) i
 for(const path of ['/absolute.md','../source.md','safe/../source.md','safe//source.md','safe/CON.md','safe/.git/config','safe/nul','file.','safe/']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{...portableBundle.documents[0],descriptor:{...portableDescriptor,path}}]}}},false);
 for(const bytesBase64 of ['', 'QQ','QR==','QQ==\n']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:portableDescriptor,bytesBase64}]}}},false);
 for(const changed of [{destinations:[]},{destinations:[{resource:receipt,name:'source.md',mode:'revise'}]},{destinations:[{resource:receipt,name:'source.md',mode:'create',expectedRevision:receipt}]},{reuse:[{foreignRevision:'bad',localRevision:receipt}]},{reuse:[{foreignRevision:receipt,localRevision:receipt}],destinations:[]},{restoreRelationships:'yes'}]) input('information.interchange.import',{...portableImport,plan:{...portablePlan,...changed}},false);
-input('information.interchange.import',{...portableImport,scope:{kind:'shared'}},false);
+input('information.interchange.import',{...portableImport,scope:{kind:'global_read'}},false);
 input('information.interchange.import',{...portableImport,plan:{...portablePlan,permissions:['admin']}},false);
 input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:{...portableDescriptor,provenance:{...portableDescriptor.provenance,dependencies:['22222222-2222-4222-8222-222222222222']}},bytesBase64:portableBody.toString('base64')}]}}},false);
 
@@ -177,6 +181,13 @@ result('conversation.trajectory', originPage({ ...originEntry, job: null, source
 for (const source of [{ kind: 'message', reference: null }, { kind: 'unknown', reference: 'msg_fixture' }, { kind: 'forged', reference: 'msg_fixture' }, { kind: 'message', reference: ' ' }])
   result('conversation.trajectory', originPage({ ...originEntry, source }), false);
 result('conversation.trajectory', originPage({ ...originEntry, job: ' ' }), false);
+// Provider usage is additive: unknown differs from a measured zero in every SDK.
+for (const tokens of [null, 0, 1200])
+  result('conversation.trajectory', originPage({ ...originEntry, promptTokens: tokens, completionTokens: tokens, reasoningTokens: tokens }), true);
+for (const key of ['promptTokens', 'completionTokens', 'reasoningTokens'])
+  for (const tokens of [-1, 1.5, '12'])
+    result('conversation.trajectory', originPage({ ...originEntry, [key]: tokens }), false);
+
 const messageDelivery = { message: 'msg_fixture', sender: 'sender', recipient: 'recipient',
   replyTo: null, replyExpected: false, finalReply: false, generated: false, state: 'handled',
   ending: 'ANSWERED', reply: null, job: 'job_fixture', deadlineAt: null,
@@ -214,7 +225,7 @@ result('application.token.issue',{receipt:appReceipt,credential:'pss_'+'1'.repea
 result('application.token.issue',{receipt:appReceipt,credential:'invalid'},false);
 input('schedule.list',{project:'fixture'},true);
 input('schedule.files',{project:null},false);
-input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeShared:false}},true);
+input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeGlobal:false}},true);
 input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',extra:true}},false);
 // Explicit project or existing conversation: omission/null must never choose Personal implicitly.
 for (const operation of ['conversation.open','conversation.list','conversation.latest','orchestration.start','agent.run']) {
@@ -466,6 +477,8 @@ input('application.files', { project: 'chatbot', location: { store: 'outputs', p
 const namedSelection = {name:'privacy', revision:'a'.repeat(64), description:'Review privacy', members:['researcher'], budget:20};
 const namedType = {name:'privacy', members:['researcher'], budget:20, refused:{}, origin:'swarm/privacy.md', selection:namedSelection};
 result('swarm.types', {project:'fixture', types:[namedType]}, true);
+result('swarm.types', {project:'fixture', types:[{...namedType,budget:null,selection:{...namedSelection,budget:null}}]}, true);
+result('swarm.types', {project:'fixture', types:[{...namedType,budget:null}]}, false);
 result('swarm.types', {project:'fixture', types:[]}, true);
 for (const change of [{name:'../privacy'}, {revision:'bad'}, {budget:1}, {budget:2.5}, {description:'x'.repeat(4097)}, {members:['researcher','researcher']}, {members:[' ']}])
   result('swarm.types', {project:'fixture', types:[{...namedType, selection:{...namedSelection,...change}}]}, false);
@@ -502,6 +515,26 @@ input('tool.scope.disconnect', { project: 'fixture', scope: 'linear' }, true);
 result('tool.scope.connect', { ...scopeConnection, sourceProvider: 'linear', provider: 'p-abc', account: 'alice' }, true);
 result('tool.scope.list', { connections: [] }, true);
 result('tool.scope.disconnect', { project: 'fixture', scope: 'linear', disconnected: true }, true);
+
+const procSelection={visibility:'mine',project:null,conversation:null,root:null,causation:null,active:null,after:null,limit:50};
+const procPage={snapshotAt:'2026-10-19T01:00:00Z',selection:procSelection,conversations:[],total:0,cursor:null,coverage:[]};
+for(const operation of ['proc.list','proc.calls','proc.queues','proc.tools']) {
+  input(operation,{},true);
+  input(operation,{visibility:'server',limit:100,active:true},true);
+  input(operation,{conversation:'cnv_fixture',after:'cursor:fixture'},true);
+  input(operation,{after:'x'.repeat(257)},false);
+  for(const change of [{limit:0},{limit:101},{limit:1.5},{active:'true'},{account:'other'},{conversation:'bad\u0000id'},{visibility:'admin'}])input(operation,change,false);
+}
+input('proc.inspect',{},false);
+input('proc.inspect',{root:'cnv_fixture'},true);
+input('proc.inspect',{conversation:'cnv_fixture',after:'cursor:fixture'},true);
+input('proc.inspect',{causation:'chain-fixture',visibility:'server'},true);
+result('proc.list',procPage,true);
+result('proc.list',{...procPage,total:-1},false);
+result('proc.list',{...procPage,snapshotAt:'yesterday'},false);
+result('proc.tools',{snapshotAt:procPage.snapshotAt,selection:procSelection,tools:[],cursor:null,coverage:[]},true);
+result('proc.calls',{snapshotAt:procPage.snapshotAt,selection:procSelection,calls:[],cursor:null,coverage:[]},true);
+result('proc.queues',{snapshotAt:procPage.snapshotAt,selection:procSelection,queues:[],summaries:[],pools:[],cursor:null,coverage:[]},true);
 
 for (const test of cases) {
   let accepted = true;

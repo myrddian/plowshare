@@ -2080,7 +2080,7 @@ await test('incomplete successful response families fail visibly and retain thei
 });
 
 await test('information keeps scoped admission receipts pending and waits only for the returned answer job', async () => {
-  const scope = { kind: 'project', project: 'research', includeShared: false };
+  const scope = { kind: 'project', project: 'research', includeGlobal: false };
   const fake = await fixture((frame) => {
     if (frame.type === 'information.upload')
       return {

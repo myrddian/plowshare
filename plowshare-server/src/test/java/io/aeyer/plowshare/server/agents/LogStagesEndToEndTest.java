@@ -114,7 +114,8 @@ class LogStagesEndToEndTest {
 
   @BeforeEach
   void fresh() throws Exception {
-    jdbc.execute("TRUNCATE TABLE user_inbox, entries, turns, conversations, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE user_inbox, entries, turns, conversations, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     conversations = new ConversationStore(jdbc);
     turns = new TurnStore(jdbc);

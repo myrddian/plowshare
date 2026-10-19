@@ -74,13 +74,15 @@ public class EventsConfig {
   }
 
   @Bean
-  public Inbox inbox(InboxStore store, ObjectProvider<AccountPushes> pushes) {
+  public Inbox inbox(
+      InboxStore store, ObjectProvider<AccountPushes> pushes, EventsProperties properties) {
     // Lazy: the push side is the event channel, which is built after the frame router,
     // which needs this. Resolved on the first delivery, not at wiring.
     return new Inbox(
         store,
         (handle, body) -> pushes.getIfAvailable(() -> AccountPushes.NONE).push(handle, body),
-        Instant::now);
+        Instant::now,
+        properties.getQuestionAlertRetryInterval());
   }
 
   /**
@@ -142,8 +144,10 @@ public class EventsConfig {
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
       DefinitionResolver resolver,
-      Callers callers) {
-    return new ScheduleReader(llm, GlobalAgentSnapshots.supply(globals, agents), resolver, callers);
+      Callers callers,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    return new ScheduleReader(
+        llm, GlobalAgentSnapshots.supply(globals, agents), resolver, callers, system);
   }
 
   @Bean

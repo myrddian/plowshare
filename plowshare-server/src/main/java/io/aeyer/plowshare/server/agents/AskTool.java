@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
-import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -154,13 +154,12 @@ public final class AskTool implements AgentTool {
 
   private final Asking asking;
   private final RetrievalService corpus;
-  private final IntSupplier allowance;
+  private final Supplier<Integer> allowance;
   private final BooleanSupplier cancelled;
   private final ToolSchema schema;
   private io.aeyer.plowshare.server.information.InformationAccess policy;
   private String owner;
   private String callerSession;
-  private Budget rootBudget;
   private io.aeyer.plowshare.server.information.InformationJobs inputs;
   private String parentLog;
   private java.util.function.Consumer<UUID> inputAudit;
@@ -176,14 +175,14 @@ public final class AskTool implements AgentTool {
    * @param allowance {@code plowshare.documents.ask-budget}, read per call rather than captured, so
    *     an operator moving it moves the next pass
    */
-  public AskTool(Asking asking, RetrievalService corpus, IntSupplier allowance) {
+  public AskTool(Asking asking, RetrievalService corpus, Supplier<Integer> allowance) {
     this(asking, corpus, allowance, () -> false, null);
   }
 
   private AskTool(
       Asking asking,
       RetrievalService corpus,
-      IntSupplier allowance,
+      Supplier<Integer> allowance,
       BooleanSupplier cancelled,
       ToolSchema schema) {
     this.asking = Objects.requireNonNull(asking, "asking");
@@ -215,7 +214,6 @@ public final class AskTool implements AgentTool {
     AskTool bound = forRun(cancelled);
     bound.policy = access;
     bound.owner = account;
-    bound.rootBudget = budget;
     bound.callerSession = session;
     return bound;
   }
@@ -253,7 +251,6 @@ public final class AskTool implements AgentTool {
               cancelled,
               schema);
       if (inputs != null) bound.inputAudit = inputs.reads(parentLog, context);
-      bound.rootBudget = rootBudget;
       return bound.run(argumentsJson, home);
     }
     try {
@@ -327,7 +324,7 @@ public final class AskTool implements AgentTool {
         asking.ask(
             document,
             question,
-            rootBudget == null ? Budget.of(allowance.getAsInt()) : rootBudget,
+            io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(allowance.get()),
             cancelled);
 
     StringBuilder out = new StringBuilder();

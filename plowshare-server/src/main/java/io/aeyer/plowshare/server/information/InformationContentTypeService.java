@@ -47,7 +47,8 @@ public final class InformationContentTypeService implements InformationContentTy
   }
 
   static String namespace(InformationContext context) {
-    if (context.selection().scope() == InformationContext.Scope.SHARED) throw absent();
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ
+        || context.selection().scope() == InformationContext.Scope.ACCOUNT) throw absent();
     return context.selection().scope() == InformationContext.Scope.PROJECT
         ? "project:" + context.selection().project()
         : "account:" + context.account();

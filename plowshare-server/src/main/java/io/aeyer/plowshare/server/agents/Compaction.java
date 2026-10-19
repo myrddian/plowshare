@@ -2,8 +2,10 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.archive.CompactionRecord;
 import io.aeyer.plowshare.server.archive.CompactionStore;
+import io.aeyer.plowshare.server.archive.ConversationLifecycle;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.EntryRecord;
@@ -17,6 +19,7 @@ import io.aeyer.plowshare.server.hooks.Summarised;
 import io.aeyer.plowshare.server.llm.FoldThresholds;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
+import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
@@ -37,6 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,12 +92,11 @@ import org.slf4j.LoggerFactory;
  * {@link #folding} is the separate guard, and a fold that finds one in flight is dropped rather
  * than queued — the reach only moves forward, so the next fold's span is simply wider.
  *
- * <p><b>A fold spends no budget</b>, which is the other half of the same argument. A budget is what
- * a person's turns spend from; a fold is the machinery keeping their conversation sendable, and
- * infrastructure that draws on an agent's allowance is infrastructure a person can be billed for
- * and can run out of. It is bounded instead by the two facts above — at most one per turn end, and
- * at most one in flight — and on a conversation whose turns are quicker than a summary is, the
- * second of those is the binding one.
+ * <p>Folds execute under bounded SYSTEM authority with their own operation allowance, unlimited
+ * unless the service spending policy limits/disables them. Usage retains the source conversation as
+ * provenance without debiting its task allowance. Claims are persisted before dispatch, including
+ * asynchronous folds. An unavailable service retains the full history. At most one fold per
+ * conversation remains the concurrency bound, independently of spending policy.
  *
  * <h2>Inside a turn, when the turn itself is what outgrew the window</h2>
  *
@@ -114,9 +117,9 @@ import org.slf4j.LoggerFactory;
  * call: the older steps of the turn, and any earlier turns no fold stands for yet, become one
  * summary placed where the steps were, and the turn's opening request and its most recent whole
  * steps — within about 30% of the window, and at least three — stay word for word. It is the one
- * fold a turn waits for, because the turn cannot go on without it; it is still on nobody's
- * allowance and against neither the turn's step cap nor the run's budget, and a failed one leaves
- * the turn running on its whole history, is written down, and is tried at most once per crossing.
+ * fold a turn waits for, because the turn cannot go on without it. It spends the shared model
+ * allowance without consuming the conversing agent's step cap. A failed one leaves the turn running
+ * on its whole history, is written down, and is tried at most once per crossing.
  *
  * <p><b>The one place this class estimates, and why it may.</b> Between turns the decision is built
  * only from measurements. Inside a turn the step's results were appended after the last
@@ -290,7 +293,7 @@ import org.slf4j.LoggerFactory;
  * reaches. A conversation with one turn therefore cannot be compacted at all — there is nothing
  * older — and that is said rather than worked around.
  */
-public final class Compaction {
+public final class Compaction implements SkillSummaries {
 
   private static final Logger log = LoggerFactory.getLogger(Compaction.class);
 
@@ -1134,6 +1137,39 @@ public final class Compaction {
    */
   private volatile Tokenizer tokenizer;
 
+  private SystemOperations system;
+
+  private Supplier<Budget> summaryAllowances = Budget::none;
+
+  /**
+   * Production wiring selects a fresh service-operation allowance independently of task spending.
+   */
+  public Compaction(
+      LlmDispatcher models,
+      Supplier<AgentDefinition> folder,
+      TurnStore turns,
+      CompactionStore compactions,
+      EntryStore entries,
+      int defaultContextLength,
+      ConversationStore conversations,
+      Learning learning,
+      Citing citing,
+      SystemOperations system,
+      Supplier<Budget> summaryAllowances) {
+    this(
+        models,
+        folder,
+        turns,
+        compactions,
+        entries,
+        defaultContextLength,
+        conversations,
+        learning,
+        citing);
+    this.system = Objects.requireNonNull(system);
+    this.summaryAllowances = Objects.requireNonNull(summaryAllowances);
+  }
+
   public Compaction(
       LlmDispatcher models,
       Supplier<AgentDefinition> folder,
@@ -1350,13 +1386,9 @@ public final class Compaction {
    * shutdown wait on a summarising stream, bounded by the transport's inactivity and whole-call
    * limits; {@code shutdownNow()} would interrupt one.
    *
-   * <p>The one more is that <b>interrupting a fold costs nothing worth saving</b>. A fold writes
-   * nothing until its summary is in hand, and a fold that dies before that leaves the log exactly
-   * as it found it — which is the same state a failed summarising call leaves, and the state the
-   * next fold repairs by covering the wider span. So there is nothing to drain and nothing to wait
-   * for, and letting an in-flight fold finish if it can is strictly better than stopping it. The
-   * threads are daemon by construction, every virtual thread is, so one still summarising does not
-   * hold the JVM open.
+   * <p>A fold writes no projection before its valid summary is in hand. An interrupted call keeps
+   * its allowance claim and accounting attempt; it is not refunded or replayed. Existing close
+   * policy lets healthy in-flight work finish. Virtual threads do not hold the JVM open.
    */
   public void close() {
     if (owned != null) {
@@ -1372,17 +1404,12 @@ public final class Compaction {
    * this is called — {@link TurnTranscript#before()} reads the log when the run starts, and {@link
    * TurnTranscript#foldWhenTheTurnIsOver()} takes the fold decision when it ends.
    *
-   * <p><b>No budget, and its absence is the rule.</b> A fold used to spend one call from the
-   * conversation's allowance and to decline when the allowance was nearly out. Both were wrong in
-   * the same direction: an allowance is what a person's turns spend from, and a fold is the
-   * machinery that keeps their conversation sendable. Infrastructure that draws on an agent's
-   * counter is infrastructure a person can be billed for, and — worse — infrastructure that stops
-   * working precisely when a long conversation needs it most.
+   * <p>Compaction selects its own SYSTEM operation allowance at the fold boundary. A source
+   * conversation is retained for inputs and usage attribution, never as the spending source.
    *
    * @param conversationId the conversation this turn is being spoken into
-   * @param definition the agent answering. Its {@code model} is both the specifier whose context
-   *     length bounds the history and the model that writes the summary, so that the summary is
-   *     counted by the same tokenizer that will read it
+   * @param definition the agent answering; its context length bounds the projected history. The
+   *     deployed folder definition supplies the summary model.
    */
   /**
    * Open the conversation a run that is nobody's turn keeps its log in, and hand back its
@@ -1738,6 +1765,11 @@ public final class Compaction {
     public void record(LoggedEntry entry) {
       turn.record(
           entry.kind() == EntryKind.UTTERANCE ? LoggedEntry.runtimeNote(entry.content()) : entry);
+    }
+
+    @Override
+    public void recordDurably(LoggedEntry entry) {
+      turn.recordDurably(entry);
     }
 
     @Override
@@ -2538,6 +2570,12 @@ public final class Compaction {
       }
     }
 
+    @Override
+    public void recordDurably(LoggedEntry entry) {
+      retainedAuthority.run();
+      entries.append(conversationId, turnOrdinal(), entry, job);
+    }
+
     /**
      * {@inheritDoc}
      *
@@ -2963,16 +3001,22 @@ public final class Compaction {
       if (confined)
         throw new IllegalStateException("Acting turns do not admit background model work");
       retainedAuthority.run();
-      return models.streamFold(
-          JobRuntime.requestFor(folding, asked).withAttribution(foldUsage(folding)),
-          Deltas.DISCARDING);
+      ChatRequest request =
+          summaryRequest(
+              SystemOperations.Purpose.CONVERSATION_COMPACTION,
+              conversationId,
+              folding,
+              JobRuntime.requestFor(folding, asked).withAttribution(foldUsage(folding)),
+              () -> false);
+      return models.streamFold(request, Deltas.DISCARDING);
     }
 
     /**
      * One model call, as the folder, over the work so far: {@link #summarise}'s shape — the
-     * folder's prompt in the system slot, the span as data in one user message — and on nobody's
-     * allowance. It streams under the pool's inactivity and whole-call bounds, as the between-turn
-     * fold does. A failure throws to the caller, so its reason reaches the diagnostic.
+     * folder's prompt in the system slot and the span as data in one user message, spending the
+     * separate SYSTEM service allowance. It streams under the pool's inactivity and whole-call
+     * bounds, as the between-turn fold does. A failure throws to the caller, so its reason reaches
+     * the diagnostic.
      */
     private String summariseTheWork(
         int since,
@@ -3238,11 +3282,13 @@ public final class Compaction {
               JobRuntime.describe(notRecorded));
         }
       } else if (outcome.ending() == Outcome.Ending.AWAITING) {
-        // A question put to a person, and not a failed attempt: the turn ended where it
-        // meant to, so no attempt_failed goes with it. The question is recorded as the
-        // turn's answer, untimed for the reason the branch below gives -- the loop records
-        // no answer for this ending, since the text is a tool's and not a model's reply.
-        record(LoggedEntry.answer(outcome.text(), List.of()));
+        // An ordinary question remains the turn's answer. A pre-inference recovery blocked on
+        // consent is only a harness status: it must not become another model-visible question.
+        // Never classify a model/tool-requested question merely by its display wording.
+        record(
+            !outcome.requested() && outcome.text().startsWith("Waiting for command approval [")
+                ? LoggedEntry.diagnostic(outcome.text())
+                : LoggedEntry.answer(outcome.text(), List.of()));
       } else if (outcome.ending() != Outcome.Ending.ANSWERED) {
         record(LoggedEntry.attemptFailed(outcome.ending(), outcome.failureText()));
         // The runtime's own sentence, and it is deliberately untimed: it
@@ -3495,8 +3541,8 @@ public final class Compaction {
      * answer only appears in the sum one turn later. So a single very large answer would otherwise
      * be answered against once before anything noticed, and the measured cost of a turn rises with
      * the standing history it answers against — {@link #SPAN_FRACTION}. This closes that one-turn
-     * lag, and the fold is free of the turn now that it neither blocks one nor is bought from
-     * anybody's allowance.
+     * lag. The fold runs after the turn while retaining its shared allowance and durable spending
+     * source.
      *
      * <p><b>It is why no minimum span is needed, and the reasoning survives the correction
      * intact.</b> The worry a threshold-only trigger raises is a fold that covers one turn, on
@@ -3904,7 +3950,7 @@ public final class Compaction {
     }
 
     /**
-     * One model call, as the folder, and on nobody's allowance.
+     * One model call as the deployed folder, under the captured conversation allowance.
      *
      * <p>Streaming, with deltas discarded and only the completed answer saved. The CLI reproduction
      * of cnv_319C7160165D5D4D on 2026-10-03 took 140 seconds to summarise 72,244 prompt tokens on
@@ -4366,17 +4412,12 @@ public final class Compaction {
   /**
    * A separate summary for a skill handoff: no fold, entry mutation, or parent projection change.
    */
-  public String summaryForSkill(
-      String source,
-      Transcript parent,
-      Budget budget,
-      java.util.function.BooleanSupplier cancelled) {
+  @Override
+  public String summaryForSkill(String source, Transcript parent, BooleanSupplier cancelled) {
     AgentDefinition folding = folder.get();
     if (cancelled.getAsBoolean())
       throw new IllegalStateException("The skill summary was cancelled before dispatch");
-    if (!budget.trySpend())
-      throw new IllegalStateException("The skill summary has no model budget remaining");
-    var asked =
+    ChatRequest asked =
         JobRuntime.requestFor(
                 folding,
                 List.of(
@@ -4388,11 +4429,58 @@ public final class Compaction {
                             + source)))
             .withAttribution(
                 parent.usage().forOperation(UsageAttribution.Operation.FOLD, folding.name()));
+    asked =
+        summaryRequest(
+            SystemOperations.Purpose.SKILL_SUMMARY,
+            parent.conversationId(),
+            folding,
+            asked,
+            cancelled);
     Completion completion = models.streamFold(asked, Deltas.DISCARDING, cancelled);
     String text = completion.content() == null ? "" : completion.content().strip();
     if (text.isEmpty())
       throw new IllegalStateException("The skill context summary came back empty");
     return text;
+  }
+
+  /**
+   * One model-only summary is one SYSTEM operation. Its claim is retained by inference admission,
+   * not by mutating the input conversation. Failed/uncertain attempts retain their claims and are
+   * never retried here. The source and cancellation fence is rechecked at dispatch.
+   */
+  private ChatRequest summaryRequest(
+      SystemOperations.Purpose purpose,
+      String conversation,
+      AgentDefinition worker,
+      ChatRequest request,
+      BooleanSupplier cancelled) {
+    Budget allowance = Objects.requireNonNull(summaryAllowances.get());
+    if (system == null) {
+      // Fixtures without retained SYSTEM admission still exercise the selected spending policy.
+      allowance
+          .tryClaim()
+          .orElseThrow(() -> new IllegalStateException("SYSTEM summary allowance exhausted"));
+      return request;
+    }
+    ConversationRecord source = conversations.find(conversation).orElseThrow();
+    return system.authorize(
+        purpose,
+        source.home(),
+        worker,
+        request,
+        allowance,
+        () -> {
+          if (cancelled.getAsBoolean())
+            throw new IllegalStateException("SYSTEM summary cancelled before dispatch");
+          ConversationRecord current =
+              conversations
+                  .find(conversation)
+                  .orElseThrow(() -> new IllegalStateException("Summary source unavailable"));
+          if (!source.home().equals(current.home())
+              || conversations.lifecycleOf(conversation).orElseThrow()
+                  == ConversationLifecycle.EJECTED)
+            throw new IllegalStateException("Summary source unavailable");
+        });
   }
 
   /**
@@ -4759,6 +4847,7 @@ public final class Compaction {
    */
   private static List<EntryRecord> whatWasSaidAndWhatCameBack(
       List<EntryRecord> log, boolean canRedeem) {
+    log = ApprovalProjection.settledResults(log);
     return canRedeem ? withResultsReferenced(log) : withTheWorkingDropped(log);
   }
 

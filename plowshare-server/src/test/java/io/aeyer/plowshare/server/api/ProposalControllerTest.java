@@ -59,7 +59,11 @@ class ProposalControllerTest {
             .findAndRegisterModules()
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     mvc =
-        MockMvcBuilders.standaloneSetup(new ProposalController(queue))
+        MockMvcBuilders.standaloneSetup(
+                new ProposalController(
+                    queue,
+                    org.mockito.Mockito.mock(
+                        io.aeyer.plowshare.server.archive.PromotionAccess.class)))
             .setControllerAdvice(new ApiExceptionHandler())
             .setMessageConverters(new MappingJackson2HttpMessageConverter(json))
             .build();

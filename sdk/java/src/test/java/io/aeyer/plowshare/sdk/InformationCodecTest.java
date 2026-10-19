@@ -24,7 +24,7 @@ class InformationCodecTest {
         "{\"revision\":\"00000000-0000-0000-0000-000000000001\",\"limit\":32769}",
         "{\"revision\":\"00000000-0000-0000-0000-000000000001\",\"offset\":-1}",
         "{\"revision\":\"00000000-0000-0000-0000-000000000001\",\"owner\":\"someone\"}",
-        "{\"revision\":\"00000000-0000-0000-0000-000000000001\",\"scope\":{\"kind\":\"personal\",\"includeShared\":\"false\"}}"
+        "{\"revision\":\"00000000-0000-0000-0000-000000000001\",\"scope\":{\"kind\":\"personal\",\"includeGlobal\":\"false\"}}"
       })
   void malformed_input_is_rejected_before_becoming_a_command(String input) {
     assertThrows(IOException.class, () -> InformationCodec.decode("read", input));

@@ -208,7 +208,8 @@ class OrchestrationsConfigTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE orchestration_messages, orchestrations, todos, todo_notices,"
             + " entries, turns, conversations, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
@@ -1804,39 +1805,6 @@ class OrchestrationsConfigTest {
             IllegalStateException.class,
             () -> OrchestrationsConfig.conductorChecks(refuses).apply(conductor));
     assertEquals("the model 'reasoning' is served by no pool", refused.getMessage());
-  }
-
-  @Test
-  void
-      the_caller_voice_speaks_as_the_caller_s_agent_and_refuses_an_agent_that_no_longer_resolves() {
-    Turn turn = mock(Turn.class);
-    Callers callers = mock(Callers.class);
-    DefinitionResolver.Caller resolved = new DefinitionResolver.Caller(null, null);
-    AgentDefinition interlocutor = mock(AgentDefinition.class);
-    when(callers.callerForConversation("cnv_1", null)).thenReturn(resolved);
-    when(callers.requireAgent("interlocutor", resolved)).thenReturn(interlocutor);
-    when(turn.isSpeaking("cnv_1")).thenReturn(true);
-    CallerVoice voice = OrchestrationsConfig.callerVoice(turn, callers);
-
-    assertTrue(voice.isSpeaking("cnv_1"));
-    voice.speak("cnv_1", "interlocutor", "the result", Speaker.orchestration("orc_1"));
-    // deliver(), not speak(): the harness relaying a conductor's own result into a caller's
-    // conversation is never a person's own words arriving fresh -- spec §6.
-    verify(turn)
-        .deliver(
-            eq("cnv_1"),
-            eq(interlocutor),
-            eq("the result"),
-            eq(Speaker.orchestration("orc_1")),
-            any());
-
-    when(callers.requireAgent("gone", resolved))
-        .thenThrow(new IllegalArgumentException("no agent is named 'gone'"));
-    Turn.Refused refused =
-        assertThrows(
-            Turn.Refused.class,
-            () -> voice.speak("cnv_1", "gone", "the result", Speaker.orchestration("orc_1")));
-    assertTrue(refused.getMessage().contains("no agent is named 'gone'"), refused.getMessage());
   }
 
   @Test

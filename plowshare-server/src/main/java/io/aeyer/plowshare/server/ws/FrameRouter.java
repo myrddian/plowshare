@@ -210,8 +210,10 @@ public final class FrameRouter {
       // A worker facade validates its binding and every nested project/topic before broker use.
       // Running the ordinary Personal fence would require giving that worker the owner's
       // membership.
-      if (!io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(
-          request.type())) {
+      // PROC selectors narrow metadata, not content access. Its repository rechecks custody,
+      // membership or explicit fleet authority, including when an administrator narrows by project.
+      if (!io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(request.type())
+          && !ProcFrames.OPERATIONS.contains(request.type())) {
         var scope =
             io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload());
         for (String project : scope.clientProjects())

@@ -304,8 +304,8 @@ class BoardLifecycleTest {
     }
     board.settled(root.id());
     assertEquals(2, notices("exhausted"));
-    assertThrows(Board.Refused.class, () -> board.topup(root.id(), 20));
-    BoardTopic topped = board.topup(child.id(), 30);
+    assertThrows(Board.Refused.class, () -> board.topup(root.id(), 20, "owner"));
+    BoardTopic topped = board.topup(child.id(), 30, "owner");
     assertEquals(root.id(), topped.id());
     assertEquals(30, topped.potTotal());
     assertEquals(18, topped.potSpent());
@@ -320,11 +320,11 @@ class BoardLifecycleTest {
                         .isOpener()));
     f.store.spend(root.id(), 9);
     board.settled(root.id());
-    assertEquals(4, notices("exhausted"));
+    assertEquals(6, notices("exhausted"), "top-up also notifies both agent openers to continue");
   }
 
   @Test
-  void spending_the_final_reserve_harness_closes_the_tree_with_documents() {
+  void spending_the_final_reserve_keeps_the_tree_recoverable_and_preserves_documents() {
     BoardTopic child = child(root, "researcher");
     BoardMessage doc =
         board
@@ -342,15 +342,21 @@ class BoardLifecycleTest {
                     List.of(),
                     false))
             .message();
+    String conversation = f.store.seat(root.id(), "critic").orElseThrow().conversation();
+    java.util.UUID source = f.store.allowance(root.id()).id().value();
     f.store.spend(root.id(), 20);
     board.settled(root.id());
-    assertTrue(f.store.topic(root.id()).orElseThrow().isClosed());
-    assertTrue(f.store.topic(child.id()).orElseThrow().isClosed());
-    String resolution =
-        f.store.message(f.store.topic(root.id()).orElseThrow().resolution()).orElseThrow().body();
-    assertTrue(resolution.contains("closed by the harness: budget exhausted"));
-    assertTrue(resolution.contains(doc.id()));
-    assertThrows(Board.Refused.class, () -> board.topup(root.id(), 40));
+    assertFalse(f.store.topic(root.id()).orElseThrow().isClosed());
+    assertFalse(f.store.topic(child.id()).orElseThrow().isClosed());
+    assertEquals(BoardTopic.EXHAUSTED, f.store.topic(root.id()).orElseThrow().state());
+    assertNull(f.store.topic(root.id()).orElseThrow().resolution());
+    assertTrue(f.store.message(doc.id()).isPresent());
+    BoardTopic topped = board.topup(root.id(), 40, "operator");
+    assertEquals(20, topped.potSpent());
+    assertEquals(source, f.store.allowance(root.id()).id().value());
+    assertEquals(conversation, f.store.seat(root.id(), "critic").orElseThrow().conversation());
+    close(root);
+    assertThrows(Board.Refused.class, () -> board.topup(root.id(), 60, "operator"));
   }
 
   @Test
@@ -393,7 +399,8 @@ class BoardLifecycleTest {
             },
             f.work,
             () -> 10,
-            f.clock);
+            f.clock,
+            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
     f.work.inTransaction(
         () -> {
           nested.open(
@@ -683,20 +690,28 @@ class BoardLifecycleTest {
         Board.Refused.class,
         () ->
             controller.topup(
-                root.id(), new io.aeyer.plowshare.server.api.BoardController.Topup(null)));
+                root.id(), new io.aeyer.plowshare.server.api.BoardController.Topup(null), "owner"));
     assertThrows(
         io.aeyer.plowshare.server.faults.CallerFault.class,
-        () -> handler.handle(java.util.Map.of("topic", root.id()), null));
+        () ->
+            handler.handle(
+                java.util.Map.of("topic", root.id()),
+                new io.aeyer.plowshare.server.ws.Asking("session", "owner")));
     assertEquals(
         30,
         controller
-            .topup(root.id(), new io.aeyer.plowshare.server.api.BoardController.Topup(30))
+            .topup(root.id(), new io.aeyer.plowshare.server.api.BoardController.Topup(30), "owner")
             .potTotal());
-    handler.handle(java.util.Map.of("topic", root.id(), "maxModelCalls", 40), null);
+    handler.handle(
+        java.util.Map.of("topic", root.id(), "maxModelCalls", 40),
+        new io.aeyer.plowshare.server.ws.Asking("session", "owner"));
     assertEquals(40, f.store.topic(root.id()).orElseThrow().potTotal());
     assertThrows(
         Board.Refused.class,
-        () -> handler.handle(java.util.Map.of("topic", root.id(), "maxModelCalls", 30), null));
+        () ->
+            handler.handle(
+                java.util.Map.of("topic", root.id(), "maxModelCalls", 30),
+                new io.aeyer.plowshare.server.ws.Asking("session", "owner")));
   }
 
   @org.junit.jupiter.params.ParameterizedTest

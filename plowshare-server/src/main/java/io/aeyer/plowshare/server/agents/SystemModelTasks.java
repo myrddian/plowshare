@@ -1,10 +1,10 @@
 package io.aeyer.plowshare.server.agents;
 
-/** Capability ceiling for internal document models: bounded judgments, with no escalation. */
+/** Capability ceiling for internal model-only tasks: bounded judgments, with no escalation. */
 public final class SystemModelTasks {
   private SystemModelTasks() {}
 
-  /** Fail before inference if configuration would give a SYSTEM document worker capabilities. */
+  /** Fail before inference if configuration would give a SYSTEM model-only worker capabilities. */
   public static void requireModelOnly(AgentDefinition definition) {
     if (!definition.tools().isEmpty()
         || !definition.calls().isEmpty()

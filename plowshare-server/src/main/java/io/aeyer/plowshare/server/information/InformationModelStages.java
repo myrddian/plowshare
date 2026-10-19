@@ -105,7 +105,8 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
       Function<String, Outcome> work) {
     HarnessRun run = harness.begin();
     try {
-      if (log != null) inputs.requireLog(log, owner);
+      if (purpose.equals("processing")) fence.run();
+      else if (log != null) inputs.requireLog(log, owner);
       UUID resource = stages.resource(revision);
       var context =
           HookContext.forLog("delegation", definition.name(), false, home.project(), log)
@@ -160,7 +161,8 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
         Outcome paid = cached.orElseThrow();
         response = new Outcome(paid.ending(), paid.text(), paid.steps(), 0, paid.detail());
       }
-      if (log != null) inputs.requireLog(log, owner);
+      if (purpose.equals("processing")) fence.run();
+      else if (log != null) inputs.requireLog(log, owner);
       Gate post = hooks.stagePost(context, new StageDone(shown, response.text(), null));
       catalogue.event(revision, generation, owner, definition.name(), "stage.post", json(post));
       if (post.isDenied()) throw new DocumentStages.Blocked(post.denied(), response.modelCalls());

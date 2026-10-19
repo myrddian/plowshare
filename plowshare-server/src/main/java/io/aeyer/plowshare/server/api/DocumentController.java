@@ -93,14 +93,18 @@ public class DocumentController {
         request
             .getRequest()
             .getAttribute(io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE);
+    if (request.getRequest().getParameterMap().containsKey("scope")
+        || request.getRequest().getParameterMap().containsKey("account"))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "This HTTP route does not support account knowledge targets");
     String project = request.getRequest().getParameter("project");
     return informationAccess
         .resolve(
             account instanceof String handle ? handle : null,
             project == null
                 ? null
-                : io.aeyer.plowshare.server.information.InformationContext.Selection.project(
-                    project))
+                : io.aeyer.plowshare.server.information.InformationScopes.from(
+                    java.util.Map.of("project", project)))
         .withView(
             io.aeyer.plowshare.server.information.InformationContentInputs.view(
                 request.getRequest().getParameter("view")));
@@ -121,9 +125,16 @@ public class DocumentController {
   }
 
   private RetrievalService retrievalReads() {
-    return informationAccess == null
-        ? retrieval
-        : retrieval.scoped(informationAccess, informationContext());
+    if (informationAccess == null) return retrieval;
+    var reader = retrieval.scoped(informationAccess, informationContext());
+    return reader.queriesEnabled()
+        ? reader.forQueries(
+            io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                () -> {
+                  if (Thread.currentThread().isInterrupted())
+                    throw new io.aeyer.plowshare.server.faults.CallerFault("Request ended");
+                }))
+        : reader;
   }
 
   private CitationStore citationReads() {
@@ -235,9 +246,8 @@ public class DocumentController {
     UUID document = RequestedDocument.askedAbout(id);
     String question = RequestedCorpusQuestion.asked(request.question());
     Corpus.theOneToAsk(documentReads(), document);
-    int allowance =
-        request.maxModelCalls() == null ? props.getAskBudget() : request.maxModelCalls();
-    Budget budget = Budget.of(allowance);
+    Budget budget =
+        request.maxModelCalls() == null ? props.askAllowance() : Budget.of(request.maxModelCalls());
     Deliberation pass = documentPass();
     var context = informationAccess == null ? null : informationContext();
     String jobId =

@@ -1,0 +1,231 @@
+# Authority substrate implementation roadmap
+
+Status: implementation roadmap, updated 18 October 2026. Slices 01–18 are
+implemented for their documented supported paths. Slice 14 includes the
+[completion implementation](authority-substrate-slices/14-completion-plan.md):
+explicit Global document destination and preparation embeddings charged to the
+existing processing budget. Later slices close the remaining existing-consumer bindings; live rollout remains separate.
+The separately requested [follow-on slice 15](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md)
+now scopes a shared SYSTEM embedding foundation and initial search consumers.
+Consumer permissions, disclosure and budget ownership stay separate. Slice 15 is
+implemented for preparation and its selected search consumers; subsequent
+consumers need their own bindings. Search spending defaults to unlimited; operators may configure
+disabled or limited spending without changing embedding authority.
+The separately requested [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md)
+implements memory query embedding for existing recall and eligible automatic
+reminders. It retains current read tiers, parent sandbox and operation policy;
+memory write/Scribe/curation/repair consumers remain separate.
+The implemented [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md)
+connects existing memory writes and Scribe to that foundation, including the
+Learner filing hook. Its explicit write policy defaults to unlimited operation
+spending; disabled/limited configuration applies only to the filing pipeline.
+The implemented [slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md)
+connects the remaining existing curation, ask, maintenance, digest/navigation and
+conversation-search consumers. Caller-backed orchestration retains its original
+conversation allowance; existing board continuations retain their pot source.
+New runs capture read-only Global knowledge eligibility; historical admissions
+remain unchanged. Required client compatibility is distinct from optional parity.
+Local migration evidence is separate from live-data adoption and deployment
+restart/restore acceptance, which remain required before rollout.
+
+## Count and scope
+
+The original roadmap defined **14 implementation slices: the first documented slice plus
+13 follow-on slices**. Each has its own scope document. These are reviewable
+planning units, not a promise of one PR per slice, an effort estimate or a request
+to execute all work. Revalidate concrete scope and source dependencies before a
+later implementation instruction. Slice 18 consolidates the remaining work in
+one scope document as requested.
+
+That original sequence is complete for its documented supported paths. Slices
+15–17 are additional implemented follow-ons. The single consolidated deferred
+scope is slice 18, bringing the inventory to **18 implemented slices for their
+supported paths**. Its internal work packages are not more
+numbered slices, and its optional capabilities register is not implementation
+scope. These follow-ons do not expand the original slice 14 outcome retroactively.
+
+[ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md) defines the
+settled architecture. The [impact report](authority-substrate-impact-report.md)
+supplies source evidence, reuse and deferred gaps; the
+[role matrices](role-scope-permissions-proposal.md) define role-facing policy.
+The original runtime source baseline was main
+`269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`; the first-slice plan was committed
+as documentation in `8f57b54`. This branch implements the project foundation,
+identities and scoped roles (01–03), knowledge homes and current-root policy
+(04–05), retained execution/inference and bounded SYSTEM services (06–08), and
+scheduling plus Relay/message integration (09–10), followed by retained independent
+orchestration roots and synchronous agent children (11), and action checks for
+the existing acting consumers (12), and verified existing-contract selectors and
+client boundaries (13). See each slice's document
+for verification and limits. This is not a complete platform cutover: configured
+curation/promotion, ask/deliberation and independent-maintenance bindings
+remain deferred, and nested/model-triggered
+orchestration starts remain refused without a supported parent-budget sharing
+contract. Independent Relay roots now use slice 11's retained lineage. Production
+embeddings without supported budget evidence refuse instead of acquiring an implicit
+source.
+This roadmap inventories source owners;
+it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
+
+## Slice documents and dependencies
+
+| Slice | Scope document | Direct prerequisites | Completion outcome |
+| --- | --- | --- | --- |
+| 01 | [Project READ/WRITE foundation](authority-substrate-first-slice-plan.md) | None | Typed READ/WRITE adapter at the existing information gate; preserve effective RBAC and current behavior. |
+| 02 | [Explicit identities, scopes and locked built-ins](authority-substrate-slices/02-identities-and-scopes.md) | 01 | Introduce explicit durable scope/account/role identities alongside existing keys, with locked SYSTEM and Global records. No existing null row is automatically reclassified or made readable. |
+| 03 | [Scoped RBAC grants and standard role helpers](authority-substrate-slices/03-rbac-grants-and-role-helpers.md) | 02 | Make ADMIN, MANAGER, CONTRIBUTOR and READER useful scoped helpers over the common substrate, with durable issuance/audit and the agent ceilings. Routine administration uses roles rather than custom ACL assembly. |
+| 04 | [Knowledge scope, creator provenance and WRITE authority](authority-substrate-slices/04-knowledge-scopes-and-write-authority.md) | 02, 03 | Admit existing document/memory mutations through scoped authority rather than creator/legacy-owner equality, while retaining mandatory data and lifecycle restrictions. |
+| 05 | [Current root-document policy and GLOBAL_READ audience](authority-substrate-slices/05-root-policy-and-global-read.md) | 04 | Use current root-document permissions for all revision reads and existing audience-management paths. GLOBAL_READ authorizes all authenticated active principal types with no individual audience exclusions. |
+| 06 | [Retained operation authority and conversation actions](authority-substrate-slices/06-retained-operation-authority.md) | 02, 03 | Retain the actual executor, targets, required actions and operation sandbox across existing conversation/run/job boundaries. Enforce CONVERSATION_CREATE and RUN_MODEL independently where those actions occur. |
+| 07 | [All-inference dispatch checks and operation budgets](authority-substrate-slices/07-inference-and-operation-budgets.md) | 06 | Check RUN_MODEL for the actual executor on every inference route and retain the operation's configured budget. SYSTEM and created_by do not implicitly pay. |
+| 08 | [Sandboxed SYSTEM services and independent processing](authority-substrate-slices/08-sandboxed-system-services.md) | 04, 05, 07 | Execute declared internal preparation/compaction/maintenance under SYSTEM's existing authority, limited by operation inputs, tools and output destinations, independently of creator access. |
+| 09 | [Scheduled and cron operation authority](authority-substrate-slices/09-scheduled-operations.md) | 07, 08 | Apply the common account/action/sandbox/budget rules when existing schedules fire, while retaining scheduling's own definition, lease and control contracts. |
+| 10 | [Relay and message-triggered operation authority](authority-substrate-slices/10-relay-and-message-operations.md) | 07, 08 | Integrate common authority at existing message/Relay effect boundaries while leaving the Relay/provider capability model intact. |
+| 11 | [Orchestration and agent-child authority lineage](authority-substrate-slices/11-orchestration-and-agent-lineage.md) | 06, 07 | Carry common authority, action limits and operation budgets through existing orchestration and agent-child lifecycles without automatic privilege inheritance. |
+| 12 | [Account acting delegation and action ceilings](authority-substrate-slices/12-account-acting-delegation.md) | 03, 06, 07 | Map the existing Application-on-behalf-of-user flow to common actions while preserving separate actor/subject proof and the currently supported target/operation set. |
+| 13 | [Existing API, scope-selection and client contract cutover](authority-substrate-slices/13-existing-contract-and-client-cutover.md) | 05, 08, 09, 10, 11, 12 | Expose the migrated semantics only through verified existing supported operations, coordinating affected contracts without requiring SDK/client parity or creating new APIs. |
+| 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Complete reviewed legacy classification and the bounded Global document admission/preparation/read path, preserving identities and private data; separately deferred consumers remain fenced. |
+| 15 | [SYSTEM embedding foundation and initial search consumers](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Share scoped SYSTEM embedding execution across existing preparation and initial document-search consumers. Each operation supplies its scope, validity and spending policy; search defaults to unlimited, with disabled/limited configuration available. Readers gain no embedding permission. Memory/repair/ask activation and other deferred consumers remain separate. |
+| 16 | [Memory query embedding and recall](authority-substrate-slices/16-memory-query-embedding-and-recall.md) | 04–08, 13, 15 | Connect existing recall and automatic Reminder query embeddings to the shared SYSTEM foundation with current read tiers, retained sandbox/lifetime and policy-selected spending. Reuse read-side disabled/limited/unlimited policy, default unlimited; a nearby finite budget does not automatically apply. Writes/Scribe/curation/repair and broader targets stay separate. |
+| 17 | [Memory writes and Scribe](authority-substrate-slices/17-memory-writes-and-scribe.md) | 04–08, 13, 15, 16 | Admit existing write/Scribe/Learner-filing consumers with same-home candidates, shared SYSTEM inference, atomic content/provenance and fenced write-time vector publication. One write operation policy defaults to unlimited; optional disabled/limited configuration explicitly applies. Curator/promotion and independent repair remain deferred. |
+| 18 | [Deferred scope and remaining cutover](authority-substrate-slices/18-deferred-scope-and-cutover.md) | 01–17 | Implemented existing consumer bindings, original-source orchestration/board continuation, captured Global READ and local migration checks. Required compatibility and genuine extensions are separated; live adoption/restart/restore acceptance remains deployment work. |
+
+The existing first-slice document remains authoritative for slice 01; it is not
+duplicated in the slice directory. Slice 14 depends transitively on 01–13
+through 13. Dependency numbers describe implementation readiness, not automatic
+role inheritance, grants or operation authority.
+These slice IDs are not Flyway version reservations; choose unique migration
+versions against the implementation/integration baseline when that work occurs.
+
+## Delivery milestones
+
+| Milestone | Slices | Evidence gained |
+| --- | --- | --- |
+| Existing-project foundation | 01 | One production READ/WRITE consumer uses the shared contract with existing effective roles and unchanged supported access. |
+| Identity and knowledge substrate | 02–05 | Explicit identities, scoped role helpers, knowledge WRITE/provenance and current-root audience policy are verified behind controlled supported boundaries. |
+| Internal execution and inference | 06–08 | Actual action admission, queued inference authority, retained operation budgets and sandboxed SYSTEM services have focused proof. |
+| Existing consumer integration | 09–12 | Scheduling, Relay/messaging, orchestration/children and acting retain their distinct authority and recovery contracts. |
+| Supported contracts and cutover | 13–14 | Affected existing interfaces represent the new semantics; legacy classification, restart/rollback and the supported Global knowledge path are rehearsed. |
+
+Slices 04–05 can follow the identity/grant work while 06 establishes the operation
+contract. Consumer families use 06–08 as applicable and retain separate review
+boundaries. Slice 13 waits for the backend consumers it exposes. Do not enable
+new Global audience or SYSTEM execution through an unmigrated consumer simply
+because an earlier schema or role exists.
+
+## Boundaries that apply to every slice
+
+- **RBAC first:** use sensible scoped ADMIN/MANAGER/CONTRIBUTOR/READER helpers.
+  Complex ACLs can refine resource access through the same substrate; routine
+  setup does not require custom ACLs or a new policy engine/editor.
+- **Authority and sandbox are separate:** SYSTEM already has root authority;
+  each operation limits its reachable inputs, tools, outputs and actions. Never
+  replace that with fresh per-task SYSTEM grants or a reserved-UUID bypass.
+- **Provenance is not control:** created_by confers no rights. Account home,
+  creator/reviser, executor, initiating actor/subject and budget source stay distinct.
+- **Audience is not publication:** current root-document policy governs revision
+  access. MANAGER can choose GLOBAL_READ for managed resources without extra
+  ADMIN approval, subject to mandatory/private-dependency constraints. GLOBAL_READ
+  has no individual exclusions.
+- **Operation validity:** independent SYSTEM preparation continues after creator
+  access loss while document/operation remain valid. Current recipient authority
+  still governs results/logs/notifications; delegated-user work retains live proof.
+- **Actual actions and existing controls:** RUN_MODEL covers all inference;
+  non-model work checks its actual actions. Supported controls use WRITE plus
+  lifecycle rules. No EXECUTE_JOB, CONTROL_EXECUTION or missing control surface is
+  inferred.
+  Existing bounded read telemetry/index bookkeeping retains its domain contract;
+  it must not require giving readers content-edit permission.
+- **Operation budget:** retain an explicitly configured budget source and incurred
+  usage through queueing/recovery. Model-call allowance, capacity pools and money
+  reservations are different controls. Missing mechanics are recorded as gaps,
+  not quietly replaced with a new billing engine or creator/SYSTEM payer.
+- **Existing interfaces only:** map verified supported operations. Account/role
+  decides authority, not client label. Coordinate affected existing contracts,
+  but do not require SDK parity, invent methods/APIs or use private integration
+  access to bypass a public gap. The explicitly agreed slice 14 destination
+  extension was implemented only on the existing information operations;
+  it is not an SDK parity requirement or authorization for further APIs.
+- **No uncertain replay:** preserve resource/request/receipt identities, current
+  delivery controls and historical costs. Recovery reconciles durable owning
+  records instead of relaunching an effect to reconstruct authority.
+- **Per-slice safety:** each persistence change has its own migration proof and
+  rollback boundaries. Slice 14 consolidates evidence; it cannot defer safety,
+  compatibility or real persistence tests needed by earlier slices.
+
+## Verification policy
+
+Each slice document names its security outcomes, existing regression owners and
+the precise reason PostgreSQL may be needed. These lists are candidate test
+owners, not commands to run entire suites or claims that all tests are mocks.
+
+For future implementation:
+
+1. Define the typed interface, state transitions and affected operation/target
+   inventory before editing business logic. Preserve specialist repository and
+   constructor-injection boundaries.
+2. Use mocked repositories/effective role sources or small fakes for role/action,
+   sandbox, invalid-input, revocation and capability-boundary tests. Include the
+   denied-effects and disclosure cases, not just a successful helper mapping.
+3. Add/select PostgreSQL tests only for actual migrations, SQL predicates,
+   constraints, row mapping, transaction races, leases or durable recovery.
+   State that reason, use tagged tests with `-PfullDb --tests` and select the
+   smallest relevant set. Compiling an existing full-db fixture is not a reason
+   to start PostgreSQL. Do not run database-backed dockerSmoke by habit.
+4. After Java changes run `./gradlew format` and `./gradlew formatCheck`, the
+   owning focused tests, and `./gradlew check` for handoff. Run affected existing
+   SDK/contract/client checks and owning generators only where their contracts
+   change; report independent failures rather than claiming skipped work passed.
+5. Rehearse migration/restart/rollback with synthetic or appropriately protected
+   retained-state fixtures for the affected slice. New Flyway migrations only;
+   never rewrite a shipped migration or relabel historical usage as new authority.
+
+The slice 01–13 documents record implementation checks. The original roadmap
+planning task ran no Java, PostgreSQL, SDK or live integration tests; its
+documentation checks are distinct from implementation verification.
+
+## Consolidated deferred scope and stop conditions
+
+[Slice 18](authority-substrate-slices/18-deferred-scope-and-cutover.md) is the single
+current inventory. It separates existing runtime gaps (R1–R7), migration and
+acceptance requirements (M1–M3), and required compatibility versus optional extensions (D1–D12).
+Every item records why it was deferred and what happens if it stays unfinished.
+Optional capabilities are recorded there for completeness, not added to the
+implementation commitment. Earlier slice exclusions remain historical evidence.
+Existing dangerous release/fallback paths must still be fenced by the adopted
+rules; deferral does not authorize their continued bypass during migration.
+
+A missing public target representation, configured budget mechanism, group
+authority or recovery contract is a concrete gap. The affected exposure waits
+for an explicit supported solution; it does not justify silently adding a new
+feature or treating document grouping as an ACL group. If such a gap changes a
+slice's scope, update its plan and dependencies before implementation proceeds.
+
+## Completion and authorization
+
+The core migration is complete only when all affected existing consumers enforce
+the adopted account/scope/action and sandbox rules, required migration/negative/
+recovery evidence passes, and the supported end-to-end path in slice 14 works.
+Unsupported capabilities remain explicitly unsupported.
+
+Slices 01–14 are implemented under subsequent explicit requests. Slice 14's
+[completion record](authority-substrate-slices/14-completion-plan.md) documents the
+supported Global document route and shared preparation allowance. The historical
+[cutover specification](authority-substrate-slices/14-cutover-specification.md)
+retains classification and compatibility-removal gates. Completing this bounded
+path does not enable deferred budget consumers or establish unrestricted
+platform-wide cutover.
+Slice 15 implements the shared embedding foundation, retained query source and
+closed query-purpose evidence on its selected consumers. Search spending defaults
+to unlimited, with explicit disabled/limited policies available. Slice 16 connects
+selected memory recall and Reminder reads, reusing the existing read-side spending
+policy without applying a nearby finite budget automatically. Retained reads
+exclude Global tiers outside their parent sandbox. Slice 17 connects memory
+writes/Scribe and the existing Learner filing step with explicit write-policy
+configuration, source/claim retention and fenced vector publication. Slice 18
+connects the remaining existing consumers and explicitly captures Global READ for
+new runs only. All 18 slices have source implementations for their supported
+paths. Live migration execution, credential issuance, external notifications,
+production deployment and automatic follow-ups are not performed or scheduled by
+this roadmap. See slice 18 for required deployment acceptance and remaining
+unsupported extensions.

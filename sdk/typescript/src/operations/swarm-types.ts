@@ -7,12 +7,12 @@ export interface SwarmSelection {
   readonly revision: string;
   readonly description: string;
   readonly members: readonly string[];
-  readonly budget: number;
+  readonly budget: number | null;
 }
 export interface SwarmType {
   readonly name: string;
   readonly members: readonly string[];
-  readonly budget: number;
+  readonly budget: number | null;
   readonly refused: Readonly<Record<string, string>>;
   readonly origin: string;
   readonly selection: SwarmSelection | null;
@@ -43,21 +43,25 @@ export const swarmSelectionCheck = record({
         member.length <= 128 &&
         !member.includes('\0'),
     ),
-  budget: (value) =>
-    typeof value === 'number' &&
-    Number.isSafeInteger(value) &&
-    value >= 2 &&
-    value <= 2147483647,
+  budget: nullable(
+    (value) =>
+      typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 2 &&
+      value <= 2147483647,
+  ),
 });
 export const swarmTypeCheck = record(
   {
     name: swarmName,
     members: list(named),
-    budget: (value) =>
-      typeof value === 'number' &&
-      Number.isSafeInteger(value) &&
-      value >= 2 &&
-      value <= 2147483647,
+    budget: nullable(
+      (value) =>
+        typeof value === 'number' &&
+        Number.isSafeInteger(value) &&
+        value >= 2 &&
+        value <= 2147483647,
+    ),
     refused: (value) => object(value) && Object.values(value).every(text),
     origin: named,
     selection: nullable(swarmSelectionCheck),

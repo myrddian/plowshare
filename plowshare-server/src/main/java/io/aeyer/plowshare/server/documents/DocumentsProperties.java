@@ -14,10 +14,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * this one. Two spellings of one bound that had to agree is exactly the drift {@code
  * LlmProperties#embeddingModel} was written about.
  *
- * <p>No field initializers, for {@link io.aeyer.plowshare.server.llm.LlmProperties}' reason: {@code
- * application.yml} owns these defaults, it is where an operator reads the argument for them, and a
- * Java initializer would be a second spelling nothing compares. An unbound instance answers zero
- * and {@link DocumentsConfig} refuses that at boot, naming the key.
+ * <p>Pipeline sizes remain configured in {@code application.yml}. Ask spending defaults to
+ * unlimited; a selected zero disables inference and a positive value bounds the whole operation.
  */
 @ConfigurationProperties(prefix = "plowshare.documents")
 public class DocumentsProperties {
@@ -138,7 +136,7 @@ public class DocumentsProperties {
    * Budget.changeTo} is for, and so that a stage growing a second call later is a configuration
    * change rather than a code change.
    */
-  private int askBudget;
+  private String askBudget = "unlimited";
 
   public int getEmbedBatchSize() {
     return embedBatchSize;
@@ -253,11 +251,26 @@ public class DocumentsProperties {
     this.spanSize = spanSize;
   }
 
-  public int getAskBudget() {
+  public String getAskBudget() {
     return askBudget;
   }
 
-  public void setAskBudget(int askBudget) {
+  public void setAskBudget(String askBudget) {
+    io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+        askBudget, "plowshare.documents.ask-budget");
     this.askBudget = askBudget;
+  }
+
+  public void setAskBudget(int askBudget) {
+    setAskBudget(Integer.toString(askBudget));
+  }
+
+  public Integer askLimit() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+        askBudget, "plowshare.documents.ask-budget");
+  }
+
+  public io.aeyer.plowshare.server.agents.Budget askAllowance() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(askLimit());
   }
 }

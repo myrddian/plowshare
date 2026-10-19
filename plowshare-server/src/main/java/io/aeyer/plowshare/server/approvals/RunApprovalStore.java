@@ -27,7 +27,7 @@ import org.springframework.jdbc.core.RowMapper;
  * allowed} and nothing else, and a revoke moves a {@code project} approval from {@code allowed}. A
  * {@code false} is the other party having got there first.
  */
-public class RunApprovalStore {
+public class RunApprovalStore implements ApprovalNotificationStore {
 
   public static final String PREFIX = "apr_";
 
@@ -244,12 +244,10 @@ public class RunApprovalStore {
         RunApproval.ASKED);
   }
 
-  /** Every open question still waiting for its account, for boot recovery. */
+  /** Every undelivered question, including owned foreground roots, for direct fallback recovery. */
   public List<RunApproval> undelivered() {
     return jdbc.query(
-        SELECT
-            + " WHERE state = ? AND delivered_at IS NULL AND handle IS NOT NULL"
-            + " ORDER BY created_at, id",
+        SELECT + " WHERE state = ? AND delivered_at IS NULL" + " ORDER BY created_at, id",
         ROW,
         RunApproval.ASKED);
   }
@@ -270,13 +268,23 @@ public class RunApprovalStore {
         RunApproval.ASKED);
   }
 
-  /** Every question an account has not had answered, wherever it was raised, oldest first. */
+  /**
+   * Every pending question addressed to an account or raised in its own attended conversation.
+   * Foreground questions have no pinned recipient; retaining their root owner here makes them
+   * discoverable after closing a view or restarting a client. Project membership alone never makes
+   * another person's question appear in this listing.
+   */
   public List<RunApproval> openFor(String handle) {
+    Objects.requireNonNull(handle, "handle");
     return jdbc.query(
-        SELECT + " WHERE handle = ? AND state = ? ORDER BY created_at, id",
+        SELECT
+            + " WHERE state = ? AND (handle = ? OR (handle IS NULL AND EXISTS"
+            + " (SELECT 1 FROM conversations c WHERE c.id = run_approvals.conversation"
+            + " AND c.owner_handle = ? AND c.origin = 'turn'))) ORDER BY created_at, id",
         ROW,
+        RunApproval.ASKED,
         handle,
-        RunApproval.ASKED);
+        handle);
   }
 
   /** A project's standing {@code project} approvals, newest first. */
@@ -319,13 +327,24 @@ public class RunApprovalStore {
 
   /** Deny a question. {@code false} when it was not {@code asked} any more. */
   public boolean deny(String id, String by) {
+    return deny(id, by, null);
+  }
+
+  /** Deny with the person's optional explanation; never substitute the original request reason. */
+  public boolean deny(String id, String by, String reason) {
+    Objects.requireNonNull(id, "id");
+    Objects.requireNonNull(by, "by");
+    if (reason != null && (reason.isBlank() || reason.length() > 4000 || reason.indexOf('\0') >= 0))
+      throw new IllegalArgumentException(
+          "A denial reason must be nonblank text of at most 4000 characters");
     boolean won =
         jdbc.update(
-                "UPDATE run_approvals SET state = ?, answered_by = ?, answered_at = ?"
+                "UPDATE run_approvals SET state = ?, answered_by = ?, answered_at = ?, denial_reason = ?"
                     + " WHERE id = ? AND state = ?",
                 RunApproval.DENIED,
                 by,
                 Timestamp.from(clock.get()),
+                reason,
                 id,
                 RunApproval.ASKED)
             == 1;
