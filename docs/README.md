@@ -21,6 +21,7 @@
 - [JDBC repository improvement plans](query-efficiency-plans/README.md) (102 owners; individual query and cache plans with a shared delivery sequence)
 - [JDBC query analysis](query-efficiency-analysis/README.md) (102 owners; measured latency, query-count evidence and cache feasibility)
 - [First query-efficiency slice](query-efficiency-first-slice.md) (facet consolidation, independent list rendering and bounded read dispatch)
+- [Second query-efficiency slice](query-efficiency-second-slice.md) (document/search snapshot reuse, keyed schedule reads and typed cache linkage contracts)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
 - [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled policy and implementation boundaries)

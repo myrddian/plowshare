@@ -238,6 +238,45 @@ class ScheduleFilesDatabaseTest {
   }
 
   @Test
+  void keyedSnapshotsAndReturningKeepRawAndEffectivePauseStateCoherent() {
+    var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    var inserted = store.apply(source, "daily", definition, NOW);
+    store.apply(source, "sibling", definition, NOW);
+    store.pause(source, "daily", definition, true, NOW);
+
+    var retained = store.snapshot(source, "daily").orElseThrow();
+    assertEquals(
+        new ScheduleDefinitionStore.FileIdentity(source.id(), "daily"), retained.identity());
+    assertEquals(source, retained.source());
+    assertEquals(definition, retained.rawDefinition());
+    assertFalse(retained.rawDefinition().paused());
+    assertEquals(Boolean.TRUE, retained.pausedOverride());
+    assertTrue(retained.effectiveDefinition().paused());
+    assertEquals(
+        retained.effective(), store.apply(source, "daily", definition, NOW.plusSeconds(60)));
+    assertEquals(
+        retained.effective(), store.managed(inserted.internalName(), "owner").orElseThrow());
+    assertTrue(store.snapshot(source, "missing").isEmpty());
+
+    var changed =
+        new io.aeyer.plowshare.protocol.ScheduledWork(
+            definition.version(),
+            "0 30 9 * * *",
+            definition.zone(),
+            false,
+            definition.action(),
+            definition.target(),
+            definition.limits());
+    var returned = store.apply(source, "daily", changed, NOW);
+    var current = store.snapshot(source, "daily").orElseThrow();
+    assertEquals(current.effective(), returned);
+    assertEquals(changed, current.rawDefinition());
+    assertNull(current.pausedOverride());
+    assertFalse(current.effectiveDefinition().paused());
+    assertFalse(store.snapshot(source, "sibling").orElseThrow().effectiveDefinition().paused());
+  }
+
+  @Test
   void runtimeProvenanceLookupDoesNotTransferRegistrarOwnership() {
     var file =
         store.apply(

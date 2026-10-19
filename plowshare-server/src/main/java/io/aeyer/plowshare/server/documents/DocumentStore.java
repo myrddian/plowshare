@@ -1496,6 +1496,117 @@ public final class DocumentStore {
                 : new Coverage(0, 0));
   }
 
+  /** The bounded candidate projections required by one search, before service-owned fusion. */
+  enum SearchProjection {
+    VECTOR,
+    LEXICAL,
+    HYBRID
+  }
+
+  static final int MOST_SEARCH_CANDIDATES = 40;
+
+  /**
+   * Reads one operation's coverage and candidates under the caller's disclosure/profile fences.
+   * Each candidate statement still resolves current repository authorization. This does not
+   * establish a repeatable-read database snapshot or admit the result to a shared cache.
+   */
+  SearchSnapshot searchSnapshot(
+      String question, float[] vector, int depth, SearchProjection projection) {
+    return searchSnapshot(question, vector, depth, projection, coverage());
+  }
+
+  /**
+   * Legacy reads may retain their documented preflight counts within the same operation. Passing
+   * those counts does not bypass candidate authorization; admitted reads use the overload above
+   * after provider IO and disclosure locking instead.
+   */
+  SearchSnapshot searchSnapshot(
+      String question, float[] vector, int depth, SearchProjection projection, Coverage coverage) {
+    Objects.requireNonNull(question);
+    Objects.requireNonNull(vector);
+    Objects.requireNonNull(projection);
+    Objects.requireNonNull(coverage);
+    if (question.isBlank() || depth < 1 || depth > MOST_SEARCH_CANDIDATES)
+      throw new IllegalArgumentException("Invalid search selection");
+    List<Hit> vectorHits =
+        coverage.searchable() == 0 || projection == SearchProjection.LEXICAL
+            ? List.of()
+            : searchByVector(vector, depth);
+    List<Hit> lexicalHits =
+        coverage.searchable() == 0 || projection == SearchProjection.VECTOR
+            ? List.of()
+            : searchByText(question, vector, depth);
+    return new SearchSnapshot(
+        question,
+        depth,
+        projection,
+        vectorHits,
+        lexicalHits,
+        coverage,
+        Optional.ofNullable(context),
+        Optional.ofNullable(embeddingProfile),
+        Optional.ofNullable(embeddingFingerprint));
+  }
+
+  /**
+   * Immutable operation-local read data, including the repository's actual selection and captured
+   * embedding configuration. An absent context denotes an unscoped internal repository, not
+   * unrestricted caller authority. A profile's version is an embedding configuration version, never
+   * a corpus generation; the legacy fingerprint has no configuration version.
+   *
+   * <p>Dependencies identify returned sources and citations, not their content versions. They do
+   * not describe non-returned corpus members that could enter the ranking. Shared admission is
+   * blocked until durable corpus/source mutation generations, every-writer invalidation and current
+   * disclosure checks exist. Reuse this value only within its owning read operation.
+   */
+  record SearchSnapshot(
+      String question,
+      int depth,
+      SearchProjection projection,
+      List<Hit> vectorHits,
+      List<Hit> lexicalHits,
+      Coverage coverage,
+      Optional<InformationContext> context,
+      Optional<EmbeddingProfile> profile,
+      Optional<String> legacyFingerprint) {
+    SearchSnapshot {
+      Objects.requireNonNull(question);
+      Objects.requireNonNull(projection);
+      vectorHits = List.copyOf(vectorHits);
+      lexicalHits = List.copyOf(lexicalHits);
+      Objects.requireNonNull(coverage);
+      Objects.requireNonNull(context);
+      Objects.requireNonNull(profile);
+      Objects.requireNonNull(legacyFingerprint);
+      if (question.isBlank() || depth < 1 || depth > MOST_SEARCH_CANDIDATES)
+        throw new IllegalArgumentException("Invalid search selection");
+      if (vectorHits.size() > depth
+          || lexicalHits.size() > depth
+          || (projection == SearchProjection.VECTOR && !lexicalHits.isEmpty())
+          || (projection == SearchProjection.LEXICAL && !vectorHits.isEmpty())
+          || (coverage.searchable() == 0 && (!vectorHits.isEmpty() || !lexicalHits.isEmpty())))
+        throw new IllegalArgumentException("Candidates differ from search selection");
+    }
+
+    Set<SearchDependency> dependencies() {
+      var dependencies = new HashSet<SearchDependency>();
+      for (Hit hit : vectorHits)
+        dependencies.add(new SearchDependency(hit.documentId(), hit.paragraphId(), hit.chunkId()));
+      for (Hit hit : lexicalHits)
+        dependencies.add(new SearchDependency(hit.documentId(), hit.paragraphId(), hit.chunkId()));
+      return Set.copyOf(dependencies);
+    }
+  }
+
+  /** Returned row identities only; none of these UUIDs is a source revision. */
+  record SearchDependency(UUID documentId, UUID paragraphId, UUID chunkId) {
+    SearchDependency {
+      Objects.requireNonNull(documentId);
+      Objects.requireNonNull(paragraphId);
+      Objects.requireNonNull(chunkId);
+    }
+  }
+
   private static final RowMapper<Hit> HIT =
       (rs, row) ->
           new Hit(
@@ -1567,7 +1678,12 @@ public final class DocumentStore {
    *     answer is complete</b>; anything else means the corpus holds text no question can reach,
    *     and ingesting those documents again embeds them without deriving anything a second time
    */
-  public record Coverage(int searchable, int unsearchable) {}
+  public record Coverage(int searchable, int unsearchable) {
+    public Coverage {
+      if (searchable < 0 || unsearchable < 0)
+        throw new IllegalArgumentException("Negative search coverage");
+    }
+  }
 
   // --- the read the ask path makes ----------------------------------------------
 

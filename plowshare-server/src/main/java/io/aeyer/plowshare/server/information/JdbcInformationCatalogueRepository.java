@@ -108,8 +108,47 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     var args = new ArrayList<Object>(selectionArgs(context));
     args.add(revision);
     return !jdbc.queryForList(
-            SELECT + " WHERE " + readableSql(context) + " AND r.id=?", args.toArray())
+            "SELECT 1 FROM information_revision_allowances r WHERE "
+                + readableSql(context)
+                + " AND r.id=?",
+            Integer.class,
+            args.toArray())
         .isEmpty();
+  }
+
+  public Optional<AuthorizedMetadata> authorizedMetadata(
+      InformationContext context, UUID revision) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    return jdbc
+        .queryForList(SELECT + " WHERE " + readableSql(context) + " AND r.id=?", args.toArray())
+        .stream()
+        .map(row -> new AuthorizedMetadata(context, decode(row, Information.Revision.class)))
+        .findFirst();
+  }
+
+  public Optional<AuthorizedText> authorizedText(InformationContext context, UUID revision) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    return jdbc
+        .query(
+            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text FROM information_revision_allowances r WHERE "
+                + readableSql(context)
+                + " AND r.id=?",
+            (rs, n) ->
+                new AuthorizedText(
+                    context,
+                    rs.getObject(1, UUID.class),
+                    rs.getObject(2, UUID.class),
+                    rs.getString(3),
+                    rs.getString(4),
+                    rs.getString(5),
+                    rs.getString(6),
+                    rs.getLong(7),
+                    rs.getString(8)),
+            args.toArray())
+        .stream()
+        .findFirst();
   }
 
   public Information.Revision metadata(UUID revision) {

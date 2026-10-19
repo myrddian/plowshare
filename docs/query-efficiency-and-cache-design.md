@@ -4,7 +4,9 @@ Status: proposed implementation strategy. The
 [query efficiency rules](coding-standards.md#query-efficiency-and-reuse) apply to
 new and changed code. The [first implementation slice](query-efficiency-first-slice.md)
 consolidates facets, separates list rendering from facets and permits bounded
-independent reads. The cache and database notification bridge remain proposed;
+independent reads. The [second slice](query-efficiency-second-slice.md) adds
+document/search snapshot reuse, keyed schedule reads and explicit DTO linkage
+contracts. The cache and database notification bridge remain proposed;
 the broader changes described here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)

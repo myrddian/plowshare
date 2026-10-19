@@ -9,6 +9,61 @@ import java.util.*;
  * transaction.
  */
 public interface InformationCatalogueRepository {
+  /**
+   * Metadata admitted under this exact selection in its retrieval statement. Reuse only within the
+   * current operation: the processing generation is not a version of resource tags, reports, steps,
+   * content-type display metadata or live authority. Shared admission needs versions/invalidation
+   * for all those dependencies; this value is neither an authority lease nor a shared cache entry.
+   */
+  record AuthorizedMetadata(InformationContext context, Information.Revision revision) {
+    public AuthorizedMetadata {
+      Objects.requireNonNull(context);
+      Objects.requireNonNull(revision);
+    }
+  }
+
+  /**
+   * One authorized extraction and its classification. Source bytes (contentHash), extraction
+   * (textHash) and processingGeneration describe distinct identities; none versions current policy
+   * or availability. Hashes are opaque retained fingerprints: V83 imported older documents without
+   * a SHA-256 format constraint. A null extraction/textHash is allowed before extraction. This
+   * immutable value is operation-local: a later disclosure must reauthorize and refetch. Future
+   * content caching must additionally fence deletion/redaction and extraction replacement;
+   * generation alone does not establish those fences.
+   */
+  record AuthorizedText(
+      InformationContext context,
+      UUID revision,
+      UUID resource,
+      String documentType,
+      String documentSubtype,
+      String contentHash,
+      String textHash,
+      long processingGeneration,
+      String text) {
+    public AuthorizedText {
+      Objects.requireNonNull(context);
+      Objects.requireNonNull(revision);
+      Objects.requireNonNull(resource);
+      if (!Set.of("document", "code").contains(documentType)
+          || documentSubtype == null
+          || !documentSubtype.matches("[a-zA-Z0-9_.+-]{1,128}")
+          || processingGeneration < 1)
+        throw new IllegalArgumentException("invalid authorized extraction identity");
+      retainedHash(contentHash, false);
+      retainedHash(textHash, true);
+    }
+
+    private static void retainedHash(String value, boolean optional) {
+      if (value == null && optional) return;
+      if (value == null
+          || value.isBlank()
+          || value.length() > 1024
+          || value.codePoints().anyMatch(Character::isISOControl))
+        throw new IllegalArgumentException("invalid retained extraction fingerprint");
+    }
+  }
+
   record Snapshot(
       UUID id,
       UUID resourceId,
@@ -42,6 +97,14 @@ public interface InformationCatalogueRepository {
   Resource lockResource(InformationContext context, UUID revision, boolean audience);
 
   boolean readable(InformationContext context, UUID revision);
+
+  /** Applies current readability in the same SQL snapshot as the metadata projection. */
+  Optional<AuthorizedMetadata> authorizedMetadata(InformationContext context, UUID revision);
+
+  /**
+   * Applies current readability in the same SQL snapshot as extraction/classification retrieval.
+   */
+  Optional<AuthorizedText> authorizedText(InformationContext context, UUID revision);
 
   Information.Revision metadata(UUID revision);
 

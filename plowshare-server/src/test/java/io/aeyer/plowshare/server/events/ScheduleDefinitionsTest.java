@@ -38,6 +38,11 @@ class ScheduleDefinitionsTest {
   void configure() {
     when(store.sources()).thenReturn(List.of(source));
     when(store.files(source)).thenReturn(List.of(prior));
+    when(store.snapshot(source, "daily"))
+        .thenReturn(
+            java.util.Optional.of(
+                new ScheduleDefinitionStore.FileSnapshot(
+                    source, prior.name(), prior.internalName(), definition, null, "active", null)));
     when(members.mayWork("project", "owner")).thenReturn(true);
   }
 
@@ -90,6 +95,8 @@ class ScheduleDefinitionsTest {
         service.save(
             "owner", new ScheduledWork.Save("daily", "project", "server", definition, false));
     assertEquals(prior, result);
+    verify(store).files(source); // deletion discovery only, never a final full-source reload
+    verify(store).snapshot(source, "daily");
     var order = inOrder(files, store);
     order.verify(files).write(source, "daily", ScheduleDefinitionCodec.write(definition), false);
     order.verify(files).read(source);

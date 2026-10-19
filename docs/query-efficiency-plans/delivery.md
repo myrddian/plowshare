@@ -3,6 +3,9 @@
 Status: proposed implementation work. See the [owner inventory](README.md) and
 [query and cache strategy](../query-efficiency-and-cache-design.md). Repository
 plans describe candidates, not measured improvements or implemented mechanisms.
+The [first implementation receipt](../query-efficiency-first-slice.md) and
+[second implementation receipt](../query-efficiency-second-slice.md) record the
+completed local slices, verification and remaining cache-admission gates.
 
 ## Start with operation costs and ownership
 
@@ -121,19 +124,19 @@ and timed eligibility still find work. A future lease expiry or schedule becomin
 due has no new database mutation, so it also needs a timer or bounded sweep.
 
 The [connection dispatcher](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/EventRequests.java)
-currently drains domain operations serially. Define an explicit operation policy
-before enabling bounded concurrent reads. Default unknown operations to ordered;
-classify apparent reads that subscribe, advance cursors, acquire leases or mutate
-bookkeeping separately. Preserve mutation order and read-after-write barriers,
-admit current authority at execution, and bound global/per-connection tasks,
-database pool use, queued bytes and response bytes. Keep packet acknowledgments
-responsive and correlate out-of-order read replies through existing request IDs.
-Closing/cancelling a read must not replay an operation of uncertain completion.
+now permits a bounded allowlist of independent reads. Unknown operation types,
+malformed envelopes and acting-context requests remain ordered barriers. Retain
+that explicit policy when adding operations; apparent reads that subscribe,
+advance cursors, acquire leases or mutate bookkeeping need separate treatment.
+Preserve mutation order, read-after-write barriers, execution-time authority and
+global/per-connection task and memory bounds. Packet acknowledgments remain
+responsive and out-of-order replies use existing request IDs. Closing/cancelling
+a read must not replay an operation of uncertain completion.
 
 The [Desktop information view](../../plowshare-desktop/src/renderer/information.ts)
-waits for both list and facets and refreshes the active view every four seconds.
-Render a valid list independently, share in-flight requests and retain DTOs already
-returned. Invalidate affected views through scoped WebSocket hints, with bounded
+now renders lists independently of facets and coalesces pending facet requests.
+It still refreshes the active view every four seconds. Retain DTOs already
+returned, and invalidate affected views through scoped WebSocket hints with bounded
 reconciliation. Fence late responses by connection, principal, scope and selection
 generation; clear private state on logout/account/server changes. A local hint
 cannot expand server authorization or reveal protected resource existence.

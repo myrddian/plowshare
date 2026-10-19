@@ -52,7 +52,11 @@ public final class InformationCatalogue implements InformationReadAccess {
   public String fingerprint(UUID revision, String stage) {
     String base = fingerprint(stage);
     if (base == null || !stage.equals("derive")) return base;
-    return "code".equals(row(revision).documentType())
+    return fingerprint(base, stage, row(revision).documentType());
+  }
+
+  private static String fingerprint(String base, String stage, String documentType) {
+    return base != null && stage.equals("derive") && "code".equals(documentType)
         ? sha256(
             (base
                     + ":"
@@ -675,8 +679,7 @@ public final class InformationCatalogue implements InformationReadAccess {
   /** An indexed passage is only evidence when it can be matched back to retained source text. */
   public Information.Window locateWindow(
       InformationContext context, UUID revision, String passage) {
-    requireReadable(context, revision);
-    String source = row(revision).extractedText();
+    String source = authorizedText(context, revision).text();
     if (source == null)
       return Information.Window.unmatched(revision, "retained extraction is unavailable");
     if (passage == null || passage.isBlank() || passage.length() > 32768)
@@ -692,11 +695,17 @@ public final class InformationCatalogue implements InformationReadAccess {
 
   public Information.Window locateCodeWindow(
       InformationContext context, UUID revision, UUID chunk) {
-    requireReadable(context, revision);
+    var admitted = access.admitted(context);
+    // This is an internal locator, not a disclosure of passage existence. Both branches must
+    // authorize the revision before returning anything. A missing locator needs no extraction.
     var span = repository.codeSpan(revision, chunk);
-    if (span.isEmpty())
+    if (span.isEmpty()) {
+      if (!repository.readable(admitted, revision)) throw absent();
       return Information.Window.unmatched(revision, "code passage has no source location");
-    String source = text(context, revision);
+    }
+    var retained =
+        repository.authorizedText(admitted, revision).orElseThrow(InformationCatalogue::absent);
+    String source = extracted(retained);
     var location = span.get();
     if (location.end() > source.length())
       throw new IllegalStateException("code passage lies outside retained source");
@@ -709,7 +718,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         null,
         source.substring(location.start(), location.end()),
         "code",
-        row(revision).documentSubtype());
+        retained.documentSubtype());
   }
 
   public Information.Window window(
@@ -717,10 +726,10 @@ public final class InformationCatalogue implements InformationReadAccess {
     if (offset < 0 || limit < 1 || limit > 32768)
       throw new CallerFault(
           "read offset must be nonnegative and limit must be between 1 and 32768 characters");
-    String value = text(context, revision);
+    var retained = authorizedText(context, revision);
+    String value = extracted(retained);
     if (offset > value.length()) throw new CallerFault("read offset is beyond the retained text");
     int end = (int) Math.min((long) offset + limit, value.length());
-    var row = row(revision);
     return new Information.Window(
         revision,
         null,
@@ -729,8 +738,8 @@ public final class InformationCatalogue implements InformationReadAccess {
         end,
         value.length(),
         value.substring(offset, end),
-        row.documentType(),
-        row.documentSubtype());
+        retained.documentType(),
+        retained.documentSubtype());
   }
 
   public void callerSession(Admission admission, String session) {
@@ -817,26 +826,49 @@ public final class InformationCatalogue implements InformationReadAccess {
     return repository.inventory(context, limit, offset);
   }
 
+  /**
+   * Reuses metadata admitted by its own retrieval statement. Checkpoints remain separate live reads
+   * as before: this view does not claim a common transaction snapshot or a durable display version.
+   * The hidden-owner fallback must still acquire write authority and its existing locks.
+   */
   public Information.Revision status(InformationContext context, UUID revision) {
     boolean readable = true;
+    Information.Revision metadata;
     try {
-      requireReadable(context, revision);
+      metadata =
+          repository
+              .authorizedMetadata(access.admitted(context), revision)
+              .orElseThrow(InformationCatalogue::absent)
+              .revision();
     } catch (NotFoundFault hidden) {
       requireWrite(context, revision);
       readable = false;
+      metadata = repository.metadata(revision);
     }
-    var metadata = repository.metadata(revision);
     if (!context.typedView()
         && (metadata.contentType() != null || "explicit_only".equals(metadata.processingPolicy())))
       throw new CallerFault("unsupported-view");
-    boolean owner = context.account().equals(row(revision).ownerHandle());
+    boolean owner = context.account().equals(metadata.author());
     boolean visible = readable;
+    var storedSteps = repository.steps(revision);
+    // Resolve provider/embedding configuration once for this status view, not once per historical
+    // stage. Hidden status never resolves processing configuration or exposes compatibility.
+    var fingerprints =
+        readable && !storedSteps.isEmpty()
+            ? Map.copyOf(configuration.get())
+            : Map.<String, String>of();
+    String documentType = metadata.documentType();
     var steps =
-        repository.steps(revision).stream()
+        storedSteps.stream()
             .map(
                 step ->
                     step.visible(
-                        visible, owner, visible ? fingerprint(revision, step.stage()) : null))
+                        visible,
+                        owner,
+                        visible
+                            ? fingerprint(
+                                fingerprints.get(step.stage()), step.stage(), documentType)
+                            : null))
             .toList();
     boolean report = readable && "report".equals(metadata.kind());
     return metadata.withStatus(
@@ -851,10 +883,19 @@ public final class InformationCatalogue implements InformationReadAccess {
   }
 
   public String text(InformationContext context, UUID revision) {
-    requireReadable(context, revision);
-    String value = repository.text(revision);
-    if (value == null) throw new CallerFault("this revision has not been extracted");
-    return value;
+    return extracted(authorizedText(context, revision));
+  }
+
+  private InformationCatalogueRepository.AuthorizedText authorizedText(
+      InformationContext context, UUID revision) {
+    return repository
+        .authorizedText(access.admitted(context), revision)
+        .orElseThrow(InformationCatalogue::absent);
+  }
+
+  private static String extracted(InformationCatalogueRepository.AuthorizedText retained) {
+    if (retained.text() == null) throw new CallerFault("this revision has not been extracted");
+    return retained.text();
   }
 
   /** Bounded, syntax-only outline; source/evidence continue to use the existing read API. */
