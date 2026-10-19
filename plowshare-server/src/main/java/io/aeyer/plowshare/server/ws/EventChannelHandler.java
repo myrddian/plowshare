@@ -459,6 +459,24 @@ public final class EventChannelHandler extends TextWebSocketHandler
     // role finds a socket that already has somewhere to put an event, so
     // there is no window in which a listener is attached and unreachable.
     Delivery delivery = new Delivery(socket, id, json, packetBudget);
+    if (delivery.transport instanceof PacketEventTransport) {
+      delivery.requests =
+          new EventRequests(
+              packetBudget,
+              frame -> {
+                try {
+                  routeFrame(socket, delivery, frame);
+                } catch (RuntimeException | Error failure) {
+                  delivery.stop();
+                  try {
+                    socket.close(CloseStatus.SERVER_ERROR.withReason("operation dispatch failed"));
+                  } catch (IOException closing) {
+                    failure.addSuppressed(closing);
+                  }
+                  throw failure;
+                }
+              });
+    }
     UsageSubscriptions usage = usageSubscriptions;
     if (usage != null) {
       usage.connect(socket.getId(), claimant, delivery::snapshot);
@@ -501,17 +519,18 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * <p><b>Stated as "exception" and not "anything", because the catch below is {@link
    * RuntimeException} and not {@link Throwable}.</b> An {@link Error} — an {@code
    * OutOfMemoryError}, a {@code StackOverflowError} — still escapes into Spring's {@code
-   * ExceptionWebSocketHandlerDecorator} and closes this session, and that is the right outcome
-   * rather than a gap to widen the catch over: a JVM that has just said it cannot continue is not
-   * one to answer the next frame from, and the honest signal to a client whose events are about to
-   * stop arriving is the socket closing. {@link FrameRouter#route(Envelope, Asking)} draws the same
-   * line for the same reason.
+   * ExceptionWebSocketHandlerDecorator} on legacy sockets; the segmented dispatcher closes its
+   * socket on the same failure. That is the right outcome rather than a gap to widen the catch
+   * over: a JVM that has just said it cannot continue is not one to answer the next frame from, and
+   * the honest signal to a client whose events are about to stop arriving is the socket closing.
+   * {@link FrameRouter#route(Envelope, Asking)} draws the same line for the same reason.
    *
-   * <p><b>The routing happens on the container's inbound thread</b>, which is {@code
-   * FileChannelHandler}'s shape for the same problem and not a new one: Tomcat does not read this
-   * session's next frame until this method returns, so a slow handler slows the client that asked
-   * and nothing else. What must not happen on this thread is the <em>write</em>, and it does not —
-   * {@link Delivery#answer} queues.
+   * <p>Segmented operations run serially on a bounded connection-owned dispatcher. The container's
+   * reader must remain free to receive packet credits while an operation waits on persistence;
+   * otherwise an unrelated push times out and closes a healthy connection. Legacy JSON keeps its
+   * existing inline routing. Neither routing path writes the answer inline: {@link Delivery#answer}
+   * queues. Queued operations recheck socket authority before execution, and closing discards
+   * queued work without replaying or cancelling an operation already started.
    *
    * <p><b>The correlation read is separate from the routing read, and is allowed to fail.</b>
    * {@link FrameRouter#route(String, Asking)} is the one place that decides what a malformed frame
@@ -537,7 +556,6 @@ public final class EventChannelHandler extends TextWebSocketHandler
           message.getPayloadLength());
       return;
     }
-    String session = named(socket);
     String frame;
     try {
       var assembled = delivery.transport.receive(message.getPayload());
@@ -552,6 +570,23 @@ public final class EventChannelHandler extends TextWebSocketHandler
       }
       return;
     }
+    if (delivery.requests == null) {
+      routeFrame(socket, delivery, frame);
+    } else {
+      try {
+        delivery.requests.offer(frame);
+      } catch (IllegalArgumentException capacity) {
+        delivery.requests.close();
+        delivery.disconnect("request admission");
+      }
+    }
+  }
+
+  /** Recheck authority at execution, because a queued operation may outlive its account session. */
+  private void routeFrame(WebSocketSession socket, Delivery delivery, String frame) {
+    if (!socket.isOpen() || !delivery.running) return;
+    if (socketAuthorization != null && !socketAuthorization.current(socket)) return;
+    String session = named(socket);
     Map<String, Object> correlation = correlationOf(frame);
     Outcome outcome;
     try {
@@ -972,6 +1007,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
     private final AtomicBoolean overrun = new AtomicBoolean();
     private volatile Thread drain;
+    private EventRequests requests;
     private volatile boolean running = true;
     private Runnable whenStopped = () -> {};
     private final Map<String, Object> snapshots = new LinkedHashMap<>();
@@ -1035,6 +1071,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     void start() {
       this.drain = Thread.ofVirtual().name("job-events-" + socket.getId()).start(this::drain);
+      if (requests != null) requests.start(socket.getId());
     }
 
     /**
@@ -1043,6 +1080,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     void stop() {
       running = false;
+      if (requests != null) requests.close();
       transport.close();
       whenStopped.run();
       synchronized (this) {
