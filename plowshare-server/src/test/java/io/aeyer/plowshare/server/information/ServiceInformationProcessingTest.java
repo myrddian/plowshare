@@ -501,6 +501,148 @@ class ServiceInformationProcessingTest {
     org.mockito.Mockito.verifyNoInteractions(ordinary);
   }
 
+  @Test
+  void manualControlsUseCommandAuthorityWithoutWorkerLeasesOrProcessingLogReplacement() {
+    UUID revision = retained(PRINCIPAL, project);
+    var access = new InformationAccess(new EffectiveProjectPermissions(members));
+    var catalogue = InformationFixtures.catalogue(jdbc, work, access, Clock.systemUTC());
+    catalogue.withGates(controlHooks(catalogue, access));
+    var context =
+        new InformationContext(
+                PRINCIPAL,
+                new InformationContext.Selection(
+                    InformationContext.Scope.PROJECT, "automation", false))
+            .withView(true);
+    UUID request = UUID.randomUUID();
+    catalogue.tags(context, revision, List.of("sdk", "manual"), request);
+    assertEquals(List.of("manual", "sdk"), catalogue.status(context, revision).tags());
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT processing_log FROM information_revisions WHERE id=?", String.class, revision));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM information_steps WHERE revision_id=? AND state='running'",
+            Integer.class,
+            revision));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM system_operations WHERE purpose='DOCUMENT_PREPARATION'",
+            Integer.class));
+    assertEquals(
+        "completed",
+        jdbc.queryForObject(
+            "SELECT state FROM information_commands WHERE account=? AND request_id=?",
+            String.class,
+            PRINCIPAL,
+            request));
+    catalogue.tags(context, revision, List.of("sdk", "manual"), request);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM system_operations WHERE purpose='DOCUMENT_PREPARATION'",
+            Integer.class));
+    jdbc.update("UPDATE service_tokens SET revoked_at=now() WHERE id=?", token);
+    assertThrows(
+        RuntimeException.class,
+        () -> catalogue.tags(context, revision, List.of("changed"), UUID.randomUUID()));
+    assertEquals(
+        "[\"manual\", \"sdk\"]",
+        jdbc.queryForObject(
+            "SELECT tags::text FROM information_resources WHERE id=(SELECT resource_id FROM information_revisions WHERE id=?)",
+            String.class,
+            revision));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "reserved",
+        "applied",
+        "blocked",
+        "completed",
+        "expired",
+        "wrongToken",
+        "wrongRevision",
+        "wrongActor"
+      })
+  void manualControlFenceChecksTheExactActiveCommandAttempt(String change) {
+    UUID revision = retained(PRINCIPAL, project);
+    var context =
+        new InformationContext(
+            PRINCIPAL,
+            new InformationContext.Selection(
+                InformationContext.Scope.PROJECT, "automation", false));
+    var commands = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var command =
+        work.inTransaction(
+            () -> commands.reserve(context, revision, UUID.randomUUID(), "a".repeat(64)));
+    if (List.of("applied", "blocked", "completed").contains(change))
+      commands.commandState(
+          context,
+          command,
+          InformationCatalogueRepository.CommandState.valueOf(change.toUpperCase(Locale.ROOT)),
+          null);
+    if (change.equals("expired"))
+      jdbc.update(
+          "UPDATE information_commands SET lease_until=now()-interval '1 second' WHERE account=? AND request_id=?",
+          PRINCIPAL,
+          command.request());
+    var selected =
+        change.equals("wrongToken")
+            ? new InformationCatalogueRepository.Command(
+                command.request(), UUID.randomUUID(), false, false)
+            : command;
+    var target = change.equals("wrongRevision") ? UUID.randomUUID() : revision;
+    var actor =
+        change.equals("wrongActor")
+            ? new InformationContext("reader", context.selection())
+            : context;
+    Runnable check =
+        () ->
+            work.inTransaction(
+                () -> {
+                  commands.requireCommand(actor, target, selected);
+                  return null;
+                });
+    if (List.of("reserved", "applied").contains(change)) assertDoesNotThrow(check::run);
+    else assertThrows(RuntimeException.class, check::run);
+  }
+
+  private InformationStageHooks controlHooks(
+      InformationCatalogue catalogue, InformationAccess access) {
+    var identities = new io.aeyer.plowshare.server.access.JdbcIdentityRepository(jdbc);
+    var grants = new io.aeyer.plowshare.server.access.JdbcScopedGrantRepository(jdbc);
+    ApplicationPolicy applications = ignored -> boundary.get();
+    var authority =
+        new io.aeyer.plowshare.server.access.LiveScopedAuthority(
+            grants,
+            applications,
+            new io.aeyer.plowshare.server.access.ApplicationGrantLineage(grants, applications),
+            identities);
+    var system =
+        new io.aeyer.plowshare.server.access.BoundSystemOperations(
+            identities,
+            grants,
+            authority,
+            new io.aeyer.plowshare.server.access.JdbcSystemOperationRecords(jdbc),
+            new io.aeyer.plowshare.server.access.OperationInference(
+                org.mockito.Mockito.mock(io.aeyer.plowshare.server.access.OperationAuthority.class),
+                new io.aeyer.plowshare.server.llm.accounting.JdbcInferenceAdmissions(jdbc)));
+    return new InformationStageHooks(
+        new JdbcInformationStageRepository(jdbc),
+        catalogue,
+        new ConversationStore(jdbc),
+        io.aeyer.plowshare.server.agents.LogStages.NONE,
+        new InformationJobs(new JdbcJobInformationRepository(jdbc), access),
+        io.aeyer.plowshare.server.hooks.Hooks.NONE,
+        io.aeyer.plowshare.server.harness.Harness.NONE,
+        () -> null,
+        system,
+        repository);
+  }
+
   void metadataReady(UUID revision, String stage) {
     jdbc.update("UPDATE information_revisions SET extracted_text='Evidence' WHERE id=?", revision);
     jdbc.update("UPDATE information_steps SET state='ready' WHERE revision_id=?", revision);

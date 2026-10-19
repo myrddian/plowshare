@@ -1169,10 +1169,31 @@ public final class InformationCatalogue implements InformationReadAccess {
             UUID.randomUUID(),
             context.account(),
             resource.projectId());
+    // Controls are authenticated commands, not queued processing stages. Recheck
+    // both their retained attempt and the caller's current knowledge authority.
+    // A retry/rebuild may change generation itself, so its command token (not a
+    // fabricated processing-generation lease) fences the pre/post hook lifetime.
+    var control =
+        new InformationLifecycle.Control(
+            lease,
+            () ->
+                transactions.inTransaction(
+                    () -> {
+                      repository.requireCommand(context, revision, command);
+                      var current =
+                          requireMutation(
+                              context,
+                              revision,
+                              operation.equals("share") || operation.equals("unshare"));
+                      if (!current.id().equals(resource.id())
+                          || !current.home().equals(resource.home()))
+                        throw new CallerFault("information command knowledge home changed");
+                      return null;
+                    }));
     if (safety) apply(context, command, work);
     try {
       if (command == null || !command.applied()) {
-        var pre = gates.before(lease);
+        var pre = gates.beforeControl(control);
         event(
             revision,
             generation(revision),
@@ -1183,7 +1204,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         if (pre.isDenied() && !safety) throw new CallerFault(pre.denied());
       }
       if (!safety && !publication) apply(context, command, work);
-      var post = gates.after(lease);
+      var post = gates.afterControl(control);
       event(
           revision,
           generation(revision),

@@ -229,6 +229,11 @@ public interface InformationCatalogueRepository {
 
   void lockReserved(InformationContext context, Command command);
 
+  /**
+   * Locks the exact live command attempt while either reserved or awaiting post-gate completion.
+   */
+  void requireCommand(InformationContext context, UUID revision, Command command);
+
   UUID recordEvidence(
       InformationContext context,
       UUID revision,
