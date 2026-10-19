@@ -1,0 +1,59 @@
+name: furrow
+services:
+  web:
+    image: ${AGILE_IMAGE:?Set an immutable app image ID or digest}
+    user: ${AGILE_RUN_USER:?Set the owner uid:gid of private app files}
+    environment:
+      AGILE_CONFIG: /etc/furrow/config.toml
+      AGILE_TOKEN_FILE: /run/secrets/plowshare-token
+      AGILE_WEB_ACCESS_KEY_FILE: /run/secrets/web-access-key
+      AGILE_BIND: ${AGILE_BIND:?Set the container listener address}
+      AGILE_PORT: ${AGILE_PORT:?Set the container listener port}
+      AGILE_PUBLIC_ORIGIN: ${AGILE_PUBLIC_ORIGIN:?Set the exact browser origin}
+      AGILE_HEALTH_ORIGIN: ${AGILE_HEALTH_ORIGIN:?Set the internal HTTP probe origin}
+    volumes:
+      - type: bind
+        source: ${AGILE_CONFIG_FILE:?Set the private TOML file}
+        target: /etc/furrow/config.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGILE_TOKEN_FILE:?Set the private Application bearer file}
+        target: /run/secrets/plowshare-token
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGILE_WEB_ACCESS_KEY_FILE:?Set the separate web key file}
+        target: /run/secrets/web-access-key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGILE_REQUEST_DIRECTORY:?Set the private persistent request directory}
+        target: /var/lib/furrow/requests
+        bind:
+          create_host_path: false
+    ports:
+      - ${AGILE_LISTEN_ADDRESS:?Set the host listener address}:${AGILE_PUBLISHED_PORT:?Set the host port}:${AGILE_PORT:?Set the container port}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid"]
+    mem_limit: 256m
+    pids_limit: 64
+    stop_grace_period: 20s
+    healthcheck:
+      test: [CMD, python, -m, plowshare_agile.container, health]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"

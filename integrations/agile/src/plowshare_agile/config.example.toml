@@ -1,0 +1,8 @@
+origin = "https://plowshare.example"
+project = "REPLACE_WITH_DEPLOYED_APPLICATION_PROJECT"
+token_environment = "AGILE_TOKEN"
+state_directory = "private-agile-requests"
+ticket_type = "REPLACE_WITH_TICKET_TYPE_UUID"
+ticket_version = "REPLACE_WITH_ACTIVE_TICKET_VERSION_UUID"
+epic_type = "REPLACE_WITH_EPIC_TYPE_UUID"
+epic_version = "REPLACE_WITH_ACTIVE_EPIC_VERSION_UUID"

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Excalibur · Plowshare</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/markdown.js" defer></script>
+    <script src="/app.mjs" type="module"></script>
+  </head>
+  <body>
+    <section id="login" class="login-screen">
+      <form id="loginForm" class="login-card">
+        <div class="brand-mark" aria-hidden="true">E</div>
+        <p class="eyebrow">EXCALIBUR · POWERED BY PLOWSHARE</p>
+        <h1>A little structure.<br />Room to do the work.</h1>
+        <p class="muted">
+          Open your maintainer workspace to plan tickets and connect ideas
+          across epics.
+        </p>
+        <label
+          >Web access key<input
+            id="accessKey"
+            name="accessKey"
+            type="password"
+            required
+            autocomplete="current-password"
+            maxlength="256"
+        /></label>
+        <button type="submit" class="primary">
+          Open workspace <span aria-hidden="true">→</span>
+        </button>
+        <p class="fine-print">
+          Use the separate key configured for this web app. Your Plowshare
+          bearer stays on the server.
+        </p>
+        <p id="loginError" role="alert" class="error-text"></p>
+      </form>
+    </section>
+
+    <div id="shell" class="shell" hidden>
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">E</span
+          ><span>Excalibur <small>by Plowshare</small></span>
+        </div>
+        <div class="workspace-label">
+          <span class="workspace-dot"></span
+          ><span id="workspace">Workspace</span>
+        </div>
+        <nav aria-label="Workspace views">
+          <button id="boardNav" class="nav-item active" aria-current="page">
+            <span aria-hidden="true">▤</span> Board
+          </button>
+          <button id="epicsNav" class="nav-item">
+            <span aria-hidden="true">◈</span> Epics
+          </button>
+        </nav>
+        <div class="sidebar-section">
+          <span>EPIC FILTERS</span
+          ><button id="newEpic" class="icon-button" aria-label="Create epic">
+            +
+          </button>
+        </div>
+        <p class="sidebar-hint">Select together to find shared work.</p>
+        <div id="epicFilters" class="epic-filters"></div>
+        <div class="sidebar-bottom">
+          <span class="workspace-dot"></span><span>Maintainer workspace</span
+          ><button id="logout" class="text-button">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">WORKSPACE / <span id="viewLabel">BOARD</span></p>
+            <h1 id="pageTitle">The work ahead</h1>
+            <p id="pageSubtitle" class="muted">
+              A clear view of what matters next.
+            </p>
+          </div>
+          <div class="header-actions">
+            <button id="refresh" class="secondary">
+              ↻ <span>Refresh</span></button
+            ><button id="newDocument" class="primary">+ New ticket</button>
+          </div>
+        </header>
+        <div id="pending" class="pending" role="alert" hidden>
+          <div>
+            <strong>A save needs checking</strong>
+            <p id="pendingText"></p>
+          </div>
+          <button id="recover" class="secondary">Check saved request</button>
+        </div>
+        <p id="status" role="status" class="status" hidden></p>
+        <section class="toolbar" aria-label="Intersecting ticket filters">
+          <label class="search-label"
+            ><span aria-hidden="true">⌕</span
+            ><input
+              id="search"
+              type="search"
+              placeholder="Find a ticket…"
+              aria-label="Find a ticket by title"
+          /></label>
+          <label class="compact-label"
+            >Kind<select id="kindFilter">
+              <option value="">All kinds</option>
+              <option value="feature">Feature</option>
+              <option value="bug">Bug</option>
+              <option value="chore">Chore</option>
+            </select></label
+          >
+          <label class="compact-label"
+            >Assignee<select id="assigneeFilter">
+              <option value="">Anyone</option>
+            </select></label
+          >
+          <label class="compact-label"
+            >Iteration<select id="iterationFilter">
+              <option value="">All iterations</option>
+            </select></label
+          >
+          <details id="tagPicker" class="tag-picker">
+            <summary>Topic tags <span id="tagCount"></span></summary>
+            <div id="tagFilters" class="tag-options"></div>
+          </details>
+        </section>
+        <div class="selection-row">
+          <div id="filterChips" class="chips"></div>
+          <div class="selection-count">
+            <span id="ticketCount">Loading…</span
+            ><button id="clearFilters" class="text-button" hidden>
+              Clear filters
+            </button>
+          </div>
+        </div>
+        <div id="loading" class="loading">Loading your workspace…</div>
+        <section id="board" class="board" aria-label="Ticket board"></section>
+        <section
+          id="epics"
+          class="epics-grid"
+          aria-label="Epics"
+          hidden
+        ></section>
+        <footer class="page-footer">
+          One ticket can belong to several epics. Every view follows the same
+          work.
+        </footer>
+      </main>
+    </div>
+
+    <aside id="detail" class="detail" aria-label="Document details" hidden>
+      <div class="detail-top">
+        <span id="detailKind" class="eyebrow">TICKET</span>
+        <div>
+          <button id="reloadDetail" class="text-button">Reload</button
+          ><button
+            id="closeDetail"
+            class="icon-button"
+            aria-label="Close document details"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+      <div id="detailContent"></div>
+    </aside>
+
+    <dialog id="createDialog">
+      <form id="createForm">
+        <div class="dialog-top">
+          <p id="createLabel" class="eyebrow">NEW TICKET</p>
+          <button
+            id="cancelCreate"
+            type="button"
+            class="icon-button"
+            aria-label="Cancel creation"
+          >
+            ×
+          </button>
+        </div>
+        <h2 id="createTitle">Make the next step clear.</h2>
+        <label
+          >Title<input
+            name="title"
+            required
+            maxlength="160"
+            placeholder="What needs to change?"
+        /></label>
+        <div id="createTicketFields" class="field-grid">
+          <label
+            >Kind<select name="kind">
+              <option value="feature">Feature</option>
+              <option value="bug">Bug</option>
+              <option value="chore">Chore</option>
+            </select></label
+          >
+          <label
+            >Priority<select name="priority">
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+            </select></label
+          >
+          <label
+            >Assignee<input
+              name="assignee"
+              maxlength="120"
+              placeholder="Unassigned"
+          /></label>
+          <label
+            >Iteration<input
+              name="iteration"
+              maxlength="80"
+              placeholder="No iteration"
+          /></label>
+        </div>
+        <label id="createBodyLabel"
+          >Description and acceptance criteria<textarea
+            name="body"
+            required
+            rows="10"
+            maxlength="16384"
+          ></textarea>
+        </label>
+        <p id="createHint" class="fine-print">
+          Connect this ticket to epics and topic tags after creating it.
+        </p>
+        <p id="createError" class="error-text" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelCreateBottom" class="secondary">
+            Cancel</button
+          ><button id="submitCreate" class="primary" type="submit">
+            Create ticket
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

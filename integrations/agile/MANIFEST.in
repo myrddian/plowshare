@@ -1,0 +1,6 @@
+include scripts/check.py
+include scripts/build_web.mjs
+include scripts/markdown-view.mjs
+include tests/preview.py
+recursive-include tests *.mjs *.cjs
+recursive-include deploy Dockerfile Dockerfile.dockerignore *.yaml *.txt *.md *.example

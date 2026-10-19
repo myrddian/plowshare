@@ -1,8 +1,9 @@
 # Integrations
 
-Integrations connect external systems to Plowshare through its public SDK and
-server contracts. They run outside the core server, configure their deployment
-addresses explicitly and retain only adapter-owned state.
+Integrations and standalone Applications consume Plowshare through its public SDK
+and server contracts. They run outside the core server, configure their deployment
+addresses explicitly and retain only application-owned local state. Authoritative
+Application documents and durable work remain on the Plowshare server.
 
 | Directory | Responsibility | Gradle identity |
 | --- | --- | --- |
@@ -12,6 +13,7 @@ addresses explicitly and retain only adapter-owned state.
 | [MCP](mcp/README.md) | Reusable outbound HTTP MCP ToolProvider with separate connections and credential contexts | `:plowshare-mcp-integration` |
 | [Discord](discord/README.md) | One service-authenticated Discord bot with fixed channel routing and optional Relay notifications | `:plowshare-discord-integration` |
 | [Network Privacy Watch](network-privacy/README.md) | Network privacy Application with a Python collector and web interface | `:plowshare-network-privacy` (definition tests); explicit `pythonCheck` |
+| [Excalibur](agile/README.md) | Separate lightweight agile Application with a Python CLI, web board, agent skill and Docker packaging | Explicit Python/Node checks; no core or Gradle module |
 
 Source locations are grouped here; Gradle commands and distribution executable
 names remain stable. See the [coding standards](../docs/coding-standards.md) for

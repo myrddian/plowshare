@@ -29,6 +29,7 @@
 - [Authority substrate first implementation slice](authority-substrate-first-slice-plan.md) (implemented project READ/WRITE foundation, reuse and verification)
 - [Authority substrate implementation roadmap](authority-substrate-implementation-plan.md) (18 slices with local implementation evidence and deferred follow-ups)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
+- [Excalibur: lightweight agile Application](lightweight-agile-application-design.md) (design, CLI, web board and Docker packaging)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
 - [Document navigation usage](authored-navigation.md) — relationships, paths and policy administration.
