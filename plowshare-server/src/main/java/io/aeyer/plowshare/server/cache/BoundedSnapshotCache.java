@@ -1,9 +1,6 @@
 package io.aeyer.plowshare.server.cache;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -11,6 +8,8 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,7 +25,9 @@ import java.util.concurrent.TimeoutException;
  * is O(d) for d bounded declared dependencies; evicting k entries is O(k*d), not a constant-time
  * bulk action.
  *
- * <p>All state transitions linearize under one short monitor. Loader, scheduler/executor calls,
+ * <p>Shared indexes and reference sets use concurrent collections. All compound state transitions
+ * still linearize under one short monitor: concurrent maps alone cannot atomically change LRU
+ * links, dependency registrations and several capacity counters. Loader, scheduler/executor calls,
  * future completion and timer cancellation happen outside it. Successful read/fill linearization
  * precedes completion callbacks: an invalidation that wins before that decision fails the read; an
  * invalidation afterwards cannot revoke a value already logically returned to an operation. Owners
@@ -87,7 +88,10 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
   private final class Flight extends Reference {
     final Fence fence;
     final long reservation;
-    final Set<Waiter> waiting = new LinkedHashSet<>();
+    final Set<Waiter> waiting = ConcurrentHashMap.newKeySet();
+    // One edge per retained nested waiter, bounded by the existing waiter limits. These edges
+    // describe unfinished loader reads, not caller authorization or arbitrary future dependencies.
+    final Set<Waiter> nested = ConcurrentHashMap.newKeySet();
     Failure invalid;
     boolean finished;
     boolean loaderExited;
@@ -112,13 +116,15 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
 
   private final class Waiter implements Read<T> {
     final Flight flight;
+    final Flight caller;
     final CompletableFuture<Tracked<T>> future = new CompletableFuture<>();
     final CompletionStage<Tracked<T>> view = future.minimalCompletionStage();
     boolean active = true;
     ScheduledFuture<?> timer;
 
-    Waiter(Flight flight) {
+    Waiter(Flight flight, Flight caller) {
       this.flight = flight;
+      this.caller = caller;
     }
 
     @Override
@@ -140,11 +146,14 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
   private final ScheduledExecutorService timer;
   private final ExecutorService ownedExecutor;
   private final boolean ownedTimer;
-  private final Map<Identity, Entry> entries = new HashMap<>();
-  private final Map<Identity, Flight> joining = new HashMap<>();
-  private final Set<Flight> physical = new HashSet<>();
-  private final Map<Key, Set<Reference>> keys = new HashMap<>();
-  private final Map<Dependency, Set<Reference>> dependencies = new HashMap<>();
+  // Concurrent collection operations do not replace the monitor's compound invariants. Every
+  // iteration and mutation of these indexes/sets, including nested sets, remains monitor-owned.
+  private final ConcurrentMap<Identity, Entry> entries = new ConcurrentHashMap<>();
+  private final ConcurrentMap<Identity, Flight> joining = new ConcurrentHashMap<>();
+  private final Set<Flight> physical = ConcurrentHashMap.newKeySet();
+  private final ConcurrentMap<Key, Set<Reference>> keys = new ConcurrentHashMap<>();
+  private final ConcurrentMap<Dependency, Set<Reference>> dependencies = new ConcurrentHashMap<>();
+  private final ThreadLocal<Flight> loading = new ThreadLocal<>();
   private Entry first;
   private Entry last;
   private long residentWeight;
@@ -238,6 +247,15 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
 
   @Override
   public Read<T> read(Request request, Loader<T> loader) {
+    return read(request, loader, false);
+  }
+
+  @Override
+  public Read<T> readInline(Request request, Loader<T> loader) {
+    return read(request, loader, true);
+  }
+
+  private Read<T> read(Request request, Loader<T> loader, boolean inline) {
     Objects.requireNonNull(request);
     Objects.requireNonNull(loader);
     // Only bounded framework keys are hashed, never arbitrary DTO values or user hash callbacks.
@@ -264,6 +282,14 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
       flight = joining.get(identity);
       if (flight != null && !flight.request.equals(request))
         return failed(Failure.INCONSISTENT_REQUEST);
+      Flight caller = loading.get();
+      // An invalidated loader retains physical capacity but may create an independently fenced
+      // replacement. A current unfinished loader must never join its own same-key work.
+      if (caller != null
+          && (caller.invalid == null
+                  && !caller.finished
+                  && caller.request.key().equals(request.key())
+              || flight != null && reaches(flight, caller))) return failed(Failure.REENTRANT_LOAD);
       if (waiterCount >= limits.waiters()
           || flight != null && flight.waiting.size() + flight.deliveries >= limits.waitersPerLoad())
         return failed(Failure.CAPACITY);
@@ -283,15 +309,17 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
         register(flight);
         dispatch = true;
       } else coalesced++;
-      waiter = new Waiter(flight);
+      waiter = new Waiter(flight, caller);
       waiterCount++;
       flight.waiting.add(waiter);
+      if (caller != null) caller.nested.add(waiter);
     }
     Flight selected = flight;
     try {
       schedule(waiter);
       if (dispatch) {
-        executor.execute(() -> load(selected, loader));
+        if (inline) load(selected, loader);
+        else executor.execute(() -> load(selected, loader));
       }
     } catch (RuntimeException | Error refused) {
       // A newly reserved task must retire even when deadline setup fails before submission.
@@ -318,6 +346,24 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
         return false;
       }
     };
+  }
+
+  /**
+   * Called only for nested misses under the monitor. The graph has at most the configured physical
+   * loads and retained waiter edges; normal lookup/LRU operations never traverse it. Rejecting a
+   * cycle is conservative: loaders must not declare cyclic reads even if they intend not to wait.
+   */
+  private boolean reaches(Flight start, Flight target) {
+    Set<Flight> visited = ConcurrentHashMap.newKeySet();
+    var remaining = new ArrayList<Flight>();
+    remaining.add(start);
+    while (!remaining.isEmpty()) {
+      Flight current = remaining.removeLast();
+      if (current == target) return true;
+      if (!visited.add(current)) continue;
+      for (Waiter nested : current.nested) remaining.add(nested.flight);
+    }
+    return false;
   }
 
   private Read<T> failed(Failure failure) {
@@ -371,6 +417,7 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
     if (!waiter.active) return;
     waiter.active = false;
     waiter.flight.waiting.remove(waiter);
+    if (waiter.caller != null) waiter.caller.nested.remove(waiter);
     waiter.flight.deliveries++;
     if (waiter.timer != null) actions.add(() -> waiter.timer.cancel(false));
     // CompletableFuture completion runs arbitrary synchronous dependents. Give each completion
@@ -436,7 +483,7 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
       }
       Loaded<T> loaded;
       try {
-        loaded = Objects.requireNonNull(loader.load(), "Loader returned no snapshot");
+        loaded = invokeLoader(flight, loader);
       } catch (Throwable failure) {
         finish(flight, null, failure);
         if (failure instanceof Error fatal) throw fatal;
@@ -448,9 +495,24 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
     }
   }
 
+  /**
+   * Restore context before delivering either success or failure, including inline test executors.
+   */
+  private Loaded<T> invokeLoader(Flight flight, Loader<T> loader) throws Exception {
+    Flight previous = loading.get();
+    loading.set(flight);
+    try {
+      return Objects.requireNonNull(loader.load(), "Loader returned no snapshot");
+    } finally {
+      if (previous == null) loading.remove();
+      else loading.set(previous);
+    }
+  }
+
   private void loaderExited(Flight flight) {
     synchronized (lock) {
       flight.loaderExited = true;
+      flight.nested.clear();
       releasePhysical(flight);
     }
   }
@@ -515,9 +577,12 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
 
   private void register(Reference reference) {
     reference.indexed = true;
-    keys.computeIfAbsent(reference.request.key(), ignored -> new HashSet<>()).add(reference);
+    keys.computeIfAbsent(reference.request.key(), ignored -> ConcurrentHashMap.newKeySet())
+        .add(reference);
     for (var dependency : reference.request.dependencies())
-      dependencies.computeIfAbsent(dependency, ignored -> new HashSet<>()).add(reference);
+      dependencies
+          .computeIfAbsent(dependency, ignored -> ConcurrentHashMap.newKeySet())
+          .add(reference);
   }
 
   private void unregister(Reference reference) {

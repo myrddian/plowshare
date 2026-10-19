@@ -56,6 +56,21 @@ system contract. Do not expose a concrete service and an identical interface
 while continuing to inject the service everywhere. Test against the contract;
 use a small fake when that gives a clearer test than a mock framework.
 
+## Shared state and reentrant calls
+
+Prefer the platform's concurrent data structures for mutable state shared across
+threads: Java `ConcurrentMap`/`ConcurrentHashMap`, concurrent key sets and suitable
+concurrent queues. Do not recreate their individual-operation safety around
+ordinary maps or sets. Thread-confined temporary collections need no concurrent
+implementation.
+
+Concurrent collections do not make compound invariants atomic. Keep a narrow,
+documented lock or atomic protocol when several indexes, LRU links and capacity
+counters must change together. Execute loaders, callbacks, future completions and
+external calls outside that lock. Shared capabilities must support concurrent and
+reentrant callers; detect recursive dependency cycles rather than deadlocking.
+Test the relevant races, lifecycle transitions and reentrant callbacks.
+
 ## Deployment values must be configurable
 
 Do not embed environment-specific values in runtime code, SDK constructors,

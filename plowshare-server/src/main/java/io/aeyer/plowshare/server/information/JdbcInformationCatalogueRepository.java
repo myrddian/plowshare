@@ -8,6 +8,8 @@ import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.faults.*;
 import io.aeyer.plowshare.server.information.InformationCatalogue.Admission;
 import java.time.*;
@@ -19,6 +21,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final JdbcTemplate jdbc;
   private final AllowanceRepository allowances;
   private final Clock clock;
+  private final ProjectionCache<Optional<AuthorizedMetadata>> metadataCache;
+  private final ProjectionCache<Optional<AuthorizedText>> textCache;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   public JdbcInformationCatalogueRepository(JdbcTemplate jdbc, Clock clock) {
@@ -27,9 +31,20 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public JdbcInformationCatalogueRepository(
       JdbcTemplate jdbc, Clock clock, AllowanceRepository allowances) {
+    this(jdbc, clock, allowances, ProjectionCache.direct(), ProjectionCache.direct());
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
     this.allowances = Objects.requireNonNull(allowances);
+    this.metadataCache = Objects.requireNonNull(metadataCache);
+    this.textCache = Objects.requireNonNull(textCache);
   }
 
   private static NotFoundFault absent() {
@@ -118,23 +133,70 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public Optional<AuthorizedMetadata> authorizedMetadata(
       InformationContext context, UUID revision) {
+    if (!metadataCache.enabled()) return loadMetadata(context, revision, null);
+    long bound = projectionBound(metadataCache.maxWeight(), context, 64);
+    if (!readable(context, revision)) return Optional.empty();
+    return metadataCache.read(
+        readKey(context, revision),
+        bound > 0,
+        () -> loadMetadata(context, revision, bound),
+        () -> loadMetadata(context, revision, null),
+        JdbcInformationCatalogueRepository::metadataWeight);
+  }
+
+  private Optional<AuthorizedMetadata> loadMetadata(
+      InformationContext context, UUID revision, Long maximumBytes) {
     var args = new ArrayList<Object>(selectionArgs(context));
     args.add(revision);
-    return jdbc
-        .queryForList(SELECT + " WHERE " + readableSql(context) + " AND r.id=?", args.toArray())
-        .stream()
+    String sql = SELECT + " WHERE " + readableSql(context) + " AND r.id=?";
+    if (maximumBytes != null) {
+      sql =
+          "WITH projected AS MATERIALIZED ("
+              + sql
+              + ") SELECT * FROM projected WHERE octet_length(to_jsonb(projected)::text)<=?";
+      args.add(maximumBytes);
+    }
+    var rows = jdbc.queryForList(sql, args.toArray());
+    // A source may grow, disappear or lose readability after preflight. Never cache a truncated
+    // projection or a false negative: retry the original current SQL outside shared admission.
+    if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
+    return rows.stream()
         .map(row -> new AuthorizedMetadata(context, decode(row, Information.Revision.class)))
         .findFirst();
   }
 
   public Optional<AuthorizedText> authorizedText(InformationContext context, UUID revision) {
-    var args = new ArrayList<Object>(selectionArgs(context));
-    args.add(revision);
-    return jdbc
-        .query(
-            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text FROM information_revision_allowances r WHERE "
+    if (!textCache.enabled()) return loadText(context, revision, null);
+    long bound = projectionBound(textCache.maxWeight(), context, 4);
+    var sizes =
+        jdbc.queryForList(
+            "SELECT "
+                + TEXT_BYTES
+                + " FROM information_revision_allowances r WHERE "
                 + readableSql(context)
                 + " AND r.id=?",
+            Long.class,
+            readArguments(context, revision));
+    if (sizes.isEmpty()) return Optional.empty();
+    return textCache.read(
+        readKey(context, revision),
+        bound > 0 && sizes.getFirst() <= bound,
+        () -> loadText(context, revision, bound),
+        () -> loadText(context, revision, null),
+        JdbcInformationCatalogueRepository::textWeight);
+  }
+
+  private Optional<AuthorizedText> loadText(
+      InformationContext context, UUID revision, Long maximumBytes) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    if (maximumBytes != null) args.add(maximumBytes);
+    var rows =
+        jdbc.query(
+            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text FROM information_revision_allowances r WHERE "
+                + readableSql(context)
+                + " AND r.id=?"
+                + (maximumBytes == null ? "" : " AND " + TEXT_BYTES + "<=?"),
             (rs, n) ->
                 new AuthorizedText(
                     context,
@@ -146,9 +208,93 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                     rs.getString(6),
                     rs.getLong(7),
                     rs.getString(8)),
-            args.toArray())
-        .stream()
-        .findFirst();
+            args.toArray());
+    if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
+    return rows.stream().findFirst();
+  }
+
+  private static final String TEXT_BYTES =
+      "COALESCE(octet_length(r.extracted_text),0)::bigint+octet_length(r.content_hash)"
+          + "+COALESCE(octet_length(r.text_hash),0)+octet_length(r.document_type)+octet_length(r.document_subtype)";
+
+  private static Object[] readArguments(InformationContext context, UUID revision) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    return args.toArray();
+  }
+
+  private static SnapshotCache.Key readKey(InformationContext context, UUID revision) {
+    return new SnapshotCache.Key(
+        revision.toString(), ProjectionCache.fingerprint(InformationJson.json(context)));
+  }
+
+  private static long contextWeight(InformationContext context) {
+    return 4096L + 4L * InformationJson.json(context).length();
+  }
+
+  private static long projectionBound(
+      long maximumWeight, InformationContext context, int expansion) {
+    long available = maximumWeight - contextWeight(context) - 4096;
+    return available <= 0 ? 0 : available / expansion;
+  }
+
+  private static long stringsWeight(String... values) {
+    long weight = 0;
+    for (String value : values) if (value != null) weight += 64L + 4L * value.length();
+    return weight;
+  }
+
+  private static long textWeight(Optional<AuthorizedText> loaded) {
+    if (loaded.isEmpty()) return 64;
+    var value = loaded.orElseThrow();
+    return contextWeight(value.context())
+        + stringsWeight(
+            value.documentType(),
+            value.documentSubtype(),
+            value.contentHash(),
+            value.textHash(),
+            value.text());
+  }
+
+  private static long metadataWeight(Optional<AuthorizedMetadata> loaded) {
+    if (loaded.isEmpty()) return 64;
+    var value = loaded.orElseThrow();
+    var r = value.revision();
+    long weight =
+        contextWeight(value.context())
+            + stringsWeight(
+                r.title(),
+                r.mediaType(),
+                r.documentType(),
+                r.documentSubtype(),
+                r.sourceUri(),
+                r.contentHash(),
+                r.textHash(),
+                r.availability(),
+                r.converter(),
+                r.sourceName(),
+                r.kind(),
+                r.author(),
+                r.documentAuthor(),
+                r.documentAuthorSource(),
+                r.tagGroupsSource(),
+                r.reportStatus(),
+                r.processingPolicy());
+    for (String tag : r.tags()) weight += stringsWeight(tag);
+    if (r.autoTag() != null) for (String tag : r.autoTag()) weight += stringsWeight(tag);
+    if (r.tagGroups() != null)
+      for (var group : r.tagGroups().entrySet()) {
+        weight += 128 + stringsWeight(group.getKey());
+        for (String tag : group.getValue()) weight += stringsWeight(tag);
+      }
+    if (r.contentType() != null)
+      weight +=
+          256
+              + stringsWeight(
+                  r.contentType().slug(),
+                  r.contentType().label(),
+                  r.contentType().definitionHash());
+    return weight;
   }
 
   public Information.Revision metadata(UUID revision) {

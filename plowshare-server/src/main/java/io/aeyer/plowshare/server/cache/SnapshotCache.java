@@ -144,7 +144,8 @@ public interface SnapshotCache<T> extends AutoCloseable {
     INVALIDATED,
     VERSION_MISMATCH,
     LOAD_TOO_LARGE,
-    INCONSISTENT_REQUEST
+    INCONSISTENT_REQUEST,
+    REENTRANT_LOAD
   }
 
   final class CacheException extends RuntimeException {
@@ -194,8 +195,24 @@ public interface SnapshotCache<T> extends AutoCloseable {
 
   /**
    * No retry or uncached fallback: a rejected read explicitly returns a failed caller-local stage.
+   * A loader may read other keys, but a cyclic dependency on an unfinished load in this cache fails
+   * with {@link Failure#REENTRANT_LOAD} instead of waiting for its own deadline. Waiters have no
+   * completion ordering guarantee. Nested reads are tracked on loader threads; work that a loader
+   * submits to an unrelated external executor does not carry that dependency context. Loaders
+   * execute independently of the caller's thread-bound transaction; transaction-local or
+   * uncommitted reads must bypass this capability.
    */
   Read<T> read(Request request, Loader<T> loader);
+
+  /**
+   * The elected loader runs on the calling thread, outside cache locks, with the same bounded
+   * coalescing and invalidation fences as {@link #read}. Joining callers do not rerun the loader.
+   * This preserves an owning repository's thread-bound committed-read transaction; it does not make
+   * transaction-local data safe to share. The owner must prove cache eligibility before the call
+   * and immediately before returning the loaded DTO, reject dirty/uncommitted state and
+   * independently enforce every caller's current authorization and disclosure/audit boundary.
+   */
+  Read<T> readInline(Request request, Loader<T> loader);
 
   /** Invalidates all versions for this address in O(affected entries/loads/dependencies). */
   void invalidate(Key key);

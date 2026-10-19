@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.events;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.board.*;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.session.*;
@@ -19,8 +21,16 @@ public class ScheduleDefinitionConfig {
       UnitOfWork work,
       ScheduleStore schedules,
       TriggerStore triggers,
-      FiringStore firings) {
-    return new JdbcScheduleDefinitionStore(jdbc, work, schedules, triggers, firings);
+      FiringStore firings,
+      ProjectionCaches caches) {
+    return new JdbcScheduleDefinitionStore(
+        jdbc,
+        work,
+        schedules,
+        triggers,
+        firings,
+        caches.create("schedule-file-v1", java.util.Set.of(Domain.SCHEDULES, Domain.AUTHORITY)),
+        caches.create("schedule-files-v1", java.util.Set.of(Domain.SCHEDULES, Domain.AUTHORITY)));
   }
 
   @Bean

@@ -2,7 +2,10 @@ package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.information.InformationJson;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +18,8 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
   private final ScheduleStore schedules;
   private final TriggerStore triggers;
   private final FiringStore firings;
+  private final ProjectionCache<Optional<FileSnapshot>> fileCache;
+  private final ProjectionCache<List<ScheduledWork.File>> filesCache;
 
   public JdbcScheduleDefinitionStore(
       JdbcTemplate jdbc,
@@ -22,11 +27,31 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
       ScheduleStore schedules,
       TriggerStore triggers,
       FiringStore firings) {
+    this(
+        jdbc,
+        work,
+        schedules,
+        triggers,
+        firings,
+        ProjectionCache.direct(),
+        ProjectionCache.direct());
+  }
+
+  public JdbcScheduleDefinitionStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ScheduleStore schedules,
+      TriggerStore triggers,
+      FiringStore firings,
+      ProjectionCache<Optional<FileSnapshot>> fileCache,
+      ProjectionCache<List<ScheduledWork.File>> filesCache) {
     this.jdbc = jdbc;
     this.work = work;
     this.schedules = schedules;
     this.triggers = triggers;
     this.firings = firings;
+    this.fileCache = java.util.Objects.requireNonNull(fileCache);
+    this.filesCache = java.util.Objects.requireNonNull(filesCache);
   }
 
   private static final String SOURCE_COLUMNS =
@@ -82,6 +107,20 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
   }
 
   public List<ScheduledWork.File> files(Source source) {
+    if (!filesCache.enabled()) return directFiles(source);
+    var currentSource = readSource(source);
+    if (currentSource.isEmpty()) return List.of();
+    var current = currentSource.orElseThrow();
+    long maximum = projectionBound(filesCache.maxWeight(), current);
+    return filesCache.read(
+        readKey(current, "files"),
+        maximum > 0,
+        () -> currentFiles(current, null, maximum).stream().map(FileSnapshot::effective).toList(),
+        () -> currentFiles(current, null, null).stream().map(FileSnapshot::effective).toList(),
+        JdbcScheduleDefinitionStore::filesWeight);
+  }
+
+  private List<ScheduledWork.File> directFiles(Source source) {
     return jdbc
         .query(
             "SELECT " + FILE_COLUMNS + " FROM schedule_files WHERE source_id=? ORDER BY name",
@@ -94,6 +133,24 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
 
   public Optional<FileSnapshot> snapshot(Source source, String name) {
     new FileIdentity(source.id(), name);
+    if (!fileCache.enabled()) return directSnapshot(source, name);
+    var currentSource = readSource(source);
+    if (currentSource.isEmpty()) return Optional.empty();
+    var current = currentSource.orElseThrow();
+    long maximum = projectionBound(fileCache.maxWeight(), current);
+    return fileCache.read(
+        readKey(current, "file:" + name),
+        maximum > 0,
+        () -> {
+          var loaded = currentFiles(current, name, maximum);
+          if (loaded.isEmpty()) throw new ProjectionCache.Bypass();
+          return loaded.stream().findFirst();
+        },
+        () -> currentFiles(current, name, null).stream().findFirst(),
+        loaded -> loaded.map(value -> fileWeight(value.effective())).orElse(64L));
+  }
+
+  private Optional<FileSnapshot> directSnapshot(Source source, String name) {
     return jdbc
         .query(
             "SELECT " + FILE_COLUMNS + " FROM schedule_files WHERE source_id=? AND name=?",
@@ -102,6 +159,111 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
             name)
         .stream()
         .findFirst();
+  }
+
+  private static final int MAX_CACHED_FILES = 256;
+  private static final String FILE_BYTES =
+      "128::bigint+COALESCE(octet_length(f.definition::text),0)+octet_length(f.name)"
+          + "+octet_length(f.internal_name)+octet_length(f.status)+COALESCE(octet_length(f.error),0)";
+  private static final String SOURCE_FROM =
+      " FROM schedule_sources s LEFT JOIN projects p ON p.id=s.project_id";
+  private static final String CURRENT_SOURCE =
+      "s.id=? AND s.account=? AND s.source=? AND s.project_id IS NOT DISTINCT FROM ?";
+
+  /**
+   * Refresh only the source address and ownership. Warm reads must not scan or serialize file
+   * definitions merely to confirm a cache hit; durable versions fence their complete membership.
+   * Count/byte guards run only in the bounded cold loader below.
+   */
+  private Optional<Source> readSource(Source source) {
+    return jdbc
+        .query(
+            SOURCE_QUERY + " WHERE " + CURRENT_SOURCE,
+            JdbcScheduleDefinitionStore::source,
+            sourceArguments(source).toArray())
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Configured readers use current source fields, not an earlier caller-held source label. The
+   * bounded left join returns only a scalar sentinel when any definition/collection grew: no
+   * oversized definition reaches the row mapper. Fallback retains the full original result.
+   */
+  private List<FileSnapshot> currentFiles(Source source, String name, Long maximumBytes) {
+    var args = sourceArguments(source);
+    if (name != null) args.add(name);
+    String selected =
+        "SELECT "
+            + SOURCE_COLUMNS
+            + ",f.name,f.internal_name,f.definition,f.paused_override,f.status,f.error"
+            + (maximumBytes == null ? "" : "," + FILE_BYTES + " AS file_bytes")
+            + SOURCE_FROM
+            + " JOIN schedule_files f ON f.source_id=s.id WHERE "
+            + CURRENT_SOURCE
+            + (name == null ? "" : " AND f.name=?");
+    if (maximumBytes == null)
+      return jdbc.query(
+          selected + " ORDER BY f.name",
+          (row, index) -> snapshot(source(row, index), row),
+          args.toArray());
+    args.add(MAX_CACHED_FILES);
+    args.add(maximumBytes);
+    return jdbc
+        .query(
+            "WITH retained AS MATERIALIZED ("
+                + selected
+                + "), bounds AS (SELECT count(*) AS total_files,"
+                + "COALESCE(sum(file_bytes),0) AS projection_bytes FROM retained) SELECT bounds.total_files,"
+                + "bounds.projection_bytes,retained.* FROM bounds LEFT JOIN retained ON bounds.total_files<=?"
+                + " AND bounds.projection_bytes<=? ORDER BY retained.name",
+            (row, index) -> {
+              if (row.getLong("total_files") > MAX_CACHED_FILES
+                  || row.getLong("projection_bytes") > maximumBytes)
+                throw new ProjectionCache.Bypass();
+              if (row.getLong("total_files") == 0) return Optional.<FileSnapshot>empty();
+              return Optional.of(snapshot(source(row, index), row));
+            },
+            args.toArray())
+        .stream()
+        .flatMap(Optional::stream)
+        .toList();
+  }
+
+  private static java.util.ArrayList<Object> sourceArguments(Source source) {
+    return new java.util.ArrayList<>(
+        java.util.Arrays.asList(
+            source.id(), source.account(), source.source(), source.projectId()));
+  }
+
+  private static SnapshotCache.Key readKey(Source source, String projection) {
+    return new SnapshotCache.Key(
+        source.id() + ":" + projection, ProjectionCache.fingerprint(InformationJson.json(source)));
+  }
+
+  private static long projectionBound(long maximumWeight, Source source) {
+    long available = maximumWeight - (4096L + 4L * InformationJson.json(source).length());
+    return available <= 0 ? 0 : available / 64;
+  }
+
+  private static long fileWeight(ScheduledWork.File file) {
+    return 2048L
+        + 4L
+            * (file.name().length()
+                + file.path().length()
+                + file.internalName().length()
+                + file.source().length()
+                + (file.project() == null ? 0 : file.project().length())
+                + (file.error() == null ? 0 : file.error().length())
+                + (file.definition() == null
+                    ? 0
+                    : ScheduleDefinitionCodec.write(file.definition()).length()));
+  }
+
+  private static long filesWeight(List<ScheduledWork.File> files) {
+    long weight = 4096;
+    for (var file : files) weight += fileWeight(file);
+    return weight;
   }
 
   private static FileSnapshot snapshot(Source source, java.sql.ResultSet row)
@@ -174,7 +336,7 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
           lock(source);
           String internal = "scheduled-" + source.id() + "-" + name;
           // Compare immutable source content, not its operational pause projection.
-          var old = snapshot(source, name);
+          var old = directSnapshot(source, name);
           if (old.isEmpty()
               && (schedules.find(internal).isPresent() || triggers.find(internal).isPresent()))
             throw new CallerFault("The internal schedule name is already in use");
@@ -280,7 +442,7 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
         () -> {
           lock(source);
           var file =
-              snapshot(source, name)
+              directSnapshot(source, name)
                   .orElseThrow(() -> new CallerFault("The schedule file was removed"))
                   .effective();
           if (!file.status().equals("active") || !expected.equals(file.definition()))

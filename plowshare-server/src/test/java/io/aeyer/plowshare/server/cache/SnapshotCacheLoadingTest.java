@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import org.junit.jupiter.api.Test;
 
 class SnapshotCacheLoadingTest {
@@ -562,29 +563,30 @@ class SnapshotCacheLoadingTest {
       var second = cache.read(request, () -> fail("Joined"));
       var entered = new CountDownLatch(1);
       var release = new CountDownLatch(1);
-      var fallback =
-          first
-              .result()
-              .handle(
-                  (answer, error) -> {
-                    assertNotNull(error);
-                    assertEquals(
-                        2,
-                        dispatches.get(),
-                        "Normal sibling dispatch must precede fallback callbacks");
-                    assertUnlocked(cache);
-                    entered.countDown();
-                    awaitRelease(release);
-                    return true;
-                  });
+      BiFunction<SnapshotCache.Tracked<Value>, Throwable, Boolean> completion =
+          (answer, error) -> {
+            if (error == null) return false;
+            assertEquals(
+                2, dispatches.get(), "Normal sibling dispatch must precede fallback callbacks");
+            assertUnlocked(cache);
+            entered.countDown();
+            awaitRelease(release);
+            return true;
+          };
+      var firstCallback = first.result().handle(completion);
+      var secondCallback = second.result().handle(completion);
       var worker = Thread.ofVirtual().start(executor.takeNext());
       try {
         assertTrue(entered.await(5, TimeUnit.SECONDS));
         assertEquals(1, accepted.size());
+        // Waiters have no dispatch-order contract; whichever task was rejected owns the fallback.
+        boolean rejectedFirst = first.result().toCompletableFuture().isCompletedExceptionally();
+        var successful = rejectedFirst ? second : first;
+        var fallback = rejectedFirst ? firstCallback : secondCallback;
         accepted.runNext();
         assertEquals(
             new Value("shared"),
-            second.result().toCompletableFuture().get(5, TimeUnit.SECONDS).value());
+            successful.result().toCompletableFuture().get(5, TimeUnit.SECONDS).value());
         assertFalse(fallback.toCompletableFuture().isDone());
         assertEquals(1, cache.statistics().waiters(), "Blocked fallback retains its waiter charge");
         assertEquals(
@@ -595,8 +597,9 @@ class SnapshotCacheLoadingTest {
         worker.join(Duration.ofSeconds(5));
       }
       assertFalse(worker.isAlive());
-      assertTrue(fallback.toCompletableFuture().get(5, TimeUnit.SECONDS));
-      assertInstanceOf(RejectedExecutionException.class, failure(first));
+      boolean rejectedFirst = firstCallback.toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertNotEquals(rejectedFirst, secondCallback.toCompletableFuture().get(5, TimeUnit.SECONDS));
+      assertInstanceOf(RejectedExecutionException.class, failure(rejectedFirst ? first : second));
       assertNoPhysicalReservations(cache);
     }
   }

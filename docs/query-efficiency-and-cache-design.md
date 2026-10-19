@@ -8,8 +8,10 @@ independent reads. The [second slice](query-efficiency-second-slice.md) adds
 document/search snapshot reuse, keyed schedule reads and explicit DTO linkage
 contracts. The [cache foundation](query-efficiency-cache-foundation.md) implements
 bounded tracked DTO storage, load coalescing and local invalidation/recovery fences.
-Repository adoption and the database notification bridge remain proposed;
-the broader changes described here require separate implementation and verification.
+The [first repository adoption](query-efficiency-cache-adoption.md) connects
+document metadata/extraction, admitted search and schedule file reads to durable
+versions and PostgreSQL notification/recovery infrastructure. The broader owner
+plans described here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)
 apply this strategy to the latest reviewed source baseline. The
@@ -175,7 +177,8 @@ Oversized values bypass admission; in-flight values and waiters still need bound
 Index dependency fan-out and bound its metadata, using a broader namespace
 invalidation when exact tracking would exceed the budget.
 
-Coordinate map and list changes under a short lock or an equivalent concurrency
+Use concurrent maps and sets for shared indexes and registrations. Coordinate
+compound map and list changes under a short lock or an equivalent concurrency
 protocol. Do not perform SQL, remote work or notifications while holding the LRU
 lock. Share one in-flight load for the same key and version, bounded separately
 from retained entries, so concurrent misses do not issue duplicate queries. Define

@@ -271,7 +271,12 @@ class SearchSnapshotTest {
   }
 
   private final class Search {
-    final DocumentStore store = mock(DocumentStore.class);
+    // Real snapshot assembly requires the repository's initialized direct-cache default. Keep
+    // persistence and scoped-view methods mocked so these remain service/query-budget tests.
+    final DocumentStore store =
+        mock(
+            DocumentStore.class,
+            withSettings().useConstructor(mock(JdbcTemplate.class), UnitOfWork.NONE));
     final EmbeddingClient embeddings = mock(EmbeddingClient.class);
     final DualEmbeddings dual = mock(DualEmbeddings.class);
     final QueryEmbeddings.Read read = mock(QueryEmbeddings.Read.class);

@@ -4,6 +4,9 @@ Status: implemented locally on 2026-10-20; deployment and repository adoption
 are separate. This follows the [second slice](query-efficiency-second-slice.md)
 and implements the cache-foundation phase of the
 [delivery plan](query-efficiency-plans/delivery.md).
+The [following adoption slice](query-efficiency-cache-adoption.md) adds the
+document/search/schedule bindings and PostgreSQL version/notification bridge;
+the boundaries below describe this foundation's original standalone delivery.
 
 ## Capability and ownership
 

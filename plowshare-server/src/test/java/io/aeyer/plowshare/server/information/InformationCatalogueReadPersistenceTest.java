@@ -8,11 +8,15 @@ import io.aeyer.plowshare.protocol.InformationContent;
 import io.aeyer.plowshare.protocol.SchemaCodec;
 import io.aeyer.plowshare.protocol.SchemaDefinition;
 import io.aeyer.plowshare.server.access.KnowledgeReadScope;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.*;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -20,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -183,5 +188,176 @@ class InformationCatalogueReadPersistenceTest {
             .revision()
             .contentType()
             .version());
+  }
+
+  private static final class CountingJdbc extends JdbcTemplate {
+    int metadataLoads, textLoads, metadataAuthorization, textSizeReads;
+    Runnable afterTextSize = () -> {};
+
+    CountingJdbc() {
+      super(source);
+    }
+
+    @Override
+    public List<Map<String, Object>> queryForList(String sql, Object... args) {
+      if (sql.startsWith("WITH projected") || sql.startsWith("SELECT r.id,r.resource_id,r.ordinal"))
+        metadataLoads++;
+      return super.queryForList(sql, args);
+    }
+
+    @Override
+    public <T> List<T> queryForList(String sql, Class<T> type, Object... args) {
+      if (sql.startsWith("SELECT 1 FROM information_revision_allowances")) metadataAuthorization++;
+      var rows = super.queryForList(sql, type, args);
+      if (sql.startsWith("SELECT COALESCE(octet_length(r.extracted_text)")) {
+        textSizeReads++;
+        var callback = afterTextSize;
+        afterTextSize = () -> {};
+        callback.run();
+      }
+      return rows;
+    }
+
+    @Override
+    public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+      if (sql.startsWith("SELECT r.id,r.resource_id,r.document_type")) textLoads++;
+      return super.query(sql, mapper, args);
+    }
+  }
+
+  private static ProjectionCacheProperties cacheProperties() {
+    return new ProjectionCacheProperties(
+        256,
+        33_554_432,
+        8,
+        67_108_864,
+        256,
+        64,
+        8192,
+        262_144,
+        Duration.ofSeconds(5),
+        Duration.ofSeconds(1),
+        Duration.ofSeconds(1),
+        128,
+        8,
+        4);
+  }
+
+  private static ProjectionChangeSignals readySignals() {
+    return new ProjectionChangeSignals() {
+      public Subscription subscribe(Set<ProjectionVersions.Domain> domains, Observer observer) {
+        observer.stateChanged(new State(1, true));
+        return () -> {};
+      }
+
+      public void start() {}
+
+      public boolean healthy() {
+        return true;
+      }
+
+      public void close() {}
+    };
+  }
+
+  private ProjectionCaches caches(CountingJdbc counted) {
+    return new ProjectionCaches(
+        new JdbcProjectionVersions(counted, source, 128), readySignals(), cacheProperties());
+  }
+
+  private JdbcInformationCatalogueRepository cached(CountingJdbc counted, ProjectionCaches caches) {
+    var domains = Set.of(ProjectionVersions.Domain.DOCUMENTS, ProjectionVersions.Domain.AUTHORITY);
+    return new JdbcInformationCatalogueRepository(
+        counted,
+        Clock.systemUTC(),
+        new JdbcAllowanceRepository(counted),
+        caches.create("metadata-fixture", domains),
+        caches.create("extraction-fixture", domains));
+  }
+
+  @Test
+  void configuredCachesSkipWarmHydrationButKeepCurrentAuthorizationAndNullableText() {
+    UUID retained = revision("reader", null, "automatic", null);
+    var counted = new CountingJdbc();
+    try (var caches = caches(counted)) {
+      var configured = cached(counted, caches);
+      var metadata = configured.authorizedMetadata(own, retained);
+      var text = configured.authorizedText(own, retained);
+      assertNull(text.orElseThrow().text());
+      assertNull(text.orElseThrow().textHash());
+      assertSame(metadata, configured.authorizedMetadata(own, retained));
+      assertSame(text, configured.authorizedText(own, retained));
+      assertEquals(
+          1, counted.metadataLoads, "Warm metadata must not rerun its materialized projection");
+      assertEquals(1, counted.textLoads);
+      assertEquals(2, counted.metadataAuthorization);
+      assertEquals(2, counted.textSizeReads);
+      jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", retained);
+      assertTrue(configured.authorizedMetadata(own, retained).isEmpty());
+      assertTrue(configured.authorizedText(own, retained).isEmpty());
+      assertEquals(1, counted.metadataLoads);
+      assertEquals(1, counted.textLoads);
+    }
+  }
+
+  @Test
+  void configuredMetadataSizeGuardAndTextGrowthPreserveCompleteUncachedResults() {
+    UUID retained = revision("reader", null, "automatic", null);
+    String title = "x".repeat(12_000), extraction = "a🔎".repeat(40_000);
+    jdbc.update("UPDATE information_revisions SET title=? WHERE id=?", title, retained);
+    var counted = new CountingJdbc();
+    try (var caches = caches(counted)) {
+      var configured = cached(counted, caches);
+      assertEquals(
+          title, configured.authorizedMetadata(own, retained).orElseThrow().revision().title());
+      assertEquals(
+          2, counted.metadataLoads, "Guard refusal must execute exactly one full fallback");
+      counted.afterTextSize =
+          () ->
+              jdbc.update(
+                  "UPDATE information_revisions SET extracted_text=?,text_hash='extraction-hash' WHERE id=?",
+                  extraction,
+                  retained);
+      assertEquals(extraction, configured.authorizedText(own, retained).orElseThrow().text());
+      assertEquals(
+          2,
+          counted.textLoads,
+          "Growth after scalar preflight must use guarded read then full fallback");
+      assertEquals(extraction, configured.authorizedText(own, retained).orElseThrow().text());
+      assertEquals(3, counted.textLoads, "Known oversize extraction must skip the bounded loader");
+    }
+  }
+
+  @Test
+  void dirtyMetadataReadsStayOnTheCallerTransactionAndCannotPublishAfterRollback() {
+    UUID retained = revision("reader", null, "automatic", "retained");
+    UUID resource = repository.authorizedText(own, retained).orElseThrow().resource();
+    var counted = new CountingJdbc();
+    try (var caches = caches(counted)) {
+      var configured = cached(counted, caches);
+      assertEquals(
+          List.of("tag"),
+          configured.authorizedMetadata(own, retained).orElseThrow().revision().tags());
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              work.inTransaction(
+                  () -> {
+                    jdbc.update(
+                        "UPDATE information_resources SET tags='[\"uncommitted\"]'::jsonb WHERE id=?",
+                        resource);
+                    assertEquals(
+                        List.of("uncommitted"),
+                        configured
+                            .authorizedMetadata(own, retained)
+                            .orElseThrow()
+                            .revision()
+                            .tags());
+                    throw new IllegalStateException("fixture rollback");
+                  }));
+      assertEquals(
+          List.of("tag"),
+          configured.authorizedMetadata(own, retained).orElseThrow().revision().tags());
+    }
   }
 }

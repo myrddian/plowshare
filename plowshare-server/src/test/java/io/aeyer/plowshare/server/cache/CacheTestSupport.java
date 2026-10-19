@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -63,13 +63,13 @@ final class CacheTestSupport {
   }
 
   static final class HeldExecutor implements Executor {
-    private final List<Runnable> tasks = new ArrayList<>();
-    boolean reject;
+    private final ConcurrentLinkedDeque<Runnable> tasks = new ConcurrentLinkedDeque<>();
+    volatile boolean reject;
 
     @Override
     public void execute(Runnable task) {
       if (reject) throw new RejectedExecutionException("Executor fixture rejected load");
-      tasks.add(task);
+      tasks.addLast(task);
     }
 
     int size() {
@@ -94,10 +94,10 @@ final class CacheTestSupport {
    * reproducing a timer that had already started when cancellation raced with it.
    */
   static final class ManualTimer extends ScheduledThreadPoolExecutor {
-    private final List<Task> tasks = new ArrayList<>();
-    boolean reject;
-    Runnable scheduling = () -> {};
-    Runnable cancelling = () -> {};
+    private final CopyOnWriteArrayList<Task> tasks = new CopyOnWriteArrayList<>();
+    volatile boolean reject;
+    volatile Runnable scheduling = () -> {};
+    volatile Runnable cancelling = () -> {};
 
     ManualTimer() {
       super(1);

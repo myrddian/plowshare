@@ -7,6 +7,8 @@ The [first implementation receipt](../query-efficiency-first-slice.md),
 [second implementation receipt](../query-efficiency-second-slice.md) and
 [cache foundation receipt](../query-efficiency-cache-foundation.md) record the
 completed local slices, verification and remaining cache-admission gates.
+The [initial adoption receipt](../query-efficiency-cache-adoption.md) records
+document/search/schedule bindings and the PostgreSQL version/notification bridge.
 
 ## Start with operation costs and ownership
 
@@ -83,8 +85,9 @@ advancing its worker revision. Introduce a separate change generation where
 necessary; do not alter claim/report fencing merely to obtain a cache key.
 
 Track an admitted DTO snapshot with its identity, version, projection, dependencies,
-invalidation generation, memory weight and LRU node. A hash map and doubly linked
-recency list provide expected O(1) lookup, known removal and individual eviction.
+invalidation generation, memory weight and LRU node. Concurrent hash indexes and a
+doubly linked recency list provide expected O(1) lookup, known removal and
+individual eviction.
 Evicting k entries costs O(k). Bound entry count, total weight, key/dependency
 metadata, in-flight loads and waiters. Oversized values bypass admission.
 Eviction releases cache ownership without changing a DTO held by a caller.

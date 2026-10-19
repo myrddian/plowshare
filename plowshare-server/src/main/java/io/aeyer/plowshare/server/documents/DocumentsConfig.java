@@ -50,8 +50,18 @@ public class DocumentsConfig {
   }
 
   @Bean
-  public DocumentStore documentStore(JdbcTemplate jdbc, UnitOfWork unitOfWork) {
-    return new DocumentStore(jdbc, unitOfWork);
+  public DocumentStore documentStore(
+      JdbcTemplate jdbc,
+      UnitOfWork unitOfWork,
+      io.aeyer.plowshare.server.cache.ProjectionCaches caches) {
+    return new DocumentStore(
+        jdbc,
+        unitOfWork,
+        caches.create(
+            "document-search-v1",
+            java.util.Set.of(
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.SEARCH,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.AUTHORITY)));
   }
 
   @Bean

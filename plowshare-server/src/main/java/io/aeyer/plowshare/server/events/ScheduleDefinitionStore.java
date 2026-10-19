@@ -35,9 +35,10 @@ public interface ScheduleDefinitionStore {
   /**
    * Immutable, operation-local database projection retaining source content and its operational
    * override together. ScheduledWork.version is the file schema version, not a row-change version.
-   * These rows have no durable invalidation generation: this DTO must not enter a shared cache or
-   * replace current source locks, authority checks or pause's expected-definition comparison.
-   * Reconciliation, pause, reject, removal and source/project changes are separate dependencies.
+   * The DTO alone has no durable invalidation generation. Shared read reuse requires the owning
+   * projection cache's complete version/authority fences. It cannot replace current source locks,
+   * execution checks or pause's expected-definition comparison. Reconciliation, pause, reject,
+   * removal and source/project changes are separate dependencies.
    */
   record FileSnapshot(
       Source source,

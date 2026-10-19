@@ -12,12 +12,17 @@ import io.aeyer.plowshare.server.archive.ApplicationProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionCacheProperties;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.documents.DocumentsConfig;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,6 +62,10 @@ class InformationFeatureConfigTest {
             io.aeyer.plowshare.server.access.GrantLineage.class,
             io.aeyer.plowshare.server.access.GrantLineageFixture::passthrough)
         .withBean(JdbcTemplate.class, () -> jdbc)
+        .withBean(
+            ProjectionCaches.class,
+            InformationFeatureConfigTest::projectionCaches,
+            definition -> definition.setDestroyMethodName("close"))
         .withBean(UnitOfWork.class, () -> UnitOfWork.NONE)
         .withBean(AccountKnowledgePermissions.class, () -> AccountKnowledgePermissions.DENY)
         .withBean(
@@ -73,6 +82,7 @@ class InformationFeatureConfigTest {
         .run(
             context -> {
               assertNull(context.getStartupFailure());
+              assertNotNull(context.getBean(ProjectionCaches.class));
               assertInstanceOf(
                   ApplicationProjectMembers.class, context.getBean(ProjectMembers.class));
               var access = context.getBean(InformationAccess.class);
@@ -87,6 +97,40 @@ class InformationFeatureConfigTest {
               verify(jdbc).afterPropertiesSet();
               verifyNoMoreInteractions(jdbc);
             });
+  }
+
+  /** Bind the real typed cache factory without opening version/listener database connections. */
+  private static ProjectionCaches projectionCaches() {
+    var versions = mock(ProjectionVersions.class);
+    when(versions.databaseIdentity())
+        .thenReturn(UUID.fromString("00000000-0000-0000-0000-000000000001"));
+    var signals = mock(ProjectionChangeSignals.class);
+    when(signals.subscribe(anySet(), any(ProjectionChangeSignals.Observer.class)))
+        .thenAnswer(
+            call -> {
+              ProjectionChangeSignals.Observer observer = call.getArgument(1);
+              observer.stateChanged(new ProjectionChangeSignals.State(1, false));
+              ProjectionChangeSignals.Subscription subscription = () -> {};
+              return subscription;
+            });
+    return new ProjectionCaches(
+        versions,
+        signals,
+        new ProjectionCacheProperties(
+            16,
+            33_554_432,
+            2,
+            67_108_864,
+            8,
+            4,
+            128,
+            262_144,
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(1),
+            128,
+            8,
+            4));
   }
 
   private final InformationNavigationRepository repository =

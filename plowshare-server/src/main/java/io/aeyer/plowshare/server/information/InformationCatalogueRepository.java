@@ -11,9 +11,9 @@ import java.util.*;
 public interface InformationCatalogueRepository {
   /**
    * Metadata admitted under this exact selection in its retrieval statement. Reuse only within the
-   * current operation: the processing generation is not a version of resource tags, reports, steps,
-   * content-type display metadata or live authority. Shared admission needs versions/invalidation
-   * for all those dependencies; this value is neither an authority lease nor a shared cache entry.
+   * current operation unless the owning projection cache additionally supplies complete durable
+   * version and current authority fences. Processing generation does not version resource tags,
+   * reports, steps, content-type display metadata or authority. The DTO grants no authority.
    */
   record AuthorizedMetadata(InformationContext context, Information.Revision revision) {
     public AuthorizedMetadata {
@@ -27,8 +27,8 @@ public interface InformationCatalogueRepository {
    * (textHash) and processingGeneration describe distinct identities; none versions current policy
    * or availability. Hashes are opaque retained fingerprints: V83 imported older documents without
    * a SHA-256 format constraint. A null extraction/textHash is allowed before extraction. This
-   * immutable value is operation-local: a later disclosure must reauthorize and refetch. Future
-   * content caching must additionally fence deletion/redaction and extraction replacement;
+   * immutable value alone is operation-local: later disclosure must reauthorize. Shared projection
+   * reuse additionally fences deletion/redaction, extraction replacement and all durable changes;
    * generation alone does not establish those fences.
    */
   record AuthorizedText(

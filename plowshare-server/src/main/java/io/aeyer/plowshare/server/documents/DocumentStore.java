@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.documents;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationContext;
@@ -87,6 +89,15 @@ public final class DocumentStore {
   private final InformationContext context;
   private Runnable mutationFence;
   private java.util.function.Consumer<UUID> readAudit;
+  private ProjectionCache<SearchSnapshot> searchCache = ProjectionCache.direct();
+  private int cacheHitChars;
+
+  /** Composition supplies one typed cache shared by all immutable scoped reader copies. */
+  public DocumentStore(
+      JdbcTemplate jdbc, UnitOfWork transactions, ProjectionCache<SearchSnapshot> searchCache) {
+    this(jdbc, transactions);
+    this.searchCache = Objects.requireNonNull(searchCache);
+  }
 
   /**
    * @param transactions must be a real transaction and not {@code UnitOfWork.NONE}. {@code
@@ -121,6 +132,7 @@ public final class DocumentStore {
     reader.embeddingQuery = embeddingQuery;
     reader.embeddingProfile = embeddingProfile;
     reader.readAudit = readAudit;
+    reader.searchCache = searchCache;
     return reader;
   }
 
@@ -272,6 +284,8 @@ public final class DocumentStore {
     reader.dualEmbeddings = dualEmbeddings;
     reader.embeddingQuery = embeddingQuery;
     reader.embeddingProfile = embeddingProfile;
+    reader.searchCache = searchCache;
+    reader.cacheHitChars = cacheHitChars;
     return reader;
   }
 
@@ -358,6 +372,63 @@ public final class DocumentStore {
 
   private <T> List<T> readRows(String expression, String sql, RowMapper<T> mapper, Object... args) {
     ReadQuery query = embeddingSql(guarded(sql, expression, args));
+    if (cacheHitChars > 0 && mapper == HIT) {
+      // Keep ranking, membership and LIMIT untouched. Oversized text becomes NULL on the wire,
+      // with an explicit flag checked before row hydration; the ordinary read then runs once.
+      String bounded = query.sql();
+      var fields =
+          Map.of(
+              "c.text",
+              "chunk_text",
+              "p.text",
+              "paragraph_text",
+              "d.source_name",
+              "source_name",
+              "d.title",
+              "title",
+              "d.summary",
+              "document_summary");
+      var oversized = new ArrayList<String>();
+      String maximum = "(SELECT maximum_chars FROM cache_bounds)";
+      for (var field : fields.entrySet()) {
+        String source = field.getKey();
+        if (!bounded.contains(source + " AS " + field.getValue()))
+          throw new IllegalStateException(
+              "Bounded search projection has no controlled column seam");
+        bounded =
+            bounded.replace(
+                source + " AS " + field.getValue(),
+                "CASE WHEN length("
+                    + source
+                    + ")<="
+                    + maximum
+                    + " THEN "
+                    + source
+                    + " END AS "
+                    + field.getValue());
+        oversized.add("coalesce(length(" + source + "),0)>" + maximum);
+      }
+      bounded =
+          bounded.replace(
+              "END AS document_summary",
+              "END AS document_summary,("
+                  + String.join(" OR ", oversized)
+                  + ") AS cache_oversized");
+      RowMapper<T> original = mapper;
+      RowMapper<T> boundedMapper =
+          (row, number) -> {
+            if (row.getBoolean("cache_oversized")) throw new ProjectionCache.Bypass();
+            return original.mapRow(row, number);
+          };
+      var boundArguments = new ArrayList<Object>();
+      boundArguments.add(cacheHitChars);
+      boundArguments.addAll(java.util.Arrays.asList(query.arguments()));
+      query =
+          new ReadQuery(
+              "WITH cache_bounds AS (SELECT ?::integer AS maximum_chars) " + bounded,
+              boundArguments.toArray());
+      mapper = boundedMapper;
+    }
     List<T> rows = jdbc.query(query.sql(), mapper, query.arguments());
     if (readAudit != null)
       for (T row : rows) {
@@ -1497,7 +1568,7 @@ public final class DocumentStore {
   }
 
   /** The bounded candidate projections required by one search, before service-owned fusion. */
-  enum SearchProjection {
+  public enum SearchProjection {
     VECTOR,
     LEXICAL,
     HYBRID
@@ -1507,12 +1578,73 @@ public final class DocumentStore {
 
   /**
    * Reads one operation's coverage and candidates under the caller's disclosure/profile fences.
-   * Each candidate statement still resolves current repository authorization. This does not
-   * establish a repeatable-read database snapshot or admit the result to a shared cache.
+   * Each candidate statement still resolves current repository authorization. Scoped admitted reads
+   * can reuse a version-fenced projection; every caller repeats live selection and auditing. This
+   * does not establish a repeatable-read database snapshot.
    */
   SearchSnapshot searchSnapshot(
       String question, float[] vector, int depth, SearchProjection projection) {
-    return searchSnapshot(question, vector, depth, projection, coverage());
+    if (!searchCache.enabled()
+        || context == null
+        || dualEmbeddings != null && embeddingProfile == null)
+      return searchSnapshot(question, vector, depth, projection, coverage());
+    Objects.requireNonNull(question);
+    Objects.requireNonNull(vector);
+    Objects.requireNonNull(projection);
+    if (question.isBlank() || depth < 1 || depth > MOST_SEARCH_CANDIDATES || vector.length > 16000)
+      throw new IllegalArgumentException("Invalid cached search selection");
+    float[] capturedVector = vector.clone();
+    for (float value : capturedVector)
+      if (!Float.isFinite(value)) throw new IllegalArgumentException("Non-finite search vector");
+    access.requireSelection(context);
+    var key =
+        new SnapshotCache.Key(
+            "search",
+            ProjectionCache.fingerprint(
+                io.aeyer.plowshare.server.information.InformationJson.json(context),
+                question,
+                java.util.Arrays.toString(capturedVector),
+                Integer.toString(depth),
+                projection.name(),
+                io.aeyer.plowshare.server.information.InformationJson.json(embeddingProfile),
+                Objects.toString(embeddingFingerprint, "")));
+    DocumentStore plain = audited(null);
+    plain.searchCache = ProjectionCache.direct();
+    DocumentStore bounded = plain.audited(null);
+    long allowance = searchCache.maxWeight() - 16384L - 2048L * depth;
+    bounded.cacheHitChars =
+        (int) Math.min(Integer.MAX_VALUE, Math.max(1, allowance / (40L * depth)));
+    var snapshot =
+        searchCache.read(
+            key,
+            allowance > 0,
+            () -> bounded.searchSnapshot(question, capturedVector, depth, projection),
+            () -> plain.searchSnapshot(question, capturedVector, depth, projection),
+            DocumentStore::searchWeight);
+    // Coalescing applies only to pure projection reads. Every caller retains its own live
+    // selection check and provenance auditing within its existing disclosure transaction.
+    access.requireSelection(context);
+    if (readAudit != null) {
+      snapshot.vectorHits().forEach(hit -> readAudit.accept(hit.documentId()));
+      snapshot.lexicalHits().forEach(hit -> readAudit.accept(hit.documentId()));
+    }
+    return snapshot;
+  }
+
+  private static long searchWeight(SearchSnapshot snapshot) {
+    long weight = 8192L + 4L * snapshot.question().length();
+    for (List<Hit> hits : List.of(snapshot.vectorHits(), snapshot.lexicalHits()))
+      for (Hit hit : hits) {
+        weight += 1024;
+        for (String text :
+            java.util.Arrays.asList(
+                hit.chunkText(),
+                hit.paragraphText(),
+                hit.sourceName(),
+                hit.title(),
+                hit.documentSummary())) if (text != null) weight += 4L * text.length();
+      }
+    return weight;
   }
 
   /**
@@ -1549,17 +1681,17 @@ public final class DocumentStore {
   }
 
   /**
-   * Immutable operation-local read data, including the repository's actual selection and captured
-   * embedding configuration. An absent context denotes an unscoped internal repository, not
-   * unrestricted caller authority. A profile's version is an embedding configuration version, never
-   * a corpus generation; the legacy fingerprint has no configuration version.
+   * Immutable read data, including the repository's actual selection and captured embedding
+   * configuration. An absent context denotes an unscoped internal repository, not unrestricted
+   * caller authority. A profile's version is an embedding configuration version, never a corpus
+   * generation; the legacy fingerprint has no configuration version.
    *
    * <p>Dependencies identify returned sources and citations, not their content versions. They do
-   * not describe non-returned corpus members that could enter the ranking. Shared admission is
-   * blocked until durable corpus/source mutation generations, every-writer invalidation and current
-   * disclosure checks exist. Reuse this value only within its owning read operation.
+   * not describe non-returned corpus members that could enter the ranking. Shared admission must
+   * additionally use the typed projection cache's durable search/authority domain fences and the
+   * caller's current disclosure checks. This DTO alone never establishes freshness or authority.
    */
-  record SearchSnapshot(
+  public record SearchSnapshot(
       String question,
       int depth,
       SearchProjection projection,
@@ -1569,7 +1701,7 @@ public final class DocumentStore {
       Optional<InformationContext> context,
       Optional<EmbeddingProfile> profile,
       Optional<String> legacyFingerprint) {
-    SearchSnapshot {
+    public SearchSnapshot {
       Objects.requireNonNull(question);
       Objects.requireNonNull(projection);
       vectorHits = List.copyOf(vectorHits);

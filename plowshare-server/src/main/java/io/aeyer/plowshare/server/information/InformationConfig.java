@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.information;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.documents.*;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.Hooks;
@@ -124,8 +126,14 @@ public class InformationConfig {
 
   @Bean
   public InformationCatalogueRepository informationCatalogueRepository(
-      JdbcTemplate jdbc, AllowanceRepository allowances) {
-    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), allowances);
+      JdbcTemplate jdbc, AllowanceRepository allowances, ProjectionCaches caches) {
+    return new JdbcInformationCatalogueRepository(
+        jdbc,
+        Clock.systemUTC(),
+        allowances,
+        caches.create("document-metadata-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean

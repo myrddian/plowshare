@@ -5,12 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionCacheProperties;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.config.RuntimeConfig;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -45,6 +51,10 @@ class DocumentsConfigTest {
               () -> Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class))
           .withBean(JdbcTemplate.class, () -> Mockito.mock(JdbcTemplate.class))
           .withBean(
+              ProjectionCaches.class,
+              DocumentsConfigTest::projectionCaches,
+              definition -> definition.setDestroyMethodName("close"))
+          .withBean(
               io.aeyer.plowshare.server.embedding.QueryEmbeddings.class,
               () ->
                   org.mockito.Mockito.mock(
@@ -65,6 +75,43 @@ class DocumentsConfigTest {
                       return work.get();
                     }
                   });
+
+  /** Composition uses the real typed factory; database identity/listener lifecycle are mocked. */
+  private static ProjectionCaches projectionCaches() {
+    var versions = Mockito.mock(ProjectionVersions.class);
+    Mockito.when(versions.databaseIdentity())
+        .thenReturn(UUID.fromString("00000000-0000-0000-0000-000000000001"));
+    var signals = Mockito.mock(ProjectionChangeSignals.class);
+    Mockito.when(
+            signals.subscribe(
+                Mockito.anySet(), Mockito.any(ProjectionChangeSignals.Observer.class)))
+        .thenAnswer(
+            call -> {
+              ProjectionChangeSignals.Observer observer = call.getArgument(1);
+              // This boot-only fixture has no authoritative database baseline. Remain fail closed.
+              observer.stateChanged(new ProjectionChangeSignals.State(1, false));
+              ProjectionChangeSignals.Subscription subscription = () -> {};
+              return subscription;
+            });
+    return new ProjectionCaches(
+        versions,
+        signals,
+        new ProjectionCacheProperties(
+            16,
+            33_554_432,
+            2,
+            67_108_864,
+            8,
+            4,
+            128,
+            262_144,
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(1),
+            128,
+            8,
+            4));
+  }
 
   /**
    * The ceiling as the shipped {@code application.yml} sets it. Written out because an {@code
@@ -102,6 +149,7 @@ class DocumentsConfigTest {
               assertNull(context.getStartupFailure());
               assertNotNull(context.getBean(IngestService.class));
               assertNotNull(context.getBean(DocumentStore.class));
+              assertNotNull(context.getBean(ProjectionCaches.class));
             });
   }
 
