@@ -331,10 +331,13 @@ interface/repository boundary, input handling and useful comments as well as
 behavior. Gradle currently enforces formatting, compilation warnings and Javadoc
 references; architecture and comment quality still require code review.
 
-Internal model processing uses the server's SYSTEM principal for accounting.
-SYSTEM is never a login, administrator role, permission bypass or fallback for
-missing user attribution. Keep the admitted owner and scope responsible for data
-access, lifecycle fences, allowances, hooks, cancellation and log visibility.
+Declared internal model processing uses SYSTEM's existing intrinsic authority,
+limited by retained purpose, input/output bindings and model-only capability
+ceilings. SYSTEM is never a login, assignable role or fallback for denied user
+work. Creator provenance is not processing authority. Valid processing continues
+after creator access loss; document/operation validity, leases, configured
+allowances and hooks still fence effects. Private logs and result disclosure
+retain their current access checks. Usage attribution cannot authorize inference.
 Document processing models have no tools, model-directed delegation, filesystem
 grants, skills or other capability acquisition. Reject a definition that would
 widen that ceiling before inference. Preserve existing usage attribution rather

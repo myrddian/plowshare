@@ -84,7 +84,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
             || context.corpus() == InformationContext.Corpus.CODE
             || io.aeyer.plowshare.protocol.DocumentType.classify(name, null).isCode()))
       throw new CallerFault("Typed refresh requires a document revision");
-    if (context.selection().scope() == InformationContext.Scope.SHARED)
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault("acquire into a personal or project namespace");
     if (request == null || url == null || url.isBlank() || name == null || name.isBlank())
       throw new CallerFault("acquisition needs requestId, URL and source name");
@@ -126,7 +126,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
     access.requireSelection(context);
     var row = repository.owned(context.account(), ticket);
     if (!Objects.equals(context.selection().project(), row.project())
-        || context.selection().scope() == InformationContext.Scope.SHARED)
+        || context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new NotFoundFault("select the acquisition's original namespace");
     return row;
   }
@@ -138,7 +138,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
   public List<AcquisitionRepository.Status> list(
       InformationContext context, int limit, int offset) {
     access.requireSelection(context);
-    if (context.selection().scope() == InformationContext.Scope.SHARED) return List.of();
+    if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ) return List.of();
     if (limit < 1 || limit > 100 || offset < 0)
       throw new CallerFault("acquisition list needs limit 1..100 and nonnegative offset");
     return repository.list(

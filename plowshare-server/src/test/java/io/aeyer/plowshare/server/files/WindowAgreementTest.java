@@ -160,7 +160,8 @@ class WindowAgreementTest {
     // CASCADE since V14: `memories` and `conversations` reference this
     // table now, so Postgres refuses a plain TRUNCATE of it whether or not
     // they hold anything. Nothing here holds a memory or a conversation.
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, projects CASCADE");
     repo = Files.createDirectory(tmp.resolve("repo")).toRealPath();
     Path server = Files.createDirectory(tmp.resolve("srv"));

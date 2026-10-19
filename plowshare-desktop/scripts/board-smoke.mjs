@@ -43,10 +43,17 @@ try {
 
   await page.locator('#connect-sidebar').click(); await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture'); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
-  await expect(page.locator('#connection-label')).toHaveText('Connected');
+  await expect(page.locator('#connection-label')).toHaveText(/ · Connected$/);
   const liveOpened = app.waitForEvent('window'); await page.locator('#board-open').click(); let live = await liveOpened; const liveBoard=live;
   live.on('pageerror', error => errors.push(error.message));
   await expect(live.locator('#board-detail h2')).toHaveText('How should device sync work?');
+  await live.locator('[data-topup="demo-board"]').click();
+  await expect(live.locator('#board-topup-dialog')).toBeVisible();
+  await live.locator('#topup-limit').fill('140');
+  await live.locator('#topup-submit').click();
+  await expect(live.locator('#board-topup-dialog')).not.toBeVisible();
+  await expect(live.locator('.board-budget')).toContainText('49 / 140');
+  assert.deepEqual(fixture.frames.filter(frame=>frame.type==='board.topup').map(frame=>frame.payload),[{topic:'demo-board',maxModelCalls:140}]);
   fixture.appendBoardMessage(); await expect(live.locator('#board-detail')).toContainText('A fresh swarm update from another session.', { timeout: 10000 });
   const trajectoryOpened = app.waitForEvent('window'); await live.locator('.board-seat').first().click(); const trajectory = await trajectoryOpened;
   trajectory.on('pageerror', error => errors.push(error.message));
@@ -90,7 +97,7 @@ try {
   fixture.disconnect(); await expect(live.locator('#board-error')).toContainText('Reconnect');
   await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
   await page.locator('#connect-sidebar').click(); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
-  await expect(page.locator('#connection-label')).toHaveText('Connected'); await expect(live.locator('#board-error')).toBeHidden();
+  await expect(page.locator('#connection-label')).toHaveText(/ · Connected$/); await expect(live.locator('#board-error')).toBeHidden();
   await live.close(); await liveBoard.close();
   const reads = fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length;
   await new Promise(resolve => setTimeout(resolve, 4500));
@@ -99,7 +106,8 @@ try {
   await expect(ending.locator('#board-detail h2')).toHaveText('How should device sync work?');
   await page.locator('#connect-sidebar').click(); await page.locator('#use-demo').click();
   await expect.poll(() => ending.isClosed()).toBe(true); await expect.poll(() => trajectory.isClosed()).toBe(true);
-  assert.equal(fixture.frames.filter(f => ['board.post','board.open','board.topup','agent.run','inbox.read'].includes(f.type)).length, 0);
+  assert.equal(fixture.frames.filter(f => ['board.post','board.open','agent.run','inbox.read'].includes(f.type)).length, 0);
+  assert.equal(fixture.frames.filter(f=>f.type==='board.topup').length,1);
   assert.deepEqual(errors, []);
   console.log('Board smoke passed: topic tree, threaded messages, child/parent navigation, live swarm updates, seat trajectory follow, editable retry limit, lost acknowledgment recovery across reload without duplicate wakes, isolation, failures, reconnect, account reset, compact layout and polling lifetime.');
 } finally { await app?.close(); await fixture.close(); await rm(profile, { recursive: true, force: true }); }

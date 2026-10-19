@@ -128,7 +128,7 @@ await client.request('agent.run', {
 ```
 
 Information operations use an explicit `{ kind: 'project', project:
-configuredProject, includeShared: false }` scope. An Application manager configures
+configuredProject, includeGlobal: false }` scope. An Application manager configures
 types and policies; a CONTRIBUTOR service identity ingests and classifies records,
 then discovers, traverses and consumes information within its grants. Project
 membership and token ceilings remain server-enforced.
@@ -261,7 +261,7 @@ listing, push notifications and binary/data inputs remain deferred.
 
 ## Machine identity
 
-Integrations can authenticate with an expiring `pss_` bearer issued to a [Plowshare service account](server-administration.md#service-accounts-and-scoped-tokens). Grant the service account the required server project roles and issue a token with project ceilings. Use the same token identity across integration restarts and rotate it to retain owned work and ingress receipts. Service tokens have no password login, refresh credential or Personal space; send an explicit project or an existing resource in an allowed project. Information requests use `includeShared:false`. Project grants, scope ceilings, expiry and revocation apply to subsequent execution as well as SDK requests.
+Integrations can authenticate with an expiring `pss_` bearer issued to a [Plowshare service account](server-administration.md#service-accounts-and-scoped-tokens). Grant the service account the required server project roles and issue a token with project ceilings. Use the same token identity across integration restarts and rotate it to retain owned work and ingress receipts. Service tokens have no password login, refresh credential or Personal space; send an explicit project or an existing resource in an allowed project. Information requests include generally readable knowledge by default; use `includeGlobal:false` for project-only discovery. Project grants, scope ceilings, expiry and revocation apply to subsequent execution as well as SDK requests.
 
 Event producers use the [explicit event payload contracts](event-payloads.md).
 Deployments must pass the restored-copy compatibility preflight before typed

@@ -66,6 +66,8 @@ public final class AgentRunner implements Dispatcher.Runner {
     if (!file.status().equals("active") || file.definition() == null || file.definition().paused())
       throw new IllegalStateException("The schedule source is suspended or paused");
     var source = configured.sourceOf(trigger.name(), trigger.definedBy()).orElseThrow();
+    if (!Objects.equals(source.account(), trigger.definedBy()))
+      throw new IllegalStateException("Schedule source cannot change its execution principal");
     scheduleAuthority.get().validate(source, file.definition());
     if (file.definition().target().kind().equals("message")) {
       var messaging = messages.get();
@@ -138,7 +140,7 @@ public final class AgentRunner implements Dispatcher.Runner {
           .id();
     }
     String conversation = trigger.conversation();
-    callers.requireConversationProject(conversation, trigger.definedBy());
+    callers.requireConversationWork(conversation, trigger.definedBy());
     AgentDefinition definition =
         callers.requireAgent(trigger.agent(), callers.callerForConversation(conversation, session));
     // A trigger's limits apply to untargeted runs only: a turn in a conversation runs under
@@ -147,13 +149,14 @@ public final class AgentRunner implements Dispatcher.Runner {
     //
     // The trigger speaks, not the account that defined it: the task is the harness's words
     // on the trigger's behalf, and a reader of the log must never be told the person said it.
-    return turns.speak(
+    return turns.speakForExecutor(
         conversation,
         definition,
         utterance,
         session,
         null,
         Speaker.event(trigger.name()),
-        outcome -> ended.accept(conversation, outcome));
+        outcome -> ended.accept(conversation, outcome),
+        trigger.definedBy());
   }
 }

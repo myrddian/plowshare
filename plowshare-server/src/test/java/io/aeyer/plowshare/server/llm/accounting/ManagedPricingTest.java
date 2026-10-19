@@ -38,7 +38,8 @@ class ManagedPricingTest {
   @BeforeEach
   void setup() {
     jdbc = new JdbcTemplate(data);
-    jdbc.execute("TRUNCATE admin_pricing,admin_pricing_history,admin_audit,admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE admin_pricing,admin_pricing_history,admin_audit,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin,must_change_password) VALUES ('owner','fixture',true,false),('reader','fixture',false,false)");
     properties = new LlmProperties();

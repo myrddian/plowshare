@@ -26,10 +26,11 @@ export function createInformation(options: {
 }): Screen {
   const root = options.root;
   const scope = document.createElement('select');
-  for (const kind of ['personal', 'project', 'shared']) {
+  for (const kind of ['personal', 'project', 'global_read']) {
     const option = document.createElement('option');
     option.value = kind;
-    option.textContent = kind;
+    option.textContent =
+      kind === 'global_read' ? 'Available to everyone' : kind;
     scope.append(option);
   }
   const project = input('Project', 'Project name');
@@ -92,7 +93,7 @@ export function createInformation(options: {
   const selection = (): InformationScope =>
     scope.value === 'project'
       ? { kind: 'project', project: project.value }
-      : scope.value === 'personal' || scope.value === 'shared'
+      : scope.value === 'personal' || scope.value === 'global_read'
         ? { kind: scope.value }
         : (() => {
             throw new Error('Unknown information scope.');

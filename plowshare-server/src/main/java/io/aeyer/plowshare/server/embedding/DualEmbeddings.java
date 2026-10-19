@@ -10,6 +10,21 @@ public interface DualEmbeddings {
   /** Processing identity includes both model spaces, but excludes index policy. */
   String fingerprint();
 
+  /** A bounded document operation; independent query/maintenance calls receive no authority. */
+  default DualEmbeddings forPreparation(EmbeddingAuthorization permit) {
+    throw new UnsupportedOperationException("Document embedding authorization is unavailable");
+  }
+
+  /** Exact committed outputs of an admitted memory write, never general repair. */
+  default DualEmbeddings forWrite(EmbeddingAuthorization permit) {
+    throw new UnsupportedOperationException("Memory publication binding unavailable");
+  }
+
+  /** Binds query dispatch only; this cannot authorize repair or publication. */
+  default DualEmbeddings forQuery(EmbeddingPermit permit) {
+    throw new UnsupportedOperationException("Query embedding authorization unavailable");
+  }
+
   EmbeddingProfile active(EmbeddingSlot slot);
 
   /**

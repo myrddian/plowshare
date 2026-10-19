@@ -494,14 +494,10 @@ public class AgentController {
    * <p>A body naming nothing is refused: it would answer 200 having done nothing, which reads to
    * whoever sent it as a limit that was moved.
    *
-   * <p><b>A budget cannot be lowered below what has already been spent.</b> {@code Budget.changeTo}
-   * permits it and defines what it means — the tree stops at its next boundary — and this door
-   * still refuses it, for a reason that is about the archive rather than about the run: a
-   * conversation's row carries {@code budget_total} and {@code budget_spent} with {@code
-   * conversations_spent_within_budget} between them, so a total below the spending is a turn whose
-   * write-back Postgres would refuse, and the conversation would lose the record of what it spent.
-   * <b>The verb for stopping a run is {@link #cancel}</b>, which stops it at the same boundary and
-   * leaves the accounting true, and the message says so.
+   * <p><b>A budget cannot be lowered below what has already been spent.</b> This control checks the
+   * live object, and a bound allowance checks current canonical usage atomically. Claims are never
+   * refunded by a limit change or turn completion. Use {@link #cancel} to stop a run at its next
+   * boundary while preserving its usage evidence.
    *
    * <p>A job that has finished is refused rather than silently accepted, which is the opposite of
    * what {@link #cancel} does with one — and the difference is what the caller is asking for.

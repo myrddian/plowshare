@@ -137,8 +137,11 @@ class ConversationStoreTest {
     // foreign key into `board_topics`. `user_inbox` is a further hop still,
     // through its pre-existing V40 foreign key into `firings`, which this
     // file had never had to name before nothing chained through it.
+    // V113 added resume receipts; V115 added digest staging and failure markers; V121/V127 added
+    // Relay execution and job links to logs.
+    // Keep those explicit too, so the persistence fixture still fails on an unknown dependency.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox");
+        "TRUNCATE TABLE orchestration_resume_receipts, digests_embedding_staging, digests_embedding_failures, relay_executions, jobs, board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox");
     clock.set(OPENED_AT);
     minted.set(0);
     store =
@@ -288,14 +291,15 @@ class ConversationStoreTest {
     store.turnEnded(opened.id(), busier);
 
     Budget behind = stale.budget();
-    behind.trySpend();
+    assertTrue(behind.trySpend(), "stale readers claim the next shared ordinal atomically");
     ArchiveException refused =
-        assertThrows(ArchiveException.class, () -> store.turnEnded(opened.id(), behind));
+        assertThrows(
+            ArchiveException.class, () -> store.turnEnded(opened.id(), Budget.resumed(10, 1)));
 
-    assertTrue(refused.getMessage().contains("already spent 3"), refused.getMessage());
-    assertTrue(refused.getMessage().contains("reports 1"), refused.getMessage());
+    assertTrue(
+        refused.getMessage().contains("different retained allowance source"), refused.getMessage());
     assertEquals(
-        3,
+        4,
         store.find(opened.id()).orElseThrow().budget().spent(),
         "and the row still holds what was really spent");
   }
@@ -427,10 +431,8 @@ class ConversationStoreTest {
         refused.getMessage().contains("conversations_an_allowance_is_both_halves_or_neither"),
         refused.getMessage());
 
-    jdbc.update(
-        "UPDATE conversations SET budget_total = NULL, budget_spent = 3,"
-            + " budget_lifted = TRUE WHERE id = ?",
-        "cnv_ordinary");
+    new io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository(jdbc)
+        .ceiling(store.find("cnv_ordinary").orElseThrow().budget().snapshot().id(), null);
 
     assertFalse(
         store.find("cnv_ordinary").orElseThrow().budget().capped(),
@@ -842,25 +844,20 @@ class ConversationStoreTest {
             () -> insert("cnv_negative", "payments", OPENED_AT, 4, -1));
 
     assertTrue(
-        refused.getMessage().contains("conversations_spending_is_not_negative"),
-        refused.getMessage());
+        refused.getMessage().contains("execution_allowances_spent_check"), refused.getMessage());
     assertTrue(
         !refused.getMessage().contains("conversations_spent_within_budget"),
         "and not the other one, which -1 also satisfies — " + refused.getMessage());
   }
 
   @Test
-  void the_table_refuses_a_budget_nothing_can_be_spent_from() {
-    // Budget.of refuses this first, naming it; this is what stops anything
-    // that bypasses Java.
+  void the_table_preserves_native_zero_call_allowances_without_permitting_spend() {
     assertThrows(CallerFault.class, () -> Budget.of(0));
-
-    DataIntegrityViolationException refused =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () -> insert("cnv_broke", "payments", OPENED_AT, 0, 0));
-    assertTrue(
-        refused.getMessage().contains("conversations_budget_is_spendable"), refused.getMessage());
+    insert("cnv_native", "payments", OPENED_AT, 0, 0);
+    assertTrue(store.find("cnv_native").orElseThrow().budget().exhausted());
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () -> insert("cnv_overdrawn", "payments", OPENED_AT, 0, 1));
   }
 
   @Test
@@ -971,10 +968,11 @@ class ConversationStoreTest {
   void a_budget_read_back_over_its_limit_is_refused_rather_than_laundered() {
     assertThrows(IllegalArgumentException.class, () -> Budget.resumed(4, 5));
     assertThrows(IllegalArgumentException.class, () -> Budget.resumed(4, -1));
-    // A non-positive total is refused by Budget.of before resumed's own
-    // checks ever run, and Budget.of raises CallerFault, not the plain
-    // IllegalArgumentException the two lines above pin.
-    assertThrows(CallerFault.class, () -> Budget.resumed(0, 0));
+    // Native execution has a durable zero-call allowance; it cannot acquire inference later.
+    Budget nativeOnly = Budget.resumed(0, 0);
+    assertTrue(nativeOnly.exhausted());
+    assertFalse(nativeOnly.trySpend());
+    assertThrows(CallerFault.class, () -> nativeOnly.changeTo(1));
 
     Budget atItsLimit = Budget.resumed(4, 4);
     assertEquals(0, atItsLimit.remaining());
@@ -1616,7 +1614,8 @@ class ConversationStoreTest {
     clock.set(OPENED_AT.minus(Duration.ofDays(30)));
     ConversationRecord spokenInto = store.open(PAYMENTS, Budget.of(4));
     clock.set(OPENED_AT);
-    store.turnEnded(spokenInto.id(), Budget.resumed(4, 1));
+    spokenInto.budget().trySpend();
+    store.turnEnded(spokenInto.id(), spokenInto.budget());
 
     assertEquals(
         List.of(),

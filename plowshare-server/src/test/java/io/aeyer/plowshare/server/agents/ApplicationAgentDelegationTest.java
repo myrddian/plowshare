@@ -193,7 +193,7 @@ class ApplicationAgentDelegationTest {
     run(runtime(transport), "alpha");
     assertEquals(2, transport.requests.size());
     assertTrue(transport.toolResult().startsWith("E_NO_ACCESS:"), transport.toolResult());
-    assertTrue(transport.toolResult().contains("current project is unavailable"));
+    assertTrue(transport.toolResult().contains("no definition fallback was used"));
   }
 
   @Test

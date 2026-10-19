@@ -255,7 +255,7 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
 
   public Retained retained(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT resource_id,source_uri FROM information_revisions WHERE id=?",
+        "SELECT resource_id,source_uri FROM information_revision_allowances WHERE id=?",
         (r, n) -> new Retained(r.getObject("resource_id", UUID.class), r.getString("source_uri")),
         Objects.requireNonNull(revision));
   }

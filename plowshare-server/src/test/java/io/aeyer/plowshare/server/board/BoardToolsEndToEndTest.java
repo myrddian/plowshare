@@ -313,7 +313,8 @@ class BoardToolsEndToEndTest {
             dispatcher::drain,
             fixture.work,
             () -> 10,
-            fixture.clock);
+            fixture.clock,
+            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
     BoardPot pot = new BoardPot(boardStore);
     SeatRunner seats =
         new SeatRunner(

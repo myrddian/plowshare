@@ -95,7 +95,9 @@ public final class ConversationResumeHandler implements FrameHandler {
         definitions.requireAgent(named, definitions.callerForConversation(conversation, session));
     // Definition lookup may use the conversation owner. Exposure belongs to the request actor.
     io.aeyer.plowshare.server.agents.AgentExposure.requireAvailable(definition, asking.handle());
-    String job = speaking.resume(conversation, definition, session, turnCap, asked.maxModelCalls());
+    String job =
+        speaking.resume(
+            conversation, definition, session, turnCap, asked.maxModelCalls(), asking.handle());
     return new Outcome(Code.ACCEPTED, null, new StartedJob(job, definition.name()));
   }
 }

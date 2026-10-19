@@ -80,7 +80,7 @@ class InformationProcessingAccountingTest {
     var processor =
         InformationLifecycle.processing(
             repository,
-            mock(UnitOfWork.class),
+            UnitOfWork.NONE,
             catalogue,
             store,
             embeddings,

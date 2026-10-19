@@ -13,7 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 class InformationProcessingAuthorityTest {
   @Test
-  void applicationGrantWithdrawalRefusesRenewalBeforeExtendingTheLease() {
+  void missingSystemAuthorityRefusesRenewalBeforeExtendingTheLease() {
     var jdbc = mock(JdbcTemplate.class);
     var members = mock(ProjectMembers.class);
     String principal = "@service/" + UUID.randomUUID();
@@ -29,16 +29,20 @@ class InformationProcessingAuthorityTest {
             12L);
     when(jdbc.queryForObject("SELECT name FROM projects WHERE id=?", String.class, 12L))
         .thenReturn("application");
-    when(members.mayUse("application", principal)).thenReturn(false);
+    when(jdbc.queryForObject(
+            "SELECT information_system_scope_valid(?)", Boolean.class, "application"))
+        .thenReturn(false);
     var repository = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
     assertFalse(repository.renew(lease));
-    verify(members).mayUse("application", principal);
+    verifyNoInteractions(members);
+    verify(jdbc)
+        .queryForObject("SELECT information_system_scope_valid(?)", Boolean.class, "application");
     verify(jdbc).queryForObject("SELECT name FROM projects WHERE id=?", String.class, 12L);
     verifyNoMoreInteractions(jdbc, members);
   }
 
   @Test
-  void applicationGrantWithdrawalRefusesCheckpointWithTheOriginalPrincipal() {
+  void missingSystemAuthorityRefusesCheckpointWithTheOriginalProvenance() {
     var jdbc = mock(JdbcTemplate.class);
     var members = mock(ProjectMembers.class);
     String principal = "@service/" + UUID.randomUUID();
@@ -54,10 +58,14 @@ class InformationProcessingAuthorityTest {
             12L);
     when(jdbc.queryForObject("SELECT name FROM projects WHERE id=?", String.class, 12L))
         .thenReturn("application");
-    when(members.mayUse("application", principal)).thenReturn(false);
+    when(jdbc.queryForObject(
+            "SELECT information_system_scope_valid(?)", Boolean.class, "application"))
+        .thenReturn(false);
     var repository = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
     assertThrows(StaleLease.class, () -> repository.requireLease(lease));
-    verify(members).mayUse("application", principal);
+    verifyNoInteractions(members);
+    verify(jdbc)
+        .queryForObject("SELECT information_system_scope_valid(?)", Boolean.class, "application");
     verify(jdbc).queryForObject("SELECT name FROM projects WHERE id=?", String.class, 12L);
     verifyNoMoreInteractions(jdbc, members);
   }

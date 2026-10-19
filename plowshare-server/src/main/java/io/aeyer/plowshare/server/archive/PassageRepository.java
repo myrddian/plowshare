@@ -8,7 +8,11 @@ import java.util.Optional;
 
 /** Committed retrieval sources and atomic derived-vector publication, without model dispatch. */
 public interface PassageRepository {
-  record ReadScope(boolean constrained, String account) {
+  record ReadScope(boolean constrained, String account, boolean knowledgeOnly) {
+    public ReadScope(boolean constrained, String account) {
+      this(constrained, account, false);
+    }
+
     public static final ReadScope UNRESTRICTED = new ReadScope(false, null);
   }
 
@@ -23,6 +27,29 @@ public interface PassageRepository {
   Optional<LogOwner> logOwner(String source);
 
   Optional<Home> digestHome(String source);
+
+  default Optional<Home> sourceHome(Source source) {
+    throw new UnsupportedOperationException("Passage source home unavailable");
+  }
+
+  /** Exact queue hash, content and next position; this check never acquires model authority. */
+  default void requireSource(Source source, String generation) {
+    throw new UnsupportedOperationException("Passage source fence unavailable");
+  }
+
+  default boolean beginRepair(Source source, String generation) {
+    throw new UnsupportedOperationException("Passage repair attempt fence unavailable");
+  }
+
+  default boolean publish(
+      Source expected,
+      List<String> texts,
+      List<float[]> vectors,
+      boolean complete,
+      String generation,
+      Runnable fence) {
+    throw new UnsupportedOperationException("Passage publication fence unavailable");
+  }
 
   /**
    * Locks owner then source, rejects stale hashes/generations/positions and publishes atomically.

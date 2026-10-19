@@ -209,7 +209,7 @@ await test('information preserves scoped receipts and refuses human publication 
     },
   };
   const payload = {
-    scope: { kind: 'project', project: 'research', includeShared: false },
+    scope: { kind: 'project', project: 'research', includeGlobal: false },
     requestId: 'retained-receipt',
     name: 'report',
     text: 'Report',
@@ -251,7 +251,7 @@ await test('information facets forwards the requested project scope and filter e
     },
   };
   const payload = {
-    scope: { kind: 'project', project: 'research', includeShared: false },
+    scope: { kind: 'project', project: 'research', includeGlobal: false },
     kind: 'source',
     filter: { tags: ['a2a'] },
   };

@@ -50,7 +50,6 @@ public record CodeOutline(
     // The raw-reader API avoids JNI modified UTF-8. Native UTF-16LE bytes / 2
     // are exactly the retained extraction's UTF-16 coordinates, on any host.
     byte[] bytes = source.getBytes(StandardCharsets.UTF_16LE);
-    long deadline = System.nanoTime() + 2_000_000_000L;
     try (TSParser parser = new TSParser()) {
       TSLanguage grammar =
           switch (language) {
@@ -65,6 +64,10 @@ public record CodeOutline(
       if (!parser.setLanguage(grammar))
         return new CodeOutline(
             "failed", "grammar_abi_mismatch", language, VERSION, hash, List.of());
+      // Cold native extraction/loading cannot be cancelled by the progress callback. Start the
+      // document's parse/traversal budget only after parser and grammar initialization; otherwise
+      // first use can exhaust it before examining even a tiny, valid source file.
+      long deadline = System.nanoTime() + 2_000_000_000L;
       try (TSTree tree =
           parser.parseWithOptions(
               new byte[8192],

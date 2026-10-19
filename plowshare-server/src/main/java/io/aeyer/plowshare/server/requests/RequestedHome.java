@@ -4,7 +4,9 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.faults.CallerFault;
 
 /**
- * The project a request named, or the global home when it named none.
+ * Legacy Home decoding, not authenticated default resolution. Existing unmigrated memory/storage
+ * consumers retain the null home here. Execution and information boundaries must resolve omission
+ * from trusted account context before using this decoder; null is not a Global-account selector.
  *
  * <p><b>The wrapper is unavoidable and that is a module boundary, not a preference.</b> {@link
  * Home} lives in {@code plowshare-protocol}, which the client also depends on, so it cannot import

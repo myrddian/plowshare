@@ -324,7 +324,11 @@ export function interchangeProblem(
       }
     } else {
       const scope = object(row['scope']);
-      if (!['personal', 'project', 'shared'].includes(text(scope['kind'], 8)))
+      if (
+        !['personal', 'project', 'global_read'].includes(
+          text(scope['kind'], 32),
+        )
+      )
         fail();
       if (scope['kind'] === 'project') text(scope['project'], 1024);
       if (row['corpus'] !== undefined && row['corpus'] !== 'documents') fail();
@@ -333,7 +337,7 @@ export function interchangeProblem(
       if (type.endsWith('.readable') || type.endsWith('.origin'))
         id(row['revision']);
       if (type.endsWith('.import')) {
-        if (scope['kind'] === 'shared') fail();
+        if (scope['kind'] === 'global_read') fail();
         id(row['requestId']);
         const plan = object(row['plan']);
         bundle(plan['bundle']);

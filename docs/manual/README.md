@@ -74,13 +74,13 @@ shared revision UUID. A personal installation is visible in **Library → Docume
 In the TUI, list the shared chapters with:
 
 ```text
-/information list --scope shared {"filter":{"tags":["plowshare-manual"]},"limit":100}
+/information list --scope global_read {"filter":{"tags":["plowshare-manual"]},"limit":100}
 ```
 
 Read a returned revision with:
 
 ```text
-/information read --scope shared {"revision":"<revision-uuid>","offset":0,"limit":8192}
+/information read --scope global_read {"revision":"<revision-uuid>","offset":0,"limit":8192}
 ```
 
 Continue with the returned end offset to read the rest of a long chapter. The
@@ -96,8 +96,10 @@ permissions. Shared manual chapters are available in ordinary scopes that includ
 shared information. The manual is reference material; its examples do not confer
 tool grants or instruct an agent to execute every command it contains.
 
-Scoped service tokens cannot read the shared catalogue. The current installer
-publishes through a human account's information collection; project-scoped manual
+Scoped service tokens can read explicitly published GLOBAL_READ roots under
+current policy; historical human-only LEGACY_SHARED roots require manager review.
+The installer supports Personal publication or explicit human ADMIN `--global`
+installation into Global account custody. Project-scoped manual
 publication for service-account agents is a separate, unfinished path.
 
 The desktop Help entry and Manual tab are the primary GUI reading path. The web

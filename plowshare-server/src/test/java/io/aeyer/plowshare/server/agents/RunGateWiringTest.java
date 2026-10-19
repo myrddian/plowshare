@@ -268,6 +268,7 @@ class RunGateWiringTest {
   private List<LoggedEntry> lastEntries;
   private volatile Scripted activeModel;
   private boolean failRetainedResult;
+  private io.aeyer.plowshare.server.access.OperationAuthority runtimeAuthority;
 
   /** The run call the model makes. */
   private String runCall = "{\"command\": [\"./gradlew\", \"test\"]}";
@@ -288,22 +289,45 @@ class RunGateWiringTest {
   private String runAs(Hooks hooks, String session, String callerHandle) throws Exception {
     Scripted model = new Scripted(runCall);
     activeModel = model;
-    JobRuntime runtime =
-        new JobRuntime(
-            new LlmDispatcher(
-                List.of(
-                    new LlmPool(
-                        "scripted",
-                        List.of("model-fast"),
-                        Map.of("fast", "model-fast"),
-                        4,
-                        1,
-                        Duration.ofSeconds(5),
-                        model)),
-                new NoOpTokenLedger()),
-            List.of(),
-            null,
-            (home, grants, sessionId, owner) -> List.of(new Machine()));
+    LlmDispatcher dispatcher =
+        new LlmDispatcher(
+            List.of(
+                new LlmPool(
+                    "scripted",
+                    List.of("model-fast"),
+                    Map.of("fast", "model-fast"),
+                    4,
+                    1,
+                    Duration.ofSeconds(5),
+                    model)),
+            new NoOpTokenLedger());
+    io.aeyer.plowshare.server.files.RunProviders providers =
+        (home, grants, sessionId, owner) -> List.of(new Machine());
+    JobRuntime runtime;
+    if (runtimeAuthority == null) {
+      runtime = new JobRuntime(dispatcher, List.of(), null, providers);
+    } else {
+      io.aeyer.plowshare.server.access.InferenceCalls calls =
+          mock(io.aeyer.plowshare.server.access.InferenceCalls.class);
+      when(calls.claimed(
+              any(io.aeyer.plowshare.server.access.OperationAuthority.Admission.class),
+              any(Budget.Claim.class)))
+          .thenReturn(io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.DIRECT);
+      runtime =
+          new JobRuntime(
+              dispatcher,
+              List.of(),
+              null,
+              providers,
+              Instant::now,
+              Reminding.NONE,
+              io.aeyer.plowshare.server.images.ImageStore.NONE,
+              RefusalDetector.PHRASES,
+              System::nanoTime,
+              mock(AgentDelegates.class),
+              runtimeAuthority,
+              calls);
+    }
     runtime.useEnvironments(new Environments(name -> 7L, id -> environment, null));
     runtime.useApprovals(approvals);
     if (suspendedCalls != null) runtime.useSuspendedRunCalls(suspendedCalls);
@@ -470,10 +494,36 @@ class RunGateWiringTest {
   }
 
   @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2})
+  @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2, 3})
   void approval_resumes_the_original_call_without_another_model_request_for_run(int scenario)
       throws Exception {
     boolean denied = scenario == 1;
+    boolean revoked = scenario == 3;
+    java.util.concurrent.atomic.AtomicBoolean authorized =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    if (revoked) {
+      runtimeAuthority = mock(io.aeyer.plowshare.server.access.OperationAuthority.class);
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission admission =
+          mock(io.aeyer.plowshare.server.access.OperationAuthority.Admission.class);
+      when(admission.executor()).thenReturn("alice");
+      when(admission.home()).thenReturn(Home.of("payments"));
+      when(admission.actions())
+          .thenReturn(
+              java.util.Set.of(
+                  io.aeyer.plowshare.server.access.AuthorityAction.READ,
+                  io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
+                  io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL));
+      when(runtimeAuthority.admit(any(), any(), any())).thenReturn(admission);
+      org.mockito.Mockito.doAnswer(
+              call -> {
+                if (!authorized.get())
+                  throw new io.aeyer.plowshare.server.faults.CallerFault(
+                      "revoked during approval wait");
+                return null;
+              })
+          .when(runtimeAuthority)
+          .require(admission);
+    }
     failRetainedResult = scenario == 2;
     Files.writeString(environment, "server:\n  mode: ask\n");
     var retained =
@@ -534,11 +584,25 @@ class RunGateWiringTest {
 
     String result;
     try (var jobs = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      var running = jobs.submit(() -> runAs(Hooks.NONE, "original-session"));
+      var running =
+          jobs.submit(() -> runAs(Hooks.NONE, "original-session", revoked ? "alice" : null));
       assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
       assertTrue(ran.isEmpty(), "A pending approval must not execute anything");
       assertEquals(1, activeModel.sent.size(), "No inference is needed while a person decides");
+      if (revoked) authorized.set(false);
       consent.set(denied ? "denied" : "allowed");
+      if (revoked) {
+        java.util.concurrent.ExecutionException refused =
+            org.junit.jupiter.api.Assertions.assertThrows(
+                java.util.concurrent.ExecutionException.class,
+                () -> running.get(10, java.util.concurrent.TimeUnit.SECONDS));
+        assertInstanceOf(io.aeyer.plowshare.server.faults.CallerFault.class, refused.getCause());
+        assertTrue(ran.isEmpty(), "Approval must not replace revoked operation authority");
+        assertEquals(1, activeModel.sent.size(), "A revoked command is not sent back to the model");
+        verify(suspendedCalls, never()).complete(any(), any());
+        verify(suspendedCalls, never()).acknowledged(any());
+        return;
+      }
       result = running.get(10, java.util.concurrent.TimeUnit.SECONDS);
     }
 

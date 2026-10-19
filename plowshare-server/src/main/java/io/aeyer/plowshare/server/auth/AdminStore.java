@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -69,6 +70,7 @@ public class AdminStore {
    */
   @org.springframework.transaction.annotation.Transactional
   public void create(String handle, String passwordHash) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES (?, ?, TRUE)",
         handle,
@@ -97,7 +99,7 @@ public class AdminStore {
   public Optional<String> handleOfAnyOtherAdmin(String handle) {
     return jdbc
         .query(
-            "SELECT handle FROM admins WHERE handle <> ? ORDER BY created_at ASC LIMIT 1",
+            "SELECT handle FROM admins WHERE handle <> ? AND account_kind='USER' ORDER BY created_at ASC LIMIT 1",
             (rs, rowNum) -> rs.getString("handle"),
             handle)
         .stream()
@@ -125,6 +127,7 @@ public class AdminStore {
    * @param passwordHash a fresh {@link PasswordHasher#hash(char[])} output
    */
   public void changePassword(String handle, String passwordHash) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     jdbc.update(
         "UPDATE admins SET password_hash = ?, must_change_password = FALSE" + " WHERE handle = ?",
         passwordHash,
@@ -132,6 +135,7 @@ public class AdminStore {
   }
 
   public boolean changePassword(String handle, String passwordHash, String expectedHash) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     return jdbc.update(
             "UPDATE admins SET password_hash=?,must_change_password=FALSE WHERE handle=? AND password_hash=? AND enabled",
             passwordHash,
@@ -194,7 +198,8 @@ public class AdminStore {
   public boolean bootstrap(String passwordHash) {
     return setupTransaction(
         () -> {
-          if (!jdbc.queryForList("SELECT 1 FROM admins WHERE NOT bootstrap", Integer.class)
+          if (!jdbc.queryForList(
+                  "SELECT 1 FROM admins WHERE NOT bootstrap AND account_kind='USER'", Integer.class)
               .isEmpty()) return false;
           jdbc.update(
               "INSERT INTO admins(handle, password_hash, server_admin, bootstrap) VALUES ('admin', ?, FALSE, TRUE)"
@@ -207,6 +212,7 @@ public class AdminStore {
   /** Consumes the temporary account and creates the chosen administrator in one commit. */
   public boolean finishSetup(
       String bootstrapHandle, String expectedHash, String handle, String passwordHash) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     return setupTransaction(
         () -> {
           int consumed =

@@ -49,6 +49,7 @@ class InformationMetadataCheckpointTest {
             return work.get();
           }
         };
+    var valid = new java.util.concurrent.atomic.AtomicBoolean(true);
     var stage =
         new InformationModelStages(
                 repository, transactions, catalogue, inputs, Hooks.NONE, Harness.NONE)
@@ -62,7 +63,9 @@ class InformationMetadataCheckpointTest {
                     UUID.randomUUID(),
                     "test-account",
                     null),
-                () -> {});
+                () -> {
+                  if (!valid.get()) throw new InformationLifecycle.StaleLease();
+                });
     var definition =
         io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
             .get("information_tagger");
@@ -112,6 +115,20 @@ class InformationMetadataCheckpointTest {
             eq("test-account"),
             any(Outcome.class),
             eq("test-log"));
-    verify(inputs, times(4)).requireLog("test-log", "test-account");
+    valid.set(false);
+    assertThrows(
+        InformationLifecycle.StaleLease.class,
+        () ->
+            stage.run(
+                definition,
+                "Retained network observations",
+                "test-log",
+                Home.of("test-project"),
+                "test-account",
+                task -> {
+                  fail("Invalid work cannot infer or reuse paid output");
+                  return null;
+                }));
+    verifyNoInteractions(inputs);
   }
 }

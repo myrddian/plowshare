@@ -11,7 +11,7 @@ class InformationInterchangeInputsTest {
   @Test
   void exact_revisions_and_explicit_scope_are_validated_before_service_calls() {
     var id = UUID.randomUUID();
-    var scope = Map.of("kind", "project", "project", "knowledge", "includeShared", false);
+    var scope = Map.of("kind", "project", "project", "knowledge", "includeGlobal", false);
     var command =
         assertInstanceOf(
             InformationRequest.InterchangeExport.class,

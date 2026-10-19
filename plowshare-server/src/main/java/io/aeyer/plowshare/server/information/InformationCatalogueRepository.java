@@ -20,13 +20,15 @@ public interface InformationCatalogueRepository {
       long generation,
       int allowanceSpent) {}
 
-  record Owner(
+  record Resource(
       UUID id,
       String namespace,
       String sourceName,
       String ownerHandle,
       Long projectId,
-      String projectName) {}
+      String projectName,
+      io.aeyer.plowshare.server.access.AuthorityIds.ScopeId home,
+      Optional<io.aeyer.plowshare.server.access.AuthorityIds.AccountId> createdBy) {}
 
   record Span(int start, int end) {
     public Span {
@@ -36,7 +38,8 @@ public interface InformationCatalogueRepository {
 
   Snapshot row(UUID revision);
 
-  Owner lockOwner(String account, UUID revision);
+  /** Locks the explicit home and rechecks live authority plus mandatory restrictions. */
+  Resource lockResource(InformationContext context, UUID revision, boolean audience);
 
   boolean readable(InformationContext context, UUID revision);
 
@@ -216,9 +219,9 @@ public interface InformationCatalogueRepository {
 
   void callerSession(Admission admission, String session);
 
-  void tagGroups(UUID resource, Map<String, List<String>> groups);
+  void tagGroups(InformationContext context, UUID revision, Map<String, List<String>> groups);
 
-  void tags(UUID resource, List<String> tags);
+  void tags(InformationContext context, UUID revision, List<String> tags);
 
   Command reserve(InformationContext context, UUID revision, UUID request, String fingerprint);
 

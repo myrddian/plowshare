@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.agents.JobsProperties;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
@@ -44,15 +45,22 @@ public class ArchiveConfig {
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
-      ArchiveProperties props) {
-    return new Archive(
-        store,
-        reasons,
-        embeddings,
-        unitOfWork,
-        props.getMaxBodyChars(),
-        props.getIndexThreshold(),
-        props.getHalfLifeDays());
+      ArchiveProperties props,
+      MemoryQueries queries,
+      org.springframework.beans.factory.ObjectProvider<MemoryWrites> writes) {
+    store.protectInformation();
+    var archive =
+        new Archive(
+            store,
+            reasons,
+            embeddings,
+            unitOfWork,
+            props.getMaxBodyChars(),
+            props.getIndexThreshold(),
+            props.getHalfLifeDays());
+    archive.useQueries(queries);
+    archive.useWrites(writes::getObject);
+    return archive;
   }
 
   /**
@@ -81,8 +89,11 @@ public class ArchiveConfig {
    * and until this bean existed the table had no production caller at all.
    */
   @Bean
-  public ConversationStore conversationStore(JdbcTemplate jdbc) {
-    return new ConversationStore(jdbc);
+  public ConversationStore conversationStore(
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      AllowanceRepository allowances) {
+    return new ConversationStore(jdbc, operations, allowances);
   }
 
   /** Local hook sets by hash (spec 2026-09-30-local-hooks-are-served §3). */

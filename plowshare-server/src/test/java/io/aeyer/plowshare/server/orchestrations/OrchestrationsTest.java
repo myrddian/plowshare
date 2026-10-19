@@ -240,7 +240,8 @@ class OrchestrationsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE orchestration_messages, orchestrations, todos, todo_notices,"
             + " entries, turns, conversations, admins, orchestration_concerns CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
@@ -453,7 +454,10 @@ class OrchestrationsTest {
   }
 
   private void setSpent(String conversation, int spent) {
-    jdbc.update("UPDATE conversations SET budget_spent = ? WHERE id = ?", spent, conversation);
+    jdbc.update(
+        "UPDATE execution_allowances SET spent = ? WHERE id = (SELECT allowance_id FROM conversations WHERE id = ?)",
+        spent,
+        conversation);
   }
 
   // --- the record ---------------------------------------------------------------------------

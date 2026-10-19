@@ -29,8 +29,8 @@ import org.springframework.stereotype.Service;
  * archive.Conversations}' shape</h2>
  *
  * <p>Both build a {@link DefinitionResolver.Caller}, and neither is the other with a parameter
- * swapped in. {@link #callerFor} translates a request's own {@code project} field — a name that may
- * be blank, malformed, or simply unwritten — through {@link RequestedProjectId#lenient}. {@link
+ * swapped in. {@link #callerFor} translates a request's own {@code project} field — a name that
+ * must resolve if explicitly supplied — through {@link RequestedProjectId#lenient}. {@link
  * #callerForConversation} never touches that field: a conversation's project is fixed at the moment
  * it was opened, so the caller for a turn spoken into one is the conversation's own {@link Home},
  * read fresh through {@link Turn#homeOf} and translated through {@link RequestedProjectId#of} — the
@@ -170,20 +170,8 @@ public final class Callers implements WorkCallers, AgentDelegates, ConversationD
   }
 
   /**
-   * The caller {@link DefinitionResolver#forCaller} resolves for a plain run: the project this
-   * request names, translated to the row's own id through {@link RequestedProjectId#lenient}, and
-   * the session it named — already validated by {@code requests.RequestedSession} before this is
-   * called.
-   *
-   * <p><b>A project name with no row resolves to {@code null}</b>, not to a refusal — see {@link
-   * RequestedProjectId#lenient}'s own javadoc. The blank or malformed case is left to whatever
-   * validates the request's own {@code project} field next — {@code requests.RequestedHome.in},
-   * reached on every path through {@link Runs#start} that has not already thrown — so this method
-   * must not race it with a second, differently worded refusal for the same blank string.
-   *
-   * <p><b>Not what {@code GET /v1/agents} resolves through.</b> That door has no later check to
-   * hand a malformed name to, so it resolves its own project id through {@link
-   * RequestedProjectId#forListing} and refuses a malformed name outright rather than swallowing it.
+   * Resolves an explicit project name without falling back after malformed/missing context. Request
+   * omission is resolved by the owning service; a server catalogue may deliberately omit a project.
    */
   public DefinitionResolver.Caller callerFor(String project, String session) {
     return callerFor(

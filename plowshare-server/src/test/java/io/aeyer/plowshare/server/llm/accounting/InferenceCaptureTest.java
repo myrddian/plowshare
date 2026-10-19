@@ -599,6 +599,9 @@ class InferenceCaptureTest {
     try (var server = new MockWebServer()) {
       server.enqueue(json(CHAT));
       new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+          .withBean(
+              io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.class,
+              () -> io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE)
           .withConfiguration(
               org.springframework.boot.autoconfigure.AutoConfigurations.of(
                   org.springframework.boot.autoconfigure.context

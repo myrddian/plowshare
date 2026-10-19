@@ -19,7 +19,12 @@ public class BoardController {
   public record Topup(Integer maxModelCalls) {}
 
   @PostMapping("/v1/board/topics/{id}/topup")
-  public BoardTopic topup(@PathVariable String id, @RequestBody Topup request) {
-    return board.topup(id, request.maxModelCalls());
+  public BoardTopic topup(
+      @PathVariable String id,
+      @RequestBody Topup request,
+      @org.springframework.web.bind.annotation.RequestAttribute(
+              name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE)
+          String account) {
+    return board.topup(id, request.maxModelCalls(), account);
   }
 }

@@ -160,7 +160,8 @@ class ProjectStoreTest {
     // TRUNCATE of it whether or not those tables hold anything. This class
     // holds no memories and no conversations of its own to lose — every
     // test here defines a project that has never been written into.
-    jdbc.execute(
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, projects CASCADE");
     repo = Files.createDirectory(tmp.resolve("repo"));
     configFile = Files.writeString(tmp.resolve("plowshare.yml"), "a fixture, not a key");

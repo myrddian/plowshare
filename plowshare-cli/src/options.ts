@@ -23,7 +23,7 @@ Conversation: open, list, latest, lifecycle, turns, compactions, chat, trajector
 Agent: list, define, run. Job: list, limits, plus status/cancel aliases above.
 Document: ask, retrieve, list, detail/outline, chunk, rank, stance, citations, search
 Information: all scoped source/evidence/report/lifecycle/migration operations.
-     Supply scope:{kind:"personal"|"shared"} or {kind:"project",project:NAME}.
+     Supply scope:{kind:"personal"|"global_read"} or {kind:"project",project:NAME}.
      Mutations retain a stable UUID requestId. --wait supports information ask.
 Approval: list, answer, revoke. Orchestration: definitions, list, status, answer,
      start, receipt, wait, resume, cancel, caps, record. Inbox: list, read. Todos: read.

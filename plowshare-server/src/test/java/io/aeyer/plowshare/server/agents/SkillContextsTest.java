@@ -23,21 +23,19 @@ class SkillContextsTest {
   @Test
   void new_has_no_parent_context_reads_and_inherited_copies_complete_log_data() {
     EntryStore entries = mock(EntryStore.class);
-    Compaction compaction = mock(Compaction.class);
+    SkillSummaries compaction = mock(SkillSummaries.class);
     SkillExecutions executions = mock(SkillExecutions.class);
     Transcript parent = mock(Transcript.class);
     when(parent.conversationId()).thenReturn("parent");
     var contexts = new SkillContexts(entries, compaction, executions);
-    Budget budget = Budget.of(8);
-    assertNull(contexts.prepare(SkillDefinition.Mode.NEW, parent, "alice", budget, () -> false));
+    assertNull(contexts.prepare(SkillDefinition.Mode.NEW, parent, "alice", () -> false));
     verifyNoInteractions(entries, compaction);
     String log =
         "[{\"conversation_id\":\"parent\",\"turn_ordinal\":1,\"ordinal\":1,\"kind\":\"utterance\",\"content\":\"Earlier context\",\"speaker\":\"person\"},"
             + "{\"conversation_id\":\"parent\",\"turn_ordinal\":1,\"ordinal\":2,\"kind\":\"answer\",\"tool_calls\":[{\"id\":\"call\",\"name\":\"run\",\"arguments\":\"{}\"}],\"content\":\"\"}]";
     when(entries.forAccount("alice")).thenReturn(entries);
     when(entries.snapshotForSkill("parent")).thenReturn(SkillContextLogs.read(log));
-    var inherited =
-        contexts.prepare(SkillDefinition.Mode.INHERITED, parent, "alice", budget, () -> false);
+    var inherited = contexts.prepare(SkillDefinition.Mode.INHERITED, parent, "alice", () -> false);
     assertEquals(SkillContextLogs.read(log), inherited.snapshot());
     assertTrue(inherited.prompt().contains(SkillContextLogs.write(SkillContextLogs.read(log))));
     assertTrue(inherited.prompt().contains("never replayed"));
@@ -46,7 +44,6 @@ class SkillContextsTest {
     verify(executions)
         .context(eq("alice"), any(), eq(SkillContextLogs.read(log)), eq(inherited.prompt()), eq(2));
     verifyNoInteractions(compaction);
-    assertEquals(0, budget.spent());
   }
 
   @Test
@@ -59,18 +56,16 @@ class SkillContextsTest {
                 "[{\"conversation_id\":\"parent\",\"turn_ordinal\":1,\"ordinal\":1,\"kind\":\"tool_result\",\"content\":null,\"ejected_at\":\"2026-10-04T00:00:00Z\"}]"));
     Transcript parent = mock(Transcript.class);
     when(parent.conversationId()).thenReturn("parent");
-    Compaction compaction = mock(Compaction.class);
+    SkillSummaries compaction = mock(SkillSummaries.class);
     var contexts = new SkillContexts(entries, compaction, mock(SkillExecutions.class));
     assertThrows(
         IllegalStateException.class,
-        () ->
-            contexts.prepare(
-                SkillDefinition.Mode.INHERITED, parent, "alice", Budget.of(8), () -> false));
+        () -> contexts.prepare(SkillDefinition.Mode.INHERITED, parent, "alice", () -> false));
     verifyNoInteractions(compaction);
   }
 
   @Test
-  void summarisation_is_a_cancel_aware_accounted_fold_on_the_shared_budget() {
+  void summarisation_retains_conversation_usage_attribution_and_cancellation() {
     LlmDispatcher models = mock(LlmDispatcher.class);
     var folder =
         new AgentDefinition(
@@ -105,11 +100,8 @@ class SkillContextsTest {
     java.util.function.BooleanSupplier cancel = () -> false;
     when(models.streamFold(any(), eq(Deltas.DISCARDING), same(cancel)))
         .thenReturn(new Completion("Parent summary", "stop", TokenUsage.UNKNOWN, List.of()));
-    Budget budget = Budget.of(8);
     assertEquals(
-        "Parent summary",
-        compaction.summaryForSkill("Historical log data", parent, budget, cancel));
-    assertEquals(1, budget.spent());
+        "Parent summary", compaction.summaryForSkill("Historical log data", parent, cancel));
     var request = ArgumentCaptor.forClass(ChatRequest.class);
     verify(models).streamFold(request.capture(), eq(Deltas.DISCARDING), same(cancel));
     assertEquals(
@@ -124,9 +116,7 @@ class SkillContextsTest {
             .toString()
             .contains("Historical log data"));
     assertThrows(
-        IllegalStateException.class,
-        () -> compaction.summaryForSkill("data", parent, budget, () -> true));
-    assertEquals(1, budget.spent());
+        IllegalStateException.class, () -> compaction.summaryForSkill("data", parent, () -> true));
     verifyNoMoreInteractions(models);
   }
 }

@@ -41,7 +41,10 @@ class BoundActingContextsTest {
           scope,
           now.plusSeconds(86400),
           false);
-  final ActingAuthorization policy = new LiveActingAuthorization(repository, members, clock);
+  final IdentityRepository identities = mock(IdentityRepository.class);
+  final ScopedAuthority actions = mock(ScopedAuthority.class);
+  final ActingAuthorization policy =
+      new LiveActingAuthorization(repository, members, clock, identities, actions);
   final BoundActingContexts contexts = new BoundActingContexts(repository, policy, clock);
   final AtomicInteger ordinary = new AtomicInteger();
   FrameRouter router;
@@ -76,6 +79,24 @@ class BoundActingContextsTest {
 
   @BeforeEach
   void setup() {
+    var subject = new AuthorityIds.AccountId(UUID.randomUUID());
+    var actorAccount = new AuthorityIds.AccountId(UUID.randomUUID());
+    when(identities.account("alice"))
+        .thenReturn(
+            new IdentityRepository.Account(
+                subject, "alice", IdentityRepository.AccountKind.USER, false));
+    when(identities.account(actor))
+        .thenReturn(
+            new IdentityRepository.Account(
+                actorAccount, actor, IdentityRepository.AccountKind.SERVICE_TOKEN, false));
+    when(identities.project("research"))
+        .thenReturn(new AuthorityScope.Project(new AuthorityIds.ScopeId(UUID.randomUUID()), 1));
+    when(identities.project(PersonalSpaces.name("alice")))
+        .thenReturn(
+            new AuthorityScope.Personal(new AuthorityIds.ScopeId(UUID.randomUUID()), subject, 2));
+    when(members.authorityAccount(anyString()))
+        .thenAnswer(call -> Optional.of(call.getArgument(0)));
+    when(actions.allows(any(), any(), any())).thenReturn(true);
     when(clock.instant()).thenReturn(now);
     when(repository.enabled()).thenReturn(true);
     when(repository.accountActive(actor)).thenReturn(true);
@@ -265,6 +286,14 @@ class BoundActingContextsTest {
   void concurrent_subjects_on_one_connection_remain_isolated() throws Exception {
     var alice = contexts.open(connection, request());
     String secondSecret = "psa_" + "b".repeat(48);
+    var bobId = new AuthorityIds.AccountId(UUID.randomUUID());
+    when(identities.account("bob"))
+        .thenReturn(
+            new IdentityRepository.Account(
+                bobId, "bob", IdentityRepository.AccountKind.USER, false));
+    when(identities.project(PersonalSpaces.name("bob")))
+        .thenReturn(
+            new AuthorityScope.Personal(new AuthorityIds.ScopeId(UUID.randomUUID()), bobId, 3));
     var bobToken =
         new ActingPolicySource.Token(
             UUID.randomUUID(), "bridge", actor, "users", "bob", scope, token.expiresAt(), false);

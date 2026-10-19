@@ -50,6 +50,32 @@ public final class ModelCallValidator implements CallValidator, AutoCloseable {
    * @param definition the {@code call_validator} agent, resolved per consult, so an operator's edit
    *     to the file reaches the next one
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public ModelCallValidator(
+      LlmDispatcher dispatcher,
+      Supplier<AgentDefinition> definition,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, definition);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.CALL_VALIDATOR,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public ModelCallValidator(LlmDispatcher dispatcher, Supplier<AgentDefinition> definition) {
     this(dispatcher, definition, TIMEOUT);
   }
@@ -65,12 +91,18 @@ public final class ModelCallValidator implements CallValidator, AutoCloseable {
   public Verdict validate(Question question, BooleanSupplier cancelled) {
     AgentDefinition validator = definition.get();
     ChatRequest request =
-        ChatRequest.of(
-                validator.model(),
-                List.of(ChatMessage.system(validator.prompt()), ChatMessage.user(brief(question))))
-            .withSampling(validator.sampling())
-            .withAttribution(
-                question.usage().forOperation(UsageAttribution.Operation.REVIEW, validator.name()));
+        authorize(
+            validator,
+            io.aeyer.plowshare.protocol.Home.global(),
+            ChatRequest.of(
+                    validator.model(),
+                    List.of(
+                        ChatMessage.system(validator.prompt()), ChatMessage.user(brief(question))))
+                .withSampling(validator.sampling())
+                .withAttribution(
+                    question
+                        .usage()
+                        .forOperation(UsageAttribution.Operation.REVIEW, validator.name())));
     CompletableFuture<Completion> call = new CompletableFuture<>();
     calls.execute(
         () -> {

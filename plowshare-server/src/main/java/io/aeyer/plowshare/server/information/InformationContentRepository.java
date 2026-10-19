@@ -16,6 +16,9 @@ public interface InformationContentRepository {
 
   Optional<Head> head(String namespace, String name, boolean lock);
 
+  /** Live home WRITE and mandatory policy; no head, typing or source lifecycle bypass. */
+  void requireWrite(InformationContext context, UUID revision);
+
   Optional<InformationContent.Binding> binding(UUID revision);
 
   void attach(UUID revision, InformationContent.Binding binding);
@@ -24,8 +27,8 @@ public interface InformationContentRepository {
 
   boolean explicitOnly(UUID revision);
 
-  /** Grants only the current generation, within the caller's owner-locked transaction. */
-  void authorise(UUID revision, String actor, UUID request, List<String> stages);
+  /** Grants only the current generation, within the caller's home-locked transaction. */
+  void authorise(InformationContext context, UUID revision, UUID request, List<String> stages);
 
   void redact(UUID revision);
 }

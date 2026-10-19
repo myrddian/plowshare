@@ -4,15 +4,73 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.*;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class InformationContentAdmissionTest {
+  @Test
+  void projectContributorCanReviseAnotherCreatorsResource() {
+    var members = mock(ProjectMembers.class);
+    when(members.role("research", "author"))
+        .thenReturn(Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR));
+    var scoped = new InformationAccess(new EffectiveProjectPermissions(members));
+    var project = scoped.resolve("author", InformationContext.Selection.project("research"));
+    var projectAdmission = new InformationContentAdmission(repository, types, scoped);
+    when(repository.head("project:research", "incident.md", false))
+        .thenReturn(
+            Optional.of(
+                new InformationContentRepository.Head(
+                    UUID.randomUUID(), revision, "other", "source", "active", true)));
+    assertTrue(
+        projectAdmission
+            .resolve(
+                project,
+                "incident.md",
+                revision,
+                new InformationContent.Typing("clear", null, null))
+            .isEmpty());
+    verify(repository).requireWrite(project, revision);
+    verifyNoInteractions(types);
+  }
+
+  @Test
+  void projectWriteDoesNotReplaceMandatoryResourceFences() {
+    var members = mock(ProjectMembers.class);
+    var scoped = new InformationAccess(new EffectiveProjectPermissions(members));
+    var catalogueRepository = mock(InformationCatalogueRepository.class);
+    var catalogue =
+        new InformationCatalogue(
+            catalogueRepository,
+            io.aeyer.plowshare.server.archive.UnitOfWork.NONE,
+            scoped,
+            mock(InformationLogAccess.class));
+    var project =
+        new InformationContext("author", InformationContext.Selection.project("research"));
+    // Resource readability includes the repository's input/reference/mandatory/lifecycle policy.
+    when(catalogueRepository.readable(project, revision)).thenReturn(false);
+    doThrow(new io.aeyer.plowshare.server.faults.NotFoundFault("unavailable"))
+        .when(catalogueRepository)
+        .lockResource(project, revision, false);
+    for (var role : io.aeyer.plowshare.server.archive.ProjectRole.values()) {
+      when(members.role("research", "author")).thenReturn(Optional.of(role));
+      assertThrows(
+          io.aeyer.plowshare.server.faults.NotFoundFault.class,
+          () -> catalogue.bytes(project, revision));
+      assertThrows(
+          RuntimeException.class, () -> catalogue.availability(project, revision, "deleted"));
+    }
+    verify(catalogueRepository, times(2)).lockResource(project, revision, false);
+    verify(catalogueRepository, never()).bytes(any());
+    verify(catalogueRepository, never()).availability(any(), any(), any());
+  }
+
   private final InformationContentRepository repository = mock(InformationContentRepository.class);
   private final InformationContentTypes types = mock(InformationContentTypes.class);
-  private final InformationAccess access = new InformationAccess(mock(ProjectMembers.class));
+  private final InformationAccess access =
+      new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class)));
   private final InformationContentAuthority admission =
       new InformationContentAdmission(repository, types, access);
   private final InformationContext own =
@@ -66,12 +124,16 @@ class InformationContentAdmissionTest {
   @Test
   void guessed_foreign_or_stale_head_never_resolves_a_contract() {
     head("other", true);
+    doThrow(new io.aeyer.plowshare.server.faults.NotFoundFault("unavailable"))
+        .when(repository)
+        .requireWrite(own, revision);
     assertThrows(
         RuntimeException.class,
         () ->
             admission.resolve(
                 own, "incident.md", revision, new InformationContent.Typing("clear", null, null)));
     head("author", true);
+    doNothing().when(repository).requireWrite(own, revision);
     assertEquals(
         "INFORMATION_REVISION_CONFLICT",
         assertThrows(
@@ -140,6 +202,7 @@ class InformationContentAdmissionTest {
                 own, "incident.md", revision, new InformationContent.Typing("clear", null, null)));
     verifyNoInteractions(repository, types);
     head("author", true);
+    doNothing().when(repository).requireWrite(own, revision);
     assertThrows(CallerFault.class, () -> disabled.resolve(own, "incident.md", null, null));
   }
 
@@ -224,7 +287,7 @@ class InformationContentAdmissionTest {
   void project_drafts_require_management_and_model_reads_never_expose_drafts() {
     var members = mock(ProjectMembers.class);
     var registry = mock(InformationContentTypeRepository.class);
-    var scoped = new InformationAccess(members);
+    var scoped = new InformationAccess(new EffectiveProjectPermissions(members));
     var work =
         new io.aeyer.plowshare.server.archive.UnitOfWork() {
           public <T> T inTransaction(java.util.function.Supplier<T> operation) {
@@ -242,7 +305,8 @@ class InformationContentAdmissionTest {
     var project =
         new InformationContext("author", InformationContext.Selection.project("research"))
             .withView(true);
-    when(members.mayUse("research", "author")).thenReturn(true);
+    when(members.role("research", "author"))
+        .thenReturn(Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.VIEWER));
     doThrow(new CallerFault("MANAGER required"))
         .when(members)
         .requireRole("research", "author", io.aeyer.plowshare.server.archive.ProjectRole.MANAGER);

@@ -29,8 +29,8 @@ public final class JdbcInformationContentRepository implements InformationConten
   public Optional<Head> head(String namespace, String name, boolean lock) {
     return jdbc
         .query(
-            "SELECT q.id,r.id,q.owner_handle,q.kind,r.availability,EXISTS(SELECT 1 FROM information_revision_content binding WHERE binding.revision_id=r.id) AS typed FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id"
-                + " WHERE q.namespace=? AND q.source_name=? AND r.ordinal=(SELECT max(last.ordinal) FROM information_revisions last WHERE last.resource_id=q.id)"
+            "SELECT q.id,r.id,q.owner_handle,q.kind,r.availability,EXISTS(SELECT 1 FROM information_revision_content binding WHERE binding.revision_id=r.id) AS typed FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id"
+                + " WHERE q.home_scope_id=information_namespace_home(?) AND q.source_name=? AND r.ordinal=(SELECT max(last.ordinal) FROM information_revision_allowances last WHERE last.resource_id=q.id)"
                 + (lock ? " FOR UPDATE OF q,r" : ""),
             (row, index) ->
                 new Head(
@@ -44,6 +44,19 @@ public final class JdbcInformationContentRepository implements InformationConten
             name)
         .stream()
         .findFirst();
+  }
+
+  @Override
+  public void requireWrite(InformationContext context, UUID revision) {
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT information_lock_knowledge(?,?,?,?,?,'WRITE')",
+            Boolean.class,
+            revision,
+            context.account(),
+            context.selection().scope().name().toLowerCase(Locale.ROOT),
+            context.selection().project(),
+            context.selection().includeGlobal()))) throw InformationContentTypeService.absent();
   }
 
   @Override
@@ -88,7 +101,7 @@ public final class JdbcInformationContentRepository implements InformationConten
   @Override
   public InformationContent.View view(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT processing_policy,starting_revision,revised_by,generation FROM information_revisions WHERE id=?",
+        "SELECT processing_policy,starting_revision,revised_by,generation FROM information_revision_allowances WHERE id=?",
         (row, index) -> {
           var reused =
               jdbc.query(
@@ -123,36 +136,37 @@ public final class JdbcInformationContentRepository implements InformationConten
     return "explicit_only"
         .equals(
             jdbc.queryForObject(
-                "SELECT processing_policy FROM information_revisions WHERE id=?",
+                "SELECT processing_policy FROM information_revision_allowances WHERE id=?",
                 String.class,
                 revision));
   }
 
   @Override
-  public void authorise(UUID revision, String actor, UUID request, List<String> stages) {
+  public void authorise(
+      InformationContext context, UUID revision, UUID request, List<String> stages) {
     if (request == null || stages.isEmpty() || stages.size() > 7)
       throw new IllegalArgumentException("Processing needs a stable request and stages");
+    requireWrite(context, revision);
+    String actor = context.account();
     for (String stage : stages) {
       if (!InformationCatalogue.STAGES.contains(stage))
         throw new IllegalArgumentException("Invalid processing stage");
       if (jdbc.update(
                   "INSERT INTO information_stage_authorizations(revision_id,generation,stage,actor,request_id)"
-                      + " SELECT r.id,r.generation,?,?,? FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id"
-                      + " WHERE r.id=? AND q.owner_handle=? AND r.availability='active' ON CONFLICT (revision_id,generation,stage) DO NOTHING",
+                      + " SELECT r.id,r.generation,?,?,? FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id"
+                      + " WHERE r.id=? AND r.availability='active' ON CONFLICT (revision_id,generation,stage) DO NOTHING",
                   stage,
                   actor,
                   request,
-                  revision,
-                  actor)
+                  revision)
               == 0
           && !Boolean.TRUE.equals(
               jdbc.queryForObject(
-                  "SELECT EXISTS(SELECT 1 FROM information_stage_authorizations a JOIN information_revisions r ON r.id=a.revision_id"
-                      + " JOIN information_resources q ON q.id=r.resource_id WHERE a.revision_id=? AND a.generation=r.generation AND a.stage=? AND q.owner_handle=? AND r.availability='active')",
+                  "SELECT EXISTS(SELECT 1 FROM information_stage_authorizations a JOIN information_revision_allowances r ON r.id=a.revision_id"
+                      + " JOIN information_resources q ON q.id=r.resource_id WHERE a.revision_id=? AND a.generation=r.generation AND a.stage=? AND r.availability='active')",
                   Boolean.class,
                   revision,
-                  stage,
-                  actor))) throw new IllegalStateException("Processing authorisation fence failed");
+                  stage))) throw new IllegalStateException("Processing authorisation fence failed");
     }
   }
 

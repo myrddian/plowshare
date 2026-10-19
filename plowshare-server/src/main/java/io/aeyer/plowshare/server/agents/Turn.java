@@ -198,14 +198,13 @@ public final class Turn {
   /**
    * Submit an utterance as a turn in {@code conversation}, and answer with the job id at once.
    *
-   * <p>The budget handed down is the row's, by reference, exactly as {@code Curator.pass} shares
-   * one across a whole pass of many rulings — one level up. Everything the turn delegates to spends
-   * the same object, and what it came to is written back onto the row when the job ends.
+   * <p>Every turn and its delegates retain the same standalone allowance identity. Claims commit
+   * before inference admission; completion stamps history without writing a counter mirror.
    *
-   * <p><b>The write-back happens for every ending and not only for {@code ANSWERED}.</b> A turn
-   * that stopped at its turn cap made the model calls it made, and a conversation that forgot them
-   * would hand the next utterance calls that have already been spent. The ending is a fact about
-   * one turn; the spending is a fact about the conversation.
+   * <p><b>Claims remain spent for every ending, not only for {@code ANSWERED}.</b> A turn that
+   * stopped at its turn cap made the model calls it made, and a conversation that forgot them would
+   * hand the next utterance calls that have already been spent. The ending is a fact about one
+   * turn; spending belongs to the retained operation source.
    *
    * @param conversation the conversation this is an utterance in
    * @param definition the agent that answers
@@ -241,7 +240,7 @@ public final class Turn {
    * is this turn's and does not touch the row. <b>There is no budget override beside it</b>: a
    * conversation's allowance is shared by every turn in it by reference, and what an operator can
    * do is raise it on the run, through {@code POST /v1/jobs/&#123;id&#125;/limits}, which is
-   * written back onto the row when the turn ends.
+   * committed to the canonical allowance when the authorized change is made.
    *
    * <p><b>Why the speaker is an argument here and not read off the session.</b> The log is what a
    * reader rebuilds the conversation from, and an utterance whose speaker is guessed afterwards is
@@ -290,6 +289,36 @@ public final class Turn {
         true,
         speaker,
         null);
+  }
+
+  /** Existing scheduled work keeps its event speaker while admitting its actual executor. */
+  public String speakForExecutor(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      String executor) {
+    if (executor == null || executor.isBlank()) throw new Refused("An event executor is required");
+    Objects.requireNonNull(definition);
+    Objects.requireNonNull(speaker);
+    Objects.requireNonNull(ended);
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        null,
+        ended,
+        Turn::requireSpeakable,
+        true,
+        speaker,
+        null,
+        null,
+        executor);
   }
 
   /**
@@ -364,6 +393,35 @@ public final class Turn {
         false,
         speaker,
         null);
+  }
+
+  /** A result notification uses its explicit recipient account, preserving its harness source. */
+  public String deliverForExecutor(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      String executor) {
+    if (executor == null || executor.isBlank())
+      throw new Refused("A recipient executor is required");
+    Objects.requireNonNull(definition);
+    Objects.requireNonNull(speaker);
+    Objects.requireNonNull(ended);
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        null,
+        null,
+        null,
+        ended,
+        Turn::requireSpeakable,
+        false,
+        speaker,
+        null,
+        null,
+        executor);
   }
 
   /**
@@ -547,6 +605,9 @@ public final class Turn {
       Budget given,
       Speaker speaker,
       Consumer<Outcome> ended) {
+    String retainedExecutor = jobs.retainedExecutor(child);
+    if (retainedExecutor != null && !retainedExecutor.equals(callerHandle))
+      throw new Refused("A delegation cannot replace its retained executor");
     Objects.requireNonNull(callee, "callee");
     Objects.requireNonNull(ended, "ended");
     ConversationRecord delegate =
@@ -600,12 +661,18 @@ public final class Turn {
       if (given != null) {
         external[0] = new DelegatedAllowance(given, () -> {});
       } else if (conductor.budget() == null) {
-        external[0] = delegatedAllowances.apply(conductor);
+        external[0] =
+            lifecycleOwner.origin() == Origin.BOARD
+                ? delegatedAllowances.apply(conductor)
+                : conversations
+                    .allowanceFor(conductor.id())
+                    .map(source -> new DelegatedAllowance(source, () -> {}))
+                    .orElseThrow(() -> new Refused("The delegation has no retained allowance"));
       }
       Budget budget = external[0] == null ? conductor.budget() : external[0].budget();
       if (external[0] == null)
         automaticLimits.budget(conductor.id(), budget, callee, sessionId, Transcript.NONE);
-      if (budget.exhausted()) {
+      if (!callee.nativeOnly() && budget.exhausted()) {
         throw new Refused(
             "conversation "
                 + conductor.id()
@@ -719,6 +786,7 @@ public final class Turn {
       Integer maxModelCalls,
       Consumer<Outcome> alsoEnded,
       Speaker source) {
+    String executor = jobs.retainedExecutor(conversation);
     Objects.requireNonNull(conductor, "conductor");
     Objects.requireNonNull(alsoEnded, "alsoEnded");
     // No turn cap: TurnCap.chosen falls back to the conductor's own
@@ -742,7 +810,9 @@ public final class Turn {
         record -> requireConductor(record, conductor),
         false,
         Objects.requireNonNull(source, "source"),
-        null);
+        null,
+        null,
+        executor);
   }
 
   /**
@@ -804,6 +874,38 @@ public final class Turn {
       Speaker speaker,
       Consumer<Outcome> ended,
       boolean incomingCommand) {
+    return messageTurn(
+        conversation, definition, utterance, lease, cap, speaker, ended, incomingCommand, null);
+  }
+
+  /** Bound receiver authority is separate from the sender, event speaker and log custodian. */
+  public String speakToMessage(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Budget lease,
+      TurnCap cap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      boolean command,
+      String executor) {
+    if (executor == null || executor.isBlank())
+      throw new Refused("A bound message executor is required");
+    return messageTurn(
+        conversation, definition, utterance, lease, cap, speaker, ended, command, executor);
+  }
+
+  private String messageTurn(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Budget lease,
+      TurnCap cap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      boolean incomingCommand,
+      String executor) {
+
     return speak(
         conversation,
         definition,
@@ -820,7 +922,9 @@ public final class Turn {
         },
         incomingCommand,
         speaker,
-        lease);
+        lease,
+        null,
+        executor);
   }
 
   /**
@@ -906,6 +1010,36 @@ public final class Turn {
       Speaker speaker,
       Budget given,
       RunAdmission admission) {
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        maxModelCalls,
+        alsoEnded,
+        admissible,
+        incoming,
+        speaker,
+        given,
+        admission,
+        null);
+  }
+
+  private String speak(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Consumer<Outcome> alsoEnded,
+      Consumer<ConversationRecord> admissible,
+      boolean incoming,
+      Speaker speaker,
+      Budget given,
+      RunAdmission admission,
+      String executor) {
     ConversationRecord record =
         conversations
             .find(conversation)
@@ -927,7 +1061,16 @@ public final class Turn {
     boolean started = false;
     try {
       admissible.accept(record);
-      Budget budget = given != null ? given : record.budget();
+      Budget budget =
+          given != null
+              ? given
+              : record.budget() != null
+                  ? record.budget()
+                  : record.origin() == Origin.ORCHESTRATION
+                      ? conversations
+                          .allowanceFor(record.id())
+                          .orElseThrow(() -> new Refused("The conductor has no retained allowance"))
+                      : null;
       // grant() before exhausted() is read, on resume()'s own ordering
       // and for the identical reason: a raise has to land before the
       // very check it exists to get past. grant() throws CallerFault --
@@ -958,6 +1101,7 @@ public final class Turn {
       boolean automaticBudgetGrant =
           admission == null
               && given == null
+              && budget.durable()
               && !definition.nativeOnly()
               && budget.exhausted()
               && automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
@@ -1033,7 +1177,11 @@ public final class Turn {
                   ended,
                   TurnCap.chosen(turnCap, record.turnCap(), definition),
                   List.of(),
-                  given != null ? conversations.ownerOf(id).orElse(null) : null,
+                  executor != null
+                      ? executor
+                      : speaker.kind() == Speaker.Kind.PERSON
+                          ? speaker.name()
+                          : conversations.ownerOf(id).orElse(null),
                   incoming)
               : jobs.submitAdmitted(
                   definition,
@@ -1125,6 +1273,17 @@ public final class Turn {
       String sessionId,
       TurnCap turnCap,
       Integer maxModelCalls) {
+    return resume(conversation, definition, sessionId, turnCap, maxModelCalls, null);
+  }
+
+  /** Existing resume operation, with its authenticated executor kept separate from provenance. */
+  public String resume(
+      String conversation,
+      AgentDefinition definition,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      String executor) {
     Objects.requireNonNull(definition, "definition");
     ConversationRecord record =
         conversations
@@ -1215,7 +1374,10 @@ public final class Turn {
               // The nine-argument overload, which states incoming = false: a resumed run
               // is the harness continuing something that already ran out of allowance,
               // never a person's own words arriving fresh -- spec §6.
-              under);
+              under,
+              List.of(),
+              executor,
+              false);
       started = true;
       return job;
     } finally {
@@ -1656,20 +1818,10 @@ public final class Turn {
   /**
    * Raise what the conversation may spend, or leave it exactly as it is.
    *
-   * <p><b>The identical refusal {@code POST /v1/jobs/&#123;id&#125;/limits} applies and for the
-   * identical reason</b>, which is about the archive rather than about the run: a conversation's
-   * row carries {@code budget_total} and {@code budget_spent} with {@code
-   * conversations_spent_within_budget} between them, so a total below the spending is a write-back
-   * Postgres refuses and a conversation that loses the record of what it spent. Two accounting
-   * stories for one conversation would be worse than one reused.
-   *
-   * <p>The new total is written onto the row when this turn ends, through the same {@code
-   * turnEnded} every turn goes through — the raise is a decision about the conversation and not
-   * about one run, which is what {@code Limits#move} already relies on.
-   *
-   * <p>Read {@code spent()} once and compare against that: nothing else is running, so this is a
-   * fact rather than a race, and naming a number in a message that a second read could contradict
-   * is a habit worth not having.
+   * <p>The existing live-limit control and this entry point refuse a ceiling below usage. The
+   * standalone repository also checks current usage atomically, since other consumers may share the
+   * source. Authorized increases commit before additional calls and never reset spending;
+   * cancellation is the control for stopping work.
    *
    * <p><b>The second refusal, and why it is caught here rather than at the door.</b> {@code
    * Budget.changeTo} throws {@code IllegalStateException} for a conversation whose allowance has no

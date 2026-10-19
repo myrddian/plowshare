@@ -172,9 +172,7 @@ class DocumentFramesTest {
         .ask(eq(DOCUMENT), eq("what does it argue?"), allowance.capture(), any());
     for (Budget given : allowance.getAllValues()) {
       assertEquals(
-          props.getAskBudget(),
-          given.limit(),
-          "both surfaces asked with the operator's own default");
+          props.askLimit(), given.limit(), "both surfaces asked with the operator's own default");
     }
   }
 

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.*;
 import io.aeyer.plowshare.server.harness.Harness;
@@ -49,8 +50,9 @@ public class InformationConfig {
   }
 
   @Bean
-  public InformationNavigationRepository informationNavigationRepository(JdbcTemplate jdbc) {
-    return new JdbcInformationNavigationRepository(jdbc);
+  public InformationNavigationRepository informationNavigationRepository(
+      JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
+    return new JdbcInformationNavigationRepository(jdbc, members);
   }
 
   @Bean
@@ -121,8 +123,9 @@ public class InformationConfig {
   }
 
   @Bean
-  public InformationCatalogueRepository informationCatalogueRepository(JdbcTemplate jdbc) {
-    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+  public InformationCatalogueRepository informationCatalogueRepository(
+      JdbcTemplate jdbc, AllowanceRepository allowances) {
+    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), allowances);
   }
 
   @Bean
@@ -300,6 +303,7 @@ public class InformationConfig {
   @Bean(destroyMethod = "close")
   public InformationLifecycle informationLifecycle(
       JdbcTemplate jdbc,
+      AllowanceRepository allowances,
       io.aeyer.plowshare.server.archive.ProjectMembers members,
       UnitOfWork work,
       InformationCatalogue catalogue,
@@ -319,8 +323,10 @@ public class InformationConfig {
       ObjectProvider<GlobalAgentDefinitions> globals,
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
+      io.aeyer.plowshare.server.embedding.SemanticEmbedding embeddingFoundation,
       ObjectProvider<io.aeyer.plowshare.server.embedding.DualEmbeddings> dualProvider,
-      ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers) {
+      ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     var dual = dualProvider.getIfAvailable();
     var counters = embeddingTokenizers.getIfAvailable();
     var chunkTokenizer = counters == null ? tokenizer : counters.documents();
@@ -336,7 +342,8 @@ public class InformationConfig {
                 GlobalAgentSnapshots.supply(globals, agents).get(),
                 dual,
                 counters));
-    var processing = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
+    var processing =
+        new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members, allowances);
     var processor =
         InformationLifecycle.processing(
             processing,
@@ -352,7 +359,8 @@ public class InformationConfig {
             modelStages,
             usageOwners.getIfAvailable(
                 () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE),
-            dual);
+            dual,
+            new BoundPreparationEmbeddings(processing, work, embeddingFoundation));
     var gates =
         new InformationStageHooks(
             new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),
@@ -364,7 +372,9 @@ public class InformationConfig {
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
             harness.getIfAvailable(() -> Harness.NONE),
-            GlobalAgentSnapshots.supply(globals, agents));
+            GlobalAgentSnapshots.supply(globals, agents),
+            system,
+            processing);
     gates.useUsageOwners(
         usageOwners.getIfAvailable(
             () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));

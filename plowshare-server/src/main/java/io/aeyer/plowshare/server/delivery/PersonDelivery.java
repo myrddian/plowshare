@@ -26,7 +26,16 @@ public final class PersonDelivery {
   public interface Voice {
     boolean isSpeaking(String conversation);
 
-    void speak(String conversation, String agent, String text, Speaker speaker);
+    /** Legacy fixture seam; production delivery requires the explicit recipient overload. */
+    default void speak(String conversation, String agent, String text, Speaker speaker) {
+      throw new Turn.Refused("Recipient authority is required for a model delivery");
+    }
+
+    /** Carries authority separately from the source speaker and conversation custodian. */
+    default void speakForAccount(
+        String conversation, String agent, String text, Speaker speaker, String account) {
+      speak(conversation, agent, text, speaker);
+    }
   }
 
   @FunctionalInterface
@@ -138,12 +147,12 @@ public final class PersonDelivery {
       String about,
       String source) {
     if (information != null && source != null) information.requireLog(source, handle);
-    if (conversation != null && isTurn(conversation)) {
+    if (handle != null && conversation != null && isTurn(conversation)) {
       if (voice.isSpeaking(conversation)) {
         return new Sent(Result.BUSY, Handover.CONVERSATION);
       }
       try {
-        voice.speak(conversation, agent, text, speaker);
+        voice.speakForAccount(conversation, agent, text, speaker, handle);
         return new Sent(Result.DELIVERED, Handover.CONVERSATION);
       } catch (Turn.Refused | ArchiveException refused) {
         // The durable caller decides whether and how to log this fallback.
@@ -164,7 +173,7 @@ public final class PersonDelivery {
    * 2026-09-28-hooks-reach-the-log §3).
    */
   public String routeFor(String conversation, String handle) {
-    if (conversation != null && isTurn(conversation)) {
+    if (handle != null && conversation != null && isTurn(conversation)) {
       return Handover.CONVERSATION;
     }
     return handle != null ? Handover.INBOX : Handover.NOWHERE;

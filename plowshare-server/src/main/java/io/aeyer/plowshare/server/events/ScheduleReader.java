@@ -135,6 +135,34 @@ public final class ScheduleReader implements UsageAware {
    *     definition comes from here and never from a project's tier, so a project cannot redefine
    *     what reads its sentences.
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public ScheduleReader(
+      LlmDispatcher dispatcher,
+      Supplier<AgentRegistry> agents,
+      DefinitionResolver resolver,
+      Callers callers,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, agents, resolver, callers);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.SCHEDULE_READER,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public ScheduleReader(
       LlmDispatcher dispatcher,
       Supplier<AgentRegistry> agents,
@@ -245,21 +273,24 @@ public final class ScheduleReader implements UsageAware {
       said =
           dispatcher
               .complete(
-                  JobRuntime.requestFor(
-                          definition,
-                          List.of(
-                              ChatMessage.system(definition.prompt()),
-                              ChatMessage.user(
-                                  opening(
-                                      request.text(),
-                                      zone,
-                                      now,
-                                      List.copyOf(offered.values()),
-                                      defaultBot))))
-                      .withBudget(BUDGET)
-                      .withAttribution(
-                          owner.forOperation(
-                              UsageAttribution.Operation.SCHEDULE_READ, definition.name())))
+                  authorize(
+                      definition,
+                      io.aeyer.plowshare.protocol.Home.global(),
+                      JobRuntime.requestFor(
+                              definition,
+                              List.of(
+                                  ChatMessage.system(definition.prompt()),
+                                  ChatMessage.user(
+                                      opening(
+                                          request.text(),
+                                          zone,
+                                          now,
+                                          List.copyOf(offered.values()),
+                                          defaultBot))))
+                          .withBudget(BUDGET)
+                          .withAttribution(
+                              owner.forOperation(
+                                  UsageAttribution.Operation.SCHEDULE_READ, definition.name()))))
               .content();
     } catch (LlmException away) {
       // LlmSaturatedException included: a reading that did not start within its budget is,

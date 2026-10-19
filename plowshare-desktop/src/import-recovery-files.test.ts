@@ -25,7 +25,7 @@ const record = decodeImportRecovery({
   format: RECOVERY_FORMAT,
   context: 'selected-account-and-scope',
   requestId: id,
-  scope: { kind: 'personal', includeShared: false },
+  scope: { kind: 'personal', includeGlobal: false },
   plan: {
     bundle: {
       format: 'plowshare-information-bundle/1',

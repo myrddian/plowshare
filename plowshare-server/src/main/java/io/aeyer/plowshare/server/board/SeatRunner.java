@@ -214,7 +214,8 @@ public final class SeatRunner implements Dispatcher.Wakes {
       // The dispatcher calls settled after refusing this firing, once the topic is idle.
       throw new IllegalStateException(SPENT);
     }
-    Optional<Budget> leased = pot.lease(topic.root(), seat.isOpener(), cap);
+    Optional<Budget> leased =
+        pot.lease(topic.root(), seat.isOpener(), Math.max(1, wakeCap.getAsInt()));
     if (leased.isEmpty()) {
       throw new IllegalStateException(
           "the topic's budget is leased out to other wakes;"

@@ -254,7 +254,12 @@ class RelayApprovalInboxDatabaseTest {
             "cnv_upgrade",
             ApprovalDelivery.about(settled.id()),
             NOW);
-    store.deny(settled.id(), "owner");
+    // Seed the historical decision using the pre-upgrade schema. The current store's deny
+    // path also writes denial_reason, which is introduced by the later suspended-call migration.
+    before.update(
+        "UPDATE run_approvals SET state='denied',answered_by='owner',answered_at=? WHERE id=?",
+        java.sql.Timestamp.from(NOW),
+        settled.id());
     before.execute("DELETE FROM relay_source_events");
     Flyway.configure().dataSource(source).load().migrate();
     assertEquals(

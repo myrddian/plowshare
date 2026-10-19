@@ -717,7 +717,8 @@ class BoardTest {
             drained::add,
             fixture.work,
             () -> 10,
-            fixture.clock);
+            fixture.clock,
+            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
     var closeFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
     var postFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
     Thread close =

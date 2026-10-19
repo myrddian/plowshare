@@ -84,9 +84,8 @@ import org.slf4j.LoggerFactory;
  *
  * <h2>A ruling that a claim is local is remembered, or a pass never converges</h2>
  *
- * <p><b>All three decisions file a proposal; the decision chooses only how the curator settles its
- * own question.</b> {@code promote} approves it, {@code ask} leaves it waiting for a person, and
- * {@code keep} rejects it under {@link #BY}.
+ * <p>All three decisions file a proposal. Both {@code promote} and {@code ask} leave it waiting for
+ * an authorized person; {@code keep} records a local rejection under {@link #BY}.
  *
  * <p>The third one is the load-bearing half and it was nearly left out. A {@code keep} that filed
  * nothing creates no row, so the memory never enters {@code ProposalStore.ruledOn}; {@link
@@ -161,21 +160,12 @@ import org.slf4j.LoggerFactory;
  * {@code promotion_judge.md} changed") are human judgements. A curator re-opening its own keeps
  * would be that ≈400 with a new name.
  *
- * <h2>A promotion is filed before it is performed</h2>
+ * <h2>Recommendations require release authority</h2>
  *
- * <p>Even a confident ruling goes through {@link ProposalStore#propose} and then {@link
- * PromotionQueue#approve}, rather than calling {@link Archive#promote} directly. {@code promote}'s
- * own javadoc says two promotions of one id can both pass its checks and file two global records,
- * and that this is "unguarded on purpose … the spec puts staleness in the proposal queue, where a
- * unique index on pending rows holds it across two transactions and a Java check cannot". A curator
- * calling {@code promote} directly is exactly the caller that sentence was written about: two
- * passes over one project are two transactions. Filing first buys the index's guarantee, and buys a
- * durable row saying what was promoted and why — which {@code Verdict.reason} could not, because
- * nothing persists one.
- *
- * <p>It also means <b>one code path files, and confidence decides only whether the curator answers
- * its own question.</b> An unsure ruling stops after the proposal; a confident one settles it as
- * {@link #BY}.
+ * <p>Both confident and uncertain recommendations file a pending proposal. A model verdict and the
+ * {@link #BY} provenance label cannot authorize a Global copy. Existing human acceptance checks
+ * authenticated source MANAGER and Global ADMIN authority before the queue claims it. KEEP still
+ * records the local ruling, and pending proposals still prevent repeated judgements.
  */
 public final class Curator {
 
@@ -184,14 +174,7 @@ public final class Curator {
   /** The agent that rules on one memory, and the stem of its file. */
   public static final String AGENT = "promotion_judge";
 
-  /**
-   * Who a curator-approved promotion is credited to.
-   *
-   * <p>Not a person, and it says so. {@code PromotionQueue.approve} documents {@code by} as the
-   * human who decided a memory belongs everywhere; this is the other caller, and a row settled
-   * under this name is one no human looked at. It is spelled once so that a query for "what did the
-   * curator decide by itself" is one string rather than a guess.
-   */
+  /** Provenance for recommendations and local rulings; never an authenticated principal. */
   public static final String BY = "curator";
 
   /**
@@ -235,6 +218,34 @@ public final class Curator {
    *     boot whose wiring has not landed, and {@link #pass} reports that rather than promoting
    *     anything.
    */
+  private record CurationInput(
+      Home home, String summary, String scope, io.aeyer.plowshare.protocol.MemoryState state) {}
+
+  private static CurationInput input(io.aeyer.plowshare.protocol.Memory memory) {
+    return new CurationInput(memory.home(), memory.summary(), memory.scope(), memory.state());
+  }
+
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+  private io.aeyer.plowshare.server.embedding.OperationEmbeddings embeddingOperations;
+
+  public void useEmbeddingOperations(
+      io.aeyer.plowshare.server.embedding.OperationEmbeddings operations) {
+    embeddingOperations = Objects.requireNonNull(operations);
+  }
+
+  /** Existing maintenance rulings use root authority with fixed materialized evidence. */
+  public Curator(
+      Archive archive,
+      ProposalStore proposals,
+      PromotionQueue queue,
+      JobRuntime runtime,
+      Supplier<AgentRegistry> agents,
+      Compaction logs,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(archive, proposals, queue, runtime, agents, logs);
+    this.system = Objects.requireNonNull(system);
+  }
+
   public Curator(
       Archive archive,
       ProposalStore proposals,
@@ -345,6 +356,9 @@ public final class Curator {
       if (cancelled.getAsBoolean()) {
         return tally.stopped(Ending.CANCELLED, "This pass was cancelled.", "");
       }
+      if (budget.exhausted())
+        return tally.stopped(
+            Ending.CALL_BUDGET, "This pass's selected spending policy is exhausted.", "");
       List<TocEntry> neighbours;
       try {
         // survey and not recall, and the difference is a number. recall
@@ -356,7 +370,24 @@ public final class Curator {
         // and so feed demotion, which means triage was quietly
         // reordering the index every project reads. Recorded by Task 9,
         // closed in Task 10 by Archive.survey.
-        Archive.Survey surveyed = archive.survey(question(candidate), Home.global(), NEIGHBOURS);
+        Archive.Survey surveyed;
+        if (embeddingOperations == null) {
+          surveyed = archive.survey(question(candidate), Home.global(), NEIGHBOURS);
+        } else {
+          var snapshot = input(archive.get(candidate.id()));
+          Runnable valid =
+              () -> {
+                if (cancelled.getAsBoolean()
+                    || !snapshot.equals(input(archive.get(candidate.id()))))
+                  throw new IllegalStateException("Curation input changed or operation ended");
+              };
+          int before = budget.spent();
+          try (var query = embeddingOperations.query(home, question(candidate), budget, valid)) {
+            surveyed = archive.surveyGlobal(question(candidate), NEIGHBOURS, query);
+          } finally {
+            tally.modelCalls += budget.spent() - before;
+          }
+        }
         neighbours = surveyed.found();
         tally.unseen = Math.max(tally.unseen, surveyed.unsearchable());
       } catch (RuntimeException unsearchable) {
@@ -401,6 +432,28 @@ public final class Curator {
       // pass's, shared by reference across every ruling in it, and a copy
       // on each ruling's row would be as many second allowances as there
       // are candidates.
+      var promptInputs = new java.util.LinkedHashMap<String, CurationInput>();
+      if (system != null) {
+        for (var item :
+            java.util.stream.Stream.concat(
+                    java.util.stream.Stream.of(candidate), neighbours.stream())
+                .toList()) {
+          var current = input(archive.get(item.id()));
+          if (!current.summary().equals(item.summary()) || !current.scope().equals(item.scope()))
+            throw new IllegalStateException("Curation input changed before judgment");
+          promptInputs.put(item.id(), current);
+        }
+      }
+      Runnable validJudgment =
+          () -> {
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted())
+              throw new IllegalStateException("Curation pass ended");
+            promptInputs.forEach(
+                (id, expected) -> {
+                  if (!expected.equals(input(archive.get(id))))
+                    throw new IllegalStateException("Curation input changed or was withdrawn");
+                });
+          };
       String task = task(home, candidate, neighbours);
       Transcript log =
           logs == null ? Transcript.NONE : logs.logFor(Origin.CURATOR, home, judge, null, null);
@@ -408,8 +461,18 @@ public final class Curator {
       // A curator pass is started by a nightly tick or by POST /v1/curate
       // and has no client machine behind it, so its rulings get the
       // server's own filesystems: a smaller set, not an empty capability.
+      JobRuntime execution =
+          system == null
+              ? runtime
+              : runtime.forSystemWork(
+                  system.admit(
+                      io.aeyer.plowshare.server.access.SystemOperations.Purpose.MEMORY_CURATION,
+                      home,
+                      judge,
+                      task,
+                      validJudgment));
       Outcome ruling =
-          runtime.run(judge, task, home, budget, cancelled, null, JobWatch.UNWATCHED, log);
+          execution.run(judge, task, home, budget, cancelled, null, JobWatch.UNWATCHED, log);
       log.closed(task, ruling);
       tally.spent(ruling);
       switch (ruling.ending()) {
@@ -651,9 +714,8 @@ public final class Curator {
    * break no boot and fail no test, and every pass would simply resolve nothing forever. What
    * belongs in the file is the policy — what makes a claim general rather than local.
    *
-   * <p>Spelled out with what each decision does, because the words are not self-explanatory: {@code
-   * promote} acts without asking anybody, and a model that had {@code promote} and {@code ask} the
-   * wrong way round would put a project's local facts into every project's recall.
+   * <p>Confidence distinguishes a recommendation from an uncertain question. Both require a person
+   * with source release and Global destination authority before copying the memory.
    *
    * <p><b>{@code keep}'s clause says it is final, and it said "nothing is filed" until a review
    * caught it.</b> That sentence described the design this class had before a keep became a durable
@@ -677,8 +739,8 @@ public final class Curator {
             {"decision": "keep", "reason": "one sentence"}
 
             promote — this claim holds for every project, not only this one, and \
-            you are sure enough that nobody needs to be asked. It is copied into \
-            the global archive at once and this project's record is retired.
+            you confidently recommend it. An authorized person must approve \
+            copying it into the global archive and retiring this project's record.
             ask — it may well belong everywhere, and you are not sure. A person \
             is asked, and your reason is the whole of what they see.
             keep — this claim is about this project alone. Nothing is promoted \
@@ -783,29 +845,9 @@ public final class Curator {
           + " question; nothing was promoted and nobody was asked.";
 
   /**
-   * File the question, and settle it the way the judge ruled.
-   *
-   * <p><b>One path for all three</b>, so that no decision can skip the queue — see the class note,
-   * both halves of it: {@code promote} must not reach {@code Archive.promote} without the claim the
-   * unique index makes, and {@code keep} must leave a row or the memory is judged again every pass
-   * forever.
-   *
-   * <p>A refusal at either step is recorded and the pass goes on: another pass having filed the
-   * same row first, or a memory retired between the index read and the promotion, are ordinary
-   * interleavings rather than reasons to stop curating a project.
-   *
-   * <p>When the promotion is refused, {@code PromotionQueue.approve} has already given the claim
-   * back, so the row is waiting again and a person still sees the question. That is its behaviour
-   * and not this method's, and it is why nothing here tries to undo anything. <b>A refused {@code
-   * keep} is the opposite case and is left waiting on purpose</b> — the row exists, so the memory
-   * is not judged again, and a person answering a question the curator meant to answer itself is a
-   * smaller fault than a pass that never converges.
-   *
-   * <p>What that leaves on the queue is a row a person reads oddly: {@code action: promote}
-   * carrying a {@code reason} that argues against promoting it, because the judge's sentence is
-   * filed before the settlement that would have explained it. Named here rather than left to be met
-   * — it needs a concurrent settle or a database failure between the two statements, so it is rare,
-   * and the alternative is filing under a reason the judge did not give.
+   * Files each recommendation durably; only KEEP settles locally. Duplicate proposals and refused
+   * local settlements retain their existing recovery semantics. A refused KEEP stays pending so the
+   * candidate is not judged repeatedly and an authorized person can review the question.
    */
   private void file(TocEntry candidate, Ruling ruling, Tally tally) {
     Proposal filed;
@@ -820,27 +862,9 @@ public final class Curator {
     switch (ruling.decision()) {
       case ASK -> tally.proposed.add(filed.id() + " for " + candidate.id());
       case KEEP -> keep(candidate, filed, tally);
-      case PROMOTE -> promote(candidate, filed, tally);
-    }
-  }
-
-  private void promote(TocEntry candidate, Proposal filed, Tally tally) {
-    try {
-      PromotionQueue.Approval approval = queue.approve(filed.id(), BY);
-      tally.promoted.add(candidate.id() + " as " + approval.promotion().promoted().id());
-    } catch (RuntimeException refused) {
-      log.warn(
-          "Proposal {} for {} was filed but the promotion was refused.",
-          filed.id(),
-          candidate.id(),
-          refused);
-      tally.unresolved.add(
-          candidate.id()
-              + " (filed as "
-              + filed.id()
-              + ", and the promotion was refused: "
-              + describe(refused)
-              + "; the question is left for a person)");
+      // A model's confidence is not source release or Global destination control. Keep the
+      // positive judgement as a durable proposal for an authenticated authorized manager.
+      case PROMOTE -> tally.proposed.add(filed.id() + " for " + candidate.id());
     }
   }
 
@@ -875,7 +899,6 @@ public final class Curator {
   private static final class Tally {
 
     private final Home home;
-    private final List<String> promoted = new ArrayList<>();
     private final List<String> proposed = new ArrayList<>();
     private final List<String> undecided = new ArrayList<>();
     private final List<String> unresolved = new ArrayList<>();
@@ -942,10 +965,7 @@ public final class Curator {
           .append(" nothing had ruled on, it judged ")
           .append(judged)
           .append('.');
-      out.append(
-          promoted.isEmpty()
-              ? " Promoted: none."
-              : " Promoted: " + String.join(", ", promoted) + ".");
+      out.append(" Promoted: none.");
       out.append(
           proposed.isEmpty()
               ? " Proposed for a person: none."

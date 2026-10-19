@@ -14,6 +14,20 @@ public final class MemoryNavigateTool implements AgentTool {
   private final Supplier<Navigator> navigator;
   private final Supplier<Integer> allowance;
   private final BooleanSupplier cancelled;
+  private boolean globalRead = true;
+  private java.util.function.Consumer<List<io.aeyer.plowshare.server.access.AccessRequest.Resource>>
+      readFence = ignored -> {};
+
+  public MemoryNavigateTool forRun(
+      BooleanSupplier cancellation,
+      boolean globalRead,
+      java.util.function.Consumer<List<io.aeyer.plowshare.server.access.AccessRequest.Resource>>
+          fence) {
+    var copy = new MemoryNavigateTool(navigator, allowance, cancellation);
+    copy.globalRead = globalRead;
+    copy.readFence = fence;
+    return copy;
+  }
 
   public MemoryNavigateTool(Supplier<Navigator> navigator, Supplier<Integer> allowance) {
     this(navigator, allowance, () -> false);
@@ -27,7 +41,7 @@ public final class MemoryNavigateTool implements AgentTool {
   }
 
   public MemoryNavigateTool cancelling(BooleanSupplier cancellation) {
-    return new MemoryNavigateTool(navigator, allowance, cancellation);
+    return forRun(cancellation, globalRead, readFence);
   }
 
   @Override
@@ -57,11 +71,18 @@ public final class MemoryNavigateTool implements AgentTool {
     String question =
         ToolArguments.requireText(args, "question", NAME, "a question about past experience");
     var service = navigator.get();
-    var budget = Budget.of(allowance.get());
+    var budget = io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(allowance.get());
     var result =
-        owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-            ? service.navigate(home, question, budget, cancelled)
-            : service.navigate(home, question, budget, cancelled, owner);
+        service.navigate(
+            home,
+            question,
+            budget,
+            cancelled,
+            owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                ? null
+                : owner,
+            globalRead,
+            readFence);
     return "Reached "
         + result.level()
         + "; complete="

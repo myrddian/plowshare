@@ -61,12 +61,13 @@ public interface InformationProcessingRepository {
 
   void start(Lease lease, String expected);
 
-  /** Extend only a current lease whose owner and inputs remain authorized. */
+  /** Extend only a current SYSTEM operation lease whose retained inputs remain valid. */
   boolean renew(Lease lease);
 
   /**
-   * Checks current principal authority (including service scope and Application grants), dependency
-   * readability and the lease token while locking revision and stage. Throws StaleLease on loss.
+   * Checks live SYSTEM authority, retained input availability, generation and the lease token while
+   * locking revision and stage. Creator access is not processing authority. Throws StaleLease on
+   * loss.
    */
   void requireLease(Lease lease);
 
@@ -78,6 +79,9 @@ public interface InformationProcessingRepository {
 
   Revision readRevision(UUID revision);
 
+  /** Exact persisted knowledge home, never inferred from creator or legacy null project. */
+  io.aeyer.plowshare.server.access.AuthorityIds.ScopeId home(UUID revision);
+
   String projectName(Long id);
 
   void extracted(UUID revision, Extracted extracted);
@@ -85,6 +89,50 @@ public interface InformationProcessingRepository {
   void documentPolicy(Lease lease);
 
   void spend(UUID revision);
+
+  record BudgetSource(UUID id, int limit, int spent, String log) {}
+
+  /**
+   * Production preparation uses one durable identity across chat, embeddings and resumed leases.
+   */
+  default BudgetSource budgetSource(UUID revision) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void spend(Lease lease, int expectedSpent) {
+    throw new UnsupportedOperationException();
+  }
+
+  default io.aeyer.plowshare.server.agents.Budget.Claim claimEmbedding(Lease lease) {
+    throw new UnsupportedOperationException();
+  }
+
+  /** Empty means the selected source is exhausted; an invalid lease still throws. */
+  default Optional<io.aeyer.plowshare.server.agents.Budget.Claim> claim(Lease lease) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void requireEmbeddingTargets(
+      Lease lease, List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void requireEmbeddingClear(
+      Lease lease, List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void bindEmbedding(
+      Lease lease,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding,
+      List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
+    throw new UnsupportedOperationException();
+  }
+
+  default void embeddingPublished(
+      Lease lease, io.aeyer.plowshare.server.llm.dispatch.InferenceBinding binding) {
+    throw new UnsupportedOperationException();
+  }
 
   void autoTags(UUID revision, InformationMetadata metadata);
 

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.protocol.InformationNavigation.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.Readable;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.*;
 import java.util.*;
 import org.flywaydb.core.Flyway;
@@ -43,7 +44,7 @@ class DocumentNavigationPersistenceTest {
   @BeforeEach
   void setup() {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute("TRUNCATE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, "TRUNCATE admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('alice','fixture',false),('bob','fixture',false),('viewer','fixture',false),('admin','fixture',true)");
     jdbc.update("INSERT INTO projects(name) VALUES('operations'),('restricted')");
@@ -53,7 +54,9 @@ class DocumentNavigationPersistenceTest {
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'viewer','VIEWER' FROM projects WHERE name='operations'");
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'bob','CONTRIBUTOR' FROM projects WHERE name='restricted'");
-    repository = new JdbcInformationNavigationRepository(jdbc);
+    repository =
+        new JdbcInformationNavigationRepository(
+            jdbc, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc));
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
   }
 
@@ -67,7 +70,7 @@ class DocumentNavigationPersistenceTest {
     jdbc.update(
         "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind,tags) VALUES(?,?,?,?,?,'source','[\"billing\"]'::jsonb)",
         id,
-        "project:" + project,
+        project == null ? "account:" + owner : "project:" + project,
         name,
         owner,
         project == null ? null : project(project));
@@ -139,11 +142,16 @@ class DocumentNavigationPersistenceTest {
   void lockedReferenceDoesNotExposeTitleOrPropagateAndPinnedRevisionMustBelongToTarget() {
     UUID a = resource("alice", "operations", "service"), b = resource("bob", null, "secret");
     set(new PolicyTarget("project", "operations", null), 0, permissive());
-    set(
-        new PolicyTarget("document", null, b),
-        0,
-        new PolicySettings(
-            new Policy(true, false, false), Policy.NONE, true, "Approved locked label"));
+    work.inTransaction(
+        () -> {
+          repository.lock();
+          return repository.setPolicy(
+              "bob",
+              new PolicyTarget("document", null, b),
+              0,
+              new PolicySettings(
+                  new Policy(true, false, false), Policy.NONE, true, "Approved locked label"));
+        });
     Relationship edge = link(a, b);
     assertTrue(readable(a, "viewer", "operations"));
     assertInstanceOf(Unavailable.class, repository.select(viewer, new Target(b, null)));
@@ -300,7 +308,12 @@ class DocumentNavigationPersistenceTest {
             List.of(
                 new ScopeStep(io.aeyer.plowshare.protocol.InformationRequest.Scope.personal())));
     work.inTransaction(() -> repository.save("alice", id, 0, "Billing", path));
-    assertEquals(path, new JdbcInformationNavigationRepository(jdbc).view("alice", id).path());
+    assertEquals(
+        path,
+        new JdbcInformationNavigationRepository(
+                jdbc, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc))
+            .view("alice", id)
+            .path());
     assertThrows(RuntimeException.class, () -> repository.view("viewer", id));
     assertThrows(
         RuntimeException.class,
@@ -373,7 +386,8 @@ class DocumentNavigationPersistenceTest {
         });
     assertEquals(
         result,
-        new JdbcInformationNavigationRepository(jdbc)
+        new JdbcInformationNavigationRepository(
+                jdbc, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc))
             .receipt("alice", request)
             .orElseThrow()
             .result());
@@ -419,29 +433,30 @@ class DocumentNavigationPersistenceTest {
   @Test
   void incompleteClosureFailsClosedAndAbsentSourcesMatchHiddenSources() {
     jdbc.update(
-        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ('22222222-2222-2222-2222-'||lpad(i::text,12,'0'))::uuid,'closure-fixture','node-'||i,'alice',?,'source' FROM generate_series(1,1025) i",
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ('22222222-2222-2222-2222-'||lpad(i::text,12,'0'))::uuid,'project:operations','node-'||i,'alice',?,'source' FROM generate_series(1,1025) i",
         project("operations"));
     jdbc.update(
-        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) SELECT id,id,1,source_name,'text/plain','fixture',1 FROM information_resources WHERE namespace='closure-fixture'");
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) SELECT id,id,1,source_name,'text/plain','fixture',1 FROM information_resources WHERE namespace='project:operations'");
     UUID root = UUID.fromString("22222222-2222-2222-2222-000000000001");
     jdbc.update(
-        "INSERT INTO information_inputs(derived_revision,input_revision) SELECT ?,id FROM information_revisions WHERE resource_id IN (SELECT id FROM information_resources WHERE namespace='closure-fixture') AND id<>?",
+        "INSERT INTO information_inputs(derived_revision,input_revision) SELECT ?,id FROM information_revisions WHERE resource_id IN (SELECT id FROM information_resources WHERE namespace='project:operations') AND id<>?",
         root,
         root);
-    assertTrue(
-        Boolean.TRUE.equals(
-            jdbc.queryForObject(
-                "SELECT information_legacy_readable(?,'alice','project','operations',true)",
-                Boolean.class,
-                root)));
-    assertTrue(
+    assertFalse(
         Boolean.TRUE.equals(
             jdbc.queryForObject(
                 "SELECT information_readable(?,'alice','project','operations',true)",
                 Boolean.class,
                 root)));
     UUID referencing = resource("alice", "operations", "bounded-reference");
-    link(referencing, root);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.NotFoundFault.class, () -> link(referencing, root));
+    // An existing edge cannot make an oversized dependency closure readable either.
+    jdbc.update(
+        "INSERT INTO information_relationships(id,source,target,relation,actor) VALUES(?,?,?,'runbook','alice')",
+        UUID.randomUUID(),
+        referencing,
+        root);
     assertFalse(readable(referencing, "alice", "operations"));
     UUID hidden = resource("bob", "restricted", "hidden");
     String known =
@@ -476,7 +491,7 @@ class DocumentNavigationPersistenceTest {
   }
 
   @Test
-  void relatedDocumentSetsUseTargetScopeAndRetainServiceProjectCeilings() {
+  void relatedDocumentsUseLiveTargetReadForHumansAndServices() {
     set(new PolicyTarget("project", "operations", null), 0, permissive());
     UUID a = resource("alice", "operations", "service"),
         b = resource("bob", "restricted", "secret");
@@ -512,9 +527,18 @@ class DocumentNavigationPersistenceTest {
             .documents()
             .getFirst()
             .scope()
-            .includeShared());
+            .includeGlobal());
+    assertEquals(
+        List.of(b),
+        repository.documents(machine, a, "runbook", "outgoing", 50, 0).documents().stream()
+            .map(Document::resource)
+            .toList());
+    var confined =
+        machine.within(
+            new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+                io.aeyer.plowshare.protocol.Home.of("operations"), false));
     assertTrue(
-        repository.documents(machine, a, "runbook", "outgoing", 50, 0).documents().isEmpty());
+        repository.documents(confined, a, "runbook", "outgoing", 50, 0).documents().isEmpty());
     assertTrue(
         Boolean.TRUE.equals(
             jdbc.queryForObject(
@@ -522,7 +546,7 @@ class DocumentNavigationPersistenceTest {
                 Boolean.class,
                 head(b),
                 "@service/fixture")));
-    assertFalse(
+    assertTrue(
         Boolean.TRUE.equals(
             jdbc.queryForObject(
                 "SELECT information_navigation_own_readable(?,?,'operations')",
@@ -538,7 +562,10 @@ class DocumentNavigationPersistenceTest {
         request = UUID.randomUUID();
     var navigation =
         new DocumentNavigation(
-            repository, new InformationAccess(new JdbcProjectMembers(jdbc)), work, true);
+            repository,
+            new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc))),
+            work,
+            true);
     var selection = io.aeyer.plowshare.protocol.InformationRequest.Selection.personal();
     var first =
         new io.aeyer.plowshare.protocol.InformationRequest.RelationshipCreate(
@@ -575,8 +602,8 @@ class DocumentNavigationPersistenceTest {
         b = resource("bob", "restricted", "quarantined");
     set(new PolicyTarget("document", null, b), 0, permissive());
     jdbc.update(
-        "UPDATE information_document_policies SET visibility='quarantined',owner_handle=NULL,project_id=NULL,assigned_at=NULL WHERE document_id=?",
-        head(b));
+        "UPDATE information_resource_policies SET version=version+1,audience='QUARANTINED',reason='AUDIENCE',actor=(SELECT id FROM authority_accounts WHERE legacy_handle='admin') WHERE resource_id=?",
+        b);
     assertThrows(io.aeyer.plowshare.server.faults.NotFoundFault.class, () -> link(a, b));
     assertEquals(
         0, jdbc.queryForObject("SELECT count(*) FROM information_relationships", Integer.class));

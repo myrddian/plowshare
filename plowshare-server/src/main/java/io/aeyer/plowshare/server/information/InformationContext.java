@@ -10,7 +10,27 @@ public record InformationContext(
     Selection selection,
     Corpus corpus,
     InformationFacets facets,
-    boolean typedView) {
+    boolean typedView,
+    io.aeyer.plowshare.server.access.KnowledgeReadScope readBoundary) {
+
+  public InformationContext(
+      String account,
+      Selection selection,
+      Corpus corpus,
+      InformationFacets facets,
+      boolean typedView) {
+    this(account, selection, corpus, facets, typedView, null);
+  }
+
+  public InformationContext within(io.aeyer.plowshare.server.access.KnowledgeReadScope boundary) {
+    return new InformationContext(
+        account,
+        selection,
+        corpus,
+        facets,
+        typedView,
+        readBoundary == null ? Objects.requireNonNull(boundary) : readBoundary.intersect(boundary));
+  }
 
   public InformationContext(
       String account, Selection selection, Corpus corpus, InformationFacets facets) {
@@ -18,7 +38,7 @@ public record InformationContext(
   }
 
   public InformationContext withView(boolean supporting) {
-    return new InformationContext(account, selection, corpus, facets, supporting);
+    return new InformationContext(account, selection, corpus, facets, supporting, readBoundary);
   }
 
   public InformationContext(String account, Selection selection, Corpus corpus) {
@@ -27,7 +47,7 @@ public record InformationContext(
 
   public InformationContext withFacets(InformationFacets value) {
     return new InformationContext(
-        account, selection, corpus, Objects.requireNonNull(value), typedView);
+        account, selection, corpus, Objects.requireNonNull(value), typedView, readBoundary);
   }
 
   public InformationContext(String account, Selection selection) {
@@ -52,7 +72,7 @@ public record InformationContext(
   public InformationContext withCorpus(Corpus value) {
     return value == null
         ? this
-        : new InformationContext(account, selection, value, facets, typedView);
+        : new InformationContext(account, selection, value, facets, typedView, readBoundary);
   }
 
   public InformationContext {
@@ -64,25 +84,54 @@ public record InformationContext(
     Objects.requireNonNull(facets, "facets");
   }
 
+  /** Stable destination locator for receipts; authenticated identity is deliberately separate. */
+  public String namespace() {
+    return switch (selection.scope()) {
+      case PROJECT -> "project:" + selection.project();
+      case ACCOUNT -> "account:" + selection.account();
+      case PERSONAL -> "account:" + account;
+      case GLOBAL_READ ->
+          throw new IllegalArgumentException("Global READ has no writable namespace");
+    };
+  }
+
   public enum Scope {
     PERSONAL,
     PROJECT,
-    SHARED
+    GLOBAL_READ,
+    ACCOUNT
   }
 
-  public record Selection(Scope scope, String project, boolean includeShared) {
+  public record Selection(Scope scope, String project, boolean includeGlobal) {
     public Selection {
       Objects.requireNonNull(scope, "scope");
       if (scope == Scope.PROJECT) {
         if (project == null || project.isBlank()) {
           throw new IllegalArgumentException("project information selection needs a project");
         }
+        io.aeyer.plowshare.protocol.Home.of(project);
       } else if (project != null) {
         throw new IllegalArgumentException("only project selection may name a project");
       }
-      if (scope == Scope.SHARED && includeShared) {
-        throw new IllegalArgumentException("shared selection does not take includeShared");
+      if ((scope == Scope.GLOBAL_READ || scope == Scope.ACCOUNT) && includeGlobal) {
+        throw new IllegalArgumentException("general selection does not take includeGlobal");
       }
+    }
+
+    /** The only additional public account home; this does not grant access to that account. */
+    public static Selection account(java.util.UUID id) {
+      if (!io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value().equals(id))
+        throw new IllegalArgumentException("Unsupported account knowledge target");
+      return new Selection(Scope.ACCOUNT, null, false);
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("account")
+    @com.fasterxml.jackson.annotation.JsonInclude(
+        com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public java.util.UUID account() {
+      return scope == Scope.ACCOUNT
+          ? io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value()
+          : null;
     }
 
     public static Selection personal() {
@@ -93,8 +142,8 @@ public record InformationContext(
       return new Selection(Scope.PROJECT, project, true);
     }
 
-    public static Selection shared() {
-      return new Selection(Scope.SHARED, null, false);
+    public static Selection globalRead() {
+      return new Selection(Scope.GLOBAL_READ, null, false);
     }
   }
 }

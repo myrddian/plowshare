@@ -93,9 +93,15 @@ public final class ActingRequests {
             ? io.aeyer.plowshare.server.acting.ActingPermission.WORK
             : io.aeyer.plowshare.server.acting.ActingPermission.READ;
     work.requireJob(authority, job, permission);
+    // Cancellation returns the existing job view. Its WRITE check cannot stand in for the
+    // delegated READ check on that disclosure, even if standard roles normally include both.
+    if (FrameTypes.JOB_CANCEL.equals(operation))
+      work.requireJob(authority, job, io.aeyer.plowshare.server.acting.ActingPermission.READ);
     var answer = jobs.getFor(job, authority.subject());
     if (FrameTypes.JOB_CANCEL.equals(operation)) jobs.cancel(job);
     work.requireJob(authority, job, permission);
+    if (FrameTypes.JOB_CANCEL.equals(operation))
+      work.requireJob(authority, job, io.aeyer.plowshare.server.acting.ActingPermission.READ);
     contexts.resolve(connection, selection.context());
     return Outcome.ok(io.aeyer.plowshare.server.api.JobView.of(answer));
   }

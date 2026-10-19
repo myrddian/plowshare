@@ -84,8 +84,8 @@ public final class DocumentAskHandler implements FrameHandler {
         Payloads.as(payload, AskDocumentRequest.class, FrameTypes.DOCUMENT_ASK);
     String question = RequestedCorpusQuestion.asked(asked.question());
     Corpus.theOneToAsk(documents, document);
-    int allowance = asked.maxModelCalls() == null ? props.getAskBudget() : asked.maxModelCalls();
-    Budget budget = Budget.of(allowance);
+    Budget budget =
+        asked.maxModelCalls() == null ? props.askAllowance() : Budget.of(asked.maxModelCalls());
     String job =
         context == null
             ? jobs.submit(

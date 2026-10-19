@@ -1,11 +1,13 @@
 package io.aeyer.plowshare.server.api;
 
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import io.aeyer.plowshare.protocol.InformationContent;
 import io.aeyer.plowshare.protocol.SchemaValidation;
+import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.auth.AuthFilter;
@@ -25,6 +27,9 @@ class AuthoredDocumentUploadTest {
   InformationCatalogue catalogue;
   JobStore jobs;
   MockMvc mvc;
+  final ProjectMembers members = mock(ProjectMembers.class);
+  final io.aeyer.plowshare.server.requests.RequestProjects defaults =
+      mock(io.aeyer.plowshare.server.requests.RequestProjects.class);
 
   @BeforeEach
   void setup() {
@@ -39,7 +44,8 @@ class AuthoredDocumentUploadTest {
             mock(DocumentStore.class),
             mock(Deliberation.class),
             new DocumentsProperties());
-    controller.useInformationAccess(new InformationAccess(mock(ProjectMembers.class)));
+    controller.useInformationAccess(
+        new InformationAccess(new EffectiveProjectPermissions(members), defaults));
     controller.useInformationCatalogue(catalogue);
     mvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -95,5 +101,55 @@ class AuthoredDocumentUploadTest {
         .andExpect(jsonPath("$.detail").value("INFORMATION_METADATA_INVALID"))
         .andExpect(jsonPath("$.metadataValidation.issues[0].instancePointer").value("/severity"));
     verifyNoInteractions(jobs);
+  }
+
+  @Test
+  void applicationUploadUsesTrustedProjectAndRetainsItsOriginalRequestId() throws Exception {
+    String actor = "@service/" + UUID.randomUUID();
+    UUID requestId = UUID.randomUUID(), revision = UUID.randomUUID();
+    when(defaults.implicit(actor)).thenReturn(java.util.Optional.of("app"));
+    when(members.role("app", actor))
+        .thenReturn(
+            java.util.Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR));
+    when(catalogue.admitForSession(
+            any(), eq(requestId), anyString(), any(), any(), any(), any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              InformationContext context = call.getArgument(0);
+              assertEquals(actor, context.account());
+              assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
+              assertEquals("app", context.selection().project());
+              assertTrue(context.selection().includeGlobal());
+              return new InformationCatalogue.Admission(revision, UUID.randomUUID(), true);
+            });
+    when(jobs.submitInformation(anyString(), any(), any(), anyList(), any()))
+        .thenReturn("job_WAIT");
+    mvc.perform(
+            request()
+                .requestAttr(AuthFilter.HANDLE_ATTRIBUTE, actor)
+                .param("requestId", requestId.toString()))
+        .andExpect(status().isAccepted());
+    verify(jobs)
+        .submitInformation(
+            anyString(),
+            eq(io.aeyer.plowshare.protocol.Home.of("app")),
+            any(),
+            eq(List.of(revision)),
+            any());
+  }
+
+  @Test
+  void invalidExplicitProjectOrAmbiguousContextCannotBeReplacedByUploadDefault() throws Exception {
+    when(defaults.implicit("author"))
+        .thenThrow(new io.aeyer.plowshare.server.faults.CallerFault("ambiguous"));
+    mvc.perform(request()).andExpect(status().isBadRequest());
+    for (String project :
+        List.of(
+            " app ",
+            "",
+            io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value().toString())) {
+      mvc.perform(request().param("project", project)).andExpect(status().isBadRequest());
+    }
+    verifyNoInteractions(catalogue, jobs);
   }
 }

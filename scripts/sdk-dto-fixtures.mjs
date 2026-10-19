@@ -53,7 +53,7 @@ for(const revisions of [[],['bad'],Array(17).fill(receipt),[receipt,receipt]]) i
 for(const path of ['/absolute.md','../source.md','safe/../source.md','safe//source.md','safe/CON.md','safe/.git/config','safe/nul','file.','safe/']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{...portableBundle.documents[0],descriptor:{...portableDescriptor,path}}]}}},false);
 for(const bytesBase64 of ['', 'QQ','QR==','QQ==\n']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:portableDescriptor,bytesBase64}]}}},false);
 for(const changed of [{destinations:[]},{destinations:[{resource:receipt,name:'source.md',mode:'revise'}]},{destinations:[{resource:receipt,name:'source.md',mode:'create',expectedRevision:receipt}]},{reuse:[{foreignRevision:'bad',localRevision:receipt}]},{reuse:[{foreignRevision:receipt,localRevision:receipt}],destinations:[]},{restoreRelationships:'yes'}]) input('information.interchange.import',{...portableImport,plan:{...portablePlan,...changed}},false);
-input('information.interchange.import',{...portableImport,scope:{kind:'shared'}},false);
+input('information.interchange.import',{...portableImport,scope:{kind:'global_read'}},false);
 input('information.interchange.import',{...portableImport,plan:{...portablePlan,permissions:['admin']}},false);
 input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:{...portableDescriptor,provenance:{...portableDescriptor.provenance,dependencies:['22222222-2222-4222-8222-222222222222']}},bytesBase64:portableBody.toString('base64')}]}}},false);
 
@@ -225,7 +225,7 @@ result('application.token.issue',{receipt:appReceipt,credential:'pss_'+'1'.repea
 result('application.token.issue',{receipt:appReceipt,credential:'invalid'},false);
 input('schedule.list',{project:'fixture'},true);
 input('schedule.files',{project:null},false);
-input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeShared:false}},true);
+input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeGlobal:false}},true);
 input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',extra:true}},false);
 // Explicit project or existing conversation: omission/null must never choose Personal implicitly.
 for (const operation of ['conversation.open','conversation.list','conversation.latest','orchestration.start','agent.run']) {
@@ -477,6 +477,8 @@ input('application.files', { project: 'chatbot', location: { store: 'outputs', p
 const namedSelection = {name:'privacy', revision:'a'.repeat(64), description:'Review privacy', members:['researcher'], budget:20};
 const namedType = {name:'privacy', members:['researcher'], budget:20, refused:{}, origin:'swarm/privacy.md', selection:namedSelection};
 result('swarm.types', {project:'fixture', types:[namedType]}, true);
+result('swarm.types', {project:'fixture', types:[{...namedType,budget:null,selection:{...namedSelection,budget:null}}]}, true);
+result('swarm.types', {project:'fixture', types:[{...namedType,budget:null}]}, false);
 result('swarm.types', {project:'fixture', types:[]}, true);
 for (const change of [{name:'../privacy'}, {revision:'bad'}, {budget:1}, {budget:2.5}, {description:'x'.repeat(4097)}, {members:['researcher','researcher']}, {members:[' ']}])
   result('swarm.types', {project:'fixture', types:[{...namedType, selection:{...namedSelection,...change}}]}, false);

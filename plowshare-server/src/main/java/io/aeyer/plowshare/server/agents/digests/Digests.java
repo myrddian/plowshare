@@ -118,17 +118,15 @@ public final class Digests {
   public Navigator.Result navigate(String project, String question) {
     String asked = RequestedMemoryQuestion.navigated(question);
     Home home = RequestedHome.in(project);
-    return navigator.navigate(
-        home, asked, Budget.of(properties.getNavigationBudget()), () -> false);
+    return navigator.navigate(home, asked, properties.navigationAllowance(), () -> false);
   }
 
   /**
    * Start a digest pass over one tier, and answer with the handle at once.
    *
-   * <p>Submitted through {@link JobStore#submit(String, java.util.function.Function)} — the
-   * overload that files no project on the job's own row, which is the endpoint's own call and is
-   * deliberately unlike {@code Passes}': the tier is inside the closure either way, and changing
-   * which row is written would change what a job listing shows.
+   * <p>The selected home is retained on the job as well as captured by the worker. A closure
+   * disappears on restart; its historical row must still identify the project the pass folded. This
+   * does not reconstruct authority or resume a historical pass with no retained admission.
    *
    * @param project the tier to fold, or null for {@link Home#global()}
    * @throws CallerFault if the tier is named blank — raised here, before the closure is handed
@@ -139,8 +137,9 @@ public final class Digests {
     String id =
         jobs.submit(
             AGENT,
+            home,
             cancelled -> {
-              Budget budget = Budget.of(properties.getDigestBudget());
+              Budget budget = properties.digestAllowance();
               String text = digester.pass(home, budget, cancelled);
               return new Outcome(
                   ending(text, budget, cancelled.getAsBoolean()),
@@ -166,6 +165,6 @@ public final class Digests {
     if (text.startsWith(BUILT)) {
       return Outcome.Ending.ANSWERED;
     }
-    return budget.remaining() == 0 ? Outcome.Ending.CALL_BUDGET : Outcome.Ending.STUCK;
+    return budget.exhausted() ? Outcome.Ending.CALL_BUDGET : Outcome.Ending.STUCK;
   }
 }

@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceSnapshot;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,16 +26,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * {@code agent_run} runs against the budget its parent was given, and re-reading the child's own
  * number there is exactly the per-agent copy this class exists to prevent.
  *
- * <h2>Atomic, though the tree serialises</h2>
+ * <h2>Atomic claims</h2>
  *
- * <p>Task 5's design serialises sub-agent calls within a turn, and a parent blocked on a child is
- * not running, so no two <em>related</em> jobs spend concurrently today. The compare-and-set is
- * here anyway because that is a property of one task's scheduling policy, and a policy is a weaker
- * thing to rest a counter's correctness on than an atomic. It costs a CAS per model call, against a
- * call that takes seconds.
- *
- * <p>{@link #trySpend} is one operation and not a {@code remaining() > 0} test followed by a
- * decrement, for the same reason: two jobs reading a remaining count of one would both proceed.
+ * <p>A claim, its optional durable charge, and operator ceiling changes share one lock. The
+ * immutable claim carries the exact ordinal and ceiling observed while claiming; queue-time
+ * authorization checks reuse it rather than spending again. Children share the same budget identity
+ * and counter. A failed durable charge prevents dispatch and is never refunded by inventing a
+ * replacement claim.
  *
  * <h2>The ceiling moves</h2>
  *
@@ -75,12 +74,11 @@ public final class Budget {
    * granting a run twenty more calls is granting them to the work that run is doing, wherever in
    * the tree it is being done, which is the only reading that matches what a budget is for.
    *
-   * <p><b>Volatile and not guarded by the same compare-and-set as {@code spent}.</b> The two are
-   * not a pair: {@link #trySpend}'s loop re-reads both on every attempt, so a limit that moves
-   * between the read and the compare-and-set is a limit that moved during the call, and the next
-   * call asks again. What the loop guarantees is that no call is made past the limit <em>as it
-   * stood when the call was claimed</em>, which is the strongest thing a moving ceiling can promise
-   * and the thing a caller depends on.
+   * <p><b>Volatile for status readers, and guarded with {@code spent} during claims.</b> The claim
+   * lock pairs the observed ceiling with its spending ordinal. Status readers may see a newer
+   * ceiling; the next claim reads that ceiling under the lock. What the loop guarantees is that no
+   * call is made past the limit <em>as it stood when the call was claimed</em>, which is the
+   * strongest thing a moving ceiling can promise and the thing a caller depends on.
    *
    * <p><b>A boxed {@link Integer}, not an {@code int} and a {@code boolean}, for {@link
    * TurnCap#turns}'s reason: one field means no pair to read between two writes and no combination
@@ -88,6 +86,80 @@ public final class Budget {
    * read once per claim, against a call that takes seconds.
    */
   private volatile Integer limit;
+
+  private final java.util.UUID identity;
+
+  /** Immutable evidence of one successful claim, including its ceiling at claim time. */
+  public record Claim(java.util.UUID budget, int ordinal, Integer limit, String conversation) {
+    public Claim(java.util.UUID budget, int ordinal, Integer limit) {
+      this(budget, ordinal, limit, null);
+    }
+  }
+
+  private java.util.function.Supplier<java.util.Optional<Claim>> durableClaim;
+  private java.util.function.Consumer<Integer> durableLimit;
+  private java.util.function.Supplier<AllowanceSnapshot> durableSnapshot;
+  private boolean windowed;
+  private int lastSourceOrdinal;
+
+  /** A wake's finite scheduling window draws claims from the root's canonical allowance. */
+  public static Budget boardLease(
+      java.util.UUID source,
+      int window,
+      java.util.function.Supplier<java.util.Optional<Claim>> claim) {
+    if (window < 1) throw new IllegalArgumentException("Positive wake window required");
+    Budget lease = new Budget(window, null, Objects.requireNonNull(source));
+    lease.windowed = true;
+    lease.durableClaim = Objects.requireNonNull(claim);
+    return lease;
+  }
+
+  public java.util.UUID identity() {
+    return identity;
+  }
+
+  public AllowanceSnapshot snapshot() {
+    claiming.lock();
+    try {
+      return new AllowanceSnapshot(new AllowanceId(identity), limit, spent.get());
+    } finally {
+      claiming.unlock();
+    }
+  }
+
+  /** Binds canonical spending independently of the input/history conversation. */
+  public void bindAllowance(
+      java.util.function.Supplier<java.util.Optional<Claim>> claim,
+      java.util.function.Consumer<Integer> ceiling) {
+    bindAllowance(claim, ceiling, null);
+  }
+
+  /** Refresh exhausted local snapshots before the existing automatic-increase policy decides. */
+  public void bindAllowance(
+      java.util.function.Supplier<java.util.Optional<Claim>> claim,
+      java.util.function.Consumer<Integer> ceiling,
+      java.util.function.Supplier<AllowanceSnapshot> snapshot) {
+    claiming.lock();
+    try {
+      durableClaim = Objects.requireNonNull(claim);
+      durableLimit = Objects.requireNonNull(ceiling);
+      durableSnapshot = snapshot;
+    } finally {
+      claiming.unlock();
+    }
+  }
+
+  public boolean durable() {
+    return durableClaim != null;
+  }
+
+  public static Budget restored(java.util.UUID id, Integer limit, int spent) {
+    if (spent < 0 || limit != null && limit < 0)
+      throw new IllegalArgumentException("Invalid retained conversation allowance");
+    Budget budget = new Budget(limit, null, id);
+    budget.spent.set(spent);
+    return budget;
+  }
 
   private final AtomicInteger spent = new AtomicInteger();
   private final Runnable charge;
@@ -98,6 +170,11 @@ public final class Budget {
   }
 
   private Budget(Integer limit, Runnable charge) {
+    this(limit, charge, java.util.UUID.randomUUID());
+  }
+
+  private Budget(Integer limit, Runnable charge, java.util.UUID identity) {
+    this.identity = Objects.requireNonNull(identity);
     this.limit = limit;
     this.charge = charge;
   }
@@ -252,44 +329,48 @@ public final class Budget {
    *     to.
    */
   public boolean trySpend() {
-    if (charge != null) {
-      claiming.lock();
-      try {
-        Integer ceiling = limit;
-        if (ceiling != null && spent.get() >= ceiling) {
-          return false;
+    return tryClaim().isPresent();
+  }
+
+  /** Claims once under the same lock as operator changes and durable charges. */
+  public java.util.Optional<Claim> tryClaim() {
+    claiming.lock();
+    try {
+      if (durableClaim != null) {
+        if (windowed && spent.get() >= limit) return java.util.Optional.empty();
+        java.util.Optional<Claim> claimed = durableClaim.get();
+        if (claimed.isPresent()) {
+          Claim claim = claimed.get();
+          if (windowed) {
+            if (!identity.equals(claim.budget()) || claim.ordinal() <= lastSourceOrdinal)
+              throw new IllegalStateException("Wake claim changed its source or ordinal");
+            lastSourceOrdinal = claim.ordinal();
+            spent.incrementAndGet();
+            return claimed;
+          }
+          if (!identity.equals(claim.budget()) || claim.ordinal() <= spent.get())
+            throw new IllegalStateException("Durable claim changed its source or counter");
+          spent.set(claim.ordinal());
+          limit = claim.limit();
+        } else if (!windowed && durableSnapshot != null) {
+          AllowanceSnapshot latest = durableSnapshot.get();
+          if (!identity.equals(latest.id().value()) || latest.spent() < spent.get())
+            throw new IllegalStateException("Retained allowance changed its source or counter");
+          spent.set(latest.spent());
+          limit = latest.ceiling();
         }
-        charge.run();
-        spent.incrementAndGet();
-        return true;
-      } finally {
-        claiming.unlock();
+        return claimed;
       }
-    }
-    // The retry arm of this loop — a compare-and-set losing to another
-    // thread — has no test and cannot get a deterministic one: it needs two
-    // threads inside these four lines at once. Said here so a green suite is
-    // not read as covering it. What is tested is the invariant the loop
-    // exists to hold, that the limit is never exceeded, which is the part a
-    // caller depends on.
-    while (true) {
       Integer ceiling = limit;
-      if (ceiling == null) {
-        // Nothing to compare against, so nothing to lose a race on: the
-        // spend is counted and the call is always permitted. A budget
-        // with no ceiling is still a budget with spending to report —
-        // see #lifted — and incrementAndGet is itself atomic, so this
-        // does not need the compare-and-set below it.
-        spent.incrementAndGet();
-        return true;
-      }
-      int now = spent.get();
-      if (now >= ceiling) {
-        return false;
-      }
-      if (spent.compareAndSet(now, now + 1)) {
-        return true;
-      }
+      if (ceiling != null && spent.get() >= ceiling) return java.util.Optional.empty();
+      if (spent.get() == Integer.MAX_VALUE)
+        throw new IllegalStateException("Model allowance counter exhausted");
+      if (charge != null) charge.run();
+      Claim claim = new Claim(identity, spent.get() + 1, ceiling);
+      spent.incrementAndGet();
+      return java.util.Optional.of(claim);
+    } finally {
+      claiming.unlock();
     }
   }
 
@@ -300,7 +381,8 @@ public final class Budget {
     try {
       Integer ceiling = limit;
       int used = spent.get();
-      if (charge != null
+      if (windowed
+          || charge != null
           || ceiling == null
           || ceiling == 0
           || used < ceiling
@@ -389,8 +471,8 @@ public final class Budget {
    *
    * <p>Was "the number this budget was built with" and is no longer: {@link #changeTo} moves it, so
    * this answers what the budget allows now rather than what it allowed when it was opened. Nothing
-   * records the opening number in memory — {@code conversations.budget_total} is where a
-   * conversation's allowance is durable, and it is written when it changes.
+   * records the opening number in memory. Bound allowances persist their current ceiling through
+   * the standalone repository when an authorized control changes it.
    *
    * @throws IllegalStateException if this budget has no ceiling. A number is not invented for a
    *     budget that has none — that is the substitution {@link #none} exists to refuse — so a
@@ -420,14 +502,10 @@ public final class Budget {
    * lowering that a run has already overtaken — would leave an operator trying to stop a runaway
    * tree unable to, which is the situation the lowering is for.
    *
-   * <p><b>Note what that means for a conversation, and where it is refused.</b> {@code
-   * conversations_spent_within_budget} refuses a row whose spending exceeds its total, and {@code
-   * ConversationStore.turnEnded} writes this limit back onto the row when the turn ends — so a
-   * lowering that has already been overtaken is a number that table cannot hold. Nothing here
-   * refuses it, because at this level it is well defined and useful; the refusal is at {@link
-   * #changeToOrRefuse}, the guarded entry point {@code Limits#move} actually calls, which names the
-   * two numbers and names cancellation as the verb for stopping a run. {@code
-   * a_budget_cannot_be_lowered_below_what_a_run_has_already_spent} is what holds it there.
+   * <p>A durable source refuses a ceiling below current usage atomically. The public live-limit
+   * control also uses {@link #changeToOrRefuse}; cancellation is the operation for stopping a run.
+   * Unbound live objects and board wake windows can still be stopped at their next boundary without
+   * changing or refunding the source's cumulative usage.
    *
    * <p><b>Refused when the budget has no ceiling, and not for {@link #limit}'s reason.</b> {@link
    * Limits#move} is where {@code POST /v1/jobs/{id}/limits} reaches this: an operator granting more
@@ -461,6 +539,7 @@ public final class Budget {
     }
     claiming.lock();
     try {
+      if (durableLimit != null) durableLimit.accept(maxModelCalls);
       this.limit = maxModelCalls;
     } finally {
       claiming.unlock();

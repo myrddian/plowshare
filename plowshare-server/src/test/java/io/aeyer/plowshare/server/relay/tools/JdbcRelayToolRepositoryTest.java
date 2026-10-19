@@ -98,7 +98,8 @@ class JdbcRelayToolRepositoryTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE projects,inference_run_ownership CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE projects,inference_run_ownership CASCADE");
     long project =
         Objects.requireNonNull(
             jdbc.queryForObject(

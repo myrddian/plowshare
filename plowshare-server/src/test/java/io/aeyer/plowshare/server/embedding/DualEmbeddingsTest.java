@@ -75,6 +75,55 @@ class DualEmbeddingsTest {
   }
 
   @Test
+  void queryPermitBindsTheFinalProfileAndBatchWithoutAllowingPublication() {
+    var profile = profile(EmbeddingSlot.PROSE, "query: ", EmbeddingSpace.Normalization.NONE);
+    when(work.active(EmbeddingSlot.PROSE)).thenReturn(Optional.of(profile));
+    when(work.inputLimit(profile.space())).thenReturn(100);
+    when(dispatcher.embed(any())).thenReturn(new Embeddings(List.of(new float[] {1, 0, 0}), null));
+    var permit = mock(EmbeddingPermit.class);
+    when(permit.mode()).thenReturn(EmbeddingPermit.Mode.QUERY);
+    when(permit.authorize(any(EmbeddingPermit.Task.class))).thenReturn(CallAuthorization.DIRECT);
+    var scoped = dual.forQuery(permit);
+    scoped.query(profile, "question", owner);
+    verify(permit)
+        .authorize(
+            argThat(
+                (EmbeddingPermit.Task task) ->
+                    task.sources().equals(List.of("question"))
+                        && task.request().input().equals(List.of("query: question"))
+                        && task.profile().equals(profile.toString())));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            scoped.repair(
+                EmbeddingWorkRepository.Key.of(
+                    EmbeddingWorkRepository.Store.DOCUMENTS, UUID.randomUUID().toString()),
+                owner));
+    verify(work, never()).source(any());
+  }
+
+  @Test
+  void queuedQueryRefusesChangedProfileWithoutAnotherProviderAttempt() {
+    var profile = profile(EmbeddingSlot.PROSE, "query: ", EmbeddingSpace.Normalization.NONE);
+    when(work.inputLimit(profile.space())).thenReturn(100);
+    when(work.active(EmbeddingSlot.PROSE)).thenReturn(Optional.empty());
+    var permit = mock(EmbeddingPermit.class);
+    when(permit.mode()).thenReturn(EmbeddingPermit.Mode.QUERY);
+    when(permit.authorize(any(EmbeddingPermit.Task.class))).thenReturn(CallAuthorization.DIRECT);
+    when(dispatcher.embed(any()))
+        .thenAnswer(
+            call -> {
+              EmbeddingRequest request = call.getArgument(0);
+              request.authorization().requireRequest(request);
+              fail("Provider must not receive stale query");
+              return null;
+            });
+    assertThrows(
+        EmbeddingException.class, () -> dual.forQuery(permit).query(profile, "question", owner));
+    verify(dispatcher, times(1)).embed(any());
+  }
+
+  @Test
   void transformedInputsAreCheckedBeforeDispatch() {
     var profile = profile(EmbeddingSlot.PROSE, "long prefix: ", EmbeddingSpace.Normalization.NONE);
     when(work.inputLimit(profile.space())).thenReturn(10);
@@ -247,5 +296,33 @@ class DualEmbeddingsTest {
             EmbeddingSearchPolicy.Distance.COSINE,
             null);
     assertEquals(4096, supported.definition().dimensions());
+  }
+
+  @Test
+  void activatedMaintenanceDoesNotAutomaticallyRepeatAnUncertainSubmission() {
+    var profile = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
+    var source =
+        new EmbeddingWorkRepository.Source(
+            EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "m"),
+            1,
+            "summary",
+            null);
+    when(work.target(EmbeddingSlot.PROSE)).thenReturn(Optional.of(profile));
+    when(work.target(EmbeddingSlot.CODE))
+        .thenReturn(
+            Optional.of(profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE)));
+    when(work.pending(eq(profile), eq(source.key().store()), anyInt())).thenReturn(List.of(source));
+    when(work.inputLimit(profile.space())).thenReturn(100);
+    when(work.beginRepair(profile, source)).thenReturn(true, false);
+    var operations = mock(OperationEmbeddings.class);
+    var permit = mock(OperationEmbeddings.Publication.class);
+    when(permit.authorize(any(EmbeddingPermit.Task.class))).thenReturn(CallAuthorization.DIRECT);
+    when(operations.publication(any(), anyList(), any(), any())).thenReturn(permit);
+    when(dispatcher.embed(any())).thenThrow(new EmbeddingException("unknown provider outcome"));
+    dual.useOperations(operations, io.aeyer.plowshare.server.agents.Budget::none);
+    assertEquals(0, dual.tick());
+    assertEquals(0, dual.tick());
+    verify(dispatcher, times(1)).embed(any());
+    verify(work, never()).failed(any(), any(), anyString());
   }
 }

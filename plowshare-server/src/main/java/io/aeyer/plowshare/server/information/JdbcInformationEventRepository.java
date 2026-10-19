@@ -67,8 +67,10 @@ public class JdbcInformationEventRepository implements InformationEventRepositor
     Objects.requireNonNull(account);
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT information_readable(?,?,'personal',NULL,true) OR EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.handle=? AND information_readable(?,?,'project',p.name,true))",
+            "SELECT information_readable(?,?,'global_read',NULL,false) OR information_readable(?,?,'personal',NULL,true) OR EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.handle=? AND information_readable(?,?,'project',p.name,true))",
             Boolean.class,
+            revision,
+            account,
             revision,
             account,
             account,

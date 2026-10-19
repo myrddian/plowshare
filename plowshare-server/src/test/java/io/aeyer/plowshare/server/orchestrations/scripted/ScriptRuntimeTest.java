@@ -64,7 +64,8 @@ class ScriptRuntimeTest {
 
   @BeforeEach
   void initialise() {
-    jdbc.execute("TRUNCATE conversations, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE conversations, admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('alice','hash')");
     conversation =
         new ConversationStore(jdbc)

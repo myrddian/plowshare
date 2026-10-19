@@ -1,6 +1,10 @@
 package io.aeyer.plowshare.server.board;
 
 import io.aeyer.plowshare.protocol.MemoryIds;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.allowances.AllowanceSnapshot;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import java.sql.Array;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -50,7 +54,7 @@ public class BoardStore {
       String openerKind,
       String opener,
       String originConversation,
-      int potTotal,
+      Integer potTotal,
       int reserve,
       SwarmSelection swarm) {
     public NewTopic(
@@ -61,7 +65,7 @@ public class BoardStore {
         String openerKind,
         String opener,
         String originConversation,
-        int potTotal,
+        Integer potTotal,
         int reserve) {
       this(
           project,
@@ -96,10 +100,16 @@ public class BoardStore {
   }
 
   private final JdbcTemplate jdbc;
+  private final AllowanceRepository allowances;
   private final Supplier<Instant> clock;
 
   public BoardStore(JdbcTemplate jdbc, Supplier<Instant> clock) {
+    this(jdbc, clock, new JdbcAllowanceRepository(jdbc));
+  }
+
+  public BoardStore(JdbcTemplate jdbc, Supplier<Instant> clock, AllowanceRepository allowances) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+    this.allowances = Objects.requireNonNull(allowances);
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -132,7 +142,9 @@ public class BoardStore {
   public Optional<BoardTopic> topic(String id) {
     return jdbc
         .query(
-            "SELECT " + TOPIC_COLUMNS + " FROM board_topics WHERE id = ?", BoardStore::topicRow, id)
+            "SELECT " + TOPIC_COLUMNS + " FROM board_allowance_state WHERE id = ?",
+            BoardStore::topicRow,
+            id)
         .stream()
         .findFirst();
   }
@@ -157,12 +169,13 @@ public class BoardStore {
             + ","
             + " (SELECT count(*) FROM board_messages m WHERE m.topic = t.id) AS messages,"
             + " (SELECT count(*) FROM board_messages m WHERE m.topic = t.id AND m.kind = 'document') AS documents"
-            + " FROM board_topics t WHERE NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = t.id)"
-            + " AND account = ? AND (?::text IS NULL OR project = ?)"
+            + " FROM board_allowance_state t WHERE NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = t.id)"
+            + " AND (account = ? OR project = ?::text) AND (?::text IS NULL OR project = ?)"
             + " AND (NOT ? OR closed_at IS NULL) ORDER BY (closed_at IS NOT NULL), opened_at DESC, id"
             + " OFFSET ? LIMIT ?",
         (rs, n) -> new Summary(topicRow(rs, n), rs.getInt("messages"), rs.getInt("documents")),
         account,
+        project,
         project,
         project,
         active,
@@ -174,7 +187,7 @@ public class BoardStore {
   public record SeatActivity(
       BoardSeat seat,
       String topicState,
-      int remaining,
+      Integer remaining,
       int reserve,
       String wake,
       String job,
@@ -184,19 +197,19 @@ public class BoardStore {
     return jdbc.query(
         "SELECT s.*, t.state AS topic_state, r.pot_total - r.pot_spent AS remaining,"
             + " r.reserve, f.status AS wake, f.job_id, f.reason, f.finished_at"
-            + " FROM board_seats s JOIN board_topics t ON t.id = s.topic"
-            + " JOIN board_topics r ON r.id = t.root"
+            + " FROM board_seats s JOIN board_allowance_state t ON t.id = s.topic"
+            + " JOIN board_allowance_state r ON r.id = t.root"
             + " LEFT JOIN LATERAL (SELECT status, job_id, reason, finished_at FROM firings"
             + " WHERE topic = s.topic AND target = 'conversation:' || s.conversation"
             + " ORDER BY (status = 'started' AND finished_at IS NULL) DESC, arrived_at DESC, id DESC LIMIT 1) f ON TRUE"
             + " WHERE NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = t.id)"
-            + " AND t.account = ? AND (?::text IS NULL OR t.id = ?)"
+            + " AND (t.account = ? OR t.id = ?::text) AND (?::text IS NULL OR t.id = ?)"
             + " AND (NOT ? OR t.closed_at IS NULL) ORDER BY t.opened_at, s.occupant COLLATE \"C\"",
         (rs, n) ->
             new SeatActivity(
                 seatRow(rs, n),
                 rs.getString("topic_state"),
-                rs.getInt("remaining"),
+                rs.getObject("remaining", Integer.class),
                 rs.getInt("reserve"),
                 rs.getObject("finished_at") == null || "refused".equals(rs.getString("wake"))
                     ? rs.getString("wake")
@@ -204,6 +217,7 @@ public class BoardStore {
                 rs.getObject("finished_at") == null ? rs.getString("job_id") : null,
                 rs.getString("reason")),
         account,
+        topic,
         topic,
         topic,
         active);
@@ -227,24 +241,36 @@ public class BoardStore {
    * tool failure or rollback cannot refund a request already made to the model.
    */
   public void spend(String root, int calls) {
-    if (calls <= 0) {
-      return;
-    }
-    var spending =
+    for (int i = 0; i < calls; i++)
+      claim(root, 0)
+          .orElseThrow(() -> new IllegalStateException("Board allowance exhausted or closed"));
+  }
+
+  /** Root policy snapshot; IDs stay internal rather than becoming a public board mutation API. */
+  public AllowanceSnapshot allowance(String root) {
+    java.util.UUID id =
+        jdbc.queryForObject(
+            "SELECT allowance_id FROM board_topics WHERE id=? AND parent IS NULL",
+            java.util.UUID.class,
+            root);
+    return allowances.find(new AllowanceId(id)).orElseThrow();
+  }
+
+  /** Short independent transaction: validate open lifecycle, then claim the common counter. */
+  public Optional<io.aeyer.plowshare.server.agents.Budget.Claim> claim(String root, int reserve) {
+    TransactionTemplate spending =
         new TransactionTemplate(
-            new DataSourceTransactionManager(
-                Objects.requireNonNull(jdbc.getDataSource(), "data source")));
+            new DataSourceTransactionManager(Objects.requireNonNull(jdbc.getDataSource())));
     spending.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-    spending.executeWithoutResult(
-        tx -> {
-          if (jdbc.update(
-                  "UPDATE board_topics SET pot_spent = pot_spent + ? WHERE id = ?"
-                      + " AND parent IS NULL",
-                  calls,
-                  root)
-              != 1) {
-            throw new IllegalStateException(root + " is not a root topic to charge");
-          }
+    return spending.execute(
+        status -> {
+          List<java.util.UUID> sources =
+              jdbc.query(
+                  "SELECT allowance_id FROM board_topics WHERE id=? AND parent IS NULL AND state<>'closed' FOR UPDATE",
+                  (r, n) -> r.getObject(1, java.util.UUID.class),
+                  root);
+          if (sources.isEmpty()) return Optional.empty();
+          return allowances.claim(new AllowanceId(sources.getFirst()), reserve);
         });
   }
 
@@ -258,13 +284,8 @@ public class BoardStore {
 
   /** Locks a topic until the caller's transaction ends, serializing writes with close. */
   public Optional<BoardTopic> lockTopic(String id) {
-    return jdbc
-        .query(
-            "SELECT " + TOPIC_COLUMNS + " FROM board_topics WHERE id = ? FOR UPDATE",
-            BoardStore::topicRow,
-            id)
-        .stream()
-        .findFirst();
+    jdbc.queryForList("SELECT id FROM board_topics WHERE id=? FOR UPDATE", String.class, id);
+    return topic(id);
   }
 
   /** Open or exhausted to closed, naming its resolution; answers whether this call closed it. */
@@ -304,7 +325,7 @@ public class BoardStore {
     return jdbc.query(
         "SELECT "
             + TOPIC_COLUMNS
-            + " FROM board_topics WHERE resolution IS"
+            + " FROM board_allowance_state WHERE resolution IS"
             + " NOT NULL AND resolution_delivered_at IS NULL ORDER BY closed_at, id",
         BoardStore::topicRow);
   }
@@ -314,7 +335,7 @@ public class BoardStore {
     return jdbc.query(
         "SELECT "
             + TOPIC_COLUMNS
-            + " FROM board_topics WHERE resolution IS"
+            + " FROM board_allowance_state WHERE resolution IS"
             + " NOT NULL AND resolution_delivered_at IS NULL AND origin_conversation = ?"
             + " ORDER BY closed_at, id",
         BoardStore::topicRow,
@@ -326,8 +347,8 @@ public class BoardStore {
     return jdbc.query(
         "SELECT "
             + TOPIC_COLUMNS
-            + " FROM board_topics WHERE closed_at IS"
-            + " NULL AND NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = board_topics.id)"
+            + " FROM board_allowance_state WHERE closed_at IS"
+            + " NULL AND NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = board_allowance_state.id)"
             + " ORDER BY opened_at, id",
         BoardStore::topicRow);
   }
@@ -388,11 +409,11 @@ public class BoardStore {
   /** Open descendants, deepest first, excluding the given topic. */
   public List<BoardTopic> descendants(String topic) {
     return jdbc.query(
-        "WITH RECURSIVE children AS (SELECT id FROM board_topics WHERE"
-            + " parent = ? UNION ALL SELECT t.id FROM board_topics t JOIN children c"
+        "WITH RECURSIVE children AS (SELECT id FROM board_allowance_state WHERE"
+            + " parent = ? UNION ALL SELECT t.id FROM board_allowance_state t JOIN children c"
             + " ON t.parent = c.id) SELECT "
             + TOPIC_COLUMNS
-            + " FROM board_topics WHERE id IN (SELECT id FROM children)"
+            + " FROM board_allowance_state WHERE id IN (SELECT id FROM children)"
             + " AND state <> 'closed' ORDER BY depth DESC, opened_at, id",
         BoardStore::topicRow,
         topic);
@@ -402,19 +423,30 @@ public class BoardStore {
     return jdbc.query(
         "SELECT "
             + TOPIC_COLUMNS
-            + " FROM board_topics WHERE root = ?"
+            + " FROM board_allowance_state WHERE root = ?"
             + " AND state <> 'closed' ORDER BY depth DESC, opened_at, id",
         BoardStore::topicRow,
         root);
   }
 
   public void topup(String root, int total, int reserve) {
-    jdbc.update(
-        "UPDATE board_topics SET pot_total = ?, reserve = ?, state = 'open'"
-            + " WHERE id = ? AND state <> 'closed'",
-        total,
-        reserve,
-        root);
+    org.springframework.transaction.support.TransactionTemplate transaction =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(
+                Objects.requireNonNull(jdbc.getDataSource())));
+    transaction.executeWithoutResult(
+        status -> {
+          lockTopic(root);
+          BoardTopic topic = topic(root).orElseThrow();
+          if (topic.isClosed()
+              || topic.potTotal() == null
+              || total <= topic.potTotal()
+              || reserve < 0
+              || reserve >= total)
+            throw new IllegalStateException("Only an open finite root allowance can be raised");
+          allowances.ceiling(allowance(root).id(), total);
+          jdbc.update("UPDATE board_topics SET reserve=?,state='open' WHERE id=?", reserve, root);
+        });
   }
 
   /** A queued or started firing includes ready, blocked and running model steps. */
@@ -638,6 +670,10 @@ public class BoardStore {
 
   /** Takes the seat; false when someone already holds it. */
   public boolean seatIfAbsent(String topic, String occupant, String conversation) {
+    jdbc.update(
+        "UPDATE conversations SET allowance_id=(SELECT allowance_id FROM board_topics WHERE id=?) WHERE id=? AND allowance_id IS NULL",
+        topic,
+        conversation);
     return jdbc.update(
             "INSERT INTO board_seats (topic, occupant, conversation) VALUES (?, ?,"
                 + " ?) ON CONFLICT (topic, occupant) DO NOTHING",
@@ -752,7 +788,7 @@ public class BoardStore {
   public List<String> queuedWakeTargets(String root) {
     return jdbc.queryForList(
         "SELECT DISTINCT f.target FROM firings f"
-            + " JOIN board_topics t ON t.id = f.topic"
+            + " JOIN board_allowance_state t ON t.id = f.topic"
             + " WHERE t.root = ? AND f.status = 'queued'",
         String.class,
         root);

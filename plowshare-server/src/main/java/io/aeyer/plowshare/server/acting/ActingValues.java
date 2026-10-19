@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.acting;
 
 import io.aeyer.plowshare.protocol.ApplicationIdentity;
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import java.util.Objects;
 import java.util.UUID;
@@ -16,6 +17,12 @@ final class ActingValues {
     return value;
   }
 
+  static String subject(String value) {
+    if (BuiltInIdentities.reservedAccount(value))
+      throw new IllegalArgumentException("Built-in accounts cannot be acting subjects");
+    return account(value);
+  }
+
   static String actor(String value) {
     if (value != null && value.startsWith("@service/")) {
       String token = value.substring("@service/".length());
@@ -24,7 +31,7 @@ final class ActingValues {
       }
       return value;
     }
-    return account(value);
+    return subject(value);
   }
 
   static String application(String value) {

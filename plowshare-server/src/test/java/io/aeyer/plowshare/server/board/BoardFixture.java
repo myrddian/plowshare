@@ -42,7 +42,7 @@ final class BoardFixture {
 
   BoardFixture(DriverManagerDataSource source) {
     jdbc = new JdbcTemplate(source);
-    jdbc.execute(TRUNCATE);
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, TRUNCATE);
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     work =
         new io.aeyer.plowshare.server.archive.ArchiveConfig()
@@ -64,7 +64,8 @@ final class BoardFixture {
         drained::add,
         work,
         () -> 10,
-        clock);
+        clock,
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
   }
 
   /** A topic a bot opened from its person's conversation in the project "payments". */

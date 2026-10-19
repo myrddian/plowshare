@@ -306,7 +306,7 @@ public class ConversationController {
             request.maxTurns(), request.noTurnCap(), "each turn in this conversation");
     Budget budget =
         RequestedBudget.in(
-            request.maxModelCalls(), request.noBudget(), properties.getDefaultBudget());
+            request.maxModelCalls(), request.noBudget(), properties.defaultBudgetLimit());
     // The signed-in account owns it: a hook's notify reaches them (amendment 2).
     ConversationRecord opened =
         conversations.open(
@@ -947,7 +947,7 @@ public class ConversationController {
         definitions.requireAgent(named, definitions.callerForConversation(id, session));
     // Definition lookup may use the conversation owner. Exposure belongs to the request actor.
     io.aeyer.plowshare.server.agents.AgentExposure.requireAvailable(definition, handle);
-    String job = speaking.resume(id, definition, session, turnCap, request.maxModelCalls());
+    String job = speaking.resume(id, definition, session, turnCap, request.maxModelCalls(), handle);
     return ResponseEntity.accepted().body(new StartedJob(job, definition.name()));
   }
 }

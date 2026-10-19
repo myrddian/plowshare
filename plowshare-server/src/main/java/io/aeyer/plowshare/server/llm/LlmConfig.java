@@ -186,13 +186,15 @@ public class LlmConfig implements EnvironmentAware {
       ObjectMapper mapper,
       ObjectProvider<TokenLedger> ledger,
       ObjectProvider<InferenceAccounting> accounting,
-      ObjectProvider<io.aeyer.plowshare.server.security.ChatFiltering> filtering) {
+      ObjectProvider<io.aeyer.plowshare.server.security.ChatFiltering> filtering,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary inferenceBoundary) {
     return buildDispatcher(
         props,
         mapper,
         ledger.getIfAvailable(),
         accounting.getIfAvailable(() -> InferenceAccounting.NONE),
-        filtering.getIfAvailable(() -> io.aeyer.plowshare.server.security.ChatFiltering.NONE));
+        filtering.getIfAvailable(() -> io.aeyer.plowshare.server.security.ChatFiltering.NONE),
+        java.util.Objects.requireNonNull(inferenceBoundary));
   }
 
   /** Own local tokenizer resources separately from chat's explicitly estimated context meter. */
@@ -219,7 +221,8 @@ public class LlmConfig implements EnvironmentAware {
         mapper,
         ledger,
         InferenceAccounting.NONE,
-        io.aeyer.plowshare.server.security.ChatFiltering.NONE);
+        io.aeyer.plowshare.server.security.ChatFiltering.NONE,
+        io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE);
   }
 
   private LlmDispatcher buildDispatcher(
@@ -227,7 +230,8 @@ public class LlmConfig implements EnvironmentAware {
       ObjectMapper mapper,
       TokenLedger ledger,
       InferenceAccounting accounting,
-      io.aeyer.plowshare.server.security.ChatFiltering filtering) {
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary inferenceBoundary) {
 
     var dual =
         environment == null
@@ -362,7 +366,8 @@ public class LlmConfig implements EnvironmentAware {
               accounting,
               props.getPromptTimeout(),
               props.getFoldTimeout(),
-              filtering);
+              filtering,
+              inferenceBoundary);
       requireEmbeddingModelIsServed(dispatcher, props);
       if (dual != null && dual.enabled()) dispatcher.requireServed(dual.code().modelId());
       log.info(

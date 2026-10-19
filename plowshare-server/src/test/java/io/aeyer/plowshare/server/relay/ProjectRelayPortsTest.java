@@ -128,6 +128,75 @@ class ProjectRelayPortsTest {
   }
 
   @Test
+  void read_access_alone_cannot_publish_consume_or_acknowledge() {
+    allow();
+    when(members.mayUse("project", "reviewer")).thenReturn(true);
+    when(members.mayWork("project", "reviewer")).thenReturn(false);
+    assertThrows(CallerFault.class, () -> ports.publish("reviewer", request()));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            ports.consume(
+                "reviewer",
+                new RelayPort.Consume(
+                    "project",
+                    "source.topic",
+                    "filters",
+                    id,
+                    RelayPort.Start.OLDEST_RETAINED,
+                    1,
+                    0)));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            ports.acknowledge(
+                "reviewer",
+                new RelayPort.Ack("project", "source.topic", "filters", id, id, "1", null)));
+    verifyNoInteractions(relay, repository);
+  }
+
+  @Test
+  void authority_or_project_identity_change_during_parent_lookup_prevents_publication() {
+    for (boolean retarget : List.of(false, true)) {
+      allow();
+      var parentTopic = new Relay.TopicKey(7, "source.topic");
+      var parent =
+          new Relay.Publication(
+              parentTopic,
+              1,
+              Instant.EPOCH,
+              new Relay.Draft(
+                  "original",
+                  "publisher",
+                  Instant.EPOCH,
+                  null,
+                  null,
+                  new RelayPayload.Text("source"),
+                  new RelayCausation(id, null, 0)));
+      when(relay.retained(parentTopic, "original"))
+          .thenAnswer(
+              call -> {
+                if (retarget) when(projects.id("project")).thenReturn(8L);
+                else when(members.mayWork("project", "reviewer")).thenReturn(false);
+                return Optional.of(parent);
+              });
+      var request =
+          new RelayPort.Publish(
+              id,
+              "project",
+              "custom.topic",
+              "reply",
+              Instant.EPOCH,
+              id,
+              "source.topic",
+              "original");
+      assertThrows(CallerFault.class, () -> ports.publish("reviewer", request));
+      verify(relay, never()).publish(any(), any());
+      verify(relay, never()).registerTopic(any(), any(), any());
+    }
+  }
+
+  @Test
   void tool_binding_derives_only_provider_request_egress_and_result_ingress() {
     var tools = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
     var binding =

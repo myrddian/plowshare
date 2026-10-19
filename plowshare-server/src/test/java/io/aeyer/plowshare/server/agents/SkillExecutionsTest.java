@@ -56,7 +56,8 @@ class SkillExecutionsTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE TABLE conversations, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE conversations, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle, password_hash) VALUES ('alice', 'hash'), ('bob', 'hash')");
     var conversations = new ConversationStore(jdbc, Instant::now, null);
@@ -141,10 +142,9 @@ class SkillExecutionsTest {
     Transcript transcript = org.mockito.Mockito.mock(Transcript.class);
     org.mockito.Mockito.when(transcript.conversationId()).thenReturn(parent);
     var contexts =
-        new SkillContexts(entries, org.mockito.Mockito.mock(Compaction.class), executions);
+        new SkillContexts(entries, org.mockito.Mockito.mock(SkillSummaries.class), executions);
     var snapshot =
-        contexts.prepare(
-            SkillDefinition.Mode.INHERITED, transcript, "alice", Budget.of(8), () -> false);
+        contexts.prepare(SkillDefinition.Mode.INHERITED, transcript, "alice", () -> false);
     UUID id = UUID.randomUUID();
     assertTrue(
         executions.claim(

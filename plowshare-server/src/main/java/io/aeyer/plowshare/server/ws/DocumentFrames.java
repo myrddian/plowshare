@@ -121,7 +121,19 @@ public class DocumentFrames implements FrameArea {
                       asking.requireHandle(type),
                       io.aeyer.plowshare.server.information.InformationScopes.from(payload));
               var scopedDocuments = documents.scoped(access, context);
-              var scopedRetrieval = retrieval.scoped(access, context);
+              var selectedRetrieval = retrieval.scoped(access, context);
+              var scopedRetrieval =
+                  java.util.Set.of(
+                                  FrameTypes.DOCUMENT_RETRIEVE,
+                                  FrameTypes.DOCUMENT_SEARCH,
+                                  FrameTypes.DOCUMENT_RANK,
+                                  FrameTypes.DOCUMENT_STANCE)
+                              .contains(type)
+                          && selectedRetrieval.queriesEnabled()
+                      ? selectedRetrieval.forQueries(
+                          io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                              asking.queryValidity()))
+                      : selectedRetrieval;
               FrameHandler handler =
                   switch (type) {
                     case FrameTypes.DOCUMENT_ASK ->

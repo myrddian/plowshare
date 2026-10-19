@@ -53,6 +53,7 @@ public final class JdbcActingRepository implements ActingRepository {
 
   @Override
   public boolean subjectActive(String account) {
+    if (io.aeyer.plowshare.server.access.BuiltInIdentities.reservedAccount(account)) return false;
     ActingValues.actor(account);
     return Boolean.TRUE.equals(
         jdbc.queryForObject(

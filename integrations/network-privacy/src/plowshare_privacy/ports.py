@@ -6,7 +6,6 @@ from typing import Protocol
 
 from plowshare import Client
 from plowshare.contracts import (
-    InformationAcquirePayloadDtoScopeVariant2Dto,
     InformationAdmissionDto,
     InformationFilterDto,
     InformationListRequest,
@@ -24,6 +23,7 @@ from plowshare.contracts import (
     RelayPublishResultDto,
     RelayTopicsPayloadVariant1Dto,
     RelayTopicsRequest,
+    SelectionDtoScopeVariant3Dto,
 )
 
 from .contracts import Configuration, Evidence
@@ -52,10 +52,10 @@ class SdkPrivacyPort:
     def __init__(self, client: Client, config: Configuration):
         self.client = client
         self.config = config
-        # Service credentials cannot include shared information; an omitted field
-        # defaults to inclusion at the public information boundary.
-        self.scope = InformationAcquirePayloadDtoScopeVariant2Dto(
-            kind="project", project=config.project, include_shared=False
+        # Keep this collector project-only. The public discovery default also
+        # includes knowledge with the current GLOBAL_READ audience.
+        self.scope = SelectionDtoScopeVariant3Dto(
+            kind="project", project=config.project, include_global=False
         )
 
     async def available_topics(self) -> frozenset[str]:

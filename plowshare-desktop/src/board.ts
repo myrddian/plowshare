@@ -45,6 +45,7 @@ export class BoardClient {
   private state: () => DesktopState;
   private ask: OperationTransport['ask'];
   private emit: () => void;
+  private toppingUp = false;
   constructor(
     state: () => DesktopState,
     ask: OperationTransport['ask'],
@@ -53,6 +54,50 @@ export class BoardClient {
     this.state = state;
     this.ask = ask;
     this.emit = emit;
+  }
+
+  /** Absolute ceiling change; an uncertain delivery is read-reconciled, never replayed. */
+  async topup(topic: string, maxModelCalls: number) {
+    const state = this.state();
+    const root = Object.values(state.board.details)
+      .map((reading) => reading.value?.root)
+      .find((row) => row?.id === topic);
+    if (!state.connected || this.toppingUp || !root || root.closedAt !== null)
+      throw new Error(
+        'Inspect an open topic and connect before raising its allowance.',
+      );
+    if (
+      root.potTotal === null ||
+      !Number.isSafeInteger(maxModelCalls) ||
+      maxModelCalls <= root.potTotal ||
+      maxModelCalls > 2147483647
+    )
+      throw new Error(
+        'Choose a whole call ceiling greater than the current finite allowance.',
+      );
+    this.toppingUp = true;
+    try {
+      const answer = await this.ask('board.topup', { topic, maxModelCalls });
+      if (answer.code !== 'OK')
+        throw new Error(answer.said ?? 'The allowance change was refused.');
+      decodeReply('board.topup', answer.payload);
+      if (
+        !isBoardTopic(answer.payload) ||
+        answer.payload.id !== topic ||
+        answer.payload.project !== root.project ||
+        answer.payload.potTotal !== maxModelCalls
+      )
+        throw new Error('The server did not confirm this allowance change.');
+    } catch (error) {
+      await this.refresh();
+      throw new Error(
+        `${errorMessage(error)} Check the refreshed allowance before submitting another change.`,
+        { cause: error },
+      );
+    } finally {
+      this.toppingUp = false;
+    }
+    await this.refresh();
   }
   async postingTopics(project: string, more = false) {
     if (
@@ -220,7 +265,7 @@ export class BoardClient {
       previous.member === member &&
       previous.maxTurns === maxTurns;
     // A retained request may already have succeeded and disappeared from active snapshots.
-    // The server rechecks ownership/membership and returns the original durable receipt.
+    // The server rechecks scoped WRITE authority and returns the original durable receipt.
     if (
       !recovering &&
       !reconcile &&

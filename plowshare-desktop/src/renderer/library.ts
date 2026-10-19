@@ -709,7 +709,7 @@ async function askDocument(question: string) {
     await action({
       action: 'information',
       operation: 'ask',
-      scope: { kind: 'personal', includeShared: true },
+      scope: { kind: 'personal', includeGlobal: true },
       payload: { revision: id, question },
     });
   } finally {

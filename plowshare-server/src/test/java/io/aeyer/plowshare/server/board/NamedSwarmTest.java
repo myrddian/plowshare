@@ -142,7 +142,8 @@ class NamedSwarmTest {
             ignored -> {},
             UnitOfWork.NONE,
             () -> 10,
-            () -> Instant.EPOCH);
+            () -> Instant.EPOCH,
+            mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
     assertThrows(
         Board.Refused.class,
         () ->

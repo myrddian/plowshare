@@ -92,7 +92,7 @@ try {
   await reports.locator('[data-ask]').dispatchEvent('submit');
   await expect(reports.locator('[data-answer]')).toContainText('Grounded answer from retained evidence.',{timeout:12000});
   assert.equal(fixture.frames.filter(frame=>frame.type==='information.ask').length,1);
-  await library.locator('#report-filter [data-scope]').selectOption('shared');
+  await library.locator('#report-filter [data-scope]').selectOption('global_read');
   await expect(reports.locator('[data-ask]')).toHaveCount(0);
   await expect(reports.locator('[data-detail]')).toContainText('Choose a report');
   await expect(reports.locator('[data-list]')).toContainText('No reports yet');

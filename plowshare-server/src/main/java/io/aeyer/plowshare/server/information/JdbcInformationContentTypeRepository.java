@@ -75,12 +75,18 @@ public final class JdbcInformationContentTypeRepository
       String namespace, UUID version, boolean lock) {
     // Serialise a type before locking any version. Otherwise two activations can each hold a
     // different version while waiting for the same type and the other's active-version update.
-    if (lock)
+    if (lock) {
+      // Import takes the navigation policy lock before resolving contracts. Keep assignment's
+      // order identical: a metadata writer must not hold a type while waiting on that importer.
+      jdbc.queryForObject(
+          "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
+          Boolean.class);
       jdbc.query(
           "SELECT t.id FROM information_content_types t WHERE t.namespace=? AND t.id=(SELECT type_id FROM information_content_type_versions WHERE id=?) FOR UPDATE OF t",
           (row, index) -> row.getObject(1, UUID.class),
           namespace,
           version);
+    }
     var rows =
         jdbc.query(
             SELECT + " WHERE t.namespace=? AND v.id=?" + (lock ? " FOR UPDATE OF v" : ""),
@@ -96,7 +102,7 @@ public final class JdbcInformationContentTypeRepository
         .query(
             SELECT
                 + " JOIN information_revision_content c ON c.type_version=v.id"
-                + " JOIN information_revisions r ON r.id=c.revision_id WHERE c.revision_id=? AND c.type_version=?"
+                + " JOIN information_revision_allowances r ON r.id=c.revision_id WHERE c.revision_id=? AND c.type_version=?"
                 + " AND NOT c.redacted AND r.availability<>'deleted'",
             JdbcInformationContentTypeRepository::decode,
             revision,

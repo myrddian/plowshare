@@ -144,8 +144,10 @@ public class EventsConfig {
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
       DefinitionResolver resolver,
-      Callers callers) {
-    return new ScheduleReader(llm, GlobalAgentSnapshots.supply(globals, agents), resolver, callers);
+      Callers callers,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    return new ScheduleReader(
+        llm, GlobalAgentSnapshots.supply(globals, agents), resolver, callers, system);
   }
 
   @Bean

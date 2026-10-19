@@ -61,6 +61,59 @@ never falls back to the chat ratio estimate. The dual configuration example is
 
 ## Implemented SQL foundation
 
+Semantic embedding executes through the shared internal SYSTEM foundation.
+Preparation supplies its retained revision allowance, lease and publication
+fences. Supported document search/retrieve/rank/stance operations supply a
+separate retained search-operation allowance and current reader context. An
+account needs the existing read permission for the operation, not an embedding
+role or its own RUN_MODEL grant. SYSTEM is the executor, not a spending wallet.
+
+Configure `plowshare.embeddings.search-budget`, or
+`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`, to select spending policy per logical query.
+Omitted, empty or `unlimited` means **unlimited**, the default in both legacy and
+dual modes.
+Set `0` to disable search inference or a positive integer to limit model calls.
+For YAML, `search-budget: unlimited` (or no value) explicitly selects unlimited.
+Negative, non-integer and out-of-range values fail binding. Unlimited uses the existing
+nullable budget ceiling and still retains every admitted call and usage count;
+scope, lifetime, input/profile and result disclosure checks remain enforced.
+Current single-query and batched stance requests each consume one dispatcher
+call. Existing memory recall and eligible automatic Reminder surveys now use the
+same read-side policy through their own typed admission. Curator, independent
+repair, ask/deliberation and digest/navigation now have their own operation
+bindings through the same foundation; they do not borrow search's policy or
+change preparation's allowance. Existing lexical-mode document search still
+embeds its query and therefore also follows the search spending policy.
+
+Each query captures its source and limit once. Completion, failure or cancellation
+closes the live capability while preserving its source, claims and accounting
+correlations. A known repeated tool invocation refuses redispatch; unkeyed new
+public reads remain new operations. Missing authority or failed inference is not
+an empty result, and no alternate model or lexical fallback is attempted.
+Active profile changes during a query refuse the stale read without another
+embedding call. Existing slot activation/coverage requirements still apply.
+
+Memory recall resolves permitted tiers before embedding. Standalone authorized
+project reads may include Global; new retained tools/reminders capture read-only
+Global knowledge eligibility alongside their home. Historical admissions remain
+home-only, and Global conversation access is not granted. Privacy, counts and use telemetry share the final read fence; reminder
+surveys do not increment use counts. Query claims cannot publish stored memory
+vectors. See [slice 16](authority-substrate-slices/16-memory-query-embedding-and-recall.md).
+
+Memory writes and Scribe use a separate admitted filing source through the same
+SYSTEM foundation. `plowshare.archive.write-budget` defaults to unlimited, with
+`0` disabling optional inference and a positive integer limiting actual requests
+across the filing pipeline. It is not borrowed from search or a parent allowance.
+Same-home candidates and exact output/source/profile fences remain mandatory.
+Only completed compatible legacy vectors may be reused; dual write vectors use
+DOCUMENT preprocessing. A write permit cannot repair unrelated sources or run
+maintenance. See [slice 17](authority-substrate-slices/17-memory-writes-and-scribe.md).
+
+Document ask uses `plowshare.documents.ask-budget` (`PLOWSHARE_ASK_BUDGET`),
+also unlimited by default with zero/finite choices. Internal retrieval and all
+ask stages share that operation source. Exact document inputs, source validity
+and current reader disclosure remain separate from SYSTEM execution authority.
+
 All five embedding stores now have unconstrained `code_embedding` and
 `prose_embedding` columns, with space IDs and source revisions. An immutable
 registry fingerprints model ID/revision, dimensions, query/document prefixes,
@@ -430,7 +483,14 @@ information-processing batches retain their original accounting owner. Their
 batch results report dispatch submissions and never fabricate embeddings.
 Model calls run outside transactions. Publication rechecks source and slot
 versions, and successful work in one slot survives failure in the other. Failure
-categories are bounded; retry starts at 30 seconds and backs off to one hour.
+categories are bounded; known pre-dispatch failures back off from 30 seconds to
+one hour. Submitted repairs retain an atomic in-flight marker before dispatch.
+An uncertain outcome stays held across restart and is not automatically retried;
+source or encoder changes identify new work. Existing explicit operator repair
+remains deliberate. `plowshare.embeddings.maintenance-budget`
+(`PLOWSHARE_EMBEDDING_MAINTENANCE_BUDGET`) selects this pass's spending policy:
+`unlimited` by default, `0` disabled, positive finite limit. It does not borrow a
+search, filing or preparation allowance.
 Worker interruption stops between sources; already committed work survives a
 restart. `paused: true` disables automatic repair/activation on the next startup.
 User-owned ingest/processing continues to honor its existing cancellation checks.

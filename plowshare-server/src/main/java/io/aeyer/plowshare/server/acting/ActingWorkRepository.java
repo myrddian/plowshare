@@ -35,7 +35,7 @@ public interface ActingWorkRepository {
 
   void lock();
 
-  String open(String subject, int budget);
+  String open(String subject, Integer budget);
 
   Optional<Binding> binding(String conversation);
 

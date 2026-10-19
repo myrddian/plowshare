@@ -12,8 +12,10 @@ import { decodePayload, decodeReply } from './schema.ts';
 import { isList } from '../binding/values.ts';
 export type InformationCorpus = 'documents' | 'code';
 export type InformationScope =
-  | { kind: 'personal' | 'shared'; includeShared?: boolean }
-  | { kind: 'project'; project: string; includeShared?: boolean };
+  | { kind: 'personal'; includeGlobal?: boolean }
+  | { kind: 'global_read' }
+  | { kind: 'project'; project: string; includeGlobal?: boolean }
+  | { kind: 'account'; account: '00000000-0000-0000-0000-000000000004' };
 export const INFORMATION_OPERATIONS = [
   ...NAVIGATION_OPERATIONS,
   ...INTERCHANGE_OPERATIONS,
@@ -211,7 +213,7 @@ export type InformationCommand = InformationCall & {
   readonly scope: InformationScope;
 };
 export const INFORMATION_HELP =
-  'information <operation> [--scope personal|shared|project] [--project NAME] {JSON payload}. Mutations need a stable UUID requestId; retain it across disconnects. Operations: ' +
+  'information <operation> [--scope personal|global_read|project] [--project NAME] {JSON payload}. Mutations need a stable UUID requestId; retain it across disconnects. Operations: ' +
   INFORMATION_OPERATIONS.join(', ');
 /** JSON remains intact; shell/slash parsing must not strip quotes inside source text. */
 export function informationCommand(
@@ -249,8 +251,8 @@ export function informationCommand(
       kind = 'project';
     } else throw new Error(`Unknown information option: ${String(flag)}`);
   }
-  if (!['personal', 'shared', 'project'].includes(kind))
-    throw new Error('Scope must be personal, shared or project.');
+  if (!['personal', 'global_read', 'project'].includes(kind))
+    throw new Error('Scope must be personal, global_read or project.');
   if (kind === 'project' && !chosen?.trim())
     throw new Error('Select a project.');
   const payload: unknown = at < 0 ? {} : JSON.parse(text.slice(at));
@@ -259,8 +261,8 @@ export function informationCommand(
   const scope: InformationScope =
     kind === 'project' && chosen !== undefined
       ? { kind: 'project', project: chosen }
-      : kind === 'shared'
-        ? { kind: 'shared' }
+      : kind === 'global_read'
+        ? { kind: 'global_read' }
         : { kind: 'personal' };
   return {
     ...decodeInformationCall(operation as InformationOperation, payload, scope),

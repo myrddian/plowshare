@@ -11,6 +11,7 @@ import io.aeyer.plowshare.server.agents.RunExtras;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -66,8 +67,8 @@ public class BoardConfig {
   private static final Logger log = LoggerFactory.getLogger(BoardConfig.class);
 
   @Bean
-  public BoardStore boardStore(JdbcTemplate jdbc) {
-    return new BoardStore(jdbc, Instant::now);
+  public BoardStore boardStore(JdbcTemplate jdbc, AllowanceRepository allowances) {
+    return new BoardStore(jdbc, Instant::now, allowances);
   }
 
   /**
@@ -96,6 +97,7 @@ public class BoardConfig {
   @Bean
   public BoardMessaging boardMessaging(
       JdbcTemplate jdbc,
+      AllowanceRepository allowances,
       BoardStore store,
       ConversationStore conversations,
       FiringStore firings,
@@ -112,7 +114,7 @@ public class BoardConfig {
       ProjectMessageRouting routing) {
     BoardMessaging messaging =
         new BoardMessaging(
-            new JdbcBoardMessagingRepository(jdbc),
+            new JdbcBoardMessagingRepository(jdbc, allowances),
             store,
             conversations,
             firings,
@@ -137,7 +139,8 @@ public class BoardConfig {
                     cap,
                     source,
                     ended,
-                    command);
+                    command,
+                    instance.account());
               }
 
               public boolean busy(String conversation) {
@@ -158,7 +161,9 @@ public class BoardConfig {
                     lease,
                     cap,
                     Speaker.harness(),
-                    ended);
+                    ended,
+                    false,
+                    instance.account());
               }
 
               public String speakCommand(
@@ -176,7 +181,8 @@ public class BoardConfig {
                     cap,
                     Speaker.harness(),
                     ended,
-                    true);
+                    true,
+                    instance.account());
               }
 
               public String continueApproved(
@@ -194,7 +200,9 @@ public class BoardConfig {
                     lease,
                     cap,
                     Speaker.approval(approval),
-                    ended);
+                    ended,
+                    false,
+                    instance.account());
               }
 
               public String resumeDelegate(
@@ -265,6 +273,7 @@ public class BoardConfig {
       Dispatcher dispatcher,
       UnitOfWork work,
       SwarmProperties properties,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
       ObjectProvider<LogStages> logStages) {
     int reserve = properties.getClosingReserve();
     if (reserve < 0 || reserve >= 100) {
@@ -285,7 +294,8 @@ public class BoardConfig {
             dispatcher::drain,
             work,
             properties::closingReserveNow,
-            Instant::now);
+            Instant::now,
+            members);
     board.useMaxDepth(properties::maxDepthNow);
     LogStages stages = logStages.getIfAvailable();
     if (stages != null) {
@@ -500,10 +510,18 @@ public class BoardConfig {
               }
 
               @Override
-              public void speak(String conversation, String agent, String text, Speaker speaker) {
+              public void speakForAccount(
+                  String conversation, String agent, String text, Speaker speaker, String account) {
+                callers.requireConversationProject(conversation, account);
+                try {
+                  callers.requireWork(turn.homeOf(conversation).project(), account);
+                } catch (io.aeyer.plowshare.server.faults.CallerFault denied) {
+                  throw new Turn.Refused("The recipient cannot execute this delivery");
+                }
                 AgentDefinition definition =
                     callers.requireAgent(agent, callers.callerForConversation(conversation, null));
-                turn.deliver(conversation, definition, text, speaker, outcome -> {});
+                turn.deliverForExecutor(
+                    conversation, definition, text, speaker, outcome -> {}, account);
               }
             },
             inbox::notify);

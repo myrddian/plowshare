@@ -49,10 +49,12 @@ public class HarnessConfig {
   public StuckTrapFactory stuckTrap(
       LlmDispatcher dispatcher,
       ObjectProvider<AgentRegistry> agents,
-      ObjectProvider<GlobalAgentDefinitions> globals) {
+      ObjectProvider<GlobalAgentDefinitions> globals,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new StuckTrapFactory(
         dispatcher,
-        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(StuckTrapFactory.ADVISOR));
+        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(StuckTrapFactory.ADVISOR),
+        system);
   }
 
   /**
@@ -65,10 +67,12 @@ public class HarnessConfig {
   public ModelCallValidator callValidator(
       LlmDispatcher dispatcher,
       ObjectProvider<AgentRegistry> agents,
-      ObjectProvider<GlobalAgentDefinitions> globals) {
+      ObjectProvider<GlobalAgentDefinitions> globals,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new ModelCallValidator(
         dispatcher,
-        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(ModelCallValidator.AGENT));
+        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(ModelCallValidator.AGENT),
+        system);
   }
 
   /**
@@ -165,9 +169,11 @@ public class HarnessConfig {
   public ModelCommandJudge commandJudge(
       LlmDispatcher dispatcher,
       ObjectProvider<AgentRegistry> agents,
-      ObjectProvider<GlobalAgentDefinitions> globals) {
+      ObjectProvider<GlobalAgentDefinitions> globals,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new ModelCommandJudge(
         dispatcher,
-        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(ModelCommandJudge.AGENT));
+        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(ModelCommandJudge.AGENT),
+        system);
   }
 }

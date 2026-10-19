@@ -5,7 +5,9 @@ import io.aeyer.plowshare.protocol.Invalidation;
 import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.protocol.MemoryState;
 import io.aeyer.plowshare.protocol.Provenance;
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.embedding.*;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -45,7 +47,7 @@ import org.springframework.stereotype.Repository;
  * that could.
  */
 @Repository
-public class MemoryStore {
+public class MemoryStore implements MemoryReadRepository, MemoryWriteRepository {
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
@@ -56,6 +58,213 @@ public class MemoryStore {
 
   public void protectInformation() {
     informationProtected = true;
+  }
+
+  @Override
+  public Selection pin(MemoryQueries.Request request) {
+    if (!informationProtected)
+      throw new IllegalStateException("Memory privacy protection is required");
+    var rows =
+        jdbc.query(
+            """
+            SELECT a.id, CASE WHEN ?::text IS NULL THEN ?::uuid
+              ELSE (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?) END
+            FROM authority_accounts a
+            WHERE a.legacy_handle=? AND information_global_read_member(?)
+              AND (?::text IS NULL OR information_project_readable(
+                (SELECT id FROM projects WHERE name=?),?))
+            """,
+            (row, n) ->
+                new QuerySources.Pin(
+                    row.getObject(1, java.util.UUID.class), row.getObject(2, java.util.UUID.class)),
+            request.home().project(),
+            BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
+            request.home().project(),
+            request.account(),
+            request.account(),
+            request.home().project(),
+            request.home().project(),
+            request.account());
+    if (rows.size() != 1 || rows.getFirst().scope() == null)
+      throw new CallerFault("Memory query is outside live read authority");
+    return new Selection(rows.getFirst(), request.readScope().memoryHomes());
+  }
+
+  @Override
+  public void require(MemoryQueries.Request request, Selection expected) {
+    if (!expected.equals(pin(request)))
+      throw new CallerFault("Memory query identity or scope changed");
+  }
+
+  @Override
+  public void lockRead(MemoryQueries.Request request, Selection expected) {
+    jdbc.queryForObject(
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
+        Boolean.class);
+    jdbc.queryForObject(
+        "SELECT information_lock_scope(?,?) IS NULL",
+        Boolean.class,
+        request.account(),
+        expected.pin().scope());
+    if (expected.tiers().stream().anyMatch(Home::isGlobal) && !request.home().isGlobal())
+      jdbc.queryForObject(
+          "SELECT information_lock_scope(?,?) IS NULL",
+          Boolean.class,
+          request.account(),
+          BuiltInIdentities.GLOBAL_KNOWLEDGE.value());
+    // Source-before-provenance matches memory writes. Serialize short telemetry-bearing reads;
+    // no provider IO occurs while these locks are held. Privacy evidence cannot change mid-read.
+    jdbc.execute("LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE");
+    jdbc.execute(
+        "LOCK TABLE memory_provenance,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
+    require(request, expected);
+  }
+
+  @Override
+  public Memory used(Memory memory, Instant at) {
+    if (jdbc.update(
+            "UPDATE memories SET uses=uses+1,last_used=? WHERE id=? AND state IN ('active','cold')",
+            utc(at),
+            memory.id())
+        != 1) throw new IllegalStateException("Recalled memory changed before telemetry");
+    return Lifecycle.recordUse(memory, at);
+  }
+
+  @Override
+  public QuerySources.Pin pin(MemoryWrites.Request request) {
+    if (!informationProtected)
+      throw new IllegalStateException("Memory privacy protection required");
+    boolean learning = request.origin().learning() != null;
+    var rows =
+        jdbc.query(
+            """
+        SELECT a.id, CASE WHEN ?::text IS NULL THEN ?::uuid ELSE
+          (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?) END
+        FROM authority_accounts a WHERE a.id=CASE WHEN ? THEN ?::uuid ELSE
+          (SELECT id FROM authority_accounts WHERE legacy_handle=?) END
+        """,
+            (row, n) ->
+                new QuerySources.Pin(
+                    row.getObject(1, java.util.UUID.class), row.getObject(2, java.util.UUID.class)),
+            request.home().project(),
+            BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
+            request.home().project(),
+            learning,
+            BuiltInIdentities.SYSTEM.value(),
+            request.account());
+    if (rows.size() != 1 || rows.getFirst().scope() == null) throw writeDenied();
+    var pin = rows.getFirst();
+    require(request, pin, false);
+    return pin;
+  }
+
+  private static CallerFault writeDenied() {
+    return new CallerFault("Memory write is outside its live authority or source window");
+  }
+
+  @Override
+  public void require(MemoryWrites.Request request, QuerySources.Pin pin, boolean processing) {
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM authority_scopes WHERE id=? AND id=CASE WHEN ?::text IS NULL THEN ?::uuid ELSE (SELECT memory_knowledge_scope(id) FROM projects WHERE name=?) END)",
+            Boolean.class,
+            pin.scope(),
+            request.home().project(),
+            BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
+            request.home().project()))) throw writeDenied();
+    if (!processing && request.origin().learning() == null) {
+      if (!Boolean.TRUE.equals(
+          jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM authority_accounts a WHERE a.id=? AND a.legacy_handle=? AND information_global_read_member(?) AND (?::text IS NOT NULL OR EXISTS(SELECT 1 FROM admins u WHERE u.handle=? AND u.enabled AND u.server_admin AND NOT u.bootstrap AND u.account_kind='USER')))",
+              Boolean.class,
+              pin.account(),
+              request.account(),
+              request.account(),
+              request.home().project(),
+              request.account()))) throw writeDenied();
+    }
+    var learning = request.origin().learning();
+    if (learning != null) {
+      if (!Boolean.TRUE.equals(
+          jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id=? AND memory_knowledge_scope(c.project_id)=? AND information_log_readable(c.id,NULL))",
+              Boolean.class,
+              learning.conversation(),
+              pin.scope()))) throw writeDenied();
+      for (var entry : learning.entries())
+        if (!Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM entries WHERE conversation_id=? AND ordinal=? AND turn_ordinal=? AND content IS NOT DISTINCT FROM ? AND kind=? AND learned_at IS NULL AND ejected_at IS NULL)",
+                Boolean.class,
+                learning.conversation(),
+                entry.ordinal(),
+                entry.turnOrdinal(),
+                entry.content(),
+                entry.kind().wireName()))) throw writeDenied();
+    }
+  }
+
+  @Override
+  public void lock(MemoryWrites.Request request, QuerySources.Pin pin, boolean processing) {
+    jdbc.queryForObject(
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
+        Boolean.class);
+    if (!processing && request.account() != null)
+      jdbc.queryForObject(
+          "SELECT information_lock_scope(?,?) IS NULL",
+          Boolean.class,
+          request.account(),
+          pin.scope());
+    else {
+      jdbc.queryForList(
+          "SELECT id FROM projects WHERE id=(SELECT project_id FROM authority_scopes WHERE id=?) FOR SHARE",
+          pin.scope());
+      jdbc.queryForList("SELECT id FROM authority_scopes WHERE id=? FOR SHARE", pin.scope());
+    }
+    // Same source-before-privacy ordering as memory read assembly. Serialize short content
+    // mutation/publication and telemetry; provider IO always occurs after these locks release.
+    jdbc.execute("LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE");
+    jdbc.execute(
+        "LOCK TABLE memory_provenance,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
+    if (request.origin().learning() != null)
+      jdbc.execute("LOCK TABLE conversations,entries IN SHARE MODE");
+    require(request, pin, processing);
+  }
+
+  @Override
+  public Memory current(String id) {
+    return load(id).orElseThrow(MemoryStore::writeDenied);
+  }
+
+  @Override
+  public void provenance(String id, MemoryWrites.Learning source) {
+    for (int turn : source.entries().stream().map(EntryRecord::turnOrdinal).distinct().toList())
+      jdbc.update(
+          "INSERT INTO memory_provenance VALUES(?,?,?) ON CONFLICT DO NOTHING",
+          id,
+          source.conversation(),
+          turn);
+  }
+
+  @Override
+  public void publishLegacy(
+      MemoryWrites.Request request,
+      QuerySources.Pin pin,
+      EmbeddingWorkRepository.Source expected,
+      float[] vector,
+      Runnable validity) {
+    lock(request, pin, true);
+    validity.run();
+    if (expected.key().store() != EmbeddingWorkRepository.Store.MEMORIES
+        || !request.home().equals(current(expected.key().id()).home())) throw writeDenied();
+    if (jdbc.update(
+            "UPDATE memories SET embedding=CAST(? AS vector) WHERE id=? AND home_scope_id=? AND embedding_source_revision=? AND summary || E'\\n' || scope=? AND state IN ('active','cold') AND information_memory_safe(id)",
+            toVectorText(vector),
+            expected.key().id(),
+            pin.scope(),
+            expected.revision(),
+            expected.text())
+        != 1) throw writeDenied();
   }
 
   private String safe(boolean aliased) {
@@ -86,24 +295,13 @@ public class MemoryStore {
   private static final String RETIRED_STATES = "('superseded', 'invalidated')";
 
   /*
-   * `project_id IS NOT DISTINCT FROM ?` and not `project_id = ?`, because the
-   * global tier is a NULL project and `NULL = NULL` is NULL, not true — a
-   * plain equality would silently return zero global rows forever. The CAST is
-   * not decoration: with a bare `?` the driver sends an untyped NULL and
-   * Postgres refuses the statement with "could not determine data type of
-   * parameter".
-   *
-   * The parameter is a project id since V14 and not a name, and it is never
-   * built here: ProjectIds.toRead is the one place a Home becomes one, because
-   * the third case -- a project nothing has written to yet -- has to become a
-   * value that matches no row rather than the NULL that means global.
-   *
-   * Unqualified despite the join below, which is deliberate rather than
-   * careless: `projects` has no column of this name, so there is nothing for it
-   * to be ambiguous with, and the two columns that DO collide -- `id` and
-   * `name` -- are qualified everywhere they appear.
+   * Explicit persisted home identity is authoritative for tier selection. ProjectIds still
+   * translates the legacy wire Home: its unknown-project sentinel resolves to no scope, while
+   * the archive's documented null tier maps to the fixed Global knowledge scope. This mapping
+   * does not grant authority to callers; existing archive/curation admission remains in force.
    */
-  private static final String HOME_MATCHES = "project_id IS NOT DISTINCT FROM CAST(? AS BIGINT)";
+  private static final String HOME_MATCHES =
+      "home_scope_id = memory_knowledge_scope(CAST(? AS BIGINT))";
 
   /*
    * The join is what keeps a Home a name. A row holds an id; a Memory holds

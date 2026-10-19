@@ -9,11 +9,11 @@ import io.aeyer.plowshare.server.faults.CallerFault;
  *
  * <p><b>The configured default arrives as a parameter, and that is the one change from the method
  * this was moved out of.</b> {@code ConversationController.allowance} read {@code
- * properties.getDefaultBudget()} off an injected {@code ConversationsProperties} field; a straight
- * move would have dragged that Spring-bound type into a value type that otherwise needs no
+ * properties.defaultBudgetLimit()} off an injected {@code ConversationsProperties} field; a
+ * straight move would have dragged that Spring-bound type into a value type that otherwise needs no
  * collaborator at all. {@link #in} takes the number instead, and {@code
- * ConversationController.open} passes {@code properties.getDefaultBudget()} at the call site — the
- * same split {@code archive.Conversations} draws between fetching a row and deciding what to do
+ * ConversationController.open} passes {@code properties.defaultBudgetLimit()} at the call site —
+ * the same split {@code archive.Conversations} draws between fetching a row and deciding what to do
  * with it, kept here between reading configuration and deciding a budget.
  *
  * <p><b>An omitted key used to be a 400 and now takes the configured default</b>, and {@code
@@ -70,7 +70,7 @@ public final class RequestedBudget {
    *     the number it names — or the configured default, when it names none — is one {@link
    *     Budget#of} refuses
    */
-  public static Budget in(Integer maxModelCalls, Boolean noBudget, int configuredDefault) {
+  public static Budget in(Integer maxModelCalls, Boolean noBudget, Integer configuredDefault) {
     boolean lifted = Boolean.TRUE.equals(noBudget);
     if (lifted && maxModelCalls != null) {
       throw new CallerFault(
@@ -83,7 +83,7 @@ public final class RequestedBudget {
     if (lifted) {
       return Budget.none();
     }
-    int limit = maxModelCalls == null ? configuredDefault : maxModelCalls;
-    return Budget.of(limit);
+    if (maxModelCalls != null) return Budget.of(maxModelCalls);
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(configuredDefault);
   }
 }

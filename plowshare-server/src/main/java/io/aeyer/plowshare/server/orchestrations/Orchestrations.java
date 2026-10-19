@@ -6,12 +6,15 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Orchestration;
 import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRunTool;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.CallerAccess;
 import io.aeyer.plowshare.server.agents.ConductorActions;
 import io.aeyer.plowshare.server.agents.LogStages;
+import io.aeyer.plowshare.server.agents.OperationExecution;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.agents.OrchestrationRegistry;
 import io.aeyer.plowshare.server.agents.Outcome;
@@ -221,7 +224,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    * What starts a run.
    *
    * @param callerConversation the conversation that started it, or {@code null}
-   * @param callerHandle the admin that started it, or {@code null}
+   * @param callerHandle the bound execution account; creator provenance supplies no authority
    * @param callerSession the session the caller was attached to, or {@code null}; each conductor
    *     turn passes it only while it is live — Decision 2
    * @param parent the orchestration whose conductor started this one, or {@code null} for a root
@@ -382,6 +385,80 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    * acceptance done again reads the answers from the approvals themselves.
    */
   private final Set<String> pendingAcceptanceAnswers = ConcurrentHashMap.newKeySet();
+
+  private OperationAuthority operations;
+  private io.aeyer.plowshare.server.allowances.AllowanceRepository allowances;
+
+  /** Production roots retain authority in the existing start transaction, before dispatch. */
+  public Orchestrations(
+      OrchestrationStore store,
+      ConversationStore conversations,
+      StageSeeding seeding,
+      TodoLists todos,
+      UnitOfWork work,
+      ConductorVoice voice,
+      DeliveryPort delivery,
+      Set<String> knownTools,
+      UnaryOperator<AgentDefinition> conductorChecks,
+      Predicate<String> sessionLive,
+      Supplier<Instant> clock,
+      Consumer<OrchestrationRecord> changed,
+      Consumer<String> cancelJobsIn,
+      int maxDepth,
+      CallerAccess access,
+      OrchestrationRecovery recovery,
+      ScriptStore scripts,
+      OperationAuthority operations,
+      io.aeyer.plowshare.server.allowances.AllowanceRepository allowances) {
+    this(
+        store,
+        conversations,
+        seeding,
+        todos,
+        work,
+        voice,
+        delivery,
+        knownTools,
+        conductorChecks,
+        sessionLive,
+        clock,
+        changed,
+        cancelJobsIn,
+        maxDepth,
+        access,
+        recovery,
+        scripts);
+    this.operations = Objects.requireNonNull(operations);
+    this.allowances = Objects.requireNonNull(allowances);
+  }
+
+  private void requireRetained(OrchestrationRecord run) {
+    if (operations == null) return; // Immutable isolated fixtures only.
+    var bound =
+        operations
+            .conversation(run.conductorConversation())
+            .orElseThrow(
+                () -> new CallerFault("This orchestration has no retained authority lineage"));
+    var row =
+        conversations
+            .find(run.conductorConversation())
+            .orElseThrow(() -> new CallerFault("The conductor conversation is unavailable"));
+    Budget allowance = allowances.restore(bound.budget());
+    if (!bound.admission().executor().equals(run.callerHandle())
+        || !bound.admission().home().equals(homeOf(run))
+        || !bound.agent().equals(row.agent())
+        || !row.home().equals(homeOf(run))
+        || !bound.budget().value().equals(allowance.identity()))
+      throw new CallerFault("The orchestration execution envelope changed");
+    operations.require(bound.admission());
+  }
+
+  private void requireCapabilities(OrchestrationRecord run, AgentDefinition conductor) {
+    if (operations == null) return;
+    var bound = operations.conversation(run.conductorConversation()).orElseThrow();
+    if (!bound.capabilities().equals(OperationExecution.fingerprint(conductor)))
+      throw new CallerFault("The conductor retained capability declarations changed");
+  }
 
   /**
    * @param conductorChecks the server's definition checks over one conductor: the checked
@@ -723,6 +800,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
             .orElseThrow(
                 () -> new CallerFault("No orchestration with that id is owned by this account."));
     access.requireWork(run.project(), account);
+    requireRetained(run);
     if (recovery.received(run.id(), account, ask.requestId())) return run;
     if (run.state() != OrchestrationState.FAILED || run.parent() != null)
       throw new CallerFault(
@@ -732,6 +810,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
           "The failed turn is still stopping; retry after it releases the conversation.");
     Rebuilt rebuilt = rebuild(run);
     if (rebuilt.conductor() == null) throw new CallerFault(rebuilt.failure());
+    requireCapabilities(run, rebuilt.conductor());
     if (budgetExhausted(run))
       throw new CallerFault(
           "The run has no model calls left; resume requires remaining allowance.");
@@ -799,6 +878,20 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   public OrchestrationRecord start(Start start, java.util.UUID requestId, String payload) {
     access.requireWork(start.home().project(), start.callerHandle());
     access.requireSession(start.callerSession(), start.callerHandle());
+    if (operations != null && start.parent() != null && start.callerConversation() == null)
+      throw new CallerFault("Nested start needs its retained caller");
+    if (operations != null && start.callerConversation() != null) {
+      var caller =
+          operations
+              .conversation(start.callerConversation())
+              .orElseThrow(() -> new CallerFault("Caller has no retained authority"));
+      operations.require(caller.admission());
+      if (!caller.admission().executor().equals(start.callerHandle())
+          || !caller.admission().home().equals(start.home())
+          || !caller.admission().actions().contains(AuthorityAction.CONVERSATION_CREATE))
+        throw new CallerFault("Caller cannot start this orchestration");
+    }
+
     OrchestrationDefinition definition = start.definition();
     // The person's caps (spec 2026-09-29 §2): the budget the conversation is logged with and
     // the first turn's steps. Every later turn is rebuilt, and capped again, in rebuild.
@@ -820,6 +913,33 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
             () -> {
               Supplier<OrchestrationRecord> insert =
                   () -> {
+                    OperationAuthority.Admission envelope = null;
+                    if (operations != null) {
+                      var actions = new HashSet<>(OperationExecution.actions(conductor));
+                      actions.add(AuthorityAction.CONVERSATION_CREATE);
+                      if (start.callerConversation() == null) {
+                        if (start.parent() != null)
+                          throw new CallerFault("Nested start needs its retained caller");
+                        envelope = operations.admit(start.callerHandle(), start.home(), actions);
+                      } else {
+                        var parent =
+                            operations
+                                .conversation(start.callerConversation())
+                                .orElseThrow(
+                                    () -> new CallerFault("Caller has no retained authority"));
+                        if (!parent.admission().executor().equals(start.callerHandle())
+                            || !parent.admission().home().equals(start.home())
+                            || !parent
+                                .admission()
+                                .actions()
+                                .contains(AuthorityAction.CONVERSATION_CREATE))
+                          throw new CallerFault("Caller cannot start this orchestration");
+                        envelope = operations.derive(parent.admission(), actions);
+                      }
+                    }
+                    // Authority derives from the caller; funding does not. Each orchestration,
+                    // including a nested phase or a board-launched workflow, selects its own
+                    // configured allowance. Only synchronous agent_run descendants share it.
                     ConversationRecord conversation =
                         conversations.log(
                             Origin.ORCHESTRATION,
@@ -829,8 +949,18 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                             conductor.nativeOnly()
                                 ? Budget.noCalls()
                                 : Budget.of(conductor.maxModelCalls()),
-                            // The caller's account owns the conductor's log (amendment 2).
+                            // Retain log custody separately; the envelope supplies execution
+                            // authority.
                             start.callerHandle());
+                    if (envelope != null)
+                      operations.bind(
+                          new OperationAuthority.Conversation(
+                              conversation.id(),
+                              conductor.name(),
+                              envelope,
+                              start.callerConversation(),
+                              conversation.budget().snapshot().id(),
+                              OperationExecution.fingerprint(conductor)));
                     OrchestrationRecord inserted =
                         store.insert(
                             new NewOrchestration(
@@ -862,6 +992,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
               return new CommittedStart(store.find(receipt.id()).orElseThrow(), receipt.created());
             });
     OrchestrationRecord run = committed.run();
+    requireRetained(run);
     if (!committed.created()) return run;
     // log.open, after the transaction committed and before the first turn is submitted, so
     // no hook holds a transaction open (spec 2026-09-28-hooks-reach-the-log decision 9). And
@@ -4076,6 +4207,8 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       String utterance,
       Integer maxModelCalls,
       Speaker source) {
+    requireRetained(run);
+    requireCapabilities(run, conductor);
     String id = run.id();
     if (store.find(id).filter(live -> live.endedAt() == null).isEmpty()) {
       log.info(
@@ -4358,7 +4491,17 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   }
 
   private Optional<Budget> budgetOf(OrchestrationRecord run) {
-    return conversations.find(run.conductorConversation()).map(ConversationRecord::budget);
+    if (operations != null)
+      return operations
+          .conversation(run.conductorConversation())
+          .map(bound -> allowances.restore(bound.budget()));
+    return conversations
+        .find(run.conductorConversation())
+        .flatMap(
+            row ->
+                row.budget() != null
+                    ? Optional.of(row.budget())
+                    : conversations.allowanceFor(row.id()));
   }
 
   /**

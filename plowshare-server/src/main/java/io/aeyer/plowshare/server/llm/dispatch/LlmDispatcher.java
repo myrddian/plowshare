@@ -34,6 +34,7 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private final io.aeyer.plowshare.server.security.ChatFiltering filtering;
   private final List<LlmPool> pools;
+  private final InferenceBoundary boundary;
   private final TokenLedger ledger;
   private final InferenceAccounting accounting;
   private final Duration promptTimeout;
@@ -133,6 +134,28 @@ public final class LlmDispatcher implements AutoCloseable {
       Duration promptTimeout,
       Duration foldTimeout,
       io.aeyer.plowshare.server.security.ChatFiltering filtering) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        filtering,
+        InferenceBoundary.FIXTURE);
+  }
+
+  /** Production requires explicit operation authority and a claimed allowance on every route. */
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      InferenceBoundary boundary) {
+    this.boundary = Objects.requireNonNull(boundary);
     this.filtering = Objects.requireNonNull(filtering);
     this.promptTimeout = promptTimeout;
     this.foldTimeout = foldTimeout;
@@ -170,8 +193,10 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   public Completion complete(ChatRequest request) {
-    request.authorization().require();
+    request.authorization().requireRequest(request);
+    boundary.submitted(request.authorization());
     ChatRequest filtered = filtering.input(request, () -> false);
+    boundary.require(filtered.authorization());
     Routing routing = route(filtered.specifier(), Lane.CHAT);
     Sampling sampling = carried(routing, filtered.sampling());
     InferenceObserver observer =
@@ -181,7 +206,9 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.specifier(),
             Lane.CHAT,
             filtered.attribution());
-    observer = InferenceObserver.authorized(observer, filtered.authorization());
+    boundary.accounted(filtered.authorization(), observer.capture());
+    observer =
+        InferenceObserver.authorized(observer, () -> boundary.require(filtered.authorization()));
     if (routing.pool().automaticCounting())
       preflight(
           observer,
@@ -199,9 +226,12 @@ public final class LlmDispatcher implements AutoCloseable {
                 filtered.submitTimeout(),
                 observer,
                 promptTimeout);
-    return filtering.output(
-        recorded(routing, filtered.specifier(), Lane.CHAT, completion)
-            .captured(observer.capture()));
+    Completion approved =
+        filtering.output(
+            recorded(routing, filtered.specifier(), Lane.CHAT, completion)
+                .captured(observer.capture()));
+    boundary.require(filtered.authorization());
+    return approved;
   }
 
   /**
@@ -268,8 +298,10 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private Completion stream(
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
-    request.authorization().require();
+    request.authorization().requireRequest(request);
+    boundary.submitted(request.authorization());
     ChatRequest filtered = filtering.input(request, abandoned);
+    boundary.require(filtered.authorization());
     Routing routing = route(filtered.specifier(), Lane.CHAT);
     Sampling sampling = carried(routing, filtered.sampling());
     InferenceObserver observer =
@@ -279,7 +311,9 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.specifier(),
             Lane.CHAT,
             filtered.attribution());
-    observer = InferenceObserver.authorized(observer, filtered.authorization());
+    boundary.accounted(filtered.authorization(), observer.capture());
+    observer =
+        InferenceObserver.authorized(observer, () -> boundary.require(filtered.authorization()));
     if (routing.pool().automaticCounting())
       preflight(
           observer,
@@ -291,7 +325,9 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.messages(),
             sampling,
             filtered.tools(),
-            filtering.bufferOutput() ? Deltas.DISCARDING : sink,
+            filtering.bufferOutput() || filtered.authorization().binding() != null
+                ? Deltas.DISCARDING
+                : sink,
             abandoned,
             filtered.toolChoice(),
             filtered.submitTimeout(),
@@ -301,8 +337,10 @@ public final class LlmDispatcher implements AutoCloseable {
         filtering.output(
             recorded(routing, filtered.specifier(), Lane.CHAT, completion)
                 .captured(observer.capture()));
-    if (filtering.bufferOutput() && !approved.content().isEmpty() && !abandoned.getAsBoolean())
-      sink.answered(approved.content());
+    boundary.require(filtered.authorization());
+    if ((filtering.bufferOutput() || filtered.authorization().binding() != null)
+        && !approved.content().isEmpty()
+        && !abandoned.getAsBoolean()) sink.answered(approved.content());
     return approved;
   }
 
@@ -350,6 +388,8 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   public Embeddings embed(EmbeddingRequest request) {
+    request.authorization().requireRequest(request);
+    boundary.submitted(request.authorization());
     Routing routing = route(request.specifier(), Lane.EMBEDDING);
     InferenceObserver observer =
         accounting.begin(
@@ -358,6 +398,14 @@ public final class LlmDispatcher implements AutoCloseable {
             request.specifier(),
             Lane.EMBEDDING,
             request.attribution());
+    boundary.accounted(request.authorization(), observer.capture());
+    observer =
+        InferenceObserver.authorized(
+            observer,
+            () -> {
+              request.authorization().requireRequest(request);
+              boundary.require(request.authorization());
+            });
     if (routing.pool().automaticCounting())
       preflight(
           observer, routing, () -> routing.pool().countEmbedding(routing.wireModel(), request));
@@ -369,6 +417,7 @@ public final class LlmDispatcher implements AutoCloseable {
     // ledger call: three sites with two conventions is how the guard below
     // comes to cover two of them.
     record(routing, request.specifier(), Lane.EMBEDDING, embeddings.usage(), null);
+    boundary.require(request.authorization());
     return embeddings.captured(observer.capture());
   }
 
@@ -829,8 +878,10 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   public Completion streamOn(
       String pool, ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
-    request.authorization().require();
+    request.authorization().requireRequest(request);
+    boundary.submitted(request.authorization());
     ChatRequest filtered = filtering.input(request, abandoned);
+    boundary.require(filtered.authorization());
     LlmPool named =
         pools.stream()
             .filter(candidate -> candidate.name().equals(pool))
@@ -845,7 +896,9 @@ public final class LlmDispatcher implements AutoCloseable {
     InferenceObserver observer =
         accounting.begin(
             named.name(), wireModel, filtered.specifier(), Lane.CHAT, filtered.attribution());
-    observer = InferenceObserver.authorized(observer, filtered.authorization());
+    boundary.accounted(filtered.authorization(), observer.capture());
+    observer =
+        InferenceObserver.authorized(observer, () -> boundary.require(filtered.authorization()));
     if (named.automaticCounting())
       preflight(
           observer, routing, () -> named.countChat(wireModel, filtered.withSampling(sampling)));
@@ -855,7 +908,9 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.messages(),
             sampling,
             filtered.tools(),
-            filtering.bufferOutput() ? Deltas.DISCARDING : sink,
+            filtering.bufferOutput() || filtered.authorization().binding() != null
+                ? Deltas.DISCARDING
+                : sink,
             abandoned,
             filtered.toolChoice(),
             filtered.submitTimeout(),
@@ -865,8 +920,10 @@ public final class LlmDispatcher implements AutoCloseable {
         filtering.output(
             recorded(routing, filtered.specifier(), Lane.CHAT, completion)
                 .captured(observer.capture()));
-    if (filtering.bufferOutput() && !approved.content().isEmpty() && !abandoned.getAsBoolean())
-      sink.answered(approved.content());
+    boundary.require(filtered.authorization());
+    if ((filtering.bufferOutput() || filtered.authorization().binding() != null)
+        && !approved.content().isEmpty()
+        && !abandoned.getAsBoolean()) sink.answered(approved.content());
     return approved;
   }
 

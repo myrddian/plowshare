@@ -201,10 +201,42 @@ public final class JobStore implements AutoCloseable, EventRuns, RunningConversa
     this.runEnds = Objects.requireNonNull(ends, "ends");
   }
 
-  /**
-   * A store nobody is watching. Every event is dropped, which is what {@link JobEvents#NONE} means
-   * and what a context with no event channel wired gets.
-   */
+  private io.aeyer.plowshare.server.access.OperationAuthority operations;
+
+  /** Harness continuation uses retained execution identity, never conversation custody. */
+  public String retainedExecutor(String conversation) {
+    if (operations == null) return null; // Isolated legacy stores only.
+    var bound =
+        operations
+            .conversation(conversation)
+            .orElseThrow(
+                () ->
+                    new io.aeyer.plowshare.server.faults.CallerFault(
+                        "Missing retained execution lineage"));
+    operations.require(bound.admission());
+    return bound.admission().executor();
+  }
+
+  /** Focused execution fixture with mandatory operation authority. */
+  public JobStore(
+      io.aeyer.plowshare.server.access.OperationAuthority operations, JobRuntime runtime) {
+    this(runtime);
+    this.operations = Objects.requireNonNull(operations);
+  }
+
+  /** Production constructor retains authority before any executor can run. */
+  public JobStore(
+      JobRuntime runtime,
+      JobEvents events,
+      Compaction logs,
+      JobLog rows,
+      Duration heartbeat,
+      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+    this(runtime, events, logs, rows, heartbeat);
+    this.operations = Objects.requireNonNull(operations);
+  }
+
+  /** A store nobody is watching; every event is dropped through JobEvents.NONE. */
   public JobStore(JobRuntime runtime) {
     this(runtime, JobEvents.NONE);
   }
@@ -852,6 +884,18 @@ public final class JobStore implements AutoCloseable, EventRuns, RunningConversa
     // other. Job's own constructor refuses the pair otherwise, the same
     // way Transcript.Spoken refuses a conversation id with no turn ordinal.
     Origin conversationOrigin = conversation == null ? null : origin;
+    var operation =
+        operations == null
+            ? null
+            : Objects.requireNonNull(
+                OperationExecution.admit(
+                    operations,
+                    callerHandle,
+                    home,
+                    definition,
+                    conversation,
+                    conversationOrigin,
+                    budget));
     return start(
         definition.name(),
         home,
@@ -860,22 +904,39 @@ public final class JobStore implements AutoCloseable, EventRuns, RunningConversa
         conversation,
         conversationOrigin,
         ended,
-        (watch, cancelled) ->
-            (admission == null ? runtime : runtime.forAdmittedTurn(admission))
-                .run(
-                    definition,
-                    userPrompt,
-                    home,
-                    budget,
-                    cancelled,
-                    sessionId,
-                    watch,
-                    transcript,
-                    under,
-                    images,
-                    callerHandle,
-                    incoming),
+        (watch, cancelled) -> {
+          JobRuntime runner = admission == null ? runtime : runtime.forAdmittedTurn(admission);
+          return operation == null
+              ? runner.run(
+                  definition,
+                  userPrompt,
+                  home,
+                  budget,
+                  cancelled,
+                  sessionId,
+                  watch,
+                  transcript,
+                  under,
+                  images,
+                  callerHandle,
+                  incoming)
+              : runner.runOperation(
+                  definition,
+                  userPrompt,
+                  home,
+                  budget,
+                  cancelled,
+                  sessionId,
+                  watch,
+                  transcript,
+                  under,
+                  images,
+                  callerHandle,
+                  incoming,
+                  operation);
+        },
         id -> {
+          if (operation != null) operations.started(operation, id);
           if (admission != null) {
             admission.check().run();
             admission.started().accept(id);

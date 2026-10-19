@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.data;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -30,6 +31,32 @@ import org.junit.jupiter.api.io.TempDir;
  * migration act on it.
  */
 class DataLayoutTest {
+
+  @Test
+  void deployment_definitions_and_private_exports_keep_their_bytes_across_restart(@TempDir Path tmp)
+      throws IOException {
+    Path root = tmp.resolve("retained");
+    var layout = new DataLayout(root).initialise();
+    Path definition = root.resolve("global/agents/summariser.md");
+    Path exported = layout.exportsFor(null).resolve("private-conversation.json");
+    Path projectExport = layout.exportsFor(12L).resolve("project-conversation.json");
+    for (Path path : new Path[] {definition, exported, projectExport}) {
+      Files.createDirectories(path.getParent());
+      Files.writeString(path, "retained " + path.getFileName(), StandardCharsets.UTF_8);
+    }
+    byte[] marker = Files.readAllBytes(root.resolve(DataLayout.MARKER));
+
+    var restarted = new DataLayout(root).initialise();
+
+    assertArrayEquals(marker, Files.readAllBytes(root.resolve(DataLayout.MARKER)));
+    for (Path path : new Path[] {definition, exported, projectExport}) {
+      assertEquals(
+          "retained " + path.getFileName(), Files.readString(path, StandardCharsets.UTF_8));
+    }
+    assertEquals(exported.getParent(), restarted.exportsFor(null));
+    assertEquals(projectExport.getParent(), restarted.exportsFor(12L));
+    assertFalse(Files.exists(root.resolve("accounts")));
+  }
 
   @Test
   void a_deployment_that_keeps_nothing_creates_nothing(@TempDir Path tmp) {

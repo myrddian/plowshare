@@ -626,8 +626,8 @@ Enable `caps.autoIncrease` in the project JSON file:
 another finite chunk when the step or model-call allowance is exhausted. Chunks use
 `steps` and `budget` when configured, otherwise the running agent's definition
 values. Spending remains cumulative; delegates spend the same parent allowance.
-Model-call increases for ordinary conversations are committed to the owning
-conversation before additional calls; an exhausted chat can accept its next
+Model-call increases for ordinary conversations are committed to the shared
+standalone allowance before additional calls; an exhausted chat can accept its next
 utterance without a manual top-up. In orchestration runs the engine records and
 continues the capped conductor through its existing continuation path, including
 script-driven conductors.
@@ -649,7 +649,8 @@ further growth. Each approved model-call chunk permits additional model use.
 
 ## Project roles
 
-Regular accounts receive Viewer, Contributor or Manager access per project. Personal
+Accounts receive explicit Viewer, Contributor or Manager data access per project.
+Administrator membership-management control supplies no implicit project data role. Personal
 spaces remain private to their account owner. See [server administration](server-administration.md#project-access-and-personal-scopes) for the permission matrix, membership commands and desktop access dialog. Workspace write restrictions still apply to every role.
 
 ## Deployed Application files

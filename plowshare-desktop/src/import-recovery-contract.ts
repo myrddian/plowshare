@@ -13,10 +13,12 @@ export interface ImportRecovery {
   readonly plan: PortableImportPlan;
 }
 export function scopeKey(scope: InformationScope): string {
+  if (scope.kind === 'account')
+    throw new Error('Account destinations do not support information import');
   return JSON.stringify([
     scope.kind,
     scope.kind === 'project' ? scope.project : null,
-    scope.includeShared ?? scope.kind !== 'shared',
+    scope.kind === 'global_read' ? false : (scope.includeGlobal ?? true),
   ]);
 }
 export function recoveryContext(

@@ -2065,7 +2065,7 @@
     "operation": "information.interchange.import",
     "value": {
       "scope": {
-        "kind": "shared"
+        "kind": "global_read"
       },
       "requestId": "11111111-1111-1111-1111-111111111111",
       "plan": {
@@ -6803,7 +6803,7 @@
       "scope": {
         "kind": "project",
         "project": "fixture",
-        "includeShared": false
+        "includeGlobal": false
       }
     },
     "valid": true
@@ -10708,6 +10708,62 @@
       ]
     },
     "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": null,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": null
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": null,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
   },
   {
     "boundary": "result",

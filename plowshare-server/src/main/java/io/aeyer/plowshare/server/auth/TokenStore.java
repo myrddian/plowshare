@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -671,6 +672,7 @@ public final class TokenStore {
   }
 
   public String mintTicket(String handle, Long version) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     sweep();
     String ticket = Tokens.mint();
     tickets.put(
@@ -897,6 +899,7 @@ public final class TokenStore {
    * @return the pair, in the clear, on its way to a {@code Set-Cookie}
    */
   public Pair issuePair(String handle, boolean restricted) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     if (handle != null && durable != null) return durable.issue(handle, restricted);
     sweep();
     String chain = UUID.randomUUID().toString();
@@ -1017,6 +1020,7 @@ public final class TokenStore {
 
   /** Issue a login pair against the password hash validated by the caller. */
   public Pair issuePair(String handle, boolean restricted, String expectedHash) {
+    BuiltInIdentities.requireOrdinaryAccount(handle);
     return durable != null && handle != null
         ? durable.issue(handle, restricted, expectedHash)
         : issuePair(handle, restricted);

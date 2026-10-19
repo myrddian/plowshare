@@ -57,8 +57,8 @@ public class DeliberationConfig {
    * injects a clock into a bean. What it stamps here is {@code citations.cited_at}.
    *
    * <p>The allowance is refused here rather than at the first ask, on {@link DocumentsConfig}'s
-   * standing rule: a number that cannot work should be refused before anybody has asked a question,
-   * naming the key an operator would have to edit.
+   * standing rule: malformed policies fail before work starts. Disabled and small finite policies
+   * are valid operator choices, even if they cannot complete a full deliberation.
    */
   @Bean
   public Deliberation deliberation(
@@ -69,28 +69,21 @@ public class DeliberationConfig {
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
       Compaction compaction,
-      DocumentsProperties props) {
+      DocumentsProperties props,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
 
-    if (props.getAskBudget() < Deliberation.A_PASS) {
-      throw new IllegalStateException(
-          "plowshare.documents.ask-budget is "
-              + props.getAskBudget()
-              + "; it must be at least "
-              + Deliberation.A_PASS
-              + ". A pass is a"
-              + " proposer, a critic, a reviewer and a synthesiser, plus one retry"
-              + " of a critic whose JSON did not parse — and that retry is the"
-              + " ordinary failure it exists for rather than an exceptional one,"
-              + " so an allowance below it is an ask that reports CALL_BUDGET the"
-              + " first time a small model answers a JSON question in prose");
-    }
-    return new Deliberation(
-        store,
-        retrieval,
-        citations,
-        runtime,
-        GlobalAgentSnapshots.supply(globals, agents),
-        Clock.systemUTC(),
-        compaction);
+    props.askLimit(); // Validate selected policy; a small/disabled policy is a valid deployment
+    // choice.
+    var pass =
+        new Deliberation(
+            store,
+            retrieval,
+            citations,
+            runtime,
+            GlobalAgentSnapshots.supply(globals, agents),
+            Clock.systemUTC(),
+            compaction);
+    pass.useSystemOperations(system);
+    return pass;
   }
 }

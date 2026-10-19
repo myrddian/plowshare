@@ -52,6 +52,8 @@ class NamedSwarmPersistenceTest {
         io.aeyer.plowshare.server.agents.Budget.of(10));
     var members = new JdbcProjectMembers(f.jdbc);
     members.add("payments", "enzo");
+    f.jdbc.update(
+        "UPDATE project_members SET role='CONTRIBUTOR' WHERE handle='enzo' AND project_id=(SELECT id FROM projects WHERE name='payments')");
     frames =
         new BoardPostingFrames(
             board, f.store, members, f.work, new JdbcBoardPostRepository(f.jdbc));
@@ -73,7 +75,8 @@ class NamedSwarmPersistenceTest {
         f.drained::add,
         f.work,
         () -> 10,
-        f.clock);
+        f.clock,
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
   }
 
   private BoardPostingFrames.OpenReceipt open(UUID request, String swarm) throws Exception {

@@ -84,7 +84,8 @@ class AdminSeedTest {
     // CASCADE, since V40 gives `schedules` and `triggers` a
     // `defined_by TEXT REFERENCES admins (handle)`: a plain TRUNCATE is
     // refused once a referencing table exists, even an empty one.
-    jdbc.execute("TRUNCATE TABLE admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE admins CASCADE");
   }
 
   private AdminSeed seed() {

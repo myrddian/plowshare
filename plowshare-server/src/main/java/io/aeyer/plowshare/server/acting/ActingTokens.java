@@ -66,7 +66,7 @@ public interface ActingTokens {
       memberProjects = Set.copyOf(memberProjects);
       if (accounts.size() > 256 || memberProjects.size() > 256)
         throw new IllegalArgumentException("Eligibility lists are bounded to 256 entries");
-      accounts.forEach(ActingValues::account);
+      accounts.forEach(ActingValues::subject);
       memberProjects.forEach(ActingValues::application);
       Objects.requireNonNull(requestId, "requestId");
     }

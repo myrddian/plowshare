@@ -41,7 +41,8 @@ public final class JdbcPassageRepository implements PassageRepository {
             FROM retrieval_sources s
             LEFT JOIN entries e ON s.source_type='entry' AND e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal
             LEFT JOIN digests d ON s.source_type='digest' AND d.id=s.source_id
-            WHERE (s.status<>'ready' OR s.generation IS DISTINCT FROM ?) AND s.retry_at<=CURRENT_TIMESTAMP
+            WHERE (s.status<>'ready' OR s.generation IS DISTINCT FROM ?)
+              AND (s.retry_at<=CURRENT_TIMESTAMP OR (s.last_error LIKE 'RepairInFlight:%' AND s.last_error<>?))
             ORDER BY s.retry_at,s.source_type,s.source_id LIMIT 8
             """,
         (r, n) ->
@@ -52,7 +53,8 @@ public final class JdbcPassageRepository implements PassageRepository {
                 r.getString("text"),
                 r.getInt("next_position")),
         generation,
-        generation);
+        generation,
+        "RepairInFlight:" + generation);
   }
 
   @Override
@@ -103,6 +105,20 @@ public final class JdbcPassageRepository implements PassageRepository {
         .findFirst();
   }
 
+  private static String digestFence(String type, ReadScope scope) {
+    if (!type.equals("digest")) return "";
+    String safe = scope.constrained() ? " AND information_digest_safe(owner.id)" : "";
+    if (!scope.knowledgeOnly()) return safe;
+    // A Global knowledge reader may see memory-derived trees, never historical NULL-home logs.
+    // Filter before ANN candidate limits, rank fusion and aggregate coverage.
+    return safe
+        + """
+         AND NOT EXISTS(WITH RECURSIVE tree(id) AS (
+           SELECT owner.id UNION SELECT e.child_id FROM digest_children e JOIN tree t ON e.parent_id=t.id
+         ) SELECT 1 FROM tree t JOIN digest_spans d ON d.digest_id=t.id)
+        """;
+  }
+
   private <T> List<T> informationRows(
       ReadScope scope,
       String sql,
@@ -142,6 +158,80 @@ public final class JdbcPassageRepository implements PassageRepository {
         complete,
         generation,
         false);
+  }
+
+  @Override
+  public Optional<Home> sourceHome(Source source) {
+    return jdbc
+        .query(
+            "SELECT p.name FROM retrieval_sources s "
+                + "LEFT JOIN conversations c ON c.id=s.conversation_id "
+                + "LEFT JOIN digests d ON s.source_type='digest' AND d.id=s.source_id "
+                + "LEFT JOIN projects p ON p.id=coalesce(c.project_id,d.project_id) "
+                + "WHERE s.source_type=? AND s.source_id=? AND s.source_hash=?",
+            (r, n) -> r.getString(1) == null ? Home.global() : Home.of(r.getString(1)),
+            source.type(),
+            source.id(),
+            source.hash())
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public void requireSource(Source source, String generation) {
+    var valid =
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM retrieval_sources s "
+                + "LEFT JOIN entries e ON s.source_type='entry' AND e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal "
+                + "LEFT JOIN digests d ON s.source_type='digest' AND d.id=s.source_id "
+                + "WHERE s.source_type=? AND s.source_id=? AND s.source_hash=? "
+                + "AND CASE WHEN s.source_type='entry' THEN e.content ELSE d.summary END=? "
+                + "AND CASE WHEN s.generation=? THEN s.next_position ELSE 0 END=? "
+                + "AND (s.generation IS DISTINCT FROM ? OR s.status<>'ready'))",
+            Boolean.class,
+            source.type(),
+            source.id(),
+            source.hash(),
+            source.text(),
+            generation,
+            source.next(),
+            generation);
+    if (!Boolean.TRUE.equals(valid))
+      throw new IllegalStateException("Passage source changed or was withdrawn");
+  }
+
+  @Override
+  public boolean beginRepair(Source source, String generation) {
+    return jdbc.update(
+            "UPDATE retrieval_sources SET status='failed',last_error=?,retry_at='infinity'::timestamptz "
+                + "WHERE source_type=? AND source_id=? AND source_hash=? "
+                + "AND CASE WHEN generation=? THEN next_position ELSE 0 END=? "
+                + "AND (generation IS DISTINCT FROM ? OR status<>'ready') "
+                + "AND (retry_at<=CURRENT_TIMESTAMP OR (last_error LIKE 'RepairInFlight:%' AND last_error<>?))",
+            "RepairInFlight:" + generation,
+            source.type(),
+            source.id(),
+            source.hash(),
+            generation,
+            source.next(),
+            generation,
+            "RepairInFlight:" + generation)
+        == 1;
+  }
+
+  @Override
+  public boolean publish(
+      Source source,
+      List<String> texts,
+      List<float[]> vectors,
+      boolean complete,
+      String generation,
+      Runnable fence) {
+    return transactions.inTransaction(
+        () -> {
+          fence.run();
+          return publish(source, texts, vectors, complete, generation);
+        });
   }
 
   private boolean publishBatch(
@@ -235,6 +325,7 @@ public final class JdbcPassageRepository implements PassageRepository {
             + " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
             + " AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
             + eligible
+            + digestFence(type, scope)
             + (type.equals("entry") ? " /*information*/" : "")
             + " AND 1-(p.embedding <=> CAST(? AS vector))>=0.35 ORDER BY s.source_id,similarity DESC,p.position) best ORDER BY similarity DESC,source_id LIMIT ?",
         (r, n) ->
@@ -276,6 +367,7 @@ public final class JdbcPassageRepository implements PassageRepository {
             + join
             + " WHERE s.source_type=? AND s.status='ready' AND s.generation=? AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
             + eligible
+            + digestFence(type, scope)
             + (type.equals("entry") ? " /*information*/" : "")
             + " AND "
             + plan.present("p");
@@ -352,6 +444,7 @@ public final class JdbcPassageRepository implements PassageRepository {
                 + " FROM retrieval_sources s"
                 + join
                 + " WHERE s.source_type=? AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
+                + digestFence(type, scope)
                 + (type.equals("entry") ? " /*information*/" : ""),
             (r, n) ->
                 new Coverage(
@@ -396,6 +489,7 @@ public final class JdbcPassageRepository implements PassageRepository {
                 + " AS stale FROM retrieval_sources s"
                 + join
                 + " WHERE s.source_type=? AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
+                + digestFence(type, scope)
                 + (type.equals("entry") ? " /*information*/" : ""),
             (r, n) ->
                 new Coverage(

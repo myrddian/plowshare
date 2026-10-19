@@ -45,7 +45,8 @@ class ScheduleStoreTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES ('enzo', 'h', TRUE), ('mara', 'h', TRUE)");
     store = new JdbcScheduleStore(jdbc);

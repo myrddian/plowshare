@@ -218,7 +218,7 @@ try {
   await library.getByText('Manage source',{exact:true}).click();
   await library.locator('[data-control="share"]').click();
   await expect(library.locator('[data-error]')).toContainText('A source was withdrawn.');
-  await library.locator('[data-scope]').selectOption('shared');
+  await library.locator('[data-scope]').selectOption('global_read');
   await expect(library.locator('[data-list]')).toContainText('No sources');
   await expect(library.locator('[data-detail]')).not.toContainText('Grounded answer');
   await sourcePage.close();

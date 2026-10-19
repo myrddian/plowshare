@@ -10,17 +10,15 @@ and chunks. `document.detail` returns chapter/section identifiers, titles and
 summaries. Its server frame resolves the caller's Information scope and reads the
 hierarchy through the permission-scoped document store.
 
-However, the Python `DocumentDetailRequest` exposes only `document`, and the
-TypeScript operation payload/schema also rejects an added `scope`. An Application
-service token requires an explicit project Information scope with
-`includeShared:false`; the omitted scope defaults to a personal selection. The
-public typed clients therefore cannot express this scoped hierarchy read.
+Resolved in the current source contracts: Python `DocumentDetailRequest` and the
+shared TypeScript operation graph both accept an information scope. Project reads
+still require scoped READ and token ceilings. The collector explicitly chooses
+`includeGlobal:false` for project-only discovery; other authenticated service
+readers can include current GLOBAL_READ knowledge. An Application-owned credential
+may resolve omission to its registered project through the existing server routing.
 
-A separately scoped platform change should align the existing `document.detail`
-request contract and generated SDKs with server scope selection. It should verify
-project membership, service-token ceilings and foreign-document refusal across the
-affected clients. Document authorization must govern the entire hierarchy; this
-requires no independent chapter permissions or chapter creation API.
+This is source-contract evidence, not a claim that an older deployed server has
+been upgraded. No independent chapter permission or creation API is needed.
 
 Network Privacy Watch proceeds through `information.upload`, `information.revise`,
 `information.list` and `information.read`, all of which already expose project

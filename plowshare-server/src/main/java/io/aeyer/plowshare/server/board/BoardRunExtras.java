@@ -136,8 +136,10 @@ public final class BoardRunExtras implements RunExtras {
             + "] \""
             + opened.topic().title()
             + "\", "
-            + opened.topic().potTotal()
-            + " model calls. Woke: "
+            + (opened.topic().potTotal() == null
+                ? "unlimited model calls"
+                : opened.topic().potTotal() + " model calls")
+            + ". Woke: "
             + names(opened.woken())
             + ". You are woken on"
             + " it as its opener when someone answers you; close it with board_close"

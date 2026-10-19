@@ -178,12 +178,13 @@ Existing workspace `writePaths` restrictions still apply.
 
 These limits follow work into queued jobs, information tasks and internal message
 routing. Supply an explicit server project or a resource ID belonging to an allowed
-project. Service tokens cannot fall back to Personal or global work, read the shared
-information catalogue, administer the server, or root/sync a local client checkout.
-For information requests, select the project without shared catalogue inclusion:
+project. Service tokens cannot fall back to Personal or Global execution, administer the
+server, or root/sync a local client checkout. Authenticated service credentials
+can read knowledge whose current root audience is GLOBAL_READ. Project searches
+include that knowledge by default. To narrow information discovery to one project:
 
 ```json
-{"scope":{"kind":"project","project":"automation","includeShared":false}}
+{"scope":{"kind":"project","project":"automation","includeGlobal":false}}
 ```
 
 Each token has a durable execution identity, shown as `principal` in its metadata:
@@ -322,7 +323,8 @@ See [projects](projects.md) for workspace ownership and discovery and
 
 ## Project access and Personal scopes
 
-A regular account has no access to an ordinary project until granted a project role.
+An account needs an explicit project data role to use an ordinary project.
+Server-administrator control is separate from reading or executing project work.
 Each account has one private Personal space, addressed as `Personal:<ACCOUNT_NAME>`.
 Its owner can read, run work and manage their own agents there. Other accounts,
 including server administrators, cannot enter that Personal space or change its membership.
@@ -345,7 +347,12 @@ a global schedule requires administrator authority.
 Per-document ownership/publication and private client-session checks continue to apply.
 Roles never widen a workspace's exclusions, read-only setting or permitted `writePaths`.
 Existing non-admin memberships migrate to Contributor. Project creators and each
-Personal-space owner receive Manager; server admins retain their ordinary-project authority.
+Personal-space owner receive Manager. The scoped-grant migration records existing
+administrators' effective ordinary-project data authority as explicit compatibility
+grants. New administrators and new projects receive no implicit data grant.
+Administrators retain scoped membership-management control through the existing
+operations; `project access` can report `permissions:["manage"]` without data access.
+VIEWER remains the wire name of the internal READER helper.
 
 Inspect the current account's effective access and explicit grants:
 
@@ -365,7 +372,12 @@ plowshare-cli project member-remove '{"project":"home-assistant","handle":"sam"}
 Adding an existing member is refused; use `member-role` to change their grant.
 A project Manager cannot remove or demote the last enabled project Manager. A server
 administrator can recover a project and replace its grants. Grant changes and removals
-are saved transactionally with project access history; Managers see the latest 25 entries.
+are saved transactionally with project access and immutable grant history; Managers see the latest 25 entries.
+Bindings retain their issuing authority, scope, version and any expiry. Revoking
+or losing an issuing grant invalidates its descendants. A manager replacing the
+membership that supplies their own issuing authority needs another manager or
+independent administrative control to authorize it. Application manifest and
+service-token ceilings are checked live along the issuing chain.
 Removing or downgrading a grant applies to subsequent requests, job inspection and live
 project delivery. Existing resource IDs do not grant access or override their stored project.
 Runs check Contributor access again before obtaining project file providers. Git sync

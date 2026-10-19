@@ -5,8 +5,8 @@ import java.util.Optional;
 
 /**
  * Durable project membership and live role grants. Callers supply authenticated principals.
- * Mutations enforce manager authority and preserve a last manager under a project lock; grant
- * history is recorded in the same transaction. No caller receives JDBC infrastructure.
+ * Mutations enforce explicit management authority and preserve a last manager under a project lock;
+ * grant history is recorded in the same transaction. No caller receives JDBC infrastructure.
  */
 public interface ProjectMembers {
   /** Whether the registered server source has a valid root application manifest. */
@@ -20,6 +20,11 @@ public interface ProjectMembers {
   }
 
   boolean isServerAdmin(String handle);
+
+  /** Explicit administrative control, never a project data role. */
+  default boolean mayAdminister(String project, String actor) {
+    return false;
+  }
 
   boolean isMember(String project, String handle);
 

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.ws;
 
+import io.aeyer.plowshare.server.archive.PromotionAccess;
 import io.aeyer.plowshare.server.archive.PromotionQueue;
 import java.util.Map;
 import java.util.Objects;
@@ -22,8 +23,8 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>Nothing here is runtime state, and that was checked rather than assumed</b> — the check
  * {@code ProjectController}'s {@code PresenceRegistry} made compulsory. This controller's
- * constructor takes one queue; that queue holds a {@code ProposalStore} and an {@code Archive},
- * both of which are a database away, and neither holds a session.
+ * constructor takes the shared queue and authenticated promotion admission. The queue holds a
+ * {@code ProposalStore} and an {@code Archive}; neither dependency holds a session.
  *
  * <p>One of the {@link FrameArea} classes that interface's javadoc describes.
  */
@@ -31,13 +32,16 @@ import org.springframework.stereotype.Component;
 public class ProposalFrames implements FrameArea {
 
   private final PromotionQueue queue;
+  private final PromotionAccess promotionAccess;
 
   /**
    * @param queue the one queue every handler below settles and reads through — the same bean {@code
    *     ProposalController} is handed
+   * @param promotionAccess the shared source release and human Global ADMIN check
    */
-  public ProposalFrames(PromotionQueue queue) {
+  public ProposalFrames(PromotionQueue queue, PromotionAccess promotionAccess) {
     this.queue = Objects.requireNonNull(queue, "queue");
+    this.promotionAccess = Objects.requireNonNull(promotionAccess);
   }
 
   @Override
@@ -45,6 +49,6 @@ public class ProposalFrames implements FrameArea {
     return Map.of(
         FrameTypes.PROPOSAL_LIST, new ProposalListHandler(queue),
         FrameTypes.PROPOSAL_RECONSIDER, new ProposalReconsiderHandler(queue),
-        FrameTypes.PROPOSAL_RESOLVE, new ProposalResolveHandler(queue));
+        FrameTypes.PROPOSAL_RESOLVE, new ProposalResolveHandler(queue, promotionAccess));
   }
 }

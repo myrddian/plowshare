@@ -19,6 +19,38 @@ const sample = () => {
   return s;
 };
 
+await test('allowance top-up raises the existing root and never replays an uncertain mutation', async () => {
+  const s = sample();
+  const detail = present(s.board.details['demo-board']).value!;
+  const root = detail.root;
+  const total = (root.potTotal ?? 0) + 20;
+  const calls: string[] = [];
+  let uncertain = false;
+  const client = boardClient(
+    () => s,
+    async (type) => {
+      calls.push(type);
+      assert.equal(type, 'board.topup');
+      if (uncertain) throw new Error('Delivery unknown');
+      return ok({ ...root, potTotal: total });
+    },
+    () => {},
+  );
+  await client.topup(root.id, total);
+  assert.deepEqual(calls, ['board.topup']);
+  uncertain = true;
+  await assert.rejects(
+    client.topup(root.id, total + 1),
+    /Check the refreshed allowance/,
+  );
+  assert.deepEqual(calls, ['board.topup', 'board.topup']);
+  await assert.rejects(client.topup(root.id, 1), /greater than/);
+  assert.equal(calls.length, 2);
+  detail.root = { ...root, potTotal: null };
+  await assert.rejects(client.topup(root.id, total), /finite allowance/);
+  assert.equal(calls.length, 2);
+});
+
 await test('board parsing rejects truncated or mismatched data instead of showing false empty states', () => {
   const s = demoState(),
     detail = present(s.board.details['demo-board']).value!;

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
 // This fixture verifies the real SDK/IPC/UI boundary; SQL access is tested separately.
 const id = (n) => `11111111-1111-4111-8111-${String(n).padStart(12, '0')}`;
-const scope = { kind: 'personal', includeShared: true };
+const scope = { kind: 'personal', includeGlobal: true };
 const service = {
   resource: id(1),
   revision: id(11),
