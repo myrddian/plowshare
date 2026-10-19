@@ -1,0 +1,13 @@
+# CitationStore
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/CitationStore.java#L133) records citations atomically through insert-select from paragraph/document rows, preserving source name and ordinal at citation time. Scoped reads (`recent`, conversation, document, home and ID) join current paragraph text/title and apply document plus conversation/log readability. `documentOf` separately resolves paragraph ownership. Callers use this store for citation recording and inspection; scoped copies hold caller policy/context.
+
+Retain insert-select rather than loading a paragraph and writing its stale fields. Within one citation operation carry the already-authorized paragraph/document DTO when it supplies a needed ID, while keeping insert-time authority checks. Batch repeated source/log permission resolution for bounded citation pages if function-call profiling confirms amplification. Introduce a narrow repository contract when changing concrete legacy consumers. Avoid hydrating paragraph text for count/metadata-only displays through a separate typed projection.
+
+[V25](../../plowshare-server/src/main/resources/db/migration/V25__citations.sql#L202) already indexes document/paragraph, conversation/turn and recent order. Evaluate `(document_id,cited_at DESC,id)` for `of` and conversation `(conversation_id,turn_ordinal,cited_at,id)` only with representative sort/row counts. No stored procedure is needed for the existing atomic record statement; an authorized batch page function is optional.
+
+Cache historical citation identity separately from live resolution. `Cited` includes today's paragraph text/title and standing, so its key needs database, caller/full selection, citation ID, projection and document/paragraph/log versions. Paragraph deletion changes standing even though the historical citation remains. Record, document rewrite/delete, paragraph edits/cascades, conversation ownership/input/policy changes and external writers invalidate item and collection dependencies after commit. Current document/log readability is always fenced. Use proposed tracked immutable DTO/LRU byte bounds and durable catch-up; no permanent cached allow decisions.
+
+Mock budgets should prove one bounded page read and no documentOf refetch when already supplied. Future focused PostgreSQL tests cover concurrent citation/ingest, orphan standing, permission filtering before paging, index plans and notification rollback. Client citation panels should reuse source metadata already returned with the citation.

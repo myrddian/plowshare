@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,6 +44,12 @@ class RetrievalServiceTest {
     when(store.coverage()).thenReturn(new DocumentStore.Coverage(12, 0));
     when(store.searchByVector(any(), anyInt())).thenReturn(List.of(hit("Alpha.")));
     when(store.searchByText(any(), any(), anyInt())).thenReturn(List.of());
+    doCallRealMethod()
+        .when(store)
+        .searchSnapshot(any(), any(), anyInt(), any(DocumentStore.SearchProjection.class));
+    doCallRealMethod()
+        .when(store)
+        .searchSnapshot(any(), any(), anyInt(), any(DocumentStore.SearchProjection.class), any());
     retrieval = new RetrievalService(store, embeddings, MODEL, 768);
   }
 

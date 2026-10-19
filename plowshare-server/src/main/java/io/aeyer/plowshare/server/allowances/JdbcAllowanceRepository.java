@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 /** Canonical persistence shared by conversation, board and information repositories. */
 @Repository
-public final class JdbcAllowanceRepository implements AllowanceRepository {
+public class JdbcAllowanceRepository implements AllowanceRepository {
   private final JdbcTemplate jdbc;
 
   public JdbcAllowanceRepository(JdbcTemplate jdbc) {

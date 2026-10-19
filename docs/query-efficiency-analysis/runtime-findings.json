@@ -1,0 +1,614 @@
+{
+  "sourceCommit": "7bc567c2282188925ac07c81e6fcae81b41a0a40",
+  "runtimeBase": "fc36351f239b62984363ababaa1de1139402aafb",
+  "countingConvention": "Synchronous JDBC statements on stated successful branch; excludes BEGIN/COMMIT, triggers and SQL executed inside stored functions unless stated; proposed counts are conditional estimates, not measured performance.",
+  "owners": [
+    {
+      "owner": "JdbcIdentityRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcIdentityRepository.java",
+      "findingIds": [
+        "R01"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcIdentityRepository.java#L17",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/LiveScopedAuthority.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V155__explicit_authority_identities.sql#L1"
+      ],
+      "countModel": "Each account/role/scope/project/personal/knowledge lookup is 1 SELECT; verifyBuiltIns is 1 function call. Reusing one already resolved mapping can replace K identical reads with 1 within the same valid operation.",
+      "uncertainty": "No caller trace proves K>1 in a specific admission, and function internals are not timed."
+    },
+    {
+      "owner": "JdbcOperationRecords",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcOperationRecords.java",
+      "findingIds": [
+        "R02"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcOperationRecords.java#L77",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/PinnedOperationAuthority.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V159__retained_operation_authority.sql#L1"
+      ],
+      "countModel": "Existing admission find=2 reads (row+support), missing find=1; existing conversation=3; bind=1 INSERT+3 hydration reads=4; retain with S support rows=S+2 statements. A narrow bind comparison reduces 4 to 2; a joined typed conversation loader can reduce 3 to 1.",
+      "uncertainty": "Counts exclude transaction/trigger work. Joined loader must preserve complete support and identical-binding rejection; runtime repetition frequency is unmeasured."
+    },
+    {
+      "owner": "JdbcResourceScopeRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcResourceScopeRepository.java",
+      "findingIds": [
+        "R03"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcResourceScopeRepository.java#L20",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/ProjectAuthorization.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V88__orchestration_start_receipts.sql#L1"
+      ],
+      "countModel": "projects(resource)=1 SELECT; triggerOwnedBy=1; receipt projects=1 bound SELECT. A trigger path requesting both scope and ownership would cost 2 and could use 1 combined typed projection.",
+      "uncertainty": "The two-call trigger composition is a conditional model, not a verified hot-path trace. Message-route fan-out/index cost is unmeasured."
+    },
+    {
+      "owner": "JdbcScopedGrantRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcScopedGrantRepository.java",
+      "findingIds": [
+        "R04"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcScopedGrantRepository.java#L35",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/LiveScopedAuthority.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V156__scoped_rbac_grants.sql#L1"
+      ],
+      "countModel": "live/lineage/projectBindings each issue 1 JDBC SELECT, potentially evaluating recursive authority_live_grants internally. issue=7+P statements on success, P=1 for a project lock, 0 otherwise. A targeted issuer query changes rows/function work, not necessarily statement count.",
+      "uncertainty": "Function rows/calls and scope cardinality determine cost; no live plan was run for this owner. Issue count excludes triggers and transaction statements."
+    },
+    {
+      "owner": "JdbcSystemOperationRecords",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcSystemOperationRecords.java",
+      "findingIds": [
+        "R05"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcSystemOperationRecords.java#L18",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/BoundSystemOperations.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V161__bounded_system_operations.sql#L1"
+      ],
+      "countModel": "retain=1 INSERT; require=1 ID-bound EXISTS. One retain followed by require=2 statements; no reduction is established across restart/reconciliation boundaries.",
+      "uncertainty": "Duplicate require within a single valid operation is a hypothesis; no call trace establishes it."
+    },
+    {
+      "owner": "JdbcActingRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/JdbcActingRepository.java",
+      "findingIds": [
+        "R06"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/JdbcActingRepository.java#L276",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/OwnedActingTokens.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V149__acting_grants_and_tokens.sql#L1"
+      ],
+      "countModel": "tokens(subject)=1 ID query+2N row/project queries, N<=256: N=256 gives513 statements. proof(found)=3; absent proof=1. Bulk token rows+all project rows can yield2 queries independent of N; an aggregate join could yield1.",
+      "uncertainty": "No database time measured here. Constant-count alternatives assume complete empty scope sets and preserved created_at DESC,id order; live consent checks remain additional."
+    },
+    {
+      "owner": "JdbcActingWorkRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/JdbcActingWorkRepository.java",
+      "findingIds": [
+        "R07"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/JdbcActingWorkRepository.java#L54",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/PersonalActingWork.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V151__acting_personal_turns.sql#L1"
+      ],
+      "countModel": "binding=1; owns=1 joined EXISTS; active=1 EXISTS. Reading a binding and both current checks is3; a combined typed ownership/lifecycle read could be1 with equivalent transaction fences. Receipt and job hydration already cost1 each.",
+      "uncertainty": "A combined result must not extend current ownership/activity across a dispatch boundary; frequency and latency are unmeasured."
+    },
+    {
+      "owner": "JdbcCommandInvocationsRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JdbcCommandInvocationsRepository.java",
+      "findingIds": [
+        "R08"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JdbcCommandInvocationsRepository.java#L33",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/BoundCommands.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V91__command_invocations.sql#L1"
+      ],
+      "countModel": "bind=1 INSERT+1 full reload=2; new insert can return its DTO in1 statement, conflict path still needs retained comparison. find/pending/claim/ended each=1. Pending query includes bound,dispatching,failed; V91 partial index includes only bound.",
+      "uncertainty": "RETURNING savings require preserving trigger/default values and conflict matching. Predicate mismatch is certain, but its latency impact needs a plan/cardinality measurement."
+    },
+    {
+      "owner": "JdbcSkillExecutionsRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JdbcSkillExecutionsRepository.java",
+      "findingIds": [
+        "R09"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JdbcSkillExecutionsRepository.java#L33",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/SkillRuntime.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V90__skill_executions.sql#L1"
+      ],
+      "countModel": "find,claim,running,active,closed,failed,context,contextResult each issue1 statement on their ordinary path. contextResult expands M stored JSON items inside that1 statement; M is SQL/bytes work, not JDBC N+1.",
+      "uncertainty": "Context size, redemption repetition and active-list cardinality are unknown. No redundant live-state read is proven."
+    },
+    {
+      "owner": "JdbcAllowanceRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/allowances/JdbcAllowanceRepository.java",
+      "findingIds": [
+        "R10"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/allowances/JdbcAllowanceRepository.java#L26",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/allowances/AllowanceRepository.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V173__standalone_execution_allowances.sql#L1"
+      ],
+      "countModel": "find/retain/claim/accept/ceiling/increase/add each=1 statement. attach(budget) always does1 find, including already durable budgets; restore does1 find. Claim/accept function internals are additional SQL work. Reusing a just-loaded verified snapshot can remove1 attach read only within equivalent fencing.",
+      "uncertainty": "Caller budget hydration multiplicity is unmeasured. Current spent/ceiling reads often have a necessary freshness reason."
+    },
+    {
+      "owner": "JdbcApplicationIdentityRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/applications/JdbcApplicationIdentityRepository.java",
+      "findingIds": [
+        "R11"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/applications/JdbcApplicationIdentityRepository.java#L23",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/applications/OwnedApplicationIdentities.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V138__application_owned_identities.sql#L1"
+      ],
+      "countModel": "find/receipt each=1; reserve=2 writes; activate=1 project read+1 identity update+optional scope insert=2 or3; issued=3 writes. Reusing already locked project/binding identity may remove a repeated read only where caller supplies equivalent evidence.",
+      "uncertainty": "No repeated caller read trace is established; activation count depends on requested role/scope branch."
+    },
+    {
+      "owner": "JdbcSuspendedRunCalls",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/approvals/JdbcSuspendedRunCalls.java",
+      "findingIds": [
+        "R12"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/approvals/JdbcSuspendedRunCalls.java#L43",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/approvals/RunCallResumption.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V154__suspended_run_calls.sql#L1"
+      ],
+      "countModel": "retain,pending,find,recoverable,claim,release,complete,acknowledged each=1 statement. pending/recoverable hydrate N calls in1 joined query, so they are not JDBC N+1.",
+      "uncertainty": "Global recovery scan cardinality and retained argument/result bytes are unknown; no latency or caller duplicate is established."
+    },
+    {
+      "owner": "RunApprovalStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/approvals/RunApprovalStore.java",
+      "findingIds": [
+        "R13"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/approvals/RunApprovalStore.java#L232",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApprovalFrames.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V50__run_approvals.sql#L1"
+      ],
+      "countModel": "ask=1 INSERT+find=2; successful allow=1 UPDATE+find=2 (before external callback work). consume=1 exact SELECT+C one-shot CAS attempts+optional1 standing SELECT. RETURNING can reduce ask/allow success to1 while preserving callback DTO; claim/consent checks stay live.",
+      "uncertainty": "Callbacks may add external reads excluded here. Candidate CAS count C depends on contention and matching stdin; prefix scan cost is unmeasured."
+    },
+    {
+      "owner": "AdminStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/AdminStore.java",
+      "findingIds": [
+        "R14"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/AdminStore.java#L35",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/SocketAuthorization.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V37__admins.sql#L1"
+      ],
+      "countModel": "byHandle/isServerAdmin/isEnabled/sessionVersion/sessionCurrent each=1 SELECT. K separate checks for the same admission cost K; a combined current-account DTO could use1, assuming one equivalent authority snapshot.",
+      "uncertainty": "No concrete K-check transport sequence is asserted; bootstrap/administration calls deliberately recheck under locks."
+    },
+    {
+      "owner": "JdbcAccountAdministrationRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcAccountAdministrationRepository.java",
+      "findingIds": [
+        "R15"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcAccountAdministrationRepository.java#L25",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/ServerAdministration.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V81__durable_login_sessions.sql#L1"
+      ],
+      "countModel": "account/list/sessions/history each=1 SELECT; revokeSessions=2 UPDATEs; update/reset/create/audit each=1. Narrow history remains1 after any predicate/index change, so no statement saving is claimed.",
+      "uncertainty": "Session/audit size and query plans are unknown. Duplicate account reads inside one administration action need a caller trace."
+    },
+    {
+      "owner": "JdbcDatabaseReadiness",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcDatabaseReadiness.java",
+      "findingIds": [
+        "R16"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcDatabaseReadiness.java#L17",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/ReadinessController.java#L1"
+      ],
+      "countModel": "Each available() invocation performs1 SELECT1; no table/row fan-out. Required current probes remain1, with no proposed cache reduction.",
+      "uncertainty": "Pool acquisition and connectivity latency are unmeasured; the SQL itself has no application-table scan."
+    },
+    {
+      "owner": "JdbcDurableSessions",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcDurableSessions.java",
+      "findingIds": [
+        "R17"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcDurableSessions.java#L48",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/TokenStore.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V81__durable_login_sessions.sql#L1"
+      ],
+      "countModel": "access/authentication=1 joined SELECT; separate valid+handle+restricted calls would be3. Successful issue=5 statements. Successful refresh=7; spent-token reuse branch=3 (locked read,spent read,revoke).",
+      "uncertainty": "Legacy accessor triple is conditional, not a verified caller sequence. Login cleanup row count and pool time are unknown."
+    },
+    {
+      "owner": "JdbcServiceAccountRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcServiceAccountRepository.java",
+      "findingIds": [
+        "R18"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcServiceAccountRepository.java#L35",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/ServiceAccounts.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V111__service_accounts.sql#L1"
+      ],
+      "countModel": "tokens(owner)=1 ID query+2N token/scope queries; N=100 gives201. A bulk row query plus all selected scopes can yield2 independent of N. Single token=2; revokeOwnedTokens=1 UPDATE RETURNING, preserved.",
+      "uncertainty": "N is returned token count; list is currently unbounded. Constant-count loader must retain empty scopes, owner filtering and created_at,id order."
+    },
+    {
+      "owner": "JdbcServiceCredentialsRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcServiceCredentialsRepository.java",
+      "findingIds": [
+        "R19"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/JdbcServiceCredentialsRepository.java#L21",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/TokenStore.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V111__service_accounts.sql#L1"
+      ],
+      "countModel": "Well-formed credential authentication=1 joined SELECT; malformed input=0. A fresh protected admission still requires authoritative authentication; no reduced count is established.",
+      "uncertainty": "account_active internal work and aggregate frame rate are unmeasured; fallback/combined transport authentication is outside this count."
+    },
+    {
+      "owner": "RuntimeConfig",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/config/RuntimeConfig.java",
+      "findingIds": [
+        "R20"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/config/RuntimeConfig.java#L195",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/config/RuntimeConfigSeed.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V28__runtime_config.sql#L1"
+      ],
+      "countModel": "M healthy intOr/get/authorOf calls each execute entry: M SELECTs, even for one unchanged key. get+authorOf same key=2 full Entry loads; retaining Entry gives1. A valid shared unchanged-key hit could give0 SQL only after freshness/invalidation semantics exist.",
+      "uncertainty": "M invocation frequency is not measured; healthy-read caching deliberately changes current freshness and needs an explicit consistency contract."
+    },
+    {
+      "owner": "JdbcCodeWorkspaceStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/files/JdbcCodeWorkspaceStore.java",
+      "findingIds": [
+        "R21"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/files/JdbcCodeWorkspaceStore.java#L42",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/files/CodeWorkspaceMonitor.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V98__workspace_code_tracking.sql#L1"
+      ],
+      "countModel": "begin existing workspace=4+P statements, P=project lookup0/1; new admitted workspace=6+P when both capacity counts run. claim empty=2,selected=3. publish success=2 ordinary statements plus source batch (S logical inserts; driver determines wire batching).",
+      "uncertainty": "Capacity, mutation cleanup and scan sizes are unknown. API batch call count is not equivalent to one SQL statement/round trip."
+    },
+    {
+      "owner": "AccountingStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/AccountingStore.java",
+      "findingIds": [
+        "R22"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/AccountingStore.java#L54",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/AccountingProjector.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V85__durable_inference_accounting.sql#L1"
+      ],
+      "countModel": "For E replayed existing events, project=E+3 statements (register,watermark lock,E duplicate checks,watermark update). E new AttemptStarted events=7E+3. New AttemptFinished events=5E+3. A transaction-local call state may save some reads, but no exact reduced count is proven.",
+      "uncertainty": "Only homogeneous successful branches are counted; triggers/price writes/mixed event kinds alter work. No live timings or retained batch distribution available."
+    },
+    {
+      "owner": "JdbcInferenceAdmissions",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcInferenceAdmissions.java",
+      "findingIds": [
+        "R23"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcInferenceAdmissions.java#L33",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/OperationInference.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V160__operation_inference_claims.sql#L1"
+      ],
+      "countModel": "retain=4 statements including allowances.accept,relation insert,relation EXISTS,admission insert; submitted=2 (require+CAS UPDATE); require/accounted each=1. A combined retained-binding/CAS predicate could make submitted1 if it proves all original fields atomically.",
+      "uncertainty": "Stored allowance/trigger work is excluded. Reducing evidence checks requires a tested equivalence proof, not merely trusting the supplied record."
+    },
+    {
+      "owner": "JdbcPricingRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcPricingRepository.java",
+      "findingIds": [
+        "R24"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "shared-immutable",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcPricingRepository.java#L21",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/ManagedPricing.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V112__admin_pricing.sql#L1"
+      ],
+      "countModel": "find=1; ManagedPricing.list with T configured route/model targets=1 admin check+T finds. Bulk findAll(targets) could make2 total. ManagedPricing.set=8 statements including2 admin checks,lock,2 entry reads and3 save writes; final entry reload can be removed with committed return mapping.",
+      "uncertainty": "T is configured target count; no list timing measured. Pre-lock and under-lock admin checks have distinct freshness purpose and are not automatically redundant."
+    },
+    {
+      "owner": "JdbcUsageReportRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageReportRepository.java",
+      "findingIds": [
+        "R25"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageReportRepository.java#L109",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/UsageQueryService.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V85__durable_inference_accounting.sql#L1"
+      ],
+      "countModel": "Basic unfiltered calls page:1 account check+1 call page+N attemptRows+1 health=N+3, N returned page rows before byte bounding. Bulk per-call capped attempts can make4 total, or3 with cohesive call+attempt SQL. Additional selector checks are A, so general count=N+3+A.",
+      "uncertainty": "N+3 assumes no fleet/project/lineage selector branches and successful decoding. Attempt lookup still runs for rows later dropped by byte bounding. SQL/function time is unmeasured."
+    },
+    {
+      "owner": "JdbcUsageScopeRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageScopeRepository.java",
+      "findingIds": [
+        "R26"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageScopeRepository.java#L18",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/AccountingConfig.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V48__orchestrations.sql#L1"
+      ],
+      "countModel": "project(global)=0 SQL; project(named)=1 UPSERT even when already present. conductorConversation=1 SELECT. Reusing an already resolved project identity makes0; lookup-first costs1 existing read but up to2+ reconciliation on create/race.",
+      "uncertainty": "The no-op update is certain, but row-lock/trigger cost is not measured. Lookup-first is not automatically fewer statements or race-equivalent."
+    },
+    {
+      "owner": "UsageExecutionStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/UsageExecutionStore.java",
+      "findingIds": [
+        "R27"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/UsageExecutionStore.java#L138",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RunUsage.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V87__immutable_run_ownership.sql#L1"
+      ],
+      "countModel": "conversations(current) adds D ancestor SELECTs; orchestration lineage with D ancestors costs D+2 (conductor lookup,root parent lookup,D parent lookups). register always INSERT+read=2; reusing one immutable operation-local ancestry result can avoid repeated D traversals. A recursive loader can make each lineage1 statement with equivalent checks.",
+      "uncertainty": "D is ancestry depth excluding current node. Full start/source count also includes saved-turn,history and registration branches, so no single global count is asserted."
+    },
+    {
+      "owner": "JdbcOrchestrationAcceptance",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/JdbcOrchestrationAcceptance.java",
+      "findingIds": [
+        "R28"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/JdbcOrchestrationAcceptance.java#L47",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/AcceptanceGate.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V60__verifier_caps_and_rules.sql#L1"
+      ],
+      "countModel": "replace with C commands=2+C ordinary statements. One JDBC batch replaces C individual API executions (logical row writes remain C). find+requirements=2 reads; one complete typed set projection could make1 when both are needed.",
+      "uncertainty": "Driver batching wire count is not assumed1; no measured command-set cardinality. Combined read requires callers actually needing both."
+    },
+    {
+      "owner": "JdbcOrchestrationChecks",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/JdbcOrchestrationChecks.java",
+      "findingIds": [
+        "R29"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/JdbcOrchestrationChecks.java#L31",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/StageChecks.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V54__orchestration_checks.sql#L1"
+      ],
+      "countModel": "set/clear/find each=1 statement; no nested SQL. A set followed by caller find would be2 and could be1 with RETURNING, but that composition is not established here.",
+      "uncertainty": "No repeated caller sequence or timing establishes a material issue; set conflict/refusal semantics constrain any returned projection."
+    },
+    {
+      "owner": "JdbcOrchestrationRecovery",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/JdbcOrchestrationRecovery.java",
+      "findingIds": [
+        "R30"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/JdbcOrchestrationRecovery.java#L24",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/Orchestrations.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V113__orchestration_resume.sql#L1"
+      ],
+      "countModel": "received=1 SELECT; successful new claim=4 statements (request advisory lock,received,CAS update,receipt insert). Existing receipt inside claim=2; external preflight received+new claim=5 if caller takes that route.",
+      "uncertainty": "The extra preflight is only a conditional caller model; the in-lock receipt read is required for concurrency correctness."
+    },
+    {
+      "owner": "OrchestrationConcerns",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/OrchestrationConcerns.java",
+      "findingIds": [
+        "R31"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/OrchestrationConcerns.java#L29",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/AcceptanceChecker.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V77__the_acceptance_checker.sql#L1"
+      ],
+      "countModel": "of/raise/each update=1 statement. raise scans existing same-run numeric suffixes inside1 SQL; N concern rows increase database work but do not create JDBC N+1. No statement reduction is proven.",
+      "uncertainty": "Concern cardinality, concurrent raisers and expression-sort cost are unknown. Existing run serialization may constrain allocation races outside this owner."
+    },
+    {
+      "owner": "OrchestrationStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/OrchestrationStore.java",
+      "findingIds": [
+        "R32"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/OrchestrationStore.java#L1072",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/StallSweep.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V48__orchestrations.sql#L1"
+      ],
+      "countModel": "StallSweep reads running once, then quietSince+liveChildren for each of N runs:1+2N statements before approval/mark work. Per-run stalledSince/mark/clear and approval queries are additional. Bulk activity+child projections could reduce that component to3 bounded statements.",
+      "uncertainty": "No stall-sweep latency measured; N is running records visited. Final reporting/delivery and exception branches are excluded from the component count."
+    },
+    {
+      "owner": "RecordStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/RecordStore.java",
+      "findingIds": [
+        "R33"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/RecordStore.java#L186",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/RecordKeeper.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V59__orchestration_record.sql#L1"
+      ],
+      "countModel": "append=2 statements per attempt (advisory lock+INSERT MAX RETURNING); settle=1; through=1; page=2 (reach+bounded rows); treeOfRun=1 recursive SELECT; placeOf found=2 (conversation placement+treeOfRun).",
+      "uncertainty": "Retrial count and per-root journal size are unknown. Reach read has explicit concurrent-append consistency purpose."
+    },
+    {
+      "owner": "JdbcScriptStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/scripted/JdbcScriptStore.java",
+      "findingIds": [
+        "R34"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/scripted/JdbcScriptStore.java#L20",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/scripted/ScriptStore.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V84__scripted_orchestrations.sql#L1"
+      ],
+      "countModel": "prepare first step=1 INSERT; later step=1 previous receipt read+1 INSERT=2. failedDelegate eligible=2 (latest+child query). requireRecoverable uncertain agent_run with no failed child or answer=4:latest,latest again,child,delegateResult; passing same verified Step can reduce to3 within one valid snapshot.",
+      "uncertainty": "Readiness/Wait/Finish/completed branches exit earlier; counts exclude sandbox CPU. Concurrent step changes require a defined snapshot before deleting the second read."
+    },
+    {
+      "owner": "JdbcOutgoingRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/JdbcOutgoingRepository.java",
+      "findingIds": [
+        "R35"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/JdbcOutgoingRepository.java#L99",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/OutgoingWork.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V92__outgoing_work.sql#L1"
+      ],
+      "countModel": "Named-project successful claim=1 project read+1 locked ID select+1 get+1 update+1 get=5; global=4. report=locked ID,get,update,get=4. send new=5+P+C (P project0/1,C conversation check0/1); cancel=3. Returning pre-state under lock plus post-update DTO can reduce claim by2 and report by2, preserving semantics.",
+      "uncertainty": "Send count includes request advisory lock,receipt lookup,peers SELECT,INSERT,get, but not validation-only work. No wire/DB latency measured."
+    },
+    {
+      "owner": "JdbcProcRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/proc/JdbcProcRepository.java",
+      "findingIds": [
+        "R36"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/proc/JdbcProcRepository.java#L394",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/proc/ProcRuntime.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V85__durable_inference_accounting.sql#L1"
+      ],
+      "countModel": "conversations=3 statements (account gate,total tree,page tree); calls with N selected page rows=2+N (account,call page,N attempt queries); tools=2. Batched per-call capped attempts can reduce calls to3 total. conversations can be2 if one typed query returns total+page without losing empty-page totals.",
+      "uncertainty": "Correlated/lateral subqueries add database work within statements. N is bounded page length; full recursion/enrichment cost requires EXPLAIN and cardinalities."
+    },
+    {
+      "owner": "JdbcProviderCredentialRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/providers/JdbcProviderCredentialRepository.java",
+      "findingIds": [
+        "R37"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/providers/JdbcProviderCredentialRepository.java#L59",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/providers/OwnedProviderConnections.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V139__provider_credentials.sql#L1"
+      ],
+      "countModel": "list/connection/credential/store/revokeAll/authorization/commit/receipt each=1 statement; project lock adds1 where requested. No nested mapper SQL or per-row list queries in this owner.",
+      "uncertainty": "Caller rehydration and JSON definition size are unmeasured; no reduced count is established."
+    },
+    {
+      "owner": "UnionStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/union/UnionStore.java",
+      "findingIds": [
+        "R38"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/union/UnionStore.java#L82",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/union/UnionFrames.java#L1",
+        "../../plowshare-server/src/main/resources/db/migration/V46__project_union.sql#L1"
+      ],
+      "countModel": "find/enabled/enable/setHidden/open/resolve each=1; disable=2 writes; openConflict=1 per attempt, up to4 attempts. UnionFrames status loads find+all open conflicts merely for size=2; count-only would remain2 but avoid full bodies/blob IDs. K separate routing mirrored calls costK finds; local shared context can make1.",
+      "uncertainty": "K>1 in one routed operation is not traced. The status count overfetch is direct source evidence; conflict/list cardinality is unknown."
+    }
+  ]
+}

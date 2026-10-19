@@ -36,6 +36,8 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
       FROM relay_deliveries d JOIN relay_admissions a ON a.scope_key=d.scope_key AND a.topic=d.topic
           AND a.subscriber=d.subscriber AND a.publication_position=d.publication_position
       """;
+  private static final String LIFECYCLE_COLUMNS =
+      "state,fence,worker,lease_until,updated_at,receipt_namespace,receipt_id,failure_code";
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
 
@@ -289,17 +291,15 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   .findFirst();
           if (ready.isEmpty()) return Optional.empty();
           var delivery = ready.get();
-          changed(
-              jdbc.update(
-                  """
-          UPDATE relay_deliveries SET state='CLAIMED',fence=?,worker=?,lease_until=?,updated_at=? WHERE id=?
-          """,
+          return Optional.of(
+              transition(
+                  delivery,
+                  "UPDATE relay_deliveries SET state='CLAIMED',fence=?,worker=?,lease_until=?,updated_at=? WHERE id=?",
                   Math.addExact(delivery.fence(), 1),
                   owner,
                   timestamp(until),
                   timestamp(at),
                   delivery.key().id()));
-          return Optional.of(locked(delivery.key()));
         });
   }
 
@@ -312,12 +312,11 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
           var delivery = locked(claim.key());
           live(delivery, claim, at);
           if (delivery.state() == RelayDeliveries.State.DISPATCHING) return delivery;
-          changed(
-              jdbc.update(
-                  "UPDATE relay_deliveries SET state='DISPATCHING',updated_at=? WHERE id=?",
-                  timestamp(at),
-                  claim.key().id()));
-          return locked(claim.key());
+          return transition(
+              delivery,
+              "UPDATE relay_deliveries SET state='DISPATCHING',updated_at=? WHERE id=?",
+              timestamp(at),
+              claim.key().id());
         });
   }
 
@@ -333,13 +332,12 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
           live(delivery, claim, at);
           Instant until =
               requested.isAfter(delivery.leaseUntil()) ? requested : delivery.leaseUntil();
-          changed(
-              jdbc.update(
-                  "UPDATE relay_deliveries SET lease_until=?,updated_at=? WHERE id=?",
-                  timestamp(until),
-                  timestamp(at),
-                  claim.key().id()));
-          return locked(claim.key());
+          return transition(
+              delivery,
+              "UPDATE relay_deliveries SET lease_until=?,updated_at=? WHERE id=?",
+              timestamp(until),
+              timestamp(at),
+              claim.key().id());
         });
   }
 
@@ -358,8 +356,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
           live(delivery, claim, at);
           if (delivery.state() != RelayDeliveries.State.DISPATCHING)
             throw new IllegalStateException("prepare Relay dispatch before recording acceptance");
-          recordAccepted(claim.key(), receipt, at);
-          return locked(claim.key());
+          return recordAccepted(delivery, receipt, at);
         });
   }
 
@@ -388,8 +385,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
           if (state == RelayDeliveries.State.UNCERTAIN
               && delivery.state() != RelayDeliveries.State.DISPATCHING)
             throw new IllegalStateException("only prepared Relay dispatch can become uncertain");
-          recordOutcome(claim.key(), state, checked, at);
-          return locked(claim.key());
+          return recordOutcome(delivery, state, checked, at);
         });
   }
 
@@ -415,12 +411,12 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
           if (delivery.state() != RelayDeliveries.State.UNCERTAIN
               && delivery.state() != RelayDeliveries.State.ABANDONED_UNCERTAIN)
             throw new IllegalStateException("only uncertain Relay dispatch can be reconciled");
-          switch (resolution) {
-            case RelayDeliveries.Accepted accepted -> recordAccepted(key, accepted.receipt(), at);
+          return switch (resolution) {
+            case RelayDeliveries.Accepted accepted ->
+                recordAccepted(delivery, accepted.receipt(), at);
             case RelayDeliveries.Failed failed ->
-                recordOutcome(key, RelayDeliveries.State.FAILED, failed.code(), at);
-          }
-          return locked(key);
+                recordOutcome(delivery, RelayDeliveries.State.FAILED, failed.code(), at);
+          };
         });
   }
 
@@ -472,31 +468,65 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
         limit);
   }
 
-  private void recordAccepted(
-      RelayDeliveries.DeliveryKey key, RelayDeliveries.Receipt receipt, Instant now) {
-    changed(
-        jdbc.update(
-            """
-        UPDATE relay_deliveries SET state='ACCEPTED',receipt_namespace=?,receipt_id=?,failure_code=NULL,
-            lease_until=NULL,updated_at=? WHERE id=?
-        """,
-            receipt.namespace(),
-            receipt.id(),
-            timestamp(now),
-            key.id()));
+  private RelayDeliveries.Delivery recordAccepted(
+      RelayDeliveries.Delivery previous, RelayDeliveries.Receipt receipt, Instant now) {
+    return transition(
+        previous,
+        "UPDATE relay_deliveries SET state='ACCEPTED',receipt_namespace=?,receipt_id=?,failure_code=NULL,lease_until=NULL,updated_at=? WHERE id=?",
+        receipt.namespace(),
+        receipt.id(),
+        timestamp(now),
+        previous.key().id());
   }
 
-  private void recordOutcome(
-      RelayDeliveries.DeliveryKey key, RelayDeliveries.State state, String code, Instant now) {
-    changed(
-        jdbc.update(
-            """
-        UPDATE relay_deliveries SET state=?,failure_code=?,lease_until=NULL,updated_at=? WHERE id=?
-        """,
-            state.name(),
-            code,
-            timestamp(now),
-            key.id()));
+  private RelayDeliveries.Delivery recordOutcome(
+      RelayDeliveries.Delivery previous, RelayDeliveries.State state, String code, Instant now) {
+    return transition(
+        previous,
+        "UPDATE relay_deliveries SET state=?,failure_code=?,lease_until=NULL,updated_at=? WHERE id=?",
+        state.name(),
+        code,
+        timestamp(now),
+        previous.key().id());
+  }
+
+  /**
+   * The caller holds the branch lock and has checked its current claim/state. Admission and branch
+   * definition are immutable: retain that typed snapshot, returning only actual mutated lifecycle
+   * fields instead of decoding copied payloads and pinned sources again after every transition.
+   */
+  private RelayDeliveries.Delivery transition(
+      RelayDeliveries.Delivery previous, String sql, Object... arguments) {
+    var rows =
+        jdbc.query(
+            sql + " RETURNING " + LIFECYCLE_COLUMNS,
+            (row, index) -> lifecycle(row, previous),
+            arguments);
+    if (rows.size() != 1)
+      throw new IllegalStateException("Relay delivery transition did not affect one row");
+    return rows.getFirst();
+  }
+
+  private static RelayDeliveries.Delivery lifecycle(
+      ResultSet row, RelayDeliveries.Delivery previous) throws SQLException {
+    String namespace = row.getString("receipt_namespace");
+    var until = row.getObject("lease_until", OffsetDateTime.class);
+    return new RelayDeliveries.Delivery(
+        previous.key(),
+        previous.admission(),
+        previous.publication(),
+        previous.routing(),
+        previous.branch(),
+        RelayDeliveries.State.valueOf(row.getString("state")),
+        row.getLong("fence"),
+        row.getString("worker"),
+        until == null ? null : until.toInstant(),
+        previous.admittedAt(),
+        instant(row, "updated_at"),
+        namespace == null
+            ? null
+            : new RelayDeliveries.Receipt(namespace, row.getString("receipt_id")),
+        row.getString("failure_code"));
   }
 
   private RelayDeliveries.Delivery locked(RelayDeliveries.DeliveryKey key) {

@@ -98,18 +98,23 @@ public final class PortableInformation implements InformationInterchangeService 
   private Bundle exportBundle(InformationContext context, List<UUID> selected) {
     var visited = new LinkedHashSet<UUID>();
     var queue = new ArrayDeque<>(selected);
+    // Export already owns one read-only REPEATABLE READ transaction. These immutable closure
+    // edges are also the provenance edges; a second read cannot provide fresher evidence here.
+    var dependencies = new LinkedHashMap<UUID, List<UUID>>();
     while (!queue.isEmpty()) {
       UUID revision = queue.removeFirst();
       if (!visited.add(revision)) continue;
       if (visited.size() > InformationInterchange.MAX_DOCUMENTS)
         throw new CallerFault("Portable dependency closure exceeds 16 revisions");
       catalogue.requireReadable(context, revision);
-      queue.addAll(repository.dependencies(revision));
+      var edges = List.copyOf(repository.dependencies(revision));
+      dependencies.put(revision, edges);
+      queue.addAll(edges);
     }
     var docs = new ArrayList<Document>();
     int size = 0;
     for (UUID revision : visited) {
-      var descriptor = descriptor(context, revision);
+      var descriptor = descriptorOfReadable(context, revision, dependencies.get(revision));
       byte[] bytes = records.bytes(revision);
       if (bytes == null || bytes.length == 0)
         throw new CallerFault("Original bytes unavailable for portable export");
@@ -131,6 +136,12 @@ public final class PortableInformation implements InformationInterchangeService 
 
   private Descriptor descriptor(InformationContext context, UUID revision) {
     catalogue.requireReadable(context, revision);
+    return descriptorOfReadable(context, revision, null);
+  }
+
+  /** Only the ordinary wrapper or the fully authorized RR export closure may call this helper. */
+  private Descriptor descriptorOfReadable(
+      InformationContext context, UUID revision, List<UUID> retainedDependencies) {
     var row = records.metadata(revision);
     if (!row.documentType().equals("document")
         || !row.availability().equals("active")
@@ -169,7 +180,7 @@ public final class PortableInformation implements InformationInterchangeService 
             row.kind(),
             row.createdAt().toString(),
             row.contentHash(),
-            repository.dependencies(revision),
+            retainedDependencies == null ? repository.dependencies(revision) : retainedDependencies,
             evidence,
             repository
                 .origin(revision)

@@ -361,6 +361,45 @@ await test('Relay receipts register unlisted owned logs with project metadata be
   );
 });
 
+await test('information hints expose only a validated invalidation counter and socket recovery fences', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  const generation = f.client.state.informationConnection;
+  const queries = f.calls.length;
+  f.push({
+    kind: 'information.invalidated',
+    revision: 'untrusted-extra-field',
+  });
+  assert.equal(f.client.state.informationRevision, 1);
+  assert.equal(f.client.state.informationConnection, generation);
+  assert.equal(
+    f.calls.length,
+    queries,
+    'The renderer owns selected refresh; pushes do not query blindly',
+  );
+  f.push({
+    kind: 'information.changed',
+    sequence: 1,
+    revision: '00000000-0000-0000-0000-000000000001',
+    generation: 1,
+  });
+  assert.equal(f.client.state.informationRevision, 2);
+  f.push({ kind: 'information.changed', sequence: -1 });
+  assert.equal(
+    f.client.state.informationRevision,
+    3,
+    'Malformed hints require safe authoritative reconciliation too',
+  );
+  assert.match(
+    f.client.state.backgroundError ?? '',
+    /Unreadable server notification/,
+  );
+  f.closed();
+  assert.notEqual(f.client.state.informationConnection, generation);
+  assert.equal(f.client.state.connected, false);
+});
+
 await test('an Inbox change discovers approvals from another client without an active local job', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());

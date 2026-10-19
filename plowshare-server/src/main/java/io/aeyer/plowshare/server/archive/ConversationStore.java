@@ -1088,6 +1088,8 @@ public final class ConversationStore {
     if (rows == 0) {
       throw refusal(wanted, target);
     }
+    // A separate post-write allowance view is intentional: claims may commit during this
+    // lifecycle row-lock wait, and a CTE join would retain the statement's earlier snapshot.
     return find(wanted)
         .orElseThrow(
             () ->
@@ -1163,16 +1165,26 @@ public final class ConversationStore {
   public ConversationRecord turnEnded(String id, Budget budget) {
     String wanted = named(id);
     Objects.requireNonNull(budget, "budget");
-    Budget retained =
-        allowanceFor(wanted)
-            .orElseThrow(
-                () ->
-                    new ArchiveException(
-                        "There is no conversation with a retained allowance: " + wanted));
-    if (!retained.identity().equals(budget.identity()))
-      throw new ArchiveException("Turn has a different retained allowance source");
-    if (jdbc.update("UPDATE conversations SET last_turn_at=? WHERE id=?", utc(now.get()), wanted)
-        != 1) throw new ArchiveException("Conversation disappeared");
+    // Compare the durable source UUID in the write, without restoring a whole mutable Budget
+    // merely to compare its identity. The FK proves the matched retained source exists.
+    if (jdbc.update(
+            "UPDATE conversations SET last_turn_at=? WHERE id=? AND allowance_id=?",
+            utc(now.get()),
+            wanted,
+            budget.identity())
+        != 1) {
+      Budget retained =
+          allowanceFor(wanted)
+              .orElseThrow(
+                  () ->
+                      new ArchiveException(
+                          "There is no conversation with a retained allowance: " + wanted));
+      if (!retained.identity().equals(budget.identity()))
+        throw new ArchiveException("Turn has a different retained allowance source");
+      throw new ArchiveException("Conversation disappeared");
+    }
+    // Keep this separate post-write snapshot: the UPDATE may have waited for a row lock while
+    // another transaction committed allowance claims. A CTE join could return pre-wait counters.
     return find(wanted).orElseThrow();
   }
 

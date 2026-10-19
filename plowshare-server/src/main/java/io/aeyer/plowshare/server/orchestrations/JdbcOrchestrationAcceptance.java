@@ -7,6 +7,8 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -45,6 +47,9 @@ public final class JdbcOrchestrationAcceptance implements OrchestrationAcceptanc
    * @param commands its commands, in order
    */
   public void replace(String orchestration, String requirements, List<Registered> commands) {
+    var selected = List.copyOf(commands);
+    if (selected.stream().anyMatch(command -> !command.orchestration().equals(orchestration)))
+      throw new IllegalArgumentException("Acceptance commands must belong to their replaced run");
     work.inTransaction(
         () -> {
           jdbc.update(
@@ -55,24 +60,37 @@ public final class JdbcOrchestrationAcceptance implements OrchestrationAcceptanc
               requirements);
           jdbc.update(
               "DELETE FROM orchestration_acceptance WHERE orchestration = ?", orchestration);
-          for (Registered c : commands) {
+          // A bounded VALUES statement is one logical INSERT for up to 64 commands. Unlike a
+          // JDBC batch, this statement count does not depend on driver batch-rewrite settings.
+          for (int start = 0; start < selected.size(); start += 64) {
+            var part = selected.subList(start, Math.min(start + 64, selected.size()));
+            var arguments = new ArrayList<Object>();
+            for (Registered c : part) {
+              Collections.addAll(
+                  arguments,
+                  c.orchestration(),
+                  c.position(),
+                  c.line(),
+                  json(c.argv()),
+                  c.stdin(),
+                  c.exit(),
+                  c.expect(),
+                  c.side(),
+                  c.cwd(),
+                  c.consent(),
+                  c.approval(),
+                  Timestamp.from(c.setAt()),
+                  c.runsFor());
+            }
             jdbc.update(
                 "INSERT INTO orchestration_acceptance (orchestration, position, line,"
                     + " argv, stdin, exit_code, expect, side, cwd, consent, approval, set_at,"
-                    + " runs_for) VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                c.orchestration(),
-                c.position(),
-                c.line(),
-                json(c.argv()),
-                c.stdin(),
-                c.exit(),
-                c.expect(),
-                c.side(),
-                c.cwd(),
-                c.consent(),
-                c.approval(),
-                Timestamp.from(c.setAt()),
-                c.runsFor());
+                    + " runs_for) VALUES "
+                    + String.join(
+                        ",",
+                        Collections.nCopies(
+                            part.size(), "(?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)")),
+                arguments.toArray());
           }
           return null;
         });

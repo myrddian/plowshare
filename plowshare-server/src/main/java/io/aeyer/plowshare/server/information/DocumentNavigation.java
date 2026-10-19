@@ -93,7 +93,7 @@ public final class DocumentNavigation implements InformationNavigationService {
                 1024));
       }
       case DocumentList q ->
-          read(
+          readProjection(
               account,
               () ->
                   new InformationResponse.NavigationDocuments(
@@ -105,7 +105,7 @@ public final class DocumentNavigation implements InformationNavigationService {
                           limit(q.limit()),
                           offset(q.offset()))));
       case DocumentFacets q ->
-          read(
+          readProjection(
               account,
               () ->
                   new InformationResponse.Facets(
@@ -121,7 +121,7 @@ public final class DocumentNavigation implements InformationNavigationService {
                   new InformationResponse.NavigationSelection(
                       repository.select(context(account, q.selection()), q.target())));
       case RelationshipList q ->
-          read(
+          readProjection(
               account,
               () ->
                   new InformationResponse.NavigationConnections(
@@ -269,9 +269,24 @@ public final class DocumentNavigation implements InformationNavigationService {
   }
 
   private InformationResponse read(String account, Supplier<InformationResponse> action) {
+    return read(account, repository::snapshot, action);
+  }
+
+  /**
+   * Lists, facets and relationship pages each authorize and assemble their projection in one
+   * repository statement. Keep the configured isolation here instead of introducing a historical
+   * snapshot that cannot share a current projection. Existing historical transactions remain
+   * historical and bypass sharing.
+   */
+  private InformationResponse readProjection(String account, Supplier<InformationResponse> action) {
+    return read(account, repository::snapshotSingleProjection, action);
+  }
+
+  private InformationResponse read(
+      String account, Runnable snapshot, Supplier<InformationResponse> action) {
     return work.inTransaction(
         () -> {
-          repository.snapshot();
+          snapshot.run();
           repository.requireActive(account);
           return action.get();
         });

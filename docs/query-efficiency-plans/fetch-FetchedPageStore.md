@@ -1,0 +1,11 @@
+# FetchedPageStore
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/fetch/FetchedPageStore.java#L128) serves `FetchService` windows. `put` atomically replaces URL/title/full text and both fetch/liveness timestamps. `find` hydrates the entire page by URL key; every served window separately `touchRead`s its durable liveness stamp. Purge removes only pages older than fetch TTL **and** the live-read window. Repeated window reads therefore reload/decode full text; the durable touch has a separate correctness purpose.
+
+Reuse the typed fetched page already in the current operation. Consider a read-and-touch `UPDATE ... RETURNING` or typed routine to combine the cold read with its liveness update; compare row-write cost and preserve the two-clock contract. [V36](../../plowshare-server/src/main/resources/db/migration/V36__buffer_purge_indexes.sql#L67) already indexes purge thresholds, while URL key is the primary lookup. No additional index is demonstrated.
+
+Track immutable page-content DTOs by database, URL key, durable content revision and projection, with byte-weight limits and oversized bypass under the proposed expected O(1) LRU. A content version should distinguish two puts at the same supplied timestamp. Do not let cached `last_read` authorize skipping durable liveness updates: retain touch on every read unless a separately proven batching contract preserves purge guarantees. Put/purge, maintenance deletion and every external writer invalidate content/missing entries after commit; touch invalidates liveness projections only. Recovery must prevent serving purged or replaced pages from stale entries, and the service retains its original freshness/authorization policy. Coalescing network fetches must not merge explicitly requested fresh fetches silently.
+
+Mock budgets should demonstrate one content load for repeated windows while preserving required touches and expiry behavior. Later focused PostgreSQL tests cover purge/read races, combined-statement mapping, timezone behavior and after-commit invalidation. Do not reinterpret this retained page buffer as an unrestricted cross-account content cache.

@@ -10497,6 +10497,7 @@ type Notification struct {
 	Variant9  *NotificationVariant9Dto
 	Variant10 *NotificationVariant10Dto
 	Variant11 *NotificationVariant11Dto
+	Variant12 *NotificationVariant12Dto
 }
 
 func (v Notification) MarshalJSON() ([]byte, error) {
@@ -10546,6 +10547,10 @@ func (v Notification) MarshalJSON() ([]byte, error) {
 		chosen = v.Variant11
 		count++
 	}
+	if v.Variant12 != nil {
+		chosen = v.Variant12
+		count++
+	}
 	if count != 1 {
 		return nil, errors.New("select exactly one union variant")
 	}
@@ -10593,7 +10598,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape1249", data) {
+	if matches("shape1244", data) {
 		var chosen NotificationVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10641,6 +10646,14 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant11 = &chosen
 		return nil
 	}
+	if matches("shape1261", data) {
+		var chosen NotificationVariant12Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant12 = &chosen
+		return nil
+	}
 	return errors.New("invalid union")
 }
 
@@ -10652,57 +10665,62 @@ type NotificationVariant3Dto struct {
 
 // NotificationVariant4Dto is the explicit NotificationVariant4Dto protocol shape.
 type NotificationVariant4Dto struct {
+	Kind string `json:"kind"`
+}
+
+// NotificationVariant5Dto is the explicit NotificationVariant5Dto protocol shape.
+type NotificationVariant5Dto struct {
 	Generation float64 `json:"generation"`
 	Kind       string  `json:"kind"`
 	Revision   string  `json:"revision"`
 	Sequence   float64 `json:"sequence"`
 }
 
-// NotificationVariant5Dto is the explicit NotificationVariant5Dto protocol shape.
-type NotificationVariant5Dto struct {
+// NotificationVariant6Dto is the explicit NotificationVariant6Dto protocol shape.
+type NotificationVariant6Dto struct {
 	Kind          string `json:"kind"`
 	Orchestration string `json:"orchestration"`
 	State         string `json:"state"`
 }
 
-// NotificationVariant6Dto is the explicit NotificationVariant6Dto protocol shape.
-type NotificationVariant6Dto struct {
+// NotificationVariant7Dto is the explicit NotificationVariant7Dto protocol shape.
+type NotificationVariant7Dto struct {
 	Kind          string `json:"kind"`
 	Orchestration string `json:"orchestration"`
 	RequestId     string `json:"requestId"`
 }
 
-// NotificationVariant7Dto is the explicit NotificationVariant7Dto protocol shape.
-type NotificationVariant7Dto struct {
+// NotificationVariant8Dto is the explicit NotificationVariant8Dto protocol shape.
+type NotificationVariant8Dto struct {
 	Kind    string   `json:"kind"`
 	Root    string   `json:"root"`
 	Settled *float64 `json:"settled,omitempty"`
 	Through float64  `json:"through"`
 }
 
-// NotificationVariant8Dto is the explicit NotificationVariant8Dto protocol shape.
-type NotificationVariant8Dto struct {
+// NotificationVariant9Dto is the explicit NotificationVariant9Dto protocol shape.
+type NotificationVariant9Dto struct {
 	Conversation string `json:"conversation"`
 	Kind         string `json:"kind"`
 }
 
-// NotificationVariant9Dto is the explicit NotificationVariant9Dto protocol shape.
-type NotificationVariant9Dto struct {
+// NotificationVariant10Dto is the explicit NotificationVariant10Dto protocol shape.
+type NotificationVariant10Dto struct {
 	Conversation string  `json:"conversation"`
 	Kind         string  `json:"kind"`
 	Through      float64 `json:"through"`
 }
 
-// NotificationVariant10Dto is the explicit NotificationVariant10Dto protocol shape.
-type NotificationVariant10Dto struct {
+// NotificationVariant11Dto is the explicit NotificationVariant11Dto protocol shape.
+type NotificationVariant11Dto struct {
 	Report       UsageReportDto `json:"report"`
 	Revision     float64        `json:"revision"`
 	Subscription string         `json:"subscription"`
 	Type         string         `json:"type"`
 }
 
-// NotificationVariant11Dto is the explicit NotificationVariant11Dto protocol shape.
-type NotificationVariant11Dto struct {
+// NotificationVariant12Dto is the explicit NotificationVariant12Dto protocol shape.
+type NotificationVariant12Dto struct {
 	Code         string `json:"code"`
 	Subscription string `json:"subscription"`
 	Type         string `json:"type"`

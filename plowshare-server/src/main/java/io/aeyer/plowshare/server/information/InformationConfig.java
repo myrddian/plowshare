@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.information;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.documents.*;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.Hooks;
@@ -51,13 +53,29 @@ public class InformationConfig {
 
   @Bean
   public InformationNavigationRepository informationNavigationRepository(
-      JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
-    return new JdbcInformationNavigationRepository(jdbc, members);
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
+      ProjectionCaches caches) {
+    return new JdbcInformationNavigationRepository(
+        jdbc,
+        members,
+        caches.create("manual-heads-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "manual-head-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "manual-connections-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean
-  public InformationContentTypeRepository informationContentTypeRepository(JdbcTemplate jdbc) {
-    return new JdbcInformationContentTypeRepository(jdbc);
+  public InformationContentTypeRepository informationContentTypeRepository(
+      JdbcTemplate jdbc, ProjectionCaches caches) {
+    return new JdbcInformationContentTypeRepository(
+        jdbc,
+        caches.create("content-type-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "content-type-version-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "content-type-attached-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -124,8 +142,16 @@ public class InformationConfig {
 
   @Bean
   public InformationCatalogueRepository informationCatalogueRepository(
-      JdbcTemplate jdbc, AllowanceRepository allowances) {
-    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), allowances);
+      JdbcTemplate jdbc, AllowanceRepository allowances, ProjectionCaches caches) {
+    return new JdbcInformationCatalogueRepository(
+        jdbc,
+        Clock.systemUTC(),
+        allowances,
+        caches.create("document-metadata-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create("catalogue-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create("catalogue-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -142,6 +168,14 @@ public class InformationConfig {
     return new InformationCatalogue(
             repository, work, access, logs, authority, content, projections, transitions)
         .withAllowance(properties::ingestBudgetNow);
+  }
+
+  @Bean(destroyMethod = "close")
+  public InformationInvalidationPublisher informationInvalidationPublisher(
+      io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
+      ObjectProvider<InformationInvalidations> pushes) {
+    return new InformationInvalidationPublisher(
+        signals, () -> pushes.getIfAvailable(() -> InformationInvalidations.NONE).invalidate());
   }
 
   @Bean(destroyMethod = "close")
@@ -388,11 +422,13 @@ public class InformationConfig {
       informationQueueStart(
           InformationLifecycle lifecycle,
           InformationAcquisitions acquisitions,
-          InformationEventPublisher events) {
+          InformationEventPublisher events,
+          InformationInvalidationPublisher invalidations) {
     return ready -> {
       lifecycle.start();
       acquisitions.start();
       events.start();
+      invalidations.start();
     };
   }
 }

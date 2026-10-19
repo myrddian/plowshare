@@ -238,7 +238,7 @@ public final class RetrievalService implements UsageAware {
    * on the other is exactly the hit fusion exists to promote, and it could not be promoted out of
    * two lists already cut to five. The cut to the caller's limit is the last thing that happens.
    */
-  public static final int CANDIDATE_DEPTH = 40;
+  public static final int CANDIDATE_DEPTH = DocumentStore.MOST_SEARCH_CANDIDATES;
 
   /**
    * The constant in {@code 1 / (k + rank)}, at the value the method was published with.
@@ -336,10 +336,12 @@ public final class RetrievalService implements UsageAware {
    * question can reach, which is what stops an empty result being read as "the corpus holds nothing
    * about this" when what is true is "the corpus holds it and has no vector for it".
    *
-   * <p>The counts are taken a moment before the search rather than inside it. A concurrent ingest
-   * can therefore move them between the two, which makes the reported figures a description of the
-   * corpus rather than a transaction over it — {@code Archive.recall} takes its inside one unit of
-   * work and can, because both halves are one statement each against a table of hundreds.
+   * <p>A preflight count avoids provider IO for an empty searchable corpus. Admitted and dual
+   * searches read final counts with their candidates after provider IO, inside the current
+   * disclosure and captured-profile fences where applicable. Legacy unadmitted searches retain
+   * their preflight counts. These multi-statement reads do not promise a repeatable-read database
+   * snapshot: concurrent ingest can still move the corpus between statements, so the counts are
+   * descriptive rather than a corpus generation or an authorization lease.
    *
    * @param query what is being asked, in prose. It is embedded here
    * @param limit how many hits at most, clamped to {@link #MAX_HITS}. The caller's number survives
@@ -401,7 +403,12 @@ public final class RetrievalService implements UsageAware {
         return disclose(
             () -> new Found(query, limit, Math.min(limit, MAX_HITS), mode, List.of(), coverage));
       return dualRead(
-          profile, owner, List.of(query), reader -> reader.search(query, limit, mode, owner));
+          profile,
+          owner,
+          List.of(query),
+          reader ->
+              reader.searchPrepared(
+                  query, limit, mode, reader.embeddings.embed(query), Optional.empty()));
     }
     int applied = Math.min(limit, MAX_HITS);
 
@@ -438,15 +445,45 @@ public final class RetrievalService implements UsageAware {
               + " worse ranking, it is no ranking at all. Changing the embedding"
               + " model is a re-embed of the corpus, not a setting");
     }
+    return searchPrepared(
+        query, limit, mode, vector, queryRead == null ? Optional.of(coverage) : Optional.empty());
+  }
+
+  /**
+   * Provider IO is complete before entering this path. The admitted path reads coverage only inside
+   * disclosure, after any lock wait: the pre-provider gate is not an authorization or corpus lease.
+   * Dual reads also retain their enclosing captured-profile fence.
+   */
+  private Found searchPrepared(
+      String query,
+      int asked,
+      Mode mode,
+      float[] vector,
+      Optional<DocumentStore.Coverage> preflight) {
+    int limit = Math.min(asked, MAX_HITS);
+    // One-half reads return exactly the requested bound. Hybrid needs a deeper bounded candidate
+    // pool from each ordering before fusion can choose the final hits.
+    int depth = mode == Mode.HYBRID ? CANDIDATE_DEPTH : limit;
+    var projection =
+        switch (mode) {
+          case VECTOR -> DocumentStore.SearchProjection.VECTOR;
+          case LEXICAL -> DocumentStore.SearchProjection.LEXICAL;
+          case HYBRID -> DocumentStore.SearchProjection.HYBRID;
+        };
     return disclose(
-        () ->
-            new Found(
-                query,
-                limit,
-                applied,
-                mode,
-                read(query, vector, applied, mode),
-                queryRead == null ? coverage : store.coverage()));
+        () -> {
+          var snapshot =
+              preflight.isPresent()
+                  ? store.searchSnapshot(query, vector, depth, projection, preflight.get())
+                  : store.searchSnapshot(query, vector, depth, projection);
+          List<DocumentStore.Hit> hits =
+              switch (mode) {
+                case VECTOR -> snapshot.vectorHits();
+                case LEXICAL -> snapshot.lexicalHits();
+                case HYBRID -> fuse(snapshot.vectorHits(), snapshot.lexicalHits(), limit);
+              };
+          return new Found(query, asked, limit, mode, hits, snapshot.coverage());
+        });
   }
 
   /**
@@ -875,25 +912,6 @@ public final class RetrievalService implements UsageAware {
         + " question in a different space is not a worse ranking, it is no ranking at"
         + " all. Changing the embedding model is a re-embed of the corpus, not a"
         + " setting";
-  }
-
-  /**
-   * The halves this mode asks for, in one list.
-   *
-   * <p>A single-half mode is asked for exactly what it will return, because there is nothing to
-   * fuse and reading deeper would be paying for rows to throw away. Hybrid reads both to {@link
-   * #CANDIDATE_DEPTH} and cuts after fusing, which is the whole point of the depth.
-   */
-  private List<DocumentStore.Hit> read(String query, float[] vector, int limit, Mode mode) {
-    return switch (mode) {
-      case VECTOR -> store.searchByVector(vector, limit);
-      case LEXICAL -> store.searchByText(query, vector, limit);
-      case HYBRID ->
-          fuse(
-              store.searchByVector(vector, CANDIDATE_DEPTH),
-              store.searchByText(query, vector, CANDIDATE_DEPTH),
-              limit);
-    };
   }
 
   /**

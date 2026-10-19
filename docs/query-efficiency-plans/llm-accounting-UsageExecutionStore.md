@@ -1,0 +1,13 @@
+# UsageExecutionStore
+
+Status: proposed; no runtime implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[SQL owner](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/UsageExecutionStore.java#L138) · [caller/contract](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RunUsage.java#L1) · [schema/routines](../../plowshare-server/src/main/resources/db/migration/V87__immutable_run_ownership.sql#L1). Cache mechanics and recovery follow the [shared strategy](../query-efficiency-and-cache-design.md#server-reuse-and-tracked-database-dtos).
+
+`RunUsage` registers immutable run attribution, resolves historical parent runs, walks conversation/orchestration ancestry and reloads retained ownership. Confirmed repeated traversal: ancestry helpers load one parent at a time, and orchestration ancestry separately queries each parent up to the depth/cycle bound. `resolve` may read current/continuing turns and later repeat the starting-turn existence read. This is a query-count scaling issue; no end-to-end timing isolates it.
+
+Retain loaded `Conversation` and attribution DTOs in a per-operation identity map, including explicit absent results under the same snapshot. Replace parent-by-parent reads with bounded recursive CTEs or typed lineage routines that preserve MAX_DEPTH, cycle rejection, historical calling-turn evidence and exact account/project invariants. Reuse already resolved starting-turn ownership before registration. V87 keys `(conversation_id,turn_ordinal)`; inspect conversation-parent and orchestration/conductor predicates plus entries' historical turn lookup before new indexes. Keep immutable ownership conflict detection and registration atomic.
+
+Immutable retained attribution and lineage projections are eligible for database/conversation/turn/projection/version LRU keys only when every mutable source dependency is fenced. A retained attribution ID alone cannot validate current project/account placement. Run registration, conversation/project lifecycle and orchestration lineage changes invalidate attribution/entity and ancestor-derived collection dependencies after commit. Pin immutable paths where possible; otherwise introduce durable generation and reconnect recovery before shared admission. Current authorization and active execution admission bypass cached lineage conclusions.
+
+Mock query budgets independent of ancestry depth after batching, repeated-read suppression and cycles. Focused PostgreSQL tests cover recursive equivalence, historical turn selection and concurrent immutable registration when SQL changes.

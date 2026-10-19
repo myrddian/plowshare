@@ -17,12 +17,20 @@ public final class JdbcInformationContentRepository implements InformationConten
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .build();
   private final JdbcTemplate jdbc;
-  private final InformationContentTypeRepository types;
+  private static final String BINDING_COLUMNS =
+      "c.revision_id AS binding_revision,c.metadata_hash,c.metadata,(r.availability<>'deleted') AS contract_available,"
+          + "v.id,v.type_id,v.ordinal,v.schema_definition,v.presentation,v.profile,v.definition_hash,t.slug,t.label,t.description";
+  private static final String BINDING_JOINS =
+      " LEFT JOIN information_revision_content c ON c.revision_id=r.id AND NOT c.redacted"
+          + " LEFT JOIN information_content_type_versions v ON v.id=c.type_version"
+          + " LEFT JOIN information_content_types t ON t.id=v.type_id";
 
   public JdbcInformationContentRepository(
       JdbcTemplate jdbc, InformationContentTypeRepository types) {
     this.jdbc = Objects.requireNonNull(jdbc);
-    this.types = Objects.requireNonNull(types);
+    // Retain the existing construction contract. Binding reads now join the exact immutable
+    // definition instead of issuing nested repository reads from a JDBC row mapper.
+    Objects.requireNonNull(types);
   }
 
   @Override
@@ -63,26 +71,34 @@ public final class JdbcInformationContentRepository implements InformationConten
   public Optional<InformationContent.Binding> binding(UUID revision) {
     return jdbc
         .query(
-            "SELECT type_version,metadata_hash,metadata FROM information_revision_content WHERE revision_id=? AND NOT redacted",
-            (row, index) -> {
-              try {
-                var version = row.getObject("type_version", UUID.class);
-                var contract =
-                    types
-                        .attached(revision, version)
-                        .orElseThrow(() -> new IllegalStateException("Retained contract missing"));
-                var metadata =
-                    DocumentMetadata.instance(
-                        JSON.readValue(row.getString("metadata"), SchemaValue.class));
-                return new InformationContent.Binding(
-                    contract, row.getString("metadata_hash"), metadata);
-              } catch (java.io.IOException invalid) {
-                throw new IllegalStateException("Invalid retained metadata", invalid);
-              }
-            },
-            revision)
+            "SELECT "
+                + BINDING_COLUMNS
+                + " FROM information_revision_allowances r"
+                + BINDING_JOINS
+                + " WHERE r.id=? AND c.revision_id IS NOT NULL",
+            (row, index) -> binding(row),
+            Objects.requireNonNull(revision))
         .stream()
+        .flatMap(Optional::stream)
         .findFirst();
+  }
+
+  private static Optional<InformationContent.Binding> binding(java.sql.ResultSet row)
+      throws java.sql.SQLException {
+    if (row.getObject("binding_revision", UUID.class) == null) return Optional.empty();
+    if (!row.getBoolean("contract_available"))
+      throw new IllegalStateException("Retained contract missing");
+    try {
+      var metadata =
+          DocumentMetadata.instance(JSON.readValue(row.getString("metadata"), SchemaValue.class));
+      return Optional.of(
+          new InformationContent.Binding(
+              JdbcInformationContentTypeRepository.decodeContract(row),
+              row.getString("metadata_hash"),
+              metadata));
+    } catch (java.io.IOException invalid) {
+      throw new IllegalStateException("Invalid retained metadata", invalid);
+    }
   }
 
   @Override
@@ -101,8 +117,15 @@ public final class JdbcInformationContentRepository implements InformationConten
   @Override
   public InformationContent.View view(UUID revision) {
     return jdbc.queryForObject(
-        "SELECT processing_policy,starting_revision,revised_by,generation FROM information_revision_allowances WHERE id=?",
+        "SELECT r.processing_policy,r.starting_revision,r.revised_by,r.generation,r.availability,"
+            + BINDING_COLUMNS
+            + " FROM information_revision_allowances r"
+            + BINDING_JOINS
+            + " WHERE r.id=?",
         (row, index) -> {
+          if (row.getString("availability").equals("deleted"))
+            throw InformationContentTypeService.absent();
+          var bound = binding(row).orElse(null);
           var reused =
               jdbc.query(
                   "SELECT stage,origin_revision,origin_generation,fingerprint FROM information_projection_reuse WHERE revision_id=? ORDER BY stage",
@@ -121,7 +144,7 @@ public final class JdbcInformationContentRepository implements InformationConten
                   row.getLong("generation"));
           return new InformationContent.View(
               revision,
-              binding(revision).orElse(null),
+              bound,
               row.getObject("starting_revision", UUID.class),
               row.getString("revised_by"),
               row.getString("processing_policy"),

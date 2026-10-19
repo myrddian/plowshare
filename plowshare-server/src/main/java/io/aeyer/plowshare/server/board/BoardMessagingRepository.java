@@ -22,6 +22,42 @@ public interface BoardMessagingRepository {
 
   record InstanceState(boolean defaultInstance, boolean archived, Instant createdAt) {}
 
+  /**
+   * One statement's operator listing data; live dispatch/lease decisions must recheck their owners.
+   */
+  record InstanceListing(
+      Instance instance, InstanceState state, boolean awaiting, int pending, Optional<String> job) {
+    public InstanceListing {
+      java.util.Objects.requireNonNull(instance);
+      java.util.Objects.requireNonNull(state);
+      java.util.Objects.requireNonNull(job);
+      if (pending < 0) throw new IllegalArgumentException("Negative pending messages");
+    }
+  }
+
+  /** Read-only delivery page snapshot; claims, cancellation and dispatch always recheck owners. */
+  record DeliveryListing(
+      Route route,
+      Instance sender,
+      Instance recipient,
+      DeliveryState state,
+      Optional<String> job,
+      boolean running,
+      Optional<String> finalReply,
+      Instant postedAt,
+      String body) {
+    public DeliveryListing {
+      java.util.Objects.requireNonNull(route);
+      java.util.Objects.requireNonNull(sender);
+      java.util.Objects.requireNonNull(recipient);
+      java.util.Objects.requireNonNull(state);
+      java.util.Objects.requireNonNull(job);
+      java.util.Objects.requireNonNull(finalReply);
+      java.util.Objects.requireNonNull(postedAt);
+      java.util.Objects.requireNonNull(body);
+    }
+  }
+
   record DeliveryState(boolean awaiting, String termination, Instant deadline) {}
 
   record ExternalPrior(
@@ -124,6 +160,11 @@ public interface BoardMessagingRepository {
 
   List<String> deliveries(String id, int offset, int limit);
 
+  /**
+   * Same raw page/order as deliveries, with its route/instance/message/status projections batched.
+   */
+  List<DeliveryListing> deliveryPage(String id, int offset, int limit);
+
   /** Latest submitted job, including completed runs, while its firing record is retained. */
   Optional<String> messageJob(String message);
 
@@ -151,7 +192,8 @@ public interface BoardMessagingRepository {
 
   List<Instance> opening(String account, String project, String requestId);
 
-  List<Instance> listing(String account, String project, boolean archived, int offset, int limit);
+  List<InstanceListing> listing(
+      String account, String project, boolean archived, int offset, int limit);
 
   InstanceState instanceState(String id);
 

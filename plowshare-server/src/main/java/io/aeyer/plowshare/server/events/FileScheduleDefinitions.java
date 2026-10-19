@@ -46,10 +46,9 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
     // reconciliation;
     // an uncertain file mutation is never automatically replayed by a client.
     requireComplete(reconcile(source));
-    return store.files(source).stream()
-        .filter(f -> f.name().equals(request.name()))
-        .findFirst()
-        .orElseThrow();
+    // Reconciliation commits each file separately. This final keyed read is current rather than
+    // reusing the pre-scan deletion snapshot or reloading every sibling definition.
+    return store.snapshot(source, request.name()).orElseThrow().effective();
   }
 
   public List<ScheduledWork.File> sync(String account, ScheduledWork.Sync request) {

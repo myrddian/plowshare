@@ -160,27 +160,56 @@ public final class JdbcHostedToolScopeRepository implements HostedToolScopeRepos
 
   public Optional<Lease> lease(UUID id) {
     var b = find(id, false);
-    if (b.isEmpty()) return Optional.empty();
-    return jdbc
-        .query(
-            "SELECT * FROM hosted_tool_scope_workers WHERE binding_id=?",
-            (r, n) -> {
-              if (r.getLong("binding_generation") != b.get().generation())
-                throw new IllegalStateException("Worker fence generation mismatch");
-              return new Lease(
-                  new Registration(
-                      b.get(),
-                      r.getObject("registration", UUID.class),
-                      r.getObject("registered_at", OffsetDateTime.class),
-                      r.getObject("expires_at", OffsetDateTime.class)),
-                  r.getString("session"),
-                  r.getString("socket"),
-                  r.getObject("server", UUID.class),
-                  r.getLong("catalogue_after"));
-            },
-            id)
-        .stream()
-        .findFirst();
+    return b.flatMap(this::lease);
+  }
+
+  @Override
+  public Optional<Lease> lease(Binding binding) {
+    return leases(List.of(binding)).stream().findFirst();
+  }
+
+  @Override
+  public List<Lease> leases(List<Binding> bindings) {
+    Objects.requireNonNull(bindings);
+    var result = new ArrayList<Lease>();
+    // Definitions are immutable within a generation. Match both supplied and current generations
+    // in this fresh statement: a stale unlocked snapshot must not authorize an old worker.
+    for (int offset = 0; offset < bindings.size(); offset += 256) {
+      var cohort = bindings.subList(offset, Math.min(bindings.size(), offset + 256));
+      var retained = new HashMap<UUID, Binding>();
+      var arguments = new ArrayList<Object>();
+      for (var binding : cohort) {
+        if (retained.put(binding.binding(), binding) != null)
+          throw new IllegalArgumentException("Duplicate hosted binding");
+        arguments.add(binding.binding());
+        arguments.add(binding.generation());
+      }
+      String values = String.join(",", Collections.nCopies(cohort.size(), "(?::uuid,?::bigint)"));
+      result.addAll(
+          jdbc.query(
+              "SELECT w.* FROM (VALUES "
+                  + values
+                  + ") expected(id,generation)"
+                  + " JOIN hosted_tool_scopes b ON b.id=expected.id AND b.generation=expected.generation"
+                  + " JOIN hosted_tool_scope_workers w ON w.binding_id=b.id",
+              (row, index) -> {
+                var binding = retained.get(row.getObject("binding_id", UUID.class));
+                if (row.getLong("binding_generation") != binding.generation())
+                  throw new IllegalStateException("Worker fence generation mismatch");
+                return new Lease(
+                    new Registration(
+                        binding,
+                        row.getObject("registration", UUID.class),
+                        row.getObject("registered_at", OffsetDateTime.class),
+                        row.getObject("expires_at", OffsetDateTime.class)),
+                    row.getString("session"),
+                    row.getString("socket"),
+                    row.getObject("server", UUID.class),
+                    row.getLong("catalogue_after"));
+              },
+              arguments.toArray()));
+    }
+    return List.copyOf(result);
   }
 
   public void lease(Lease l) {

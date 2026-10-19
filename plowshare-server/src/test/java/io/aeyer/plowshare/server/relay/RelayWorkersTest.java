@@ -84,6 +84,7 @@ class RelayWorkersTest {
               return new RelaySubscriptionWork.Result(0, 0, null);
             });
     var signals = mock(RelayPublicationSignals.class);
+    when(signals.reconciliationWait(any())).thenCallRealMethod();
     when(signals.listen(SUB))
         .thenAnswer(
             call ->
@@ -151,6 +152,7 @@ class RelayWorkersTest {
             });
     var stopped = new java.util.concurrent.LinkedBlockingQueue<Boolean>();
     var signals = mock(RelayPublicationSignals.class);
+    when(signals.reconciliationWait(any())).thenCallRealMethod();
     when(signals.listen(SUB))
         .thenAnswer(
             call ->

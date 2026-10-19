@@ -90,19 +90,15 @@ public final class JdbcInformationGateRepository implements InformationGateRepos
       return receipt(claimed, resultType);
     }
     UUID token = UUID.randomUUID();
-    jdbc.update(
-        "INSERT INTO information_write_gates(account,request_id,fingerprint,operation,token,lease_until) VALUES(?,?,?,?,?,?)",
-        account,
-        request,
-        fingerprint,
-        operation,
-        token,
-        expiry());
     return receipt(
         jdbc.queryForMap(
-            "SELECT * FROM information_write_gates WHERE account=? AND request_id=?",
+            "INSERT INTO information_write_gates(account,request_id,fingerprint,operation,token,lease_until) VALUES(?,?,?,?,?,?) RETURNING token,state,response,log_id",
             account,
-            request),
+            request,
+            fingerprint,
+            operation,
+            token,
+            expiry()),
         resultType);
   }
 

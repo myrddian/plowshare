@@ -1,0 +1,1906 @@
+{
+  "sourceCommit": "7bc567c2282188925ac07c81e6fcae81b41a0a40",
+  "runtimeBase": "fc36351f239b62984363ababaa1de1139402aafb",
+  "method": "Static source analysis; JDBC call formulas exclude transaction begin/commit unless stated. No database timings, row counts, bytes or actual planner results measured by this subagent.",
+  "owners": [
+    {
+      "owner": "JdbcBoardMessagingRepository",
+      "class": "JdbcBoardMessagingRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/board/JdbcBoardMessagingRepository.java",
+      "findingIds": [
+        "A01"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardMessaging.java#L1315",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/JdbcBoardMessagingRepository.java#L543",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardMessaging.java#L1422",
+        "../../plowshare-server/src/main/resources/db/migration/V93__board_direct_messages.sql#L36",
+        "../../plowshare-server/src/main/resources/db/migration/V94__message_continuations.sql#L16"
+      ],
+      "countModel": "Instance listing: 1+4V repository statements plus visibility work for R examined rows, V visible rows. Delivery page: 2+7D+S statements plus 1+2D visibility checks, S<=D conditional runningJobs lookups; excludes authorization internals.",
+      "uncertainty": "Exact visibility-function SQL and runtime service latency are not counted. Combined projection SQL is not implemented; metadata/firing changes need consistency semantics.",
+      "analysis": "**Confirmed N+1.** [BoardMessaging.listingPage/view](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardMessaging.java#L1315) selects `limit+1` raw instances, checks at most `limit` visibility predicates, then performs four queries for each visible row: latest instance job, awaiting existence, pending count and instance state. [Repository listing/instanceState](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/JdbcBoardMessagingRepository.java#L543) separates fields from the initial instance projection. With 20 visible rows this is **81 repository statements**, before readability functions; a page-first combined inspection projection targets **1**, or **2** with a separate bounded aggregate batch. This preserves raw-row pagination before visibility filtering. Historical source snapshot `d38d55f4` contains the per-row composition; `f78e4f04` extracted persistence, so it is not evidence of a new regression.\n\n[Delivery pages](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardMessaging.java#L1422) cost `2+7D+S` statements: participant and ID list, then route, two participant reloads, job, delivery state, Board body and final reply per delivery; `S` adds running-job probes on unresolved branches. Repeated participants are available to reuse. Visibility work is additional. Bodies and instance requests are variable-sized; counts return scalars but scan matching routes. No actual bytes/rows examined are measured.\n\n[Pending/final-reply indexes](../../plowshare-server/src/main/resources/db/migration/V93__board_direct_messages.sql#L36) match their predicates; [deadline](../../plowshare-server/src/main/resources/db/migration/V94__message_continuations.sql#L16) filtering is indexed. Fired-job JSON expression lookup/index fit still needs an actual plan. Reducing statements must not omit current participant/source authorization.\n\n**Cache:** instance/route records are immutable Java values but mutable database state; they expose no durable whole-view version. Reuse DTOs within the authorized operation now. Shared admission is blocked by route/firing/approval/participant writer coverage and a complete version for defaults, awaiting, completion and list membership. Worker locks and handling decisions remain uncached.",
+      "directJdbcSiteCount": 53,
+      "jdbcSiteMethods": [
+        {
+          "method": "route",
+          "siteCount": 1
+        },
+        {
+          "method": "retainedBindings",
+          "siteCount": 1
+        },
+        {
+          "method": "bindRoute",
+          "siteCount": 1
+        },
+        {
+          "method": "lockConversation",
+          "siteCount": 1
+        },
+        {
+          "method": "lockAddress",
+          "siteCount": 1
+        },
+        {
+          "method": "activeInstances",
+          "siteCount": 1
+        },
+        {
+          "method": "insertInstance",
+          "siteCount": 1
+        },
+        {
+          "method": "passiveSender",
+          "siteCount": 1
+        },
+        {
+          "method": "insertExternalContext",
+          "siteCount": 1
+        },
+        {
+          "method": "replies",
+          "siteCount": 1
+        },
+        {
+          "method": "lastTurn",
+          "siteCount": 1
+        },
+        {
+          "method": "queued",
+          "siteCount": 1
+        },
+        {
+          "method": "priorSend",
+          "siteCount": 1
+        },
+        {
+          "method": "terminated",
+          "siteCount": 1
+        },
+        {
+          "method": "pendingCount",
+          "siteCount": 1
+        },
+        {
+          "method": "insertRoute",
+          "siteCount": 1
+        },
+        {
+          "method": "deadline",
+          "siteCount": 2
+        },
+        {
+          "method": "addAllowance",
+          "siteCount": 1
+        },
+        {
+          "method": "handled",
+          "siteCount": 1
+        },
+        {
+          "method": "externalCommand",
+          "siteCount": 1
+        },
+        {
+          "method": "lockRequest",
+          "siteCount": 1
+        },
+        {
+          "method": "finalReply",
+          "siteCount": 1
+        },
+        {
+          "method": "awaiting",
+          "siteCount": 1
+        },
+        {
+          "method": "endRequest",
+          "siteCount": 1
+        },
+        {
+          "method": "deactivate",
+          "siteCount": 1
+        },
+        {
+          "method": "otherStarted",
+          "siteCount": 1
+        },
+        {
+          "method": "approvalQueued",
+          "siteCount": 1
+        },
+        {
+          "method": "lockHandling",
+          "siteCount": 1
+        },
+        {
+          "method": "started",
+          "siteCount": 1
+        },
+        {
+          "method": "interrupted",
+          "siteCount": 1
+        },
+        {
+          "method": "answeredApprovals",
+          "siteCount": 1
+        },
+        {
+          "method": "instanceJob",
+          "siteCount": 1
+        },
+        {
+          "method": "awaitingAny",
+          "siteCount": 1
+        },
+        {
+          "method": "openingDefault",
+          "siteCount": 1
+        },
+        {
+          "method": "clearDefault",
+          "siteCount": 1
+        },
+        {
+          "method": "recordOpening",
+          "siteCount": 1
+        },
+        {
+          "method": "makeDefault",
+          "siteCount": 1
+        },
+        {
+          "method": "deliveries",
+          "siteCount": 1
+        },
+        {
+          "method": "messageJob",
+          "siteCount": 1
+        },
+        {
+          "method": "terminate",
+          "siteCount": 1
+        },
+        {
+          "method": "refuseQueued",
+          "siteCount": 1
+        },
+        {
+          "method": "runningJobs",
+          "siteCount": 1
+        },
+        {
+          "method": "stop",
+          "siteCount": 1
+        },
+        {
+          "method": "pending",
+          "siteCount": 1
+        },
+        {
+          "method": "expired",
+          "siteCount": 1
+        },
+        {
+          "method": "instances",
+          "siteCount": 1
+        },
+        {
+          "method": "instanceState",
+          "siteCount": 1
+        },
+        {
+          "method": "deliveryState",
+          "siteCount": 1
+        },
+        {
+          "method": "priorExternal",
+          "siteCount": 1
+        },
+        {
+          "method": "externalContext",
+          "siteCount": 1
+        },
+        {
+          "method": "insertExternalTask",
+          "siteCount": 1
+        },
+        {
+          "method": "externalTask",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "DigestStore",
+      "class": "DigestStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java",
+      "findingIds": [
+        "A02"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java#L56",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java#L314",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ArchiveConfig.java#L256",
+        "../../plowshare-server/src/main/resources/db/migration/V29__memory_digests.sql#L12",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java#L363"
+      ],
+      "countModel": "capture: H+1+C+U+(2+H)B. covered adds2. group(M) successful new/existing named home:3M+2+H(M+2), H=1 named/0global, assumes project exists for toWrite.",
+      "uncertainty": "No cardinalities or plans measured. group count depends on home lookup expansion; stale/information function internals unknown. Refresh version gap verified in supplied source/migrations, not by concurrent DB execution.",
+      "analysis": "**Confirmed home-wide amplification.** [captureUnfolded](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java#L56) first resolves home and lists `C` conversations, queries uncovered turns per conversation, then aggregates each of `U` turns and inserts two rows for each of `B` nonblank excerpts. A named-home lookup also occurs for every inserted digest. The exact JDBC model is `H+1+C+U+(2+H)B`, where `H=1` for a named home and zero for Global. With `C=20,U=B=5,H=1`, this is **42 statements**.\n\n[`covered(conversation)`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java#L314) adds two queries and invokes capture for the entire home. [Retention wiring](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ArchiveConfig.java#L256) calls it per conversation: after all turns are covered, each eligible conversation still costs `C+H+3`; `K` same-home checks repeat that work `K` times. This behavior is present in public snapshot `cd7f68ab`, not a demonstrated recent regression. A conversation-bounded set operation plus coverage result targets **2\u20133 statements per requested conversation**, or one home capture plus bounded coverage batch per sweep; moving loops inside a function without set operations does not reduce internal work.\n\n[Digest keys](../../plowshare-server/src/main/resources/db/migration/V29__memory_digests.sql#L12) cover home/depth and span conversation leading columns, but range overlap and correlated `NOT EXISTS` still need plans. `get/roots/children` select `d.*` though Node maps five fields: embedding/text columns cross JDBC unnecessarily. Excerpt `left(content,4000)` bounds each entry, not total entries per turn.\n\n**Cache blocked:** Node is immutable, but [`refresh`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/DigestStore.java#L363) changes summary/stale state without incrementing `revision`; `digest_dirty` increments only on dirtying. Memory/fold triggers also write nodes. Thus `(id,revision)` cannot version every current snapshot. Source privacy, new parents/root membership and trigger ancestors require complete after-commit coverage before shared admission.",
+      "directJdbcSiteCount": 28,
+      "jdbcSiteMethods": [
+        {
+          "method": "captureUnfolded",
+          "siteCount": 5
+        },
+        {
+          "method": "source",
+          "siteCount": 3
+        },
+        {
+          "method": "archiveFor",
+          "siteCount": 2
+        },
+        {
+          "method": "homes",
+          "siteCount": 1
+        },
+        {
+          "method": "roots",
+          "siteCount": 1
+        },
+        {
+          "method": "get",
+          "siteCount": 1
+        },
+        {
+          "method": "readTargets",
+          "siteCount": 1
+        },
+        {
+          "method": "children",
+          "siteCount": 1
+        },
+        {
+          "method": "stale",
+          "siteCount": 1
+        },
+        {
+          "method": "memory",
+          "siteCount": 1
+        },
+        {
+          "method": "span",
+          "siteCount": 1
+        },
+        {
+          "method": "provenance",
+          "siteCount": 2
+        },
+        {
+          "method": "covered",
+          "siteCount": 2
+        },
+        {
+          "method": "group",
+          "siteCount": 3
+        },
+        {
+          "method": "refresh",
+          "siteCount": 3
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "MemoryStore",
+      "class": "MemoryStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java",
+      "findingIds": [
+        "A03"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L166",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L134",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L240",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L124",
+        "../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L315"
+      ],
+      "countModel": "Learning require(N): N+2 statements. Successful write pin+one ordinary lock phase with nonnull account: (N+3)+(N+7)=2N+10, excluding actual save and other processing/fences. Provenance(T): T inserts.",
+      "uncertainty": "Formula describes named successful phases, not full MemoryWrites workflow; additional requires/provider publication calls vary. Internal safety SQL work and body bytes unmeasured.",
+      "analysis": "**Confirmed per-entry validation.** [Learning require](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L166) executes a scope query, a conversation/safety query and one EXISTS per supplied entry: `N+2` statements. [pin then lock](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L134) intentionally validates twice, before work and under source/privacy locks. For a nonnull account and one successful ordinary lock phase, those phases cost `2N+10` statements before saving: **50 at N=20**. A bounded cohort-validation statement per phase targets **8** total while retaining both freshness boundaries; collapsing them to one pre-work allow would be incorrect. [provenance](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L240) separately inserts `T` distinct turns and can use a bounded batch. The validation loop originates in `0b495f97` (scoped SYSTEM memory writes), without measured evidence it caused a UI regression.\n\nThe entry checks return booleans but resend every expected content string in each phase; input transfer grows with summed content size. Table locks are SQL statements with no hydrated rows and are not disposable duplicate reads. [Usage](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/MemoryStore.java#L124) already derives a new immutable Memory after an authoritative counter update, avoiding refetch. Count/index versus body projections are separate; vector recall returns full Memory bodies. Primary entry keys fit ordinal validation; state/home and profile-vector matching are distinct plan questions. [Safety functions](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L315) traverse provenance/readability, so one statement can still invoke many function reads.\n\n**Cache blocked:** protocol Memory copies immutable values but exposes no whole-row version. `embedding_source_revision` versions embedding inputs, not usage, lifecycle, home or privacy. Usage, Archive saves, embedding jobs and provenance/information triggers are other writers. Shared body/TOC snapshots need separate complete versions, collection membership and live privacy fences. Cached reads must not bypass mandatory usage or lock admission.",
+      "directJdbcSiteCount": 32,
+      "jdbcSiteMethods": [
+        {
+          "method": "pin",
+          "siteCount": 2
+        },
+        {
+          "method": "lockRead",
+          "siteCount": 5
+        },
+        {
+          "method": "used",
+          "siteCount": 1
+        },
+        {
+          "method": "require",
+          "siteCount": 4
+        },
+        {
+          "method": "lock",
+          "siteCount": 7
+        },
+        {
+          "method": "provenance",
+          "siteCount": 1
+        },
+        {
+          "method": "publishLegacy",
+          "siteCount": 1
+        },
+        {
+          "method": "save",
+          "siteCount": 1
+        },
+        {
+          "method": "load",
+          "siteCount": 1
+        },
+        {
+          "method": "loadAll",
+          "siteCount": 1
+        },
+        {
+          "method": "saveEmbedding",
+          "siteCount": 1
+        },
+        {
+          "method": "searchByVector",
+          "siteCount": 2
+        },
+        {
+          "method": "countUnsearchable",
+          "siteCount": 2
+        },
+        {
+          "method": "loadRetired",
+          "siteCount": 1
+        },
+        {
+          "method": "index",
+          "siteCount": 1
+        },
+        {
+          "method": "unsearchable",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcProjectMembers",
+      "class": "JdbcProjectMembers",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java",
+      "findingIds": [
+        "A04"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java#L182",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java#L324",
+        "../../plowshare-server/src/main/resources/db/migration/V110__project_roles.sql#L17"
+      ],
+      "countModel": "access admin:4 statements. Existing ordinary non-admin viewer/contributor:5; MANAGER:6. managementAccess non-admin adds1. Mutation manager-check expansion varies by roles/branches.",
+      "uncertainty": "Counts assume stable valid project/authority during operation and one statement per effective-role function invocation; nested routine reads are unknown.",
+      "analysis": "**Confirmed repeated authority.** [`access`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java#L182) calls `mayAdminister`; the admin branch calls it again through `managementAccess`, then reads members and 25 audit rows: **4 statements \u2192 target3** with one current operation authority result. The non-admin named-project path resolves existence, calls `requireRole` and then calls `role` again, followed by members and optional manager audit: **5 \u21924**, or **6 \u21925** for managers. `managementAccess`'s non-admin fallback adds another check. Reusing a role within a defined snapshot removes an actual repeated function call, not current authorization itself. Role duplication is visible in public snapshot `f78e4f04`; the administration round trip was added by `b234e132`.\n\n[Mutation helpers](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java#L324) additionally load project name despite callers holding it, repeat administration checks and count effective managers. The post-mutation manager count and project row lock protect concurrency and cannot be replaced by a pre-mutation cached count. Role reads call `authority_project_role`/`service_project_role`; their internal grant/account fan-out is unknown here, so statement reductions do not quantify total SQL saved.\n\nThe member projection returns all `M` grants ordered by handle and manager history at most25; scalar role reads are narrow. Project/name and member composite keys fit equality lookup; [audit index](../../plowshare-server/src/main/resources/db/migration/V110__project_roles.sql#L17) fits project/latest-ID ordering. No additional index is proven missing.\n\n**Operation-local only:** Access/Grant DTOs describe mutable authority with no complete authorization generation. Account disable, service ceilings, grant expiry/revocation and membership writers change effective roles independently. Notification delivery cannot guarantee immediate revocation; cache admission of allows/manager counts/locks is rejected. A safely fenced inspection snapshot is possible later, but requires every-writer authority/version proof and reconnect bypass.",
+      "directJdbcSiteCount": 26,
+      "jdbcSiteMethods": [
+        {
+          "method": "authorityAccount",
+          "siteCount": 1
+        },
+        {
+          "method": "isServerAdmin",
+          "siteCount": 1
+        },
+        {
+          "method": "isMember",
+          "siteCount": 1
+        },
+        {
+          "method": "members",
+          "siteCount": 1
+        },
+        {
+          "method": "add",
+          "siteCount": 2
+        },
+        {
+          "method": "remove",
+          "siteCount": 5
+        },
+        {
+          "method": "role",
+          "siteCount": 2
+        },
+        {
+          "method": "mayAdminister",
+          "siteCount": 1
+        },
+        {
+          "method": "projectAccess",
+          "siteCount": 2
+        },
+        {
+          "method": "assign",
+          "siteCount": 6
+        },
+        {
+          "method": "protectManager",
+          "siteCount": 1
+        },
+        {
+          "method": "projectName",
+          "siteCount": 1
+        },
+        {
+          "method": "protectResultingManagers",
+          "siteCount": 1
+        },
+        {
+          "method": "lock",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcRelayPortRepository",
+      "class": "JdbcRelayPortRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayPortRepository.java",
+      "findingIds": [
+        "A05"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayPortRepository.java#L43",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayRepository.java#L153",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/ProjectRelayPorts.java#L139",
+        "../../plowshare-server/src/main/resources/db/migration/V131__relay_sdk_ports.sql#L3"
+      ],
+      "countModel": "DurableRelay/JdbcRelayRepository subscribe S=3, read R=3. consume empty/new-issued query path9 statements; live same-consumer outstanding retry12; newbatchadds1write. ProjectRelayPorts empty pollsrepeat9+authority each100ms afterpriorattempt, A attemptsdependSQLtime.",
+      "uncertainty": "S/R not expanded here; root SQL catalogue may supply expansion. Number of attempts and bytes are unmeasured; UI inspection is a different API path.",
+      "analysis": "**Confirmed polling and repeated read.** [consume](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayPortRepository.java#L43) issues topic lock, database-clock and locked-batch queries, plus delegated subscribe/read. A live batch retry by its owner performs the requested-limit read then immediately replaces it with a 100-item read: `3+S+2R` statements rather than `3+S+R`, where [JdbcRelayRepository](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayRepository.java#L153) expands both `S=3,R=3`: **12\u21929 statements** for this retry, excluding authority. Ordinary empty consume is **9** statements. Choosing the correct read after inspecting Issued removes one full read, retaining exact token boundary and gap detection. BUSY still needs authoritative seen state. `SELECT *` on issued transfers its three key columns in addition to mapped fields; clock could be returned alongside that locked row, but preserving database-time semantics is essential.\n\n[ProjectRelayPorts](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/ProjectRelayPorts.java#L139) repeats authority/project resolution and consume every100ms while empty. `A` attempts cost `A\u00d7(authority+9)` plus any topic registration; `A` is approximately one initial attempt plus wait duration divided by100ms **only if query/scheduling time is negligible**. A notification-backed wait targets one initial and one wake/deadline reconciliation rather than this fixed cadence; expiry still needs timers. Polling appears in `4f25f68f`, so it predates the present audit.\n\n[V131 primary key](../../plowshare-server/src/main/resources/db/migration/V131__relay_sdk_ports.sql#L3) exactly matches batch equality/locking; no new index is warranted from this source. Returned event bytes depend on Relay's bounded prefix; reading twice decodes duplicate candidates, but actual bytes are unknown. Topic-before-batch locks, lease/token/fence checks and acknowledgement idempotency are necessary state transitions.\n\n**No cache for consume/ack decisions.** Batch DTO is immutable but mutable ownership, expiry, offsets and acknowledgements have no reusable authorization version. Only underlying immutable publications may be shared by their owning repository after current retention/access fences. LISTEN/NOTIFY remains a wake hint with durable reconciliation and reconnect recovery, not a receipt or replay instruction.",
+      "directJdbcSiteCount": 5,
+      "jdbcSiteMethods": [
+        {
+          "method": "consume",
+          "siteCount": 1
+        },
+        {
+          "method": "acknowledge",
+          "siteCount": 1
+        },
+        {
+          "method": "lock",
+          "siteCount": 1
+        },
+        {
+          "method": "issued",
+          "siteCount": 1
+        },
+        {
+          "method": "now",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcHostedToolScopeRepository",
+      "class": "JdbcHostedToolScopeRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcHostedToolScopeRepository.java",
+      "findingIds": [
+        "A06"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcHostedToolScopeRepository.java#L161",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/OwnedHostedToolScopes.java#L389",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/OwnedHostedToolScopes.java#L511",
+        "../../plowshare-server/src/main/resources/db/migration/V140__hosted_tool_scopes.sql#L43"
+      ],
+      "countModel": "lease(existing id):2 queries (Binding +worker). workerStatus:3 repository reads vs target2; renew:3 reads+1 worker upsert vs target2reads+1upsert; connections core:1+2N before credential/catalogue work vs target1+N or2 batched.",
+      "uncertainty": "Credential/catalogue lookups and source version elsewhere remain additional; no runtime liveness or row/byte timings measured.",
+      "analysis": "**Confirmed Binding rehydration.** [`lease(id)`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcHostedToolScopeRepository.java#L161) calls `find` then queries worker state. [workerStatus/register/renew](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/OwnedHostedToolScopes.java#L389) already loaded the same Binding, sometimes under `FOR UPDATE`. Status therefore uses **3 reads \u2192 target2**; renew uses **3 reads+1 write \u21922 reads+1 write**, excluding owner/executor checks. Passing the locked immutable binding and generation eliminates a repeated JSON definition decode while still comparing worker generation. A nonlocked status read needs a coherent binding-worker snapshot rather than blindly trusting an earlier DTO.\n\n[`connections`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/OwnedHostedToolScopes.java#L511) starts with `N` bindings and repeats lease's two queries for each, before credential inspection/catalogue reads: **1+2N \u21921+N**, or **2** for a bounded binding/worker batch. Current session/credential/catalogue checks remain additional. List decodes at most4097 definitions before its caller rejects more than256, so overfetch can include thousands of JSON definitions, credential subjects and tombstone rows. Actual retained cardinality and bytes are unknown. V140's route and binding keys fit equality; its nondeleted owner/scope index does not fully cover tombstone-inclusive owner/ID listing.\n\n**Operation-local reuse now.** Binding is an immutable record graph with explicit monotonically advanced generation on ordinary save, but worker lease writes do not bump Binding generation; socket/session liveness and credential policy are external dependencies. [Project deletion trigger](../../plowshare-server/src/main/resources/db/migration/V140__hosted_tool_scopes.sql#L43) also withdraws bindings/workers. Full Binding/Lease caching is rejected for authority/liveness; a sanitized definition projection could later share `(database,binding,generation,projection)` with current authority and all-writer invalidation. Reconnect and expired leases require authoritative reconciliation; no missing cache entry permits registration replay.",
+      "directJdbcSiteCount": 12,
+      "jdbcSiteMethods": [
+        {
+          "method": "lockProject",
+          "siteCount": 1
+        },
+        {
+          "method": "list",
+          "siteCount": 1
+        },
+        {
+          "method": "find",
+          "siteCount": 1
+        },
+        {
+          "method": "route",
+          "siteCount": 1
+        },
+        {
+          "method": "save",
+          "siteCount": 2
+        },
+        {
+          "method": "lease",
+          "siteCount": 2
+        },
+        {
+          "method": "clearLease",
+          "siteCount": 1
+        },
+        {
+          "method": "reserve",
+          "siteCount": 1
+        },
+        {
+          "method": "receipt",
+          "siteCount": 2
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcApplicationDeploymentStore",
+      "class": "JdbcApplicationDeploymentStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java",
+      "findingIds": [
+        "A07"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "share-immutable",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java#L127",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java#L85",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java#L196"
+      ],
+      "countModel": "Active replacement executes release(project,active) twice; removing second saves exactly1 SELECT. Local commit core with existing project and active replacement install:9 statements before delegated identity/project/acting/schedule work; target8. receipt/status/release each1.",
+      "uncertainty": "Core count excludes delegated owners and transaction begin/commit. Immutable release retention has normal-source evidence, not a database-enforced never-update proof.",
+      "analysis": "**Confirmed duplicate retained release.** [commit](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java#L127) loads the active Retained value for destination/writable-area checks, then reloads it at line143 for its placement. Both run under the same project transaction lock. Hoisting the first DTO saves **one SELECT per active replacement**, independent of cache. Under existing named project, active replacement and `install=true`, local/helper-expanded core costs9 statements (identity lookup, project lock, receipt, head, two release reads, release/head/receipt writes), targeting8; delegated owners add more. `0c2e57c7` introduced both calls. No UI latency impact is measured.\n\n[release](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java#L85) uses `s.*` but maps release UUID/digest/count plus destination/placement, transferring unused project ID/created-at. Each duplicate also repeats JSON decoding. [status](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationDeploymentStore.java#L196) returns at most100 releases in one head/catalog snapshot; active-first ordering is semantically significant. V134 keys match request, project/head and retained UUID equality; its `(project_id,revision)` unique index does not by itself satisfy created-at sorting. Actual sort/bytes/cardinality are unknown. Receipt identity checks, expected-head comparison and activation locks are necessary, including when status is in memory.\n\n**Share immutable retained content only:** Retained/Release values are immutable records, with revision UUID an explicit identity and no normal UPDATE writer here. `(database,projectID,revision,projection)` can identify retained metadata; administrative replacement/delete protection is not yet a proven immutability contract. Heads/status have no complete catalog generation. Project activation, identity/acting changes, schedules and maintenance are cross-owner invalidation dependencies. Publication must follow the enclosing commit, current access and FileStore resolution must remain authoritative, and reconnect must bypass uncertain heads. No cached receipt absence permits reactivation.",
+      "directJdbcSiteCount": 8,
+      "jdbcSiteMethods": [
+        {
+          "method": "receipt",
+          "siteCount": 1
+        },
+        {
+          "method": "release",
+          "siteCount": 1
+        },
+        {
+          "method": "commit",
+          "siteCount": 5
+        },
+        {
+          "method": "status",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcPassageRepository",
+      "class": "JdbcPassageRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPassageRepository.java",
+      "findingIds": [
+        "A08"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPassageRepository.java#L249",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPassageRepository.java#L420",
+        "../../plowshare-server/src/main/resources/db/migration/V79__retrieval_passages.sql#L3"
+      ],
+      "countModel": "publish successful P passages:3+P+D+L statements, D=1 nextPosition0 delete else0; L=1 legacy single-digest completion else0. target4+D+L with one multirow insert. pending1; rank/coverage1+H, H home lookup.",
+      "uncertainty": "No SQL plans/bytes measured. Multirow insert target hypothetical; failure/withdrawn-owner branches terminate earlier. Provider I/O is outside locks.",
+      "analysis": "**Confirmed per-passage writes.** [publishBatch](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPassageRepository.java#L249) locks owner and queue, optionally deletes old passages, loops over `P<=16` individual INSERTs and updates queue, optionally copying a legacy digest vector. Exact cost is `3+P+D+L`; at `P=16,D=1,L=0`, **20 statements \u2192 target5** using one bound multirow insert, retaining two locks, delete and queue update. JDBC batching may reduce wire exchanges but still executes P statements; do not report that alone as one SQL statement. The loop is present in public snapshot `f78e4f04`.\n\n[coverage](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPassageRepository.java#L420) executes three correlated passage subqueries per eligible source in its profile path: nonempty, no missing vector and count. The planner may transform them; actual invocation count is unknown. Rank/coverage add a named-home lookup, and constrained paths invoke information safety per candidate. `pending` returns at most8 full source texts, so row bounds do not bound text bytes; publish limits16 passages but vector/string lengths still matter. [V79 keys/index](../../plowshare-server/src/main/resources/db/migration/V79__retrieval_passages.sql#L3) support owner/passages equality and status/retry, but pending's `status<>ready OR generation differs` plus retry/order is not a simple equality-prefix use. Vector profile operator/column/index fit requires generated-plan inspection.\n\n**Cache blocked for composite state:** Source has text hash and progress; hash alone does not version ready/error/position or embedding-space cutovers. Match contains immutable scalar/text fields, while digestVector exposes mutable `float[]` requiring copying. Entry/digest triggers delete/recreate retrieval sources and embedding workers update vectors outside this owner. Immutable passage DTOs need source hash plus generation/space/projection and current privacy; coverage lists need membership versions. Owner-before-queue locks and requireSource are authoritative source-change fences, not wasteful reads. No shared repair/lease admission is safe.",
+      "directJdbcSiteCount": 16,
+      "jdbcSiteMethods": [
+        {
+          "method": "pending",
+          "siteCount": 1
+        },
+        {
+          "method": "digestVector",
+          "siteCount": 1
+        },
+        {
+          "method": "failed",
+          "siteCount": 1
+        },
+        {
+          "method": "logOwner",
+          "siteCount": 1
+        },
+        {
+          "method": "digestHome",
+          "siteCount": 1
+        },
+        {
+          "method": "informationRows",
+          "siteCount": 1
+        },
+        {
+          "method": "sourceHome",
+          "siteCount": 1
+        },
+        {
+          "method": "requireSource",
+          "siteCount": 1
+        },
+        {
+          "method": "beginRepair",
+          "siteCount": 1
+        },
+        {
+          "method": "publishBatch",
+          "siteCount": 7
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "BoardStore",
+      "class": "BoardStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java",
+      "findingIds": [
+        "A09"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java#L543",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java#L432",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java#L166",
+        "../../plowshare-server/src/main/resources/db/migration/V74__the_project_board.sql#L95"
+      ],
+      "countModel": "post(no reply)=2 statements, with reply=3; target1/2 via RETURNING. topup precheck lockTopic2 then topic1 =>3 vs target2. summaries1 JDBC statement with2 count subqueries per selected topic before planner transformations.",
+      "uncertainty": "No statement latency/cardinality measured; correlated count execution not assumed. V74 filename verified during link validation; proposed RETURNING not implemented.",
+      "analysis": "**Confirmed avoidable hydration.** [post](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java#L543) inserts then fetches the complete message by minted ID: **2 statements \u21921** with `RETURNING`, or **3\u21922** when the same-topic reply check is retained. `openRoot` similarly inserts then reads the allowance view; the view/trigger fields mean a returned base row needs deliberate projection mapping. [topup](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java#L432) discards lockTopic's returned BoardTopic, then rereads it: **3 precheck statements \u21922** by retaining the locked result. Allowance ceiling/claim calls remain additional authoritative work.\n\n[Summary SQL](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/BoardStore.java#L166) embeds two correlated message counts per selected topic. One JDBC statement is not one scan: a filtered count can compute both together; actual evaluation order/count needs EXPLAIN. `inspectSeats` uses per-seat latest-firing LATERAL; current firing-by-topic index is not proof of matching topic+target+latest ordering. [V74](../../plowshare-server/src/main/resources/db/migration/V74__the_project_board.sql#L95) already indexes `(topic,seq)` for messages and children for recursion; no duplicate message index is justified. Messages returns all bodies without a limit; known writer limits do not establish total list byte bounds. Counts transfer scalars, while topic responses include allowance metadata.\n\n**Operation-local now:** BoardMessage copies mentions and is immutable; normal store has no body UPDATE, making body snapshots an eventual shareable candidate. BoardTopic and seat views change with allowances, lifecycle, wakes and watermarks; no complete returned version exists. `seq` orders messages but does not version a whole topic/seat projection. BoardMessaging, firing, allowance and notice writers bypass individual methods. Current authority and live claim/alert/seen predicates remain uncached; every-writer commit invalidation, list membership and reconnect proof are missing.",
+      "directJdbcSiteCount": 54,
+      "jdbcSiteMethods": [
+        {
+          "method": "openRoot",
+          "siteCount": 1
+        },
+        {
+          "method": "topic",
+          "siteCount": 1
+        },
+        {
+          "method": "messagingTopic",
+          "siteCount": 1
+        },
+        {
+          "method": "summaries",
+          "siteCount": 1
+        },
+        {
+          "method": "inspectSeats",
+          "siteCount": 1
+        },
+        {
+          "method": "decisions",
+          "siteCount": 1
+        },
+        {
+          "method": "allowance",
+          "siteCount": 1
+        },
+        {
+          "method": "claim",
+          "siteCount": 1
+        },
+        {
+          "method": "exhaust",
+          "siteCount": 1
+        },
+        {
+          "method": "lockTopic",
+          "siteCount": 1
+        },
+        {
+          "method": "close",
+          "siteCount": 1
+        },
+        {
+          "method": "resolutionDelivered",
+          "siteCount": 1
+        },
+        {
+          "method": "resolutionUndelivered",
+          "siteCount": 1
+        },
+        {
+          "method": "undeliveredResolutions",
+          "siteCount": 1
+        },
+        {
+          "method": "undeliveredResolutionsFor",
+          "siteCount": 1
+        },
+        {
+          "method": "openTopics",
+          "siteCount": 1
+        },
+        {
+          "method": "openChild",
+          "siteCount": 1
+        },
+        {
+          "method": "decision",
+          "siteCount": 1
+        },
+        {
+          "method": "decide",
+          "siteCount": 1
+        },
+        {
+          "method": "requestForChild",
+          "siteCount": 1
+        },
+        {
+          "method": "descendants",
+          "siteCount": 1
+        },
+        {
+          "method": "openTree",
+          "siteCount": 1
+        },
+        {
+          "method": "topup",
+          "siteCount": 1
+        },
+        {
+          "method": "activeWakes",
+          "siteCount": 1
+        },
+        {
+          "method": "refuseMemberWakes",
+          "siteCount": 1
+        },
+        {
+          "method": "markQuiet",
+          "siteCount": 1
+        },
+        {
+          "method": "notice",
+          "siteCount": 1
+        },
+        {
+          "method": "noticeKind",
+          "siteCount": 1
+        },
+        {
+          "method": "noticeWake",
+          "siteCount": 1
+        },
+        {
+          "method": "noticeNeedsRecovery",
+          "siteCount": 1
+        },
+        {
+          "method": "owedNotices",
+          "siteCount": 1
+        },
+        {
+          "method": "noticeDelivered",
+          "siteCount": 1
+        },
+        {
+          "method": "post",
+          "siteCount": 2
+        },
+        {
+          "method": "message",
+          "siteCount": 1
+        },
+        {
+          "method": "messages",
+          "siteCount": 1
+        },
+        {
+          "method": "countAfter",
+          "siteCount": 2
+        },
+        {
+          "method": "messagesAfter",
+          "siteCount": 1
+        },
+        {
+          "method": "messagesSince",
+          "siteCount": 1
+        },
+        {
+          "method": "seatIfAbsent",
+          "siteCount": 2
+        },
+        {
+          "method": "seat",
+          "siteCount": 1
+        },
+        {
+          "method": "seatByConversation",
+          "siteCount": 1
+        },
+        {
+          "method": "seats",
+          "siteCount": 1
+        },
+        {
+          "method": "useAlert",
+          "siteCount": 1
+        },
+        {
+          "method": "recordSilent",
+          "siteCount": 1
+        },
+        {
+          "method": "recordFailure",
+          "siteCount": 1
+        },
+        {
+          "method": "clearFailure",
+          "siteCount": 1
+        },
+        {
+          "method": "advanceSeen",
+          "siteCount": 1
+        },
+        {
+          "method": "pass",
+          "siteCount": 1
+        },
+        {
+          "method": "queuedWakeTargets",
+          "siteCount": 1
+        },
+        {
+          "method": "ancestorSeen",
+          "siteCount": 2
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "ProjectStore",
+      "class": "ProjectStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java",
+      "findingIds": [
+        "A10"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L527",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L1229",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L2048",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L1439"
+      ],
+      "countModel": "place/activate source-body successful existing path:find1+UPDATE1+find1=3 vs target2. attachClient body UPDATE+SELECT=2 vs target1. Creator/authorization/alias work adds branch-specific calls.",
+      "uncertainty": "Counts deliberately exclude creator/admin/authorization expansion. Filesystem time, SQL plans and row/array sizes unmeasured; source-to-caller chain uses existing ProjectWorkspaces/ServerProjects interfaces.",
+      "analysis": "**Confirmed post-write reloads.** [place and activateDeployment](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L527) load current placement for checks, update it, then call `find` again. Their successful existing-source bodies cost **3 SQL statements \u2192 target2** with a returned stored projection; `withCreator`, administrator checks, FileStore checks and membership operations are additional. [attachClient](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L1229) uses UPDATE then SELECT: **2\u21921** within its body. Expected-placement/row-count checks remain; returning caller input would not prove database-trigger results.\n\nProjectRecord's copied lists make its stored values immutable, but [`find/resolved`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L2048) also resolves aliases and calls filesystem directory checks. Repeated response hydration repeats this host work, not just SQL. [effectiveExclusions(ProjectRecord)](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectStore.java#L1439) already avoids a reload and should remain the caller path. Listing all visible projects transfers every path/array/placement; no row cap exists in all/allFor. Project/name unique keys fit ID/name probes. Visibility list EXISTS probes and client `LIKE` prefixes require cardinality/plans; no missing broad index is established.\n\n**Cache blocked for resolved access:** ProjectRecord exposes no database row generation. `defined_at` is not changed by rename, forget or all client/Personal/registration writes. ProjectIds, Personal initialization, Application boundary/deployment and membership/authority are other writers. A stored-metadata projection could be versioned later, but a cached resolved root also depends on host FileStore config and current filesystem existence, neither covered by PostgreSQL notifications. Current workspace/grant fences and alias refusal must remain live; invalidation must include negative/name mappings and list membership. No cache of a previously valid root authorizes filesystem access. Locks and first-manager insertion are necessary transaction invariants.",
+      "directJdbcSiteCount": 25,
+      "jdbcSiteMethods": [
+        {
+          "method": "createServer",
+          "siteCount": 2
+        },
+        {
+          "method": "place",
+          "siteCount": 1
+        },
+        {
+          "method": "activateDeployment",
+          "siteCount": 1
+        },
+        {
+          "method": "withCreator",
+          "siteCount": 2
+        },
+        {
+          "method": "defineLending",
+          "siteCount": 1
+        },
+        {
+          "method": "updatedLent",
+          "siteCount": 1
+        },
+        {
+          "method": "rootOn",
+          "siteCount": 1
+        },
+        {
+          "method": "rootedElsewhere",
+          "siteCount": 1
+        },
+        {
+          "method": "moveWorkspace",
+          "siteCount": 1
+        },
+        {
+          "method": "rename",
+          "siteCount": 1
+        },
+        {
+          "method": "find",
+          "siteCount": 1
+        },
+        {
+          "method": "nameForId",
+          "siteCount": 1
+        },
+        {
+          "method": "exists",
+          "siteCount": 1
+        },
+        {
+          "method": "id",
+          "siteCount": 1
+        },
+        {
+          "method": "personalOwner",
+          "siteCount": 1
+        },
+        {
+          "method": "attachClient",
+          "siteCount": 2
+        },
+        {
+          "method": "allForSession",
+          "siteCount": 1
+        },
+        {
+          "method": "allFor",
+          "siteCount": 1
+        },
+        {
+          "method": "all",
+          "siteCount": 1
+        },
+        {
+          "method": "forget",
+          "siteCount": 1
+        },
+        {
+          "method": "heldByAnother",
+          "siteCount": 1
+        },
+        {
+          "method": "refuseLegacyPlacement",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "ConversationStore",
+      "class": "ConversationStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java",
+      "findingIds": [
+        "A11"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java#L1063",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java#L1163",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java#L575",
+        "../../plowshare-server/src/main/resources/db/migration/V17__conversation_origin.sql#L302",
+        "../../plowshare-server/src/main/resources/db/migration/V19__conversation_lifecycle.sql#L161",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationRecord.java#L90"
+      ],
+      "countModel": "moveTo success:UPDATE1+find1 plus allowance attach work; target one returned projection with equivalent allowance state. turnEnded:3 local statements plus allowance restore/attach. root/tree/lifecycle1 each; named-home lists1+H.",
+      "uncertainty": "Allowance.attach/restore expansion not asserted. Target CTE must preserve trigger/allowance mapping; no runtime concurrency or query measurements performed.",
+      "analysis": "**Confirmed response rehydration.** [`moveTo`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java#L1063) performs a guarded lifecycle UPDATE then full `find`: **2 local statements \u2192 target1** via a typed data-modifying projection, retaining live-orchestration/root/state predicates. Failure-only refusal reads distinguish real outcomes and are not avoidable success-path work. [`turnEnded`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java#L1163) has three local statements: allowance identity read, last-turn update and full find; allowance restore/attach may add work. The identity comparison protects the canonical shared counter, so only the final hydration is a clear consolidation candidate.\n\n[Find](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java#L575) reads `conversation_allowance_state` and attaches its Budget. Home/latest listings load complete conversation/allowance metadata without a general list cap; latestFor returns one row but runs EXISTS over turns for each candidate. [Home index](../../plowshare-server/src/main/resources/db/migration/V17__conversation_origin.sql#L302) covers project/origin/created order, not lifecycle plus ID tiebreak or turns.agent. [Children index](../../plowshare-server/src/main/resources/db/migration/V19__conversation_lifecycle.sql#L161) fits downward recursion; upward recursion uses IDs. Depth64 prevents unbounded cycles. Actual scanned rows/sort/function costs are unknown.\n\n**Cache blocked as-is:** [ConversationRecord](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationRecord.java#L90) embeds mutable Budget and TurnCap; records are not automatically immutable graphs. It has no complete conversation/allowance generation. TurnStore stamps title, allowance writers update shared counts, Board/messaging writes allowance references, and root lifecycle affects children. A separate immutable status DTO is needed, with independent versions for root, relationship and allowance projections. Current source/ownership visibility and execution checks remain authoritative. Cached balances, caps or root lifecycle must not replace claims/transition guards; reconnect cannot rely on missed hints.",
+      "directJdbcSiteCount": 20,
+      "jdbcSiteMethods": [
+        {
+          "method": "allowanceFor",
+          "siteCount": 1
+        },
+        {
+          "method": "write",
+          "siteCount": 1
+        },
+        {
+          "method": "find",
+          "siteCount": 1
+        },
+        {
+          "method": "ownerOf",
+          "siteCount": 1
+        },
+        {
+          "method": "opening",
+          "siteCount": 1
+        },
+        {
+          "method": "fixOpening",
+          "siteCount": 1
+        },
+        {
+          "method": "pinLocalHooks",
+          "siteCount": 1
+        },
+        {
+          "method": "localHooksOf",
+          "siteCount": 1
+        },
+        {
+          "method": "closeLog",
+          "siteCount": 1
+        },
+        {
+          "method": "inHome",
+          "siteCount": 1
+        },
+        {
+          "method": "latestFor",
+          "siteCount": 1
+        },
+        {
+          "method": "rootOf",
+          "siteCount": 1
+        },
+        {
+          "method": "lifecycleOf",
+          "siteCount": 1
+        },
+        {
+          "method": "treeOf",
+          "siteCount": 1
+        },
+        {
+          "method": "rootsAt",
+          "siteCount": 1
+        },
+        {
+          "method": "roots",
+          "siteCount": 1
+        },
+        {
+          "method": "moveTo",
+          "siteCount": 1
+        },
+        {
+          "method": "refusal",
+          "siteCount": 1
+        },
+        {
+          "method": "turnEnded",
+          "siteCount": 1
+        },
+        {
+          "method": "nameFromFirstTurn",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "ProposalStore",
+      "class": "ProposalStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java",
+      "findingIds": [
+        "A12"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java#L227",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java#L344",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java#L395",
+        "../../plowshare-server/src/main/resources/db/migration/V2__proposals.sql#L85"
+      ],
+      "countModel": "propose/resolve successful paths2 each; note/release successful paths3 each; targets1 and2 respectively retaining diagnostic preread. pending/ruledOn1+H named-home lookup.",
+      "uncertainty": "No latency/row statistics. CTE result mapping and constraint error behavior require persistence tests before implementation; no tests run for this analysis.",
+      "analysis": "**Confirmed repeated returned projection.** [propose](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java#L227) and [resolve](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java#L344) each write then `get`: **2 statements \u2192 target1** using RETURNING plus the existing memory/home join in a data-modifying CTE. [note/release](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProposalStore.java#L395) also preread to name refusal outcomes, costing **3\u21922** if that diagnostic snapshot stays and the final write returns its result. The conditional state UPDATE is necessary even when the DTO was just read: release/settle may race. PromotionQueue owns claim/compensation sequencing and cannot use a cache as its claim.\n\nEach reread transfers the full reason/resolution and joined memory home, although note callers just changed the resolution. Pending/rulings collections are ordered but unbounded; actual count/text bytes unknown. [V2](../../plowshare-server/src/main/resources/db/migration/V2__proposals.sql#L85) already has the partial `(memory_id,action) WHERE state=pending` unique index and memory index. These enforce idempotency but do not alone prove a state/home list is cheaply ordered. `ruledOn` returns distinct memory IDs, narrower than loading all proposals. No expensive correlated routine is present in the direct SQL; authorization adds separate work.\n\n**Operation-local:** Proposal is an immutable scalar record but state/resolution/settler fields mutate and release clears them. No monotonic row version is exposed; resolvedAt cannot version a return to pending. PromotionQueue plus memory home/project writers affect projections/list membership. Shared admission is blocked until versions and every-writer after-commit coverage exist, including negative/new pending entries and reconnect recovery. Current source/destination authority must be evaluated independently. Failure-only lookups after a declined update preserve useful diagnostics and should not be counted as unnecessary successful work.",
+      "directJdbcSiteCount": 9,
+      "jdbcSiteMethods": [
+        {
+          "method": "propose",
+          "siteCount": 1
+        },
+        {
+          "method": "get",
+          "siteCount": 1
+        },
+        {
+          "method": "pending",
+          "siteCount": 1
+        },
+        {
+          "method": "ruledOn",
+          "siteCount": 1
+        },
+        {
+          "method": "resolve",
+          "siteCount": 1
+        },
+        {
+          "method": "note",
+          "siteCount": 1
+        },
+        {
+          "method": "release",
+          "siteCount": 1
+        },
+        {
+          "method": "rulingsSettledUnder",
+          "siteCount": 1
+        },
+        {
+          "method": "alreadyWaiting",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "TodoStore",
+      "class": "TodoStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoStore.java",
+      "findingIds": [
+        "A13"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoBoard.java#L126",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoBoard.java#L270",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoStore.java#L56",
+        "../../plowshare-server/src/main/resources/db/migration/V45__todos.sql#L35"
+      ],
+      "countModel": "TodoBoard.apply successful batch:2+I+U store statements, I inserts U changed existing items, plus effects/callbacks. One initial read and1multirow insert/1batch update plus optional finalread would bound groups; postread elimination conditional.",
+      "uncertainty": "Whether final reload is redundant remains unproven. Multirow target assumes affected-row mismatch can be validated as a set without losing exact atomic refusal semantics.",
+      "analysis": "**Batch amplification, with a conditional reload candidate.** [TodoBoard.apply](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoBoard.java#L126) holds a baseline and complete working map, writes `I` inserted and `U` changed existing items, invokes effects, then [reloads](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoBoard.java#L270) after callbacks. Exact store count is `2+I+U`; at20 changed rows, **22** statements, excluding stage/orchestration effects. One bounded multirow insert and one set-based optimistic update target at most4 store statements with the fresh final list retained. Removing that final read would save one more only after proving callbacks/triggers cannot change returned rows; current source alone does not establish that.\n\n[The UPDATE](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoStore.java#L56) compares previous `updated_at`; every intended row must match or the entire transaction rolls back. This is concurrency protection, not a wasted reread. List transfers all text/summary/status fields and is bounded to100 items by TodoBoard, not by SQL itself. [V45 index](../../plowshare-server/src/main/resources/db/migration/V45__todos.sql#L35) covers conversation,parent,position but lacks the ID final tiebreak; NULLS FIRST order may still need sorting. A100-row cap makes another index an unproven priority. There are no nested SQL permission functions in TodoStore itself.\n\n**Operation-local:** TodoItem is immutable and carries microsecond-truncated updatedAt as an optimistic item token. That token does not version inserted/deleted list membership or every multi-row effect. Stage seeding/orchestration and callbacks are additional writers/dependencies. Shared list admission requires durable list generation and current conversation visibility, every-writer post-commit invalidation and reconnect proof. Cached `locked`/stage values must not authorize edits; preserve baseline predicates and no publication on rollback.",
+      "directJdbcSiteCount": 3,
+      "jdbcSiteMethods": [
+        {
+          "method": "list",
+          "siteCount": 1
+        },
+        {
+          "method": "insert",
+          "siteCount": 1
+        },
+        {
+          "method": "update",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcPersonalSpaceRepository",
+      "class": "JdbcPersonalSpaceRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/JdbcPersonalSpaceRepository.java",
+      "findingIds": [
+        "A14"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/PersonalSpaces.java#L112",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/JdbcPersonalSpaceRepository.java#L64",
+        "../../plowshare-server/src/main/resources/db/migration/V95__personal_spaces.sql#L2"
+      ],
+      "countModel": "PersonalSpaces.ensure normal initialized path6 JDBC statements:serviceAccount1 +reserve(service1,insert1,lockedread1)+initialized2. first startup accounts adds1 for collection, then per-account work. target5 only if duplicate eligibility safely consolidated.",
+      "uncertainty": "No regression claim. Second serviceAccount query has a potential freshness role; cache cannot erase it without proving the consistency boundary.",
+      "analysis": "**Repeated eligibility, not a safe unconditional deletion.** [PersonalSpaces.ensure](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/PersonalSpaces.java#L112) calls serviceAccount before opening its initialization transaction; [`reserve`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/JdbcPersonalSpaceRepository.java#L64) calls it again, inserts a personal project if absent and locks/resolves reservation. `initialized` then updates project and ensures membership. A normal initialized call therefore executes **6 statements**; startup is `1+6A` for A accounts, before filesystem work. Consolidating eligibility could target5 per account, but the checks straddle transaction/filesystem boundaries: it is a candidate until current eligibility and pre-I/O refusal are preserved.\n\nBoth initialized and new cases execute project UPDATE/membership INSERT, even when unchanged; whether avoiding no-op writes is worthwhile depends on call frequency and intended union timestamp/membership repair behavior. Reservation selects only ID/initialized, so there is no full-project hydration waste. [V95](../../plowshare-server/src/main/resources/db/migration/V95__personal_spaces.sql#L2) supplies unique personal_owner, supporting insert conflict and locked lookup; project/admin names use existing keys. Returned SQL rows are tiny, but initialized paths do filesystem/git checks; SQL cannot be assumed the latency owner.\n\n**Operation-local:** Reserved is immutable but its initialized state is mutable and has no explicit generation. Account kind and project Personal ownership participate in admission. ProjectStore, membership/authority and account administration are other writers; a cached owner mapping does not prove initialization or current eligibility. No shared reservation/lock/eligibility cache is safe. Stable name/ID metadata could later share only behind complete identity/version invalidation and reconnect recovery, with current access fences. Exact row bytes/plans and startup cardinality were not measured.",
+      "directJdbcSiteCount": 9,
+      "jdbcSiteMethods": [
+        {
+          "method": "owner",
+          "siteCount": 1
+        },
+        {
+          "method": "id",
+          "siteCount": 1
+        },
+        {
+          "method": "projectId",
+          "siteCount": 1
+        },
+        {
+          "method": "accounts",
+          "siteCount": 1
+        },
+        {
+          "method": "serviceAccount",
+          "siteCount": 1
+        },
+        {
+          "method": "reserve",
+          "siteCount": 2
+        },
+        {
+          "method": "initialized",
+          "siteCount": 2
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "EntryStore",
+      "class": "EntryStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java",
+      "findingIds": [
+        "A15"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L1864",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L1892",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ConversationTrajectoryTool.java#L146",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentsConfig.java#L788",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/api/ConversationController.java#L181",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L2107",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L785",
+        "../../plowshare-server/src/main/resources/db/migration/V23__entry_text_search.sql#L151"
+      ],
+      "countModel": "pageOfLog nonempty:3+2Q statements; Q=1 account scoped else0. Empty:2+2Q. Tail nonempty repeats pageOfLog:6 ordinary tool wiring, or10 withscopedstore; target3+Q in equivalenttail snapshot. append2; thatProjectedAt2+Q.",
+      "uncertainty": "Before budgets exclude outer conversation authorization. Single-tail target must preserve historical summary order and reach consistency. No production timing claimed.",
+      "analysis": "**Confirmed duplicate readability, beyond planned SQL consolidation.** [`pageOfLog`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L1864) calls `requireInformation`, then invokes public [`pageOfLogAfter`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L1892), which calls it again before the package-private implementation. An account-scoped nonempty page therefore executes **5 statements**: two identical same-log readability SELECTs, reach, count and page. Removing only the delegation duplicate targets4; no current authorization check is skipped. Unscoped cost is3 because requireInformation is a no-op there.\n\n[ConversationTrajectoryTool tail](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ConversationTrajectoryTool.java#L146) fetches a one-row page for its count, discards its body, then fetches the final offset page: **6 statements in the ordinary unscoped tool wiring**, or10 if supplied an account-scoped store, for a nonempty log. [AgentsConfig](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentsConfig.java#L788) supplies the ordinary store; [HTTP conversation reads](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/api/ConversationController.java#L181) explicitly select a scoped copy. A correctly ordered tail/single-snapshot capability targets **4 scoped /3 unscoped**. Existing reverse-ordinal paging is not automatically equivalent to `(turn_ordinal,ordinal)` order when summaries sort earlier; preserve the requested order. [`page`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L2107) captures reach to bound count/page against concurrent appends; deleting that consistency fence is not the fix.\n\n[PAGE_OF](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java#L785) returns whole content for utterance, answer, refusal and summary rows; only other kinds use the8000-character excerpt cap. Tool-call arguments are capped separately, while metadata and the number of tool calls still add bytes. The discarded first tail page can therefore transfer a full narrative entry, with no universal8000-character page-row bound; actual transferred bytes are unknown. Search snippet generation is a separate post-limit projection. Complete logs/skill snapshots are unbounded and serve different contracts. [V23 GIN](../../plowshare-server/src/main/resources/db/migration/V23__entry_text_search.sql#L151) covers maintained text-search vector; conversation PK supports ordinal reach, not necessarily turn/ordinal sorting. Actual scanned rows/function cost remains unknown.\n\n**Cache blocked:** EntryRecord copies ToolCall lists but its database row later changes superseded/ejected/learned state; no row generation is returned. Ordinal is append identity, not a content/privacy version. Fold/retention/learner/retrieval writers and child-conversation page references create dependencies. Use operation-local page/authority snapshots first; immutable payload caching needs complete version, membership and live visibility proof. Append's advisory lock/RETURNING already avoids unsafe refetch.",
+      "directJdbcSiteCount": 27,
+      "jdbcSiteMethods": [
+        {
+          "method": "requireInformation",
+          "siteCount": 1
+        },
+        {
+          "method": "informationQuery",
+          "siteCount": 1
+        },
+        {
+          "method": "append",
+          "siteCount": 2
+        },
+        {
+          "method": "invocationOf",
+          "siteCount": 1
+        },
+        {
+          "method": "lastAnswerWasAFallback",
+          "siteCount": 1
+        },
+        {
+          "method": "redeem",
+          "siteCount": 1
+        },
+        {
+          "method": "storedResultsBehindASeam",
+          "siteCount": 2
+        },
+        {
+          "method": "payloadsHeldBy",
+          "siteCount": 1
+        },
+        {
+          "method": "ejectPayload",
+          "siteCount": 1
+        },
+        {
+          "method": "forConversation",
+          "siteCount": 1
+        },
+        {
+          "method": "snapshotForSkill",
+          "siteCount": 1
+        },
+        {
+          "method": "thatProjectFor",
+          "siteCount": 1
+        },
+        {
+          "method": "thatProjectedAt",
+          "siteCount": 2
+        },
+        {
+          "method": "through",
+          "siteCount": 1
+        },
+        {
+          "method": "page",
+          "siteCount": 3
+        },
+        {
+          "method": "supersede",
+          "siteCount": 1
+        },
+        {
+          "method": "foldWithinATurn",
+          "siteCount": 1
+        },
+        {
+          "method": "foldedThrough",
+          "siteCount": 1
+        },
+        {
+          "method": "awaitingTheLearner",
+          "siteCount": 1
+        },
+        {
+          "method": "countAwaitingTheLearner",
+          "siteCount": 1
+        },
+        {
+          "method": "conversationsAwaitingTheLearner",
+          "siteCount": 1
+        },
+        {
+          "method": "markLearned",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "CompactionStore",
+      "class": "CompactionStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/CompactionStore.java",
+      "findingIds": [
+        "A16"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "share-immutable",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/CompactionStore.java#L64",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodosConfig.java#L60",
+        "../../plowshare-server/src/main/resources/db/migration/V8__compactions.sql#L64"
+      ],
+      "countModel": "record1 with RETURNING; latest1 returning0/1 row; history1 returningF rows. TodosConfig latest-to-ordinal remains1query but unnecessarily returns summary text.",
+      "uncertainty": "No measured fold sizes/caller frequency. Data immutability is normal-source behavior, not a claimed enforcement against all SQL writers.",
+      "analysis": "[CompactionStore](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/CompactionStore.java#L64) executes one statement for each insert/latest/history operation; insert already uses RETURNING. [Todo wiring](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodosConfig.java#L60) loads latest's complete summary only to extract throughOrdinal. This is projection overfetch: **1\u21921 query**, but summary bytes can be avoided with a scalar reach projection or an already loaded compaction. Actual summary sizes/frequency are unknown. History returns all F folds; [V8 primary key](../../plowshare-server/src/main/resources/db/migration/V8__compactions.sql#L64) matches conversation/reach and both scan directions, so a second latest index is unnecessary. No correlated routine multiplication exists here.\n\n**Share immutable candidate:** CompactionRecord is an immutable string/int record; normal source only inserts and constraints retain turn references. `(database,conversation,reach,projection)` identifies a fold, but latest/history membership needs an append generation. Maintenance/deletion and current conversation privacy still need proof, after-commit invalidation and reconnect handling. No material SQL latency or repeated caller read is established.",
+      "directJdbcSiteCount": 3,
+      "jdbcSiteMethods": [
+        {
+          "method": "record",
+          "siteCount": 1
+        },
+        {
+          "method": "latest",
+          "siteCount": 1
+        },
+        {
+          "method": "forConversation",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcApplicationRegistrations",
+      "class": "JdbcApplicationRegistrations",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationRegistrations.java",
+      "findingIds": [
+        "A17"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationRegistrations.java#L15",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/WorkspaceApplicationPolicy.java#L49"
+      ],
+      "countModel": "required1; require1 update; WorkspaceApplicationPolicy ordinary named read2 (flag+project) plusoptional1 adoption write. Potential combined snapshot2->1, not proven duplicate identicalquery.",
+      "uncertainty": "Projection consolidation changes interface/result shape; filesystem policy still requires current host checks. Latency unknown.",
+      "analysis": "[`required/require`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcApplicationRegistrations.java#L15) each execute one narrow key lookup/update. [WorkspaceApplicationPolicy.read](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/WorkspaceApplicationPolicy.java#L49) then loads the project, yielding **2 reads**, plus at most one adoption write. Flag and project are different projections, so this is a **2\u21921 combined-snapshot candidate**, not proven identical-query repetition. Project name uniqueness supports both; flag results transfer one Boolean, project/path bytes and filesystem I/O are additional. No correlated SQL is present.\n\n**Operation-local:** the Boolean has no row version and participates in enforcement. ProjectStore/deployment can set boundary independently. Cached false could reopen a newly adopted boundary; notification-only invalidation is insufficient. A current combined project/boundary snapshot can be reused within the policy read, but shared admission requires a boundary/project generation, complete writer coverage, live authority and reconnect bypass. Managed-source adoption writes must remain explicit and checked, not silently omitted on a hit.",
+      "directJdbcSiteCount": 2,
+      "jdbcSiteMethods": [
+        {
+          "method": "required",
+          "siteCount": 1
+        },
+        {
+          "method": "require",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcConversationContextRepository",
+      "class": "JdbcConversationContextRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcConversationContextRepository.java",
+      "findingIds": [
+        "A18"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcConversationContextRepository.java#L19",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/OwnedConversationContext.java#L30",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcDocumentPolicyRepository.java#L132"
+      ],
+      "countModel": "ownership1 SELECT returning0/1 narrow typed row; OwnedConversationContext adds account/service androle checks outsideowner. Target remains1.",
+      "uncertainty": "No repeated call proven in inspected owner() path. Role/account internal SQL counted elsewhere.",
+      "analysis": "[`ownership`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcConversationContextRepository.java#L19) already combines owner, project identity/name and Personal status in **one SELECT** with0/1 row. [OwnedConversationContext](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/OwnedConversationContext.java#L30) uses all fields to construct attribution and separately verifies current account/service activity and role. Those are distinct authority checks, not unnecessary owner rereads. Conversation/project primary keys fit the equality join; no correlated SQL or full text is fetched. Actual bytes/plan latency are unknown; **1\u21921** is the honest budget.\n\n**Operation-local:** Ownership is an immutable scalar record without a source generation. [Document policy](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcDocumentPolicyRepository.java#L132) can fill owner_handle outside this repository; conversation home and project name/Personal writers also affect it; earlier ownership does not lease account/role authority. There is no demonstrated benefit justifying shared admission before complete ownership/version and every-writer commit/reconnect proof. Reusing this returned DTO through the one attribution operation is already supported.",
+      "directJdbcSiteCount": 1,
+      "jdbcSiteMethods": [
+        {
+          "method": "ownership",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcJobLog",
+      "class": "JdbcJobLog",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcJobLog.java",
+      "findingIds": [
+        "A19"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "cache-blocked",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcJobLog.java#L110",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcJobLog.java#L199",
+        "../../plowshare-server/src/main/resources/db/migration/V24__jobs.sql#L189"
+      ],
+      "countModel": "started1+H plusmissing project upsert; ended/find/all/prune1 each. all returnsJ rows with no cap; no N+1 demonstrated.",
+      "uncertainty": "Historical logging deliberately tolerates missing end records; cache must not invent RUNNING status. No hot path demonstrated.",
+      "analysis": "[Job log](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcJobLog.java#L110) has one statement per ended/find/all/prune, and started adds project resolution/possible registration. JobStore/Retention consume this as historical evidence; duplicate Java argument validation does **not** imply duplicate SQL. [`all`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcJobLog.java#L199) loads J records unbounded, a paging candidate if it is a hot call. It already projects metadata rather than payloads. ID primary order and [V24 age index](../../plowshare-server/src/main/resources/db/migration/V24__jobs.sql#L189) match listing/pruning. No correlated routine or measured index gap exists; **1\u21921** for single lookup is appropriate.\n\n**Cache blocked for current snapshots:** JobRecord is immutable but ended() overwrites ending/counters/time without a row version. Project renames and pruning also change results/membership; missing job is legitimate after failed logging/prune. Ended-at alone is not enforced finality. Shared reuse requires explicit completed-record/version contracts, writer invalidation and current access; no cached history may become active-job authority. Actual J/bytes/runtime frequency unknown.",
+      "directJdbcSiteCount": 5,
+      "jdbcSiteMethods": [
+        {
+          "method": "started",
+          "siteCount": 1
+        },
+        {
+          "method": "ended",
+          "siteCount": 1
+        },
+        {
+          "method": "find",
+          "siteCount": 1
+        },
+        {
+          "method": "all",
+          "siteCount": 1
+        },
+        {
+          "method": "pruneStartedBefore",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcProjectDirectories",
+      "class": "JdbcProjectDirectories",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectDirectories.java",
+      "findingIds": [
+        "A20"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectDirectories.java#L18",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ExportDirectories.java#L64"
+      ],
+      "countModel": "directJDBCsites0; existing/global0, named1; register/global0, existingnamed1, missingnamed2 throughProjectIds. Same counts as helper,no additionaladapterquery.",
+      "uncertainty": "Caller repetition across a complete export batch not measured; ProjectIds source documents deliberate upsert-lock avoidance.",
+      "analysis": "[The adapter](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectDirectories.java#L18) contains **zero direct SQL sites**, but [export/image directory callers](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ExportDirectories.java#L64) execute delegated ProjectIds resolution. Existing named home costs1 SELECT; first registration costs SELECT+upsert2; Global costs0. This is not a zero-query capability. Scalar ID transfer and unique name lookup are suitable; no correlated work/index gap is present. No adapter-specific reduction is justified (**1\u21921** normal named lookup).\n\n**Operation-local:** reuse an already resolved home/ID if the enclosing operation holds it; do not build an independent directory cache. Missing directory must refuse instead of using ProjectIds.NONE or registering an export typo. Long ID is immutable, but name mapping lacks a generation and creation/rename/deletion are other writers. Shared admission depends on the resolver's transaction/negative-invalidation proof, current filesystem authority and reconnect recovery.",
+      "directJdbcSiteCount": 0,
+      "jdbcSiteMethods": [],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcPromotionSourceRepository",
+      "class": "JdbcPromotionSourceRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPromotionSourceRepository.java",
+      "findingIds": [
+        "A21"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPromotionSourceRepository.java#L18",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ScopedPromotionAccess.java#L31",
+        "../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L315"
+      ],
+      "countModel": "source1 SELECT returning0/1 typed source; information_memory_safe called on qualifyingmemory, internalworkdependsprovenanceP. ScopedPromotionAccess addsidentity/role/grant checks outsideowner.",
+      "uncertainty": "Function call counts/planner behavior unmeasured. No claim that this repository owns destination grant cost.",
+      "analysis": "[`source`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcPromotionSourceRepository.java#L18) resolves proposal\u2192memory\u2192authority home/project and information safety in **one narrow SELECT**. [ScopedPromotionAccess](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ScopedPromotionAccess.java#L31) uses the result and adds distinct source-manager/destination-ADMIN checks. ID primary keys support the joins and scope kind filter. [information_memory_safe](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L315) may invoke log readability for P provenance rows; JDBC count1 does not bound that internal work. No repeated source query is demonstrated; budget **1\u21921**, actual P/bytes/plans unknown.\n\n**Operation-local:** Source is immutable but its publishable Boolean is mutable privacy state and has no version. Proposal\u2192memory identity, memory home/provenance, information policy and grants have independent writers. Caching `publishable=true` as permission is unsafe. Shared admission is blocked without complete source/privacy generations and live authority; operation-local reuse preserves the existing source/destination separation.",
+      "directJdbcSiteCount": 1,
+      "jdbcSiteMethods": [
+        {
+          "method": "source",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcReasonLog",
+      "class": "JdbcReasonLog",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcReasonLog.java",
+      "findingIds": [
+        "A22"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcReasonLog.java#L107",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Navigator.java#L393",
+        "../../plowshare-server/src/main/resources/db/migration/V5__memory_reasons.sql#L115"
+      ],
+      "countModel": "record1 INSERT; forMemory1 SELECT returningR reasonrows. Navigator.evidence adds this once foractive/retiredmemorybranch, not N+1 insideowner.",
+      "uncertainty": "Reason history cardinality/bytes unknown. Existing no-reader javadoc is contradicted by actual call site, not relied upon.",
+      "analysis": "[ReasonLog](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcReasonLog.java#L107) executes one append or one ordered history read. Its comment saying no production reader is stale: [Navigator.evidence](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Navigator.java#L393) embeds filing reasons in active/retired memory evidence. One expansion loads R variable-length reason strings unbounded; no duplicate history read is present in that branch. Candidate is bounded evidence/history, not an invented latency issue: **1\u21921 statement**, fewer returned rows/bytes if semantics allow. [V5 index](../../plowshare-server/src/main/resources/db/migration/V5__memory_reasons.sql#L115) covers memory/time but not final ID tiebreak; actual sort cost unknown.\n\n**Operation-local:** Entry values are immutable, but list has no durable returned generation or surrogate ID; filedAt can tie/backdate. Archive writes and memory visibility/provenance changes affect the evidence. Shared history cache needs append membership/version and after-commit writer/reconnect coverage; current memory authorization remains required. No material performance result is established.",
+      "directJdbcSiteCount": 2,
+      "jdbcSiteMethods": [
+        {
+          "method": "record",
+          "siteCount": 1
+        },
+        {
+          "method": "forMemory",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "LocalHookSetStore",
+      "class": "LocalHookSetStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/LocalHookSetStore.java",
+      "findingIds": [
+        "A23"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "share-immutable",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/LocalHookSetStore.java#L44",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/hooks/HookFile.java#L24",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/hooks/script/LocalHookSets.java#L39"
+      ],
+      "countModel": "remember1 conflict-safeINSERT; find1 SELECT fullcanonicalJSON then decode. ExistingLocalHookSets pin/hook loader avoids repeatedstoreloads foractivepins; warmhitrequestfrequencyunknown.",
+      "uncertainty": "Ingress bounds not asserted as DB constraints. Existing LocalHookSets runtime cache semantics are distinct from proposed repository DTO tracking.",
+      "analysis": "[`remember/find`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/LocalHookSetStore.java#L44) each execute one keyed statement. Content-addressed insert is conflict-safe and find decodes the required entire hook set; no scalar/full-row waste is demonstrated. [HookFile bounds](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/hooks/HookFile.java#L24) describe32 files/1MiB set limits at ingress, although repository parsing itself does not establish a database byte cap. [LocalHookSets](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/hooks/script/LocalHookSets.java#L39) already remembers pins in a bounded LRU and avoids rereading each fire. Do not count every hook execution as a DB miss. Hash primary key fits; budget remains **1\u21921 cold lookup**,0 on existing caller reuse.\n\n**Share immutable candidate:** ordered HookFile/string lists are immutable, with canonical SHA256 content identity. Shared hash cache could deduplicate across logs, but needs weight bounds and committed provenance; pin/owner, policy, runtime compilation and executable authority are separate. Exceptional database replacement/deletion and missing\u2192present invalidation/reconnect coverage remain unproven. No generic shared DTO cache currently exists here.",
+      "directJdbcSiteCount": 2,
+      "jdbcSiteMethods": [
+        {
+          "method": "remember",
+          "siteCount": 1
+        },
+        {
+          "method": "find",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "ProjectIds",
+      "class": "ProjectIds",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectIds.java",
+      "findingIds": [
+        "A24"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectIds.java#L109",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectIds.java#L183"
+      ],
+      "countModel": "Global0; toRead/forDirectorynamed1; toWriteexisting1,missing2 (lookup+upsertRETURNING). Digestcaller repetitionisA02nothelperduplicate.",
+      "uncertainty": "No complete transaction-level count asserted for every caller. First-write double query intentionally trades round trips for lock contention.",
+      "analysis": "[ProjectIds](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectIds.java#L109) returns0 SQL for Global,1 scalar lookup for a named read/directory/existing write, and2 for a missing first write (lookup then race-safe upsert RETURNING). Unique project name/positive ID constraints fit the predicates. The [source explanation](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectIds.java#L183) is valid: unconditionally upserting existing projects would acquire a shared project-row lock every archive write. Thus **2\u21921 first registration is not an unconditional optimization**; normal1-query budget should remain.\n\n**Operation-local:** Long mappings are immutable values, but no mapping generation is returned. Pass a resolved ID across composed repository work when home/authority remain fixed; A02 demonstrates a real caller repeating this helper. Creation, rename, deletion, rollback and negative membership complicate sharing. An ID from uncommitted registration cannot enter shared cache. No permission is encoded by a project ID; current authority and directory missing/global distinctions remain explicit. Actual lookup latency/bytes unknown; no nested permission routines occur here.",
+      "directJdbcSiteCount": 2,
+      "jdbcSiteMethods": [
+        {
+          "method": "toWrite",
+          "siteCount": 1
+        },
+        {
+          "method": "lookUp",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "TurnStore",
+      "class": "TurnStore",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/TurnStore.java",
+      "findingIds": [
+        "A25"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "share-immutable",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/TurnStore.java#L214",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/TurnStore.java#L282",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/Conversations.java#L61"
+      ],
+      "countModel": "record1 INSERT RETURNING +1 best-efforttitleUPDATE attempt=2; remember/block/list/latest1 each. forConversationreturnsT fullturns; targetrecord2 preservesfailureboundary.",
+      "uncertainty": "Append concurrent-writer behavior and retained history size not measured. Title update attempt may fail by design; no redundant read proven.",
+      "analysis": "[`record`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/TurnStore.java#L214) assigns ordinal with INSERT/MAX/RETURNING, then separately attempts title UPDATE: **2 statements**, not a post-insert refetch. [Title failure isolation](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/TurnStore.java#L282) deliberately preserves the turn when naming fails; combining both into an atomic routine changes behavior. Remember/block/latest/list each cost1. [Conversation consumers](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/Conversations.java#L61) read full T turns for transcript/budget history; bodies may be large, but no repeated same-operation list is proven. V7's conversation/ordinal primary key matches list/MAX, so another ordinal index is unnecessary.\n\n**Share immutable candidate:** TurnRecord is scalar immutable; system blocks are content-addressed and normal source only inserts. `(database,conversation,ordinal,projection)` can identify turn content, while list/latest require append generation and current source visibility. Title invalidates ConversationStore separately. Maintenance updates/deletes and exact retained-immutability guarantees still require writer/reconnect proof. A cached turn never authorizes a new turn or shared allowance claim; existing returned ordinal should be retained by callers.",
+      "directJdbcSiteCount": 5,
+      "jdbcSiteMethods": [
+        {
+          "method": "record",
+          "siteCount": 1
+        },
+        {
+          "method": "remember",
+          "siteCount": 1
+        },
+        {
+          "method": "blockSentAt",
+          "siteCount": 1
+        },
+        {
+          "method": "forConversation",
+          "siteCount": 1
+        },
+        {
+          "method": "latestOrdinal",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcBoardPostRepository",
+      "class": "JdbcBoardPostRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/board/JdbcBoardPostRepository.java",
+      "findingIds": [
+        "A26"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/JdbcBoardPostRepository.java#L33",
+        "../../plowshare-server/src/main/resources/db/migration/V89__board_post_receipts.sql#L2"
+      ],
+      "countModel": "lockAndRead2 (advisorylock+receiptcomparison); save1; newpostreceiptpath3 excludingBoardStore/effects. Returnreceipt1row2columns.",
+      "uncertainty": "Payload input size and lock wait time unknown. Locking two statements is deliberate serialization, not fetch-discard-refetch.",
+      "analysis": "[`lockAndRead`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/board/JdbcBoardPostRepository.java#L33) executes an advisory transaction lock and one receipt comparison; save adds one INSERT. Board posting therefore spends **3 receipt statements** on new work,2 on retained receipt reconciliation, before message/wake work. JSONB comparison returns only message ID and match Boolean rather than transferring retained payload. [V89 key](../../plowshare-server/src/main/resources/db/migration/V89__board_post_receipts.sql#L2) matches account/request UUID exactly. No N+1, correlated function or index gap exists; budget remains3/2 unless a measured routine consolidation preserves locking.\n\n**No shared admission cache:** receipt identity/result is immutable in normal source, but a cached miss cannot authorize another post and a hit cannot establish the transaction's lock. Current board authority is separate. Payload mismatch, concurrent servers and uncertain send require authoritative reconciliation. Only the already locked operation's returned message can be reused. Maintenance/deletion/authority writer coverage and a reconnect protocol would be required even for a read-only receipt view; no such caching is justified by measured frequency.",
+      "directJdbcSiteCount": 3,
+      "jdbcSiteMethods": [
+        {
+          "method": "lockAndRead",
+          "siteCount": 2
+        },
+        {
+          "method": "save",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "TodoNotices.Jdbc",
+      "class": "TodoNotices",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoNotices.java",
+      "findingIds": [
+        "A27"
+      ],
+      "verdict": "no-material-waste",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoNotices.java#L48",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoBoard.java#L433"
+      ],
+      "countModel": "seen/remember/forget1 each. TodoBoard.noticeFor unchanged3 reads withrealcompactionstore(todo1+compaction1+seen1); changedempty adds1ackwrite; nonemptyacksseparately1.",
+      "uncertainty": "Counts assume configured CompactionStore; fallback constructor costsone fewerread. Callback/readfrequency not measured.",
+      "analysis": "[TodoNotices.Jdbc](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoNotices.java#L48) performs one narrow seen lookup, upsert or delete. [noticeFor](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/todos/TodoBoard.java#L433) combines todo list, current compaction reach and Seen: **3 reads** with normal compaction wiring, plus1 write for a changed empty list; nonempty acknowledgement happens later via noticed. These are different inputs, not three copies of one query. Reusing already loaded list/compaction can save2 reads in a composed prompt, but no duplicated invocation is proved. Conversation primary key fits the lookup; Seen returns hash/int, not rendered text. Actual list/hash/render cost unknown.\n\n**Operation-local:** Seen is immutable but acknowledgement mutates and forget deletes it; hash+reach does not version existence. Caching the desired notice before actual delivery would suppress unsent notices. Todo/stage, compaction and notice writers require membership/version invalidation after commit before sharing, plus current conversation access and reconnect recovery. No claim of missing SQL index or high-cost JDBC call is supported.",
+      "directJdbcSiteCount": 3,
+      "jdbcSiteMethods": [
+        {
+          "method": "seen",
+          "siteCount": 1
+        },
+        {
+          "method": "remember",
+          "siteCount": 1
+        },
+        {
+          "method": "forget",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcRelayApprovalInboxRepository",
+      "class": "JdbcRelayApprovalInboxRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayApprovalInboxRepository.java",
+      "findingIds": [
+        "A28"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "no-cache",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayApprovalInboxRepository.java#L74",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/DurableRelayApprovalInbox.java#L61",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayApprovalInboxRepository.java#L15",
+        "../../plowshare-server/src/main/resources/db/migration/V152__approval_inbox_recovery.sql#L3",
+        "../../plowshare-server/src/main/resources/db/migration/V153__approval_alert_retry.sql#L4"
+      ],
+      "countModel": "ready/missing/unsettled/prune1 each; recoverGap1localwrite +2ownedfences+ackdelegation. advance2ownedfences+advanceSeen; per-eventDurableconsumerrepeatsadvanceE times; actualdelegatedcountsnotexpanded.",
+      "uncertainty": "No exact optimizer/subplan count or notification timing measured. SQL authority/firing work in recipient delivery excluded from local count.",
+      "analysis": "[Approval discovery](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayApprovalInboxRepository.java#L74) uses one statement each for ready topics, missing requested notices and unsettled resolved notices. Ready returns at most256 keys; notice pages at most1000 IDs, not command/payload bodies. [DurableRelayApprovalInbox](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/DurableRelayApprovalInbox.java#L61) performs per-ID notification work and per-event cursor advances; SQL in those owners is additional. Two requireOwned checks around each advance deliberately fence a consumer lease and cannot be removed as duplication.\n\nThe [MISSING predicate](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayApprovalInboxRepository.java#L15) repeats a correlated owner subquery and two Inbox probes per approval candidate; exact function/subplan executions depend on optimizer and OR short-circuiting. A joined candidate projection is a candidate **1\u21921 statement** with fewer probes. Ready's `'project:'||a.project_id::text` comparison differs from numeric project equality; [V152 pending project/ID index](../../plowshare-server/src/main/resources/db/migration/V152__approval_inbox_recovery.sql#L3) directly fits missing() but is not proof of matching the text expression. [V153 alert index](../../plowshare-server/src/main/resources/db/migration/V153__approval_alert_retry.sql#L4) matches open approval about/handle/attempt predicates; `NOT EXISTS` over all notices needs independent plan inspection. No actual row scans/bytes measured.\n\n**No cached eligibility:** return values are immutable IDs but pending/settled/read/retry states change and time alone makes alert retry eligible. Approval, Inbox, conversation owner and Relay offset/retention writers all matter; a topic generation does not version these. Notifications can wake discovery, with timers and retained approvals for recovery after missed hints. Shared cache absence cannot authorize redelivery or approval action. Current account authority and durable lease checks stay live; reconnect requires reconciliation, not stale candidate reuse.",
+      "directJdbcSiteCount": 5,
+      "jdbcSiteMethods": [
+        {
+          "method": "ready",
+          "siteCount": 1
+        },
+        {
+          "method": "missing",
+          "siteCount": 1
+        },
+        {
+          "method": "unsettledNotices",
+          "siteCount": 1
+        },
+        {
+          "method": "recoverGap",
+          "siteCount": 1
+        },
+        {
+          "method": "prune",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcRelayForwardingHistory",
+      "class": "JdbcRelayForwardingHistory",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayForwardingHistory.java",
+      "findingIds": [
+        "A29"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayForwardingHistory.java#L18"
+      ],
+      "countModel": "carriedcausation0;legacy validHhops=H queries, H<=maximum<=32; missing/malformedstops earlier. RecursiveCTEtarget1forlegacy preservesallhopchecks.",
+      "uncertainty": "Legacy-path cardinality/runtime bytes unknown. H bound is source-derived, not a measured workload distribution.",
+      "analysis": "[`causation`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayForwardingHistory.java#L18) immediately returns the Publication's carried RelayCausation with **0 queries**. Legacy forwarded events execute one delivery/admission join per hop, at most maximum32; wrong identity, pointer, receiver, scope or target stops with no proof. ForwardRelayReceiver/WorkRelayReceiver use this to bound effects. This is a candidate **H\u21921** recursive proof query, not evidence every event costs32 queries. Current fast path already reuses the DTO, and legacy frequency/depth are unknown.\n\nThe query returns five scalar/causation fields, never source payload; delivery UUID primary key and admission composite key match equality joins. No correlated function or proven index gap exists. Recursive consolidation must carry target/pointer at each hop and fail closed; one stored function with an unchanged row loop would merely hide work.\n\n**Operation-local:** Parent/Causation values are immutable, and IDs identify retained admission input, but retention may remove proof links. No source version/retention generation is returned. Shared proof reuse could silently outlive the required durable evidence contract; without that explicit policy and all-writer retention/delete invalidation, cache admission is blocked. Already carried ancestry remains preferred. Current effect admission and account scope remain separate from provenance; a cached ancestry is not permission or a replay receipt.",
+      "directJdbcSiteCount": 1,
+      "jdbcSiteMethods": [
+        {
+          "method": "causation",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcRelayLogRepository",
+      "class": "JdbcRelayLogRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java",
+      "findingIds": [
+        "A30"
+      ],
+      "verdict": "confirmed-waste",
+      "cacheVerdict": "share-immutable",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java#L113",
+        "../../plowshare-server/src/main/resources/db/migration/V118__relay_delivery_admission.sql#L27",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java#L35",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/ScopedRelayInspection.java#L29",
+        "../../plowshare-server/src/main/resources/db/migration/V120__relay_scopes.sql#L20",
+        "../../plowshare-server/src/main/resources/db/migration/V123__relay_operator_controls.sql#L2",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayRepository.java#L75"
+      ],
+      "countModel": "Rows:topics<=100;latest1/2queries;read5queries returningtopic1,eventprefix<=16,subs<=1000,branches<=limit<=100,recoveries<=1000. Narrowprojectiontarget5samequeries, handlerbyteseliminated<=131072*B.",
+      "uncertainty": "Handler bound is theoretical and excludes overhead; actual unused bytes unknown. New projection/index not implemented; five-query snapshot consistency preserved.",
+      "analysis": "**Confirmed branch projection overfetch.** [read's branch SQL](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java#L113) selects `d.*`, then maps diagnostics without `handler_source`, handler_path, worker or lease. [V118](../../plowshare-server/src/main/resources/db/migration/V118__relay_delivery_admission.sql#L27) permits131072 handler-source bytes per row. For `B<=100` branches, unused handler text alone has a **source-derived upper bound13,107,200 bytes (12.5MiB)**, not an observed transfer. Explicit columns target **5\u21925 statements** with those bytes removed. Live small-population Relay timings do not invalidate this growth issue or prove it causes today's queue waits.\n\nInspection executes5 distinct bounded queries: shared-locked topic, event prefix<=16 and byte ceiling, subscribers<=1000, newest branches<=limit100, latest recovery per subscriber<=1000. [latest](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java#L35) costs2 when topic exists,1 otherwise; topics costs1. The topic lock makes append/retention boundaries coherent. Account-filtered receipt/conversation mapping must remain. [ScopedRelayInspection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/ScopedRelayInspection.java#L29) supplies separate current authority checks.\n\nPublication/subscription primary keys, renamed to scope keys in [V120](../../plowshare-server/src/main/resources/db/migration/V120__relay_scopes.sql#L20), match prefix/order. Delivery indexes lead with subscriber before publication position, so they do not directly order cross-subscriber newest branch windows; actual sort/row cost needs a plan. Recovery composite key supports scoped subscriber/latest-boundary access. There is no JDBC N+1 within read.\n\n**Share immutable publications only:** payload records contain immutable scalar values; `(database,scope,topic,generation,position,projection)` can identify retained content. [Topic UUID generation](../../plowshare-server/src/main/resources/db/migration/V123__relay_operator_controls.sql#L2) identifies incarnation; [configureTopic](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayRepository.java#L75) retains it even when policy changes, and append/expiry do not advance it; lastPosition does not version subscriptions, branches or recovery lists. Delivery/retention/execution/offset writers require independent invalidation and current visibility. A whole Snapshot needs new projection versions/membership proof; reconnect must bypass uncertain mutable diagnostics. Locks/cursors/claims remain uncached.",
+      "directJdbcSiteCount": 8,
+      "jdbcSiteMethods": [
+        {
+          "method": "topics",
+          "siteCount": 1
+        },
+        {
+          "method": "latest",
+          "siteCount": 2
+        },
+        {
+          "method": "read",
+          "siteCount": 5
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    },
+    {
+      "owner": "JdbcRelayToolRepository",
+      "class": "JdbcRelayToolRepository",
+      "path": "plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcRelayToolRepository.java",
+      "findingIds": [
+        "A31"
+      ],
+      "verdict": "candidate",
+      "cacheVerdict": "operation-local",
+      "evidenceLinks": [
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcRelayToolRepository.java#L60",
+        "../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcRelayToolRepository.java#L122"
+      ],
+      "countModel": "nonhosted submit2local (insert+lockedread) plusRelay registration/publication;hostednew3+pin work;hostedexisting2reads. finishpending2,completedidentical1. find/ancestry1each.",
+      "uncertainty": "Credential pin and Relay SQL not expanded. RETURNING optimization is a candidate because retained/trigger mapping and conflict ordering need proof; no benchmark performed.",
+      "analysis": "[Tool submit](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcRelayToolRepository.java#L60) executes INSERT+locked hydration for ordinary invocations (**2 local statements**), or preflight find+INSERT+locked hydration for new hosted work (**3**, plus credential pinning). Existing hosted retry deliberately finds before selecting new credentials and then locks the immutable original (**2 reads**); that is a documented idempotency/freshness boundary. One first-insert RETURNING path could target1/2 while conflict uses locked reconciliation, but returning supplied input without checking the retained hosted pin would be incorrect. Topic registration/publication adds delegated SQL.\n\n[`finish`](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/JdbcRelayToolRepository.java#L122) costs2 when completing pending work,1 for identical completed reconciliation; it already returns a new Stored with retained intent and result without refetch. Result contains bounded scalar text, Request copies typed argument maps and definition copies parameter lists; full Intent also carries hosted credential-selection metadata and typed schema whose nested immutability needs proof. Finds decode request/definition/result envelopes for one row; V132 bounds each retained string but aggregate transfer/actual bytes remain unknown. Primary key fits invocation lookup; `(project,account,run)` index supports owner access, not proof for inference ancestry JSON predicates. No direct N+1 is established.\n\n**Operation-local:** immutable completed Result is a good eventual sanitized cache projection, but full Stored/Intent should not become a generic credential cache. No monotonic row version is returned; pending\u2192complete changes, project cascade and current hosting/account authority are independent. Current intent/claim lock and exact fingerprint checks remain authoritative, including after broker retention. Every completion/maintenance writer, current visibility and reconnect reconciliation need proof before shared admission. Notifications may wake result readers; absent publication/cache never permits resubmission.",
+      "directJdbcSiteCount": 5,
+      "jdbcSiteMethods": [
+        {
+          "method": "ancestry",
+          "siteCount": 1
+        },
+        {
+          "method": "submit",
+          "siteCount": 1
+        },
+        {
+          "method": "finish",
+          "siteCount": 1
+        },
+        {
+          "method": "locked",
+          "siteCount": 1
+        },
+        {
+          "method": "find",
+          "siteCount": 1
+        }
+      ],
+      "siteCountCaveat": "Direct AST sites in this file, not executed round trips, unique SQL strings or nested function work; delegated adapters can have zero sites but execute SQL."
+    }
+  ]
+}

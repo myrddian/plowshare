@@ -107,6 +107,15 @@ cohesive changes and existing lifecycle/access primitives over new frameworks.
 Do not add speculative abstractions, swallowing catches, unchecked casts, or
 nullable success values to conceal an error.
 
+Treat fetch-discard-refetch, N+1 reads, repeated permission resolution within one
+operation, unused projections and unconditional refreshes as query anti-patterns.
+Reuse authorized typed snapshots already in memory; a repeated read needs an
+explicit freshness, version, scope or concurrency reason. Follow the
+[query efficiency rules](docs/coding-standards.md#query-efficiency-and-reuse)
+and the [query and cache strategy](docs/query-efficiency-and-cache-design.md).
+Shared caches must remain bounded and preserve current authorization and
+documented consistency; adding a cache is not a substitute for fixing wasteful SQL.
+
 ### Database test policy
 
 - **Mock database dependencies by default.** Test service and tool behavior

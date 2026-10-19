@@ -89,7 +89,7 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
     String sourceCursor = null, nativeCursor = null, approvalCursor = null;
     boolean failed = false;
     boolean nativeFirst = false;
-    try {
+    try (var discovery = signals.discovery()) {
       while (!closed.get() && !Thread.currentThread().isInterrupted()) {
         try {
           workers.entrySet().removeIf(entry -> entry.getValue().isDone());
@@ -133,8 +133,8 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
                 "Relay internal discovery paused; durable source notices and inboxes retained");
           failed = true;
         }
-        TimeUnit.NANOSECONDS.sleep(
-            (failed ? properties.getFailureBackoff() : properties.getIdleInterval()).toNanos());
+        if (failed) TimeUnit.NANOSECONDS.sleep(properties.getFailureBackoff().toNanos());
+        else discovery.await(signals.reconciliationWait(properties.getIdleInterval()));
       }
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
@@ -262,7 +262,7 @@ public final class RelayInternalWorkers implements AutoCloseable, Dispatcher.Nat
         } finally {
           capacity.release();
         }
-        if (!progressed) waiting.await(properties.getIdleInterval());
+        if (!progressed) waiting.await(signals.reconciliationWait(properties.getIdleInterval()));
       }
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();

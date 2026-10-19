@@ -470,6 +470,7 @@ class RunAttributionTest {
                   new io.aeyer.plowshare.server.data.DataLayout(directory.resolve("server-data"))
                       .initialise())
           .withBean(JdbcTemplate.class, () -> jdbc)
+          .withBean(UsageScopeRepository.class, () -> new JdbcUsageScopeRepository(jdbc))
           .withBean(
               org.springframework.transaction.PlatformTransactionManager.class,
               () -> new DataSourceTransactionManager(database))
@@ -713,7 +714,7 @@ class RunAttributionTest {
           new io.aeyer.plowshare.server.llm.DispatchingEmbeddingClient(
               harness.dispatcher,
               properties,
-              new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(4));
+              new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4));
       assertEquals(
           2,
           client.embed("query", owner.withOperation(UsageAttribution.Operation.EMBEDDING_QUERY))

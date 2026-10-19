@@ -24,11 +24,93 @@ public interface ScheduleDefinitionStore {
     }
   }
 
+  /** Stable persisted file address; a removed/recreated row can reuse this address. */
+  record FileIdentity(long sourceId, String name) {
+    public FileIdentity {
+      if (sourceId < 1) throw new IllegalArgumentException("Persisted schedule source required");
+      name = ScheduledWork.identity(name, "file name");
+    }
+  }
+
+  /**
+   * Immutable, operation-local database projection retaining source content and its operational
+   * override together. ScheduledWork.version is the file schema version, not a row-change version.
+   * The DTO alone has no durable invalidation generation. Shared read reuse requires the owning
+   * projection cache's complete version/authority fences. It cannot replace current source locks,
+   * execution checks or pause's expected-definition comparison. Reconciliation, pause, reject,
+   * removal and source/project changes are separate dependencies.
+   */
+  record FileSnapshot(
+      Source source,
+      String name,
+      String internalName,
+      ScheduledWork rawDefinition,
+      Boolean pausedOverride,
+      String status,
+      String error) {
+    public FileSnapshot {
+      java.util.Objects.requireNonNull(source, "source");
+      new FileIdentity(source.id(), name);
+      validateError(error);
+      if (internalName == null
+          || internalName.isBlank()
+          || !internalName.equals(internalName.strip())
+          || internalName.length() > 512
+          || internalName.codePoints().anyMatch(Character::isISOControl)
+          || !internalName.equals("scheduled-" + source.id() + "-" + name)
+          || status == null
+          || !java.util.Set.of("active", "refused").contains(status))
+        throw new IllegalArgumentException("Invalid retained schedule file");
+    }
+
+    /** Diagnostics retain newlines, but neither oversized text nor NUL is a valid stored value. */
+    static void validateError(String error) {
+      if (error != null && (error.length() > 1000 || error.indexOf('\0') >= 0))
+        throw new IllegalArgumentException(
+            "Schedule diagnostics must be at most 1000 characters without NUL");
+    }
+
+    public FileIdentity identity() {
+      return new FileIdentity(source.id(), name);
+    }
+
+    /** Full source definition and override are value records; no live runtime objects are held. */
+    public ScheduledWork effectiveDefinition() {
+      if (rawDefinition == null || pausedOverride == null) return rawDefinition;
+      return new ScheduledWork(
+          rawDefinition.version(),
+          rawDefinition.cron(),
+          rawDefinition.zone(),
+          pausedOverride,
+          rawDefinition.action(),
+          rawDefinition.target(),
+          rawDefinition.limits());
+    }
+
+    public ScheduledWork.File effective() {
+      return new ScheduledWork.File(
+          name,
+          source.project(),
+          source.source(),
+          (source.source().equals("workspace") ? ".plowshare/" : "")
+              + "schedules/"
+              + name
+              + ".json",
+          internalName,
+          effectiveDefinition(),
+          status,
+          error);
+    }
+  }
+
   Source register(String account, Long projectId, String source);
 
   List<Source> sources();
 
   List<ScheduledWork.File> files(Source source);
+
+  /** Current keyed projection; transaction callers must obtain the source lock before reuse. */
+  Optional<FileSnapshot> snapshot(Source source, String name);
 
   /**
    * Retained runtime provenance survives a removed source; it must never become a legacy trigger.

@@ -148,6 +148,50 @@ class EntryStoreTest {
   }
 
   @Test
+  void boundedTranscriptProjectionPreservesForwardTailAndOversizedText() {
+    var maximum = new java.util.concurrent.atomic.AtomicLong(2_000_000);
+    var bypasses = new java.util.concurrent.atomic.AtomicInteger();
+    var cache =
+        new io.aeyer.plowshare.server.cache.ProjectionCache<EntryPage>() {
+          public boolean enabled() {
+            return true;
+          }
+
+          public long maxWeight() {
+            return maximum.get();
+          }
+
+          public EntryPage read(
+              io.aeyer.plowshare.server.cache.SnapshotCache.Key key,
+              boolean cacheable,
+              Supplier<EntryPage> bounded,
+              Supplier<EntryPage> direct,
+              java.util.function.ToLongFunction<EntryPage> weight) {
+            if (!cacheable) return direct.get();
+            try {
+              return bounded.get();
+            } catch (Bypass oversized) {
+              bypasses.incrementAndGet();
+              return direct.get();
+            }
+          }
+        };
+    entries.append(conversation, 1, LoggedEntry.utterance("first", Speaker.person(null)));
+    entries.append(conversation, 2, LoggedEntry.answer("last", List.of()));
+    var scoped = entries.useTranscriptCache(cache).forAccount("reader");
+    assertEquals(entries.pageOfLog(conversation, 0, 20), scoped.pageOfLog(conversation, 0, 20));
+    assertEquals(entries.tailOfLog(conversation, 1), scoped.tailOfLog(conversation, 1));
+    assertEquals(0, bypasses.get());
+    String large = "complete transcript ".repeat(10_000);
+    entries.append(conversation, 3, LoggedEntry.answer(large, List.of()));
+    maximum.set(20_000);
+    var page = scoped.tailOfLog(conversation, 1);
+    assertEquals(large, page.listed().getFirst().excerpt());
+    assertEquals(1, bypasses.get());
+    assertEquals(entries.tailOfLog(conversation, 1), page);
+  }
+
+  @Test
   void approval_audit_does_not_project_but_person_text_and_denials_are_preserved() {
     String allowed = "[approval] The person allowed `program`, this once. Run it again.";
     String denied = "[approval] The person denied `program`. Do not run it.";

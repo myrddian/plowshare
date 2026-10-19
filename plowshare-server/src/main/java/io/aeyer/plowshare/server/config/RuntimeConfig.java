@@ -193,7 +193,10 @@ public class RuntimeConfig {
    * comment on why that is not the same answer as an empty string.
    */
   public Optional<String> get(String key) {
-    return entry(key).map(Entry::value);
+    return jdbc
+        .queryForList("SELECT value FROM runtime_config WHERE key = ?", String.class, key)
+        .stream()
+        .findFirst();
   }
 
   /**
@@ -380,7 +383,10 @@ public class RuntimeConfig {
    * the configuration.
    */
   public Optional<String> authorOf(String key) {
-    return entry(key).map(Entry::updatedBy);
+    return jdbc
+        .queryForList("SELECT updated_by FROM runtime_config WHERE key = ?", String.class, key)
+        .stream()
+        .findFirst();
   }
 
   /**

@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 
 /** Owns additive UUID mappings; unresolved/restricted records never become alternate scopes. */
 @Repository
-public final class JdbcIdentityRepository implements IdentityRepository {
+public class JdbcIdentityRepository implements IdentityRepository {
   private static final String SCOPES =
       "SELECT s.*,a.account_kind AS owner_kind FROM authority_scopes s "
           + "LEFT JOIN authority_accounts i ON i.id=s.account_id LEFT JOIN admins a ON a.handle=i.legacy_handle ";

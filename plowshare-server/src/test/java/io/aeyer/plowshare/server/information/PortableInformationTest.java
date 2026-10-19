@@ -260,4 +260,23 @@ class PortableInformationTest {
     assertThrows(CallerFault.class, () -> importing.execute("writer", request, null));
     verify(records, never()).admit(any(), any(), any());
   }
+
+  @Test
+  void exportRetainsDependencySnapshotForProvenanceInsteadOfQueryingItTwice() {
+    byte[] bytes = "# Retained".getBytes(StandardCharsets.UTF_8);
+    row("markdown", "text/markdown", bytes);
+    var response =
+        assertInstanceOf(
+            InformationResponse.InterchangeBundle.class,
+            service.execute(
+                "owner",
+                new InformationRequest.InterchangeExport(selected, List.of(revision)),
+                null));
+    assertEquals(
+        List.of(),
+        response.value().documents().getFirst().descriptor().provenance().dependencies());
+    verify(repository, times(1)).dependencies(revision);
+    verify(catalogue, times(1)).requireReadable(any(), eq(revision));
+    verify(navigation).snapshot();
+  }
 }

@@ -17,12 +17,23 @@ public class JdbcUsageScopeRepository implements UsageScopeRepository {
   @Override
   public String project(Home home) {
     Objects.requireNonNull(home);
-    return home.isGlobal()
-        ? null
-        : jdbc.queryForObject(
-            "INSERT INTO projects(name) VALUES (?) ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name RETURNING id::text",
+    if (home.isGlobal()) return null;
+    var existing =
+        jdbc.queryForList(
+            "SELECT id::text FROM projects WHERE name=? FOR KEY SHARE",
             String.class,
             home.project());
+    if (!existing.isEmpty()) return existing.getFirst();
+    var inserted =
+        jdbc.queryForList(
+            "INSERT INTO projects(name) VALUES (?) ON CONFLICT(name) DO NOTHING RETURNING id::text",
+            String.class,
+            home.project());
+    if (!inserted.isEmpty()) return inserted.getFirst();
+    // A competing registration may commit while the INSERT waits. Read its identity afresh;
+    // never update an unchanged project solely to obtain its ID and invalidate unrelated data.
+    return jdbc.queryForObject(
+        "SELECT id::text FROM projects WHERE name=? FOR KEY SHARE", String.class, home.project());
   }
 
   @Override

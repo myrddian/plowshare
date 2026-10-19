@@ -103,17 +103,29 @@ public final class Citations implements Citing {
     if (!definition.canCite() || answer == null || answer.isBlank()) {
       return;
     }
-    for (UUID paragraph : named(answer)) {
+    var paragraphs = named(answer);
+    if (paragraphs.isEmpty()) return;
+    CitationStore writer = citations;
+    io.aeyer.plowshare.server.information.InformationContext context = null;
+    if (access != null) {
       try {
-        CitationStore writer = citations;
-        io.aeyer.plowshare.server.information.InformationContext context = null;
-        if (access != null) {
-          var conversation = conversations.find(conversationId).orElseThrow();
-          String owner = conversations.ownerOf(conversationId).orElseThrow();
-          context = access.forRun(owner, conversation.home());
-          inputs.requireLog(conversationId, owner);
-          writer = citations.scoped(access, context);
-        }
+        // Home/owner are one answer's operation-local address. Every input binding still rechecks
+        // log readability, and each guarded INSERT checks current selection and log ownership.
+        var conversation = conversations.find(conversationId).orElseThrow();
+        String owner = conversations.ownerOf(conversationId).orElseThrow();
+        context = access.forRun(owner, conversation.home());
+        inputs.requireLog(conversationId, owner);
+        writer = citations.scoped(access, context);
+      } catch (RuntimeException unavailable) {
+        log.warn(
+            "conversation {}: citation context is unavailable: {}",
+            conversationId,
+            unavailable.getMessage());
+        return;
+      }
+    }
+    for (UUID paragraph : paragraphs) {
+      try {
         if (context != null) {
           var revision = citations.documentOf(paragraph);
           if (revision != null) inputs.reads(conversationId, context).accept(revision);

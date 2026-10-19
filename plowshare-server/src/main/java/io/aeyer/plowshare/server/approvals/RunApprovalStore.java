@@ -35,11 +35,11 @@ public class RunApprovalStore implements ApprovalNotificationStore {
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
   private static final TypeReference<List<List<String>>> SETS = new TypeReference<>() {};
 
-  private static final String SELECT =
-      "SELECT id, project_id, conversation, asked_in, handle, agent, side,"
+  private static final String COLUMNS =
+      "id, project_id, conversation, asked_in, handle, agent, side,"
           + " argv::text AS argv, cwd, reason, state, scope, prefix::text AS prefix, answered_by,"
-          + " answered_at, delivered_at, created_at, commands::text AS commands, judged"
-          + " FROM run_approvals";
+          + " answered_at, delivered_at, created_at, commands::text AS commands, judged";
+  private static final String SELECT = "SELECT " + COLUMNS + " FROM run_approvals";
 
   private static final Logger log = LoggerFactory.getLogger(RunApprovalStore.class);
 
@@ -105,23 +105,25 @@ public class RunApprovalStore implements ApprovalNotificationStore {
       String cwd,
       String reason) {
     String id = newId();
-    jdbc.update(
-        "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle, agent, side,"
-            + " argv, cwd, reason, state, created_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)",
-        id,
-        projectId,
-        conversation,
-        askedIn,
-        handle,
-        agent,
-        side,
-        json(argv),
-        cwd,
-        reason,
-        RunApproval.ASKED,
-        Timestamp.from(clock.get()));
-    RunApproval asked = find(id).orElseThrow();
+    RunApproval asked =
+        jdbc.queryForObject(
+            "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle, agent, side,"
+                + " argv, cwd, reason, state, created_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?) RETURNING "
+                + COLUMNS,
+            ROW,
+            id,
+            projectId,
+            conversation,
+            askedIn,
+            handle,
+            agent,
+            side,
+            json(argv),
+            cwd,
+            reason,
+            RunApproval.ASKED,
+            Timestamp.from(clock.get()));
     tell("approval " + id, () -> events.asked(asked));
     return asked;
   }
@@ -149,24 +151,26 @@ public class RunApprovalStore implements ApprovalNotificationStore {
       throw new IllegalArgumentException("a set approval asks about at least one command");
     }
     String id = newId();
-    jdbc.update(
-        "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle,"
-            + " agent, side, argv, cwd, reason, state, created_at, commands, judged)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, '[]'::jsonb, ?, ?, ?, ?, ?::jsonb, ?)",
-        id,
-        projectId,
-        conversation,
-        askedIn,
-        handle,
-        agent,
-        side,
-        cwd,
-        reason,
-        RunApproval.ASKED,
-        Timestamp.from(clock.get()),
-        sets(commands),
-        judged);
-    RunApproval asked = find(id).orElseThrow();
+    RunApproval asked =
+        jdbc.queryForObject(
+            "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle,"
+                + " agent, side, argv, cwd, reason, state, created_at, commands, judged)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, '[]'::jsonb, ?, ?, ?, ?, ?::jsonb, ?) RETURNING "
+                + COLUMNS,
+            ROW,
+            id,
+            projectId,
+            conversation,
+            askedIn,
+            handle,
+            agent,
+            side,
+            cwd,
+            reason,
+            RunApproval.ASKED,
+            Timestamp.from(clock.get()),
+            sets(commands),
+            judged);
     tell("approval " + id, () -> events.asked(asked));
     return asked;
   }
@@ -198,29 +202,31 @@ public class RunApprovalStore implements ApprovalNotificationStore {
       String judged) {
     String id = newId();
     Timestamp now = Timestamp.from(clock.get());
-    jdbc.update(
-        "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle,"
-            + " agent, side, argv, cwd, reason, state, scope, answered_by, answered_at,"
-            + " created_at, commands, judged)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)",
-        id,
-        projectId,
-        conversation,
-        askedIn,
-        handle,
-        agent,
-        side,
-        json(commands == null ? argv : List.of()),
-        cwd,
-        reason,
-        RunApproval.ALLOWED,
-        RunApproval.ONCE,
-        by,
-        now,
-        now,
-        commands == null ? null : sets(commands),
-        judged);
-    RunApproval allowed = find(id).orElseThrow();
+    RunApproval allowed =
+        jdbc.queryForObject(
+            "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle,"
+                + " agent, side, argv, cwd, reason, state, scope, answered_by, answered_at,"
+                + " created_at, commands, judged)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?) RETURNING "
+                + COLUMNS,
+            ROW,
+            id,
+            projectId,
+            conversation,
+            askedIn,
+            handle,
+            agent,
+            side,
+            json(commands == null ? argv : List.of()),
+            cwd,
+            reason,
+            RunApproval.ALLOWED,
+            RunApproval.ONCE,
+            by,
+            now,
+            now,
+            commands == null ? null : sets(commands),
+            judged);
     tell("approval " + id, () -> events.answered(allowed));
     return allowed;
   }
@@ -306,20 +312,22 @@ public class RunApprovalStore implements ApprovalNotificationStore {
    */
   public boolean allow(String id, String scope, List<String> prefix, String by) {
     String prefixJson = RunApproval.PROJECT.equals(scope) ? json(prefix) : null;
-    boolean won =
-        jdbc.update(
-                "UPDATE run_approvals SET state = ?, scope = ?, prefix = ?::jsonb,"
-                    + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ?",
-                RunApproval.ALLOWED,
-                scope,
-                prefixJson,
-                by,
-                Timestamp.from(clock.get()),
-                id,
-                RunApproval.ASKED)
-            == 1;
+    var answered =
+        jdbc.query(
+            "UPDATE run_approvals SET state = ?, scope = ?, prefix = ?::jsonb,"
+                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? RETURNING "
+                + COLUMNS,
+            ROW,
+            RunApproval.ALLOWED,
+            scope,
+            prefixJson,
+            by,
+            Timestamp.from(clock.get()),
+            id,
+            RunApproval.ASKED);
+    boolean won = !answered.isEmpty();
     if (won) {
-      find(id).ifPresent(answered -> tell("approval " + id, () -> events.answered(answered)));
+      tell("approval " + id, () -> events.answered(answered.getFirst()));
       tell("the settling of approval " + id, () -> settled.accept(id));
     }
     return won;
@@ -337,19 +345,21 @@ public class RunApprovalStore implements ApprovalNotificationStore {
     if (reason != null && (reason.isBlank() || reason.length() > 4000 || reason.indexOf('\0') >= 0))
       throw new IllegalArgumentException(
           "A denial reason must be nonblank text of at most 4000 characters");
-    boolean won =
-        jdbc.update(
-                "UPDATE run_approvals SET state = ?, answered_by = ?, answered_at = ?, denial_reason = ?"
-                    + " WHERE id = ? AND state = ?",
-                RunApproval.DENIED,
-                by,
-                Timestamp.from(clock.get()),
-                reason,
-                id,
-                RunApproval.ASKED)
-            == 1;
+    var answered =
+        jdbc.query(
+            "UPDATE run_approvals SET state = ?, answered_by = ?, answered_at = ?, denial_reason = ?"
+                + " WHERE id = ? AND state = ? RETURNING "
+                + COLUMNS,
+            ROW,
+            RunApproval.DENIED,
+            by,
+            Timestamp.from(clock.get()),
+            reason,
+            id,
+            RunApproval.ASKED);
+    boolean won = !answered.isEmpty();
     if (won) {
-      find(id).ifPresent(answered -> tell("approval " + id, () -> events.answered(answered)));
+      tell("approval " + id, () -> events.answered(answered.getFirst()));
       tell("the settling of approval " + id, () -> settled.accept(id));
     }
     return won;

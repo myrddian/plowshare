@@ -1133,6 +1133,82 @@ class EventChannelTest {
   }
 
   @Test
+  void information_hints_coalesce_without_displacing_replies_or_lifecycle_events()
+      throws Exception {
+    var registry = new SessionRegistry();
+    var channel = new EventChannelHandler(registry, answering("test.ping"), new Watchers());
+    var socket = new Stalling(true);
+    attachAs(channel, registry, "information-session", "reader", socket);
+    channel.push("reader", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
+    assertTrue(socket.awaitWedged(PATIENCE_MILLIS));
+    for (int index = 0; index < 10_000; index++) channel.invalidate();
+    channel.handleTextMessage(socket, new TextMessage(request("hint-reply", "test.ping")));
+    channel.publish("information-session", JobEvent.started("retained-job", "echo"));
+    socket.release();
+    var frames = socket.await(4, PATIENCE_MILLIS);
+    assertEquals(4, frames.size());
+    assertEquals("hint-reply", frame(frames.get(1)).get("id"));
+    assertTrue(frames.get(2).contains("retained-job"));
+    assertEquals(Map.of("kind", "information.invalidated"), frame(frames.get(3)));
+    assertTrue(socket.isOpen());
+    channel.afterConnectionClosed(socket, CloseStatus.NORMAL);
+  }
+
+  @Test
+  void continuous_information_hints_and_job_tokens_each_make_progress_when_both_lanes_stay_busy()
+      throws Exception {
+    var registry = new SessionRegistry();
+    var watchers = new Watchers();
+    var channel = new EventChannelHandler(registry, answering("test.ping"), watchers);
+    int lowerFrames = 12;
+    var observed = new java.util.concurrent.atomic.AtomicInteger();
+    var prefixWritten = new CountDownLatch(1);
+    var socket =
+        new Stalling(
+            true,
+            payload -> {
+              if (payload.contains("fairness-warmup")) return;
+              int written = observed.incrementAndGet();
+              if (written < lowerFrames) {
+                // Replenish before sendMessage returns, so the next drain choice always has BOTH
+                // lanes available. A producer thread or elapsed-time test would leave that to
+                // chance.
+                channel.invalidate();
+                channel.stream("fairness-session", JobDelta.answering("fairness-token", "next"));
+              } else {
+                prefixWritten.countDown();
+              }
+            });
+    attachAs(channel, registry, "fairness-session", "reader", socket);
+    watchers.wants("fairness-session", true);
+    channel.publish("fairness-session", JobEvent.started("fairness-warmup", "echo"));
+    assertTrue(socket.awaitWedged(PATIENCE_MILLIS));
+    try {
+      channel.invalidate();
+      channel.stream("fairness-session", JobDelta.answering("fairness-token", "initial"));
+      socket.release();
+      assertTrue(prefixWritten.await(PATIENCE_MILLIS, TimeUnit.MILLISECONDS));
+      var delivered = socket.frames().subList(1, lowerFrames + 1);
+      for (int index = 0; index < lowerFrames; index++) {
+        var payload = delivered.get(index);
+        if (index % 2 == 0)
+          assertEquals(
+              Map.of("kind", "information.invalidated"),
+              frame(payload),
+              "the hint lane must progress despite continuously queued tokens");
+        else
+          assertTrue(
+              payload.contains("fairness-token"),
+              "the token lane must progress despite continuously replenished hints: " + payload);
+      }
+      assertTrue(socket.isOpen());
+    } finally {
+      socket.release();
+      channel.afterConnectionClosed(socket, CloseStatus.NORMAL);
+    }
+  }
+
+  @Test
   void usage_snapshots_coalesce_without_displacing_the_correlated_initial_reply() throws Exception {
     var queries =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.accounting.UsageQueryService.class);
@@ -1485,6 +1561,7 @@ class EventChannelTest {
     private final CountDownLatch closed = new CountDownLatch(1);
     private final AtomicReference<String> closeReason = new AtomicReference<>("");
     private final boolean stalls;
+    private final java.util.function.Consumer<String> afterWrite;
     private volatile URI uri;
     private volatile boolean open = true;
 
@@ -1492,7 +1569,13 @@ class EventChannelTest {
      * @param stalls whether the first write blocks until {@link #release}
      */
     Stalling(boolean stalls) {
+      this(stalls, ignored -> {});
+    }
+
+    /** Optional bounded producer callback runs synchronously before the drain chooses again. */
+    Stalling(boolean stalls, java.util.function.Consumer<String> afterWrite) {
       this.stalls = stalls;
+      this.afterWrite = java.util.Objects.requireNonNull(afterWrite);
     }
 
     List<String> frames() {
@@ -1568,7 +1651,9 @@ class EventChannelTest {
       if (!open) {
         throw new IllegalStateException("this socket is closed");
       }
-      frames.add(String.valueOf(message.getPayload()));
+      String payload = String.valueOf(message.getPayload());
+      frames.add(payload);
+      afterWrite.accept(payload);
     }
 
     @Override

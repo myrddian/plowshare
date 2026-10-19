@@ -232,13 +232,18 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
           if (previous.isPresent()
               && previous.get().space().equals(space)
               && previous.get().search().equals(policy)) return previous.get();
-          jdbc.update(
-              "UPDATE embedding_slots SET target_space_id=?,target_mode=?,target_distance=? WHERE slot=?",
-              space.id(),
-              policy.mode().configurationName(),
-              policy.distance().name(),
-              slot.stored());
-          return target(slot).orElseThrow();
+          long version =
+              Objects.requireNonNull(
+                  jdbc.queryForObject(
+                      "UPDATE embedding_slots SET target_space_id=?,target_mode=?,target_distance=? WHERE slot=? RETURNING version",
+                      Long.class,
+                      space.id(),
+                      policy.mode().configurationName(),
+                      policy.distance().name(),
+                      slot.stored()));
+          // The slot row is still exclusively locked. The supplied immutable descriptor/policy
+          // are exactly what was written; V115 supplies the actual incremented slot version.
+          return new EmbeddingProfile(slot, space, policy, version);
         });
   }
 

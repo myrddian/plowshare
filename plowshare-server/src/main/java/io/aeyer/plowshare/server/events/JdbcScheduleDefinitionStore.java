@@ -2,7 +2,10 @@ package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.information.InformationJson;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +18,8 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
   private final ScheduleStore schedules;
   private final TriggerStore triggers;
   private final FiringStore firings;
+  private final ProjectionCache<Optional<FileSnapshot>> fileCache;
+  private final ProjectionCache<List<ScheduledWork.File>> filesCache;
 
   public JdbcScheduleDefinitionStore(
       JdbcTemplate jdbc,
@@ -22,15 +27,41 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
       ScheduleStore schedules,
       TriggerStore triggers,
       FiringStore firings) {
+    this(
+        jdbc,
+        work,
+        schedules,
+        triggers,
+        firings,
+        ProjectionCache.direct(),
+        ProjectionCache.direct());
+  }
+
+  public JdbcScheduleDefinitionStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ScheduleStore schedules,
+      TriggerStore triggers,
+      FiringStore firings,
+      ProjectionCache<Optional<FileSnapshot>> fileCache,
+      ProjectionCache<List<ScheduledWork.File>> filesCache) {
     this.jdbc = jdbc;
     this.work = work;
     this.schedules = schedules;
     this.triggers = triggers;
     this.firings = firings;
+    this.fileCache = java.util.Objects.requireNonNull(fileCache);
+    this.filesCache = java.util.Objects.requireNonNull(filesCache);
   }
 
+  private static final String SOURCE_COLUMNS =
+      "s.id,s.account,s.project_id,p.name AS project,s.source";
   private static final String SOURCE_QUERY =
-      "SELECT s.id,s.account,s.project_id,p.name AS project,s.source FROM schedule_sources s LEFT JOIN projects p ON p.id=s.project_id";
+      "SELECT "
+          + SOURCE_COLUMNS
+          + " FROM schedule_sources s LEFT JOIN projects p ON p.id=s.project_id";
+  private static final String FILE_COLUMNS =
+      "name,internal_name,definition,paused_override,status,error";
 
   private static Source source(java.sql.ResultSet row, int index) throws java.sql.SQLException {
     return new Source(
@@ -76,31 +107,176 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
   }
 
   public List<ScheduledWork.File> files(Source source) {
-    return files(source, true);
+    if (!filesCache.enabled()) return directFiles(source);
+    var currentSource = readSource(source);
+    if (currentSource.isEmpty()) return List.of();
+    var current = currentSource.orElseThrow();
+    long maximum = projectionBound(filesCache.maxWeight(), current);
+    return filesCache.read(
+        readKey(current, "files"),
+        maximum > 0,
+        () -> currentFiles(current, null, maximum).stream().map(FileSnapshot::effective).toList(),
+        () -> currentFiles(current, null, null).stream().map(FileSnapshot::effective).toList(),
+        JdbcScheduleDefinitionStore::filesWeight);
   }
 
-  private List<ScheduledWork.File> files(Source source, boolean effective) {
-    return jdbc.query(
-        "SELECT name,internal_name,definition,paused_override,status,error FROM schedule_files WHERE source_id=? ORDER BY name",
-        (r, i) -> {
-          ScheduledWork definition =
-              r.getString("definition") == null
-                  ? null
-                  : ScheduleDefinitionCodec.read(r.getString("definition"));
-          Boolean paused = r.getObject("paused_override", Boolean.class);
-          if (effective && definition != null && paused != null)
-            definition = withPaused(definition, paused);
-          return new ScheduledWork.File(
-              r.getString("name"),
-              source.project(),
-              source.source(),
-              path(source, r.getString("name")),
-              r.getString("internal_name"),
-              definition,
-              r.getString("status"),
-              r.getString("error"));
+  private List<ScheduledWork.File> directFiles(Source source) {
+    return jdbc
+        .query(
+            "SELECT " + FILE_COLUMNS + " FROM schedule_files WHERE source_id=? ORDER BY name",
+            (row, index) -> snapshot(source, row),
+            source.id())
+        .stream()
+        .map(FileSnapshot::effective)
+        .toList();
+  }
+
+  public Optional<FileSnapshot> snapshot(Source source, String name) {
+    new FileIdentity(source.id(), name);
+    if (!fileCache.enabled()) return directSnapshot(source, name);
+    var currentSource = readSource(source);
+    if (currentSource.isEmpty()) return Optional.empty();
+    var current = currentSource.orElseThrow();
+    long maximum = projectionBound(fileCache.maxWeight(), current);
+    return fileCache.read(
+        readKey(current, "file:" + name),
+        maximum > 0,
+        () -> {
+          var loaded = currentFiles(current, name, maximum);
+          if (loaded.isEmpty()) throw new ProjectionCache.Bypass();
+          return loaded.stream().findFirst();
         },
-        source.id());
+        () -> currentFiles(current, name, null).stream().findFirst(),
+        loaded -> loaded.map(value -> fileWeight(value.effective())).orElse(64L));
+  }
+
+  private Optional<FileSnapshot> directSnapshot(Source source, String name) {
+    return jdbc
+        .query(
+            "SELECT " + FILE_COLUMNS + " FROM schedule_files WHERE source_id=? AND name=?",
+            (row, index) -> snapshot(source, row),
+            source.id(),
+            name)
+        .stream()
+        .findFirst();
+  }
+
+  private static final int MAX_CACHED_FILES = 256;
+  private static final String FILE_BYTES =
+      "128::bigint+COALESCE(octet_length(f.definition::text),0)+octet_length(f.name)"
+          + "+octet_length(f.internal_name)+octet_length(f.status)+COALESCE(octet_length(f.error),0)";
+  private static final String SOURCE_FROM =
+      " FROM schedule_sources s LEFT JOIN projects p ON p.id=s.project_id";
+  private static final String CURRENT_SOURCE =
+      "s.id=? AND s.account=? AND s.source=? AND s.project_id IS NOT DISTINCT FROM ?";
+
+  /**
+   * Refresh only the source address and ownership. Warm reads must not scan or serialize file
+   * definitions merely to confirm a cache hit; durable versions fence their complete membership.
+   * Count/byte guards run only in the bounded cold loader below.
+   */
+  private Optional<Source> readSource(Source source) {
+    return jdbc
+        .query(
+            SOURCE_QUERY + " WHERE " + CURRENT_SOURCE,
+            JdbcScheduleDefinitionStore::source,
+            sourceArguments(source).toArray())
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Configured readers use current source fields, not an earlier caller-held source label. The
+   * bounded left join returns only a scalar sentinel when any definition/collection grew: no
+   * oversized definition reaches the row mapper. Fallback retains the full original result.
+   */
+  private List<FileSnapshot> currentFiles(Source source, String name, Long maximumBytes) {
+    var args = sourceArguments(source);
+    if (name != null) args.add(name);
+    String selected =
+        "SELECT "
+            + SOURCE_COLUMNS
+            + ",f.name,f.internal_name,f.definition,f.paused_override,f.status,f.error"
+            + (maximumBytes == null ? "" : "," + FILE_BYTES + " AS file_bytes")
+            + SOURCE_FROM
+            + " JOIN schedule_files f ON f.source_id=s.id WHERE "
+            + CURRENT_SOURCE
+            + (name == null ? "" : " AND f.name=?");
+    if (maximumBytes == null)
+      return jdbc.query(
+          selected + " ORDER BY f.name",
+          (row, index) -> snapshot(source(row, index), row),
+          args.toArray());
+    args.add(MAX_CACHED_FILES);
+    args.add(maximumBytes);
+    return jdbc
+        .query(
+            "WITH retained AS MATERIALIZED ("
+                + selected
+                + "), bounds AS (SELECT count(*) AS total_files,"
+                + "COALESCE(sum(file_bytes),0) AS projection_bytes FROM retained) SELECT bounds.total_files,"
+                + "bounds.projection_bytes,retained.* FROM bounds LEFT JOIN retained ON bounds.total_files<=?"
+                + " AND bounds.projection_bytes<=? ORDER BY retained.name",
+            (row, index) -> {
+              if (row.getLong("total_files") > MAX_CACHED_FILES
+                  || row.getLong("projection_bytes") > maximumBytes)
+                throw new ProjectionCache.Bypass();
+              if (row.getLong("total_files") == 0) return Optional.<FileSnapshot>empty();
+              return Optional.of(snapshot(source(row, index), row));
+            },
+            args.toArray())
+        .stream()
+        .flatMap(Optional::stream)
+        .toList();
+  }
+
+  private static java.util.ArrayList<Object> sourceArguments(Source source) {
+    return new java.util.ArrayList<>(
+        java.util.Arrays.asList(
+            source.id(), source.account(), source.source(), source.projectId()));
+  }
+
+  private static SnapshotCache.Key readKey(Source source, String projection) {
+    return new SnapshotCache.Key(
+        source.id() + ":" + projection, ProjectionCache.fingerprint(InformationJson.json(source)));
+  }
+
+  private static long projectionBound(long maximumWeight, Source source) {
+    long available = maximumWeight - (4096L + 4L * InformationJson.json(source).length());
+    return available <= 0 ? 0 : available / 64;
+  }
+
+  private static long fileWeight(ScheduledWork.File file) {
+    return 2048L
+        + 4L
+            * (file.name().length()
+                + file.path().length()
+                + file.internalName().length()
+                + file.source().length()
+                + (file.project() == null ? 0 : file.project().length())
+                + (file.error() == null ? 0 : file.error().length())
+                + (file.definition() == null
+                    ? 0
+                    : ScheduleDefinitionCodec.write(file.definition()).length()));
+  }
+
+  private static long filesWeight(List<ScheduledWork.File> files) {
+    long weight = 4096;
+    for (var file : files) weight += fileWeight(file);
+    return weight;
+  }
+
+  private static FileSnapshot snapshot(Source source, java.sql.ResultSet row)
+      throws java.sql.SQLException {
+    String definition = row.getString("definition");
+    return new FileSnapshot(
+        source,
+        row.getString("name"),
+        row.getString("internal_name"),
+        definition == null ? null : ScheduleDefinitionCodec.read(definition),
+        row.getObject("paused_override", Boolean.class),
+        row.getString("status"),
+        row.getString("error"));
   }
 
   public Optional<Source> sourceOf(String name, String account) {
@@ -135,8 +311,18 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
   }
 
   public Optional<ScheduledWork.File> managed(String name, String account) {
-    return sourceOf(name, account)
-        .flatMap(s -> files(s).stream().filter(f -> f.internalName().equals(name)).findFirst());
+    return jdbc
+        .query(
+            "SELECT "
+                + SOURCE_COLUMNS
+                + ",f.name,f.internal_name,f.definition,f.paused_override,f.status,f.error"
+                + " FROM schedule_sources s LEFT JOIN projects p ON p.id=s.project_id"
+                + " JOIN schedule_files f ON f.source_id=s.id WHERE f.internal_name=? AND s.account=?",
+            (row, index) -> snapshot(source(row, index), row).effective(),
+            name,
+            account)
+        .stream()
+        .findFirst();
   }
 
   public ScheduledWork.File apply(
@@ -150,12 +336,12 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
           lock(source);
           String internal = "scheduled-" + source.id() + "-" + name;
           // Compare immutable source content, not its operational pause projection.
-          var old = files(source, false).stream().filter(f -> f.name().equals(name)).findFirst();
+          var old = directSnapshot(source, name);
           if (old.isEmpty()
               && (schedules.find(internal).isPresent() || triggers.find(internal).isPresent()))
             throw new CallerFault("The internal schedule name is already in use");
           if (old.isPresent()
-              && definition.equals(old.get().definition())
+              && definition.equals(old.get().rawDefinition())
               && old.get().status().equals("active")
               && triggers
                   .find(internal)
@@ -168,20 +354,9 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
                                   : definition.target().project() == null
                                       ? source.project()
                                       : definition.target().project()))
-                  .isPresent())
-            return files(source).stream()
-                .filter(f -> f.name().equals(name))
-                .findFirst()
-                .orElseThrow();
-          boolean unchanged = old.filter(f -> definition.equals(f.definition())).isPresent();
-          var projected =
-              unchanged
-                  ? files(source).stream()
-                      .filter(f -> f.name().equals(name))
-                      .findFirst()
-                      .orElseThrow()
-                      .definition()
-                  : definition;
+                  .isPresent()) return old.get().effective();
+          boolean unchanged = old.filter(f -> definition.equals(f.rawDefinition())).isPresent();
+          var projected = unchanged ? old.orElseThrow().effectiveDefinition() : definition;
           var timing = CronSchedule.parse(definition.cron(), definition.zone());
           if (old.filter(f -> f.status().equals("refused")).isPresent()
               || schedules
@@ -212,20 +387,21 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
                   projected.paused(),
                   source.account()));
           if (projected.paused()) firings.refuseWaiting(internal, "schedule file paused");
-          jdbc.update(
-              "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES (?,?,?,?::jsonb,'active') ON CONFLICT(source_id,name) DO UPDATE SET definition=EXCLUDED.definition,paused_override=CASE WHEN schedule_files.definition=EXCLUDED.definition THEN schedule_files.paused_override ELSE NULL END,status='active',error=NULL",
+          // RETURNING observes the persisted override decision, including equality of JSONB on
+          // conflict. Publish only through the enclosing transaction's existing commit boundary.
+          return jdbc.queryForObject(
+              "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES (?,?,?,?::jsonb,'active') ON CONFLICT(source_id,name) DO UPDATE SET definition=EXCLUDED.definition,paused_override=CASE WHEN schedule_files.definition=EXCLUDED.definition THEN schedule_files.paused_override ELSE NULL END,status='active',error=NULL RETURNING "
+                  + FILE_COLUMNS,
+              (row, index) -> snapshot(source, row).effective(),
               source.id(),
               name,
               internal,
               ScheduleDefinitionCodec.write(definition));
-          return files(source).stream()
-              .filter(f -> f.name().equals(name))
-              .findFirst()
-              .orElseThrow();
         });
   }
 
   public void reject(Source source, String name, String error) {
+    FileSnapshot.validateError(error);
     work.inTransaction(
         () -> {
           lock(source);
@@ -266,10 +442,9 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
         () -> {
           lock(source);
           var file =
-              files(source).stream()
-                  .filter(f -> f.name().equals(name))
-                  .findFirst()
-                  .orElseThrow(() -> new CallerFault("The schedule file was removed"));
+              directSnapshot(source, name)
+                  .orElseThrow(() -> new CallerFault("The schedule file was removed"))
+                  .effective();
           if (!file.status().equals("active") || !expected.equals(file.definition()))
             throw new CallerFault(
                 "Schedule changed; inspect its current state before controlling it");
@@ -298,30 +473,13 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
         });
   }
 
-  private static ScheduledWork withPaused(ScheduledWork value, boolean paused) {
-    return new ScheduledWork(
-        value.version(),
-        value.cron(),
-        value.zone(),
-        paused,
-        value.action(),
-        value.target(),
-        value.limits());
-  }
-
   private void lock(Source source) {
     if (jdbc.queryForList(
                 "SELECT id FROM schedule_sources WHERE id=? AND account=? FOR UPDATE",
+                Long.class,
                 source.id(),
                 source.account())
             .size()
         != 1) throw new CallerFault("The schedule folder registration is unavailable");
-  }
-
-  private static String path(Source source, String name) {
-    return (source.source().equals("workspace") ? ".plowshare/" : "")
-        + "schedules/"
-        + name
-        + ".json";
   }
 }

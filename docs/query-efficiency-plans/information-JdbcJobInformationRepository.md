@@ -1,0 +1,13 @@
+# JdbcJobInformationRepository
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcJobInformationRepository.java#L18) implements `JobInformationRepository` for `InformationJobs`, inbox visibility and retained-input propagation. `hasInputs/inputsOf` recursively traverse conversation and orchestration ancestry; `bind` repeats that recursive CTE for every revision, while `inherit` propagates distinct ancestor inputs in one insert-select. `inputs` reconstructs direct typed selections. `logAllowed/readable` call current SQL authorization functions.
+
+**Confirmed repeated work:** `bind` resolves identical ancestor edges once per input. Resolve ancestors once, cross join a bounded bound UUID array and insert all edges set-wise with conflict handling. Reuse the typed input set when a caller asks `hasInputs` immediately before `inputsOf`; combine existence and contents under one operation snapshot. Preserve lineage semantics and duplicate elimination. A table-returning ancestor function can centralize these repeated CTEs, but should follow indexed child-to-parent lookups instead of materializing the global edge universe repeatedly. [V83](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L124) supplies input identity; inspect actual conversation/orchestration traversal plans before adding child/conductor indexes.
+
+Request-local ancestor/input snapshots are the first reuse layer. Shared caching needs database, job/log, projection, retained lineage/input generation and exact owner/selection for protected views. Current `logAllowed/readable` allow decisions remain authoritative and uncached. Bind/inherit, conversation/orchestration parent changes, revision input/availability/policy changes, deletions and external writers invalidate downstream lineage and list memberships after commit. Fan-out can be broad; use namespace invalidation if dependency indexing exceeds its bound. Use proposed tracked immutable DTO/LRU only after durable versions and recovery exist, rather than treating job ancestry as permanently immutable.
+
+Mock budgets should prove one ancestry resolution per bind and no hasInputs-then-reload. Future focused PostgreSQL tests cover nested orchestration equivalence, cycles/duplicate paths, rollback, current revocation and notification loss. Do not treat retained inputs as a permanent authorization grant.
+
+Coordinate live permission evaluation with the [readability-function workstream](readability-functions.md) and apply the shared [delivery contracts](delivery.md).

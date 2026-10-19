@@ -540,33 +540,43 @@ class UsageQueryTest {
   @Test
   void deep_attempt_paging_is_lossless_and_rechecks_access_and_cursor_identity() {
     var recorder = new AccountingRecorder(journal, AccountingFixtures.CLOCK, 10);
-    var call =
-        recorder.begin(
-            new AccountingEvent.CallCreated(
-                parent,
-                "model",
-                "pool",
-                "model",
-                null,
-                "local",
-                Lane.CHAT,
-                AccountingFixtures.PRICE));
-    for (int i = 0; i < 55; i++) {
-      call.startAttempt();
-      call.finishAttempt(
-          CallLifecycle.FAILED,
-          UsageObservation.UNKNOWN,
-          null,
-          503,
-          AccountingEvent.FinishReason.UNKNOWN,
-          null,
-          1);
+    for (int cohort = 0; cohort < 2; cohort++) {
+      var call =
+          recorder.begin(
+              new AccountingEvent.CallCreated(
+                  parent,
+                  "model",
+                  "pool",
+                  "model",
+                  null,
+                  "local",
+                  Lane.CHAT,
+                  AccountingFixtures.PRICE));
+      for (int i = 0; i < 55; i++) {
+        call.startAttempt();
+        call.finishAttempt(
+            CallLifecycle.FAILED,
+            UsageObservation.UNKNOWN,
+            null,
+            503,
+            AccountingEvent.FinishReason.UNKNOWN,
+            null,
+            1);
+      }
+      call.finish(CallLifecycle.FAILED);
     }
-    call.finish(CallLifecycle.FAILED);
-    store.project(journal.journalId(), journal.readBatch(200));
+    store.project(journal.journalId(), journal.readBatch(500));
     var resolved =
         queries.resolve("usage.calls", filter(null, "one", null, null, List.of(), null, 10));
-    var audit = queries.calls("alice", resolved).calls().getFirst();
+    var audits = queries.calls("alice", resolved).calls();
+    assertEquals(2, audits.size());
+    assertTrue(
+        audits.stream()
+            .allMatch(
+                row ->
+                    Boolean.TRUE.equals(row.attemptsTruncated()) && row.attempts().size() == 50));
+    assertNotEquals(audits.getFirst().attemptCursor(), audits.getLast().attemptCursor());
+    var audit = audits.getFirst();
     assertEquals(true, audit.attemptsTruncated());
     assertEquals(50, ((List<?>) audit.attempts()).size());
     String id = audit.callId().toString();

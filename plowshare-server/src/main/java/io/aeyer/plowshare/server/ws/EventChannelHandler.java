@@ -170,6 +170,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 public final class EventChannelHandler extends TextWebSocketHandler
     implements JobEvents,
         AccountPushes,
+        io.aeyer.plowshare.server.information.InformationInvalidations,
         SpeakerHandles,
         SessionPushes,
         org.springframework.web.socket.SubProtocolCapable {
@@ -281,13 +282,28 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * Nothing about {@code JobEvent} changes: it has no temporal component, so a push is written
    * exactly as it always was.
    */
+  private final ObjectMapper json = FrameJson.answering();
+
+  private EventReadCapacity readCapacity = new EventReadCapacity(2, 8);
+  private boolean readDispatchStarted;
+
+  /** Configure one shared server read bound before attaching segmented sockets. */
+  synchronized void useReadConcurrency(int perConnection, int global) {
+    if (readDispatchStarted)
+      throw new IllegalStateException("Event read concurrency cannot change after dispatch starts");
+    readCapacity = new EventReadCapacity(perConnection, global);
+  }
+
+  private synchronized EventReadCapacity readCapacity() {
+    readDispatchStarted = true;
+    return readCapacity;
+  }
+
   private volatile UsageSubscriptions usageSubscriptions;
 
   public void useUsageSubscriptions(UsageSubscriptions source) {
     usageSubscriptions = source;
   }
-
-  private final ObjectMapper json = FrameJson.answering();
 
   /**
    * The shape a correlation read wants: whatever the frame's top level is, untyped, because the
@@ -475,7 +491,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   }
                   throw failure;
                 }
-              });
+              },
+              readCapacity());
     }
     UsageSubscriptions usage = usageSubscriptions;
     if (usage != null) {
@@ -525,12 +542,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * the honest signal to a client whose events are about to stop arriving is the socket closing.
    * {@link FrameRouter#route(Envelope, Asking)} draws the same line for the same reason.
    *
-   * <p>Segmented operations run serially on a bounded connection-owned dispatcher. The container's
-   * reader must remain free to receive packet credits while an operation waits on persistence;
-   * otherwise an unrelated push times out and closes a healthy connection. Legacy JSON keeps its
-   * existing inline routing. Neither routing path writes the answer inline: {@link Delivery#answer}
-   * queues. Queued operations recheck socket authority before execution, and closing discards
-   * queued work without replaying or cancelling an operation already started.
+   * <p>Segmented operations use a bounded connection-owned dispatcher with audited independent
+   * reads. The container's reader must remain free to receive packet credits while an operation
+   * waits on persistence; otherwise an unrelated push times out and closes a healthy connection.
+   * Legacy JSON keeps its existing inline routing. Neither routing path writes the answer inline:
+   * {@link Delivery#answer} queues. Queued operations recheck socket authority before execution,
+   * and closing discards queued work without replaying or cancelling an operation already started.
    *
    * <p><b>The correlation read is separate from the routing read, and is allowed to fail.</b>
    * {@link FrameRouter#route(String, Asking)} is the one place that decides what a malformed frame
@@ -860,6 +877,17 @@ public final class EventChannelHandler extends TextWebSocketHandler
     }
   }
 
+  /** Only authenticated account sockets receive this fixed, content-free refresh hint. */
+  @Override
+  public void invalidate() {
+    for (var sockets : byHandle.values()) {
+      for (var socket : sockets) {
+        if (socket.getAttributes().get(DELIVERY) instanceof Delivery live)
+          live.informationInvalidated();
+      }
+    }
+  }
+
   /**
    * Which account {@code session}'s listener socket is signed in as, or empty when the session has
    * no listener or that listener carries no handle.
@@ -989,6 +1017,16 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     private final BlockingQueue<Pending> tokens = new ArrayBlockingQueue<>(STREAMING);
 
+    /** One coalesced refresh hint cannot consume lifecycle/reply or subscription capacity. */
+    private final BlockingQueue<Pending> informationHints = new ArrayBlockingQueue<>(1);
+
+    void informationInvalidated() {
+      if (running
+          && informationHints.offer(
+              new Pushed(new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated())))
+        waiting.release();
+    }
+
     /**
      * How many items are waiting across both queues.
      *
@@ -1083,6 +1121,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
       if (requests != null) requests.close();
       transport.close();
       whenStopped.run();
+      informationHints.clear();
       synchronized (this) {
         snapshots.clear();
       }
@@ -1196,6 +1235,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
     }
 
     private void drain() {
+      // Writer-thread confined: two lower-priority lanes alternate when both stay busy. Neither
+      // continuous invalidations nor a long token stream can indefinitely starve the other.
+      boolean hintNext = true;
       while (running) {
         try {
           waiting.acquire();
@@ -1212,7 +1254,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
           next = nextSnapshot();
         }
         if (next == null) {
-          next = tokens.poll();
+          boolean servedHint = hintNext;
+          next = servedHint ? informationHints.poll() : tokens.poll();
+          if (next == null) {
+            servedHint = !servedHint;
+            next = servedHint ? informationHints.poll() : tokens.poll();
+          }
+          if (next != null) hintNext = !servedHint;
         }
         if (next == null) {
           // Unreachable on the argument above, and written rather

@@ -108,6 +108,42 @@ class ServiceAccountsTest {
   }
 
   @Test
+  void ownerTokenListKeepsEmptyScopeTokensAndDoesNotMixOwners() {
+    var empty = issue(ProjectRole.VIEWER);
+    jdbc.update("DELETE FROM service_token_scopes WHERE token_id=?", empty.token().id());
+    var scoped =
+        services.issue(
+            "owner",
+            "ha-integration",
+            "second",
+            List.of(
+                new ServiceAccounts.Scope("automation", ProjectRole.VIEWER),
+                new ServiceAccounts.Scope("other", ProjectRole.VIEWER)),
+            30);
+    var repository = new JdbcServiceAccountRepository(jdbc);
+    var listed = repository.tokens("ha-integration");
+    assertEquals(2, listed.size());
+    assertTrue(
+        listed.stream()
+            .filter(token -> token.id().equals(empty.token().id()))
+            .findFirst()
+            .orElseThrow()
+            .scopes()
+            .isEmpty());
+    assertEquals(
+        List.of("automation", "other"),
+        listed.stream()
+            .filter(token -> token.id().equals(scoped.token().id()))
+            .findFirst()
+            .orElseThrow()
+            .scopes()
+            .stream()
+            .map(ServiceAccounts.Scope::project)
+            .toList());
+    assertTrue(repository.tokens("unrelated-owner").isEmpty());
+  }
+
+  @Test
   void machine_identity_has_no_interactive_login_or_administrator_role() {
     assertFalse(accounts.byHandle("ha-integration").orElseThrow().interactive());
     assertFalse(accounts.isServerAdmin("ha-integration"));

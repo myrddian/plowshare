@@ -107,14 +107,26 @@ task completion. Ordinary response correlation remains inside the assembled
 message. Large messages serialize behind other messages in their direction;
 credits are the only bypass traffic in version one.
 
-The event channel dispatches complete segmented operations on one bounded serial
-worker per connection, keeping the socket reader free to receive credits during
-slow operations. Queued messages reserve their retained UTF-16 bytes against the
-shared process budget and are limited to 256 waiting operations and 640 MiB per
-connection, including the operation in flight. Admission overflow closes the
-connection rather than dropping a request. Authority is checked again when each
-operation starts. Disconnect discards queued operations without interrupting or
-replaying an operation that has already started. Legacy JSON routing stays inline.
+The event channel dispatches complete segmented operations through one bounded
+coordinator per connection, keeping the socket reader free to receive credits
+during slow operations. Since the [first query-efficiency slice](../query-efficiency-first-slice.md),
+an explicit allowlist of audited independent reads may run concurrently and finish
+out of order. Every other operation, including unknown types, malformed envelopes and
+acting-context requests, forms a barrier: it waits for prior reads and completes
+before later work starts. Ordinary routing still performs validation and current
+authorization when each operation executes.
+
+Read capacity defaults to two per connection and eight across the event handler.
+Configure `plowshare.transport.event-read-concurrency` and
+`plowshare.transport.event-read-global-concurrency` before connections attach;
+both must be positive and global capacity must cover one connection's capacity.
+A shared fair permit is acquired before a read worker starts. Queued, selected
+and running messages reserve their retained UTF-16 bytes against the shared
+process budget and are limited to 256 operations and 640 MiB per connection.
+Admission overflow closes the connection rather than dropping a request.
+Disconnect discards unstarted operations without interrupting or replaying an
+operation that has already started. Legacy JSON routing stays inline. Packet
+credits and physical response serialization retain their existing contracts.
 
 ## Bounds and ownership
 

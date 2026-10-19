@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.orchestrations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
@@ -12,6 +13,7 @@ import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
 import io.aeyer.plowshare.server.todos.StageRules;
 import io.aeyer.plowshare.server.todos.TodoItem;
@@ -25,13 +27,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.stream.IntStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -242,6 +248,98 @@ class StallSweepTest {
 
     assertTrue(inbox.notices.isEmpty());
     assertEquals(Optional.empty(), store.stalledSince(run.id()));
+  }
+
+  @Test
+  void activity_committed_after_the_batch_snapshot_prevents_a_stale_stall_mark() {
+    OrchestrationRecord run = running("enzo");
+    OrchestrationStore delayed =
+        new OrchestrationStore(jdbc, clock::get) {
+          @Override
+          public boolean markStalled(String id, Instant since) {
+            clock.set(T0.plus(16, ChronoUnit.MINUTES));
+            entries.append(
+                run.conductorConversation(),
+                1,
+                LoggedEntry.utterance("new work after the snapshot", Speaker.person(null)));
+            return super.markStalled(id, since);
+          }
+        };
+    StallSweep delayedSweep =
+        new StallSweep(delayed, conversation -> List.of(), inbox, FIFTEEN_MINUTES);
+
+    assertEquals(0, delayedSweep.sweep(T0.plus(16, ChronoUnit.MINUTES)));
+    assertTrue(inbox.notices.isEmpty());
+    assertEquals(Optional.empty(), store.stalledSince(run.id()));
+  }
+
+  @Test
+  void a_working_child_committed_after_the_batch_snapshot_prevents_a_stale_stall_mark() {
+    OrchestrationRecord parent = running("enzo");
+    OrchestrationStore delayed =
+        new OrchestrationStore(jdbc, clock::get) {
+          @Override
+          public boolean markStalled(String id, Instant since) {
+            StallSweepTest.this.running(conductorConversation(), "enzo", parent.id(), 1);
+            return super.markStalled(id, since);
+          }
+        };
+    StallSweep delayedSweep =
+        new StallSweep(delayed, conversation -> List.of(), inbox, FIFTEEN_MINUTES);
+
+    assertEquals(0, delayedSweep.sweep(T0.plus(16, ChronoUnit.MINUTES)));
+    assertTrue(inbox.notices.isEmpty());
+    assertEquals(Optional.empty(), store.stalledSince(parent.id()));
+  }
+
+  @Test
+  void bounded_acceptance_insert_preserves_order_and_rolls_back_the_whole_replacement() {
+    OrchestrationRecord run = running("enzo");
+    var transactions =
+        new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()));
+    UnitOfWork work =
+        new UnitOfWork() {
+          @Override
+          public <T> T inTransaction(Supplier<T> action) {
+            return transactions.execute(status -> action.get());
+          }
+        };
+    var acceptance = new JdbcOrchestrationAcceptance(jdbc, work);
+    var commands =
+        IntStream.range(0, 65)
+            .mapToObj(
+                position ->
+                    new OrchestrationAcceptance.Registered(
+                        run.id(),
+                        position,
+                        "inspect " + position,
+                        List.of("inspect", Integer.toString(position)),
+                        null,
+                        0,
+                        null,
+                        "server",
+                        "/fixture",
+                        "open",
+                        null,
+                        T0,
+                        position == 64 ? 10 : null))
+            .toList();
+
+    acceptance.replace(run.id(), "first requirements", commands);
+    assertEquals(commands, acceptance.find(run.id()));
+    assertEquals(Optional.of("first requirements"), acceptance.requirements(run.id()));
+
+    var duplicate = new ArrayList<>(commands);
+    duplicate.add(commands.getFirst());
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () -> acceptance.replace(run.id(), "must roll back", duplicate));
+    assertEquals(commands, acceptance.find(run.id()));
+    assertEquals(Optional.of("first requirements"), acceptance.requirements(run.id()));
+
+    acceptance.replace(run.id(), "empty requirements", List.of());
+    assertEquals(List.of(), acceptance.find(run.id()));
+    assertEquals(Optional.of("empty requirements"), acceptance.requirements(run.id()));
   }
 
   // --- excused: an open approval, or a live child -------------------------------------------

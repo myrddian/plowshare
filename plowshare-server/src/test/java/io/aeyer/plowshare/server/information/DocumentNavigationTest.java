@@ -44,7 +44,7 @@ class DocumentNavigationTest {
                     new InformationRequest.NavigationViewDelete(
                         project, UUID.randomUUID(), UUID.randomUUID(), 1L))));
     // Existing transaction/account fences precede admission; content and effects remain blocked.
-    verify(repository).snapshot();
+    verify(repository).snapshotSingleProjection();
     verify(repository).requireActive("author");
     verify(repository).lock();
     verify(repository).lockAccount("author");

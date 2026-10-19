@@ -641,10 +641,9 @@ class RuntimeConfigSeedTest {
    * The map, in memory.
    *
    * <p>A subclass and not a mock: three of the tests above turn on a write being visible to a later
-   * read, which is state and not an interaction, and {@link RuntimeConfig#get} and {@link
-   * RuntimeConfig#authorOf} are already projections of {@link RuntimeConfig#entry} — so overriding
-   * the two statements gives the whole surface. The {@code null} {@code JdbcTemplate} is safe for
-   * exactly that reason: nothing left un-overridden touches it.
+   * read, which is state and not an interaction. This fake explicitly implements all three read
+   * projections from its retained entry; production reads each narrow column directly. The {@code
+   * null} {@code JdbcTemplate} is safe because every exercised statement is overridden.
    */
   static final class InMemory extends RuntimeConfig {
 
@@ -657,6 +656,16 @@ class RuntimeConfigSeedTest {
     @Override
     public void put(String key, String value, String updatedBy) {
       rows.put(key, new Entry(key, value, Instant.EPOCH, updatedBy));
+    }
+
+    @Override
+    public Optional<String> get(String key) {
+      return entry(key).map(Entry::value);
+    }
+
+    @Override
+    public Optional<String> authorOf(String key) {
+      return entry(key).map(Entry::updatedBy);
     }
 
     @Override

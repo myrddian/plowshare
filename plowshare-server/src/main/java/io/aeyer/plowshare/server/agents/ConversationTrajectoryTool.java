@@ -144,13 +144,9 @@ public final class ConversationTrajectoryTool implements AgentTool {
         return render(EntryPageView.of(entries.entryAt(id, ordinal), 0, 1));
       }
       if (tail) {
-        EntryPageView first = EntryPageView.of(entries.pageOfLog(id, 0, 1), 0, limit);
-        int lastOffset = Math.max(0, first.total() - limit);
-        if (first.total() == 0) {
-          return render(first);
-        }
-        return render(
-            EntryPageView.of(entries.pageOfLog(id, lastOffset, limit), lastOffset, limit));
+        var page = entries.tailOfLog(id, limit);
+        int lastOffset = Math.max(0, page.total() - limit);
+        return render(EntryPageView.of(page, lastOffset, limit));
       }
       return render(EntryPageView.of(entries.pageOfLog(id, offset, limit), offset, limit));
     } catch (ToolArguments.BadArguments refused) {

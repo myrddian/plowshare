@@ -1,0 +1,554 @@
+{
+  "capturedAtUtc": "2026-10-19T10:32:51.184036+00:00",
+  "sourceCommit": "7bc567c2282188925ac07c81e6fcae81b41a0a40",
+  "deployedRevision": "b96f260203bc880441a0c7709918926e5e642f1d",
+  "postgresVersion": "16.15",
+  "flywayMaxVersion": 174,
+  "method": "Existing configured account and SDK segmented WebSocket session; bounded read operations, three samples per repeated comparison; database SELECT profiles under READ ONLY with 20-second statement and 2-second lock limits. Normal SDK session renewal used; no domain mutation submitted.",
+  "limits": [
+    "API times include server queueing, transport, decoding and client scheduling; they are not isolated SQL times or UI render times.",
+    "Three samples give observed ranges and medians, not p95 or a load-test distribution.",
+    "Database probes use one existing authorized account; account identity, project names, server addresses, resource IDs and raw private diagnostics are omitted.",
+    "Direct SQL is a read-only diagnostic path, not a proposed integration bypass.",
+    "Function total times include descendants and must not be summed as independent costs.",
+    "Live data changes concurrently; counts from separate statements can differ.",
+    "No indexes, functions, procedures, cache or dispatch changes were implemented or benchmarked.",
+    "The first raw WebSocket attempt failed authentication; successful measurements followed normal SDK locked renewal, not a replay of a domain mutation."
+  ],
+  "apiSummary": {
+    "capabilities": {
+      "samples": 1,
+      "minMs": 10.55,
+      "medianMs": 10.55,
+      "maxMs": 10.55
+    },
+    "manual_global_list": {
+      "samples": 3,
+      "minMs": 91.951,
+      "medianMs": 99.909,
+      "maxMs": 100.016
+    },
+    "manual_global_facets": {
+      "samples": 3,
+      "minMs": 1104.811,
+      "medianMs": 1150.052,
+      "maxMs": 1166.503
+    },
+    "manual_personal_facets": {
+      "samples": 3,
+      "minMs": 1885.978,
+      "medianMs": 1910.077,
+      "maxMs": 1968.771
+    },
+    "manual_personal_lookup": {
+      "samples": 1,
+      "minMs": 12.769,
+      "medianMs": 12.769,
+      "maxMs": 12.769
+    },
+    "manual_status": {
+      "samples": 1,
+      "minMs": 31.568,
+      "medianMs": 31.568,
+      "maxMs": 31.568
+    },
+    "manual_read": {
+      "samples": 1,
+      "minMs": 11.601,
+      "medianMs": 11.601,
+      "maxMs": 11.601
+    },
+    "schedule_list": {
+      "samples": 1,
+      "minMs": 2.492,
+      "medianMs": 2.492,
+      "maxMs": 2.492
+    },
+    "schedule_files": {
+      "samples": 1,
+      "minMs": 62.86,
+      "medianMs": 62.86,
+      "maxMs": 62.86
+    },
+    "isolated_relay_topics": {
+      "samples": 3,
+      "minMs": 24.278,
+      "medianMs": 26.012,
+      "maxMs": 26.854
+    },
+    "isolated_relay_messages": {
+      "samples": 3,
+      "minMs": 27.636,
+      "medianMs": 29.549,
+      "maxMs": 29.566
+    },
+    "same_socket_facets": {
+      "samples": 3,
+      "minMs": 1818.232,
+      "medianMs": 1922.146,
+      "maxMs": 2018.476
+    },
+    "same_socket_topics": {
+      "samples": 3,
+      "minMs": 1840.808,
+      "medianMs": 1944.417,
+      "maxMs": 2042.069
+    },
+    "same_socket_messages": {
+      "samples": 3,
+      "minMs": 1866.097,
+      "medianMs": 1973.567,
+      "maxMs": 2073.92
+    },
+    "separate_socket_topics": {
+      "samples": 3,
+      "minMs": 22.094,
+      "medianMs": 24.225,
+      "maxMs": 25.487
+    },
+    "separate_socket_messages": {
+      "samples": 3,
+      "minMs": 49.001,
+      "medianMs": 52.773,
+      "maxMs": 52.913
+    },
+    "separate_socket_facets": {
+      "samples": 3,
+      "minMs": 1803.151,
+      "medianMs": 1942.558,
+      "maxMs": 1973.671
+    }
+  },
+  "apiSamples": [
+    {
+      "label": "authentication",
+      "status": "established",
+      "transport": "segmented SDK events"
+    },
+    {
+      "label": "capabilities",
+      "type": "information.types.capabilities",
+      "ms": 10.55,
+      "code": "OK"
+    },
+    {
+      "label": "manual_global_list_1",
+      "type": "information.list",
+      "ms": 100.016,
+      "code": "OK",
+      "rows": 0
+    },
+    {
+      "label": "manual_global_facets_1",
+      "type": "information.facets",
+      "ms": 1150.052,
+      "code": "OK",
+      "total": 0
+    },
+    {
+      "label": "manual_personal_facets_1",
+      "type": "information.facets",
+      "ms": 1885.978,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "manual_global_list_2",
+      "type": "information.list",
+      "ms": 91.951,
+      "code": "OK",
+      "rows": 0
+    },
+    {
+      "label": "manual_global_facets_2",
+      "type": "information.facets",
+      "ms": 1104.811,
+      "code": "OK",
+      "total": 0
+    },
+    {
+      "label": "manual_personal_facets_2",
+      "type": "information.facets",
+      "ms": 1968.771,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "manual_global_list_3",
+      "type": "information.list",
+      "ms": 99.909,
+      "code": "OK",
+      "rows": 0
+    },
+    {
+      "label": "manual_global_facets_3",
+      "type": "information.facets",
+      "ms": 1166.503,
+      "code": "OK",
+      "total": 0
+    },
+    {
+      "label": "manual_personal_facets_3",
+      "type": "information.facets",
+      "ms": 1910.077,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "manual_personal_lookup",
+      "type": "information.list",
+      "ms": 12.769,
+      "code": "OK",
+      "rows": 1
+    },
+    {
+      "label": "manual_status",
+      "type": "information.status",
+      "ms": 31.568,
+      "code": "OK"
+    },
+    {
+      "label": "manual_read",
+      "type": "information.read",
+      "ms": 11.601,
+      "code": "OK",
+      "total": 6510
+    },
+    {
+      "label": "schedule_list",
+      "type": "schedule.list",
+      "ms": 2.492,
+      "code": "OK",
+      "rows": 2
+    },
+    {
+      "label": "schedule_files",
+      "type": "schedule.files",
+      "ms": 62.86,
+      "code": "OK",
+      "rows": 1
+    },
+    {
+      "label": "isolated_relay_topics_1",
+      "type": "relay.topics",
+      "ms": 26.012,
+      "code": "OK"
+    },
+    {
+      "label": "isolated_relay_messages_1",
+      "type": "relay.log",
+      "ms": 29.566,
+      "code": "OK"
+    },
+    {
+      "label": "isolated_relay_topics_2",
+      "type": "relay.topics",
+      "ms": 24.278,
+      "code": "OK"
+    },
+    {
+      "label": "isolated_relay_messages_2",
+      "type": "relay.log",
+      "ms": 27.636,
+      "code": "OK"
+    },
+    {
+      "label": "isolated_relay_topics_3",
+      "type": "relay.topics",
+      "ms": 26.854,
+      "code": "OK"
+    },
+    {
+      "label": "isolated_relay_messages_3",
+      "type": "relay.log",
+      "ms": 29.549,
+      "code": "OK"
+    },
+    {
+      "label": "same_socket_facets_1",
+      "type": "information.facets",
+      "ms": 2018.476,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "same_socket_topics_1",
+      "type": "relay.topics",
+      "ms": 2042.069,
+      "code": "OK"
+    },
+    {
+      "label": "same_socket_messages_1",
+      "type": "relay.log",
+      "ms": 2073.92,
+      "code": "OK"
+    },
+    {
+      "label": "same_socket_facets_2",
+      "type": "information.facets",
+      "ms": 1818.232,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "same_socket_topics_2",
+      "type": "relay.topics",
+      "ms": 1840.808,
+      "code": "OK"
+    },
+    {
+      "label": "same_socket_messages_2",
+      "type": "relay.log",
+      "ms": 1866.097,
+      "code": "OK"
+    },
+    {
+      "label": "same_socket_facets_3",
+      "type": "information.facets",
+      "ms": 1922.146,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "same_socket_topics_3",
+      "type": "relay.topics",
+      "ms": 1944.417,
+      "code": "OK"
+    },
+    {
+      "label": "same_socket_messages_3",
+      "type": "relay.log",
+      "ms": 1973.567,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_topics_1",
+      "type": "relay.topics",
+      "ms": 25.487,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_messages_1",
+      "type": "relay.log",
+      "ms": 49.001,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_facets_1",
+      "type": "information.facets",
+      "ms": 1973.671,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "separate_socket_topics_2",
+      "type": "relay.topics",
+      "ms": 22.094,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_messages_2",
+      "type": "relay.log",
+      "ms": 52.773,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_facets_2",
+      "type": "information.facets",
+      "ms": 1803.151,
+      "code": "OK",
+      "total": 37
+    },
+    {
+      "label": "separate_socket_topics_3",
+      "type": "relay.topics",
+      "ms": 24.225,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_messages_3",
+      "type": "relay.log",
+      "ms": 52.913,
+      "code": "OK"
+    },
+    {
+      "label": "separate_socket_facets_3",
+      "type": "information.facets",
+      "ms": 1942.558,
+      "code": "OK",
+      "total": 37
+    }
+  ],
+  "matchedReadabilitySqlSamples": [
+    {
+      "variant": "matched_without_readability",
+      "rows": 37,
+      "milliseconds": 3.504
+    },
+    {
+      "variant": "matched_with_readability",
+      "rows": 37,
+      "milliseconds": 172.36
+    },
+    {
+      "variant": "matched_without_readability",
+      "rows": 37,
+      "milliseconds": 0.715
+    },
+    {
+      "variant": "matched_with_readability",
+      "rows": 37,
+      "milliseconds": 159.326
+    },
+    {
+      "variant": "matched_without_readability",
+      "rows": 37,
+      "milliseconds": 0.711
+    },
+    {
+      "variant": "matched_with_readability",
+      "rows": 37,
+      "milliseconds": 159.646
+    }
+  ],
+  "functionProfiles": {
+    "function-profile": [
+      {
+        "function": "knowledge_revision_readable",
+        "calls": 74,
+        "totalMsIncludingChildren": 161.464,
+        "selfMs": 36.178
+      },
+      {
+        "function": "information_global_read_member",
+        "calls": 148,
+        "totalMsIncludingChildren": 56.245,
+        "selfMs": 28.439
+      },
+      {
+        "function": "account_active",
+        "calls": 148,
+        "totalMsIncludingChildren": 27.807,
+        "selfMs": 27.807
+      },
+      {
+        "function": "knowledge_scope_readable",
+        "calls": 74,
+        "totalMsIncludingChildren": 54.511,
+        "selfMs": 26.693
+      },
+      {
+        "function": "information_navigation_policy",
+        "calls": 74,
+        "totalMsIncludingChildren": 26.121,
+        "selfMs": 26.121
+      },
+      {
+        "function": "information_privacy_allows",
+        "calls": 74,
+        "totalMsIncludingChildren": 42.348,
+        "selfMs": 16.227
+      },
+      {
+        "function": "information_root_readable",
+        "calls": 37,
+        "totalMsIncludingChildren": 85.811,
+        "selfMs": 3.573
+      },
+      {
+        "function": "knowledge_dependencies_readable",
+        "calls": 37,
+        "totalMsIncludingChildren": 82.653,
+        "selfMs": 3.427
+      }
+    ],
+    "event-permission-profile": [
+      {
+        "function": "authority_project_role",
+        "calls": 78,
+        "totalMsIncludingChildren": 280.98,
+        "selfMs": 224.596
+      },
+      {
+        "function": "information_account_action",
+        "calls": 78,
+        "totalMsIncludingChildren": 262.644,
+        "selfMs": 184.033
+      },
+      {
+        "function": "account_active",
+        "calls": 6547,
+        "totalMsIncludingChildren": 163.439,
+        "selfMs": 163.439
+      },
+      {
+        "function": "knowledge_revision_readable",
+        "calls": 73,
+        "totalMsIncludingChildren": 678.754,
+        "selfMs": 36.748
+      },
+      {
+        "function": "information_public_policy",
+        "calls": 67,
+        "totalMsIncludingChildren": 31.126,
+        "selfMs": 31.126
+      },
+      {
+        "function": "knowledge_scope_readable",
+        "calls": 78,
+        "totalMsIncludingChildren": 602.572,
+        "selfMs": 29.959
+      },
+      {
+        "function": "information_global_read_member",
+        "calls": 151,
+        "totalMsIncludingChildren": 58.144,
+        "selfMs": 29.7
+      },
+      {
+        "function": "information_navigation_policy",
+        "calls": 73,
+        "totalMsIncludingChildren": 26.331,
+        "selfMs": 26.331
+      },
+      {
+        "function": "information_privacy_allows",
+        "calls": 73,
+        "totalMsIncludingChildren": 43.736,
+        "selfMs": 17.405
+      },
+      {
+        "function": "information_root_readable",
+        "calls": 72,
+        "totalMsIncludingChildren": 748.002,
+        "selfMs": 13.695
+      },
+      {
+        "function": "knowledge_dependencies_readable",
+        "calls": 1,
+        "totalMsIncludingChildren": 9.489,
+        "selfMs": 0.458
+      }
+    ]
+  },
+  "revisionHistoryPlan": {
+    "returnedRows": 93,
+    "removedByFilter": 54976,
+    "scan": "sequential scan then sort by sequence",
+    "sharedHitBuffersScan": 834,
+    "executionMs": 3.974,
+    "availableIndex": "primary key on sequence; no revision_id/sequence index observed"
+  },
+  "relayOutboxPlans": {
+    "rowsAtProbe": 0,
+    "pendingSingleExecutionMs": 0.016,
+    "partitionDiscoveryExecutionMs": 0.029,
+    "interpretation": "Cannot establish a scale benefit from an empty outbox; expression/predicate mismatch remains a source-grounded candidate."
+  },
+  "laterExactDatasetCounts": {
+    "informationEvents": 55117,
+    "schedules": 2,
+    "scheduleFiles": 1,
+    "relaySourceEvents": 0
+  }
+}

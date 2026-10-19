@@ -38,19 +38,34 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
         && (after.length() > io.aeyer.plowshare.protocol.RelayPort.MAX_TOPIC_LENGTH + 28
             || after.indexOf('\0') >= 0))
       throw new IllegalArgumentException("invalid publisher cursor");
+    String scope = "COALESCE('project:'||project_id::text,'system')";
+    var arguments = new java.util.ArrayList<Object>();
+    String predicate = "";
+    if (after != null) {
+      int separator = after.indexOf('/');
+      if (separator < 1) throw new IllegalArgumentException("invalid publisher cursor");
+      String afterScope = after.substring(0, separator);
+      String afterTopic = after.substring(separator + 1);
+      try {
+        new Relay.TopicKey(RelayScopeCodec.read(afterScope), afterTopic);
+      } catch (IllegalStateException invalid) {
+        throw new IllegalArgumentException("invalid publisher cursor");
+      }
+      predicate = " WHERE (" + scope + ",topic)>(?,?)";
+      arguments.add(afterScope);
+      arguments.add(afterTopic);
+    }
+    arguments.add(limit);
     return jdbc.query(
-        """
-        SELECT DISTINCT COALESCE('project:'||project_id::text,'system') AS scope_key,topic
-        FROM relay_source_events
-        WHERE CAST(? AS text) IS NULL OR COALESCE('project:'||project_id::text,'system')||'/'||topic > ?
-        ORDER BY scope_key,topic LIMIT ?
-        """,
+        "SELECT DISTINCT "
+            + scope
+            + " AS scope_key,topic FROM relay_source_events"
+            + predicate
+            + " ORDER BY scope_key,topic LIMIT ?",
         (row, index) ->
             new Relay.TopicKey(
                 RelayScopeCodec.read(row.getString("scope_key")), row.getString("topic")),
-        after,
-        after,
-        limit);
+        arguments.toArray());
   }
 
   @Override
@@ -69,7 +84,7 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
               jdbc
                   .query(
                       """
-          SELECT * FROM relay_source_events WHERE project_id IS NOT DISTINCT FROM ? AND topic=?
+          SELECT id,occurred_at,family,topic,subject,state,context,related,relay_causation FROM relay_source_events WHERE COALESCE(project_id,0)=? AND topic=?
           ORDER BY sequence LIMIT 1 FOR UPDATE
           """,
                       (row, index) -> {
@@ -98,7 +113,9 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
                             payload,
                             RelayCausationCodec.read(row.getString("relay_causation")));
                       },
-                      RelayScopeCodec.project(topic),
+                      topic.scope() instanceof Relay.ProjectScope project
+                          ? project.projectId()
+                          : 0L,
                       topic.name())
                   .stream()
                   .findFirst();

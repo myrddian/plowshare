@@ -8,6 +8,8 @@ import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.faults.*;
 import io.aeyer.plowshare.server.information.InformationCatalogue.Admission;
 import java.time.*;
@@ -19,6 +21,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final JdbcTemplate jdbc;
   private final AllowanceRepository allowances;
   private final Clock clock;
+  private final ProjectionCache<Optional<AuthorizedMetadata>> metadataCache;
+  private final ProjectionCache<Optional<AuthorizedText>> textCache;
+  private final ProjectionCache<List<Information.Revision>> listCache;
+  private final ProjectionCache<Information.Facets> facetsCache;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   public JdbcInformationCatalogueRepository(JdbcTemplate jdbc, Clock clock) {
@@ -27,9 +33,40 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public JdbcInformationCatalogueRepository(
       JdbcTemplate jdbc, Clock clock, AllowanceRepository allowances) {
+    this(jdbc, clock, allowances, ProjectionCache.direct(), ProjectionCache.direct());
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache) {
+    this(
+        jdbc,
+        clock,
+        allowances,
+        metadataCache,
+        textCache,
+        ProjectionCache.direct(),
+        ProjectionCache.direct());
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache,
+      ProjectionCache<List<Information.Revision>> listCache,
+      ProjectionCache<Information.Facets> facetsCache) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
     this.allowances = Objects.requireNonNull(allowances);
+    this.metadataCache = Objects.requireNonNull(metadataCache);
+    this.textCache = Objects.requireNonNull(textCache);
+    this.listCache = Objects.requireNonNull(listCache);
+    this.facetsCache = Objects.requireNonNull(facetsCache);
   }
 
   private static NotFoundFault absent() {
@@ -108,8 +145,178 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     var args = new ArrayList<Object>(selectionArgs(context));
     args.add(revision);
     return !jdbc.queryForList(
-            SELECT + " WHERE " + readableSql(context) + " AND r.id=?", args.toArray())
+            "SELECT 1 FROM information_revision_allowances r WHERE "
+                + readableSql(context)
+                + " AND r.id=?",
+            Integer.class,
+            args.toArray())
         .isEmpty();
+  }
+
+  public Optional<AuthorizedMetadata> authorizedMetadata(
+      InformationContext context, UUID revision) {
+    if (!metadataCache.enabled()) return loadMetadata(context, revision, null);
+    long bound = projectionBound(metadataCache.maxWeight(), context, 64);
+    if (!readable(context, revision)) return Optional.empty();
+    return metadataCache.read(
+        readKey(context, revision),
+        bound > 0,
+        () -> loadMetadata(context, revision, bound),
+        () -> loadMetadata(context, revision, null),
+        JdbcInformationCatalogueRepository::metadataWeight);
+  }
+
+  private Optional<AuthorizedMetadata> loadMetadata(
+      InformationContext context, UUID revision, Long maximumBytes) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    String sql = SELECT + " WHERE " + readableSql(context) + " AND r.id=?";
+    if (maximumBytes != null) {
+      sql =
+          "WITH projected AS MATERIALIZED ("
+              + sql
+              + ") SELECT * FROM projected WHERE octet_length(to_jsonb(projected)::text)<=?";
+      args.add(maximumBytes);
+    }
+    var rows = jdbc.queryForList(sql, args.toArray());
+    // A source may grow, disappear or lose readability after preflight. Never cache a truncated
+    // projection or a false negative: retry the original current SQL outside shared admission.
+    if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
+    return rows.stream()
+        .map(row -> new AuthorizedMetadata(context, decode(row, Information.Revision.class)))
+        .findFirst();
+  }
+
+  public Optional<AuthorizedText> authorizedText(InformationContext context, UUID revision) {
+    if (!textCache.enabled()) return loadText(context, revision, null);
+    long bound = projectionBound(textCache.maxWeight(), context, 4);
+    var sizes =
+        jdbc.queryForList(
+            "SELECT "
+                + TEXT_BYTES
+                + " FROM information_revision_allowances r WHERE "
+                + readableSql(context)
+                + " AND r.id=?",
+            Long.class,
+            readArguments(context, revision));
+    if (sizes.isEmpty()) return Optional.empty();
+    return textCache.read(
+        readKey(context, revision),
+        bound > 0 && sizes.getFirst() <= bound,
+        () -> loadText(context, revision, bound),
+        () -> loadText(context, revision, null),
+        JdbcInformationCatalogueRepository::textWeight);
+  }
+
+  private Optional<AuthorizedText> loadText(
+      InformationContext context, UUID revision, Long maximumBytes) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    if (maximumBytes != null) args.add(maximumBytes);
+    var rows =
+        jdbc.query(
+            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text FROM information_revision_allowances r WHERE "
+                + readableSql(context)
+                + " AND r.id=?"
+                + (maximumBytes == null ? "" : " AND " + TEXT_BYTES + "<=?"),
+            (rs, n) ->
+                new AuthorizedText(
+                    context,
+                    rs.getObject(1, UUID.class),
+                    rs.getObject(2, UUID.class),
+                    rs.getString(3),
+                    rs.getString(4),
+                    rs.getString(5),
+                    rs.getString(6),
+                    rs.getLong(7),
+                    rs.getString(8)),
+            args.toArray());
+    if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
+    return rows.stream().findFirst();
+  }
+
+  private static final String TEXT_BYTES =
+      "COALESCE(octet_length(r.extracted_text),0)::bigint+octet_length(r.content_hash)"
+          + "+COALESCE(octet_length(r.text_hash),0)+octet_length(r.document_type)+octet_length(r.document_subtype)";
+
+  private static Object[] readArguments(InformationContext context, UUID revision) {
+    var args = new ArrayList<Object>(selectionArgs(context));
+    args.add(revision);
+    return args.toArray();
+  }
+
+  private static SnapshotCache.Key readKey(InformationContext context, UUID revision) {
+    return new SnapshotCache.Key(
+        revision.toString(), ProjectionCache.fingerprint(InformationJson.json(context)));
+  }
+
+  private static long contextWeight(InformationContext context) {
+    return 4096L + 4L * InformationJson.json(context).length();
+  }
+
+  private static long projectionBound(
+      long maximumWeight, InformationContext context, int expansion) {
+    long available = maximumWeight - contextWeight(context) - 4096;
+    return available <= 0 ? 0 : available / expansion;
+  }
+
+  private static long stringsWeight(String... values) {
+    long weight = 0;
+    for (String value : values) if (value != null) weight += 64L + 4L * value.length();
+    return weight;
+  }
+
+  private static long textWeight(Optional<AuthorizedText> loaded) {
+    if (loaded.isEmpty()) return 64;
+    var value = loaded.orElseThrow();
+    return contextWeight(value.context())
+        + stringsWeight(
+            value.documentType(),
+            value.documentSubtype(),
+            value.contentHash(),
+            value.textHash(),
+            value.text());
+  }
+
+  private static long metadataWeight(Optional<AuthorizedMetadata> loaded) {
+    if (loaded.isEmpty()) return 64;
+    var value = loaded.orElseThrow();
+    var r = value.revision();
+    long weight =
+        contextWeight(value.context())
+            + stringsWeight(
+                r.title(),
+                r.mediaType(),
+                r.documentType(),
+                r.documentSubtype(),
+                r.sourceUri(),
+                r.contentHash(),
+                r.textHash(),
+                r.availability(),
+                r.converter(),
+                r.sourceName(),
+                r.kind(),
+                r.author(),
+                r.documentAuthor(),
+                r.documentAuthorSource(),
+                r.tagGroupsSource(),
+                r.reportStatus(),
+                r.processingPolicy());
+    for (String tag : r.tags()) weight += stringsWeight(tag);
+    if (r.autoTag() != null) for (String tag : r.autoTag()) weight += stringsWeight(tag);
+    if (r.tagGroups() != null)
+      for (var group : r.tagGroups().entrySet()) {
+        weight += 128 + stringsWeight(group.getKey());
+        for (String tag : group.getValue()) weight += stringsWeight(tag);
+      }
+    if (r.contentType() != null)
+      weight +=
+          256
+              + stringsWeight(
+                  r.contentType().slug(),
+                  r.contentType().label(),
+                  r.contentType().definitionHash());
+    return weight;
   }
 
   public Information.Revision metadata(UUID revision) {
@@ -227,7 +434,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       selected =
           new InformationSql.Filter(selected.sql() + " AND r.id=ANY(CAST(? AS uuid[]))", args);
     }
-    return facetCounts(selected, context.typedView());
+    var reader = new JdbcInformationFacets(jdbc, facetsCache);
+    // The run's complete pin list remains part of selection. Oversized pin bookkeeping bypasses
+    // sharing rather than shortening the key or changing the existing SQL intersection.
+    if (!facetsCache.enabled() || pinned != null && pinned.size() > 1024)
+      return reader.read(selected, JdbcInformationFacets.Candidates.REVISIONS, context.typedView());
+    return reader.read(
+        selected,
+        JdbcInformationFacets.Candidates.REVISIONS,
+        context.typedView(),
+        InformationCatalogueFingerprint.readKey(
+            "catalogue-facets-v1", context, Arrays.asList(kind, pinned)));
   }
 
   public List<Information.Revision> list(
@@ -236,19 +453,56 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (kind != null && !List.of("source", "report").contains(kind))
       throw new CallerFault("kind must be source or report");
     var selected = discovery(context, kind);
+    int applied = Math.max(1, Math.min(limit, 100));
+    if (!listCache.enabled()) return loadList(selected, applied, offset, null);
+    long maximum = listCache.maxWeight() <= 4096 ? 0 : (listCache.maxWeight() - 4096) / 32;
+    return listCache.read(
+        InformationCatalogueFingerprint.readKey(
+            "catalogue-list-v1", context, Arrays.asList(kind, applied, offset)),
+        maximum > 0,
+        () -> loadList(selected, applied, offset, maximum),
+        () -> loadList(selected, applied, offset, null),
+        revisions -> {
+          long weight = 4096;
+          for (var revision : revisions)
+            weight += metadataWeight(Optional.of(new AuthorizedMetadata(context, revision)));
+          return weight;
+        });
+  }
+
+  private List<Information.Revision> loadList(
+      InformationSql.Filter selected, int limit, int offset, Long maximumBytes) {
     var args = new ArrayList<Object>(selected.arguments());
-    args.add(Math.max(1, Math.min(limit, 100)));
+    args.add(limit);
     args.add(offset);
-    return jdbc
-        .queryForList(
-            SELECT
-                + " WHERE "
-                + selected.sql()
-                + " ORDER BY r.created_at DESC,r.id LIMIT ? OFFSET ?",
-            args.toArray())
-        .stream()
-        .map(row -> decode(row, Information.Revision.class))
-        .toList();
+    String sql =
+        SELECT + " WHERE " + selected.sql() + " ORDER BY r.created_at DESC,r.id LIMIT ? OFFSET ?";
+    if (maximumBytes == null)
+      return jdbc.queryForList(sql, args.toArray()).stream()
+          .map(row -> decode(row, Information.Revision.class))
+          .toList();
+    // Limit/page first, then bound the complete selected projection. The left-join sentinel never
+    // transfers oversized text and still represents an empty page without a second query.
+    sql =
+        "WITH catalogue_page AS MATERIALIZED ("
+            + sql
+            + "), page_bounds AS (SELECT count(*) AS cache_rows,"
+            + "COALESCE(sum(256::bigint+octet_length(to_jsonb(catalogue_page)::text)),0) AS cache_bytes FROM catalogue_page)"
+            + " SELECT catalogue_page.*,page_bounds.cache_rows,page_bounds.cache_bytes FROM page_bounds LEFT JOIN catalogue_page"
+            + " ON page_bounds.cache_bytes<=? ORDER BY catalogue_page.created_at DESC,catalogue_page.id";
+    args.add(maximumBytes);
+    var rows = jdbc.queryForList(sql, args.toArray());
+    var revisions = new ArrayList<Information.Revision>();
+    for (var row : rows) {
+      if (((Number) row.get("cache_bytes")).longValue() > maximumBytes)
+        throw new ProjectionCache.Bypass();
+      if (((Number) row.get("cache_rows")).longValue() == 0) continue;
+      var value = new LinkedHashMap<String, Object>(row);
+      value.remove("cache_bytes");
+      value.remove("cache_rows");
+      revisions.add(decode(value, Information.Revision.class));
+    }
+    return List.copyOf(revisions);
   }
 
   private io.aeyer.plowshare.server.information.InformationSql.Filter discovery(
@@ -258,88 +512,18 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     var facets =
         io.aeyer.plowshare.server.information.InformationFacetSql.facets(
             context.facets(), "r", "q");
-    var args = new ArrayList<Object>(selectionArgs(context));
-    args.add(context.corpus().documentType());
-    if (kind != null) args.add(kind);
+    var selected = InformationSelectionSql.catalogue(context, kind);
+    var content = InformationSql.content(context, "r");
+    var args = new ArrayList<Object>(selected.arguments());
+    args.addAll(content.arguments());
     args.addAll(facets.arguments());
     return new io.aeyer.plowshare.server.information.InformationSql.Filter(
-        readableSql(context)
-            + " AND r.document_type=? AND NOT r.excluded"
-            + (kind == null ? "" : " AND q.kind=?")
+        selected.sql()
+            + " AND "
+            + content.sql()
             + " AND NOT EXISTS(SELECT 1 FROM information_reports report WHERE report.revision_id=r.id AND report.status NOT IN ('draft','final')) AND "
             + facets.sql(),
         args);
-  }
-
-  private Information.Facets facetCounts(
-      io.aeyer.plowshare.server.information.InformationSql.Filter selected, boolean typedView) {
-    String from =
-        " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE "
-            + selected.sql();
-    var counts = new java.util.LinkedHashMap<String, List<Information.FacetCount>>();
-    var more = new java.util.LinkedHashMap<String, Boolean>();
-    var names = new ArrayList<>(InformationFacets.NAMES);
-    if (typedView) names.addAll(List.of("contentType", "contentTypeVersion"));
-    for (String name : names) {
-      String expression =
-          switch (name) {
-            case "contentType" ->
-                "(SELECT v.type_id::text FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version WHERE c.revision_id=r.id AND NOT c.redacted)";
-            case "contentTypeVersion" ->
-                "(SELECT c.type_version::text FROM information_revision_content c WHERE c.revision_id=r.id AND NOT c.redacted)";
-            case "kind" -> "q.kind";
-            case "author" -> "q.owner_handle";
-            case "documentAuthor" ->
-                io.aeyer.plowshare.server.information.InformationFacetSql.documentAuthor("r", "q");
-            case "tagGroup" -> InformationFacetSql.visibleGroups("r", "q");
-            case "subtype" -> "r.document_subtype";
-            case "when" -> "to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM')";
-            case "tags" -> "q.tags";
-            default -> io.aeyer.plowshare.server.information.InformationFacetSql.readyTags("r");
-          };
-      String sql =
-          name.equals("tags") || name.equals("autoTag")
-              ? "SELECT value,count(*) AS count FROM (SELECT "
-                  + expression
-                  + " AS tags"
-                  + from
-                  + ") candidates CROSS JOIN LATERAL jsonb_array_elements_text(candidates.tags) AS tag(value) GROUP BY value ORDER BY count(*) DESC,value LIMIT 101"
-              : name.equals("tagGroup")
-                  ? "SELECT value,count(*) AS count FROM (SELECT "
-                      + expression
-                      + " AS groups"
-                      + from
-                      + ") candidates CROSS JOIN LATERAL jsonb_object_keys(candidates.groups) AS g(value) GROUP BY value ORDER BY count(*) DESC,value LIMIT 101"
-                  : "SELECT "
-                      + expression
-                      + " AS value,count(*) AS count"
-                      + from
-                      + " GROUP BY value HAVING "
-                      + expression
-                      + " IS NOT NULL ORDER BY count(*) DESC,value LIMIT 101";
-      var rows = jdbc.queryForList(sql, selected.arguments().toArray());
-      more.put(name, rows.size() > 100);
-      counts.put(
-          name,
-          rows.stream().limit(100).map(row -> decode(row, Information.FacetCount.class)).toList());
-    }
-    var edges =
-        jdbc.queryForList(
-            "SELECT g.key AS \"group\",t.tag,count(*) AS count FROM (SELECT "
-                + InformationFacetSql.visibleGroups("r", "q")
-                + " AS groups"
-                + from
-                + ") candidates"
-                + " CROSS JOIN LATERAL jsonb_each(candidates.groups) g CROSS JOIN LATERAL jsonb_array_elements_text(g.value) t(tag)"
-                + " GROUP BY g.key,t.tag ORDER BY count(*) DESC,g.key,t.tag LIMIT 1001",
-            selected.arguments().toArray());
-    return new Information.Facets(
-        jdbc.queryForObject("SELECT count(*)" + from, Long.class, selected.arguments().toArray()),
-        counts,
-        more,
-        new Information.TagGraph(
-            edges.stream().limit(1000).map(row -> decode(row, Information.TagEdge.class)).toList(),
-            edges.size() > 1000));
   }
 
   public List<Information.Revision> inventory(InformationContext context, int limit, int offset) {

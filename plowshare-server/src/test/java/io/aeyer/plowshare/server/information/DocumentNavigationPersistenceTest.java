@@ -139,6 +139,93 @@ class DocumentNavigationPersistenceTest {
   }
 
   @Test
+  void boundedConnectionsReuseWarmDtoButDurableRoleAndBoundaryFencesRemainCurrent() {
+    UUID a = resource("alice", "operations", "service");
+    UUID b = resource("alice", "operations", "manual");
+    link(a, b);
+    var count = new java.util.concurrent.atomic.AtomicInteger();
+    var counted =
+        new JdbcTemplate(source) {
+          @Override
+          public <T> T query(
+              String sql,
+              org.springframework.jdbc.core.ResultSetExtractor<T> extractor,
+              Object... arguments) {
+            if (sql.contains("edge_policy AS MATERIALIZED")) count.incrementAndGet();
+            return super.query(sql, extractor, arguments);
+          }
+        };
+    var signals =
+        new io.aeyer.plowshare.server.cache.ProjectionChangeSignals() {
+          public Subscription subscribe(
+              Set<io.aeyer.plowshare.server.cache.ProjectionVersions.Domain> domains,
+              Observer observer) {
+            observer.stateChanged(new State(1, true));
+            return () -> {};
+          }
+
+          public void start() {}
+
+          public boolean healthy() {
+            return true;
+          }
+
+          public void close() {}
+        };
+    var properties =
+        new io.aeyer.plowshare.server.cache.ProjectionCacheProperties(
+            32,
+            8_388_608,
+            4,
+            16_777_216,
+            32,
+            8,
+            128,
+            2_000_000,
+            java.time.Duration.ofSeconds(5),
+            java.time.Duration.ofSeconds(1),
+            java.time.Duration.ofSeconds(1),
+            128,
+            2,
+            2);
+    try (var caches =
+        new io.aeyer.plowshare.server.cache.ProjectionCaches(
+            new io.aeyer.plowshare.server.cache.JdbcProjectionVersions(jdbc, source, 128),
+            signals,
+            properties)) {
+      var cached =
+          new JdbcInformationNavigationRepository(
+              counted,
+              new JdbcProjectMembers(counted),
+              io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+              io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+              caches.create(
+                  "test-connections",
+                  Set.of(
+                      io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.DOCUMENTS,
+                      io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.AUTHORITY)));
+      var first = cached.relationships(viewer, a, "outgoing", null, null, 2, 0);
+      assertEquals(1, first.connections().size());
+      assertInstanceOf(Readable.class, first.connections().getFirst().selection());
+      assertSame(first, cached.relationships(viewer, a, "outgoing", null, null, 2, 0));
+      assertEquals(1, count.get());
+      var ceiling =
+          viewer.within(
+              io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(
+                  io.aeyer.plowshare.protocol.Home.of("restricted")));
+      assertThrows(
+          io.aeyer.plowshare.server.faults.NotFoundFault.class,
+          () -> cached.relationships(ceiling, a, "outgoing", null, null, 2, 0));
+      assertEquals(2, count.get());
+      jdbc.update("DELETE FROM project_members WHERE handle='viewer'");
+      assertThrows(
+          io.aeyer.plowshare.server.faults.NotFoundFault.class,
+          () -> cached.relationships(viewer, a, "outgoing", null, null, 2, 0));
+      assertEquals(3, count.get()); // No listener hints: durable authority versions reject the hit.
+    }
+  }
+
+  @Test
   void lockedReferenceDoesNotExposeTitleOrPropagateAndPinnedRevisionMustBelongToTarget() {
     UUID a = resource("alice", "operations", "service"), b = resource("bob", null, "secret");
     set(new PolicyTarget("project", "operations", null), 0, permissive());

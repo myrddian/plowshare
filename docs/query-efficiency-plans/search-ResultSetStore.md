@@ -1,0 +1,11 @@
+# ResultSetStore
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/search/ResultSetStore.java#L133) serves `SearchService` result paging. `put` atomically replaces a query-key row containing ordered hit JSON; `get` returns a whole set only when `fetched_at` is within TTL; `purgeExpired` is separate reclamation. The service deliberately reruns page one according to its refresh contract. Repeated later pages reload and decode the complete same set.
+
+Retain the typed result just produced for page-one rendering and share it for later pages when its exact source version remains valid. Introduce a narrow repository interface when changing legacy concrete consumers. Preserve provider ordering, query-key normalization and the deliberate refresh behavior; do not reuse a nearby query or turn explicit fresh searches into hidden cache hits. [V34](../../plowshare-server/src/main/resources/db/migration/V34__search_result_sets.sql#L27) supplies the query-key primary key and [V36](../../plowshare-server/src/main/resources/db/migration/V36__buffer_purge_indexes.sql#L65) indexes expiry. A new index or stored routine has no demonstrated need.
+
+Cache immutable `StoredSet` DTOs by database, exact query key, durable replacement version and projection. Check expiry with the caller's clock on every hit; TTL is not extended by access. Add a monotonic replacement version because supplied timestamps can repeat. All puts, purge and external deletions invalidate content and negative entries after commit, with durable recovery and generation-fenced fills. Use the proposed bounded expected O(1) LRU with JSON/hit byte weights and oversized bypass. Preserve the existing server authorization/disclosure boundary; if future results become principal-specific, principal/scope must join the durable and RAM keys before reuse.
+
+Mock tests should prove one decode/load across unchanged page requests, ordered hits, exact-key isolation and expiry without a database. Focused future PostgreSQL tests cover replacement/purge races, timestamp mapping and notifications. No provider call should be replayed merely because a local cache fill was lost.

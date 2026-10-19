@@ -8,6 +8,7 @@ import io.aeyer.plowshare.server.todos.TodoStatus;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -90,9 +91,19 @@ public final class StallSweep {
    */
   public int sweep(Instant now) {
     int reported = 0;
-    for (OrchestrationRecord run : store.running()) {
+    var runs = store.running();
+    Map<String, OrchestrationStore.StallActivity> activity;
+    try {
+      activity = store.activity(runs);
+    } catch (RuntimeException unavailable) {
+      // A read-only optimization must not weaken the existing per-run failure isolation. Fall
+      // back before any decisions/mutations, never replay a mark, recorder or inbox delivery.
+      log.warn("the stall activity batch failed; judging each run separately", unavailable);
+      activity = Map.of();
+    }
+    for (OrchestrationRecord run : runs) {
       try {
-        if (sweepOne(run, now)) {
+        if (sweepOne(run, now, activity.get(run.id()))) {
           reported++;
         }
       } catch (RuntimeException failed) {
@@ -119,15 +130,18 @@ public final class StallSweep {
    *
    * @return whether this call is the one that newly reported this run stalled
    */
-  private boolean sweepOne(OrchestrationRecord run, Instant now) {
-    Instant quietSince = store.quietSince(run);
+  private boolean sweepOne(
+      OrchestrationRecord run, Instant now, OrchestrationStore.StallActivity activity) {
+    Instant quietSince = activity == null ? store.quietSince(run) : activity.quietSince();
     boolean stalled = !quietSince.plus(quiet).isAfter(now);
     // RULE 3 (spec 2026-09-29 §3): a child asking its parent is waiting on this run, not
     // working for it, so it is no excuse. A child asking the person (stuck) still is.
     // Measured 2026-09-28 23:51, orc_31893856D8F462A1: a phase asking its parent about its cap
     // excused that parent, and the person was never told of five hours deadlocked.
     boolean childWorking =
-        store.liveChildren(run.id()).stream().anyMatch(child -> !waitsOnItsParent(child));
+        activity == null
+            ? store.liveChildren(run.id()).stream().anyMatch(child -> !waitsOnItsParent(child))
+            : activity.childWorking();
     // An acceptance command's approval is asked at the spec stage, and the conductor goes on
     // with its plan meanwhile (plan choice 4): it is waited on only at the acceptance stage.
     // Anywhere else it excused a run that was not waiting on it at all (final review).

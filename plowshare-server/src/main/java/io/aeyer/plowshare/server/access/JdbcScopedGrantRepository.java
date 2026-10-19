@@ -14,7 +14,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Specialist store for atomic role issuance, retained lineage and optimistic revocation. */
 @Repository
-public final class JdbcScopedGrantRepository implements ScopedGrantRepository {
+public class JdbcScopedGrantRepository implements ScopedGrantRepository {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
 

@@ -218,12 +218,19 @@ public final class JdbcRelayOperationRepository implements RelayOperationReposit
             }
             default -> throw new IllegalStateException("Unhandled Relay control");
           }
-          jdbc.update(
-              "UPDATE relay_operator_receipts SET status=?,seen_through=?,completed_at=clock_timestamp() WHERE request_id=?",
-              status,
-              seen == null ? null : Long.parseLong(seen),
-              UUID.fromString(request.requestId()));
-          return stored(access, request, false).orElseThrow().result().orElseThrow();
+          // The locked receipt was already authenticated above. Return the actual database clock
+          // and outcome from this mutation rather than hydrating and checking that receipt again.
+          return jdbc
+              .query(
+                  "UPDATE relay_operator_receipts SET status=?,seen_through=?,completed_at=clock_timestamp() WHERE request_id=? RETURNING status,seen_through,completed_at",
+                  (row, index) -> result(row, request),
+                  status,
+                  seen == null ? null : Long.parseLong(seen),
+                  UUID.fromString(request.requestId()))
+              .stream()
+              .findFirst()
+              .orElseThrow(
+                  () -> new IllegalStateException("Relay receipt disappeared while locked"));
         });
   }
 

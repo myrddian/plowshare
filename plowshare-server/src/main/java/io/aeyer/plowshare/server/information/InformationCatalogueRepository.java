@@ -9,6 +9,61 @@ import java.util.*;
  * transaction.
  */
 public interface InformationCatalogueRepository {
+  /**
+   * Metadata admitted under this exact selection in its retrieval statement. Reuse only within the
+   * current operation unless the owning projection cache additionally supplies complete durable
+   * version and current authority fences. Processing generation does not version resource tags,
+   * reports, steps, content-type display metadata or authority. The DTO grants no authority.
+   */
+  record AuthorizedMetadata(InformationContext context, Information.Revision revision) {
+    public AuthorizedMetadata {
+      Objects.requireNonNull(context);
+      Objects.requireNonNull(revision);
+    }
+  }
+
+  /**
+   * One authorized extraction and its classification. Source bytes (contentHash), extraction
+   * (textHash) and processingGeneration describe distinct identities; none versions current policy
+   * or availability. Hashes are opaque retained fingerprints: V83 imported older documents without
+   * a SHA-256 format constraint. A null extraction/textHash is allowed before extraction. This
+   * immutable value alone is operation-local: later disclosure must reauthorize. Shared projection
+   * reuse additionally fences deletion/redaction, extraction replacement and all durable changes;
+   * generation alone does not establish those fences.
+   */
+  record AuthorizedText(
+      InformationContext context,
+      UUID revision,
+      UUID resource,
+      String documentType,
+      String documentSubtype,
+      String contentHash,
+      String textHash,
+      long processingGeneration,
+      String text) {
+    public AuthorizedText {
+      Objects.requireNonNull(context);
+      Objects.requireNonNull(revision);
+      Objects.requireNonNull(resource);
+      if (!Set.of("document", "code").contains(documentType)
+          || documentSubtype == null
+          || !documentSubtype.matches("[a-zA-Z0-9_.+-]{1,128}")
+          || processingGeneration < 1)
+        throw new IllegalArgumentException("invalid authorized extraction identity");
+      retainedHash(contentHash, false);
+      retainedHash(textHash, true);
+    }
+
+    private static void retainedHash(String value, boolean optional) {
+      if (value == null && optional) return;
+      if (value == null
+          || value.isBlank()
+          || value.length() > 1024
+          || value.codePoints().anyMatch(Character::isISOControl))
+        throw new IllegalArgumentException("invalid retained extraction fingerprint");
+    }
+  }
+
   record Snapshot(
       UUID id,
       UUID resourceId,
@@ -43,8 +98,21 @@ public interface InformationCatalogueRepository {
 
   boolean readable(InformationContext context, UUID revision);
 
+  /** Applies current readability in the same SQL snapshot as the metadata projection. */
+  Optional<AuthorizedMetadata> authorizedMetadata(InformationContext context, UUID revision);
+
+  /**
+   * Applies current readability in the same SQL snapshot as extraction/classification retrieval.
+   */
+  Optional<AuthorizedText> authorizedText(InformationContext context, UUID revision);
+
   Information.Revision metadata(UUID revision);
 
+  /**
+   * Immutable discovery page with readability and filters applied before pagination. The caller
+   * admits the selection on each operation. Shared implementations fence the complete context and
+   * page with DOCUMENTS and AUTHORITY versions; historical or dirty transactions read directly.
+   */
   List<Information.Revision> list(InformationContext context, int limit, int offset, String kind);
 
   List<Information.Revision> inventory(InformationContext context, int limit, int offset);
@@ -69,6 +137,11 @@ public interface InformationCatalogueRepository {
 
   List<UUID> discoveryRevisions(InformationContext context);
 
+  /**
+   * All dimensions, graph and total consume one authorized candidate snapshot. Null pins leave the
+   * selection unrestricted; empty pins select nothing. Sharing preserves this distinction and
+   * requires the same document/authority fences as discovery pages.
+   */
   Information.Facets facets(InformationContext context, String kind, List<UUID> pinned);
 
   Information.Events events(InformationContext context, long after, int limit);

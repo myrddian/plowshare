@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.cache.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.*;
@@ -624,5 +625,425 @@ class AuthoredInformationPersistenceTest {
         jdbc.queryForObject(
             "SELECT count(*) FROM information_content_type_versions WHERE state='active'",
             Integer.class));
+  }
+
+  /** Counts only owning registry hydration, excluding current version/expiry probes. */
+  private static final class RegistryJdbc extends JdbcTemplate {
+    final List<String> projections = new ArrayList<>();
+
+    RegistryJdbc() {
+      super(source);
+    }
+
+    @Override
+    public <T> List<T> query(
+        String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... arguments) {
+      if (sql.startsWith("WITH registry_rows") || sql.startsWith("SELECT v.id,"))
+        projections.add(sql);
+      return super.query(sql, mapper, arguments);
+    }
+  }
+
+  private ProjectionCaches registryCaches(RegistryJdbc counted, long maximum) {
+    var signals =
+        new ProjectionChangeSignals() {
+          public Subscription subscribe(Set<ProjectionVersions.Domain> domains, Observer observer) {
+            observer.stateChanged(new State(1, true));
+            return () -> {};
+          }
+
+          public void start() {}
+
+          public boolean healthy() {
+            return true;
+          }
+
+          public void close() {}
+        };
+    return new ProjectionCaches(
+        new JdbcProjectionVersions(counted, source, 128),
+        signals,
+        new ProjectionCacheProperties(
+            32,
+            8_388_608,
+            4,
+            16_777_216,
+            64,
+            16,
+            1024,
+            maximum,
+            java.time.Duration.ofSeconds(5),
+            java.time.Duration.ofSeconds(1),
+            java.time.Duration.ofSeconds(1),
+            128,
+            3,
+            4));
+  }
+
+  private JdbcInformationContentTypeRepository cachedTypes(
+      RegistryJdbc counted, ProjectionCaches caches) {
+    var domains = Set.of(ProjectionVersions.Domain.DOCUMENTS, ProjectionVersions.Domain.AUTHORITY);
+    return new JdbcInformationContentTypeRepository(
+        counted,
+        caches.create("registry-list", domains),
+        caches.create("registry-version", domains),
+        caches.create("registry-attached", domains));
+  }
+
+  @Test
+  void configuredRegistryReadsReuseBoundedDtosAndRefreshLifecycleWithoutHints() {
+    var contract = published();
+    UUID revision = original(false, "source");
+    content.attach(revision, binding(contract, "low"));
+    var counted = new RegistryJdbc();
+    try (var caches = registryCaches(counted, 1_048_576)) {
+      var cached = cachedTypes(counted, caches);
+      var page = cached.list("account:author", false, 10, 0);
+      var version = cached.version("account:author", contract.version(), false);
+      var attached = cached.attached(revision, contract.version());
+      assertSame(page, cached.list("account:author", false, 10, 0));
+      assertSame(version, cached.version("account:author", contract.version(), false));
+      assertSame(attached, cached.attached(revision, contract.version()));
+      assertEquals(3, counted.projections.size(), "Warm hits skip all owning schema hydration");
+      var deprecated =
+          work.inTransaction(
+              () ->
+                  cached.transition(
+                      "account:author",
+                      contract.version(),
+                      version.orElseThrow().controlRevision(),
+                      false));
+      assertEquals(version.orElseThrow().contract().schema(), deprecated.contract().schema());
+      assertEquals("deprecated", deprecated.state());
+      assertEquals(
+          Long.valueOf(deprecated.controlRevision()),
+          jdbc.queryForObject(
+              "SELECT control_revision FROM information_content_types WHERE id=?",
+              Long.class,
+              contract.type()));
+      assertEquals(
+          deprecated.createdAt(),
+          jdbc.queryForObject(
+              "SELECT created_at FROM information_content_type_versions WHERE id=?",
+              (row, index) -> row.getTimestamp(1).toInstant().toString(),
+              contract.version()));
+      counted.projections.clear();
+      assertEquals(
+          "deprecated",
+          cached.version("account:author", contract.version(), false).orElseThrow().state());
+      assertEquals(
+          "deprecated", cached.list("account:author", false, 10, 0).results().getFirst().state());
+      assertEquals(contract, cached.attached(revision, contract.version()).orElseThrow());
+      assertEquals(
+          3, counted.projections.size(), "Committed writers refresh without notification hints");
+      jdbc.update("UPDATE information_revisions SET availability='deleted' WHERE id=?", revision);
+      assertTrue(cached.attached(revision, contract.version()).isEmpty());
+    }
+  }
+
+  @Test
+  void registrySentinelsHandleAbsenceAndLookaheadWithoutDecodingAnUnreturnedSchema() {
+    var counted = new RegistryJdbc();
+    try (var caches = registryCaches(counted, 1_048_576)) {
+      var cached = cachedTypes(counted, caches);
+      var empty = cached.list("account:author", true, 1, 0);
+      assertTrue(empty.results().isEmpty());
+      assertFalse(empty.hasMore());
+      assertSame(empty, cached.list("account:author", true, 1, 0));
+      UUID missing = UUID.randomUUID();
+      assertTrue(cached.version("account:author", missing, false).isEmpty());
+      assertTrue(cached.attached(missing, missing).isEmpty());
+      assertEquals(3, counted.projections.size());
+      var first = published();
+      UUID type = UUID.randomUUID(), version = UUID.randomUUID();
+      jdbc.update(
+          "INSERT INTO information_content_types(id,namespace,slug,label,description,created_by) VALUES(?,'account:author','z-last','Lookahead','','author')",
+          type);
+      jdbc.update(
+          "INSERT INTO information_content_type_versions(id,type_id,ordinal,schema_definition,presentation,profile,definition_hash,created_by) VALUES(?,?,1,'{\"type\":\"invalid-profile-type\"}'::jsonb,'{}'::jsonb,?,?,'author')",
+          version,
+          type,
+          DocumentMetadata.PROFILE,
+          "c".repeat(64));
+      var page = cached.list("account:author", true, 1, 0);
+      assertEquals(first, page.results().getFirst().contract());
+      assertTrue(page.hasMore(), "The second row is only lookahead, not a contract to decode");
+      assertEquals(page, types.list("account:author", true, 1, 0));
+    }
+  }
+
+  @Test
+  void registryGuardsReturnCompleteOversizeValuesAndNeverPublishDirtyRollback() {
+    var contract = published();
+    UUID revision = original(false, "source");
+    content.attach(revision, binding(contract, "low"));
+    var counted = new RegistryJdbc();
+    try (var caches = registryCaches(counted, 18_000)) {
+      var cached = cachedTypes(counted, caches);
+      for (int attempt = 0; attempt < 2; attempt++) {
+        assertEquals(
+            contract, cached.list("account:author", false, 1, 0).results().getFirst().contract());
+        assertEquals(
+            contract,
+            cached.version("account:author", contract.version(), false).orElseThrow().contract());
+        assertEquals(contract, cached.attached(revision, contract.version()).orElseThrow());
+      }
+      assertEquals(
+          12,
+          counted.projections.size(),
+          "Each oversize projection performs one guard and one complete fallback");
+    }
+    try (var caches = registryCaches(counted, 1_048_576)) {
+      var cached = cachedTypes(counted, caches);
+      var active = cached.version("account:author", contract.version(), false).orElseThrow();
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              work.inTransaction(
+                  () -> {
+                    var changed =
+                        cached.transition(
+                            "account:author", contract.version(), active.controlRevision(), false);
+                    assertEquals("deprecated", changed.state());
+                    assertEquals(
+                        "deprecated",
+                        cached
+                            .version("account:author", contract.version(), false)
+                            .orElseThrow()
+                            .state());
+                    throw new IllegalStateException("rollback fixture");
+                  }));
+      assertEquals(
+          "active",
+          cached.version("account:author", contract.version(), false).orElseThrow().state());
+      assertEquals("active", active.state());
+    }
+  }
+
+  @Test
+  void joinedBindingsAndPairedProjectionBoundsPreserveCopyRecapture() {
+    var contract = published();
+    UUID revision = original(true, "source"), request = request();
+    content.attach(revision, binding(contract, "low"));
+    var counted =
+        new JdbcTemplate(source) {
+          int bounds;
+
+          @Override
+          public <T> T queryForObject(
+              String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... arguments) {
+            if (sql.startsWith("SELECT count(*),coalesce(sum(octet_length")) bounds++;
+            return super.queryForObject(sql, mapper, arguments);
+          }
+        };
+    var joined = new JdbcInformationContentRepository(counted, types);
+    assertEquals(contract, joined.binding(revision).orElseThrow().contract());
+    assertEquals(contract, Objects.requireNonNull(joined.view(revision).contentType()).contract());
+    var reuse = new JdbcInformationProjectionRepository(counted, joined);
+    var prepared =
+        work.inTransaction(() -> reuse.prepare(own, request, revision, null, configuration));
+    assertTrue(prepared.manifest().reusable().contains("derive"));
+    assertEquals(8, counted.bounds, "Each selected table has one count+expanded-byte aggregate");
+    var copied = work.inTransaction(() -> reuse.copy(own, request, prepared, configuration));
+    assertEquals(16, counted.bounds, "Copy must recapture the current manifest after preparation");
+    assertEquals("explicit_only", joined.view(copied.revision()).processingPolicy());
+    jdbc.update("UPDATE information_revisions SET availability='deleted' WHERE id=?", revision);
+    assertThrows(io.aeyer.plowshare.server.faults.NotFoundFault.class, () -> joined.view(revision));
+  }
+
+  @Test
+  void learningAndJobCohortsAndPassagePublicationKeepExactSourceAndAncestorFences() {
+    jdbc.update("INSERT INTO projects(name) VALUES('cohort-home')");
+    Long project =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name='cohort-home'", Long.class);
+    var conversationIds = List.of("cohort-root", "cohort-child").iterator();
+    var conversations = new ConversationStore(jdbc, java.time.Instant::now, conversationIds::next);
+    conversations.open(
+        Home.of("cohort-home"), io.aeyer.plowshare.server.agents.Budget.of(5), null, "author");
+    conversations.log(
+        Origin.DELEGATION, Home.of("cohort-home"), "fixture", "cohort-root", null, "author");
+    assertEquals(
+        jdbc.queryForObject(
+            "SELECT allowance_id FROM conversations WHERE id='cohort-root'", UUID.class),
+        jdbc.queryForObject(
+            "SELECT allowance_id FROM conversations WHERE id='cohort-child'", UUID.class));
+    assertFalse(
+        Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                "SELECT owns_allowance FROM conversations WHERE id='cohort-child'",
+                Boolean.class)));
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,kind,role,content,turn_ordinal) VALUES('cohort-child',1,'utterance','user','first',1),('cohort-child',2,'answer','assistant','second',1),('cohort-child',3,'utterance','user','third',2)");
+    var entries =
+        List.of(
+            new EntryRecord(
+                "cohort-child",
+                1,
+                io.aeyer.plowshare.server.agents.EntryKind.UTTERANCE,
+                "first",
+                null,
+                List.of(),
+                null,
+                null,
+                1,
+                null,
+                null,
+                null,
+                null),
+            new EntryRecord(
+                "cohort-child",
+                2,
+                io.aeyer.plowshare.server.agents.EntryKind.ANSWER,
+                "second",
+                null,
+                List.of(),
+                null,
+                null,
+                1,
+                null,
+                null,
+                null,
+                null),
+            new EntryRecord(
+                "cohort-child",
+                3,
+                io.aeyer.plowshare.server.agents.EntryKind.UTTERANCE,
+                "third",
+                null,
+                List.of(),
+                null,
+                null,
+                2,
+                null,
+                null,
+                null,
+                null));
+    var learning = new MemoryWrites.Learning("cohort-child", entries, 0);
+    UUID scope = jdbc.queryForObject("SELECT memory_knowledge_scope(?)", UUID.class, project);
+    var request =
+        new MemoryWrites.Request(
+            null,
+            Home.of("cohort-home"),
+            new MemoryProposal("claim", "scope", "body", "fixture", "fixture"),
+            new MemoryWrites.Origin("cohort-learning", () -> {}, () -> {}, learning));
+    var memories = new MemoryStore(jdbc);
+    var pin = new io.aeyer.plowshare.server.embedding.QuerySources.Pin(UUID.randomUUID(), scope);
+    memories.require(request, pin, false);
+    jdbc.update(
+        "INSERT INTO memories(id,project_id,home_scope_id,summary,scope,body,state,formed_at,formed_by,formed_where) VALUES('cohort-memory',?,?,'claim','scope','body','active',now(),'fixture','fixture')",
+        project,
+        scope);
+    memories.provenance("cohort-memory", learning);
+    assertEquals(
+        2,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM memory_provenance WHERE memory_id='cohort-memory'",
+            Integer.class));
+    String hash =
+        jdbc.queryForObject(
+            "SELECT source_hash FROM retrieval_sources WHERE source_type='entry' AND source_id='cohort-child:1'",
+            String.class);
+    var passage = new JdbcPassageRepository(jdbc, work);
+    var source = new PassageIndex.Source("entry", "cohort-child:1", hash, "first", 0);
+    assertTrue(
+        passage.publishText(source, List.of("one", "two", "three"), true, "cohort-generation"));
+    assertEquals(
+        List.of("one", "two", "three"),
+        jdbc.queryForList(
+            "SELECT passage FROM retrieval_passages WHERE source_id='cohort-child:1' ORDER BY position",
+            String.class));
+    assertFalse(passage.publishText(source, List.of("stale"), true, "cohort-generation"));
+    jdbc.update(
+        "UPDATE entries SET content='changed' WHERE conversation_id='cohort-child' AND ordinal=2");
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> memories.require(request, pin, false));
+    UUID first = original(false, "source"), second = original(false, "source");
+    var jobs = new JdbcJobInformationRepository(jdbc);
+    jobs.bind("cohort-child", own, List.of(first, second, first));
+    jobs.bind("cohort-child", own, List.of(first, second));
+    assertEquals(
+        4,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM information_job_inputs WHERE job_id IN ('cohort-root','cohort-child')",
+            Integer.class));
+    assertEquals(Set.of(first, second), new HashSet<>(jobs.inputsOf("cohort-child")));
+  }
+
+  @Test
+  void stageTargetAndReturnedAcquisitionAndGateRowsPreserveLiveSemantics() {
+    UUID revision = original(true, "source"), foreign = original(true, "source");
+    UUID chunk =
+        jdbc.queryForObject(
+            "SELECT c.id FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?",
+            UUID.class,
+            revision);
+    UUID other =
+        jdbc.queryForObject(
+            "SELECT c.id FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?",
+            UUID.class,
+            foreign);
+    var lease =
+        new InformationLifecycle.Lease(
+            revision, UUID.randomUUID(), 1, "embed", 1, UUID.randomUUID(), "author", null);
+    var processing =
+        new JdbcInformationProcessingRepository(
+            jdbc, Clock.systemUTC(), new JdbcProjectMembers(jdbc));
+    var key =
+        io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key.of(
+            io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.CHUNKS,
+            chunk.toString());
+    var bad =
+        io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key.of(
+            io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Store.CHUNKS,
+            other.toString());
+    processing.requireEmbeddingTargets(lease, List.of(key, key));
+    assertThrows(
+        IllegalStateException.class,
+        () -> processing.requireEmbeddingTargets(lease, List.of(key, bad)));
+    processing.requireEmbeddingClear(lease, List.of(key));
+    var stage = new JdbcInformationStageRepository(jdbc);
+    assertNull(stage.logState(revision, null).project());
+    jdbc.update("INSERT INTO projects(name) VALUES('stage-project')");
+    Long project =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name='stage-project'", Long.class);
+    assertEquals("stage-project", stage.logState(revision, project).project());
+    assertThrows(
+        org.springframework.dao.EmptyResultDataAccessException.class,
+        () -> stage.logState(revision, Long.MAX_VALUE));
+    var acquisitions = new JdbcAcquisitionRepository(jdbc, Clock.systemUTC());
+    UUID request = UUID.randomUUID();
+    var retained =
+        work.inTransaction(
+            () ->
+                acquisitions.submitRetained(
+                    own,
+                    request,
+                    "a".repeat(64),
+                    "https://fixture.invalid/item",
+                    "item",
+                    null,
+                    10,
+                    "documents",
+                    null));
+    assertEquals("queued", retained.status().state());
+    assertEquals(retained.status(), acquisitions.owned("author", retained.status().id()).status());
+    jdbc.update(
+        "UPDATE information_acquisitions SET content_intent='{}'::jsonb WHERE id=?",
+        retained.status().id());
+    assertEquals(
+        retained.status(), acquisitions.list("author", null, "documents", 10, 0).getFirst());
+    var gates = new JdbcInformationGateRepository(jdbc, Clock.systemUTC());
+    var receipt =
+        work.inTransaction(
+            () ->
+                gates.claim(
+                    "author",
+                    UUID.randomUUID(),
+                    "b".repeat(64),
+                    "intake",
+                    InformationCatalogue.Admission.class));
+    assertEquals(InformationGateRepository.State.RESERVED, receipt.state());
+    assertNotNull(receipt.token());
   }
 }

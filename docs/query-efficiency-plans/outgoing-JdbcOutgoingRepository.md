@@ -1,0 +1,13 @@
+# JdbcOutgoingRepository
+
+Status: proposed; no runtime implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[SQL owner](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/JdbcOutgoingRepository.java#L99) · [caller/contract](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/OutgoingWork.java#L1) · [schema/routines](../../plowshare-server/src/main/resources/db/migration/V92__outgoing_work.sql#L1). Cache mechanics and recovery follow the [shared strategy](../query-efficiency-and-cache-design.md#server-reuse-and-tracked-database-dtos).
+
+`OutgoingWork` manages advertised peers, account-owned idempotent sends, adapter claims, reports and cancellation. Confirmed duplicate hydration: claim selects an ID, calls `get` before updating and calls `get` again afterward; report locks an ID then calls `get`, updates and calls `get` again. Send inserts then gets, while cancel reads inside its transaction and reloads afterward. Claims preserve remote UNKNOWN observation semantics and worker/revision ownership.
+
+Select the required typed pre-state directly under the row lock, then use `UPDATE ... RETURNING` plus project projection for the committed result. Preserve action selection from the pre-state, exact remote task/context identity and stale worker/revision refusal. Batch peer advertisements and reuse known project identity. V92's claim index `(account,state,lease_until)` does not automatically match nullable project, peer set and created order; evaluate queued versus expired-observation SQL branches and candidate partial/composite indexes using realistic backlogs. A typed claim/report routine can reduce trips while retaining locking and idempotency.
+
+Cache only immutable message/result descriptors or explicitly versioned display `Work`, keyed by database/account/work UUID/revision/projection. Claims, peer TTL eligibility, leases and report/cancel authority remain uncached. Cancellation does not increment the execution revision, so it cannot version every display change. Add a separate display/change generation or equivalent invalidation version before cache admission; preserve existing worker/revision claim/report fences rather than blindly incrementing execution revision on cancel. Advertise/send/claim/report/cancel and project lifecycle invalidate work and account/project/peer collections after commit. Durable change recovery and listener bypass are prerequisites. Notifications may wake local discovery but never replay uncertain sends; adapters continue using public SDK contracts.
+
+Mock first-send/conflict and claim/report query budgets. Focused PostgreSQL tests cover RETURNING equivalence, revision/cancel races and competing claims.

@@ -94,11 +94,19 @@ public final class JdbcInformationInterchangeRepository
         "INSERT INTO information_import_origins(revision_id,origin) VALUES(?,CAST(? AS jsonb))",
         revision,
         InformationJson.json(origin));
-    for (UUID input : dependencies)
+    if (!dependencies.isEmpty()) {
+      var arguments = new ArrayList<Object>();
+      for (UUID input : dependencies) {
+        arguments.add(revision);
+        arguments.add(input);
+      }
+      // At most seventeen typed pairs. Only the placeholder shape is generated; values stay bound.
       jdbc.update(
-          "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?) ON CONFLICT DO NOTHING",
-          revision,
-          input);
+          "INSERT INTO information_inputs(derived_revision,input_revision) VALUES "
+              + String.join(",", Collections.nCopies(dependencies.size(), "(?,?)"))
+              + " ON CONFLICT DO NOTHING",
+          arguments.toArray());
+    }
   }
 
   public Optional<Origin> origin(UUID revision) {

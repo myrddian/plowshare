@@ -275,14 +275,23 @@ public final class JdbcPassageRepository implements PassageRepository {
                 "DELETE FROM retrieval_passages WHERE source_type=? AND source_id=?",
                 expected.type(),
                 expected.id());
-          for (int i = 0; i < texts.size(); i++)
+          if (!texts.isEmpty()) {
+            var arguments = new ArrayList<Object>();
+            for (int i = 0; i < texts.size(); i++) {
+              arguments.add(expected.type());
+              arguments.add(expected.id());
+              arguments.add(expected.next() + i);
+              arguments.add(texts.get(i));
+              arguments.add(vectors.get(i) == null ? null : Arrays.toString(vectors.get(i)));
+            }
+            // The existing sixteen-passage limit bounds this statement. Owner/queue locks and
+            // all publication predicates remain held; no partial per-passage publication escapes.
             jdbc.update(
-                "INSERT INTO retrieval_passages(source_type,source_id,position,passage,embedding) VALUES(?,?,?,?,CAST(? AS vector))",
-                expected.type(),
-                expected.id(),
-                expected.next() + i,
-                texts.get(i),
-                vectors.get(i) == null ? null : Arrays.toString(vectors.get(i)));
+                "INSERT INTO retrieval_passages(source_type,source_id,position,passage,embedding) VALUES "
+                    + String.join(
+                        ",", Collections.nCopies(texts.size(), "(?,?,?,?,CAST(? AS vector))")),
+                arguments.toArray());
+          }
           jdbc.update(
               "UPDATE retrieval_sources SET status=?,generation=?,next_position=?,attempts=0,last_error=NULL,retry_at=CURRENT_TIMESTAMP WHERE source_type=? AND source_id=?",
               complete ? "ready" : "pending",

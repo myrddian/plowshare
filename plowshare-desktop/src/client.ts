@@ -18,7 +18,10 @@ import {
   ProviderManagementRefused,
   managementRequest,
 } from 'plowshare-client-ts/operations/provider-management';
-import { jobNotification } from 'plowshare-client-ts/operations/push';
+import {
+  decodeServerPush,
+  jobNotification,
+} from 'plowshare-client-ts/operations/push';
 import {
   decodeReply,
   decodeRequest,
@@ -180,6 +183,8 @@ export function emptyConnectionState(
     mode: 'live',
     connected: false,
     connection: 'Disconnected',
+    informationRevision: 0,
+    informationConnection: 0,
     base,
     handle,
     files: { status: 'off' },
@@ -888,6 +893,7 @@ export class DesktopClient {
     this.catchups.clear();
     this.dirtyHistories.clear();
     this.state.connected = false;
+    this.state.informationConnection = this.generation;
     this.state.liveHistory = {
       status: 'unavailable',
       detail: 'Reconnect to restore live conversation updates.',
@@ -1406,6 +1412,7 @@ export class DesktopClient {
             ? { ...previous, connected: false, connection: 'Connecting…' }
             : emptyConnectionState(base, handle);
         this.state.connection = 'Connecting…';
+        this.state.informationConnection = this.generation;
         if (this.state.jobs !== previous.jobs) {
           this.lifecycle.reset();
           this.tickets.clear();
@@ -2442,6 +2449,25 @@ export class DesktopClient {
   private push(value: unknown) {
     if (this.usage.push(value)) return;
     const event = fieldsOf(value);
+    if (
+      event['kind'] === 'information.changed' ||
+      event['kind'] === 'information.invalidated'
+    ) {
+      try {
+        // The shared SDK validates this boundary. No resource identity or extra wire fields
+        // enter Desktop state: the renderer reconciles through its authenticated selection.
+        decodeServerPush(value);
+      } catch (error) {
+        this.state.backgroundError = errorMessage(error);
+      }
+      // Invalid hints also invalidate private snapshots and trigger a bounded authoritative
+      // recovery read. This bounded process-local counter is a hint, never a durable cursor.
+      const previous = this.state.informationRevision ?? 0;
+      this.state.informationRevision =
+        previous === Number.MAX_SAFE_INTEGER ? 0 : previous + 1;
+      this.emit();
+      return;
+    }
     if (event['kind'] === 'inbox.changed')
       this.background(this.refresh().then(() => this.emit()));
     if (typeof event['job'] !== 'string') {

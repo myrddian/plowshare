@@ -378,6 +378,48 @@ class JdbcProcRepositoryTest {
         io.aeyer.plowshare.server.ws.FrameJson.answering().writeValueAsString(fixture));
   }
 
+  @Test
+  void attemptBatchKeepsItsIndependentCapAndOrderForEveryAuthorizedCall() {
+    UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
+        journal);
+    jdbc.update(
+        "INSERT INTO inference_accounting_instances(instance_id,journal_id,started_at) VALUES (?,?,now())",
+        instance,
+        journal);
+    jdbc.update(
+        """
+        INSERT INTO inference_calls(call_id,instance_id,attribution,project_id,scope,conversation_id,
+          root_conversation_id,ancestor_conversation_ids,ancestor_run_ids,ancestor_orchestration_ids,
+          agent_name,operation,attribution_status,specifier,pool,wire_model,billing_route,lane,
+          created_at,last_event_at,ended_at,lifecycle,attempt_count,last_call_sequence)
+        SELECT gen_random_uuid(),?,'{}',project_id::text,'PROJECT',id,?,ARRAY[?]::text[],ARRAY[]::text[],ARRAY[]::text[],
+          'information_tagger','DOCUMENT_SUMMARY','SYSTEM','fast','fixture-pool','fixture-model',
+          'fixture-pool','CHAT',now(),now(),now(),'FAILED',101,1
+        FROM conversations CROSS JOIN generate_series(1,2) cohort WHERE id=?
+        """,
+        instance,
+        root,
+        root,
+        child);
+    jdbc.update(
+        """
+        INSERT INTO inference_attempts(attempt_id,call_id,attempt_number,started_at,ended_at,outcome)
+        SELECT gen_random_uuid(),call_id,attempt,now(),now(),'FAILED'
+        FROM inference_calls CROSS JOIN generate_series(1,101) attempt
+        """);
+    var page = repository.calls("alice", query("mine", root, null, 100));
+    assertEquals(2, page.calls().size());
+    for (var call : page.calls()) {
+      assertEquals(101, call.attempts());
+      assertEquals(100, call.observations().size());
+      assertEquals(1, call.observations().getFirst().number());
+      assertEquals(100, call.observations().getLast().number());
+    }
+    assertTrue(repository.calls("bob", query("mine", root, null, 100)).calls().isEmpty());
+  }
+
   /** Synthetic PostgreSQL evidence consumed by SDK and browser acceptance, without source text. */
   record Acceptance(
       ProcViews.Conversations conversations,

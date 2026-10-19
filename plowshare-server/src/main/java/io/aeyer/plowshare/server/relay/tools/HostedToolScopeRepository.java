@@ -31,6 +31,16 @@ public interface HostedToolScopeRepository {
 
   Optional<Lease> lease(UUID binding);
 
+  /** Reuse the operation's typed binding, fencing its generation against current durable state. */
+  default Optional<Lease> lease(Binding binding) {
+    return lease(binding.binding()).filter(value -> value.registration().binding().equals(binding));
+  }
+
+  /** Bounded set lookup; live sessions, credentials and catalogue admission remain the caller's. */
+  default List<Lease> leases(List<Binding> bindings) {
+    return bindings.stream().flatMap(binding -> lease(binding).stream()).toList();
+  }
+
   void lease(Lease value);
 
   void clearLease(UUID binding);

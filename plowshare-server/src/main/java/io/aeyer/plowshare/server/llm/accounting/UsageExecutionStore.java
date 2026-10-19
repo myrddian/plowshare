@@ -12,7 +12,9 @@ import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -150,11 +152,11 @@ public final class UsageExecutionStore implements RunUsage {
     }
     int startingTurn =
         transcript.continuingTurn() == null ? spoken.turnOrdinal() : transcript.continuingTurn();
+    var ancestry = ancestry(conversation);
+    var lineage = lineage(ancestry);
     UsageAttribution owner;
     if (saved != null) {
-      require(
-          saved.conversations().equals(conversations(conversation)),
-          "execution cannot change lineage");
+      require(saved.conversations().equals(lineage), "execution cannot change lineage");
       if (transcript.parentUsage().status() != UsageAttribution.Status.LEGACY_UNATTRIBUTED) {
         require(
             Objects.equals(conversation.parent(), transcript.parentUsage().conversations().id()),
@@ -186,7 +188,6 @@ public final class UsageExecutionStore implements RunUsage {
               (long) spoken.turnOrdinal(),
               null);
     } else {
-      var lineage = conversations(conversation);
       var parent = transcript.parentUsage();
       UsageLineage runs;
       UsageLineage orchestration;
@@ -198,7 +199,9 @@ public final class UsageExecutionStore implements RunUsage {
         orchestration = UsageLineage.NONE;
       } else {
         if (parent.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED) {
-          parent = historicalParent(conversation, new HashSet<>());
+          var retained = new LinkedHashMap<String, Conversation>();
+          ancestry.forEach(row -> retained.put(row.id(), row));
+          parent = historicalParent(conversation, new HashSet<>(), retained);
         }
         require(
             conversation.parent().equals(parent.conversations().id()),
@@ -210,7 +213,7 @@ public final class UsageExecutionStore implements RunUsage {
             Objects.equals(
                 conversation.account() != null ? conversation.account() : account,
                 parent.status() == UsageAttribution.Status.SYSTEM
-                    ? conversation(conversation.parent()).account()
+                    ? ancestry.get(1).account()
                     : parent.accountHandle()),
             "delegation cannot change account");
         require(
@@ -254,7 +257,8 @@ public final class UsageExecutionStore implements RunUsage {
   }
 
   /** Recover an older delegation's actual calling turn from its persisted tool-call reference. */
-  private UsageAttribution historicalParent(Conversation child, HashSet<String> visiting) {
+  private UsageAttribution historicalParent(
+      Conversation child, HashSet<String> visiting, Map<String, Conversation> ancestry) {
     require(visiting.add(child.id()) && visiting.size() <= MAX_DEPTH, "invalid execution ancestry");
     require(child.openedBy() != null, "delegation has no durable caller reference");
     List<Integer> turns =
@@ -274,8 +278,10 @@ public final class UsageExecutionStore implements RunUsage {
     if (saved != null) {
       return saved;
     }
-    var parent = conversation(child.parent());
-    var preceding = parent.parent() == null ? null : historicalParent(parent, visiting);
+    var parent =
+        Objects.requireNonNull(
+            ancestry.get(child.parent()), "conversation missing from retained ancestry");
+    var preceding = parent.parent() == null ? null : historicalParent(parent, visiting, ancestry);
     UsageLineage runs =
         preceding == null
             ? UsageLineage.root(runId(parent.id(), turn))
@@ -289,7 +295,7 @@ public final class UsageExecutionStore implements RunUsage {
                 : UsageAttribution.project(
                     parent.account(), parent.projectId(), UsageAttribution.Operation.AGENT_CHAT);
     return identity.withExecution(
-        conversations(parent),
+        lineageFrom(parent, ancestry),
         runs,
         orchestrations(parent.id(), orchestration),
         parent.agent(),
@@ -298,48 +304,92 @@ public final class UsageExecutionStore implements RunUsage {
   }
 
   private UsageLineage conversations(Conversation current) {
-    var ancestors = new ArrayList<String>();
+    return lineage(ancestry(current));
+  }
+
+  private List<Conversation> ancestry(Conversation current) {
+    if (current.parent() == null) return List.of(current);
+    // Capture one bounded source snapshot, including a cycle/depth sentinel. Do not mix different
+    // parents' placement/owner rows across individual statements, or share this beyond the call.
+    var rows =
+        jdbc.query(
+            """
+        WITH RECURSIVE ancestry AS (
+          SELECT c.*,0 AS depth,ARRAY[c.id] AS path,false AS cycle FROM conversations c WHERE c.id=?
+          UNION ALL SELECT p.*,a.depth+1,a.path||p.id,p.id=ANY(a.path)
+          FROM conversations p JOIN ancestry a ON p.id=a.parent_id
+          WHERE a.depth<? AND NOT a.cycle
+        ) SELECT a.id,a.parent_id,a.project_id,p.name AS project_name,a.owner_handle,
+            a.agent,a.opened_by_call,a.created_at
+          FROM ancestry a LEFT JOIN projects p ON p.id=a.project_id ORDER BY a.depth
+        """,
+            UsageExecutionStore::conversation,
+            current.id(),
+            MAX_DEPTH);
+    require(
+        !rows.isEmpty() && rows.getFirst().equals(current),
+        "conversation changed during attribution");
     var seen = new HashSet<String>();
-    seen.add(current.id());
-    String next = current.parent();
-    while (next != null) {
-      require(seen.add(next) && seen.size() <= MAX_DEPTH, "invalid conversation ancestry");
-      var parent = conversation(next);
+    for (var parent : rows) {
+      require(seen.add(parent.id()) && seen.size() <= MAX_DEPTH, "invalid conversation ancestry");
       require(
           Objects.equals(current.account(), parent.account()),
           "conversation tree has different owners");
       require(
           Objects.equals(current.projectId(), parent.projectId()),
           "conversation tree has different projects");
-      ancestors.add(next);
-      next = parent.parent();
     }
-    return new UsageLineage(current.id(), ancestors);
+    require(rows.getLast().parent() == null, "conversation ancestor missing");
+    return List.copyOf(rows);
+  }
+
+  private static UsageLineage lineage(List<Conversation> ancestry) {
+    return new UsageLineage(
+        ancestry.getFirst().id(), ancestry.stream().skip(1).map(Conversation::id).toList());
+  }
+
+  private static UsageLineage lineageFrom(
+      Conversation current, Map<String, Conversation> retained) {
+    var path = new ArrayList<String>();
+    String parent = current.parent();
+    while (parent != null) {
+      require(path.size() < MAX_DEPTH, "invalid conversation ancestry");
+      path.add(parent);
+      parent = Objects.requireNonNull(retained.get(parent)).parent();
+    }
+    return new UsageLineage(current.id(), path);
   }
 
   private UsageLineage orchestrations(String conversation, UsageLineage inherited) {
-    List<String> found =
-        jdbc.queryForList(
-            "SELECT id FROM orchestrations WHERE conductor_conversation = ?",
-            String.class,
-            conversation);
+    var found =
+        jdbc.query(
+            """
+        WITH RECURSIVE ancestry AS (
+          SELECT id,parent,0 AS depth,ARRAY[id] AS path,false AS cycle FROM orchestrations WHERE conductor_conversation=?
+          UNION ALL SELECT p.id,p.parent,a.depth+1,a.path||p.id,p.id=ANY(a.path)
+          FROM orchestrations p JOIN ancestry a ON p.id=a.parent
+          WHERE a.depth<? AND NOT a.cycle
+        ) SELECT id,parent FROM ancestry ORDER BY depth
+        """,
+            (row, index) -> new OrchestrationAncestor(row.getString(1), row.getString(2)),
+            conversation,
+            MAX_DEPTH);
     if (found.isEmpty()) {
       return inherited;
     }
-    String id = found.getFirst();
+    String id = found.getFirst().id();
     var path = new ArrayList<String>();
     var seen = new HashSet<String>();
-    seen.add(id);
-    String next =
-        jdbc.queryForObject("SELECT parent FROM orchestrations WHERE id = ?", String.class, id);
-    while (next != null) {
-      require(seen.add(next) && seen.size() <= MAX_DEPTH, "invalid orchestration ancestry");
-      path.add(next);
-      next =
-          jdbc.queryForObject("SELECT parent FROM orchestrations WHERE id = ?", String.class, next);
+    for (var ancestor : found) {
+      require(
+          seen.add(ancestor.id()) && seen.size() <= MAX_DEPTH, "invalid orchestration ancestry");
+      if (!ancestor.id().equals(id)) path.add(ancestor.id());
     }
+    require(found.getLast().parent() == null, "orchestration ancestor missing");
     return new UsageLineage(id, path);
   }
+
+  private record OrchestrationAncestor(String id, String parent) {}
 
   private Conversation conversation(String id) {
     List<Conversation> rows =

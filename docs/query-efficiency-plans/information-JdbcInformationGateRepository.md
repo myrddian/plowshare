@@ -1,0 +1,11 @@
+# JdbcInformationGateRepository
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationGateRepository.java#L46) serves `InformationWriteGates`. `claim` takes a request advisory lock, locks any existing `(account,request_id)` gate, checks fingerprint/state/lease and either returns receipt evidence, reclaims, or inserts then reloads. `fence` is a token/expiry locking read. Other point operations fetch/open log identity or persist approved/completed/blocked state and hook records.
+
+**Confirmed extra read:** the new-gate insert immediately selects the same row. Use insert `RETURNING` through a typed receipt mapper. Reuse the receipt/log value within the owning operation rather than another `openedLog` query where no intervening write requires refresh. Do not reuse lease state across hook execution; its later fence is intentional. [V83](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L351) provides the composite gate key; these point lookups need no speculative indexes. A claim routine can reduce round trips only if it preserves request locks, token renewal and unknown-effect reconciliation.
+
+Active claims, tokens, approval admission and in-progress state remain outside shared cache. A completed receipt DTO is potentially reusable by database, account, request, fingerprint, operation/result projection and durable receipt/redaction version, but completion is not universally immutable: catalogue deletion sanitizes stored response information. Completed/blocked/opened/gate-hook writes, related revision deletion and external writers must invalidate dependent receipt/log views after commit. Current authority and typed result validation remain mandatory on receipt reuse. Use the proposed bounded tracked DTO/LRU only after these invalidation paths exist; no automatic dirty tracking or mutation replay.
+
+Mock budgets should prove one insert/result and reuse of log identity, while preserving fences after IO. Focused future PostgreSQL tests cover concurrent claims, lease expiry, rollback, request fingerprint conflicts, sanitization and notification recovery. Dispatch must continue to order these mutations even if independent reads become asynchronous.

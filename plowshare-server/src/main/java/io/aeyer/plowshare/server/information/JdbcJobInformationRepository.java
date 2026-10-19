@@ -27,19 +27,24 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
   }
 
   public void bind(String job, InformationContext context, List<UUID> revisions) {
-    for (UUID revision : revisions)
+    revisions = List.copyOf(revisions);
+    // Bound parameter/JSON allocation while traversing the ancestor relation once per cohort.
+    for (int start = 0; start < revisions.size(); start += 256) {
+      var selected = revisions.subList(start, Math.min(start + 256, revisions.size()));
       jdbc.update(
           "WITH RECURSIVE edges(child,parent) AS (SELECT id,parent_id FROM conversations WHERE parent_id IS NOT NULL"
               + " UNION SELECT conductor_conversation,caller_conversation FROM orchestrations WHERE caller_conversation IS NOT NULL"
               + " UNION SELECT o.conductor_conversation,p.conductor_conversation FROM orchestrations o JOIN orchestrations p ON p.id=o.parent"
               + " UNION SELECT conductor_conversation,id FROM orchestrations), parents(id) AS (SELECT ?::text UNION SELECT e.parent FROM edges e JOIN parents p ON e.child=p.id)"
-              + " INSERT INTO information_job_inputs SELECT id,?,?,?,?,? FROM parents ON CONFLICT DO NOTHING",
+              + ", selected(revision_id) AS (SELECT value::uuid FROM jsonb_array_elements_text(?::jsonb))"
+              + " INSERT INTO information_job_inputs SELECT p.id,?,s.revision_id,?,?,? FROM parents p CROSS JOIN selected s ON CONFLICT DO NOTHING",
           job,
+          InformationJson.json(selected),
           context.account(),
-          revision,
           context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
           context.selection().project(),
           context.selection().includeGlobal());
+    }
   }
 
   public void inherit(String source, String target) {

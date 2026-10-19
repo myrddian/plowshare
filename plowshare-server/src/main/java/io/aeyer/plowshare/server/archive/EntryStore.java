@@ -12,6 +12,8 @@ import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.sql.ResultSet;
@@ -1133,6 +1135,14 @@ public final class EntryStore {
   }
 
   private String informationAccount;
+  private ProjectionCache<EntryPage> transcriptCache = ProjectionCache.direct();
+
+  /** Composition supplies TRANSCRIPTS/DOCUMENTS/AUTHORITY fences; live log admission stays here. */
+  public EntryStore useTranscriptCache(ProjectionCache<EntryPage> cache) {
+    transcriptCache = Objects.requireNonNull(cache);
+    return this;
+  }
+
   private final Supplier<Instant> now;
   private final UnitOfWork transactions;
 
@@ -1152,6 +1162,7 @@ public final class EntryStore {
     EntryStore copy = new EntryStore(jdbc, now, transactions);
     copy.informationScoped = true;
     copy.informationAccount = account;
+    copy.transcriptCache = transcriptCache;
     if (retrieval != null) copy.retrieval = () -> retrieval.get().forAccount(account);
     return copy;
   }
@@ -1862,8 +1873,28 @@ public final class EntryStore {
   }
 
   public EntryPage pageOfLog(String conversationId, int skip, int most) {
-    requireInformation(conversationId);
     return pageOfLogAfter(conversationId, 0, EVERY_KIND, false, skip, most);
+  }
+
+  /**
+   * The final forward page, with its offset derived from the same reached count as its rows. This
+   * reads reach/count/rows once; it never hydrates and discards an initial page to learn total.
+   */
+  public EntryPage tailOfLog(String conversationId, int most) {
+    requireInformation(conversationId);
+    return page(
+        conversationId,
+        AFTER,
+        0,
+        "",
+        EVERY_KIND,
+        IN_CONVERSATION_ORDER,
+        false,
+        0,
+        most,
+        "read the final page of a conversation's log",
+        null,
+        true);
   }
 
   /**
@@ -2075,6 +2106,34 @@ public final class EntryStore {
       int most,
       String doing,
       Integer asOf) {
+    return page(
+        conversationId,
+        side,
+        ordinal,
+        narrowing,
+        kinds,
+        order,
+        backwards,
+        skip,
+        most,
+        doing,
+        asOf,
+        false);
+  }
+
+  private EntryPage page(
+      String conversationId,
+      String side,
+      int ordinal,
+      String narrowing,
+      Set<EntryKind> kinds,
+      String order,
+      boolean backwards,
+      int skip,
+      int most,
+      String doing,
+      Integer asOf,
+      boolean tail) {
     String conversation = ConversationStore.named(conversationId);
     if (skip < 0 || most < 1 || kinds.isEmpty()) {
       throw new IllegalArgumentException(
@@ -2101,39 +2160,164 @@ public final class EntryStore {
                 : " AND kind IN ("
                     + String.join(", ", Collections.nCopies(named.size(), "?"))
                     + ")");
+    Supplier<EntryPage> direct =
+        () ->
+            readPage(
+                conversation, ordinal, order, backwards, skip, most, asOf, tail, named, where, 0);
+    if (!informationScoped || informationAccount == null || !transcriptCache.enabled())
+      return ArchiveUnavailableException.translating(doing, direct);
+    var key =
+        new SnapshotCache.Key(
+            "transcript-page-v1",
+            ProjectionCache.fingerprint(
+                informationAccount,
+                conversation,
+                side,
+                Integer.toString(ordinal),
+                narrowing,
+                String.join(",", named),
+                order,
+                Boolean.toString(backwards),
+                Integer.toString(skip),
+                Integer.toString(most),
+                String.valueOf(asOf),
+                Boolean.toString(tail)));
+    // SQL measures the complete bounded page, including full transcript text and nested calls,
+    // before JDBC maps any payload. Larger pages retain their exact ordinary output, uncached.
+    long byteBudget = Math.max(0, (transcriptCache.maxWeight() - 8192) / 32);
     return ArchiveUnavailableException.translating(
         doing,
-        () -> {
-          Integer reach =
-              asOf != null ? asOf : jdbc.queryForObject(THROUGH, Integer.class, conversation);
-          int through = reach == null ? 0 : reach;
-          List<Object> bound = new ArrayList<>();
-          bound.add(conversation);
-          bound.add(ordinal);
-          bound.add(through);
-          bound.addAll(named);
-          // The total first, so that a page past the end still comes back with
-          // the number a caller needs to page back from.
-          Integer total =
-              jdbc.queryForObject(COUNT_OF.formatted(where), Integer.class, bound.toArray());
-          if (total == null || total == 0) {
-            return new EntryPage(List.of(), 0, through, backwards ? false : null);
-          }
-          List<Object> paged = new ArrayList<>();
-          paged.add(MOST_CHARACTERS_PER_ENTRY);
-          paged.add(MOST_CHARACTERS_PER_ENTRY);
-          paged.addAll(bound);
-          paged.add(skip);
-          paged.add(most);
-          List<EntryPage.Row> rows =
-              jdbc.query(
-                  PAGE_OF.formatted(where) + order + " OFFSET ? LIMIT ?",
-                  PAGE_MAPPER,
-                  paged.toArray());
-          // Newest first and unique by ordinal, so everything this reading holds past the
-          // rows skipped and the rows shown is older than all of them: no second query.
-          return new EntryPage(rows, total, through, backwards ? total > skip + rows.size() : null);
-        });
+        () ->
+            transcriptCache.read(
+                key,
+                most <= 100 && byteBudget >= 256L * most,
+                () ->
+                    authorizedPage(
+                        conversation,
+                        () ->
+                            readPage(
+                                conversation,
+                                ordinal,
+                                order,
+                                backwards,
+                                skip,
+                                most,
+                                asOf,
+                                tail,
+                                named,
+                                where,
+                                byteBudget)),
+                () -> authorizedPage(conversation, direct),
+                EntryStore::transcriptWeight));
+  }
+
+  private EntryPage authorizedPage(String conversation, Supplier<EntryPage> loader) {
+    EntryPage page = loader.get();
+    // The public preflight can precede a revocation that commits before version capture. Never
+    // publish a newly loaded DTO under that newer token without rechecking current log inputs.
+    // The coordinator's post-loader stored-token fence covers changes after this check; warm
+    // hits retain the public caller's own admission and never coalesce an authority decision.
+    requireInformation(conversation);
+    return page;
+  }
+
+  private EntryPage readPage(
+      String conversation,
+      int ordinal,
+      String order,
+      boolean backwards,
+      int skip,
+      int most,
+      Integer asOf,
+      boolean tail,
+      List<String> named,
+      String where,
+      long byteBudget) {
+    Integer reach = asOf != null ? asOf : jdbc.queryForObject(THROUGH, Integer.class, conversation);
+    int through = reach == null ? 0 : reach;
+    List<Object> bound = new ArrayList<>();
+    bound.add(conversation);
+    bound.add(ordinal);
+    bound.add(through);
+    bound.addAll(named);
+    // The total first, so that a page past the end still comes back with
+    // the number a caller needs to page back from.
+    Integer total = jdbc.queryForObject(COUNT_OF.formatted(where), Integer.class, bound.toArray());
+    if (total == null || total == 0) {
+      return new EntryPage(List.of(), 0, through, backwards ? false : null);
+    }
+    int selectedSkip = tail ? Math.max(0, total - most) : skip;
+    List<Object> paged = new ArrayList<>();
+    paged.add(MOST_CHARACTERS_PER_ENTRY);
+    paged.add(MOST_CHARACTERS_PER_ENTRY);
+    paged.addAll(bound);
+    paged.add(selectedSkip);
+    paged.add(most);
+    String sql = PAGE_OF.formatted(where) + order + " OFFSET ? LIMIT ?";
+    List<EntryPage.Row> rows;
+    if (byteBudget == 0) {
+      rows = jdbc.query(sql, PAGE_MAPPER, paged.toArray());
+    } else {
+      // The LEFT JOIN yields a scalar-only sentinel for an oversized or empty page. It
+      // prevents both full entry content and tool-call JSON from crossing the wire first.
+      sql =
+          "WITH page_rows AS MATERIALIZED ("
+              + sql
+              + "), page_bounds AS (SELECT coalesce(sum(256::bigint + "
+              + "octet_length(to_jsonb(p)::text)),0) AS cache_bytes FROM page_rows p) "
+              + "SELECT p.*,b.cache_bytes FROM page_bounds b LEFT JOIN page_rows p ON "
+              + "b.cache_bytes<=?"
+              + order;
+      paged.add(byteBudget);
+      rows =
+          jdbc.query(
+              sql,
+              (ResultSetExtractor<List<EntryPage.Row>>)
+                  rs -> {
+                    var accepted = new ArrayList<EntryPage.Row>();
+                    while (rs.next()) {
+                      if (rs.getLong("cache_bytes") > byteBudget)
+                        throw new ProjectionCache.Bypass();
+                      if (rs.getObject("ordinal") != null)
+                        accepted.add(PAGE_MAPPER.mapRow(rs, accepted.size()));
+                    }
+                    return List.copyOf(accepted);
+                  },
+              paged.toArray());
+    }
+    // Newest first and unique by ordinal, so everything this reading holds past the
+    // rows skipped and the rows shown is older than all of them: no second query.
+    return new EntryPage(
+        rows, total, through, backwards ? total > selectedSkip + rows.size() : null);
+  }
+
+  private static long transcriptWeight(EntryPage page) {
+    long weight = 8192;
+    for (var row : page.listed()) {
+      weight +=
+          4096
+              + textWeight(
+                  row.excerpt(),
+                  row.toolCallId(),
+                  row.dispatch(),
+                  row.wireModel(),
+                  row.completion(),
+                  row.outcome(),
+                  row.job(),
+                  row.speaker() == null ? null : row.speaker().name());
+      for (var call : row.toolCalls()) {
+        weight += 2048 + textWeight(call.id(), call.name(), call.arguments(), call.salient());
+        if (call.opened() != null)
+          weight += textWeight(call.opened().conversation(), call.opened().agent());
+      }
+    }
+    return weight;
+  }
+
+  private static long textWeight(String... values) {
+    long weight = 0;
+    for (String value : values) if (value != null) weight += 4L * value.length();
+    return weight;
   }
 
   /**

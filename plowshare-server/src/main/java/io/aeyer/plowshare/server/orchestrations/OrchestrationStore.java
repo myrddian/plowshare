@@ -22,7 +22,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -1102,6 +1106,59 @@ public class OrchestrationStore {
     return latest == null ? run.createdAt() : latest.toInstant();
   }
 
+  /** Display-only activity for one sweep; claims and stall marks remain authoritative mutations. */
+  public record StallActivity(Instant quietSince, boolean childWorking) {}
+
+  /** Two bounded statements per 128 runs, rather than one descendant and child read per run. */
+  public Map<String, StallActivity> activity(List<OrchestrationRecord> runs) {
+    var found = new LinkedHashMap<String, StallActivity>();
+    for (int start = 0; start < runs.size(); start += 128) {
+      var part = runs.subList(start, Math.min(start + 128, runs.size()));
+      var arguments = new ArrayList<Object>();
+      for (var run : part) {
+        arguments.add(run.id());
+        arguments.add(run.conductorConversation());
+      }
+      var quiet =
+          jdbc.query(
+              "WITH RECURSIVE roots(run,conversation) AS (VALUES "
+                  + String.join(",", Collections.nCopies(part.size(), "(?::text,?::text)"))
+                  + "), tree(run,id) AS (SELECT run,conversation FROM roots UNION SELECT t.run,c.id"
+                  + " FROM conversations c JOIN tree t ON c.parent_id=t.id)"
+                  + " SELECT root.run,MAX(e.recorded_at) AS latest FROM roots root LEFT JOIN tree t ON t.run=root.run"
+                  + " LEFT JOIN entries e ON e.conversation_id=t.id GROUP BY root.run",
+              (row, index) ->
+                  new QuietActivity(row.getString(1), row.getObject(2, OffsetDateTime.class)),
+              arguments.toArray());
+      var times = new HashMap<String, Instant>();
+      for (var row : quiet)
+        if (row.latest() != null) times.put(row.run(), row.latest().toInstant());
+      var children =
+          jdbc.query(
+              "SELECT parent,state,pending_cap FROM orchestrations WHERE parent IN ("
+                  + String.join(",", Collections.nCopies(part.size(), "?"))
+                  + ") AND ended_at IS NULL",
+              (row, index) ->
+                  new ChildActivity(
+                      row.getString(1), OrchestrationState.of(row.getString(2)), row.getString(3)),
+              part.stream().map(OrchestrationRecord::id).toArray());
+      var working = new HashSet<String>();
+      for (var child : children)
+        if (child.state() != OrchestrationState.ASKING
+            || Orchestrations.personOnly(child.pendingCap())) working.add(child.parent());
+      for (var run : part)
+        found.put(
+            run.id(),
+            new StallActivity(
+                times.getOrDefault(run.id(), run.createdAt()), working.contains(run.id())));
+    }
+    return Map.copyOf(found);
+  }
+
+  private record QuietActivity(String run, OffsetDateTime latest) {}
+
+  private record ChildActivity(String parent, OrchestrationState state, String pendingCap) {}
+
   /**
    * Record that a stall sweep judged this run quiet since {@code since}, if it is still running and
    * nobody has already recorded a mark for this same or a later quiet period — compare-and-set, so
@@ -1116,16 +1173,39 @@ public class OrchestrationStore {
    * same quiet period the last winning call reported, or an out-of-order one older than it — is
    * refused, which is what keeps a quiet period reported exactly once.
    *
+   * <p>The sweep's batched activity is a candidate snapshot, not a lease. This statement checks
+   * descendant activity and working children again before marking, so work committed after that
+   * snapshot cannot be reported as the captured quiet period.
+   *
    * @return whether this call is the one that set it
    */
   public boolean markStalled(String id, Instant since) {
+    List<String> personOnly = Orchestrations.PERSON_ONLY.stream().sorted().toList();
+    List<Object> parameters =
+        new ArrayList<>(
+            List.of(
+                utc(since),
+                id,
+                OrchestrationState.RUNNING.wire(),
+                utc(since),
+                utc(since),
+                OrchestrationState.ASKING.wire()));
+    parameters.addAll(personOnly);
     return jdbc.update(
-            "UPDATE orchestrations SET stalled_since = ? WHERE id = ? AND state = ?"
-                + " AND (stalled_since IS NULL OR stalled_since < ?)",
-            utc(since),
-            id,
-            OrchestrationState.RUNNING.wire(),
-            utc(since))
+            "UPDATE orchestrations current SET stalled_since = ? WHERE current.id = ?"
+                + " AND current.state = ?"
+                + " AND (current.stalled_since IS NULL OR current.stalled_since < ?)"
+                + " AND coalesce((WITH RECURSIVE tree(id) AS ("
+                + " SELECT current.conductor_conversation"
+                + " UNION SELECT c.id FROM conversations c JOIN tree t ON c.parent_id = t.id)"
+                + " SELECT max(e.recorded_at) FROM entries e JOIN tree t"
+                + " ON e.conversation_id = t.id), current.created_at) <= ?"
+                + " AND NOT EXISTS (SELECT 1 FROM orchestrations child"
+                + " WHERE child.parent = current.id AND child.ended_at IS NULL"
+                + " AND (child.state <> ? OR child.pending_cap IN ("
+                + String.join(", ", java.util.Collections.nCopies(personOnly.size(), "?"))
+                + ")))",
+            parameters.toArray())
         == 1;
   }
 

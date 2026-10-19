@@ -13,6 +13,35 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Reproduces the Boot exception-translation proxy mode without needing PostgreSQL. */
 class RepositoryProxyCompatibilityTest {
+  @Test
+  void specialistRepositoriesPermitBootClassProxiesWithoutChangingInterfaceInjection() {
+    // Boot enables class-based exception translation by default. These specialist repositories
+    // still expose their typed interfaces; a final implementation prevents application startup
+    // before JDBC, a listener or any domain operation can run.
+    for (Class<?> repository :
+        java.util.List.of(
+            io.aeyer.plowshare.server.access.JdbcIdentityRepository.class,
+            io.aeyer.plowshare.server.access.JdbcScopedGrantRepository.class,
+            io.aeyer.plowshare.server.access.JdbcOperationRecords.class,
+            io.aeyer.plowshare.server.access.JdbcSystemOperationRecords.class,
+            io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository.class,
+            io.aeyer.plowshare.server.archive.JdbcPromotionSourceRepository.class,
+            io.aeyer.plowshare.server.embedding.JdbcQueryEmbeddingRepository.class,
+            io.aeyer.plowshare.server.llm.accounting.JdbcInferenceAdmissions.class)) {
+      var factory = new org.springframework.aop.framework.ProxyFactory();
+      factory.setTargetClass(repository);
+      factory.setProxyTargetClass(true);
+      factory.addAdvice(
+          (org.aopalliance.intercept.MethodInterceptor)
+              invocation -> {
+                throw new AssertionError("Proxy construction must not invoke persistence");
+              });
+      var proxy = factory.getProxy();
+      assertTrue(AopUtils.isCglibProxy(proxy), repository.getName());
+      assertTrue(repository.isInstance(proxy), repository.getName());
+    }
+  }
+
   @org.junit.jupiter.params.ParameterizedTest
   @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
   void archiveCompositionAcceptsRepositoryInterfaceAndClassProxies(boolean classProxy) {

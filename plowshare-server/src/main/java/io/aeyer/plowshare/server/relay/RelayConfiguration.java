@@ -38,7 +38,8 @@ public class RelayConfiguration {
       ProjectMembers members,
       ProjectWorkspaces projects,
       RelayProperties relayProperties,
-      io.aeyer.plowshare.server.relay.tools.ApplicationToolRegistry tools) {
+      io.aeyer.plowshare.server.relay.tools.ApplicationToolRegistry tools,
+      RelayPublicationSignals signals) {
     return new ProjectRelayPorts(
         relay,
         repository,
@@ -46,7 +47,8 @@ public class RelayConfiguration {
         members,
         projects,
         relayProperties.getMaxForwardingHops(),
-        tools);
+        tools,
+        signals);
   }
 
   @Bean
@@ -159,9 +161,11 @@ public class RelayConfiguration {
         members, projects, routing, dispatch, repository, signals, transactions);
   }
 
-  @Bean
-  public RelayPublicationSignals relayPublicationSignals() {
-    return new LocalRelayPublicationSignals();
+  @Bean(destroyMethod = "close")
+  public RelayPublicationSignals relayPublicationSignals(
+      io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
+      RelayWorkerProperties properties) {
+    return new NotificationRelayPublicationSignals(signals, properties);
   }
 
   @Bean
@@ -281,8 +285,17 @@ public class RelayConfiguration {
 
   @Bean
   @DependsOnDatabaseInitialization
-  public RelayLogRepository relayLogRepository(JdbcTemplate jdbc, UnitOfWork work) {
-    return new JdbcRelayLogRepository(jdbc, work);
+  public RelayLogRepository relayLogRepository(
+      JdbcTemplate jdbc, UnitOfWork work, io.aeyer.plowshare.server.cache.ProjectionCaches caches) {
+    var domains =
+        java.util.Set.of(
+            io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.RELAY,
+            io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.AUTHORITY);
+    return new JdbcRelayLogRepository(
+        jdbc,
+        work,
+        caches.create("relay-topics-v1", domains),
+        caches.create("relay-inspection-v1", domains));
   }
 
   @Bean

@@ -87,11 +87,22 @@ public final class ManagedPricing implements PricingAdministration, InferencePri
   @Override
   public List<Entry> list(String actor) {
     accounts.requireServerAdmin(actor);
-    return targets.stream().map(this::entry).toList();
+    var overrides =
+        repository.findAll(
+            targets.stream()
+                .map(target -> new PricingRepository.Key(target.route(), target.model()))
+                .toList());
+    return targets.stream()
+        .map(
+            target ->
+                entry(
+                    target,
+                    Optional.ofNullable(
+                        overrides.get(new PricingRepository.Key(target.route(), target.model())))))
+        .toList();
   }
 
-  private Entry entry(Target target) {
-    var override = repository.find(target.route(), target.model());
+  private Entry entry(Target target, Optional<PricingRepository.PriceOverride> override) {
     var configured = base.cards(target.route(), target.model());
     var card =
         override
@@ -99,13 +110,7 @@ public final class ManagedPricing implements PricingAdministration, InferencePri
             .orElseGet(
                 () -> base.select(target.route(), target.model(), clock.instant()).orElse(null));
     // Boot versions include every interval so a deployment change invalidates a stale editor.
-    String version =
-        override
-            .map(row -> row.card().version())
-            .orElse(
-                "boot:"
-                    + String.join(
-                        ",", configured.stream().map(RateCard::version).sorted().toList()));
+    String version = version(override, configured);
     return new Entry(
         target.route(),
         target.model(),
@@ -115,6 +120,17 @@ public final class ManagedPricing implements PricingAdministration, InferencePri
         card == null ? null : view(card),
         configured.stream().map(ManagedPricing::view).toList(),
         override.map(PricingRepository.PriceOverride::updatedAt).orElse(null));
+  }
+
+  private static String version(
+      Optional<PricingRepository.PriceOverride> override, List<RateCard> configured) {
+    return override
+        .map(row -> row.card().version())
+        .orElseGet(
+            () ->
+                "boot:"
+                    + String.join(
+                        ",", configured.stream().map(RateCard::version).sorted().toList()));
   }
 
   @Override
@@ -162,11 +178,12 @@ public final class ManagedPricing implements PricingAdministration, InferencePri
         status -> {
           repository.lockChanges();
           accounts.requireServerAdmin(actor);
-          if (!entry(target).version().equals(change.expectedVersion()))
+          var current = repository.find(target.route(), target.model());
+          if (!version(current, base.cards(target.route(), target.model()))
+              .equals(change.expectedVersion()))
             throw new CallerFault(
                 "Pricing changed; refresh and review the current rates before saving");
-          repository.save(card, actor);
-          return entry(target);
+          return entry(target, Optional.of(repository.save(card, actor)));
         });
   }
 

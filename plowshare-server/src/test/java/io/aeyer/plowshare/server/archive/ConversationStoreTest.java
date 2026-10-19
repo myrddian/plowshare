@@ -116,32 +116,13 @@ class ConversationStoreTest {
 
   @BeforeEach
   void freshConversations() {
-    // Both tables, because V7 gave `turns` a foreign key to this one.
-    // Postgres refuses to truncate a table another one references unless
-    // that one is truncated with it, whether or not the referencing table
-    // holds a row — so naming `turns` here is not about clearing turns this
-    // file writes (it writes none), it is what makes the statement legal at
-    // all. `compactions` is here for the same reason one hop further out:
-    // V8 gave it a composite key into `turns`. This comment used to say
-    // `conversations` had no foreign key in either direction, which V7 made
-    // false.
-    //
-    // Named rather than CASCADE: CASCADE would silently reach whatever
-    // references this table next, and a fixture that empties a table nobody
-    // in this file knows about is a fixture that hides its own blast radius.
-    // `board_topics`, `board_messages` and `board_seats` are here for the
-    // same reason as `turns` and `compactions`: V74 gave each of them a
-    // foreign key to this one — `origin_conversation`, `conversation` and
-    // `conversation` respectively. `firings` is here one hop further out
-    // again, the same shape as `compactions` into `turns`: V74 gave it a
-    // foreign key into `board_topics`. `user_inbox` is a further hop still,
-    // through its pre-existing V40 foreign key into `firings`, which this
-    // file had never had to name before nothing chained through it.
-    // V113 added resume receipts; V115 added digest staging and failure markers; V121/V127 added
-    // Relay execution and job links to logs.
-    // Keep those explicit too, so the persistence fixture still fails on an unknown dependency.
-    jdbc.execute(
-        "TRUNCATE TABLE orchestration_resume_receipts, digests_embedding_staging, digests_embedding_failures, relay_executions, jobs, board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox");
+    // This class owns an isolated container. Conversation dependencies now include suspended
+    // calls and other execution evidence beyond turns/compactions. Reset their complete fixture
+    // graph with CASCADE, preserving migration-owned builtin authority rows through the shared
+    // helper; production retention and deletion keep their own explicit lifecycle rules.
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
+        "TRUNCATE TABLE orchestration_resume_receipts, digests_embedding_staging, digests_embedding_failures, relay_executions, jobs, board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     clock.set(OPENED_AT);
     minted.set(0);
     store =

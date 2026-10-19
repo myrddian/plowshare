@@ -16,6 +16,26 @@ public final class RelayWorkerProperties {
   private int maxWorkers = 256;
   private int concurrency = 8;
   private int batchSize = 8;
+  private int maxSignalWaiters = 4096;
+  private Duration reconciliationInterval = Duration.ofSeconds(30);
+
+  public int getMaxSignalWaiters() {
+    return maxSignalWaiters;
+  }
+
+  public void setMaxSignalWaiters(int value) {
+    if (value < 1 || value > 65536)
+      throw new IllegalArgumentException("Invalid Relay waiter bound");
+    maxSignalWaiters = value;
+  }
+
+  public Duration getReconciliationInterval() {
+    return reconciliationInterval;
+  }
+
+  public void setReconciliationInterval(Duration value) {
+    reconciliationInterval = interval(value);
+  }
 
   /** A trusted deployment binding supplies the principal; project JS cannot choose authority. */
   public record Project(String project, String account) {

@@ -1,0 +1,11 @@
+# JdbcReasonLog
+
+Status: Proposed. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[The reason log](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcReasonLog.java#L62) appends one judgement inside Archive's memory transaction and lists one memory's history ordered by `filed_at,id`. The source comment claiming no production reader is stale: [Navigator.evidence](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Navigator.java#L366) loads filing reasons when expanding active and retired memories. Measure repeated expansion frequency before prioritizing shared history caching. [V5](../../plowshare-server/src/main/resources/db/migration/V5__memory_reasons.sql#L115) indexes `(memory_id,filed_at)`; evaluate adding the final ID tiebreak only if representative history plans show meaningful sorting cost.
+
+First preserve the already available `ReasonLog.Entry` through the write response; do not append and refetch history just to report that entry. Navigator currently embeds complete reason history in evidence text; define an explicit bounded evidence/history projection before repeatedly reading an unbounded lifetime, preserving a way to inspect the full audit trail. A stored routine is unnecessary for a simple append plus ordered read.
+
+Eligible snapshots are immutable judgement pages, keyed by database, memory, page/cursor, projection and durable reason-stream generation. Do not use `filed_at` alone as a version because clocks can tie or backdate. Invalidate memory history membership after every committed append and maintenance delete; integrate database coverage for writers outside Archive. Memory visibility/home/policy changes must fence disclosure and invalidate affected view dependencies. Rollback cannot publish a judgement or generation. On listener loss bypass/clear uncertain history entries until durable recovery; use the shared bounded LRU rather than adding a log-specific map.
+
+Mock that Archive records once in the owning transaction and reuses the supplied entry. A changed paging/index/invalidation contract warrants focused PostgreSQL equal-timestamp ordering, rollback and membership tests. No performance measurement or implementation is claimed.

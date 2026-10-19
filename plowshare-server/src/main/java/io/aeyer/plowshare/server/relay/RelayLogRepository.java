@@ -45,6 +45,11 @@ public interface RelayLogRepository {
     }
   }
 
+  /**
+   * Immutable inspection projection only. A configured typed cache tracks the complete scoped,
+   * account-filtered selection under durable Relay/authority versions. This value never proves
+   * current membership, a delivery claim, cursor ownership or execution permission.
+   */
   record Snapshot(
       Relay.Topic topic,
       long after,

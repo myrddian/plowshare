@@ -336,12 +336,27 @@ limit. Already admitted branches drain before new admission so the pending cap
 cannot prevent freeing queue capacity. Receiver submission is asynchronous;
 agent/orchestration completion never blocks the consumer loop.
 
-Committed publications wake interested local consumers with coalesced signals.
-Signals are hints. Startup reads and `idle-interval` fallback reads (default five
-seconds) recover missed signals and publications from another server. Idle virtual
-threads wait instead of spinning. Failed passes wait `failure-backoff` (default
-30 seconds), even when publications keep arriving. Worker failures log scope,
-topic and group without private source or exception excerpts.
+Committed publications wake consumers across servers through PostgreSQL
+LISTEN/NOTIFY, as well as local coalesced signals. The shared listener commits its
+registration before taking a recovery baseline. Startup/reconnect/outage wake
+readers to rescan durable state; notifications carry only a fixed domain hint.
+Outbox/inbox rows, offsets and leases remain authoritative. Notifications never
+acknowledge work or authorize replay.
+
+Healthy consumers and internal discovery wait for a hint or the bounded
+`reconciliation-interval` (default 30 seconds). During listener outages, or in
+standalone local-only composition, `idle-interval` remains the fallback (default
+five seconds). External long-poll ports register before reading and wait for a
+hint, their deadline or at most five seconds; unhealthy transport retains the
+100 ms fallback. Every read after a wait rechecks live port/membership authority.
+Workspace enrollment continues its existing configuration polling. Failed passes
+wait `failure-backoff` (default 30 seconds), even when hints keep arriving.
+
+`max-signal-waiters` bounds all local consumers, discovery and long polls together
+(default 4,096; allowed 1–65,536). Each waiter coalesces hints into one pending wake;
+closing releases its slot and interrupts a blocked wait. See the
+[query/cache/wakeup receipt](query-efficiency-relay-slice.md) for version fences,
+inspection cache limits, query budgets and verification.
 
 Local defaults are `max-workers: 256`, `concurrency: 8` and `batch-size: 8`.
 Limits are respectively 1–4,096, 1–64 and 1–32. Worker intervals accept one second

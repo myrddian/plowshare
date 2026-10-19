@@ -37,6 +37,18 @@ public sealed interface AccountEvent extends ServerPush {
   }
 
   /**
+   * Opaque account-socket invalidation. It carries no resource identity or authority decision;
+   * clients must reauthorize their selected reads and reconcile dropped hints after reconnect.
+   */
+  record InformationInvalidated() implements AccountEvent {
+    @Override
+    @JsonProperty
+    public String kind() {
+      return "information.invalidated";
+    }
+  }
+
+  /**
    * Explicit recovery acknowledgment for account listeners; correlated with the durable receipt.
    */
   record OrchestrationResumed(String orchestration, UUID requestId) implements AccountEvent {

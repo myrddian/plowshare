@@ -7446,11 +7446,13 @@ public sealed record Notification {
  public static Notification FromVariant10(NotificationVariant10Dto value)=>new() {Variant10=new(value)};
  public Optional<NotificationVariant11Dto> Variant11 {get; private init;}
  public static Notification FromVariant11(NotificationVariant11Dto value)=>new() {Variant11=new(value)};
+ public Optional<NotificationVariant12Dto> Variant12 {get; private init;}
+ public static Notification FromVariant12(NotificationVariant12Dto value)=>new() {Variant12=new(value)};
 }
 internal sealed class NotificationConverter : JsonConverter<Notification> {
  public override bool HandleNull => true;
- public override Notification Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1233",value))return Notification.FromVariant1(value.Deserialize<JobEventDto>(options)!);if(Codec.Matches("shape1234",value))return Notification.FromVariant2(value.Deserialize<JobDeltaDto>(options)!);if(Codec.Matches("shape1238",value))return Notification.FromVariant3(value.Deserialize<NotificationVariant3Dto>(options)!);if(Codec.Matches("shape1240",value))return Notification.FromVariant4(value.Deserialize<NotificationVariant4Dto>(options)!);if(Codec.Matches("shape1242",value))return Notification.FromVariant5(value.Deserialize<NotificationVariant5Dto>(options)!);if(Codec.Matches("shape1249",value))return Notification.FromVariant6(value.Deserialize<NotificationVariant6Dto>(options)!);if(Codec.Matches("shape1251",value))return Notification.FromVariant7(value.Deserialize<NotificationVariant7Dto>(options)!);if(Codec.Matches("shape1253",value))return Notification.FromVariant8(value.Deserialize<NotificationVariant8Dto>(options)!);if(Codec.Matches("shape1255",value))return Notification.FromVariant9(value.Deserialize<NotificationVariant9Dto>(options)!);if(Codec.Matches("shape1257",value))return Notification.FromVariant10(value.Deserialize<NotificationVariant10Dto>(options)!);if(Codec.Matches("shape1259",value))return Notification.FromVariant11(value.Deserialize<NotificationVariant11Dto>(options)!);throw new JsonException("Invalid union");}
- public override void Write(Utf8JsonWriter writer,Notification value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}if(value.Variant5.IsSet){JsonSerializer.Serialize(writer,value.Variant5.Value,options);return;}if(value.Variant6.IsSet){JsonSerializer.Serialize(writer,value.Variant6.Value,options);return;}if(value.Variant7.IsSet){JsonSerializer.Serialize(writer,value.Variant7.Value,options);return;}if(value.Variant8.IsSet){JsonSerializer.Serialize(writer,value.Variant8.Value,options);return;}if(value.Variant9.IsSet){JsonSerializer.Serialize(writer,value.Variant9.Value,options);return;}if(value.Variant10.IsSet){JsonSerializer.Serialize(writer,value.Variant10.Value,options);return;}if(value.Variant11.IsSet){JsonSerializer.Serialize(writer,value.Variant11.Value,options);return;}throw new JsonException("Select a union variant");}
+ public override Notification Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1233",value))return Notification.FromVariant1(value.Deserialize<JobEventDto>(options)!);if(Codec.Matches("shape1234",value))return Notification.FromVariant2(value.Deserialize<JobDeltaDto>(options)!);if(Codec.Matches("shape1238",value))return Notification.FromVariant3(value.Deserialize<NotificationVariant3Dto>(options)!);if(Codec.Matches("shape1240",value))return Notification.FromVariant4(value.Deserialize<NotificationVariant4Dto>(options)!);if(Codec.Matches("shape1242",value))return Notification.FromVariant5(value.Deserialize<NotificationVariant5Dto>(options)!);if(Codec.Matches("shape1244",value))return Notification.FromVariant6(value.Deserialize<NotificationVariant6Dto>(options)!);if(Codec.Matches("shape1251",value))return Notification.FromVariant7(value.Deserialize<NotificationVariant7Dto>(options)!);if(Codec.Matches("shape1253",value))return Notification.FromVariant8(value.Deserialize<NotificationVariant8Dto>(options)!);if(Codec.Matches("shape1255",value))return Notification.FromVariant9(value.Deserialize<NotificationVariant9Dto>(options)!);if(Codec.Matches("shape1257",value))return Notification.FromVariant10(value.Deserialize<NotificationVariant10Dto>(options)!);if(Codec.Matches("shape1259",value))return Notification.FromVariant11(value.Deserialize<NotificationVariant11Dto>(options)!);if(Codec.Matches("shape1261",value))return Notification.FromVariant12(value.Deserialize<NotificationVariant12Dto>(options)!);throw new JsonException("Invalid union");}
+ public override void Write(Utf8JsonWriter writer,Notification value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}if(value.Variant5.IsSet){JsonSerializer.Serialize(writer,value.Variant5.Value,options);return;}if(value.Variant6.IsSet){JsonSerializer.Serialize(writer,value.Variant6.Value,options);return;}if(value.Variant7.IsSet){JsonSerializer.Serialize(writer,value.Variant7.Value,options);return;}if(value.Variant8.IsSet){JsonSerializer.Serialize(writer,value.Variant8.Value,options);return;}if(value.Variant9.IsSet){JsonSerializer.Serialize(writer,value.Variant9.Value,options);return;}if(value.Variant10.IsSet){JsonSerializer.Serialize(writer,value.Variant10.Value,options);return;}if(value.Variant11.IsSet){JsonSerializer.Serialize(writer,value.Variant11.Value,options);return;}if(value.Variant12.IsSet){JsonSerializer.Serialize(writer,value.Variant12.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
 /// <summary>Fields of the NotificationVariant3Dto protocol contract.</summary>
@@ -7461,57 +7463,62 @@ public sealed record NotificationVariant3Dto {
 
 /// <summary>Fields of the NotificationVariant4Dto protocol contract.</summary>
 public sealed record NotificationVariant4Dto {
+ [JsonPropertyName("kind")] public required string Kind { get; init; }
+}
+
+/// <summary>Fields of the NotificationVariant5Dto protocol contract.</summary>
+public sealed record NotificationVariant5Dto {
  [JsonPropertyName("generation")] public required double Generation { get; init; }
  [JsonPropertyName("kind")] public required string Kind { get; init; }
  [JsonPropertyName("revision")] public required string Revision { get; init; }
  [JsonPropertyName("sequence")] public required double Sequence { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant5Dto protocol contract.</summary>
-public sealed record NotificationVariant5Dto {
+/// <summary>Fields of the NotificationVariant6Dto protocol contract.</summary>
+public sealed record NotificationVariant6Dto {
  [JsonPropertyName("kind")] public required string Kind { get; init; }
  [JsonPropertyName("orchestration")] public required string Orchestration { get; init; }
  [JsonPropertyName("state")] public required string State { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant6Dto protocol contract.</summary>
-public sealed record NotificationVariant6Dto {
+/// <summary>Fields of the NotificationVariant7Dto protocol contract.</summary>
+public sealed record NotificationVariant7Dto {
  [JsonPropertyName("kind")] public required string Kind { get; init; }
  [JsonPropertyName("orchestration")] public required string Orchestration { get; init; }
  [JsonPropertyName("requestId")] public required string RequestId { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant7Dto protocol contract.</summary>
-public sealed record NotificationVariant7Dto {
+/// <summary>Fields of the NotificationVariant8Dto protocol contract.</summary>
+public sealed record NotificationVariant8Dto {
  [JsonPropertyName("kind")] public required string Kind { get; init; }
  [JsonPropertyName("root")] public required string Root { get; init; }
  [JsonPropertyName("settled")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Settled { get; init; }
  [JsonPropertyName("through")] public required double Through { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant8Dto protocol contract.</summary>
-public sealed record NotificationVariant8Dto {
+/// <summary>Fields of the NotificationVariant9Dto protocol contract.</summary>
+public sealed record NotificationVariant9Dto {
  [JsonPropertyName("conversation")] public required string Conversation { get; init; }
  [JsonPropertyName("kind")] public required string Kind { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant9Dto protocol contract.</summary>
-public sealed record NotificationVariant9Dto {
+/// <summary>Fields of the NotificationVariant10Dto protocol contract.</summary>
+public sealed record NotificationVariant10Dto {
  [JsonPropertyName("conversation")] public required string Conversation { get; init; }
  [JsonPropertyName("kind")] public required string Kind { get; init; }
  [JsonPropertyName("through")] public required double Through { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant10Dto protocol contract.</summary>
-public sealed record NotificationVariant10Dto {
+/// <summary>Fields of the NotificationVariant11Dto protocol contract.</summary>
+public sealed record NotificationVariant11Dto {
  [JsonPropertyName("report")] public required UsageReportDto Report { get; init; }
  [JsonPropertyName("revision")] public required double Revision { get; init; }
  [JsonPropertyName("subscription")] public required string Subscription { get; init; }
  [JsonPropertyName("type")] public required string Type { get; init; }
 }
 
-/// <summary>Fields of the NotificationVariant11Dto protocol contract.</summary>
-public sealed record NotificationVariant11Dto {
+/// <summary>Fields of the NotificationVariant12Dto protocol contract.</summary>
+public sealed record NotificationVariant12Dto {
  [JsonPropertyName("code")] public required string Code { get; init; }
  [JsonPropertyName("subscription")] public required string Subscription { get; init; }
  [JsonPropertyName("type")] public required string Type { get; init; }

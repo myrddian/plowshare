@@ -11,6 +11,15 @@ public interface InformationNavigationRepository {
   /** First statement in a fresh read transaction: keep multi-query projections on one snapshot. */
   void snapshot();
 
+  /**
+   * First statement in a fresh read transaction for one documents/facets/relationships projection
+   * only. Mark the transaction read-only without changing its configured isolation. Ordinary READ
+   * COMMITTED transactions may share current projections; an ambient historical snapshot remains
+   * historical and must bypass sharing. Multi-query selection, relationship and policy reads retain
+   * {@link #snapshot()}.
+   */
+  void snapshotSingleProjection();
+
   void requireActive(String account);
 
   void lockAccount(String account);
@@ -24,6 +33,11 @@ public interface InformationNavigationRepository {
   PolicyView setPolicy(
       String account, PolicyTarget target, long expectedVersion, PolicySettings settings);
 
+  /**
+   * One bounded metadata page. SQL owns visibility, relationship filtering and ordering before
+   * LIMIT/OFFSET. Shared immutable pages require DOCUMENTS and AUTHORITY version fences; the caller
+   * still admits the authenticated selection in its own read transaction.
+   */
   Documents documents(
       InformationContext context,
       UUID relatedTo,
