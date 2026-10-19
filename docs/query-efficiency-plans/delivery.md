@@ -3,8 +3,9 @@
 Status: proposed implementation work. See the [owner inventory](README.md) and
 [query and cache strategy](../query-efficiency-and-cache-design.md). Repository
 plans describe candidates, not measured improvements or implemented mechanisms.
-The [first implementation receipt](../query-efficiency-first-slice.md) and
-[second implementation receipt](../query-efficiency-second-slice.md) record the
+The [first implementation receipt](../query-efficiency-first-slice.md),
+[second implementation receipt](../query-efficiency-second-slice.md) and
+[cache foundation receipt](../query-efficiency-cache-foundation.md) record the
 completed local slices, verification and remaining cache-admission gates.
 
 ## Start with operation costs and ownership

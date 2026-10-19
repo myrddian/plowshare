@@ -6,7 +6,9 @@ new and changed code. The [first implementation slice](query-efficiency-first-sl
 consolidates facets, separates list rendering from facets and permits bounded
 independent reads. The [second slice](query-efficiency-second-slice.md) adds
 document/search snapshot reuse, keyed schedule reads and explicit DTO linkage
-contracts. The cache and database notification bridge remain proposed;
+contracts. The [cache foundation](query-efficiency-cache-foundation.md) implements
+bounded tracked DTO storage, load coalescing and local invalidation/recovery fences.
+Repository adoption and the database notification bridge remain proposed;
 the broader changes described here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)
