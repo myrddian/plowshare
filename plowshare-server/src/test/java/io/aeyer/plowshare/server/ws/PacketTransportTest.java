@@ -170,6 +170,142 @@ class PacketTransportTest {
     }
   }
 
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void a_blocked_operation_keeps_credits_flowing_and_rechecks_queued_authority(boolean revoke)
+      throws Exception {
+    var entered = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var pushed = new java.util.concurrent.CountDownLatch(1);
+    var nextRouted = new java.util.concurrent.CountDownLatch(1);
+    var current = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var accounts = mock(AdminStore.class);
+    when(accounts.sessionCurrent("fixture", 1L)).thenAnswer(call -> current.get());
+    var routed = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
+    var socket = mock(WebSocketSession.class);
+    var attributes = new java.util.HashMap<String, Object>();
+    attributes.put(EventChannelHandler.HANDLE, "fixture");
+    attributes.put("plowshare.sessionVersion", 1L);
+    when(socket.getAttributes()).thenReturn(attributes);
+    when(socket.getId()).thenReturn("slow-packet-fixture");
+    when(socket.getUri())
+        .thenReturn(java.net.URI.create("ws://fixture.invalid/v1/events?session=slow-packet"));
+    when(socket.getAcceptedProtocol()).thenReturn(SegmentedMessages.SUBPROTOCOL);
+    when(socket.isOpen()).thenReturn(true);
+    var watchers = new Watchers();
+    var handler =
+        new EventChannelHandler(
+            new io.aeyer.plowshare.server.session.SessionRegistry(),
+            new FrameRouter(
+                Map.of(
+                    "fixture.slow",
+                    (payload, caller) -> {
+                      routed.add("slow");
+                      entered.countDown();
+                      try {
+                        if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                          throw new IllegalStateException("Fixture did not release");
+                      } catch (InterruptedException stopping) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(stopping);
+                      }
+                      return Outcome.ok();
+                    },
+                    "fixture.next",
+                    (payload, caller) -> {
+                      routed.add("next");
+                      nextRouted.countDown();
+                      return Outcome.ok();
+                    })),
+            watchers);
+    handler.useSocketAuthorization(new SocketAuthorization(accounts));
+    var json = FrameJson.answering();
+    var peer =
+        new SegmentedMessages(
+            new io.aeyer.plowshare.protocol.transport.PacketWire() {
+              public void segment(io.aeyer.plowshare.protocol.transport.MessageSegment part)
+                  throws java.io.IOException {
+                handler.handleTextMessage(
+                    socket,
+                    new org.springframework.web.socket.TextMessage(json.writeValueAsString(part)));
+              }
+
+              public void credit(io.aeyer.plowshare.protocol.transport.SegmentCredit credit)
+                  throws java.io.IOException {
+                handler.handleTextMessage(
+                    socket,
+                    new org.springframework.web.socket.TextMessage(
+                        json.writeValueAsString(credit)));
+              }
+            },
+            SegmentedMessages.PROCESS_BUDGET,
+            () -> {});
+    doAnswer(
+            call -> {
+              var value =
+                  json.readTree(
+                      ((org.springframework.web.socket.TextMessage) call.getArgument(0))
+                          .getPayload());
+              if (value.path("kind").asText().equals("transport.credit")) {
+                peer.credit(
+                    json.treeToValue(
+                        value, io.aeyer.plowshare.protocol.transport.SegmentCredit.class));
+              } else {
+                var complete =
+                    peer.receive(
+                        json.treeToValue(
+                            value, io.aeyer.plowshare.protocol.transport.MessageSegment.class));
+                if (complete.isPresent() && complete.get().contains("fixture.push"))
+                  pushed.countDown();
+              }
+              return null;
+            })
+        .when(socket)
+        .sendMessage(any());
+    handler.afterConnectionEstablished(socket);
+    try {
+      var accepted =
+          java.util.concurrent.CompletableFuture.runAsync(
+              () -> {
+                try {
+                  peer.send(
+                      "{\"id\":\"slow\",\"type\":\"fixture.slow\",\"protocol_version\":\"plowshare-v1\",\"payload\":{}}");
+                } catch (java.io.IOException error) {
+                  throw new java.io.UncheckedIOException(error);
+                }
+              });
+      assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS));
+      accepted.get(2, java.util.concurrent.TimeUnit.SECONDS);
+      peer.send(
+          "{\"id\":\"next\",\"type\":\"fixture.next\",\"protocol_version\":\"plowshare-v1\",\"payload\":{}}");
+      watchers.wants("slow-packet", true);
+      handler.stream(
+          "slow-packet",
+          io.aeyer.plowshare.protocol.JobDelta.answering(
+              "job_fixture", "fixture.push" + "x".repeat(150_000)));
+      assertTrue(
+          pushed.await(2, java.util.concurrent.TimeUnit.SECONDS),
+          "A multi-packet push must finish while the query remains blocked");
+      assertEquals(java.util.List.of("slow"), routed, "Following operations must remain serial");
+      if (revoke) current.set(false);
+      release.countDown();
+      if (revoke) {
+        verify(socket, timeout(2000).atLeastOnce())
+            .close(
+                org.springframework.web.socket.CloseStatus.POLICY_VIOLATION.withReason(
+                    "Account session revoked"));
+        assertEquals(java.util.List.of("slow"), routed);
+      } else {
+        assertTrue(nextRouted.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(java.util.List.of("slow", "next"), routed);
+      }
+    } finally {
+      release.countDown();
+      handler.afterConnectionClosed(socket, org.springframework.web.socket.CloseStatus.NORMAL);
+      peer.close();
+    }
+  }
+
   @Test
   void legacy_receive_counts_utf8_bytes_before_domain_dispatch() throws Exception {
     var socket = mock(WebSocketSession.class);
