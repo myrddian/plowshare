@@ -144,8 +144,17 @@ public class ArchiveConfig {
   public EntryStore entryStore(
       JdbcTemplate jdbc,
       UnitOfWork transactions,
-      org.springframework.beans.factory.ObjectProvider<ConversationSearch> retrieval) {
-    return new EntryStore(jdbc, transactions).retrieving(retrieval::getObject);
+      org.springframework.beans.factory.ObjectProvider<ConversationSearch> retrieval,
+      io.aeyer.plowshare.server.cache.ProjectionCaches caches) {
+    return new EntryStore(jdbc, transactions)
+        .retrieving(retrieval::getObject)
+        .useTranscriptCache(
+            caches.create(
+                "transcript-page-v1",
+                java.util.Set.of(
+                    io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.TRANSCRIPTS,
+                    io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.DOCUMENTS,
+                    io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.AUTHORITY)));
   }
 
   /**

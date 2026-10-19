@@ -112,20 +112,27 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
     var prior = repository.prior(context.account(), request, fingerprint);
     if (prior.isPresent()) return status(context, prior.get());
-    UUID id =
+    var retained =
         work.inTransaction(
             () -> {
               var intent = catalogue.acquisitionIntent(context, name, expectedRevision, typing);
-              return repository.submit(
+              return repository.submitRetained(
                   context, request, fingerprint, url, name, session, total, corpus, intent);
             });
-    return status(context, id);
+    access.requireSelection(context);
+    return original(context, retained).status();
   }
 
   private AcquisitionRepository.Ticket owned(InformationContext context, UUID ticket) {
     access.requireSelection(context);
     var row = repository.owned(context.account(), ticket);
-    if (!Objects.equals(context.selection().project(), row.project())
+    return original(context, row);
+  }
+
+  private AcquisitionRepository.Ticket original(
+      InformationContext context, AcquisitionRepository.Ticket row) {
+    if (!Objects.equals(context.account(), row.account())
+        || !Objects.equals(context.selection().project(), row.project())
         || context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new NotFoundFault("select the acquisition's original namespace");
     return row;

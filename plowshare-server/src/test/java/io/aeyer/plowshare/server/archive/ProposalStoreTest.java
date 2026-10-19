@@ -123,17 +123,12 @@ class ProposalStoreTest {
 
   @BeforeEach
   void freshQueue() {
-    // proposals first: its rows reference memories, so the other order is
-    // refused by the foreign key rather than cascading silently.
-    //
-    // memory_reasons is named although this class writes none: Postgres
-    // refuses a TRUNCATE of a table something references unless the
-    // referring table is in the list or CASCADE is given, and it refuses on
-    // the constraint rather than on the row count. Named rather than
-    // CASCADE'd, matching the sentence above: this file says which tables it
-    // empties.
-    jdbc.execute(
-        "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, proposals, memory_reasons, memories");
+    // This class owns an isolated container. Reset the full dependent fixture graph (including
+    // digest embedding staging) and preserve migration-owned builtin authority identities through
+    // the shared test helper. This CASCADE is fixture setup, never application cleanup behavior.
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+        jdbc,
+        "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, proposals, memory_reasons, memories CASCADE");
     clock = NOW;
     minted = 0;
     memories = new MemoryStore(jdbc);

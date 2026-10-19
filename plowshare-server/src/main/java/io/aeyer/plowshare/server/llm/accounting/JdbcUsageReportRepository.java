@@ -137,10 +137,13 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
                               + " ORDER BY c.created_at,c.call_id LIMIT ?",
                           args.toArray());
                   boolean more = rows.size() > resolved.filter().limit();
+                  var selected = rows.stream().limit(resolved.filter().limit()).toList();
+                  var observations =
+                      attemptsForCalls(
+                          selected.stream().map(row -> row.get("call_id").toString()).toList());
                   var page =
                       bounded(
-                          rows.stream()
-                              .limit(resolved.filter().limit())
+                          selected.stream()
                               .map(
                                   row -> {
                                     var safe = new LinkedHashMap<String, Object>(row);
@@ -154,7 +157,8 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
                                           "preflight_observation",
                                           readJson(row.get("preflight_observation").toString()));
                                     var attempts =
-                                        attemptRows(row.get("call_id").toString(), 0, 51);
+                                        observations.getOrDefault(
+                                            row.get("call_id").toString(), List.of());
                                     if (attempts.size() > 50)
                                       safe.put(
                                           "attempt_cursor",
@@ -212,6 +216,34 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
             call,
             after,
             limit);
+    decodeCostReasons(rows);
+    return rows;
+  }
+
+  /** Per-call indexed LIMIT 51 retains each independent truncation cursor, not a global cap. */
+  private Map<String, List<Map<String, Object>>> attemptsForCalls(List<String> calls) {
+    var found = new LinkedHashMap<String, List<Map<String, Object>>>();
+    for (int start = 0; start < calls.size(); start += 128) {
+      var selected = calls.subList(start, Math.min(start + 128, calls.size()));
+      var rows =
+          jdbc.queryForList(
+              "SELECT chosen.call_id::text AS parent_call,attempt.* FROM (VALUES "
+                  + String.join(",", Collections.nCopies(selected.size(), "(?::uuid)"))
+                  + ") chosen(call_id) CROSS JOIN LATERAL (SELECT "
+                  + ATTEMPT_FIELDS
+                  + " FROM inference_attempts WHERE call_id=chosen.call_id ORDER BY attempt_number LIMIT 51) attempt"
+                  + " ORDER BY chosen.call_id,attempt.attempt_number",
+              selected.toArray());
+      decodeCostReasons(rows);
+      for (var row : rows) {
+        String call = row.remove("parent_call").toString();
+        found.computeIfAbsent(call, ignored -> new ArrayList<>()).add(row);
+      }
+    }
+    return found;
+  }
+
+  private void decodeCostReasons(List<Map<String, Object>> rows) {
     for (var row : rows)
       if (row.get("cost_reasons") != null) {
         try {
@@ -220,7 +252,6 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
           throw new IllegalStateException("invalid accounting cost coverage");
         }
       }
-    return rows;
   }
 
   public AttemptPage attempts(

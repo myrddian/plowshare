@@ -9329,6 +9329,21 @@
   {
     "boundary": "push",
     "value": {
+      "kind": "information.invalidated"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "future": "ignored"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
       "kind": "inbox.changed",
       "unread": -1
     },

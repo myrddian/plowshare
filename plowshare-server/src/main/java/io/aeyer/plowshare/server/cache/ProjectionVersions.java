@@ -25,6 +25,7 @@ public interface ProjectionVersions {
     SEARCH,
     SCHEDULES,
     RELAY,
+    TRANSCRIPTS,
     AUTHORITY
   }
 

@@ -39,46 +39,53 @@ public final class JdbcCommandInvocationsRepository implements CommandInvocation
       String arguments,
       String mode) {
     java.util.Objects.requireNonNull(command, "command");
-    new Bound(
-        account,
-        UUID.randomUUID(),
-        conversation,
-        source,
-        caller,
-        command.command(),
-        command.kind(),
-        command.name(),
-        command.hash(),
-        arguments,
-        mode,
-        "bound",
-        null);
-    jdbc.update(
-        """
+    var requested =
+        new Bound(
+            account,
+            UUID.randomUUID(),
+            conversation,
+            source,
+            caller,
+            command.command(),
+            command.kind(),
+            command.name(),
+            command.hash(),
+            arguments,
+            mode,
+            "bound",
+            null);
+    var inserted =
+        jdbc.query(
+            """
                 INSERT INTO command_invocations(account_handle, invocation, conversation, source_run, caller,
                     command, kind, name, definition_hash, arguments, mode)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (account_handle, conversation, source_run) DO NOTHING
+                RETURNING *
                 """,
-        account,
-        UUID.randomUUID(),
-        conversation,
-        source,
-        caller,
-        command.command(),
-        command.kind(),
-        command.name(),
-        command.hash(),
-        arguments,
-        mode);
+            ROW,
+            account,
+            requested.id(),
+            conversation,
+            source,
+            caller,
+            command.command(),
+            command.kind(),
+            command.name(),
+            command.hash(),
+            arguments,
+            mode);
+    // Only the conflict branch needs a fresh statement to see the competing committed receipt.
     Bound bound =
-        jdbc.query(
-                "SELECT * FROM command_invocations WHERE account_handle=? AND conversation=? AND source_run=?",
-                ROW,
-                account,
-                conversation,
-                source)
-            .getFirst();
+        inserted.isEmpty()
+            ? jdbc.query(
+                    "SELECT * FROM command_invocations WHERE account_handle=? AND conversation=? AND source_run=?",
+                    ROW,
+                    account,
+                    conversation,
+                    source)
+                .getFirst()
+            : inserted.getFirst();
     if (!bound.caller().equals(caller)
         || !bound.command().equals(command.command())
         || !bound.arguments().equals(arguments)

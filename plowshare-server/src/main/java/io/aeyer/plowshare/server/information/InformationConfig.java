@@ -61,12 +61,21 @@ public class InformationConfig {
         members,
         caches.create("manual-heads-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create(
-            "manual-head-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
+            "manual-head-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "manual-connections-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean
-  public InformationContentTypeRepository informationContentTypeRepository(JdbcTemplate jdbc) {
-    return new JdbcInformationContentTypeRepository(jdbc);
+  public InformationContentTypeRepository informationContentTypeRepository(
+      JdbcTemplate jdbc, ProjectionCaches caches) {
+    return new JdbcInformationContentTypeRepository(
+        jdbc,
+        caches.create("content-type-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "content-type-version-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "content-type-attached-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -159,6 +168,14 @@ public class InformationConfig {
     return new InformationCatalogue(
             repository, work, access, logs, authority, content, projections, transitions)
         .withAllowance(properties::ingestBudgetNow);
+  }
+
+  @Bean(destroyMethod = "close")
+  public InformationInvalidationPublisher informationInvalidationPublisher(
+      io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
+      ObjectProvider<InformationInvalidations> pushes) {
+    return new InformationInvalidationPublisher(
+        signals, () -> pushes.getIfAvailable(() -> InformationInvalidations.NONE).invalidate());
   }
 
   @Bean(destroyMethod = "close")
@@ -405,11 +422,13 @@ public class InformationConfig {
       informationQueueStart(
           InformationLifecycle lifecycle,
           InformationAcquisitions acquisitions,
-          InformationEventPublisher events) {
+          InformationEventPublisher events,
+          InformationInvalidationPublisher invalidations) {
     return ready -> {
       lifecycle.start();
       acquisitions.start();
       events.start();
+      invalidations.start();
     };
   }
 }

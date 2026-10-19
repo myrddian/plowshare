@@ -69,12 +69,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='autoTag'"
                 + " WHERE "
                 + InformationQueueSql.tagging());
-    for (var candidate : candidates) {
-      jdbc.update(
-          "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='autoTag'",
-          candidate.queued().revision(),
-          candidate.queued().generation());
-    }
+    resetCandidates(candidates, "autoTag");
     return candidates.stream().map(SweepRow::queued).toList();
   }
 
@@ -86,13 +81,25 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='tagGroups'"
                 + " WHERE "
                 + InformationQueueSql.grouping());
-    for (var candidate : candidates) {
-      jdbc.update(
-          "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='tagGroups'",
-          candidate.queued().revision(),
-          candidate.queued().generation());
-    }
+    resetCandidates(candidates, "tagGroups");
     return candidates.stream().map(SweepRow::queued).toList();
+  }
+
+  private void resetCandidates(List<SweepRow> candidates, String stage) {
+    if (candidates.isEmpty()) return;
+    var arguments = new ArrayList<Object>();
+    for (var candidate : candidates) {
+      arguments.add(candidate.queued().revision());
+      arguments.add(candidate.queued().generation());
+    }
+    arguments.add(stage);
+    // sweepCandidates already holds the exact revision/stage rows and filters live authority.
+    // Preserve each generation fence while issuing one statement for its bounded 100-row page.
+    jdbc.update(
+        "UPDATE information_steps s SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL FROM (VALUES "
+            + String.join(",", Collections.nCopies(candidates.size(), "(?::uuid,?::bigint)"))
+            + ") selected(revision,generation) WHERE s.revision_id=selected.revision AND s.generation=selected.generation AND s.stage=?",
+        arguments.toArray());
   }
 
   // A full page of withdrawn Application grants must not hide eligible work in other projects.
@@ -416,24 +423,35 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public void requireEmbeddingTargets(
       InformationLifecycle.Lease lease,
       List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
-    for (var key : targets) {
+    var chunks = new LinkedHashSet<UUID>();
+    for (var key : List.copyOf(targets)) {
       targetKey(key);
-      boolean valid =
-          switch (key.store()) {
-            case DOCUMENTS ->
-                lease.stage().equals("summary_embed")
-                    && lease.revision().toString().equals(key.id());
-            case CHUNKS ->
-                lease.stage().equals("embed")
-                    && Boolean.TRUE.equals(
-                        jdbc.queryForObject(
-                            "SELECT EXISTS(SELECT 1 FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE c.id=? AND p.document_id=?)",
-                            Boolean.class,
-                            UUID.fromString(key.id()),
-                            lease.revision()));
-            default -> false;
-          };
-      if (!valid)
+      switch (key.store()) {
+        case DOCUMENTS -> {
+          if (!lease.stage().equals("summary_embed")
+              || !lease.revision().toString().equals(key.id()))
+            throw new IllegalStateException(
+                "Embedding target is outside this preparation operation");
+        }
+        case CHUNKS -> {
+          if (!lease.stage().equals("embed"))
+            throw new IllegalStateException(
+                "Embedding target is outside this preparation operation");
+          chunks.add(UUID.fromString(key.id()));
+        }
+        default ->
+            throw new IllegalStateException(
+                "Embedding target is outside this preparation operation");
+      }
+    }
+    if (!chunks.isEmpty()) {
+      Long count =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=? AND c.id IN (SELECT value::uuid FROM jsonb_array_elements_text(?::jsonb))",
+              Long.class,
+              lease.revision(),
+              InformationJson.json(chunks));
+      if (count == null || count != chunks.size())
         throw new IllegalStateException("Embedding target is outside this preparation operation");
     }
   }
@@ -441,16 +459,18 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public void requireEmbeddingClear(
       InformationLifecycle.Lease lease,
       List<io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository.Key> targets) {
-    for (var target : targets)
-      if (Boolean.TRUE.equals(
-          jdbc.queryForObject(
-              "SELECT EXISTS(SELECT 1 FROM inference_admissions WHERE preparation_revision=? AND preparation_generation=? AND NOT preparation_published AND ?=ANY(preparation_targets))",
-              Boolean.class,
-              lease.revision(),
-              lease.generation(),
-              targetKey(target))))
-        throw new IllegalStateException(
-            "Embedding outcome is unresolved; reconcile the original attempt without replay");
+    var keys =
+        List.copyOf(targets).stream().map(JdbcInformationProcessingRepository::targetKey).toList();
+    if (keys.isEmpty()) return;
+    if (Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM inference_admissions WHERE preparation_revision=? AND preparation_generation=? AND NOT preparation_published AND preparation_targets && ARRAY(SELECT jsonb_array_elements_text(?::jsonb)))",
+            Boolean.class,
+            lease.revision(),
+            lease.generation(),
+            InformationJson.json(keys))))
+      throw new IllegalStateException(
+          "Embedding outcome is unresolved; reconcile the original attempt without replay");
   }
 
   public void bindEmbedding(

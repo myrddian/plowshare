@@ -81,7 +81,7 @@ public class UnionFrames implements FrameArea {
               said.put("state", gate.state(project).name());
               said.put("syncHidden", union.syncHidden());
               said.put("maxFileBytes", maxFileBytes);
-              said.put("openConflicts", unions.open(union.projectId()).size());
+              said.put("openConflicts", unions.openCount(union.projectId()));
               said.put("url", url(project));
               return Outcome.ok(said);
             })

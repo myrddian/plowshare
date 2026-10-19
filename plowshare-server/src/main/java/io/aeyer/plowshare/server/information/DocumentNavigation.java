@@ -121,7 +121,7 @@ public final class DocumentNavigation implements InformationNavigationService {
                   new InformationResponse.NavigationSelection(
                       repository.select(context(account, q.selection()), q.target())));
       case RelationshipList q ->
-          read(
+          readProjection(
               account,
               () ->
                   new InformationResponse.NavigationConnections(
@@ -273,9 +273,10 @@ public final class DocumentNavigation implements InformationNavigationService {
   }
 
   /**
-   * Lists and facets each authorize and assemble their projection in one repository statement. Keep
-   * the configured isolation here instead of introducing a historical snapshot that cannot share a
-   * current projection. Existing historical transactions remain historical and bypass sharing.
+   * Lists, facets and relationship pages each authorize and assemble their projection in one
+   * repository statement. Keep the configured isolation here instead of introducing a historical
+   * snapshot that cannot share a current projection. Existing historical transactions remain
+   * historical and bypass sharing.
    */
   private InformationResponse readProjection(String account, Supplier<InformationResponse> action) {
     return read(account, repository::snapshotSingleProjection, action);

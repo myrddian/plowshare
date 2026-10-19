@@ -512,14 +512,15 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     var facets =
         io.aeyer.plowshare.server.information.InformationFacetSql.facets(
             context.facets(), "r", "q");
-    var args = new ArrayList<Object>(selectionArgs(context));
-    args.add(context.corpus().documentType());
-    if (kind != null) args.add(kind);
+    var selected = InformationSelectionSql.catalogue(context, kind);
+    var content = InformationSql.content(context, "r");
+    var args = new ArrayList<Object>(selected.arguments());
+    args.addAll(content.arguments());
     args.addAll(facets.arguments());
     return new io.aeyer.plowshare.server.information.InformationSql.Filter(
-        readableSql(context)
-            + " AND r.document_type=? AND NOT r.excluded"
-            + (kind == null ? "" : " AND q.kind=?")
+        selected.sql()
+            + " AND "
+            + content.sql()
             + " AND NOT EXISTS(SELECT 1 FROM information_reports report WHERE report.revision_id=r.id AND report.status NOT IN ('draft','final')) AND "
             + facets.sql(),
         args);

@@ -6178,7 +6178,7 @@ class WebSearchPayloadDto:
     page_size: float
     query: str
 
-Notification: TypeAlias = "JobEventDto | JobDeltaDto | NotificationVariant3Dto | NotificationVariant4Dto | NotificationVariant5Dto | NotificationVariant6Dto | NotificationVariant7Dto | NotificationVariant8Dto | NotificationVariant9Dto | NotificationVariant10Dto | NotificationVariant11Dto"
+Notification: TypeAlias = "JobEventDto | JobDeltaDto | NotificationVariant3Dto | NotificationVariant4Dto | NotificationVariant5Dto | NotificationVariant6Dto | NotificationVariant7Dto | NotificationVariant8Dto | NotificationVariant9Dto | NotificationVariant10Dto | NotificationVariant11Dto | NotificationVariant12Dto"
 
 @dataclass(frozen=True, kw_only=True)
 class NotificationVariant3Dto:
@@ -6189,57 +6189,62 @@ class NotificationVariant3Dto:
 @dataclass(frozen=True, kw_only=True)
 class NotificationVariant4Dto:
     """Validated fields of the NotificationVariant4Dto protocol contract."""
+    kind: Literal["information.invalidated"]
+
+@dataclass(frozen=True, kw_only=True)
+class NotificationVariant5Dto:
+    """Validated fields of the NotificationVariant5Dto protocol contract."""
     generation: float
     kind: Literal["information.changed"]
     revision: str
     sequence: float
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant5Dto:
-    """Validated fields of the NotificationVariant5Dto protocol contract."""
+class NotificationVariant6Dto:
+    """Validated fields of the NotificationVariant6Dto protocol contract."""
     kind: Literal["orchestration.changed"]
     orchestration: str
     state: Literal["running", "failed", "cancelled", "asking", "waiting", "finished", "capped"]
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant6Dto:
-    """Validated fields of the NotificationVariant6Dto protocol contract."""
+class NotificationVariant7Dto:
+    """Validated fields of the NotificationVariant7Dto protocol contract."""
     kind: Literal["orchestration.resumed"]
     orchestration: str
     request_id: str
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant7Dto:
-    """Validated fields of the NotificationVariant7Dto protocol contract."""
+class NotificationVariant8Dto:
+    """Validated fields of the NotificationVariant8Dto protocol contract."""
     kind: Literal["orchestration.recorded"]
     root: str
     settled: float | Unset = UNSET
     through: float
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant8Dto:
-    """Validated fields of the NotificationVariant8Dto protocol contract."""
+class NotificationVariant9Dto:
+    """Validated fields of the NotificationVariant9Dto protocol contract."""
     conversation: str
     kind: Literal["todos.changed"]
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant9Dto:
-    """Validated fields of the NotificationVariant9Dto protocol contract."""
+class NotificationVariant10Dto:
+    """Validated fields of the NotificationVariant10Dto protocol contract."""
     conversation: str
     kind: Literal["conversation.appended"]
     through: float
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant10Dto:
-    """Validated fields of the NotificationVariant10Dto protocol contract."""
+class NotificationVariant11Dto:
+    """Validated fields of the NotificationVariant11Dto protocol contract."""
     report: UsageReportDto
     revision: float
     subscription: str
     type_: Literal["usage.updated"]
 
 @dataclass(frozen=True, kw_only=True)
-class NotificationVariant11Dto:
-    """Validated fields of the NotificationVariant11Dto protocol contract."""
+class NotificationVariant12Dto:
+    """Validated fields of the NotificationVariant12Dto protocol contract."""
     code: Literal["BAD_REQUEST"]
     subscription: str
     type_: Literal["usage.closed"]
@@ -9439,12 +9444,13 @@ _MODELS = {
     "shape1238": NotificationVariant3Dto,
     "shape1240": NotificationVariant4Dto,
     "shape1242": NotificationVariant5Dto,
-    "shape1249": NotificationVariant6Dto,
+    "shape1244": NotificationVariant6Dto,
     "shape1251": NotificationVariant7Dto,
     "shape1253": NotificationVariant8Dto,
     "shape1255": NotificationVariant9Dto,
     "shape1257": NotificationVariant10Dto,
     "shape1259": NotificationVariant11Dto,
+    "shape1261": NotificationVariant12Dto,
 }
 
 _REQUESTS = {
@@ -10412,14 +10418,15 @@ _FIELDS = {
     WebFetchPayloadDto: {"offset": "offset", "url": "url"},
     WebSearchPayloadDto: {"max": "max", "page": "page", "pageSize": "page_size", "query": "query"},
     NotificationVariant3Dto: {"kind": "kind", "unread": "unread"},
-    NotificationVariant4Dto: {"generation": "generation", "kind": "kind", "revision": "revision", "sequence": "sequence"},
-    NotificationVariant5Dto: {"kind": "kind", "orchestration": "orchestration", "state": "state"},
-    NotificationVariant6Dto: {"kind": "kind", "orchestration": "orchestration", "requestId": "request_id"},
-    NotificationVariant7Dto: {"kind": "kind", "root": "root", "settled": "settled", "through": "through"},
-    NotificationVariant8Dto: {"conversation": "conversation", "kind": "kind"},
-    NotificationVariant9Dto: {"conversation": "conversation", "kind": "kind", "through": "through"},
-    NotificationVariant10Dto: {"report": "report", "revision": "revision", "subscription": "subscription", "type": "type_"},
-    NotificationVariant11Dto: {"code": "code", "subscription": "subscription", "type": "type_"},
+    NotificationVariant4Dto: {"kind": "kind"},
+    NotificationVariant5Dto: {"generation": "generation", "kind": "kind", "revision": "revision", "sequence": "sequence"},
+    NotificationVariant6Dto: {"kind": "kind", "orchestration": "orchestration", "state": "state"},
+    NotificationVariant7Dto: {"kind": "kind", "orchestration": "orchestration", "requestId": "request_id"},
+    NotificationVariant8Dto: {"kind": "kind", "root": "root", "settled": "settled", "through": "through"},
+    NotificationVariant9Dto: {"conversation": "conversation", "kind": "kind"},
+    NotificationVariant10Dto: {"conversation": "conversation", "kind": "kind", "through": "through"},
+    NotificationVariant11Dto: {"report": "report", "revision": "revision", "subscription": "subscription", "type": "type_"},
+    NotificationVariant12Dto: {"code": "code", "subscription": "subscription", "type": "type_"},
     ActingContextCloseRequest: {"context": "context"},
     ActingContextOpenRequest: {"application": "application", "grant": "grant", "proof": "proof"},
     ActingTurnReceiptRequest: {"requestId": "request_id"},

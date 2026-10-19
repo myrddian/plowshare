@@ -54,53 +54,79 @@ public final class DigestStore {
 
   /** Completed, unfolded turns are source leaves even if no lesson was extracted. */
   public void captureUnfolded(Home home) {
+    captureUnfolded(home, null);
+  }
+
+  private record CapturedTurn(String conversation, int ordinal, String excerpt) {}
+
+  private record GroupingState(String id, long revision, boolean stale) {}
+
+  private void captureUnfolded(Home home, String onlyConversation) {
     transactions.inTransaction(
         () -> {
-          List<String> conversations =
-              jdbc.queryForList(
-                  "SELECT c.id FROM conversations c WHERE "
-                      + (informationProtected ? "information_log_readable(c.id,NULL) AND " : "")
-                      + "c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) AND c.origin NOT IN ('curator','memory') "
-                      + "ORDER BY c.id",
-                  String.class,
-                  ProjectIds.toRead(jdbc, home));
-          for (String conversation : conversations) {
-            List<Integer> turns =
-                jdbc.queryForList(
-                    "SELECT DISTINCT e.turn_ordinal FROM entries e "
+          // Resolve the tier once inside this transaction. Each bounded cohort obtains current
+          // source
+          // eligibility and aggregates excerpts together; no conversation/turn N+1 read is needed.
+          Long project = ProjectIds.toRead(jdbc, home);
+          String afterConversation = "";
+          int afterTurn = 0;
+          while (true) {
+            var bound = new java.util.ArrayList<Object>();
+            bound.add(project);
+            if (onlyConversation != null) bound.add(onlyConversation);
+            bound.add(afterConversation);
+            bound.add(afterConversation);
+            bound.add(afterTurn);
+            var turns =
+                jdbc.query(
+                    "WITH source_turns AS MATERIALIZED (SELECT DISTINCT e.conversation_id,e.turn_ordinal "
+                        + "FROM conversations c JOIN entries e ON e.conversation_id=c.id "
                         + "JOIN turns t ON t.conversation_id=e.conversation_id AND t.ordinal=e.turn_ordinal "
-                        + "WHERE e.conversation_id=? AND e.superseded_by IS NULL AND e.kind='utterance' "
+                        + "WHERE "
+                        + (informationProtected ? "information_log_readable(c.id,NULL) AND " : "")
+                        + "c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) "
+                        + "AND c.origin NOT IN ('curator','memory') "
+                        + (onlyConversation == null ? "" : "AND c.id=? ")
+                        + "AND (c.id>? OR (c.id=? AND e.turn_ordinal>?)) "
+                        + "AND e.superseded_by IS NULL AND e.kind='utterance' "
                         + "AND NOT EXISTS(SELECT 1 FROM digest_spans s WHERE s.conversation_id=e.conversation_id "
-                        + "AND e.turn_ordinal>s.since_turn AND e.turn_ordinal<=s.through_turn)",
-                    Integer.class,
-                    conversation);
-            for (int turn : turns) {
+                        + "AND e.turn_ordinal>s.since_turn AND e.turn_ordinal<=s.through_turn) "
+                        + "ORDER BY e.conversation_id,e.turn_ordinal LIMIT 64) "
+                        + "SELECT s.conversation_id,s.turn_ordinal,"
+                        + "string_agg(left(e.content,4000), E'\\n' ORDER BY e.ordinal) AS excerpt "
+                        + "FROM source_turns s LEFT JOIN entries e ON e.conversation_id=s.conversation_id "
+                        + "AND e.turn_ordinal=s.turn_ordinal AND e.kind IN ('utterance','answer') "
+                        + "AND e.content IS NOT NULL GROUP BY s.conversation_id,s.turn_ordinal "
+                        + "ORDER BY s.conversation_id,s.turn_ordinal",
+                    (row, number) ->
+                        new CapturedTurn(
+                            row.getString("conversation_id"),
+                            row.getInt("turn_ordinal"),
+                            row.getString("excerpt")),
+                    bound.toArray());
+            for (var turn : turns) {
+              if (turn.excerpt() == null || turn.excerpt().isBlank()) continue;
               String id =
                   "dig_t_"
                       + UUID.nameUUIDFromBytes(
-                          (conversation + ":" + turn)
+                          (turn.conversation() + ":" + turn.ordinal())
                               .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-              String excerpt =
-                  jdbc.queryForObject(
-                      "SELECT string_agg(left(content,4000), E'\\n' ORDER BY ordinal) "
-                          + "FROM entries WHERE conversation_id=? AND turn_ordinal=? AND kind IN ('utterance','answer') "
-                          + "AND content IS NOT NULL",
-                      String.class,
-                      conversation,
-                      turn);
-              if (excerpt == null || excerpt.isBlank()) continue;
               jdbc.update(
                   "INSERT INTO digests(id,project_id,depth,summary) VALUES(?,?,0,?) ON CONFLICT DO NOTHING",
                   id,
-                  ProjectIds.toRead(jdbc, home),
-                  "Unfolded turn excerpts (not a lesson):\n" + excerpt);
+                  project,
+                  "Unfolded turn excerpts (not a lesson):\n" + turn.excerpt());
               jdbc.update(
                   "INSERT INTO digest_spans VALUES(?,?,?,?,NULL) ON CONFLICT DO NOTHING",
                   id,
-                  conversation,
-                  turn - 1,
-                  turn);
+                  turn.conversation(),
+                  turn.ordinal() - 1,
+                  turn.ordinal());
             }
+            if (turns.size() < 64) break;
+            var last = turns.getLast();
+            afterConversation = last.conversation();
+            afterTurn = last.ordinal();
           }
           return null;
         });
@@ -158,7 +184,7 @@ public final class DigestStore {
   public ArchivedSpan archiveFor(Home home, Span span) {
     return jdbc
         .query(
-            "SELECT d.*,s.summary_ordinal FROM digest_spans s JOIN digests d ON d.id=s.digest_id "
+            "SELECT d.id,d.depth,d.summary,d.stale_at,d.revision,s.summary_ordinal FROM digest_spans s JOIN digests d ON d.id=s.digest_id "
                 + "WHERE "
                 + safe("d.")
                 + "s.conversation_id=? AND s.since_turn<=? AND s.through_turn>=? "
@@ -181,7 +207,7 @@ public final class DigestStore {
 
   public List<Node> roots(Home home) {
     return jdbc.query(
-        "SELECT d.* FROM digests d WHERE "
+        "SELECT d.id,d.depth,d.summary,d.stale_at,d.revision FROM digests d WHERE "
             + safe("d.")
             + "d.project_id IS NOT DISTINCT FROM CAST(? AS bigint) "
             + "AND NOT EXISTS(SELECT 1 FROM digest_children e WHERE e.child_id=d.id) ORDER BY d.id",
@@ -192,7 +218,7 @@ public final class DigestStore {
   public Node get(Home home, String id) {
     return jdbc
         .query(
-            "SELECT * FROM digests WHERE "
+            "SELECT id,depth,summary,stale_at,revision FROM digests WHERE "
                 + safe("")
                 + "id=? AND project_id IS NOT DISTINCT FROM CAST(? AS bigint)",
             NODE,
@@ -227,7 +253,7 @@ public final class DigestStore {
   public List<Node> children(Home home, String id) {
     get(home, id);
     return jdbc.query(
-        "SELECT d.* FROM digests d JOIN digest_children e ON d.id=e.child_id "
+        "SELECT d.id,d.depth,d.summary,d.stale_at,d.revision FROM digests d JOIN digest_children e ON d.id=e.child_id "
             + "WHERE "
             + safe("d.")
             + "e.parent_id=? ORDER BY d.id",
@@ -237,7 +263,7 @@ public final class DigestStore {
 
   public List<Node> stale(Home home) {
     return jdbc.query(
-        "SELECT * FROM digests WHERE "
+        "SELECT id,depth,summary,stale_at,revision FROM digests WHERE "
             + safe("")
             + "project_id IS NOT DISTINCT FROM CAST(? AS bigint) "
             + "AND stale_at IS NOT NULL ORDER BY depth,id",
@@ -277,7 +303,7 @@ public final class DigestStore {
   public ArchivedSpan archiveFor(Span span) {
     return jdbc
         .query(
-            "SELECT d.*,s.summary_ordinal FROM digest_spans s JOIN digests d ON d.id=s.digest_id "
+            "SELECT d.id,d.depth,d.summary,d.stale_at,d.revision,s.summary_ordinal FROM digest_spans s JOIN digests d ON d.id=s.digest_id "
                 + "WHERE "
                 + safe("d.")
                 + "s.conversation_id=? AND s.since_turn<=? AND s.through_turn>=? "
@@ -319,7 +345,7 @@ public final class DigestStore {
                 + "WHERE c.id=? AND c.origin NOT IN ('curator','memory')",
             (r, n) -> r.getString(1) == null ? Home.global() : Home.of(r.getString(1)),
             conversation)
-        .forEach(this::captureUnfolded);
+        .forEach(home -> captureUnfolded(home, conversation));
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT NOT EXISTS(SELECT 1 FROM entries e "
@@ -335,28 +361,55 @@ public final class DigestStore {
       throw new IllegalArgumentException("A singleton is carried, not summarised");
     return transactions.inTransaction(
         () -> {
-          // Stable lock order also serialises competing passes in different server processes.
-          for (Node member :
-              members.stream().sorted(java.util.Comparator.comparing(Node::id)).toList()) {
+          // Retain the lock phase and a separate fresh post-wait read: collapsing them into
+          // one statement would reuse authority/source facts from before a lock wait.
+          var ordered = members.stream().sorted(java.util.Comparator.comparing(Node::id)).toList();
+          for (Node member : ordered)
             jdbc.queryForList(
                 "SELECT id FROM digests WHERE id=? FOR UPDATE", String.class, member.id());
-            Node current = get(home, member.id());
-            if (current.revision() != member.revision() || current.staleAt() != null)
-              throw new ValidationException("Digest changed during grouping; retry the pass");
+          for (int start = 0; start < ordered.size(); start += 64) {
+            var cohort = ordered.subList(start, Math.min(ordered.size(), start + 64));
+            var bound = new java.util.ArrayList<Object>();
+            for (var member : cohort) bound.add(member.id());
+            bound.add(home.project());
+            bound.add(home.project());
+            var current =
+                jdbc.query(
+                    "SELECT d.id,d.revision,d.stale_at IS NOT NULL AS stale "
+                        + "FROM digests d LEFT JOIN projects p ON p.id=d.project_id WHERE d.id IN ("
+                        + String.join(",", java.util.Collections.nCopies(cohort.size(), "?"))
+                        + ") AND "
+                        + safe("d.")
+                        + "(p.name=? OR (d.project_id IS NULL AND CAST(? AS text) IS NULL))",
+                    (row, number) ->
+                        new GroupingState(
+                            row.getString("id"), row.getLong("revision"), row.getBoolean("stale")),
+                    bound.toArray());
+            var byId = new java.util.HashMap<String, GroupingState>();
+            for (var node : current) byId.put(node.id(), node);
+            for (var member : cohort) {
+              var node = byId.get(member.id());
+              if (node == null)
+                throw new ValidationException("No digest " + member.id() + " in this home");
+              if (node.revision() != member.revision() || node.stale())
+                throw new ValidationException("Digest changed during grouping; retry the pass");
+            }
           }
           String id = "dig_" + UUID.randomUUID();
           int depth = members.stream().mapToInt(Node::depth).max().orElseThrow() + 1;
-          jdbc.update(
-              "INSERT INTO digests(id,project_id,depth,summary,embedding,embedding_generation) VALUES(?,?,?,?,CAST(? AS vector),?)",
-              id,
-              ProjectIds.toWrite(jdbc, home),
-              depth,
-              summary,
-              vector(embedding),
-              embeddingGeneration);
+          Node grouped =
+              jdbc.queryForObject(
+                  "INSERT INTO digests(id,project_id,depth,summary,embedding,embedding_generation) VALUES(?,?,?,?,CAST(? AS vector),?) RETURNING id,depth,summary,stale_at,revision",
+                  NODE,
+                  id,
+                  ProjectIds.toWrite(jdbc, home),
+                  depth,
+                  summary,
+                  vector(embedding),
+                  embeddingGeneration);
           for (Node member : members)
             jdbc.update("INSERT INTO digest_children VALUES(?,?)", id, member.id());
-          return get(home, id);
+          return java.util.Objects.requireNonNull(grouped, "group insert returned no DTO");
         });
   }
 

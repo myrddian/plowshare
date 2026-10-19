@@ -88,6 +88,22 @@ public interface AcquisitionRepository {
     return submit(context, request, fingerprint, url, name, session, total, corpus);
   }
 
+  /** Inserted/reconciled receipt with database defaults; the service still admits its scope. */
+  default Ticket submitRetained(
+      InformationContext context,
+      UUID request,
+      String fingerprint,
+      String url,
+      String name,
+      String session,
+      int total,
+      String corpus,
+      Intent intent) {
+    return owned(
+        context.account(),
+        submit(context, request, fingerprint, url, name, session, total, corpus, intent));
+  }
+
   record Retained(UUID resource, String sourceUri) {}
 
   UUID submit(

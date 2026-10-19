@@ -136,6 +136,73 @@ class JdbcRelayToolRepositoryTest {
   }
 
   @Test
+  void suppliedBindingLeaseKeepsCurrentGenerationAndProjectWithdrawalFences() {
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+    var scopes = new JdbcHostedToolScopeRepository(jdbc, json);
+    String owner = "hosted-reuse-owner";
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash) VALUES(?,'fixture') ON CONFLICT DO NOTHING",
+        owner);
+    long project =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name='tool-fixture'", Long.class);
+    var connection = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO provider_connections(id,project_id,revision,enabled,definition) VALUES(?,?,?,true,'{}'::jsonb)",
+        connection,
+        project,
+        UUID.randomUUID());
+    var definition =
+        new io.aeyer.plowshare.protocol.HostedToolScopes.Definition(
+            "scans",
+            "scanner",
+            "network_",
+            List.of("*"),
+            List.of("coordinator"),
+            30,
+            "configuration",
+            connection,
+            null,
+            HostedScopeFixture.EXECUTOR);
+    var id = UUID.randomUUID();
+    var route =
+        new io.aeyer.plowshare.protocol.ToolScopes.Connection(
+            "tool-fixture",
+            definition.scope(),
+            definition.provider(),
+            io.aeyer.plowshare.protocol.HostedToolScopes.route(id, 1),
+            definition.executor(),
+            definition.prefix(),
+            definition.grants(),
+            definition.agents(),
+            definition.leaseSeconds());
+    var binding =
+        new io.aeyer.plowshare.protocol.HostedToolScopes.Binding(
+            id, "tool-fixture", owner, 1, true, false, false, definition, owner, route);
+    scopes.save(binding, null);
+    var registration =
+        new io.aeyer.plowshare.protocol.HostedToolScopes.Registration(
+            binding,
+            UUID.randomUUID(),
+            NOW.atOffset(java.time.ZoneOffset.UTC),
+            NOW.plusSeconds(30).atOffset(java.time.ZoneOffset.UTC));
+    scopes.lease(
+        new HostedToolScopeRepository.Lease(
+            registration, "session", "socket", UUID.randomUUID(), 7));
+    var retained = scopes.leases(List.of(binding));
+    assertEquals(1, retained.size());
+    assertSame(binding, retained.getFirst().registration().binding());
+    assertEquals(7, retained.getFirst().catalogueAfter());
+    jdbc.update("UPDATE hosted_tool_scopes SET generation=2 WHERE id=?", id);
+    assertTrue(
+        scopes.lease(binding).isEmpty(),
+        "A stale typed definition cannot adopt a newer generation");
+    jdbc.update("DELETE FROM projects WHERE id=?", project);
+    assertTrue(
+        scopes.leases(List.of(binding)).isEmpty(),
+        "Project withdrawal fences the retained snapshot");
+  }
+
+  @Test
   void large_schema_definitions_survive_storage_completion_and_recovery() {
     var fields =
         java.util.stream.IntStream.range(0, 40)

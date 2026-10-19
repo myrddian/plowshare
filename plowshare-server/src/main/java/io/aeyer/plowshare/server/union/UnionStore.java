@@ -164,6 +164,16 @@ public final class UnionStore {
     }
   }
 
+  /** Status needs only cardinality, not retained path/blob/author payloads. */
+  public int openCount(long projectId) {
+    return Math.toIntExact(
+        Objects.requireNonNull(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM union_conflicts WHERE project_id=? AND resolved_at IS NULL",
+                Long.class,
+                projectId)));
+  }
+
   public List<Conflict> open(long projectId) {
     return jdbc.query(
         "SELECT "

@@ -50,7 +50,17 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
           Instant now = now();
           var rows = issued(scope, topic.name(), key.subscriber());
           Issued old = rows.isEmpty() ? null : rows.getFirst();
-          var read = relay.read(key, request.limit() == null ? 100 : request.limit());
+          // A retry must recover its complete retained boundary even if the caller now asks for
+          // fewer rows. Decide before reading so that retry does not discard and reload a page.
+          boolean ownOutstanding =
+              old != null
+                  && !old.acknowledged()
+                  && old.until().isAfter(now)
+                  && old.account().equals(account)
+                  && old.consumer().equals(request.consumerId());
+          var read =
+              relay.read(
+                  key, ownOutstanding ? 100 : (request.limit() == null ? 100 : request.limit()));
           if (old != null && !old.acknowledged() && old.until().isAfter(now)) {
             if (!old.account().equals(account) || !old.consumer().equals(request.consumerId()))
               return batch(
@@ -64,7 +74,6 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
                   List.of());
             // Repeat the same token and exact boundary. A smaller later limit must not hide records
             // covered by that token. A new retention gap invalidates the original acknowledgement.
-            read = relay.read(key, 100);
             if (read.gap().isEmpty() && old.gap() == null) {
               var events =
                   read.publications().stream()

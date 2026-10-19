@@ -1174,6 +1174,36 @@ class BoardMessagingTest {
   }
 
   @Test
+  void delivery_page_batches_status_instances_jobs_and_final_reply_with_existing_paging()
+      throws Exception {
+    JsonNode request = request(true);
+    String original = request.path("message").asText();
+    String sender = request.path("from").asText();
+    var firing = wake(request);
+    assertTrue(fixture.firings.claimStart(firing.id(), fixture.clock.get()));
+    fixture.firings.startedAs(firing.id(), "running-job");
+    var before = messages.deliveries(sender, "enzo", 0, 10);
+    assertEquals(List.of(messages.delivery(original, "enzo")), before);
+    assertEquals("running", before.getFirst().state());
+    assertEquals("running-job", before.getFirst().job());
+    var reply =
+        send(
+            recipient(request),
+            "{\"reply_to\":\"" + original + "\",\"body\":\"Reviewed\",\"final\":true}",
+            "reply");
+    var page = messages.deliveries(sender, "enzo", 0, 10);
+    assertEquals(2, page.size());
+    for (var row : page) assertEquals(messages.delivery(row.message(), "enzo"), row);
+    var requestRow =
+        page.stream().filter(row -> row.message().equals(original)).findFirst().orElseThrow();
+    assertEquals(reply.path("message").asText(), requestRow.reply());
+    assertEquals(page.subList(1, 2), messages.deliveries(sender, "enzo", 1, 1));
+    assertThrows(Board.Refused.class, () -> messages.deliveries(sender, "another-account", 0, 10));
+    messages.useLogVisibility((conversation, account) -> false);
+    assertThrows(Board.Refused.class, () -> messages.deliveries(sender, "enzo", 0, 10));
+  }
+
+  @Test
   void explicit_final_reply_satisfies_the_request_and_repeated_completion_cannot_add_a_fallback()
       throws Exception {
     JsonNode request = request(true);

@@ -653,6 +653,13 @@ class ApplicationDeploymentPersistenceTest {
     var credential = actingTokens().issue(caller, issue);
     var repository = actingRepository();
     assertEquals(credential.token(), repository.token(credential.token().id()).orElseThrow());
+    assertEquals(List.of(credential.token()), repository.tokens("deployer"));
+    assertTrue(repository.tokens("foreign").isEmpty());
+    assertEquals(
+        credential.token(),
+        repository
+            .proof(io.aeyer.plowshare.server.auth.Tokens.hash(credential.credential()))
+            .orElseThrow());
     var rotated =
         identities.issue(
             "deployer",

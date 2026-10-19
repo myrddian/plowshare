@@ -1,5 +1,5 @@
 import { demoState } from '../demo.ts';
-import type { DesktopApi } from '../shared.ts';
+import type { DesktopApi, DesktopState } from '../shared.ts';
 import type { InformationFacetCounts } from 'plowshare-client-ts/operations/information-replies';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import { installInformation } from './information.ts';
@@ -10,17 +10,23 @@ const state = {
   connected: true,
   base: 'https://fixture.invalid',
   handle: 'fixture',
+  informationRevision: 0,
+  informationConnection: 0,
 };
 const pending: {
   resolve: (value: InformationFacetCounts) => void;
   reject: (reason: Error) => void;
 }[] = [];
 const requests: string[] = [];
+let listener: ((snapshot: DesktopState) => void) | undefined;
+let refused = false;
 const api: DesktopApi = {
   async request(request) {
     if (request.action !== 'information')
       throw new Error('Unexpected fixture action');
     requests.push(request.operation);
+    if (refused && ['list', 'facets'].includes(request.operation))
+      throw new Error('Selection permission revoked');
     if (request.operation === 'list') {
       const collection =
         request.scope.kind === 'project'
@@ -52,8 +58,11 @@ const api: DesktopApi = {
     }
     throw new Error('Optional fixture capability unavailable');
   },
-  subscribe() {
-    return () => undefined;
+  subscribe(next) {
+    listener = next;
+    return () => {
+      listener = undefined;
+    };
   },
 };
 const host = document.querySelector<HTMLElement>('#collection');
@@ -92,6 +101,18 @@ const facetValue = (total: number): InformationFacetCounts => ({
 Object.assign(window, {
   informationCollectionFixture: {
     requests,
+    pendingCount() {
+      return pending.length;
+    },
+    hint() {
+      state.informationRevision++;
+      listener?.(state);
+    },
+    revoke() {
+      refused = true;
+      state.informationRevision++;
+      listener?.(state);
+    },
     open() {
       panel.open();
       host.querySelector<HTMLDetailsElement>('[data-faceting]')!.open = true;

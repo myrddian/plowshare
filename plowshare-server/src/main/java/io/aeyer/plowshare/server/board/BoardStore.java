@@ -436,8 +436,8 @@ public class BoardStore {
                 Objects.requireNonNull(jdbc.getDataSource())));
     transaction.executeWithoutResult(
         status -> {
-          lockTopic(root);
-          BoardTopic topic = topic(root).orElseThrow();
+          // lockTopic already returns the snapshot protected by the retained row lock.
+          BoardTopic topic = lockTopic(root).orElseThrow();
           if (topic.isClosed()
               || topic.potTotal() == null
               || total <= topic.potTotal()
@@ -567,30 +567,35 @@ public class BoardStore {
     }
     Instant at = clock.get();
     String id = MemoryIds.mint(MESSAGE_PREFIX, at);
-    jdbc.update(
-        connection -> {
-          PreparedStatement ps =
-              connection.prepareStatement(
-                  "INSERT INTO board_messages (id,"
-                      + " topic, reply_to, author_kind, author, conversation, entry, kind, title,"
-                      + " body, alert, mentions, posted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                      + " ?, ?)");
-          ps.setString(1, id);
-          ps.setString(2, message.topic());
-          ps.setString(3, message.replyTo());
-          ps.setString(4, message.authorKind());
-          ps.setString(5, message.author());
-          ps.setString(6, message.conversation());
-          ps.setObject(7, message.entry(), Types.INTEGER);
-          ps.setString(8, message.kind());
-          ps.setString(9, message.title());
-          ps.setString(10, message.body());
-          ps.setBoolean(11, message.alert());
-          ps.setArray(12, connection.createArrayOf("text", message.mentions().toArray()));
-          ps.setObject(13, utc(at));
-          return ps;
-        });
-    return message(id).orElseThrow();
+    var inserted =
+        jdbc.query(
+            connection -> {
+              PreparedStatement ps =
+                  connection.prepareStatement(
+                      "INSERT INTO board_messages (id,"
+                          + " topic, reply_to, author_kind, author, conversation, entry, kind, title,"
+                          + " body, alert, mentions, posted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                          + " ?, ?) RETURNING "
+                          + MESSAGE_COLUMNS);
+              ps.setString(1, id);
+              ps.setString(2, message.topic());
+              ps.setString(3, message.replyTo());
+              ps.setString(4, message.authorKind());
+              ps.setString(5, message.author());
+              ps.setString(6, message.conversation());
+              ps.setObject(7, message.entry(), Types.INTEGER);
+              ps.setString(8, message.kind());
+              ps.setString(9, message.title());
+              ps.setString(10, message.body());
+              ps.setBoolean(11, message.alert());
+              ps.setArray(12, connection.createArrayOf("text", message.mentions().toArray()));
+              ps.setObject(13, utc(at));
+              return ps;
+            },
+            BoardStore::messageRow);
+    if (inserted.size() != 1)
+      throw new IllegalStateException("board message insert returned no row");
+    return inserted.getFirst();
   }
 
   public Optional<BoardMessage> message(String id) {

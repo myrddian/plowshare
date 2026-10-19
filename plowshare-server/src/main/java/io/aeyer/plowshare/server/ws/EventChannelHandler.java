@@ -170,6 +170,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 public final class EventChannelHandler extends TextWebSocketHandler
     implements JobEvents,
         AccountPushes,
+        io.aeyer.plowshare.server.information.InformationInvalidations,
         SpeakerHandles,
         SessionPushes,
         org.springframework.web.socket.SubProtocolCapable {
@@ -876,6 +877,17 @@ public final class EventChannelHandler extends TextWebSocketHandler
     }
   }
 
+  /** Only authenticated account sockets receive this fixed, content-free refresh hint. */
+  @Override
+  public void invalidate() {
+    for (var sockets : byHandle.values()) {
+      for (var socket : sockets) {
+        if (socket.getAttributes().get(DELIVERY) instanceof Delivery live)
+          live.informationInvalidated();
+      }
+    }
+  }
+
   /**
    * Which account {@code session}'s listener socket is signed in as, or empty when the session has
    * no listener or that listener carries no handle.
@@ -1005,6 +1017,16 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     private final BlockingQueue<Pending> tokens = new ArrayBlockingQueue<>(STREAMING);
 
+    /** One coalesced refresh hint cannot consume lifecycle/reply or subscription capacity. */
+    private final BlockingQueue<Pending> informationHints = new ArrayBlockingQueue<>(1);
+
+    void informationInvalidated() {
+      if (running
+          && informationHints.offer(
+              new Pushed(new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated())))
+        waiting.release();
+    }
+
     /**
      * How many items are waiting across both queues.
      *
@@ -1099,6 +1121,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
       if (requests != null) requests.close();
       transport.close();
       whenStopped.run();
+      informationHints.clear();
       synchronized (this) {
         snapshots.clear();
       }
@@ -1212,6 +1235,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
     }
 
     private void drain() {
+      // Writer-thread confined: two lower-priority lanes alternate when both stay busy. Neither
+      // continuous invalidations nor a long token stream can indefinitely starve the other.
+      boolean hintNext = true;
       while (running) {
         try {
           waiting.acquire();
@@ -1228,7 +1254,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
           next = nextSnapshot();
         }
         if (next == null) {
-          next = tokens.poll();
+          boolean servedHint = hintNext;
+          next = servedHint ? informationHints.poll() : tokens.poll();
+          if (next == null) {
+            servedHint = !servedHint;
+            next = servedHint ? informationHints.poll() : tokens.poll();
+          }
+          if (next != null) hintNext = !servedHint;
         }
         if (next == null) {
           // Unreachable on the argument above, and written rather

@@ -85,7 +85,7 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
   public Retained release(String project, UUID revision) {
     return jdbc
         .query(
-            "SELECT s.* FROM application_releases s JOIN projects p ON p.id = s.project_id "
+            "SELECT s.revision,s.digest,s.file_count,s.destination,s.placement FROM application_releases s JOIN projects p ON p.id = s.project_id "
                 + "WHERE p.name = ? AND s.revision = ?",
             (row, n) ->
                 new Retained(
@@ -124,8 +124,10 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
             throw new CallerFault(
                 "Application revision changed; read deployment status before submitting a new request");
           var release = mutation.release();
-          if (active != null) {
-            var previous = release(mutation.project(), active);
+          // The project row lock retains this exact active release throughout activation. Reuse
+          // its immutable placement instead of resolving and decoding the retained row twice.
+          Retained previous = active == null ? null : release(mutation.project(), active);
+          if (previous != null) {
             if (!previous.destination().equals(release.destination())
                 || !previous
                     .placement()
@@ -140,7 +142,7 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
           projects.activateDeployment(
               mutation.project(),
               release.placement(),
-              active == null ? null : release(mutation.project(), active).placement(),
+              previous == null ? null : previous.placement(),
               mutation.verifiedRoot(),
               account);
           if (mutation.install()) {

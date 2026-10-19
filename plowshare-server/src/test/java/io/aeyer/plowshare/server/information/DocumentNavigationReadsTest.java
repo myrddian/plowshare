@@ -69,6 +69,26 @@ class DocumentNavigationReadsTest {
   }
 
   @Test
+  void relationshipPagesUseTheSingleProjectionBoundaryAndLiveSelectionAdmission() {
+    UUID resource = UUID.randomUUID();
+    when(members.role("research", "reader")).thenReturn(Optional.of(ProjectRole.VIEWER));
+    when(repository.relationships(context, resource, "outgoing", "cites", null, 20, 0))
+        .thenReturn(new Connections(List.of(), 20, 0));
+
+    service.execute(
+        "reader",
+        new InformationRequest.RelationshipList(
+            project, resource, "outgoing", "cites", null, 20, 0));
+
+    var order = inOrder(repository, members);
+    order.verify(repository).snapshotSingleProjection();
+    order.verify(repository).requireActive("reader");
+    order.verify(members).role("research", "reader");
+    order.verify(repository).relationships(context, resource, "outgoing", "cites", null, 20, 0);
+    verifyNoMoreInteractions(repository, members);
+  }
+
+  @Test
   void singleProjectionResourceDenialAfterAdmissionPropagatesWithoutReplay() {
     when(members.role("research", "reader")).thenReturn(Optional.of(ProjectRole.VIEWER));
     var denied = new NotFoundFault("authority changed before projection");

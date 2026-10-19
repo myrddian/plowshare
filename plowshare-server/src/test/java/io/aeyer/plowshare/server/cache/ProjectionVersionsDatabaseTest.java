@@ -521,6 +521,33 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
+  void transcriptDomainFencesNoOpsRollbackTruncateAndCommitNotifications() throws Exception {
+    var domains = Set.of(ProjectionVersions.Domain.TRANSCRIPTS);
+    var baseline = versions.capture(domains).orElseThrow();
+    jdbc.update("UPDATE entries SET ordinal=ordinal WHERE false");
+    assertTrue(versions.current(baseline), "An empty write must not invalidate transcript DTOs");
+    var notifications = new PostgresProjectionNotificationSource(source());
+    var listener = notifications.open();
+    try (var writer = transaction()) {
+      listener.listen();
+      view(writer).execute("TRUNCATE entries CASCADE");
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+      writer.rollback();
+      assertFalse(versions.current(baseline), "Rolled back sequence allocations are conservative");
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+      var afterRollback = versions.capture(domains).orElseThrow();
+      view(writer).execute("TRUNCATE entries CASCADE");
+      writer.commit();
+      assertFalse(versions.current(afterRollback));
+      assertTrue(
+          listener.poll(Duration.ofSeconds(2)).contains(ProjectionVersions.Domain.TRANSCRIPTS));
+      assertTrue(versions.current(versions.capture(domains).orElseThrow()));
+    } finally {
+      listener.close();
+    }
+  }
+
+  @Test
   void notificationsRequireCommitAndRollbackEmitsNoHintOnTheIndependentListener() throws Exception {
     var notifications = new PostgresProjectionNotificationSource(source());
     var listener = notifications.open();

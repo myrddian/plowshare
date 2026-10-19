@@ -12,11 +12,11 @@ public interface InformationNavigationRepository {
   void snapshot();
 
   /**
-   * First statement in a fresh read transaction for one documents/facets projection only. Mark the
-   * transaction read-only without changing its configured isolation. Ordinary READ COMMITTED
-   * transactions may share current projections; an ambient historical snapshot remains historical
-   * and must bypass sharing. Multi-query selection, relationship and policy reads retain {@link
-   * #snapshot()}.
+   * First statement in a fresh read transaction for one documents/facets/relationships projection
+   * only. Mark the transaction read-only without changing its configured isolation. Ordinary READ
+   * COMMITTED transactions may share current projections; an ambient historical snapshot remains
+   * historical and must bypass sharing. Multi-query selection, relationship and policy reads retain
+   * {@link #snapshot()}.
    */
   void snapshotSingleProjection();
 

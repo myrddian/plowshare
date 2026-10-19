@@ -17,6 +17,7 @@ import type { InformationFilter } from 'plowshare-client-ts/operations/informati
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { background } from './events.ts';
 import { InformationCollectionReads } from './information-collection.ts';
+import { InformationRefresh } from './information-refresh.ts';
 import { decodeInformationCall } from 'plowshare-client-ts/operations/information';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import type { Replies } from 'plowshare-client-ts/operations/replies';
@@ -114,6 +115,7 @@ export function installInformation(
     busy = false,
     epoch = 0;
   let reloading = false,
+    reloadRequested = false,
     resetGroupDraft = false;
   let filters: InformationFilter = {};
   const collectionReads = new InformationCollectionReads();
@@ -125,6 +127,7 @@ export function installInformation(
       state().handle,
       state().mode,
       state().selectedConnection,
+      state().informationConnection,
     ]);
   const facetContext = () =>
     JSON.stringify([epoch, connectionContext(), scope(), view.value, filters]);
@@ -154,6 +157,7 @@ export function installInformation(
     contentTypeVersion: 'Type version ID',
   };
   function renderFacets(value: InformationFacetCounts) {
+    revealFacets();
     const choices = dialog.querySelector<HTMLElement>('[data-facet-choices]')!;
     dialog.querySelector<HTMLElement>('[data-facet-total]')!.textContent =
       `· ${String(value.total)} ${value.total === 1 ? 'version' : 'versions'}`;
@@ -364,7 +368,13 @@ export function installInformation(
     return id;
   }
   async function reload() {
-    if (!active || busy || reloading || !state().connected) return;
+    if (!active || !state().connected || state().mode !== 'live') return;
+    if (busy || reloading) {
+      reloadRequested = true;
+      return;
+    }
+    reloadRequested = false;
+    refreshes.readStarted();
     reloading = true;
     const stamp = epoch;
     const context = collectionContext();
@@ -374,19 +384,18 @@ export function installInformation(
       state().mode === 'live' &&
       context === collectionContext();
     try {
-      const connectionIdentity = JSON.stringify([
-        state().base,
-        state().handle,
-        state().mode,
-      ]);
+      const connectionIdentity = connectionContext();
       if (authoredIdentity !== connectionIdentity) {
         authoredIdentity = connectionIdentity;
         authored = undefined;
         typeIdentity = '';
         availableTypes = [];
         try {
-          authored = await call('types.capabilities', {});
+          const capabilities = await call('types.capabilities', {});
+          if (!current()) return;
+          authored = capabilities;
         } catch {
+          if (!current()) return;
           notice.hidden = false;
           notice.textContent =
             'This server has not advertised authored document types. Existing untyped sources remain available.';
@@ -396,12 +405,15 @@ export function installInformation(
       if (portable && portableIdentity !== portableContext) {
         portableIdentity = portableContext;
         await portable.probe();
+        if (!current()) return;
       }
       if (navigation && navigationIdentity !== connectionIdentity) {
         navigationIdentity = connectionIdentity;
         try {
           await navigation.probe();
+          if (!current()) return;
         } catch (reason) {
+          if (!current()) return;
           notice.hidden = false;
           notice.textContent = `Document navigation is unavailable: ${errorMessage(reason)}`;
         }
@@ -418,6 +430,7 @@ export function installInformation(
             ? []
             : (await call('types.list', { view: authored.view, limit: 100 }))
                 .results;
+        if (!current()) return;
         const registryScope = scope();
         const manager =
           registryScope.kind === 'personal' ||
@@ -442,9 +455,8 @@ export function installInformation(
                 })
               ).results
             : availableTypes;
-        authoredControls.querySelector<HTMLElement>(
-          '[data-type-versions]',
-        )!.innerHTML = versions
+        if (!current()) return;
+        const versionsHtml = versions
           .map((type) => {
             const controls =
               manager && authored?.typedWrites
@@ -453,11 +465,20 @@ export function installInformation(
             return `<section class="information-type-version"><p>${escape(type.contract.label)} · ${escape(type.contract.ordinal)} · ${escape(type.state)} <code>${escape(type.contract.version)}</code></p>${controls}</section>`;
           })
           .join('');
-        authoredControls.querySelector<HTMLSelectElement>(
-          '[data-type-filter]',
-        )!.innerHTML =
+        const versionList = authoredControls.querySelector<HTMLElement>(
+          '[data-type-versions]',
+        )!;
+        if (versionList.innerHTML !== versionsHtml)
+          versionList.innerHTML = versionsHtml;
+        const typeFilter =
+          authoredControls.querySelector<HTMLSelectElement>(
+            '[data-type-filter]',
+          )!;
+        const filterOptions =
           '<option value="">All document types</option><option value="untyped">Untyped</option>' +
           typeOptions(availableTypes);
+        if (typeFilter.innerHTML !== filterOptions)
+          typeFilter.innerHTML = filterOptions;
         for (const fieldset of dialog.querySelectorAll<HTMLElement>(
           '[data-typed-author]',
         )) {
@@ -465,8 +486,12 @@ export function installInformation(
             !authored.typedWrites ||
             scope().kind === 'global_read' ||
             !!options.manual;
-          fieldset.querySelector<HTMLSelectElement>('select')!.innerHTML =
+          const typeSelect =
+            fieldset.querySelector<HTMLSelectElement>('select')!;
+          const authorOptions =
             '<option value="">Untyped</option>' + typeOptions(availableTypes);
+          if (typeSelect.innerHTML !== authorOptions)
+            typeSelect.innerHTML = authorOptions;
         }
       }
       const faceting = dialog.querySelector<HTMLElement>('[data-faceting]')!;
@@ -587,10 +612,15 @@ export function installInformation(
           dialog.querySelector<HTMLButtonElement>('[data-next]')!.disabled =
             data.length < 20;
           if (selected) await inspect(selected, acquisition, stamp);
+          if (current()) revealReadSurfaces();
         },
       });
     } catch (reason) {
       if (current()) {
+        collectionReads.invalidate();
+        displayedFacetContext = '';
+        clearProtected();
+        revealReadSurfaces();
         list.textContent = 'This collection is unavailable.';
         detail.textContent = '';
         question.hidden = true;
@@ -599,7 +629,8 @@ export function installInformation(
       }
     } finally {
       reloading = false;
-      if (context !== collectionContext() && active) background(reload());
+      if ((reloadRequested || context !== collectionContext()) && active)
+        background(reload());
     }
   }
   async function inspect(id: string, isAcquisition: boolean, stamp = epoch) {
@@ -1341,7 +1372,8 @@ export function installInformation(
     question.hidden = true;
     question.innerHTML = '';
     collectionNote();
-    background(reload());
+    observeRefresh();
+    refreshes.refreshNow();
   };
   function removeFilter(name: keyof InformationFilter) {
     const next = { ...filters };
@@ -1708,16 +1740,96 @@ export function installInformation(
             job.status,
           ));
   }
-  const unsubscribe = api.subscribe(renderAnswer);
-  const timer = setInterval(() => {
-    if (
-      active &&
-      !dialog.querySelector('input:focus,textarea:focus,select:focus')
-    )
-      background(reload());
-  }, 4000);
+  const facetSurfaces = () => [
+    dialog.querySelector<HTMLElement>('[data-facet-choices]')!,
+    dialog.querySelector<HTMLElement>('[data-tag-graph]')!,
+    dialog.querySelector<HTMLElement>('[data-facet-total]')!,
+  ];
+  function revealFacets() {
+    for (const surface of facetSurfaces()) surface.style.visibility = '';
+  }
+  function revealReadSurfaces() {
+    for (const surface of [list, detail, question, authoredControls])
+      surface.style.visibility = '';
+  }
+  function clearProtected() {
+    list.replaceChildren();
+    detail.replaceChildren();
+    question.replaceChildren();
+    for (const surface of facetSurfaces()) surface.replaceChildren();
+    selectedContent = undefined;
+    pendingMetadataEdit = undefined;
+    sourceWindow = undefined;
+    cachedText = undefined;
+    detailSignature = '';
+    sourceCanAsk = false;
+    authoredControls.hidden = true;
+    authoredControls
+      .querySelector<HTMLElement>('[data-type-versions]')!
+      .replaceChildren();
+    authoredControls.querySelector<HTMLSelectElement>(
+      '[data-type-filter]',
+    )!.innerHTML =
+      '<option value="">All document types</option><option value="untyped">Untyped</option>';
+    for (const fieldset of dialog.querySelectorAll<HTMLElement>(
+      '[data-typed-author]',
+    )) {
+      fieldset.hidden = true;
+      fieldset.querySelector<HTMLSelectElement>('select')!.innerHTML =
+        '<option value="">Untyped</option>';
+    }
+    availableTypes = [];
+    authored = undefined;
+    authoredIdentity = typeIdentity = '';
+  }
+  const refreshes = new InformationRefresh(
+    {
+      schedule(delay, action) {
+        const timer = setTimeout(action, delay);
+        return () => clearTimeout(timer);
+      },
+    },
+    (contextChanged) => {
+      epoch++;
+      inspectRevision++;
+      collectionReads.invalidate();
+      typeIdentity = '';
+      navigation?.reset();
+      portable?.reset();
+      navigationIdentity = portableIdentity = '';
+      // A hint carries no authority or content. Preserve current drafts in hidden
+      // DOM only until fresh scoped list/status reads authorize their disclosure.
+      if (contextChanged) {
+        clearProtected();
+        selected = '';
+        authoredIdentity = navigationIdentity = portableIdentity = '';
+      }
+      for (const surface of [
+        list,
+        detail,
+        question,
+        authoredControls,
+        ...facetSurfaces(),
+      ])
+        surface.style.visibility = 'hidden';
+    },
+    () => background(reload()),
+  );
+  function observeRefresh(snapshot = state()) {
+    refreshes.observe(
+      active && snapshot.connected && snapshot.mode === 'live'
+        ? JSON.stringify([connectionContext(), scope()])
+        : undefined,
+      snapshot.informationRevision ?? 0,
+    );
+  }
+  const unsubscribe = api.subscribe((snapshot) => {
+    observeRefresh(snapshot);
+    renderAnswer(snapshot);
+  });
   const close = () => {
     active = false;
+    refreshes.stop();
     collectionReads.invalidate();
     facetStatus.hidden = true;
     epoch++;
@@ -1768,9 +1880,11 @@ export function installInformation(
       error.hidden = true;
       collectionNote();
       detail.innerHTML = emptyDetail;
+      observeRefresh();
       if (!state().connected || state().mode !== 'live') {
         detail.innerHTML = '';
         list.textContent = `Connect to your server in the main window to read ${options.manual ? 'the manual' : options.kind === 'report' ? 'reports' : 'sources'}.`;
+        revealReadSurfaces();
         return;
       }
       if (options.manual) {
@@ -1806,17 +1920,17 @@ export function installInformation(
           if (stamp === epoch && active) showError(reason);
         });
       }
-      background(reload());
+      refreshes.refreshNow();
     },
     refresh() {
-      if (active) background(reload());
+      if (active) refreshes.refreshNow();
     },
     close,
     destroy() {
       close();
       sourceResize.destroy();
       unsubscribe();
-      clearInterval(timer);
+      refreshes.stop();
       dialog.replaceChildren();
     },
   };

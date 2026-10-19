@@ -13,6 +13,8 @@ The [Relay receipt](../query-efficiency-relay-slice.md) records indexed/narrow
 inspection reads, DTO caches and recoverable consumer/discovery wakeups.
 The [Manual and facet receipt](../query-efficiency-manual-slice.md) records scoped
 collection caches, bounded facet admission and operation-local permission reuse.
+The [query reuse sweep](../query-efficiency-reuse-sweep.md) records subsequent cold
+authority batching, client invalidation refresh and owner-specific query fixes.
 
 ## Start with operation costs and ownership
 

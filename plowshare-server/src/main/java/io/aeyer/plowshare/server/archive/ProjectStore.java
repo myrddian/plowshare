@@ -543,14 +543,16 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
               .equals(resolved.root()))
             throw new ArchiveRefusedException(
                 "Placement must name the current Application root; move source through its owning lifecycle first");
-          int changed =
-              jdbc.update(
-                  "UPDATE projects SET application_storage = ?::jsonb, application_boundary = TRUE, write_paths = '{}', lent = '{}', defined_at = now() WHERE name = ? AND machine IS NULL AND workspace IS NOT NULL",
+          List<ProjectRecord> changed =
+              jdbc.query(
+                  "UPDATE projects SET application_storage = ?::jsonb, application_boundary = TRUE, write_paths = '{}', lent = '{}', defined_at = now() WHERE name = ? AND machine IS NULL AND workspace IS NOT NULL RETURNING "
+                      + COLUMNS,
+                  ROW_MAPPER,
                   ApplicationPlacementCodec.encode(placement),
                   name);
-          if (changed != 1)
+          if (changed.size() != 1)
             throw new ArchiveRefusedException("Application placement changed concurrently");
-          return find(name).orElseThrow();
+          return resolved(changed.getFirst());
         });
   }
 
@@ -587,15 +589,17 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
           if (!root.equals(verifiedRoot))
             throw new ArchiveRefusedException("FileStore configuration changed before activation");
           validWorkspace(name, root);
-          int changed =
-              jdbc.update(
-                  "UPDATE projects SET workspace = ?, machine = NULL, project_type = 'MANAGED', application_storage = ?::jsonb, application_boundary = TRUE, write_paths = '{}', defined_at = now() WHERE name = ? AND personal_owner IS NULL",
+          List<ProjectRecord> changed =
+              jdbc.query(
+                  "UPDATE projects SET workspace = ?, machine = NULL, project_type = 'MANAGED', application_storage = ?::jsonb, application_boundary = TRUE, write_paths = '{}', defined_at = now() WHERE name = ? AND personal_owner IS NULL RETURNING "
+                      + COLUMNS,
+                  ROW_MAPPER,
                   root.toString(),
                   ApplicationPlacementCodec.encode(placement),
                   name);
-          if (changed != 1)
+          if (changed.size() != 1)
             throw new ArchiveRefusedException("Application identity is unavailable");
-          return find(name).orElseThrow();
+          return resolved(changed.getFirst());
         });
   }
 
@@ -1235,13 +1239,17 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
         key,
         handle,
         () -> {
-          jdbc.update(
-              "UPDATE projects SET workspace = ?, machine = ?, lent = '{}', exclusions = '{}', project_type = 'DISJOINT', write_paths = ARRAY['.']::TEXT[], union_since = NULL WHERE name = ?",
-              workspace,
-              machine,
-              key);
-          return jdbc.queryForObject(
-              "SELECT " + COLUMNS + " FROM projects WHERE name = ?", ROW_MAPPER, key);
+          var changed =
+              jdbc.query(
+                  "UPDATE projects SET workspace = ?, machine = ?, lent = '{}', exclusions = '{}', project_type = 'DISJOINT', write_paths = ARRAY['.']::TEXT[], union_since = NULL WHERE name = ? RETURNING "
+                      + COLUMNS,
+                  ROW_MAPPER,
+                  workspace,
+                  machine,
+                  key);
+          if (changed.size() != 1)
+            throw new ArchiveRefusedException("Client project changed concurrently");
+          return changed.getFirst();
         });
   }
 

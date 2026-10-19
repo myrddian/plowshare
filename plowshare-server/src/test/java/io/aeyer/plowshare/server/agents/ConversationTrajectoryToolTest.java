@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.agents;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -99,8 +101,7 @@ class ConversationTrajectoryToolTest {
   @Test
   void tail_jumps_to_the_final_page_without_the_model_knowing_an_ordinal() throws Exception {
     when(conversations.find(ID)).thenReturn(Optional.of(conversation(ID, LEDGER)));
-    when(entries.pageOfLog(ID, 0, 1)).thenReturn(new EntryPage(List.of(row(1)), 87));
-    when(entries.pageOfLog(ID, 67, ConversationTrajectoryTool.MOST_ENTRIES))
+    when(entries.tailOfLog(ID, ConversationTrajectoryTool.MOST_ENTRIES))
         .thenReturn(new EntryPage(List.of(row(87)), 87));
 
     JsonNode result =
@@ -109,6 +110,8 @@ class ConversationTrajectoryToolTest {
     assertEquals(87, result.path("total").asInt());
     assertEquals(67, result.path("offset").asInt());
     assertEquals(87, result.path("entries").get(0).path("ordinal").asInt());
+    verify(entries).tailOfLog(ID, ConversationTrajectoryTool.MOST_ENTRIES);
+    verify(entries, never()).pageOfLog(anyString(), anyInt(), anyInt());
   }
 
   @Test

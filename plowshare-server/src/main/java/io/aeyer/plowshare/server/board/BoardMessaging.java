@@ -1304,7 +1304,7 @@ public final class BoardMessaging
   public List<InstanceView> listing(
       String account, String project, boolean archived, int offset, int limit) {
     return repository.listing(account, project, archived, offset, limit).stream()
-        .filter(i -> logVisible.test(i.conversation(), account))
+        .filter(i -> logVisible.test(i.instance().conversation(), account))
         .map(this::view)
         .toList();
   }
@@ -1314,11 +1314,11 @@ public final class BoardMessaging
   /** Page the raw rows before visibility filtering, so a withheld row cannot hide later pages. */
   public InstancePage listingPage(
       String account, String project, boolean archived, int offset, int limit) {
-    List<Instance> rows = repository.listing(account, project, archived, offset, limit + 1);
+    var rows = repository.listing(account, project, archived, offset, limit + 1);
     return new InstancePage(
         rows.stream()
             .limit(limit)
-            .filter(i -> logVisible.test(i.conversation(), account))
+            .filter(i -> logVisible.test(i.instance().conversation(), account))
             .map(this::view)
             .toList(),
         rows.size() > limit,
@@ -1330,6 +1330,17 @@ public final class BoardMessaging
     boolean awaiting = Boolean.TRUE.equals(repository.awaitingAny(instance.id()));
     int pending = repository.pendingCount(instance.id());
     var state = repository.instanceState(instance.id());
+    return view(
+        new BoardMessagingRepository.InstanceListing(
+            instance, state, awaiting, pending, Optional.ofNullable(job)));
+  }
+
+  private InstanceView view(BoardMessagingRepository.InstanceListing listing) {
+    var instance = listing.instance();
+    var state = listing.state();
+    String job = listing.job().orElse(null);
+    boolean awaiting = listing.awaiting();
+    int pending = listing.pending();
     return new InstanceView(
         instance.id(),
         instance.project(),
@@ -1422,8 +1433,44 @@ public final class BoardMessaging
   public List<Delivery> deliveries(String id, String account, int offset, int limit) {
     Instance participant = owned(id, account);
     requireReadable(participant);
-    List<String> ids = repository.deliveries(id, offset, limit);
-    return ids.stream().map(message -> delivery(message, account)).toList();
+    return repository.deliveryPage(id, offset, limit).stream()
+        .map(
+            row -> {
+              if (!row.sender().account().equals(account)
+                  || !row.recipient().account().equals(account))
+                throw new Board.Refused(
+                    "No message instance owned by this account has that address.");
+              // Keep current input visibility per participant after the metadata statement. These
+              // are
+              // disclosure checks, not cached page state or permission decisions from a previous
+              // command.
+              requireReadable(row.sender());
+              requireReadable(row.recipient());
+              var route = row.route();
+              var state = row.state();
+              return new Delivery(
+                  route.message(),
+                  route.sender(),
+                  route.recipient(),
+                  route.replyTo(),
+                  route.replyExpected(),
+                  route.finalReply(),
+                  route.generated(),
+                  state.termination() != null
+                      ? state.termination()
+                      : route.handled()
+                          ? "handled"
+                          : state.awaiting() ? "awaiting" : row.running() ? "running" : "queued",
+                  route.ending(),
+                  row.finalReply().orElse(null),
+                  row.job().orElse(null),
+                  state.deadline(),
+                  row.postedAt(),
+                  row.body(),
+                  row.recipient().conversation(),
+                  row.sender().conversation());
+            })
+        .toList();
   }
 
   public Delivery delivery(String message, String account) {

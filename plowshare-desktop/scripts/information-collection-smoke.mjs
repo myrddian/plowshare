@@ -98,16 +98,38 @@ try {
       ),
     )
     .toBe(4);
+  await page.locator('[data-detail]').evaluate((detail) => {
+    detail.innerHTML = '<textarea aria-label="Retained draft">keep this draft</textarea>';
+  });
+  await page.evaluate(() => {
+    window.informationCollectionFixture.hint();
+    window.informationCollectionFixture.hint();
+    window.informationCollectionFixture.hint();
+  });
+  await expect(page.locator('[data-detail]')).toHaveCSS('visibility', 'hidden');
+  await expect.poll(() => page.evaluate(() =>
+    window.informationCollectionFixture.pendingCount())).toBe(5);
+  await expect(page.getByLabel('Retained draft')).toHaveValue('keep this draft');
+  await expect(page.locator('[data-detail]')).toHaveCSS('visibility', 'visible');
+  await page.evaluate(() => {
+    window.informationCollectionFixture.resolve(3, 88);
+    window.informationCollectionFixture.resolve(4, 3);
+  });
+  await expect(page.locator('[data-facet-total]')).toHaveText('· 3 versions');
+  await page.evaluate(() => window.informationCollectionFixture.revoke());
+  await expect(page.locator('[data-list]')).toHaveText('This collection is unavailable.');
+  await expect(page.locator('[data-detail]')).toBeEmpty();
+  await expect(page.locator('[data-facet-total]')).toBeEmpty();
+  await expect(page.locator('[data-error]')).toContainText('permission revoked');
   await page.evaluate(() => {
     window.informationCollectionFixture.logout();
-    window.informationCollectionFixture.resolve(3, 88);
   });
   await expect(page.locator('#collection')).toBeHidden();
-  await expect(page.locator('[data-facet-total]')).toHaveText('· 2 versions');
+  await expect(page.locator('[data-facet-total]')).toBeEmpty();
   assert.deepEqual(errors, []);
   await page.evaluate(() => window.informationCollectionFixture.destroy());
   console.log(
-    'PASS: list renders while facets wait; facet failure preserves list/detail draft; pending reads coalesce; scope/logout reject stale facets; no unhandled browser rejection.',
+    'PASS: list renders while facets wait; facet failure preserves list/detail draft; pending reads coalesce; scope/logout reject stale facets; coalesced hints hide and reauthorize without losing drafts; permission loss clears protected data; no unhandled browser rejection.',
   );
 } finally {
   await browser.close();

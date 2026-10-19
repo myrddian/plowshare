@@ -102,6 +102,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
                   case "search" -> ProjectionVersions.Domain.SEARCH;
                   case "schedules" -> ProjectionVersions.Domain.SCHEDULES;
                   case "relay" -> ProjectionVersions.Domain.RELAY;
+                  case "transcripts" -> ProjectionVersions.Domain.TRANSCRIPTS;
                   case "authority" -> ProjectionVersions.Domain.AUTHORITY;
                   default -> throw unavailable();
                 });

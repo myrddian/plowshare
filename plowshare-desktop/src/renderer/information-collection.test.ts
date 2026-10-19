@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  InformationRefresh,
+  type InformationRefreshClock,
+} from './information-refresh.ts';
 import type { InformationFacetCounts } from 'plowshare-client-ts/operations/information-replies';
 import {
   InformationCollectionReads,
@@ -190,4 +194,119 @@ await test('close/logout invalidates both late success and late rejection withou
   assert.deepEqual(f.rendered, []);
   assert.deepEqual(f.aggregates, []);
   assert.deepEqual(f.progress, [{ state: 'loading' }]);
+});
+
+class RefreshClock implements InformationRefreshClock {
+  now = 0;
+  readonly tasks: { at: number; action: () => void; cancelled: boolean }[] = [];
+  schedule(delay: number, action: () => void) {
+    const task = { at: this.now + delay, action, cancelled: false };
+    this.tasks.push(task);
+    return () => {
+      task.cancelled = true;
+    };
+  }
+  advance(milliseconds: number) {
+    const end = this.now + milliseconds;
+    for (;;) {
+      const next = this.tasks.find((task) => !task.cancelled && task.at <= end);
+      if (!next) break;
+      this.now = next.at;
+      next.cancelled = true;
+      next.action();
+    }
+    this.now = end;
+  }
+}
+function refreshFixture() {
+  const clock = new RefreshClock();
+  const invalidations: boolean[] = [];
+  let reads = 0;
+  const owner = new InformationRefresh(
+    clock,
+    (changed) => {
+      invalidations.push(changed);
+    },
+    () => {
+      reads++;
+    },
+  );
+  return { clock, invalidations, owner, reads: () => reads };
+}
+await test('unchanged information does no four-second reads and reconciles at a bounded interval', () => {
+  const f = refreshFixture();
+  f.owner.observe('server/account/personal/socket1', 0);
+  f.clock.advance(0);
+  assert.equal(f.reads(), 1);
+  for (let tick = 0; tick < 14; tick++) {
+    f.owner.observe('server/account/personal/socket1', 0);
+    f.clock.advance(4000);
+  }
+  assert.equal(f.reads(), 1);
+  f.clock.advance(4000);
+  assert.equal(f.reads(), 2);
+  assert.deepEqual(f.invalidations, [true, false]);
+});
+await test('hints hide immediately and bursts coalesce without postponing the first deadline', () => {
+  const f = refreshFixture();
+  f.owner.observe('selection', 0);
+  f.clock.advance(0);
+  f.owner.observe('selection', 1);
+  f.clock.advance(100);
+  f.owner.observe('selection', 2);
+  f.clock.advance(149);
+  assert.equal(f.reads(), 1);
+  assert.deepEqual(f.invalidations, [true, false, false]);
+  f.clock.advance(1);
+  assert.equal(f.reads(), 2);
+  f.owner.observe('selection', 2);
+  f.clock.advance(250);
+  assert.equal(f.reads(), 2);
+});
+await test('scope/account/server/socket switches fence already queued callbacks and recover immediately', () => {
+  for (const identity of [
+    'other-scope',
+    'other-account',
+    'other-server',
+    'same-account/new-socket',
+  ]) {
+    const f = refreshFixture();
+    f.owner.observe('initial', 0);
+    const stale = f.clock.tasks.slice();
+    f.owner.observe(identity, 0);
+    for (const task of stale) task.action();
+    assert.equal(f.reads(), 0);
+    f.clock.advance(0);
+    assert.equal(f.reads(), 1);
+    assert.deepEqual(f.invalidations, [true, true]);
+  }
+});
+await test('logout stops all timers; reconnect requires fresh reads even with unchanged hint counter', () => {
+  const f = refreshFixture();
+  f.owner.observe('selection', 0);
+  f.clock.advance(0);
+  f.owner.observe('selection', 1);
+  const stale = f.clock.tasks.slice();
+  f.owner.observe(undefined, 1);
+  for (const task of stale) task.action();
+  f.clock.advance(120_000);
+  assert.equal(f.reads(), 1);
+  f.owner.observe('selection', 1);
+  f.clock.advance(0);
+  assert.equal(f.reads(), 2);
+});
+await test('manual recovery consumes pending hint and destroy fences cancelled callback execution', () => {
+  const f = refreshFixture();
+  f.owner.observe('selection', 0);
+  const initial = f.clock.tasks[0];
+  assert.ok(initial);
+  f.owner.refreshNow();
+  initial.action();
+  assert.equal(f.reads(), 1);
+  f.owner.observe('selection', 1);
+  const stale = f.clock.tasks.slice();
+  f.owner.stop();
+  for (const task of stale) task.action();
+  f.clock.advance(120_000);
+  assert.equal(f.reads(), 1);
 });

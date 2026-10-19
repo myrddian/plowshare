@@ -13,6 +13,8 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -191,16 +193,27 @@ public class MemoryStore implements MemoryRepository {
               Boolean.class,
               learning.conversation(),
               pin.scope()))) throw writeDenied();
-      for (var entry : learning.entries())
-        if (!Boolean.TRUE.equals(
-            jdbc.queryForObject(
-                "SELECT EXISTS(SELECT 1 FROM entries WHERE conversation_id=? AND ordinal=? AND turn_ordinal=? AND content IS NOT DISTINCT FROM ? AND kind=? AND learned_at IS NULL AND ejected_at IS NULL)",
-                Boolean.class,
-                learning.conversation(),
-                entry.ordinal(),
-                entry.turnOrdinal(),
-                entry.content(),
-                entry.kind().wireName()))) throw writeDenied();
+      var arguments = new ArrayList<Object>();
+      for (var entry : learning.entries()) {
+        arguments.add(entry.ordinal());
+        arguments.add(entry.turnOrdinal());
+        arguments.add(entry.content());
+        arguments.add(entry.kind().wireName());
+      }
+      arguments.add(learning.conversation());
+      // The exact server-selected learning cohort is bounded to forty entries. Validate every
+      // expected tuple in one statement without serializing/copying its retained content into JSON.
+      Long matched =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM (VALUES "
+                  + String.join(
+                      ",",
+                      Collections.nCopies(
+                          learning.entries().size(), "(?::integer,?::integer,?::text,?::text)"))
+                  + ") expected(ordinal,turn_ordinal,content,kind) WHERE EXISTS(SELECT 1 FROM entries e WHERE e.conversation_id=? AND e.ordinal=expected.ordinal AND e.turn_ordinal=expected.turn_ordinal AND e.content IS NOT DISTINCT FROM expected.content AND e.kind=expected.kind AND e.learned_at IS NULL AND e.ejected_at IS NULL)",
+              Long.class,
+              arguments.toArray());
+      if (matched == null || matched != learning.entries().size()) throw writeDenied();
     }
   }
 
@@ -238,12 +251,19 @@ public class MemoryStore implements MemoryRepository {
 
   @Override
   public void provenance(String id, MemoryWrites.Learning source) {
-    for (int turn : source.entries().stream().map(EntryRecord::turnOrdinal).distinct().toList())
+    var turns = source.entries().stream().map(EntryRecord::turnOrdinal).distinct().toList();
+    var arguments = new ArrayList<Object>();
+    for (int turn : turns) {
+      arguments.add(id);
+      arguments.add(source.conversation());
+      arguments.add(turn);
+    }
+    if (!turns.isEmpty())
       jdbc.update(
-          "INSERT INTO memory_provenance VALUES(?,?,?) ON CONFLICT DO NOTHING",
-          id,
-          source.conversation(),
-          turn);
+          "INSERT INTO memory_provenance VALUES "
+              + String.join(",", Collections.nCopies(turns.size(), "(?,?,?)"))
+              + " ON CONFLICT DO NOTHING",
+          arguments.toArray());
   }
 
   @Override

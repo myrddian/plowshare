@@ -76,18 +76,69 @@ public final class JdbcScriptStore implements ScriptStore {
     return jdbc
         .query(
             "SELECT * FROM orchestration_script_steps WHERE conversation_id=? ORDER BY sequence DESC LIMIT 1",
-            (row, n) ->
-                new Step(
-                    row.getInt("sequence"),
-                    row.getString("source_hash"),
-                    ScriptCommands.read(decode(row.getString("command"))),
-                    row.getString("raw_result"),
-                    row.getString("result"),
-                    row.getTimestamp("started_at") != null,
-                    row.getString("effective_arguments")),
+            (row, n) -> step(row),
             conversation)
         .stream()
         .findFirst();
+  }
+
+  private static Step step(java.sql.ResultSet row) throws java.sql.SQLException {
+    return new Step(
+        row.getInt("sequence"),
+        row.getString("source_hash"),
+        ScriptCommands.read(decode(row.getString("command"))),
+        row.getString("raw_result"),
+        row.getString("result"),
+        row.getTimestamp("started_at") != null,
+        row.getString("effective_arguments"));
+  }
+
+  private record Recovery(Step step, long failed, long answered, long missingAnswers) {}
+
+  /** One current statement pairs its retained latest step with that exact step's child evidence. */
+  @Override
+  public void requireRecoverable(String conversation) {
+    var rows =
+        jdbc.query(
+            """
+        SELECT s.*,
+          (SELECT count(*) FROM conversations child JOIN turns t ON t.conversation_id=child.id
+           WHERE child.parent_id=s.conversation_id AND child.opened_by_call='script_'||s.sequence
+             AND t.ordinal=(SELECT MAX(last.ordinal) FROM turns last WHERE last.conversation_id=child.id)
+             AND t.ending IN ('UNAVAILABLE','SESSION_GONE')) AS failed_children,
+          (SELECT count(*) FROM conversations child JOIN turns t ON t.conversation_id=child.id
+           WHERE child.parent_id=s.conversation_id AND child.opened_by_call='script_'||s.sequence
+             AND t.ending='ANSWERED') AS answered_children,
+          (SELECT count(*) FROM conversations child JOIN turns t ON t.conversation_id=child.id
+           WHERE child.parent_id=s.conversation_id AND child.opened_by_call='script_'||s.sequence
+             AND t.ending='ANSWERED' AND t.answer IS NULL) AS missing_answers
+        FROM orchestration_script_steps s WHERE s.conversation_id=? ORDER BY s.sequence DESC LIMIT 1
+        """,
+            (row, index) ->
+                new Recovery(
+                    step(row),
+                    row.getLong("failed_children"),
+                    row.getLong("answered_children"),
+                    row.getLong("missing_answers")),
+            conversation);
+    if (rows.isEmpty()) return;
+    var recovery = rows.getFirst();
+    var step = recovery.step();
+    if (step.result() != null || !step.started() || step.raw() != null) return;
+    if (step.command() instanceof Wait || step.command() instanceof Finish) return;
+    if (step.command() instanceof Tool tool && tool.readinessObserver()) return;
+    if (step.command() instanceof Tool tool && tool.name().equals("agent_run")) {
+      if (recovery.failed() > 1)
+        throw new IllegalStateException("script command has multiple delegated runs");
+      if (recovery.failed() == 1) return;
+    }
+    if (recovery.answered() > 1)
+      throw new IllegalStateException("script command has multiple delegated answers");
+    if (recovery.missingAnswers() > 0)
+      throw new IllegalStateException("script delegation lost its answer");
+    if (recovery.answered() == 1) return;
+    throw new io.aeyer.plowshare.server.faults.CallerFault(
+        "The interrupted script command has no durable result; it may have run. Reconcile it before resuming; replay is refused.");
   }
 
   public void started(String conversation, int sequence, String arguments) {

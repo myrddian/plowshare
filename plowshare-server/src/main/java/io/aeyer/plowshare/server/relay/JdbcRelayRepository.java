@@ -56,22 +56,26 @@ public final class JdbcRelayRepository implements RelayRepository {
     var requested = new Relay.Topic(key, kind, policy, 0, 0);
     return transactions.inTransaction(
         () -> {
-          jdbc.update(
-              """
+          var inserted =
+              jdbc.query(
+                  """
           INSERT INTO relay_topics(scope_key,project_id,name,payload_kind,retention_seconds,max_records)
           VALUES(?,?,?,?,?,?) ON CONFLICT(scope_key,name) DO NOTHING
-          """,
-              RelayScopeCodec.write(key),
-              RelayScopeCodec.project(key),
-              key.name(),
-              requested.kind().name(),
-              policy.retention().getSeconds(),
-              policy.maxRecords());
-          Relay.Topic existing = topic(key, true);
+          """
+                      + " RETURNING "
+                      + TOPIC_COLUMNS,
+                  JdbcRelayRepository::topicRow,
+                  RelayScopeCodec.write(key),
+                  RelayScopeCodec.project(key),
+                  key.name(),
+                  requested.kind().name(),
+                  policy.retention().getSeconds(),
+                  policy.maxRecords());
+          Relay.Topic existing = inserted.isEmpty() ? topic(key, true) : inserted.getFirst();
           if (existing.kind() != kind)
             throw new IllegalArgumentException(
                 "an existing Relay topic cannot change payload family");
-          if (!replacePolicy) return existing;
+          if (!replacePolicy || existing.policy().equals(policy)) return existing;
           changed(
               jdbc.update(
                   """
@@ -159,17 +163,22 @@ public final class JdbcRelayRepository implements RelayRepository {
           Relay.Topic topic = topic(key.topic(), true);
           long baseline =
               start == Relay.Start.LATEST ? topic.lastPosition() : topic.expiredThrough();
-          jdbc.update(
-              """
+          var inserted =
+              jdbc.query(
+                  """
           INSERT INTO relay_subscriptions(scope_key,topic,subscriber,seen_through,seen_at)
           VALUES(?,?,?,?,?) ON CONFLICT(scope_key,topic,subscriber) DO NOTHING
+          RETURNING seen_through,seen_at,generation
           """,
-              RelayScopeCodec.write(key.topic()),
-              key.topic().name(),
-              key.subscriber(),
-              baseline,
-              timestamp(establishedAt));
-          return subscription(key);
+                  (row, index) -> subscriptionRow(row, key),
+                  RelayScopeCodec.write(key.topic()),
+                  key.topic().name(),
+                  key.subscriber(),
+                  baseline,
+                  timestamp(establishedAt));
+          // A conflict may retain a concurrently established cursor and generation. Only that
+          // path needs a fresh read; a newly inserted row is already the authoritative result.
+          return inserted.isEmpty() ? subscription(key) : inserted.getFirst();
         });
   }
 
@@ -375,12 +384,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             """
         SELECT seen_through,seen_at,generation FROM relay_subscriptions WHERE scope_key=? AND topic=? AND subscriber=?
         """,
-            (row, index) ->
-                new Relay.Subscription(
-                    key,
-                    row.getLong("seen_through"),
-                    instant(row, "seen_at"),
-                    row.getObject("generation", java.util.UUID.class)),
+            (row, index) -> subscriptionRow(row, key),
             RelayScopeCodec.write(key.topic()),
             key.topic().name(),
             key.subscriber())
@@ -402,6 +406,15 @@ public final class JdbcRelayRepository implements RelayRepository {
             key.topic().name(),
             key.subscriber()));
     return new Relay.Subscription(key, position, seenAt, previous.generation());
+  }
+
+  private static Relay.Subscription subscriptionRow(ResultSet row, Relay.SubscriptionKey key)
+      throws SQLException {
+    return new Relay.Subscription(
+        key,
+        row.getLong("seen_through"),
+        instant(row, "seen_at"),
+        row.getObject("generation", java.util.UUID.class));
   }
 
   private static Optional<Relay.Gap> gap(Relay.Topic topic, Relay.Subscription subscription) {

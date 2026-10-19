@@ -171,16 +171,17 @@ public class JdbcOutgoingRepository implements OutgoingRepository {
           args.add(account);
           args.add(project);
           args.addAll(peers);
-          var ids =
-              jdbc.queryForList(
-                  "SELECT id FROM outgoing_work WHERE account=? AND project_id IS NOT DISTINCT FROM CAST(? AS BIGINT) AND peer IN ("
+          var candidates =
+              jdbc.query(
+                  SELECT
+                      + "WHERE w.account=? AND w.project_id IS NOT DISTINCT FROM CAST(? AS BIGINT) AND w.peer IN ("
                       + marks
-                      + ") AND (state='QUEUED' OR (remote_task IS NOT NULL AND state IN ('DISPATCHED','WORKING','INPUT_REQUIRED','AUTH_REQUIRED','UNKNOWN') AND lease_until<now())) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED",
-                  UUID.class,
+                      + ") AND (w.state='QUEUED' OR (w.remote_task IS NOT NULL AND w.state IN ('DISPATCHED','WORKING','INPUT_REQUIRED','AUTH_REQUIRED','UNKNOWN') AND w.lease_until<now())) ORDER BY w.created_at LIMIT 1 FOR UPDATE OF w SKIP LOCKED",
+                  this::read,
                   args.toArray());
-          if (ids.isEmpty()) return new Outgoing.Claimed(null, null);
-          UUID id = ids.getFirst();
-          Outgoing.Work before = get(account, id);
+          if (candidates.isEmpty()) return new Outgoing.Claimed(null, null);
+          Outgoing.Work before = candidates.getFirst();
+          UUID id = before.id();
           jdbc.update(
               "UPDATE outgoing_work SET state=CASE WHEN state='QUEUED' THEN 'DISPATCHED' ELSE state END,worker=?,lease_until=now()+interval '30 seconds',revision=revision+1 WHERE id=?",
               worker,
@@ -203,12 +204,14 @@ public class JdbcOutgoingRepository implements OutgoingRepository {
             > 1024 * 1024) throw new CallerFault("outgoing result exceeds 1 MiB");
     return transactions.inTransaction(
         () -> {
-          jdbc.queryForList(
-              "SELECT id FROM outgoing_work WHERE account=? AND id=? FOR UPDATE",
-              UUID.class,
-              account,
-              report.id());
-          Outgoing.Work old = get(account, report.id());
+          var locked =
+              jdbc.query(
+                  SELECT + "WHERE w.account=? AND w.id=? FOR UPDATE OF w",
+                  this::read,
+                  account,
+                  report.id());
+          if (locked.isEmpty()) throw new CallerFault("no outgoing work is owned by this account");
+          Outgoing.Work old = locked.getFirst();
           if (old.revision() != report.revision() || TERMINAL.contains(old.state()))
             throw new CallerFault("outgoing observation is stale or work is terminal");
           if (old.remoteTask() != null && !old.remoteTask().equals(report.remoteTask()))
@@ -238,11 +241,15 @@ public class JdbcOutgoingRepository implements OutgoingRepository {
   public Outgoing.Work cancel(String account, UUID id) {
     transactions.inTransaction(
         () -> {
-          get(account, id);
-          jdbc.update(
-              "UPDATE outgoing_work SET cancel_requested=true,state=CASE WHEN state='QUEUED' THEN 'CANCELED' ELSE state END WHERE id=? AND account=? AND state NOT IN ('COMPLETED','FAILED','CANCELED','REJECTED')",
-              id,
-              account);
+          var changed =
+              jdbc.queryForList(
+                  "UPDATE outgoing_work SET cancel_requested=true,state=CASE WHEN state='QUEUED' THEN 'CANCELED' ELSE state END WHERE id=? AND account=? AND state NOT IN ('COMPLETED','FAILED','CANCELED','REJECTED') RETURNING id",
+                  UUID.class,
+                  id,
+                  account);
+          // No mutation can affect another owner. A terminal/no-match branch still distinguishes
+          // owned terminal work from a guessed ID, then keeps the post-commit display read below.
+          if (changed.isEmpty()) get(account, id);
           return null;
         });
     return get(account, id);

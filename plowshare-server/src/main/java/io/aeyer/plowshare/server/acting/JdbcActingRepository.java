@@ -277,51 +277,54 @@ public final class JdbcActingRepository implements ActingRepository {
     if (digest == null || !digest.matches("[0-9a-f]{64}"))
       throw new IllegalArgumentException("Invalid proof digest");
     return jdbc
-        .queryForList("SELECT id FROM acting_tokens WHERE digest=?", UUID.class, digest)
+        .query(TOKEN_SELECT + " WHERE t.digest=?", JdbcActingRepository::token, digest)
         .stream()
-        .findFirst()
-        .flatMap(this::token);
+        .findFirst();
+  }
+
+  // Scope projects are part of the token snapshot, not a query from inside its row mapper.
+  // Retain at most the contract bound plus one sentinel; corrupt excess scope fails closed.
+  private static final String TOKEN_SELECT =
+      "SELECT t.id,t.application,t.actor,t.grant_name,t.subject,t.ceiling,t.personal,t.expires_at,"
+          + "t.revoked_at IS NOT NULL AS revoked,ARRAY(SELECT p.name FROM acting_token_projects s "
+          + "JOIN projects p ON p.id=s.project_id WHERE s.token_id=t.id ORDER BY p.name LIMIT 257) AS projects "
+          + "FROM acting_tokens t";
+
+  private static Token token(java.sql.ResultSet row, int number) throws java.sql.SQLException {
+    java.sql.Array projects = row.getArray("projects");
+    Set<String> scope;
+    try {
+      scope = Set.copyOf(List.of((String[]) projects.getArray()));
+    } finally {
+      projects.free();
+    }
+    return new Token(
+        row.getObject("id", UUID.class),
+        row.getString("application"),
+        row.getString("actor"),
+        row.getString("grant_name"),
+        row.getString("subject"),
+        new ActingScope(
+            ProjectRole.valueOf(row.getString("ceiling")), scope, row.getBoolean("personal")),
+        row.getObject("expires_at", OffsetDateTime.class).toInstant(),
+        row.getBoolean("revoked"));
   }
 
   @Override
   public Optional<Token> token(UUID id) {
     Objects.requireNonNull(id);
-    return jdbc
-        .query(
-            "SELECT * FROM acting_tokens WHERE id=?",
-            (row, n) ->
-                new Token(
-                    id,
-                    row.getString("application"),
-                    row.getString("actor"),
-                    row.getString("grant_name"),
-                    row.getString("subject"),
-                    new ActingScope(
-                        ProjectRole.valueOf(row.getString("ceiling")),
-                        Set.copyOf(
-                            jdbc.queryForList(
-                                "SELECT p.name FROM acting_token_projects s JOIN projects p ON p.id=s.project_id WHERE s.token_id=?",
-                                String.class,
-                                id)),
-                        row.getBoolean("personal")),
-                    row.getObject("expires_at", OffsetDateTime.class).toInstant(),
-                    row.getObject("revoked_at") != null),
-            id)
-        .stream()
+    return jdbc.query(TOKEN_SELECT + " WHERE t.id=?", JdbcActingRepository::token, id).stream()
         .findFirst();
   }
 
   @Override
   public List<Token> tokens(String subject) {
     ActingValues.account(subject);
-    return jdbc
-        .queryForList(
-            "SELECT id FROM acting_tokens WHERE subject=? ORDER BY created_at DESC,id LIMIT 256",
-            UUID.class,
-            subject)
-        .stream()
-        .map(id -> token(id).orElseThrow())
-        .toList();
+    return List.copyOf(
+        jdbc.query(
+            TOKEN_SELECT + " WHERE t.subject=? ORDER BY t.created_at DESC,t.id LIMIT 256",
+            JdbcActingRepository::token,
+            subject));
   }
 
   @Override

@@ -19,6 +19,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   private final io.aeyer.plowshare.server.archive.ProjectMembers members;
   private final ProjectionCache<Documents> documentsCache;
   private final ProjectionCache<Information.Facets> facetsCache;
+  private final ProjectionCache<Connections> connectionsCache;
 
   public JdbcInformationNavigationRepository(
       JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
@@ -31,10 +32,21 @@ public final class JdbcInformationNavigationRepository implements InformationNav
       io.aeyer.plowshare.server.archive.ProjectMembers members,
       ProjectionCache<Documents> documentsCache,
       ProjectionCache<Information.Facets> facetsCache) {
+    this(jdbc, members, documentsCache, facetsCache, ProjectionCache.direct());
+  }
+
+  /** All graph DTO dependencies are watched by DOCUMENTS/AUTHORITY; no authority is cached. */
+  public JdbcInformationNavigationRepository(
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
+      ProjectionCache<Documents> documentsCache,
+      ProjectionCache<Information.Facets> facetsCache,
+      ProjectionCache<Connections> connectionsCache) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.members = Objects.requireNonNull(members);
     this.documentsCache = Objects.requireNonNull(documentsCache);
     this.facetsCache = Objects.requireNonNull(facetsCache);
+    this.connectionsCache = Objects.requireNonNull(connectionsCache);
   }
 
   public void requireActive(String account) {
@@ -316,43 +328,11 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   private InformationSql.Filter selected(
       InformationContext c, UUID relatedTo, String relation, String direction) {
     requireTraversal(c, relatedTo, relation, direction);
-    var a = relatedTo == null ? args(c) : new ArrayList<Object>(List.of(c.account()));
-    var filter = InformationFacetSql.facets(c.facets(), "r", "q");
-    String sql =
-        (relatedTo == null
-                ? "information_readable(r.id,?,?,?,?)"
-                // V172 defines both former own/reference predicates as this same dependency
-                // check. Evaluate it once per candidate without granting additional authority.
-                : "knowledge_dependencies_readable(r.id,?)")
-            + " AND r.document_type='document' AND NOT r.excluded AND "
-            + filter.sql();
-    a.addAll(filter.arguments());
-    var boundary = InformationSql.boundary(c, "r.id");
-    sql += " AND " + boundary.sql();
-    a.addAll(boundary.arguments());
-    if (relatedTo != null) {
-      boolean outgoing = !"backlinks".equals(direction);
-      var sourceBoundary = InformationSql.boundary(c, "information_navigation_head(?)");
-      sql +=
-          // This uncorrelated scalar subquery is a PostgreSQL InitPlan: parent readability and
-          // its retained boundary are invariant for the whole page, rather than per candidate.
-          " AND (SELECT information_readable(information_navigation_head(?),?,?,?,?) AND "
-              + sourceBoundary.sql()
-              + ") AND EXISTS(SELECT 1 FROM information_relationships e WHERE NOT e.removed AND e."
-              + (outgoing ? "source" : "target")
-              + "=? AND e."
-              + (outgoing ? "target" : "source")
-              + "=q.id"
-              + (relation == null ? "" : " AND e.relation=?")
-              + ")";
-      a.add(relatedTo);
-      a.addAll(args(c));
-      if (c.readBoundary() != null) a.add(relatedTo);
-      a.addAll(sourceBoundary.arguments());
-      a.add(relatedTo);
-      if (relation != null) a.add(relation);
-    }
-    return new InformationSql.Filter(sql, a);
+    var selection = InformationSelectionSql.navigation(c, relatedTo, relation, direction);
+    var facets = InformationFacetSql.facets(c.facets(), "r", "q");
+    var arguments = new ArrayList<Object>(selection.arguments());
+    arguments.addAll(facets.arguments());
+    return new InformationSql.Filter(selection.sql() + " AND " + facets.sql(), arguments);
   }
 
   private static void requireTraversal(
@@ -551,33 +531,6 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             a.toArray()));
   }
 
-  private Selection relatedSelection(InformationContext c, UUID resource, UUID revision) {
-    var boundary = InformationSql.boundary(c, "r.id");
-    var a =
-        new ArrayList<Object>(
-            Arrays.asList(
-                revision,
-                resource,
-                c.account(),
-                c.selection().project(),
-                c.account(),
-                c.selection().project()));
-    a.addAll(boundary.arguments());
-    var rows =
-        jdbc.query(
-            DOCUMENT
-                + " FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id AND r.id=coalesce(?,information_navigation_head(q.id)) WHERE q.id=? AND information_navigation_own_readable(r.id,?,?) AND information_reference_readable(r.id,?,?) AND "
-                + boundary.sql(),
-            (rs, n) -> document(rs, c.selection().includeGlobal()),
-            a.toArray());
-    if (!rows.isEmpty()) return new Readable(rows.getFirst());
-    if (!referenceVisible(c, resource)) return new Unavailable();
-    String label =
-        jdbc.queryForObject(
-            "SELECT information_navigation_policy(?)->>'referenceLabel'", String.class, resource);
-    return new Locked(resource, label);
-  }
-
   private static Relationship relationship(java.sql.ResultSet rs) throws java.sql.SQLException {
     return new Relationship(
         rs.getObject("id", UUID.class),
@@ -597,48 +550,155 @@ public final class JdbcInformationNavigationRepository implements InformationNav
       UUID otherResource,
       int limit,
       int offset) {
-    if (!(select(c, new Target(resource, null)) instanceof Readable)) throw unavailable();
+    Objects.requireNonNull(c);
+    Objects.requireNonNull(resource);
+    io.aeyer.plowshare.protocol.InformationNavigation.direction(direction);
+    if (relation != null) io.aeyer.plowshare.protocol.InformationNavigation.relation(relation);
+    if (limit < 1 || limit > 100 || offset < 0)
+      throw new IllegalArgumentException("invalid relationship page bounds");
+    if (!connectionsCache.enabled())
+      return relationships(c, resource, direction, relation, otherResource, limit, offset, 0);
+    var key =
+        InformationCatalogueFingerprint.readKey(
+            "navigation-connections-v1",
+            c,
+            Arrays.asList(resource, direction, relation, otherResource, limit, offset));
+    long byteBudget = Math.max(0, (connectionsCache.maxWeight() - 8192) / 64);
+    return connectionsCache.read(
+        key,
+        byteBudget >= 256L * limit,
+        () ->
+            relationships(
+                c, resource, direction, relation, otherResource, limit, offset, byteBudget),
+        () -> relationships(c, resource, direction, relation, otherResource, limit, offset, 0),
+        JdbcInformationNavigationRepository::connectionsWeight);
+  }
+
+  private Connections relationships(
+      InformationContext c,
+      UUID resource,
+      String direction,
+      String relation,
+      UUID otherResource,
+      int limit,
+      int offset,
+      long byteBudget) {
     boolean outgoing = direction.equals("outgoing");
-    // Filter hidden neighbours BEFORE paging. Returned relationship fields never contain captions.
     String neighbour = outgoing ? "e.target" : "e.source";
-    var visible = InformationSql.relationshipNeighbour(c, outgoing);
-    var a = new ArrayList<Object>();
-    a.add(resource);
-    a.addAll(args(c));
-    if (relation != null) a.add(relation);
-    if (otherResource != null) a.add(otherResource);
-    a.addAll(visible.arguments());
-    a.add(limit);
-    a.add(offset);
-    var edges =
-        jdbc.query(
-            "SELECT e.* FROM information_relationships e WHERE NOT e.removed AND e."
-                + (outgoing ? "source" : "target")
-                + "=? AND information_readable(information_navigation_head(e."
-                + (outgoing ? "source" : "target")
-                + "),?,?,?,?)"
-                + (relation == null ? "" : " AND e.relation=?")
-                + (otherResource == null ? "" : " AND " + neighbour + "=?")
-                + " AND "
-                + visible.sql()
-                + " ORDER BY e.id LIMIT ? OFFSET ?",
-            (rs, n) -> relationship(rs),
-            a.toArray());
-    var result = new ArrayList<Connection>();
-    for (var e : edges) {
-      Selection choice =
-          relatedSelection(
-              c, outgoing ? e.target() : e.source(), outgoing ? e.pinnedRevision() : null);
-      if (!(choice instanceof Unavailable)) {
-        var visibleEdge =
-            choice instanceof Locked
-                ? new Relationship(
-                    e.id(), e.source(), e.target(), null, e.relation(), e.version(), e.removed())
-                : e;
-        result.add(new Connection(visibleEdge, choice));
-      }
+    String selectedRevision =
+        outgoing
+            ? "coalesce(e.pinned_revision,information_navigation_head(e.target))"
+            : "coalesce(NULL::uuid,information_navigation_head(e.source))";
+    var parent = InformationSql.read(c, "r");
+    var boundary = InformationSql.boundary(c, selectedRevision);
+    var headBoundary = InformationSql.boundary(c, "r.id");
+    var args = new ArrayList<Object>(parent.arguments());
+    args.add(resource);
+    args.add(resource);
+    if (relation != null) args.add(relation);
+    if (otherResource != null) args.add(otherResource);
+    args.add(c.account());
+    args.add(c.account());
+    args.add(c.selection().project());
+    args.addAll(boundary.arguments());
+    args.add(limit);
+    args.add(offset);
+    args.addAll(headBoundary.arguments());
+    // Materialize the parent gate once, then the exact pre-page neighbour eligibility. V172's
+    // own/reference readability functions are both knowledge_dependencies_readable; one result
+    // feeds page membership AND metadata mapping. Locked references never hydrate private fields.
+    String sql =
+        "WITH source AS MATERIALIZED (SELECT EXISTS(SELECT 1 FROM information_resources q "
+            + "JOIN information_revision_allowances r ON r.resource_id=q.id "
+            + "AND r.id=information_navigation_head(q.id) WHERE "
+            + parent.sql()
+            + " AND q.id=?) AS parent_readable), edge_base AS MATERIALIZED ("
+            + "SELECT e.*, "
+            + neighbour
+            + " AS neighbour,"
+            + selectedRevision
+            + " AS selected_revision FROM information_relationships e CROSS JOIN source s "
+            + "WHERE s.parent_readable AND NOT e.removed AND e."
+            + (outgoing ? "source" : "target")
+            + "=?"
+            + (relation == null ? "" : " AND e.relation=?")
+            + (otherResource == null ? "" : " AND " + neighbour + "=?")
+            + "), edge_policy AS MATERIALIZED (SELECT e.*,"
+            + "coalesce(knowledge_dependencies_readable(e.selected_revision,?),false) AS dependency_readable,"
+            + "information_navigation_reference_visible(e.neighbour,?,?) AS reference_visible,"
+            + boundary.sql()
+            + " AS selection_boundary FROM edge_base e), "
+            + "edge_page AS MATERIALIZED (SELECT * FROM edge_policy WHERE "
+            + "(dependency_readable OR reference_visible) AND selection_boundary ORDER BY id LIMIT ? OFFSET ?) "
+            + "SELECT s.parent_readable,p.id,p.source,p.target,p.pinned_revision,p.relation,p.version,"
+            + "p.removed,p.neighbour,d.*,coalesce(label.locked_visible,false) AS locked_visible,label.locked_label "
+            + "FROM source s LEFT JOIN edge_page p ON true LEFT JOIN LATERAL ("
+            + DOCUMENT
+            + " FROM information_resources q JOIN information_revision_allowances r ON r.resource_id=q.id "
+            + "AND r.id=p.selected_revision WHERE q.id=p.neighbour AND p.dependency_readable) d ON true "
+            + "LEFT JOIN LATERAL (SELECT true AS locked_visible,"
+            + "information_navigation_policy(p.neighbour)->>'referenceLabel' AS locked_label "
+            + "WHERE d.resource IS NULL AND p.reference_visible AND coalesce((SELECT "
+            + headBoundary.sql()
+            + " FROM information_revision_allowances r "
+            + "WHERE r.id=information_navigation_head(p.neighbour)),false)) label ON true ORDER BY p.id";
+    if (byteBudget > 0) {
+      // The scalar-only sentinel is checked before reading any document/label text. Oversized
+      // graphs keep the exact uncached projection, including complete titles and tags.
+      sql =
+          "WITH connection_rows AS MATERIALIZED ("
+              + sql
+              + "), connection_bounds AS "
+              + "(SELECT coalesce(sum(256::bigint+octet_length(to_jsonb(p)::text)),0) AS cache_bytes "
+              + "FROM connection_rows p) SELECT p.*,b.cache_bytes FROM connection_bounds b "
+              + "LEFT JOIN connection_rows p ON b.cache_bytes<=? ORDER BY p.id";
+      args.add(byteBudget);
     }
-    return new Connections(result, limit, offset);
+    return jdbc.query(
+        sql,
+        (org.springframework.jdbc.core.ResultSetExtractor<Connections>)
+            rs -> {
+              var connections = new ArrayList<Connection>();
+              while (rs.next()) {
+                if (byteBudget > 0 && rs.getLong("cache_bytes") > byteBudget)
+                  throw new ProjectionCache.Bypass();
+                if (!rs.getBoolean("parent_readable")) throw unavailable();
+                if (rs.getObject("id", UUID.class) == null) continue;
+                var edge = relationship(rs);
+                Selection choice;
+                if (rs.getObject("resource", UUID.class) != null)
+                  choice = new Readable(document(rs, c.selection().includeGlobal()));
+                else if (rs.getBoolean("locked_visible"))
+                  choice =
+                      new Locked(
+                          rs.getObject("neighbour", UUID.class), rs.getString("locked_label"));
+                else continue;
+                if (choice instanceof Locked)
+                  edge =
+                      new Relationship(
+                          edge.id(),
+                          edge.source(),
+                          edge.target(),
+                          null,
+                          edge.relation(),
+                          edge.version(),
+                          edge.removed());
+                connections.add(new Connection(edge, choice));
+              }
+              return new Connections(connections, limit, offset);
+            },
+        args.toArray());
+  }
+
+  private static long connectionsWeight(Connections page) {
+    long weight = 8192 + 8192L * page.connections().size();
+    for (var connection : page.connections()) {
+      if (connection.selection() instanceof Readable readable)
+        weight += documentsWeight(new Documents(List.of(readable.document()), 1, 0));
+      else if (connection.selection() instanceof Locked locked)
+        weight += 4L * locked.label().length();
+    }
+    return weight;
   }
 
   private UUID writable(InformationContext c, UUID resource) {

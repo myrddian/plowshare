@@ -180,18 +180,39 @@ public class JdbcProjectMembers implements ProjectMembers {
 
   @Override
   public Access managementAccess(String project, String actor) {
-    if (!mayAdminister(project, actor)) return access(project, actor);
+    return mayAdminister(project, actor)
+        ? administratorAccess(project)
+        : ordinaryAccess(project, actor);
+  }
+
+  private Access administratorAccess(String project) {
     Access result = projectAccess(project, ProjectRole.MANAGER);
     return new Access(
         project, ProjectRole.MANAGER, List.of("manage"), result.members(), result.history());
   }
 
   public Access access(String project, String handle) {
-    if (mayAdminister(project, handle)) return managementAccess(project, handle);
+    return mayAdminister(project, handle)
+        ? administratorAccess(project)
+        : ordinaryAccess(project, handle);
+  }
+
+  private Access ordinaryAccess(String project, String handle) {
     if (ProjectIds.toRead(jdbc, Home.of(project)) == ProjectIds.NONE)
       throw new ArchiveRefusedException("No project has that name");
-    requireRole(project, handle, ProjectRole.VIEWER);
-    ProjectRole effective = role(project, handle).orElseThrow();
+    // This is one operation-local authority resolution. A future command must resolve it again;
+    // member/history hydration below neither grants authority nor calls external providers.
+    ProjectRole effective =
+        role(project, handle)
+            .filter(role -> role.allows(ProjectRole.VIEWER))
+            .orElseThrow(
+                () ->
+                    new io.aeyer.plowshare.server.faults.CallerFault(
+                        "This account needs "
+                            + ProjectRole.VIEWER
+                            + " access to project '"
+                            + project
+                            + "'"));
     return projectAccess(project, effective);
   }
 

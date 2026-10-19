@@ -103,7 +103,7 @@ func main() {
 			bare := <-client.Pushes()
 			check(bare.Variant3 != nil && bare.Variant3.Unread == 1, "invalid hints escaped")
 			envelope := <-client.Pushes()
-			check(envelope.Variant11 != nil && envelope.Variant11.Type == "usage.closed", "enveloped hint missing")
+			check(envelope.Variant12 != nil && envelope.Variant12.Type == "usage.closed", "enveloped hint missing")
 		}
 		if test.Name == "disconnect" {
 			select {

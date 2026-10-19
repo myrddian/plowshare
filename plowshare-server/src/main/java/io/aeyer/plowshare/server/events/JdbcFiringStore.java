@@ -101,10 +101,12 @@ public class JdbcFiringStore implements FiringStore {
     // poisoned, preventing the publication, remaining fan-out and seen cursor from committing.
     for (int attempt = 0; attempt < 3; attempt++) {
       String id = ids.get();
-      int inserted =
-          jdbc.update(
+      var inserted =
+          jdbc.query(
               "INSERT INTO firings (id, event, data, schedule, fire_at, trigger, target,"
-                  + " status, arrived_at) VALUES (?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                  + " status, arrived_at) VALUES (?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING "
+                  + COLUMNS,
+              JdbcFiringStore::row,
               id,
               event,
               EventPayloadCodec.write(data),
@@ -114,7 +116,7 @@ public class JdbcFiringStore implements FiringStore {
               trigger == null ? null : trigger.target(),
               trigger == null ? "unmatched" : "queued",
               ts(at));
-      if (inserted == 1) return find(id);
+      if (!inserted.isEmpty()) return Optional.of(inserted.getFirst());
       if (schedule != null
           && Boolean.TRUE.equals(
               jdbc.queryForObject(
@@ -180,16 +182,20 @@ public class JdbcFiringStore implements FiringStore {
           "a wake requires a conversation target and an explicit wake DTO");
     EventPayloadCodec.require(WAKE_EVENT, topic, null, null, data);
     String id = MemoryIds.mint(PREFIX, at);
-    jdbc.update(
-        "INSERT INTO firings (id, event, data, target, status, arrived_at, topic)"
-            + " VALUES (?, ?, ?::jsonb, ?, 'queued', ?, ?)",
-        id,
-        WAKE_EVENT,
-        EventPayloadCodec.write(data),
-        target,
-        ts(at),
-        topic);
-    return find(id);
+    return jdbc
+        .query(
+            "INSERT INTO firings (id, event, data, target, status, arrived_at, topic)"
+                + " VALUES (?, ?, ?::jsonb, ?, 'queued', ?, ?) RETURNING "
+                + COLUMNS,
+            JdbcFiringStore::row,
+            id,
+            WAKE_EVENT,
+            EventPayloadCodec.write(data),
+            target,
+            ts(at),
+            topic)
+        .stream()
+        .findFirst();
   }
 
   /**

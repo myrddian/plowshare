@@ -564,7 +564,8 @@ public final class InformationCatalogue implements InformationReadAccess {
   public InformationContent.View content(InformationContext context, UUID revision) {
     if (contentRepository == null) throw new CallerFault("Typed information is unavailable");
     requireReadable(context, revision);
-    if (row(revision).availability().equals("deleted")) throw absent();
+    // The view's existing header projection rejects deleted content. Do not hydrate a full
+    // extraction merely to inspect that lifecycle field before the typed view reads it again.
     return contentRepository.view(revision);
   }
 

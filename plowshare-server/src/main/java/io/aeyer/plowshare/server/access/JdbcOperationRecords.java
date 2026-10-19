@@ -1,8 +1,11 @@
 package io.aeyer.plowshare.server.access;
 
 import io.aeyer.plowshare.server.allowances.AllowanceId;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -72,49 +75,92 @@ public class JdbcOperationRecords implements OperationRecords {
 
   @Override
   public Optional<OperationAuthority.Admission> find(UUID id) {
-    return jdbc
-        .query(
-            "SELECT * FROM operation_admissions WHERE id=? AND sealed",
-            (rs, n) ->
-                new OperationAuthority.Admission(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("executor_handle"),
-                    new AuthorityIds.AccountId(rs.getObject("executor", UUID.class)),
-                    new AuthorityIds.ScopeId(rs.getObject("scope", UUID.class)),
-                    io.aeyer.plowshare.protocol.Home.of(rs.getString("project_name")),
-                    GrantRecipient.account(
-                        new AuthorityIds.AccountId(rs.getObject("source_account", UUID.class))),
-                    jdbc.query(
-                        "SELECT action,grant_id FROM operation_admission_support WHERE operation=? ORDER BY action,grant_id",
-                        (support, index) ->
-                            new OperationAuthority.Support(
-                                AuthorityAction.valueOf(support.getString(1)),
-                                support.getObject(2, UUID.class)),
-                        id),
-                    rs.getBoolean("global_read")),
-            id)
-        .stream()
-        .findFirst();
+    return jdbc.query(
+        "SELECT a.*,s.action AS support_action,s.grant_id FROM operation_admissions a"
+            + " LEFT JOIN operation_admission_support s ON s.operation=a.id"
+            + " WHERE a.id=? AND a.sealed ORDER BY s.action,s.grant_id",
+        (ResultSetExtractor<Optional<OperationAuthority.Admission>>)
+            rows -> {
+              if (!rows.next()) return Optional.empty();
+              var header = AdmissionHeader.read(rows);
+              return Optional.of(header.admission(supports(rows)));
+            },
+        id);
   }
 
   @Override
   public Optional<OperationAuthority.Conversation> conversation(String id) {
-    return jdbc
-        .query(
-            "SELECT * FROM operation_conversations WHERE conversation=?",
-            (rs, n) ->
-                new OperationAuthority.Conversation(
-                    rs.getString("conversation"),
-                    rs.getString("agent"),
-                    find(rs.getObject("operation", UUID.class))
-                        .orElseThrow(
-                            () -> new IllegalStateException("Missing conversation admission")),
-                    rs.getString("parent_conversation"),
-                    migratedAllowance(rs.getObject("allowance_id", UUID.class), id),
-                    rs.getString("capabilities")),
-            id)
-        .stream()
-        .findFirst();
+    return jdbc.query(
+        "SELECT c.conversation,c.agent,c.parent_conversation,c.allowance_id,c.capabilities,"
+            + "a.*,s.action AS support_action,s.grant_id FROM operation_conversations c"
+            + " LEFT JOIN operation_admissions a ON a.id=c.operation AND a.sealed"
+            + " LEFT JOIN operation_admission_support s ON s.operation=a.id"
+            + " WHERE c.conversation=? ORDER BY s.action,s.grant_id",
+        (ResultSetExtractor<Optional<OperationAuthority.Conversation>>)
+            rows -> {
+              if (!rows.next()) return Optional.empty();
+              if (rows.getObject("id", UUID.class) == null)
+                throw new IllegalStateException("Missing conversation admission");
+              var header = AdmissionHeader.read(rows);
+              String conversation = rows.getString("conversation"),
+                  agent = rows.getString("agent"),
+                  parent = rows.getString("parent_conversation"),
+                  capabilities = rows.getString("capabilities");
+              var budget = migratedAllowance(rows.getObject("allowance_id", UUID.class), id);
+              return Optional.of(
+                  new OperationAuthority.Conversation(
+                      conversation,
+                      agent,
+                      header.admission(supports(rows)),
+                      parent,
+                      budget,
+                      capabilities));
+            },
+        id);
+  }
+
+  private static List<OperationAuthority.Support> supports(ResultSet rows) throws SQLException {
+    var support = new ArrayList<OperationAuthority.Support>();
+    do {
+      String action = rows.getString("support_action");
+      if (action != null)
+        support.add(
+            new OperationAuthority.Support(
+                AuthorityAction.valueOf(action), rows.getObject("grant_id", UUID.class)));
+    } while (rows.next());
+    return List.copyOf(support);
+  }
+
+  private record AdmissionHeader(
+      UUID id,
+      String executor,
+      UUID account,
+      UUID scope,
+      String project,
+      UUID source,
+      boolean globalRead) {
+    static AdmissionHeader read(ResultSet row) throws SQLException {
+      return new AdmissionHeader(
+          row.getObject("id", UUID.class),
+          row.getString("executor_handle"),
+          row.getObject("executor", UUID.class),
+          row.getObject("scope", UUID.class),
+          row.getString("project_name"),
+          row.getObject("source_account", UUID.class),
+          row.getBoolean("global_read"));
+    }
+
+    OperationAuthority.Admission admission(List<OperationAuthority.Support> support) {
+      return new OperationAuthority.Admission(
+          id,
+          executor,
+          new AuthorityIds.AccountId(account),
+          new AuthorityIds.ScopeId(scope),
+          io.aeyer.plowshare.protocol.Home.of(project),
+          GrantRecipient.account(new AuthorityIds.AccountId(source)),
+          support,
+          globalRead);
+    }
   }
 
   private static AllowanceId migratedAllowance(UUID source, String conversation) {
@@ -148,24 +194,53 @@ public class JdbcOperationRecords implements OperationRecords {
   public void bind(OperationAuthority.Conversation bound) {
     transactions.executeWithoutResult(
         status -> {
-          jdbc.update(
-              "INSERT INTO operation_conversations(conversation,agent,operation,parent_conversation,allowance_id,capabilities) VALUES(?,?,?,?,?,?) ON CONFLICT(conversation) DO NOTHING",
-              bound.id(),
-              bound.agent(),
-              bound.admission().id(),
-              bound.parent(),
-              bound.budget().value(),
-              bound.capabilities());
-          var stored = conversation(bound.id()).orElseThrow();
+          var inserted =
+              jdbc.query(
+                  "INSERT INTO operation_conversations(conversation,agent,operation,parent_conversation,allowance_id,capabilities) VALUES(?,?,?,?,?,?) ON CONFLICT(conversation) DO NOTHING RETURNING conversation,agent,operation,parent_conversation,allowance_id,capabilities",
+                  JdbcOperationRecords::binding,
+                  bound.id(),
+                  bound.agent(),
+                  bound.admission().id(),
+                  bound.parent(),
+                  bound.budget().value(),
+                  bound.capabilities());
+          // Idempotent conflict reconciliation needs only the immutable binding tuple. Admission
+          // support is unrelated to this comparison and remains live evidence at its own owner.
+          var stored =
+              inserted.isEmpty()
+                  ? jdbc.query(
+                          "SELECT conversation,agent,operation,parent_conversation,allowance_id,capabilities FROM operation_conversations WHERE conversation=?",
+                          JdbcOperationRecords::binding,
+                          bound.id())
+                      .getFirst()
+                  : inserted.getFirst();
           // Supporting rows have a stable semantic set, independent of JDBC enumeration order.
           if (!stored.id().equals(bound.id())
               || !stored.agent().equals(bound.agent())
-              || !stored.admission().id().equals(bound.admission().id())
+              || !stored.operation().equals(bound.admission().id())
               || !Objects.equals(stored.parent(), bound.parent())
-              || !stored.budget().equals(bound.budget())
+              || !Objects.equals(stored.allowance(), bound.budget().value())
               || !stored.capabilities().equals(bound.capabilities()))
             throw new IllegalStateException("Conversation authority cannot be rebound");
         });
+  }
+
+  private record Binding(
+      String id,
+      String agent,
+      UUID operation,
+      String parent,
+      UUID allowance,
+      String capabilities) {}
+
+  private static Binding binding(ResultSet row, int index) throws SQLException {
+    return new Binding(
+        row.getString("conversation"),
+        row.getString("agent"),
+        row.getObject("operation", UUID.class),
+        row.getString("parent_conversation"),
+        row.getObject("allowance_id", UUID.class),
+        row.getString("capabilities"));
   }
 
   @Override

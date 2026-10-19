@@ -48,7 +48,7 @@ foreach (var test in tests)
     if (test.Name == "push")
     {
         var bare = await client.Pushes.ReadAsync(); Check(bare.Notification.Variant3.IsSet && bare.Notification.Variant3.Value.Unread == 1, "invalid push escaped");
-        var envelope = await client.Pushes.ReadAsync(); Check(envelope.Notification.Variant11.IsSet && envelope.Notification.Variant11.Value.Type == "usage.closed", "enveloped hint missing");
+        var envelope = await client.Pushes.ReadAsync(); Check(envelope.Notification.Variant12.IsSet && envelope.Notification.Variant12.Value.Type == "usage.closed", "enveloped hint missing");
     }
     if (test.Name == "disconnect")
     {

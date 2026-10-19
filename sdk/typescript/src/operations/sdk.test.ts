@@ -295,6 +295,7 @@ describe('external DTOs and typed notifications', () => {
     const waiting = client.request('project.list', {});
     wire.push({ kind: 'inbox.changed', unread: 2, future: { private: true } });
     wire.push({ kind: 'inbox.changed', unread: -1 });
+    wire.push({ kind: 'information.invalidated', ignored: 'private' });
     const requestId = '00000000-0000-4000-8000-000000000001';
     wire.push({
       kind: 'orchestration.resumed',
@@ -311,6 +312,7 @@ describe('external DTOs and typed notifications', () => {
     expect(requirePayload(await waiting)).toEqual([]);
     expect(pushes).toEqual([
       { kind: 'inbox.changed', unread: 2 },
+      { kind: 'information.invalidated' },
       { kind: 'orchestration.resumed', orchestration: 'root', requestId },
     ]);
     expect(faults).toHaveLength(2);

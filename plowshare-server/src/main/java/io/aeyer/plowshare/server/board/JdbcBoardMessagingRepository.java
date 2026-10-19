@@ -433,6 +433,82 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
         limit);
   }
 
+  public List<DeliveryListing> deliveryPage(String id, int offset, int limit) {
+    page(offset, limit);
+    return List.copyOf(
+        jdbc.query(
+            """
+        WITH route_page AS MATERIALIZED (
+          SELECT r.*,b.posted_at,b.body FROM board_message_routes r
+          JOIN board_messages b ON b.id=r.message WHERE r.sender=? OR r.recipient=?
+          ORDER BY b.posted_at DESC,r.message DESC OFFSET ? LIMIT ?
+        ), jobs AS (
+          SELECT DISTINCT ON(p.message) p.message,f.job_id FROM firings f JOIN route_page p
+          ON f.data->>'direct_message'=p.message
+          WHERE f.job_id IS NOT NULL AND f.job_id<>'pending'
+          ORDER BY p.message,f.started_at DESC NULLS LAST,f.id DESC
+        ), running AS (
+          SELECT DISTINCT p.message FROM firings f JOIN route_page p ON f.data->>'direct_message'=p.message
+          WHERE f.status='started' AND f.finished_at IS NULL AND f.job_id IS NOT NULL
+        ), final_replies AS (
+          SELECT r.reply_to,r.message FROM board_message_routes r JOIN route_page p ON p.message=r.reply_to WHERE r.final
+        )
+        SELECT p.*,s.account AS sender_account,s.project AS sender_project,s.agent AS sender_agent,
+          s.conversation AS sender_conversation,s.topic AS sender_topic,s.lifetime AS sender_lifetime,
+          s.active AS sender_active,t.account AS recipient_account,t.project AS recipient_project,
+          t.agent AS recipient_agent,t.conversation AS recipient_conversation,t.topic AS recipient_topic,
+          t.lifetime AS recipient_lifetime,t.active AS recipient_active,j.job_id,
+          run.message IS NOT NULL AS running,reply.message AS final_reply
+        FROM route_page p JOIN board_message_instances s ON s.id=p.sender
+          JOIN board_message_instances t ON t.id=p.recipient LEFT JOIN jobs j ON j.message=p.message
+          LEFT JOIN running run ON run.message=p.message LEFT JOIN final_replies reply ON reply.reply_to=p.message
+        ORDER BY p.posted_at DESC,p.message DESC
+        """,
+            (row, number) ->
+                new DeliveryListing(
+                    new Route(
+                        row.getString("message"),
+                        row.getString("sender"),
+                        row.getString("recipient"),
+                        row.getString("reply_to"),
+                        row.getBoolean("reply_expected"),
+                        row.getBoolean("final"),
+                        row.getBoolean("generated"),
+                        row.getString("ending"),
+                        row.getTimestamp("handled_at") != null),
+                    deliveryInstance(row, "sender"),
+                    deliveryInstance(row, "recipient"),
+                    new DeliveryState(
+                        row.getBoolean("awaiting"),
+                        row.getString("termination"),
+                        row.getTimestamp("deadline_at") == null
+                            ? null
+                            : row.getTimestamp("deadline_at").toInstant()),
+                    Optional.ofNullable(row.getString("job_id")),
+                    row.getBoolean("running"),
+                    Optional.ofNullable(row.getString("final_reply")),
+                    row.getTimestamp("posted_at").toInstant(),
+                    row.getString("body")),
+            id,
+            id,
+            offset,
+            limit));
+  }
+
+  private static Instance deliveryInstance(java.sql.ResultSet row, String side)
+      throws java.sql.SQLException {
+    // Only these two code-owned prefixes reach column lookup, never a caller's identifier.
+    return new Instance(
+        row.getString(side),
+        row.getString(side + "_account"),
+        row.getString(side + "_project"),
+        row.getString(side + "_agent"),
+        row.getString(side + "_conversation"),
+        row.getString(side + "_topic"),
+        row.getString(side + "_lifetime"),
+        row.getBoolean(side + "_active"));
+  }
+
   public Optional<String> messageJob(String message) {
 
     return jdbc
@@ -540,16 +616,56 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
     return instances("account = ? AND project = ? AND request_id = ?", account, project, requestId);
   }
 
-  public List<Instance> listing(
+  public List<InstanceListing> listing(
       String account, String project, boolean archived, int offset, int limit) {
     page(offset, limit);
-    return instances(
-        "account = ? AND project = ? AND (? OR archived_at IS NULL) ORDER BY created_at, id OFFSET ? LIMIT ?",
-        account,
-        project,
-        archived,
-        offset,
-        limit);
+    // Bound raw instance rows before aggregation/visibility filtering, including the caller's
+    // lookahead row. Routes and started jobs are read in sets, never from an instance row mapper.
+    return List.copyOf(
+        jdbc.query(
+            """
+        WITH instance_page AS MATERIALIZED (
+          SELECT id,account,project,agent,conversation,topic,lifetime,active,is_default,
+            archived_at IS NOT NULL AS archived,created_at
+          FROM board_message_instances WHERE account=? AND project=? AND (? OR archived_at IS NULL)
+          ORDER BY created_at,id OFFSET ? LIMIT ?
+        ), route_counts AS (
+          SELECT r.recipient,count(*) AS pending,bool_or(r.awaiting) AS awaiting
+          FROM board_message_routes r JOIN instance_page p ON p.id=r.recipient
+          WHERE r.handled_at IS NULL GROUP BY r.recipient
+        ), jobs AS (
+          SELECT DISTINCT ON(f.topic) f.topic,f.job_id
+          FROM firings f JOIN instance_page p ON p.topic=f.topic
+          WHERE f.status='started' AND f.finished_at IS NULL AND f.job_id IS NOT NULL
+          ORDER BY f.topic,f.started_at DESC,f.id
+        )
+        SELECT p.*,coalesce(r.pending,0) AS pending,coalesce(r.awaiting,false) AS awaiting,j.job_id
+        FROM instance_page p LEFT JOIN route_counts r ON r.recipient=p.id
+        LEFT JOIN jobs j ON j.topic=p.topic ORDER BY p.created_at,p.id
+        """,
+            (row, number) ->
+                new InstanceListing(
+                    new Instance(
+                        row.getString("id"),
+                        row.getString("account"),
+                        row.getString("project"),
+                        row.getString("agent"),
+                        row.getString("conversation"),
+                        row.getString("topic"),
+                        row.getString("lifetime"),
+                        row.getBoolean("active")),
+                    new InstanceState(
+                        row.getBoolean("is_default"),
+                        row.getBoolean("archived"),
+                        row.getTimestamp("created_at").toInstant()),
+                    row.getBoolean("awaiting"),
+                    row.getInt("pending"),
+                    Optional.ofNullable(row.getString("job_id"))),
+            account,
+            project,
+            archived,
+            offset,
+            limit));
   }
 
   public InstanceState instanceState(String id) {

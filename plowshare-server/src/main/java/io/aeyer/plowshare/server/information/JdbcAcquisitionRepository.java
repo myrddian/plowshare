@@ -22,23 +22,25 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
     return clock.instant().atOffset(ZoneOffset.UTC);
   }
 
-  private Ticket ticket(Map<String, Object> row) {
-    Status status =
-        new Status(
-            (UUID) row.get("id"),
-            (String) row.get("url"),
-            (String) row.get("source_name"),
-            (String) row.get("corpus"),
-            (String) row.get("state"),
-            (UUID) row.get("revision_id"),
-            ((Number) row.get("attempt")).intValue(),
-            (String) row.get("error"),
-            ((Number) row.get("allowance_total")).intValue(),
-            ((java.sql.Timestamp) row.get("created_at")).toInstant(),
-            gate(row.get("pre_gate")),
-            gate(row.get("post_gate")));
+  private static Status status(Map<String, Object> row) {
+    return new Status(
+        (UUID) row.get("id"),
+        (String) row.get("url"),
+        (String) row.get("source_name"),
+        (String) row.get("corpus"),
+        (String) row.get("state"),
+        (UUID) row.get("revision_id"),
+        ((Number) row.get("attempt")).intValue(),
+        (String) row.get("error"),
+        ((Number) row.get("allowance_total")).intValue(),
+        ((java.sql.Timestamp) row.get("created_at")).toInstant(),
+        gate(row.get("pre_gate")),
+        gate(row.get("post_gate")));
+  }
+
+  private static Ticket ticket(Map<String, Object> row) {
     return new Ticket(
-        status,
+        status(row),
         (String) row.get("account"),
         (UUID) row.get("request_id"),
         (String) row.get("project_name"),
@@ -102,6 +104,22 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
       int total,
       String corpus,
       Intent intent) {
+    return submitRetained(context, request, fingerprint, url, name, session, total, corpus, intent)
+        .status()
+        .id();
+  }
+
+  @Override
+  public Ticket submitRetained(
+      InformationContext context,
+      UUID request,
+      String fingerprint,
+      String url,
+      String name,
+      String session,
+      int total,
+      String corpus,
+      Intent intent) {
     Objects.requireNonNull(context);
     Objects.requireNonNull(request);
     if (total < 1
@@ -125,7 +143,7 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
     if (!prior.isEmpty()) {
       if (!fingerprint.equals(prior.getFirst().get("fingerprint")))
         throw new CallerFault("requestId was already used for a different acquisition");
-      return (UUID) prior.getFirst().get("id");
+      return owned(context.account(), (UUID) prior.getFirst().get("id"));
     }
     if (jdbc.queryForObject(
             "SELECT count(*) FROM information_requests WHERE account=? AND request_id=?",
@@ -134,21 +152,22 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
             request)
         != 0) throw new CallerFault("requestId was already used for information intake");
     UUID ticket = UUID.randomUUID();
-    jdbc.update(
-        "INSERT INTO information_acquisitions(id,account,request_id,scope,project_name,fingerprint,url,source_name,caller_session,allowance_total,corpus,content_intent) VALUES(?,?,?,?,?,?,?,?,?,?,?,CAST(? AS jsonb))",
-        ticket,
-        context.account(),
-        request,
-        context.selection().scope().name().toLowerCase(Locale.ROOT),
-        context.selection().project(),
-        fingerprint,
-        url,
-        name,
-        session,
-        total,
-        corpus,
-        intent == null ? null : InformationJson.json(intent));
-    return ticket;
+    var inserted =
+        jdbc.queryForMap(
+            "INSERT INTO information_acquisitions(id,account,request_id,scope,project_name,fingerprint,url,source_name,caller_session,allowance_total,corpus,content_intent) VALUES(?,?,?,?,?,?,?,?,?,?,?,CAST(? AS jsonb)) RETURNING *",
+            ticket,
+            context.account(),
+            request,
+            context.selection().scope().name().toLowerCase(Locale.ROOT),
+            context.selection().project(),
+            fingerprint,
+            url,
+            name,
+            session,
+            total,
+            corpus,
+            intent == null ? null : InformationJson.json(intent));
+    return ticket(inserted);
   }
 
   public Ticket owned(String account, UUID id) {
@@ -167,14 +186,14 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
       throw new IllegalArgumentException("invalid acquisition page");
     return jdbc
         .queryForList(
-            "SELECT * FROM information_acquisitions WHERE account=? AND project_name IS NOT DISTINCT FROM ? AND corpus=? ORDER BY created_at DESC,id OFFSET ? LIMIT ?",
+            "SELECT id,url,source_name,corpus,state,revision_id,attempt,error,allowance_total,created_at,pre_gate,post_gate FROM information_acquisitions WHERE account=? AND project_name IS NOT DISTINCT FROM ? AND corpus=? ORDER BY created_at DESC,id OFFSET ? LIMIT ?",
             account,
             project,
             corpus,
             offset,
             limit)
         .stream()
-        .map(row -> ticket(row).status())
+        .map(JdbcAcquisitionRepository::status)
         .toList();
   }
 

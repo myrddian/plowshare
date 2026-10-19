@@ -4,9 +4,11 @@ import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.auth.ServiceAccounts.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Repository;
 
 /** Owns service token row mappings and scope locks; no credential minting or permission policy. */
@@ -74,14 +76,52 @@ public class JdbcServiceAccountRepository implements ServiceAccountRepository {
   }
 
   public List<Token> tokens(String handle) {
-    return jdbc
-        .queryForList(
-            "SELECT id FROM service_tokens WHERE owner_handle=? ORDER BY created_at,id",
-            UUID.class,
-            handle)
-        .stream()
-        .map(id -> token(handle, id, false))
-        .toList();
+    // Display rows and all their scopes share one statement snapshot. The owner predicate is on
+    // tokens, so an empty scope set survives the LEFT JOIN without adopting another owner's row.
+    return jdbc.query(
+        "SELECT t.id,t.name,t.principal_handle,t.created_at,t.expires_at,t.revoked_at,p.name AS project,s.role"
+            + " FROM service_tokens t LEFT JOIN service_token_scopes s ON s.token_id=t.id"
+            + " LEFT JOIN projects p ON p.id=s.project_id WHERE t.owner_handle=?"
+            + " ORDER BY t.created_at,t.id,p.name",
+        (ResultSetExtractor<List<Token>>)
+            rows -> {
+              var tokens = new ArrayList<Token>();
+              Token current = null;
+              var scopes = new ArrayList<Scope>();
+              while (rows.next()) {
+                UUID id = rows.getObject("id", UUID.class);
+                if (current == null || !current.id().equals(id)) {
+                  if (current != null) tokens.add(withScopes(current, scopes));
+                  scopes.clear();
+                  current =
+                      new Token(
+                          id,
+                          rows.getString("name"),
+                          rows.getString("principal_handle"),
+                          rows.getObject("created_at", OffsetDateTime.class),
+                          rows.getObject("expires_at", OffsetDateTime.class),
+                          rows.getObject("revoked_at", OffsetDateTime.class),
+                          List.of());
+                }
+                String project = rows.getString("project");
+                if (project != null)
+                  scopes.add(new Scope(project, ProjectRole.parse(rows.getString("role"))));
+              }
+              if (current != null) tokens.add(withScopes(current, scopes));
+              return List.copyOf(tokens);
+            },
+        handle);
+  }
+
+  private static Token withScopes(Token token, List<Scope> scopes) {
+    return new Token(
+        token.id(),
+        token.name(),
+        token.principal(),
+        token.createdAt(),
+        token.expiresAt(),
+        token.revokedAt(),
+        List.copyOf(scopes));
   }
 
   @Override

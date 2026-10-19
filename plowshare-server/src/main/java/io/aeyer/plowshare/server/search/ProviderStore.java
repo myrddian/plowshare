@@ -14,6 +14,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -176,24 +177,31 @@ public class ProviderStore {
    * to bump a version number. The failure counter is different in kind and that is why only it is
    * reset: it describes a deployment, and a re-registration is a new deployment wearing an old key.
    */
-  public void upsert(String providerKey, String baseUrl, ProviderFacts facts) {
+  public Registration upsert(String providerKey, String baseUrl, ProviderFacts facts) {
     String[] verbNames = facts.verbs().stream().map(Enum::name).toArray(String[]::new);
-    jdbc.update(
-        connection -> {
-          PreparedStatement statement = connection.prepareStatement(UPSERT);
-          statement.setString(1, providerKey);
-          statement.setString(2, baseUrl);
-          statement.setString(3, facts.name());
-          statement.setString(4, facts.version());
-          statement.setString(5, facts.description());
-          statement.setArray(6, connection.createArrayOf("text", verbNames));
-          statement.setString(7, facts.costClass().name());
-          statement.setString(8, facts.networkTier().name());
-          statement.setInt(9, facts.maxResults());
-          statement.setInt(10, facts.maxQueryLength());
-          statement.setBoolean(11, facts.domainExclusion());
-          return statement;
-        });
+    return Objects.requireNonNull(
+        jdbc
+            .query(
+                connection -> {
+                  PreparedStatement statement =
+                      connection.prepareStatement(UPSERT + " RETURNING " + COLUMNS);
+                  statement.setString(1, providerKey);
+                  statement.setString(2, baseUrl);
+                  statement.setString(3, facts.name());
+                  statement.setString(4, facts.version());
+                  statement.setString(5, facts.description());
+                  statement.setArray(6, connection.createArrayOf("text", verbNames));
+                  statement.setString(7, facts.costClass().name());
+                  statement.setString(8, facts.networkTier().name());
+                  statement.setInt(9, facts.maxResults());
+                  statement.setInt(10, facts.maxQueryLength());
+                  statement.setBoolean(11, facts.domainExclusion());
+                  return statement;
+                },
+                ROW_MAPPER)
+            .stream()
+            .findFirst()
+            .orElseThrow());
   }
 
   /** The row registered under this key, if there is one. */

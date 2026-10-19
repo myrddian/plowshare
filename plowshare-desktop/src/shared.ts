@@ -171,6 +171,9 @@ export interface History {
   error?: string;
 }
 export interface DesktopState {
+  /** Opaque invalidation/reconnect counters; they never confer read authority. */
+  informationRevision?: number;
+  informationConnection?: number;
   localFileStores?: FileStoreState;
   applicationFiles?: {
     project: string;

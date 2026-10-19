@@ -696,6 +696,16 @@ class RuntimeConfigControllerTest {
       }
 
       @Override
+      public Optional<String> get(String key) {
+        return entry(key).map(Entry::value);
+      }
+
+      @Override
+      public Optional<String> authorOf(String key) {
+        return entry(key).map(Entry::updatedBy);
+      }
+
+      @Override
       public Optional<Entry> entry(String key) {
         throw gone();
       }
@@ -725,6 +735,16 @@ class RuntimeConfigControllerTest {
       @Override
       public List<Entry> all() {
         throw failure;
+      }
+
+      @Override
+      public Optional<String> get(String key) {
+        return entry(key).map(Entry::value);
+      }
+
+      @Override
+      public Optional<String> authorOf(String key) {
+        return entry(key).map(Entry::updatedBy);
       }
 
       @Override
@@ -760,6 +780,16 @@ class RuntimeConfigControllerTest {
       @Override
       public void put(String key, String value, String updatedBy) {
         // Accepted, and then overtaken.
+      }
+
+      @Override
+      public Optional<String> get(String key) {
+        return entry(key).map(Entry::value);
+      }
+
+      @Override
+      public Optional<String> authorOf(String key) {
+        return entry(key).map(Entry::updatedBy);
       }
 
       @Override

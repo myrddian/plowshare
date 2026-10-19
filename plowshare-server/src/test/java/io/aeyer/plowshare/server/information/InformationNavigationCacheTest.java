@@ -164,37 +164,28 @@ class InformationNavigationCacheTest {
       var parent = UUID.randomUUID();
       direct.documents(context, parent, "runbook", "outgoing", 2, 5);
       String sql = fixture.sql.getFirst();
-      assertEquals(1, occurrences(sql, "knowledge_dependencies_readable(r.id,?)"));
+      assertEquals(1, occurrences(sql, "knowledge_readable_selection("));
       assertFalse(sql.contains("information_navigation_own_readable(r.id"));
       assertFalse(sql.contains("information_reference_readable(r.id"));
       assertEquals(
-          1, occurrences(sql, "(SELECT information_readable(information_navigation_head(?)"));
-      assertTrue(
-          sql.contains(
-              "AND knowledge_document_in_boundary(information_navigation_head(?),?,?,?)) AND EXISTS"));
-      assertTrue(sql.contains("e.source=? AND e.target=q.id AND e.relation=?"));
-      assertEquals(
-          List.of(
-              "alice",
-              "alice",
-              "research",
-              false,
-              parent,
+          Arrays.asList(
               "alice",
               "project",
               "research",
               true,
-              parent,
-              "alice",
               "research",
               false,
+              "document",
+              null,
+              true,
               parent,
               "runbook",
+              "outgoing",
               2,
               5),
           fixture.arguments.getFirst());
       direct.documents(context, parent, "runbook", "backlinks", 2, 5);
-      assertTrue(fixture.sql.getLast().contains("e.target=? AND e.source=q.id AND e.relation=?"));
+      assertEquals("backlinks", fixture.arguments.getLast().get(11));
     }
   }
 

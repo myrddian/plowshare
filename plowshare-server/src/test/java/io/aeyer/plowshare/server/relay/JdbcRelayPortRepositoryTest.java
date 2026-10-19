@@ -132,6 +132,25 @@ class JdbcRelayPortRepositoryTest {
   }
 
   @Test
+  void outstandingBatchRetryReadsOnceAndStillRejectsSmallerLimits() {
+    relay = spy(relay);
+    ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
+    publish("one");
+    publish("two");
+    var request = consume("retry-budget", UUID.randomUUID().toString(), 100);
+    var batch = ports.consume(topic, "reviewer", request);
+    clearInvocations(relay);
+    assertEquals(batch, ports.consume(topic, "reviewer", request));
+    verify(relay, times(1)).read(any(Relay.SubscriptionKey.class), eq(100));
+    clearInvocations(relay);
+    assertThrows(
+        CallerFault.class,
+        () -> ports.consume(topic, "reviewer", consume(request.group(), request.consumerId(), 1)));
+    verify(relay, times(1)).read(any(Relay.SubscriptionKey.class), eq(100));
+    assertEquals(batch.through(), ports.acknowledge(topic, "reviewer", ack(batch)).through());
+  }
+
+  @Test
   void long_topics_survive_publish_consume_ack_and_migration_constraints() {
     String name = "a".repeat(1024);
     topic = new Relay.TopicKey(topic.projectId(), name);

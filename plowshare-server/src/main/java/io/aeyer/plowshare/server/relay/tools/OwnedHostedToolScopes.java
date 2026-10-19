@@ -371,7 +371,7 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
     enabled(b);
     var l =
         repository
-            .lease(b.binding())
+            .lease(b)
             .filter(
                 v ->
                     v.registration().binding().equals(b)
@@ -397,7 +397,7 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
               || !sessions.live(actor, session, socket))
             throw new CallerFault(
                 "Worker needs current binding generation and authenticated socket");
-          if (repository.lease(b.binding()).filter(this::live).isPresent())
+          if (repository.lease(b).filter(this::live).isPresent())
             throw new CallerFault("A live executor already owns this route; inspect worker status");
           repository.reserve(request.requestId(), b.binding(), actor, "tool.scope.worker.register");
           var time = now();
@@ -440,7 +440,7 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
     executor(b, actor);
     var lease =
         repository
-            .lease(b.binding())
+            .lease(b)
             .filter(
                 l ->
                     l.session().equals(session)
@@ -503,17 +503,31 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
   private HostedToolScopeRepository.Lease available(Binding b) {
     enabled(b);
     return repository
-        .lease(b.binding())
+        .lease(b)
         .filter(this::live)
         .orElseThrow(() -> new CallerFault("Hosted executor is unavailable"));
   }
 
   public List<ToolScopes.Connection> connections(String project, String actor) {
-    return repository.list(project, actor).stream()
+    var bindings =
+        repository.list(project, actor).stream()
+            .filter(binding -> binding.enabled() && !binding.deleted())
+            .toList();
+    var leases =
+        repository.leases(bindings).stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    value -> value.registration().binding().binding(),
+                    java.util.function.Function.identity()));
+    return bindings.stream()
         .filter(
             b -> {
               try {
-                var l = available(b);
+                enabled(b);
+                var l =
+                    Optional.ofNullable(leases.get(b.binding()))
+                        .filter(this::live)
+                        .orElseThrow(() -> new CallerFault("Hosted executor is unavailable"));
                 credentials.inspect(b.owner(), target(b));
                 catalogue(b, l);
                 return true;

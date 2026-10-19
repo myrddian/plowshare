@@ -182,16 +182,9 @@ public class SearchRegistrar {
     named(facts.version(), "version", stripped);
     declared(facts.costClass(), "costClass", stripped);
     declared(facts.networkTier(), "networkTier", stripped);
-    store.upsert(facts.providerKey(), stripped, facts);
-    return store
-        .find(facts.providerKey())
-        .orElseThrow(
-            () ->
-                new IllegalStateException(
-                    "just upserted '"
-                        + facts.providerKey()
-                        + "' and could not read it back — the"
-                        + " store and this method have disagreed about what upsert does"));
+    // RETURNING preserves the database's health history/defaults without a second read whose
+    // result could already describe a different concurrent registration.
+    return store.upsert(facts.providerKey(), stripped, facts);
   }
 
   /**

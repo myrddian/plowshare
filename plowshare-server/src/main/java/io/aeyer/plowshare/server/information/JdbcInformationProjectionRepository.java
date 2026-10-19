@@ -197,18 +197,22 @@ public final class JdbcInformationProjectionRepository implements InformationPro
                 "FROM chunks_embedding_staging material JOIN chunks c ON c.id=material.source_id JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?";
             default -> "FROM " + table + " material WHERE material.document_id=?";
           };
-      Long count = jdbc.queryForObject("SELECT count(*) " + selected, Long.class, revision);
-      if (count == null || count > (table.endsWith("_staging") ? 20000 : 10000)) return false;
-      // Measure expanded snapshot bytes rather than compressed/TOAST storage sizes.
-      bytes +=
+      // Count and expanded bytes describe the exact same selected material. One aggregate keeps
+      // both bounds on one statement snapshot; compressed/TOAST size is not a RAM allocation bound.
+      var bounds =
           jdbc.queryForObject(
-              "SELECT coalesce(sum(octet_length(to_jsonb(material)::text)),0) " + selected,
-              Long.class,
+              "SELECT count(*),coalesce(sum(octet_length(to_jsonb(material)::text)),0) " + selected,
+              (row, index) -> new MaterialBounds(row.getLong(1), row.getLong(2)),
               revision);
+      if (bounds == null || bounds.count() > (table.endsWith("_staging") ? 20000 : 10000))
+        return false;
+      bytes += bounds.bytes();
       if (bytes > 64L * 1024 * 1024) return false;
     }
     return true;
   }
+
+  private record MaterialBounds(long count, long bytes) {}
 
   private boolean vectorsComplete(UUID revision, boolean summary) {
     boolean dual =

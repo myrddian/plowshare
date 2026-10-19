@@ -68,6 +68,10 @@ class OutgoingEndToEndTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("plowshare.data.dir", DATA::toString);
     registry.add("LLM_BASE_URL", () -> "http://127.0.0.1:1/v1");
+    // Model identities are explicit deployment configuration. This no-inference fixture still
+    // needs valid declarations while its primary embedding stub prevents provider calls.
+    registry.add("LLM_CHAT_MODEL", () -> "fixture-chat");
+    registry.add("LLM_EMBEDDING_MODEL", () -> "fixture-embedding");
     registry.add("SPARK_BASE_URL", () -> "http://127.0.0.1:1/v1");
   }
 

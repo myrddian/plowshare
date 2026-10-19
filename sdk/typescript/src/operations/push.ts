@@ -15,6 +15,7 @@ export type {
 } from '../binding/job-notification.ts';
 export type AccountEvent =
   | { readonly kind: 'inbox.changed'; readonly unread: number }
+  | { readonly kind: 'information.invalidated' }
   | {
       readonly kind: 'information.changed';
       readonly sequence: number;
@@ -156,6 +157,8 @@ export function decodeServerPush(value: unknown): ServerPush {
       return whole(value.unread)
         ? { kind: value.kind, unread: value.unread }
         : fail();
+    case 'information.invalidated':
+      return { kind: value.kind };
     case 'information.changed':
       return whole(value.sequence) &&
         value.sequence >= 1 &&

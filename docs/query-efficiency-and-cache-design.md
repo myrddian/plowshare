@@ -15,7 +15,11 @@ versions and PostgreSQL notification/recovery infrastructure. The
 reads, tracked inspection DTOs and cross-process consumer/discovery wakeups.
 The [Manual and facet slice](query-efficiency-manual-slice.md) adds versioned
 catalogue/navigation collections, facet DTO reuse and scoped permission-query reuse.
-The broader owner plans described here require separate implementation and verification.
+The [query reuse sweep](query-efficiency-reuse-sweep.md) adds set-based cold
+authority, event-driven Desktop collection refresh, further tracked DTOs and
+owner-specific removal of confirmed query waste. Its ledgers distinguish changed
+paths from necessary fresh reads and remaining work. Other owner plans described
+here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)
 apply this strategy to the latest reviewed source baseline. The

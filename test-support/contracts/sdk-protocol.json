@@ -24069,16 +24069,31 @@
         "additionalProperties": false
       },
       "shape1241": {
-        "const": "information.changed"
+        "const": "information.invalidated"
       },
       "shape1240": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/shape1241"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "shape1243": {
+        "const": "information.changed"
+      },
+      "shape1242": {
         "type": "object",
         "properties": {
           "generation": {
             "$ref": "#/$defs/shape16"
           },
           "kind": {
-            "$ref": "#/$defs/shape1241"
+            "$ref": "#/$defs/shape1243"
           },
           "revision": {
             "$ref": "#/$defs/shape1"
@@ -24095,22 +24110,22 @@
         ],
         "additionalProperties": false
       },
-      "shape1243": {
+      "shape1245": {
         "const": "orchestration.changed"
       },
-      "shape1245": {
+      "shape1247": {
         "const": "asking"
       },
-      "shape1246": {
+      "shape1248": {
         "const": "waiting"
       },
-      "shape1247": {
+      "shape1249": {
         "const": "finished"
       },
-      "shape1248": {
+      "shape1250": {
         "const": "capped"
       },
-      "shape1244": {
+      "shape1246": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape827"
@@ -24122,30 +24137,30 @@
             "$ref": "#/$defs/shape908"
           },
           {
-            "$ref": "#/$defs/shape1245"
-          },
-          {
-            "$ref": "#/$defs/shape1246"
-          },
-          {
             "$ref": "#/$defs/shape1247"
           },
           {
             "$ref": "#/$defs/shape1248"
+          },
+          {
+            "$ref": "#/$defs/shape1249"
+          },
+          {
+            "$ref": "#/$defs/shape1250"
           }
         ]
       },
-      "shape1242": {
+      "shape1244": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1243"
+            "$ref": "#/$defs/shape1245"
           },
           "orchestration": {
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape1244"
+            "$ref": "#/$defs/shape1246"
           }
         },
         "required": [
@@ -24155,14 +24170,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1250": {
+      "shape1252": {
         "const": "orchestration.resumed"
       },
-      "shape1249": {
+      "shape1251": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1250"
+            "$ref": "#/$defs/shape1252"
           },
           "orchestration": {
             "$ref": "#/$defs/shape1"
@@ -24178,14 +24193,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1252": {
+      "shape1254": {
         "const": "orchestration.recorded"
       },
-      "shape1251": {
+      "shape1253": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1252"
+            "$ref": "#/$defs/shape1254"
           },
           "root": {
             "$ref": "#/$defs/shape1"
@@ -24204,27 +24219,8 @@
         ],
         "additionalProperties": false
       },
-      "shape1254": {
-        "const": "todos.changed"
-      },
-      "shape1253": {
-        "type": "object",
-        "properties": {
-          "conversation": {
-            "$ref": "#/$defs/shape1"
-          },
-          "kind": {
-            "$ref": "#/$defs/shape1254"
-          }
-        },
-        "required": [
-          "conversation",
-          "kind"
-        ],
-        "additionalProperties": false
-      },
       "shape1256": {
-        "const": "conversation.appended"
+        "const": "todos.changed"
       },
       "shape1255": {
         "type": "object",
@@ -24234,6 +24230,25 @@
           },
           "kind": {
             "$ref": "#/$defs/shape1256"
+          }
+        },
+        "required": [
+          "conversation",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "shape1258": {
+        "const": "conversation.appended"
+      },
+      "shape1257": {
+        "type": "object",
+        "properties": {
+          "conversation": {
+            "$ref": "#/$defs/shape1"
+          },
+          "kind": {
+            "$ref": "#/$defs/shape1258"
           },
           "through": {
             "$ref": "#/$defs/shape16"
@@ -24246,10 +24261,10 @@
         ],
         "additionalProperties": false
       },
-      "shape1258": {
+      "shape1260": {
         "const": "usage.updated"
       },
-      "shape1257": {
+      "shape1259": {
         "type": "object",
         "properties": {
           "report": {
@@ -24262,7 +24277,7 @@
             "$ref": "#/$defs/shape1"
           },
           "type": {
-            "$ref": "#/$defs/shape1258"
+            "$ref": "#/$defs/shape1260"
           }
         },
         "required": [
@@ -24273,23 +24288,23 @@
         ],
         "additionalProperties": false
       },
-      "shape1260": {
+      "shape1262": {
         "const": "BAD_REQUEST"
       },
-      "shape1261": {
+      "shape1263": {
         "const": "usage.closed"
       },
-      "shape1259": {
+      "shape1261": {
         "type": "object",
         "properties": {
           "code": {
-            "$ref": "#/$defs/shape1260"
+            "$ref": "#/$defs/shape1262"
           },
           "subscription": {
             "$ref": "#/$defs/shape1"
           },
           "type": {
-            "$ref": "#/$defs/shape1261"
+            "$ref": "#/$defs/shape1263"
           }
         },
         "required": [
@@ -24317,7 +24332,7 @@
             "$ref": "#/$defs/shape1242"
           },
           {
-            "$ref": "#/$defs/shape1249"
+            "$ref": "#/$defs/shape1244"
           },
           {
             "$ref": "#/$defs/shape1251"
@@ -24333,6 +24348,9 @@
           },
           {
             "$ref": "#/$defs/shape1259"
+          },
+          {
+            "$ref": "#/$defs/shape1261"
           }
         ]
       }

@@ -22,7 +22,6 @@ import io.aeyer.plowshare.server.search.ProviderStore;
 import io.aeyer.plowshare.server.search.Registration;
 import io.aeyer.plowshare.server.search.SearchRegistrar;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
@@ -64,10 +63,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
  * deleted, all three refusal tests below fail and the other five still pass — so they are pinned to
  * the guards and not to something incidental. What they cannot see is <em>which</em> 500 the
  * unguarded code produced: {@code upsert} is mocked here, so the unguarded run dies one line later
- * on the read-back instead of inside the store or at a {@code NOT NULL} column. The production
- * failure modes named above are facts about the wired stack, not something these assertions
- * observe. What they observe is that a caller's mistake leaves this route as a 400 naming the
- * field.
+ * on the unstubbed write result instead of inside the store or at a {@code NOT NULL} column. The
+ * production failure modes named above are facts about the wired stack, not something these
+ * assertions observe. What they observe is that a caller's mistake leaves this route as a 400
+ * naming the field.
  */
 class SearchProviderControllerTest {
 
@@ -144,7 +143,8 @@ class SearchProviderControllerTest {
       provider.start();
       String baseUrl = provider.url("/").toString();
       String stripped = baseUrl.substring(0, baseUrl.length() - 1);
-      when(store.find("searxng")).thenReturn(Optional.of(registered("searxng", stripped)));
+      when(store.upsert(anyString(), anyString(), any()))
+          .thenReturn(registered("searxng", stripped));
 
       mvc.perform(
               post("/v1/search/providers")
@@ -153,6 +153,7 @@ class SearchProviderControllerTest {
           .andExpect(status().isCreated())
           .andExpect(jsonPath("$.providerKey").value("searxng"))
           .andExpect(jsonPath("$.baseUrl").value(stripped));
+      verify(store, never()).find(anyString());
     }
   }
 

@@ -21,23 +21,21 @@ public class JdbcInformationStageRepository implements InformationStageRepositor
   @Override
   public LogState logState(UUID revision, Long project) {
     Objects.requireNonNull(revision);
-    String name =
-        project == null
-            ? null
-            : jdbc.queryForObject("SELECT name FROM projects WHERE id=?", String.class, project);
     return jdbc.queryForObject(
         "SELECT processing_log,allowance_total,allowance_spent,caller_session,"
             + " NOT EXISTS (SELECT 1 FROM inference_run_ownership o WHERE o.conversation_id=r.processing_log"
-            + " AND o.attribution->>'status' IS DISTINCT FROM 'SYSTEM') FROM information_revision_allowances r WHERE id=?",
+            + " AND o.attribution->>'status' IS DISTINCT FROM 'SYSTEM'),p.name FROM information_revision_allowances r LEFT JOIN projects p ON p.id=? WHERE r.id=? AND (?::bigint IS NULL OR p.id IS NOT NULL)",
         (row, n) ->
             new LogState(
-                name,
+                row.getString(6),
                 row.getString(1),
                 row.getInt(2),
                 row.getInt(3),
                 row.getString(4),
                 row.getBoolean(5)),
-        revision);
+        project,
+        revision,
+        project);
   }
 
   @Override

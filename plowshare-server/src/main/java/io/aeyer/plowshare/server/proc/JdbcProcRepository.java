@@ -6,8 +6,11 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -442,29 +445,11 @@ public final class JdbcProcRepository implements ProcRepository {
                           r.getInt("attempt_count"),
                           List.of()));
           boolean more = rows.size() > q.limit();
+          var selectedCalls = rows.stream().limit(q.limit()).toList();
+          var observations = attemptsForCalls(selectedCalls);
           var page = new ArrayList<ProcViews.Call>();
-          for (var call : rows.stream().limit(q.limit()).toList()) {
-            var attempts =
-                jdbc.query(
-                    """
-            SELECT * FROM inference_attempts WHERE call_id::text=:call
-            ORDER BY attempt_number LIMIT 100
-            """,
-                    new MapSqlParameterSource("call", call.id()),
-                    (r, n) ->
-                        new ProcViews.Attempt(
-                            r.getString("attempt_id"),
-                            r.getInt("attempt_number"),
-                            r.getString("outcome"),
-                            instant(r, "started_at"),
-                            instant(r, "ended_at"),
-                            r.getObject("http_status", Integer.class),
-                            r.getString("finish_reason"),
-                            r.getString("input_tokens"),
-                            r.getString("output_tokens"),
-                            r.getString("cost_kind"),
-                            r.getString("cost_amount"),
-                            r.getString("cost_currency")));
+          for (var call : selectedCalls) {
+            var attempts = observations.getOrDefault(call.id(), List.of());
             page.add(
                 new ProcViews.Call(
                     call.id(),
@@ -498,6 +483,48 @@ public final class JdbcProcRepository implements ProcRepository {
                   "Pool, model and billing route are captured destinations. Provider-internal queues/hosts are unknown.",
                   "No prompts, model outputs, tool arguments, credentials or provider error bodies are returned."));
         });
+  }
+
+  private record CallAttempt(String call, ProcViews.Attempt attempt) {}
+
+  /** UUID equality preserves the existing call/attempt index and an independent cap per call. */
+  private Map<String, List<ProcViews.Attempt>> attemptsForCalls(List<ProcViews.Call> calls) {
+    var found = new LinkedHashMap<String, List<ProcViews.Attempt>>();
+    for (int start = 0; start < calls.size(); start += 128) {
+      var part = calls.subList(start, Math.min(start + 128, calls.size()));
+      var parameters = new MapSqlParameterSource();
+      var marks = new ArrayList<String>();
+      for (int index = 0; index < part.size(); index++) {
+        parameters.addValue("id" + index, UUID.fromString(part.get(index).id()));
+        marks.add("(CAST(:id" + index + " AS uuid))");
+      }
+      var rows =
+          jdbc.query(
+              "SELECT chosen.call_id::text AS parent_call,attempt.* FROM (VALUES "
+                  + String.join(",", marks)
+                  + ") chosen(call_id) CROSS JOIN LATERAL (SELECT * FROM inference_attempts"
+                  + " WHERE call_id=chosen.call_id ORDER BY attempt_number LIMIT 100) attempt ORDER BY chosen.call_id,attempt.attempt_number",
+              parameters,
+              (r, index) ->
+                  new CallAttempt(
+                      r.getString("parent_call"),
+                      new ProcViews.Attempt(
+                          r.getString("attempt_id"),
+                          r.getInt("attempt_number"),
+                          r.getString("outcome"),
+                          instant(r, "started_at"),
+                          instant(r, "ended_at"),
+                          r.getObject("http_status", Integer.class),
+                          r.getString("finish_reason"),
+                          r.getString("input_tokens"),
+                          r.getString("output_tokens"),
+                          r.getString("cost_kind"),
+                          r.getString("cost_amount"),
+                          r.getString("cost_currency"))));
+      for (var row : rows)
+        found.computeIfAbsent(row.call(), ignored -> new ArrayList<>()).add(row.attempt());
+    }
+    return found;
   }
 
   @Override

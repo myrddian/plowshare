@@ -92,6 +92,10 @@ public class ProposalStore {
             LEFT JOIN projects pr ON pr.id = m.project_id
             """;
 
+  // Hydrate the exact successful write, including its current memory home, in the statement
+  // that won the conditional transition. Failed transitions retain their explanatory read below.
+  private static final String WRITTEN_SELECT = SELECT.replace("FROM proposals p", "FROM written p");
+
   /*
    * `IS NOT DISTINCT FROM` and not `=`, for the reason MemoryStore gives at
    * length: the global tier is a NULL project and `NULL = NULL` is NULL, so a
@@ -175,7 +179,7 @@ public class ProposalStore {
     requireNonBlank("by", by);
 
     String id = idFactory.get();
-    int filed;
+    List<Proposal> filed;
     try {
       // The translation sits INSIDE this try, and the order is the whole
       // point: an unreachable database leaves as an
@@ -186,13 +190,18 @@ public class ProposalStore {
           ArchiveUnavailableException.translating(
               "file a proposal",
               () ->
-                  jdbc.update(
-                      """
+                  jdbc.query(
+                      "WITH written AS ("
+                          + """
                             INSERT INTO proposals
                                 (id, memory_id, action, reason, state, created_at, proposed_by)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                             ON CONFLICT (memory_id, action) WHERE state = 'pending' DO NOTHING
-                            """,
+                             RETURNING *
+                    """
+                          + ") "
+                          + WRITTEN_SELECT,
+                      ROW_MAPPER,
                       id,
                       memoryId,
                       action,
@@ -224,10 +233,10 @@ public class ProposalStore {
       throw new ArchiveException(
           "no memory with id " + memoryId + "; a proposal names the memory it is about");
     }
-    if (filed == 0) {
+    if (filed.isEmpty()) {
       throw alreadyWaiting(memoryId, action);
     }
-    return get(id);
+    return filed.getFirst();
   }
 
   /**
@@ -350,16 +359,21 @@ public class ProposalStore {
     requireNonBlank("by", by);
 
     ProposalState settled = accept ? ProposalState.ACCEPTED : ProposalState.REJECTED;
-    int rows =
+    List<Proposal> rows =
         ArchiveUnavailableException.translating(
             "settle a proposal",
             () ->
-                jdbc.update(
-                    """
+                jdbc.query(
+                    "WITH written AS ("
+                        + """
                         UPDATE proposals
                            SET state = ?, resolved_at = ?, resolved_by = ?, resolution = ?
                          WHERE id = ? AND state = ?
-                        """,
+                         RETURNING *
+                    """
+                        + ") "
+                        + WRITTEN_SELECT,
+                    ROW_MAPPER,
                     settled.wireName(),
                     utc(now.get()),
                     by,
@@ -367,14 +381,14 @@ public class ProposalStore {
                     id,
                     ProposalState.PENDING.wireName()));
 
-    if (rows == 0) {
+    if (rows.isEmpty()) {
       // Zero means one of two things, and this read is what tells them
       // apart. It is not part of the guarantee above: the UPDATE has
       // already decided, and nothing deletes a proposal, so this read
       // cannot change the answer — only describe it.
       throw alreadySettledOrUnknown(id);
     }
-    return get(id);
+    return rows.getFirst();
   }
 
   /**
@@ -412,16 +426,18 @@ public class ProposalStore {
               + " settlement on it to account for; an account on a waiting proposal would"
               + " be an answer to a question nobody has answered");
     }
-    int rows =
+    List<Proposal> rows =
         ArchiveUnavailableException.translating(
             "record the account of a settled proposal",
             () ->
-                jdbc.update(
-                    "UPDATE proposals SET resolution = ? WHERE id = ? AND state <> ?",
+                jdbc.query(
+                    "WITH written AS (UPDATE proposals SET resolution = ? WHERE id = ? AND state <> ? RETURNING *) "
+                        + WRITTEN_SELECT,
+                    ROW_MAPPER,
                     blankToNull(account),
                     id,
                     ProposalState.PENDING.wireName()));
-    if (rows == 0) {
+    if (rows.isEmpty()) {
       // The state test stays on the UPDATE even though the read above
       // already made it, and this branch is what it is for: a release()
       // landing between the two. Removing the test survives every other
@@ -435,7 +451,7 @@ public class ProposalStore {
               + " went back to waiting while its"
               + " account was being written; nothing was recorded");
     }
-    return get(id);
+    return rows.getFirst();
   }
 
   /**
@@ -481,7 +497,7 @@ public class ProposalStore {
               + " is still waiting; nobody"
               + " has claimed it, so there is no claim to give back");
     }
-    int rows;
+    List<Proposal> rows;
     try {
       // Inside the try for the same reason as propose()'s: the duplicate
       // key below is the database answering, and only a failure to reach
@@ -490,13 +506,18 @@ public class ProposalStore {
           ArchiveUnavailableException.translating(
               "give back a claim on a proposal",
               () ->
-                  jdbc.update(
-                      """
+                  jdbc.query(
+                      "WITH written AS ("
+                          + """
                             UPDATE proposals
                                SET state = ?, resolved_at = NULL, resolved_by = NULL,
                                    resolution = NULL
                              WHERE id = ? AND state <> ?
-                            """,
+                             RETURNING *
+                    """
+                          + ") "
+                          + WRITTEN_SELECT,
+                      ROW_MAPPER,
                       ProposalState.PENDING.wireName(),
                       id,
                       ProposalState.PENDING.wireName()));
@@ -514,7 +535,7 @@ public class ProposalStore {
               + claimed.state().wireName()
               + ".");
     }
-    if (rows == 0) {
+    if (rows.isEmpty()) {
       // Same shape as note()'s, and reachable the same way: a second
       // release between the read above and this write. Held down by
       // a_claim_given_back_twice_says_somebody_else_got_there_first.
@@ -524,7 +545,7 @@ public class ProposalStore {
               + " was released by somebody else"
               + " while this claim was being given back");
     }
-    return get(id);
+    return rows.getFirst();
   }
 
   /**
