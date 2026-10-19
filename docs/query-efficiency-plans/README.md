@@ -8,6 +8,8 @@ Read the [shared query and cache strategy](../query-efficiency-and-cache-design.
 
 The [shared readability function plan](readability-functions.md) traces the nested PostgreSQL work used by several owners and defines the authority invariants its optimization must preserve.
 
+The subsequent [source and measured query analysis](../query-efficiency-analysis/README.md) checks these proposals against execution paths, branch-specific query counts, current DTO/version semantics and refreshed read-only measurements. Use its evidence and corrections when implementing a plan.
+
 ## Inventory and coverage
 
 The inventory covers **102 persistence owners, adapters, SQL helpers and database probes** in the server. It includes legacy stores that own SQL, `RuntimeConfig` despite its name, the nested `TodoNotices.Jdbc`, the shared `ProjectIds` SQL helper and its `JdbcProjectDirectories` adapter. Each entry has an individual plan. Configuration that only constructs repositories, domain callers that mention JDBC in comments, and row-mapping/SQL-construction helpers without database execution are not separate persistence owners; their effects belong in the owning plans.

@@ -19,6 +19,7 @@
 - [Information and evidence](information-system.md)
 - [Query efficiency and cache design](query-efficiency-and-cache-design.md) (proposed implementation strategy; query anti-pattern rules apply now)
 - [JDBC repository improvement plans](query-efficiency-plans/README.md) (102 owners; individual query and cache plans with a shared delivery sequence)
+- [JDBC query analysis](query-efficiency-analysis/README.md) (102 owners; measured latency, query-count evidence and cache feasibility)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
 - [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled policy and implementation boundaries)
