@@ -380,17 +380,6 @@ public final class ConversationStore {
     return logInternal(origin, home, agent, parent, owned, owner, openedBy, work);
   }
 
-  /**
-   * Existing nested conductors keep their own lifecycle/log while sharing the retained caller's
-   * durable allowance. The orchestration owner binds authority and budget lineage in this same
-   * transaction; a deferred database constraint rejects a missing binding at commit.
-   */
-  public ConversationRecord logSharedOrchestration(
-      Home home, String agent, String owner, Budget shared) {
-    allowances().attach(Objects.requireNonNull(shared));
-    return write(Origin.ORCHESTRATION, home, agent, null, null, null, owner, null);
-  }
-
   /** Reads only an existing immutable operation-to-budget relationship, never inventing one. */
   public Optional<Budget> allowanceFor(String conversation) {
     named(conversation);

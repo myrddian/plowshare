@@ -688,8 +688,10 @@ disclosures too. Filesystem and tool grants remain independent restrictions.
 
 Persist grant references and the admission ceiling with jobs, schedules, Relay
 work, orchestration, approvals and child agents. Children inherit or narrow the
-parent's authority and budget. Revalidate current authority against that retained
-ceiling so later grant expansion does not widen existing work. An expired or
+parent's authority. Synchronous `agent_run` delegates share the caller's allowance;
+each orchestration, including nested phases, retains its own selected allowance.
+Authority ancestry does not imply shared funding. Revalidate current authority
+against that retained ceiling so later grant expansion does not widen existing work. An expired or
 revoked grant stops further protected work; it cannot undo a completed external
 effect. Recovery reads original receipts and never resubmits uncertain effects
 or manufactures replacement request identities.

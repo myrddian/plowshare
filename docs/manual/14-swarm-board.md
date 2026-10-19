@@ -11,6 +11,14 @@ A swarm does not turn every participant into an unrestricted worker or
 automatically implement a proposal. The roles and permitted effects come from
 the agents you choose.
 
+A member granted an orchestration can start that separate workflow. The
+orchestration retains the member's authority ceiling but selects its own configured
+allowance and lifecycle; it does not spend the board pot or retain the member's
+wake lease. Finishing the wake or closing the board does not by itself cancel the
+workflow. Existing orchestration controls and live authority checks still apply.
+The launch returns a run handle; use orchestration status to follow it. Existing
+delivery routes apply, without automatically waking the board member on completion.
+
 Use [delegation](07-coordination-and-workflows.md) when you need a specialist's
 result in the current task, and [messaging](13-messaging-and-routing.md) when you
 need an addressed asynchronous exchange. A board topic is shared deliberation

@@ -30,7 +30,8 @@ slices or claim that their supported paths never worked.
   usage. A stale reader refreshes shared usage before an exhausted-source decision.
   Board continuations retain their owning lease callback and its closing floor.
   Child binding accepts the retained parent or a proven derived continuation of
-  it, while retaining the exact allowance and scoped grant ancestry.
+  it. Synchronous delegates retain its exact allowance; orchestration runs select
+  their own allowance while preserving scoped grant ancestry.
 - **C:** board trees and message instances share canonical rows. Unlimited roots
   have no finite total or percentage reserve; every wake still has a finite
   scheduling window. Root claim ordinals are distinct from a wake's local spent
@@ -94,12 +95,51 @@ explicit reconciliation error; the migration never invents unlimited authority.
 Historical closed swarms are not reopened. Deployment adoption and live provider
 restart/operator acceptance remain deployment work.
 
-Independent orchestration from board-backed work remains refused: a spending ID
-alone cannot reconstruct its owning wake window, reserve, closure or scheduling
-lifecycle. This preserves the earlier unsupported boundary, now with a specific
-lifecycle refusal instead of the missing-conversation-budget error. Board wakes
-and resumed delegates continue through their existing lease adapter. Enabling an
-independent asynchronous board consumer needs a separately scoped lifecycle bridge.
+### Orchestration contract correction, 19 October 2026
+
+The original orchestration contract remains authoritative: every new orchestration,
+including nested phases and workflows launched by a board member, has its own
+configured allowance. `agent_run` delegates share the calling run's Budget. Grant
+ancestry is independent of spending ownership: a child orchestration derives its
+caller's retained authority and keeps existing depth, phase, cancellation, approval,
+session, token and capability restrictions. Separate funding grants no extra access.
+
+Slice 18 (`4271689`) incorrectly replaced independent child budgets with caller
+sharing; `bef9fb2` carried that behavior into standalone allowance storage. This
+correction restores independent allocation and removes the board-source refusal.
+V171 allows an independently funded conductor to retain its actual caller while
+still rejecting unrelated authority ancestry, another source's allowance and
+replacement funding for ordinary delegates. The active shared-conductor creation
+helper is removed. Existing immutable envelopes, usage and claims are not rebound:
+already admitted shared runs retain their recorded source; no budget is reset.
+
+Each new conductor uses the existing definition/project cap selection and existing
+native zero-call behavior. Retained disabled, finite and unlimited policies and
+existing automatic-increase controls continue through the canonical repository.
+The correction does not add a policy setting or replace an explicit selected limit.
+
+A board-launched orchestration is a separate operation, not a continuation of the
+member's wake lease. Its calls and `agent_run` delegates use the orchestration's
+source; they do not spend the board pot, inherit its closing reserve, or stop merely
+because that wake settles or the board closes. Existing orchestration lifecycle and
+live authority checks continue to govern it. Board wakes and resumed board delegates
+still use their existing lease adapter. No additional board lifecycle bridge is
+required for this independent operation contract. The existing background-start
+handle/status and result-delivery contract is unchanged; this does not add automatic
+board-member wake-up on workflow completion.
+
+Correction verification: 28 selected PostgreSQL cases passed across retained
+operation records (17), standalone allowance migration/policy tests (8), and
+orchestration project-cap, automatic-increase and nested-hook tests (3). They
+cover separate nested sources, shared delegate claims after repository reopening,
+board wake settlement/closure, receipt replay, and rejection of unrelated
+authority or replacement delegate funding. The wider acceptance evidence below
+records the preceding standalone-storage implementation.
+
+`format`, `formatCheck` and repository `check` also passed for the correction.
+Default runtime tests include board-provenance recovery, retained-authority
+refusal, existing result delivery and `agent_run` sharing. No public API or SDK
+contract changed. No live deployment or model-provider execution was performed.
 
 The previously documented delegated-runtime capability repair and monetary
 accounting/pools remain deferred. This change neither grants missing capabilities
@@ -445,7 +485,7 @@ of these packages; the implementation mapping below records the resulting bounda
 | Package | Changes | Completion gate |
 | --- | --- | --- |
 | A — Contract and conversation-backed foundation | Typed allowance repository, canonical row/claims and conversation adapter; preserve existing `Budget` behavior and initial migration evidence. | Finite/unlimited/no-call reconstruction and concurrent claims work without conversation-owned counters. No active double writer. |
-| B — Execution lineage and recovery | Orchestration/delegation references, root factories, automatic increases, separate SYSTEM compaction/summary allowances and retained target separation. | Parent/child task execution shares its applicable allowance across restart; compaction/summary never debit it. SYSTEM input/operation fences survive. Missing durable conversation storage no longer causes the quoted orchestration refusal when a valid allowance is retained. |
+| B — Execution lineage and recovery | Orchestration/delegation references, root factories, automatic increases, separate SYSTEM compaction/summary allowances and retained target separation. | Each orchestration keeps its own allowance across restart; synchronous delegates share their caller's source. Compaction/summary never debit it. SYSTEM input/operation fences survive. Missing durable conversation storage no longer causes the quoted orchestration refusal when a valid allowance is retained. |
 | C — Swarms and messaging | Canonical pots, finite/unlimited contracts, distinct wake limits, recoverable exhaustion, scoped operator retry/top-up and affected client controls. | Exhaust → top-up → retry works without a new conversation, lost usage or authority substitution. Explicit close stays terminal. Messaging retains its distinct committed-message lifecycle. This package is required, not optional UI polish. |
 | D — Other operation sources | Processing/acquisition, query/write sources, ask, digest/Curator/maintenance and internal consultations; remove mirrored counters and storage-dependent lookups. | Every affected consumer selects policy once and retains/reuses the correct source. No fresh allowance on stage transition, retry or reconstruction. |
 | E — Complete cutover evidence | Remove remaining active legacy counter paths, update generated contracts/manuals and verify cross-consumer migration/restart behavior. | Source inventory has no unexplained allowance factories, claim writers or conversation-only recovery assumptions. Supported public controls and typed decoders pass. |

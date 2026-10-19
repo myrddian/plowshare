@@ -259,6 +259,14 @@ is not the same contract as `agent_run` sharing. Default maximum nesting depth i
 two below a root; server configuration can lower or raise it, and grant cycles are
 refused. A nested phase does not carry the root's acceptance stage.
 
+Each orchestration retains its own allowance in durable storage, using the existing
+conductor definition and project cap policy. It derives the caller's authority
+without sharing the caller's spending source. This also applies when a board
+member with the required orchestration grant starts a workflow: the workflow has
+its own lifecycle and budget, independent of the board wake's lease. Its own
+`agent_run` delegates share that workflow's Budget. Restart/resume keeps the same
+allowance and usage; it never allocates a fresh budget for an existing run.
+
 `artifacts: docs/workflows/{date}-{name}-{id}/` supplies a per-run relative output
 directory. Placeholders are `{date}`, `{name}` and `{id}`. Absolute paths, hidden
 segments, `.` and `..` are invalid; the run still needs workspace write authority.

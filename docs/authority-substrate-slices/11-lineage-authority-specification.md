@@ -3,6 +3,12 @@
 Recorded before enforcement, 18 October 2026. Internal contracts only; no new
 public operations, delegation modes, grant-management or budget API.
 
+The original enforcement and unsupported-consumer inventory below are historical.
+The [19 October orchestration correction](../standalone-allowance-and-recovery-plan.md#orchestration-contract-correction-19-october-2026)
+restores each new orchestration's own allowance while retaining caller authority.
+It supersedes the parent-budget requirement for nested/model-triggered workflows;
+synchronous delegates continue to share their caller's Budget.
+
 ## Supported consumers
 
 - Independent orchestration roots retain their executor, exact home/scope and

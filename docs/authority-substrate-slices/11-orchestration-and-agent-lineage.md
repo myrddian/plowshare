@@ -83,6 +83,11 @@ Preserve parent/child records, request IDs and budgets. Incompatible continuatio
 
 ## Implementation and activation limits
 
+This records the original slice 11 activation. The
+[19 October orchestration correction](../standalone-allowance-and-recovery-plan.md#orchestration-contract-correction-19-october-2026)
+supersedes its nested/model-triggered budget restriction: orchestration runs keep
+their own selected allowance while deriving retained caller authority.
+
 V159 adds immutable parent-admission edges and conversation envelopes to the existing
 operation records. Envelopes retain agent identity/capability fingerprints, executor,
 exact scope, parent conversation, at-most-CONTRIBUTOR actions and original budget

@@ -202,6 +202,31 @@ class OrchestrationResumptionTest {
   }
 
   @Test
+  void board_provenance_does_not_replace_the_orchestrations_own_budget_on_resume() {
+    io.aeyer.plowshare.server.access.OperationAuthority.Conversation retained =
+        operations.conversation("cnv_conductor").orElseThrow();
+    when(operations.conversation("cnv_conductor"))
+        .thenReturn(
+            Optional.of(
+                new io.aeyer.plowshare.server.access.OperationAuthority.Conversation(
+                    retained.id(),
+                    retained.agent(),
+                    retained.admission(),
+                    "cnv_board",
+                    retained.budget(),
+                    retained.capabilities())));
+    ConversationRecord board = mock(ConversationRecord.class);
+    when(board.origin()).thenReturn(io.aeyer.plowshare.server.archive.Origin.BOARD);
+    when(conversations.find("cnv_board")).thenReturn(Optional.of(board));
+
+    assertEquals(running, engine.resume(ask, "owner"));
+    verify(voice).speak(eq("cnv_conductor"), any(), anyString(), eq("session"), isNull(), any());
+    verify(conversations, never()).allowanceFor("cnv_board");
+    verify(conversations, never()).find("cnv_board");
+    verify(operations, never()).admit(any(), any(), any());
+  }
+
+  @Test
   void recorded_request_never_dispatches_again_even_after_a_second_failure() {
     when(recovery.received(ask.id(), "owner", ask.requestId())).thenReturn(true);
     assertEquals(failed, engine.resume(ask, "owner"));
@@ -307,7 +332,7 @@ class OrchestrationResumptionTest {
   }
 
   @Test
-  void child_orchestration_cannot_mint_an_independent_allowance_under_parent_authority() {
+  void caller_backed_orchestration_needs_retained_authority_before_allocating_its_budget() {
     var definition = mock(OrchestrationDefinition.class);
     for (String parent : java.util.Arrays.asList(null, "parent-run")) {
       var start =
