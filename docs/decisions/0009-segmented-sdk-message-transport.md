@@ -107,6 +107,15 @@ task completion. Ordinary response correlation remains inside the assembled
 message. Large messages serialize behind other messages in their direction;
 credits are the only bypass traffic in version one.
 
+The event channel dispatches complete segmented operations on one bounded serial
+worker per connection, keeping the socket reader free to receive credits during
+slow operations. Queued messages reserve their retained UTF-16 bytes against the
+shared process budget and are limited to 256 waiting operations and 640 MiB per
+connection, including the operation in flight. Admission overflow closes the
+connection rather than dropping a request. Authority is checked again when each
+operation starts. Disconnect discards queued operations without interrupting or
+replaying an operation that has already started. Legacy JSON routing stays inline.
+
 ## Bounds and ownership
 
 | Bound | Version-one value |

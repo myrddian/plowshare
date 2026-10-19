@@ -15,12 +15,16 @@ public final class PacketBudget {
     this.limit = limit;
   }
 
-  synchronized void acquire(long bytes) {
+  /** Reserve retained transport data, including messages waiting for domain dispatch. */
+  public synchronized void acquire(long bytes) {
+    if (bytes < 0) throw new IllegalArgumentException("negative packet reservation");
     if (bytes > limit - held) throw new IllegalArgumentException("packet memory capacity exceeded");
     held += bytes;
   }
 
-  synchronized void release(long bytes) {
+  /** Release exactly the reservation owned by a completed or discarded transport operation. */
+  public synchronized void release(long bytes) {
+    if (bytes < 0 || bytes > held) throw new IllegalArgumentException("invalid packet release");
     held -= bytes;
   }
 
