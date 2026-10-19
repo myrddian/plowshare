@@ -48,6 +48,11 @@ public class ProjectAuthorization {
   // Reads are named explicitly. New operations require work until their policy is reviewed.
   private static final Set<String> READ =
       Set.of(
+          "proc.list",
+          "proc.inspect",
+          "proc.calls",
+          "proc.queues",
+          "proc.tools",
           "project.list",
           "project.access",
           "tool.scope.host.list",
@@ -341,6 +346,14 @@ public class ProjectAuthorization {
       return;
     }
     boolean service = io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account);
+    if (Set.of("proc.list", "proc.inspect", "proc.calls", "proc.tools", "proc.queues")
+        .contains(operation)) {
+      // These are metadata inventory filters, not content/execution targets. The specialist
+      // repository rechecks custody/membership or explicit fleet authority on every bounded read.
+      if (service || !accounts.isEnabled(account))
+        throw new CallerFault("PROC needs an active human account");
+      return;
+    }
     if (operation.equals("information.policy.set") || operation.equals("information.policy.get")) {
       // Typed navigation service resolves the durable target; payload scope is not policy
       // authority.

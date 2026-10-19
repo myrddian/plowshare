@@ -34,6 +34,8 @@ import { checkedTransport } from 'plowshare-client-ts/operations/transport';
 import { background } from './background.ts';
 import { parseCommand as parseScheduleFileCommand } from 'plowshare-client-ts/operations/commands';
 import { UsageClient, runUsage } from '../logic/usage.ts';
+import { ProcClient, procText } from 'plowshare-client-ts/operations/proc';
+import { exploreProc } from './proc.ts';
 import { serverCommand } from '../logic/session.ts';
 import { listingConversations } from 'plowshare-client-ts/operations/session';
 import {
@@ -5621,6 +5623,41 @@ export async function converse(talking: Talking): Promise<void> {
                   'The message control response was refused or incomplete.',
               );
             show('client', JSON.stringify(result.outcome.payload, null, 2));
+          } catch (failure) {
+            show(
+              'trouble',
+              failure instanceof Error
+                ? failure.message
+                : errorMessage(failure),
+            );
+          }
+          continue;
+        }
+        if (line.kind === 'proc') {
+          try {
+            const proc = new ProcClient(connection);
+            if (line.command)
+              show(
+                'client',
+                procText(
+                  await proc.read(line.command.type, line.command.payload),
+                ),
+              );
+            else
+              await exploreProc(proc, {
+                show: (text) => show('client', text),
+                view:
+                  surface.view && surface.viewKey
+                    ? (text) =>
+                        viewDraft({
+                          name: 'PROC audit snapshot',
+                          path: 'Read-only server evidence',
+                          text,
+                        })
+                    : undefined,
+                choose: surface.questionDialog?.bind(surface),
+                close: surface.closeDialog?.bind(surface),
+              });
           } catch (failure) {
             show(
               'trouble',

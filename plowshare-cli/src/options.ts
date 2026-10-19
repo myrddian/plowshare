@@ -21,6 +21,9 @@ read takes an id; recall/navigate take question text. Other arguments are JSON.
 Conversation: open, list, latest, lifecycle, turns, compactions, chat, trajectory,
               context, projection, resume, follow
 Agent: list, define, run. Job: list, limits, plus status/cancel aliases above.
+Proc: list, inspect, calls, tools, queues [JSON selector]. All non-archived conversations,
+     including internal logs and completed work; visibility:"server" requires an administrator.
+     Inspect accepts conversation, root or causation. Pages return a cursor for the after selector.
 Document: ask, retrieve, list, detail/outline, chunk, rank, stance, citations, search
 Information: all scoped source/evidence/report/lifecycle/migration operations.
      Supply scope:{kind:"personal"|"global_read"} or {kind:"project",project:NAME}.

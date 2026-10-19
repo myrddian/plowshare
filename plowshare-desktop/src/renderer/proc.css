@@ -1,0 +1,20 @@
+body { margin:0; height:100vh; overflow:auto; background:var(--bg); color:var(--ink); }
+.proc-screen { max-width:1400px; margin:auto; padding:24px; }
+.proc-panel { font-size:13px; line-height:1.6; padding:12px 0; }
+.proc-panel h2 { font-size:23px; margin-bottom:8px; }
+.proc-panel h3 { font-size:15px; margin:16px 0 8px; }
+.proc-controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
+.proc-controls input,.proc-controls select { color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:7px; max-width:100%; }
+.proc-controls label { display:flex; align-items:center; gap:5px; }
+.proc-panel button { color:var(--accent); border:1px solid var(--line); border-radius:5px; padding:6px 10px; background:var(--panel); }
+.proc-panel button:disabled { opacity:.5; }
+.proc-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 var(--mono); margin:10px 0; }
+.proc-panel code { overflow-wrap:anywhere; display:block; }
+.proc-conversation,.proc-detail { padding:14px 0; border-top:1px solid var(--line); }
+.proc-conversation-facts,.proc-status { color:var(--muted); }
+.proc-panel table { width:100%; border-collapse:collapse; text-align:left; }
+.proc-panel th,.proc-panel td { padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
+.proc-results { overflow-x:auto; }
+.proc-totals { display:flex; flex-wrap:wrap; gap:12px; }
+.proc-totals>div { border:1px solid var(--line); border-radius:6px; padding:12px; }
+@media(max-width:620px) { .proc-screen {padding:12px;} .proc-panel th,.proc-panel td {padding:7px 4px;} }

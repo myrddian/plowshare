@@ -1,4 +1,5 @@
 import { interchangeProblem } from './interchange-validation.ts';
+import { procProblem } from './proc.ts';
 import { isNavigationOperation } from './information-navigation.ts';
 import { navigationPayloadProblem } from './navigation-validation.ts';
 import { hostedProblem, isHostedOperation } from './hosted-tool-scopes.ts';
@@ -21,6 +22,7 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (type.startsWith('proc.')) return procProblem(type, payload);
   if (type === 'acting.turn.start' || type === 'acting.turn.receipt') {
     if (
       typeof payload['requestId'] !== 'string' ||
@@ -212,6 +214,71 @@ export const SHAPES: Record<
   ExtendedOperation,
   readonly [readonly string[], readonly string[]]
 > = {
+  'proc.tools': [
+    [],
+    [
+      'visibility',
+      'project',
+      'conversation',
+      'root',
+      'causation',
+      'active',
+      'after',
+      'limit',
+    ],
+  ],
+  'proc.list': [
+    [],
+    [
+      'visibility',
+      'project',
+      'conversation',
+      'root',
+      'causation',
+      'active',
+      'after',
+      'limit',
+    ],
+  ],
+  'proc.inspect': [
+    [],
+    [
+      'visibility',
+      'project',
+      'conversation',
+      'root',
+      'causation',
+      'active',
+      'after',
+      'limit',
+    ],
+  ],
+  'proc.calls': [
+    [],
+    [
+      'visibility',
+      'project',
+      'conversation',
+      'root',
+      'causation',
+      'active',
+      'after',
+      'limit',
+    ],
+  ],
+  'proc.queues': [
+    [],
+    [
+      'visibility',
+      'project',
+      'conversation',
+      'root',
+      'causation',
+      'active',
+      'after',
+      'limit',
+    ],
+  ],
   'tool.scope.host.save': [
     ['project', 'binding', 'requestId', 'expectedGeneration', 'definition'],
     [],
@@ -950,6 +1017,7 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (type.startsWith('proc.')) return procProblem(type, body);
   if (type.startsWith('information.interchange.'))
     return interchangeProblem(type, body);
   if (isNavigationOperation(type))

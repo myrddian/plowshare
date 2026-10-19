@@ -1701,7 +1701,8 @@ describe('/help, which is the first thing anybody types and was refused', () => 
     expect(COMMANDS).toContain(HELP_COMMAND);
     expect(COMMANDS).toContain('/commands');
     expect(COMMANDS).toContain('/skills');
-    expect(COMMANDS).toHaveLength(40);
+    expect(COMMANDS).toContain('/proc');
+    expect(COMMANDS).toHaveLength(41);
   });
 
   it('says what a line that is not a command is', () => {

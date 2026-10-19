@@ -23,6 +23,7 @@ export const desktopCommands = [
   ['/board', 'Open board'],
   ['/swarm', 'Open swarm'],
   ['/usage', 'Open usage'],
+  ['/proc', 'Audit conversations, calls and queues'],
   ['/approvals', 'Review permissions'],
   ['/refresh', 'Refresh this workspace'],
   ['/cancel', 'Stop the current chat job'],

@@ -221,6 +221,11 @@ export const JOB_SUBMISSIONS: readonly Operation[] = [
 ];
 
 export const VALIDATED_OPERATIONS: readonly Operation[] = [
+  'proc.list',
+  'proc.inspect',
+  'proc.calls',
+  'proc.queues',
+  'proc.tools',
   ...OUTGOING_OPERATIONS,
   ...MESSAGING_OPERATIONS,
   ...USAGE_FRAMES.filter(

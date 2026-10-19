@@ -1,4 +1,5 @@
 import { interchangeProblem } from './interchange-validation.ts';
+import { validateProcReply } from './proc.ts';
 import { validateHostedReply } from './hosted-tool-scopes.ts';
 import { validateProviderCredentialReply } from './provider-credentials.ts';
 import {
@@ -274,6 +275,7 @@ export function decodeReply<K extends keyof Replies>(
   )
     throw new Error('Invalid Application identity reply');
   validateEntryMetadata(type, decoded);
+  validateProcReply(type, decoded);
   validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);
   validateExternalResponse({ type, payload: decoded } as Parameters<

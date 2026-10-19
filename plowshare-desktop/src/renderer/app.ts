@@ -1347,6 +1347,7 @@ $('#approval-bar').addEventListener('click', (event) => {
     action({ action: 'approvals-refresh' });
 });
 
+$('#proc-open').addEventListener('click', () => action({ action: 'proc' }));
 $('#usage-open').addEventListener('click', () => action({ action: 'usage' }));
 $('#connection-usage').addEventListener('click', () => {
   dialog.close();
@@ -1782,6 +1783,7 @@ async function runWorkspaceCommand(name: string, argument: string) {
       '/memory': '#memories-open',
       '/board': '#board-open',
       '/swarm': '#swarm-open',
+      '/proc': '#proc-open',
       '/usage': '#usage-open',
       '/approvals': '#controls-button',
     } as Record<string, string>
@@ -2118,6 +2120,14 @@ const navigation = installNavigation((): NavigationItem[] => {
       icon: 'route',
       disabled: !selected,
       run: () => action({ action: 'trajectory', conversation: selected }),
+    },
+    {
+      id: 'proc',
+      title: 'Processes',
+      detail: 'Audit conversations, calls and queues',
+      group: 'Actions',
+      icon: 'activity',
+      run: () => action({ action: 'proc' }),
     },
     {
       id: 'usage',
@@ -2590,6 +2600,7 @@ function renderBreadcrumb() {
           'Scheduled work': 'schedules-open',
           Memories: 'memories-open',
           Library: 'library-open',
+          Processes: 'proc-open',
           Usage: 'usage-open',
           Board: 'board-open',
           Swarm: 'swarm-open',

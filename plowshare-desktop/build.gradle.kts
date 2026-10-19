@@ -15,6 +15,8 @@ fun Exec.desktopSources() {
     inputs.dir(rootProject.file("clients")).withPathSensitivity(PathSensitivity.RELATIVE)
     workingDir = projectDir
     inputs.file(rootProject.file("plowshare-console/src/screens/usage-panel.ts"))
+    inputs.files(rootProject.file("plowshare-console/src/screens/proc-panel.ts"),
+        rootProject.file("plowshare-console/src/screens/proc-panel.css"))
     inputs.dir(rootProject.file("integrations/mcp/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files("package.json", "pnpm-lock.yaml", "tsconfig.json")
