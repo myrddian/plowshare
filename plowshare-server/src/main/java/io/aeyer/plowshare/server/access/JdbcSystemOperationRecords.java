@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 /** Owns SYSTEM purpose evidence, without granting or manufacturing executor authority. */
 @Repository
-public final class JdbcSystemOperationRecords implements SystemOperationRecords {
+public class JdbcSystemOperationRecords implements SystemOperationRecords {
   private final JdbcTemplate jdbc;
 
   public JdbcSystemOperationRecords(JdbcTemplate jdbc) {

@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 
 /** Owns proposal-to-memory scope resolution; a provenance label never becomes caller identity. */
 @Repository
-public final class JdbcPromotionSourceRepository implements PromotionSourceRepository {
+public class JdbcPromotionSourceRepository implements PromotionSourceRepository {
   private final JdbcTemplate jdbc;
 
   public JdbcPromotionSourceRepository(JdbcTemplate jdbc) {

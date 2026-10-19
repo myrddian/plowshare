@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
 
 /** Owns immutable call claims, single submission and optional accounting correlation. */
 @Repository
-public final class JdbcInferenceAdmissions implements InferenceAdmissions {
+public class JdbcInferenceAdmissions implements InferenceAdmissions {
   private final JdbcTemplate jdbc;
   private final AllowanceRepository allowances;
   private final org.springframework.transaction.support.TransactionTemplate transactions;

@@ -9,7 +9,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Owns admission/support atomicity; immutable rows never manufacture permission on restart. */
 @Repository
-public final class JdbcOperationRecords implements OperationRecords {
+public class JdbcOperationRecords implements OperationRecords {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
 

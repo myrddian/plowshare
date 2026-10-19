@@ -17,7 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Retained allowance and single-attempt evidence. All claim methods join the owner's transaction.
  */
 @Repository
-public final class JdbcQueryEmbeddingRepository implements QueryEmbeddingRepository {
+public class JdbcQueryEmbeddingRepository implements QueryEmbeddingRepository {
   private final JdbcTemplate jdbc;
   private final AllowanceRepository allowances;
 
