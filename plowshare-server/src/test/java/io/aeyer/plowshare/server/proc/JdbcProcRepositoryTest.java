@@ -116,6 +116,12 @@ class JdbcProcRepositoryTest {
             .conversations()
             .getFirst()
             .state());
+    var active =
+        repository.conversations(
+            "alice", new ProcQuery("mine", null, null, null, null, true, null, 1), live());
+    assertEquals(1, active.total());
+    assertEquals(child, active.conversations().getFirst().id());
+    assertNull(active.cursor());
     var first = repository.conversations("alice", query("mine", null, null, 1), live());
     assertNotNull(first.cursor());
     var second = repository.conversations("alice", query("mine", null, first.cursor(), 1), live());
@@ -124,6 +130,60 @@ class JdbcProcRepositoryTest {
     assertEquals(
         0,
         repository.conversations("alice", query("mine", null, first.cursor(), 1), live()).total());
+  }
+
+  @Test
+  void onlyTheAuthorizedPageIsEnrichedEvenWhenThePlannerSorts() throws Exception {
+    for (int i = 0; i < 80; i++) {
+      conversations.open(Home.of("research"), Budget.of(20), TurnCap.none(), "alice");
+    }
+    var transaction =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new DataSourceTransactionManager(data));
+    String explained =
+        transaction.execute(
+            ignored -> {
+              // A valid alternative plan must not enrich the entire selection before its sort.
+              // Counting actual scan loops avoids a machine-dependent wall-clock assertion.
+              jdbc.execute("SET LOCAL enable_indexscan=off");
+              jdbc.execute("SET LOCAL enable_bitmapscan=off");
+              var args =
+                  new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+                      .addValue("account", "alice")
+                      .addValue("fleet", false)
+                      .addValue("project", null)
+                      .addValue("conversation", null)
+                      .addValue("root", null)
+                      .addValue("causation", null)
+                      .addValue("after", null)
+                      .addValue("limit", 2)
+                      .addValue("live", List.of(""));
+              return new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+                  .queryForObject(
+                      "EXPLAIN (ANALYZE, FORMAT JSON) "
+                          + JdbcProcRepository.conversationPageSql(false),
+                      args,
+                      String.class);
+            });
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertTrue(checkJobScanLoops(plan) > 0, "the plan must exercise job enrichment");
+    var first = repository.conversations("alice", query("mine", null, null, 1), live());
+    assertEquals(82, first.total());
+    assertEquals(1, first.conversations().size());
+    assertNotNull(first.cursor());
+    assertEquals("alice", first.conversations().getFirst().owner());
+  }
+
+  private int checkJobScanLoops(com.fasterxml.jackson.databind.JsonNode plan) {
+    int found = 0;
+    if (plan.isObject() && plan.path("Relation Name").asText().equals("jobs")) {
+      found++;
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 2,
+          "job enrichment must execute only for the requested page plus its cursor row: " + plan);
+    }
+    for (var child : plan) found += checkJobScanLoops(child);
+    return found;
   }
 
   @Test

@@ -61,6 +61,14 @@ public final class JdbcProcRepository implements ProcRepository {
           .replace(":root IS NULL", "CAST(:root AS text) IS NULL")
           .replace(":causation IS NULL", "CAST(:causation AS text) IS NULL");
 
+  private static final String ACTIVE =
+      "(c.id IN (:live) OR EXISTS(SELECT 1 FROM inference_calls ic"
+          + " WHERE ic.conversation_id=c.id AND ic.ended_at IS NULL) OR EXISTS("
+          + "SELECT 1 FROM information_revisions ir JOIN information_steps s"
+          + " ON s.revision_id=ir.id AND s.generation=ir.generation"
+          + " WHERE ir.processing_log=c.id AND s.state IN ('pending','running','blocked')) OR EXISTS("
+          + "SELECT 1 FROM jobs WHERE conversation_id=c.id AND ended_at IS NULL))";
+
   private static final List<String> COVERAGE =
       List.of(
           "All retained non-archived conversation origins; no implicit date cutoff.",
@@ -103,33 +111,22 @@ public final class JdbcProcRepository implements ProcRepository {
     return args;
   }
 
-  @Override
-  public ProcViews.Conversations conversations(String account, ProcQuery q, Live live) {
-    return read(
-        () -> {
-          var args =
-              parameters(account, q)
-                  .addValue(
-                      "live",
-                      live.runningConversations().isEmpty()
-                          ? List.of("")
-                          : live.runningConversations());
-          String active =
-              "(c.id IN (:live) OR EXISTS(SELECT 1 FROM inference_calls ic"
-                  + " WHERE ic.conversation_id=c.id AND ic.ended_at IS NULL) OR EXISTS("
-                  + "SELECT 1 FROM information_revisions ir JOIN information_steps s"
-                  + " ON s.revision_id=ir.id AND s.generation=ir.generation"
-                  + " WHERE ir.processing_log=c.id AND s.state IN ('pending','running','blocked')) OR EXISTS("
-                  + "SELECT 1 FROM jobs WHERE conversation_id=c.id AND ended_at IS NULL))";
-          String filter = WHERE + (Boolean.TRUE.equals(q.active()) ? " AND " + active : "");
-          long total =
-              Objects.requireNonNull(
-                  jdbc.queryForObject(
-                      TREE + "SELECT count(*)" + JOIN + " WHERE " + filter, args, Long.class));
-          String sql =
-              TREE
-                  + """
-          SELECT c.id,t.root,c.parent_id,c.origin,t.lifecycle,p.name AS project,c.owner_handle,
+  /**
+   * Fix the authorized page before reading per-conversation aggregates. Without this
+   * materialization PostgreSQL can enrich every retained conversation before sorting and limiting,
+   * turning a small audit page into repeated full-table scans. Counts still cover the entire
+   * authorized selection.
+   */
+  static String conversationPageSql(boolean active) {
+    String filter = WHERE + (active ? " AND " + ACTIVE : "");
+    return TREE
+        + ", page AS MATERIALIZED (SELECT c.*,t.root AS audit_root,t.lifecycle AS audit_lifecycle,p.name AS audit_project"
+        + JOIN
+        + " WHERE "
+        + filter
+        + " AND (CAST(:after AS text) IS NULL OR c.id>:after) ORDER BY c.id LIMIT :limit)"
+        + """
+          SELECT c.id,c.audit_root AS root,c.parent_id,c.origin,c.audit_lifecycle AS lifecycle,c.audit_project AS project,c.owner_handle,
             acting.application,acting.actor,acting.subject AS acting_subject,c.agent,c.opened_by_call,source.resource,source.revision,c.relay_causation->>'rootId' AS causation_root,
             c.relay_causation->>'parentId' AS causation_parent,
             CASE WHEN (c.relay_causation->>'depth')::integer>=0
@@ -153,12 +150,12 @@ public final class JdbcProcRepository implements ProcRepository {
             COALESCE(ic.active_calls,0) AS active_calls,COALESCE(ic.repeated,0) AS repeated,
             COALESCE(ic.principal,'UNKNOWN') AS principal
           """
-                  + JOIN
-                  + """
-          LEFT JOIN acting_work_conversations acting ON acting.conversation=t.root
+        + " FROM page c "
+        + """
+          LEFT JOIN acting_work_conversations acting ON acting.conversation=c.audit_root
           LEFT JOIN LATERAL(SELECT q.source_name AS resource,r.id::text AS revision
             FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id
-            WHERE r.processing_log=t.root AND r.availability='active' AND NOT r.excluded
+            WHERE r.processing_log=c.audit_root AND r.availability='active' AND NOT r.excluded
             ORDER BY r.created_at DESC,r.id DESC LIMIT 1) source ON true
           LEFT JOIN LATERAL(SELECT id,ending,ended_at FROM jobs WHERE conversation_id=c.id
             ORDER BY started_at DESC,id DESC LIMIT 1) j ON true
@@ -175,10 +172,27 @@ public final class JdbcProcRepository implements ProcRepository {
               WHEN bool_and(attribution_status='ATTRIBUTED') AND count(DISTINCT account_handle)=1 THEN max(account_handle)
               ELSE 'MIXED_OR_UNKNOWN' END AS principal
             FROM inference_calls WHERE conversation_id=c.id) ic ON true
-          WHERE
-          """
-                  + filter
-                  + " AND (CAST(:after AS text) IS NULL OR c.id>:after) ORDER BY c.id LIMIT :limit";
+          ORDER BY c.id
+          """;
+  }
+
+  @Override
+  public ProcViews.Conversations conversations(String account, ProcQuery q, Live live) {
+    return read(
+        () -> {
+          var args =
+              parameters(account, q)
+                  .addValue(
+                      "live",
+                      live.runningConversations().isEmpty()
+                          ? List.of("")
+                          : live.runningConversations());
+          String filter = WHERE + (Boolean.TRUE.equals(q.active()) ? " AND " + ACTIVE : "");
+          long total =
+              Objects.requireNonNull(
+                  jdbc.queryForObject(
+                      TREE + "SELECT count(*)" + JOIN + " WHERE " + filter, args, Long.class));
+          String sql = conversationPageSql(Boolean.TRUE.equals(q.active()));
           var rows =
               jdbc.query(
                   sql,
