@@ -182,7 +182,7 @@ public class Archive implements UsageAware, MemoryFiling {
 
   private static final Logger log = LoggerFactory.getLogger(Archive.class);
 
-  private final MemoryStore store;
+  private final MemoryRepository store;
   private final ReasonLog reasons;
   private final EmbeddingClient embeddings;
   private final UnitOfWork unitOfWork;
@@ -202,7 +202,7 @@ public class Archive implements UsageAware, MemoryFiling {
    * Spring context and applies no proxy.
    */
   public Archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
@@ -229,7 +229,7 @@ public class Archive implements UsageAware, MemoryFiling {
    * real transaction manager is, in {@code TransactionBoundaryTest}.
    */
   public Archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       int maxBodyChars,
@@ -274,7 +274,7 @@ public class Archive implements UsageAware, MemoryFiling {
    *     ordering it chose rather than on random hex.
    */
   public Archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
