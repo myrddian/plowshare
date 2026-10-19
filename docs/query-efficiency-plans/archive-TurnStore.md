@@ -1,0 +1,11 @@
+# TurnStore
+
+Status: Proposed. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[TurnStore](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/TurnStore.java#L214) appends the next conversation ordinal with `INSERT ... SELECT MAX ... RETURNING`, content-addresses system blocks, reads a block at a turn, lists turns and reads the latest ordinal. Compaction and conversation inspection consume the retained transcript. [V7](../../plowshare-server/src/main/resources/db/migration/V7__turns.sql#L32) supplies `(conversation_id,ordinal)`, covering list/latest reads; no extra identical index is needed.
+
+First reuse the returned TurnRecord and ordinal through completion and transcript assembly. Avoid `latestOrdinal` immediately after a successful `record` when the returned ordinal already answers the same question. For prompt budgeting, add a narrow last-measurements projection only if callers currently hydrate the entire transcript for a bounded statistic. Preserve title stamping as a separate best-effort operation: its failure must not lose the written turn, so combining both into a single atomic stored procedure changes the documented failure contract. Do not change ordinal concurrency behavior incidentally.
+
+Immutable turn content and system-block bodies are eligible snapshots, keyed by database/conversation/ordinal/projection and block hash respectively. A latest pointer or turn-list page additionally needs an append generation returned in the same read; a maximum ordinal versions append membership only, not arbitrary maintenance changes. Invalidate list/latest/negative membership after committed append and cover maintenance writers. Turn-driven title changes also invalidate ConversationStore projections. Current conversation/source visibility still fences protected transcript and block disclosure. Reconnect bypasses uncertain pointers/pages until durable recovery, using shared bounded LRU with text-weight limits.
+
+Mock returned-ordinal reuse and one prompt-history read per valid composition. Only changed SQL/invalidation requires focused PostgreSQL ordinal conflicts, block foreign keys, title-failure behavior and rollback/notification tests. Preserve append-only history and absent-versus-zero prompt measurements.

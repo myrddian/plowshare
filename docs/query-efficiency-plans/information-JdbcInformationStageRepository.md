@@ -1,0 +1,11 @@
+# JdbcInformationStageRepository
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationStageRepository.java#L22) serves `InformationStageHooks` and `InformationModelStages`. `logState` loads project name separately, then revision log/allowance/session and ownership attribution. `resource` resolves revision parent. `paid` decodes a retained answered outcome by revision/generation/stage-key/owner. Writes compare-and-set log pin/replacement, remember an outcome idempotently and transition its receipt ready.
+
+Combine `logState` with the project-name lookup or accept the name already in an authorized lease snapshot; two reads are visible in the current implementation. Pass the resource ID already carried by the lease instead of resolving it again. Keep live allowance/ownership checks where required before new work. [V83](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L246) keys paid receipts `(revision_id,generation,stage_key)`; owner is a disclosure filter. Existing point keys fit; no new index or stored procedure is demonstrated.
+
+Cache immutable validated paid-outcome content by database, revision, generation, stage key, owner and receipt/content version. Do not cache allowance availability or log ownership admission. Log-state snapshots need a separate source version because pin/replacement and allowance spending change without a new generation. Remember/ready/log writes, allowance mutations, catalogue deletion and external writers invalidate receipt/log dependencies after commit; deletion removes paid rows. Do not retain missing receipts across insertion without invalidation. Use the proposed tracked immutable DTO/LRU foundation with byte bounds, current authorization fences and reconnect recovery. A cached paid answer must never trigger a paid replay on uncertainty.
+
+Mock tests should establish one log-state query and reuse of the lease resource. Future focused PostgreSQL tests cover concurrent pin/replacement, receipt conflicts, deletion/redaction, result mapping and notification rollback. No database execution is needed to review this plan.

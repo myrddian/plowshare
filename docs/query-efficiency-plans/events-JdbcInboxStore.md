@@ -1,0 +1,13 @@
+# JdbcInboxStore
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/events/JdbcInboxStore.java#L63) implements account-scoped `InboxStore` for `Inbox`, `InboxNoticing` and agent notices. Delivery/notice methods already return inserted DTOs. `noticeOnceFromLog` checks legacy notices, attempts deterministic-ID insertion, then reads on a concurrent conflict. Reads list unsettled notices, count unread, and compute count/latest time since a conversation turn; information visibility adds `information_log_readable`. Writes mark read in a bound array, settle by question with affected handles returned, and claim approval alerts atomically.
+
+Reuse the delivered DTO and the handles returned by settlement for push updates. Combine unread count and newest arrival into one typed aggregate when the caller needs both with identical selection, rather than two scans. Preserve legacy duplicate-notice reuse; its first read is a compatibility requirement, not blindly removable. Batch visibility resolution by distinct log within one authorized snapshot if profiling confirms repeated expensive checks.
+
+[V68](../../plowshare-server/src/main/resources/db/migration/V68__a_question_s_notice_settles_with_it.sql#L24) supplies unread and open-question indexes; [V153](../../plowshare-server/src/main/resources/db/migration/V153__approval_alert_retry.sql#L4) supports alert discovery. Evaluate an unsettled `(handle,arrived_at DESC,id DESC)` index for all-notice paging and a legacy lookup `(handle,kind,about,arrived_at,id)` only against actual plans. A bounded table-returning inbox summary function is optional; no routine is necessary for existing atomic writes.
+
+Cache display snapshots/aggregates by database, handle, filter/cursor and projection version, never alert claims or current log-read authority. Introduce account-inbox generation returned with the read. Track insertions as collection dependencies, conversation-turn watermark and information policy/input changes. All notice/delivery/markRead/settle paths, approval/question lifecycle writers and cascades must invalidate after commit. Listener hints require durable catch-up and current authorization fences; an earlier visible log must not stay disclosed after revocation. Use bounded tracked immutable DTO/LRU values and coalesced pending reads.
+
+Mock tests should bound list-plus-summary work and assert no post-delivery refetch. Future focused PostgreSQL tests cover concurrent notice retries, settlement/read races, visibility revocation, array mapping and notification rollback/reconnect. Reuse scoped account pushes in clients instead of unconditional unread polling.

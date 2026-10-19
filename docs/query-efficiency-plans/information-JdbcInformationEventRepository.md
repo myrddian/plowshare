@@ -1,0 +1,15 @@
+# JdbcInformationEventRepository
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationEventRepository.java#L24) serves `InformationEventPublisher`. `claim` locks the singleton dispatch cursor, selects at most 100 ordered events, then leases the batch. `recipients` reads retained recipient handles per event; `readable` re-evaluates global, personal and each joined-project selection for one revision/account. `complete` advances the cursor only for the lease token. The publisher consequently performs per-event recipient and per-recipient readability calls.
+
+**Confirmed amplification:** readability repeats the same root/authority/dependency traversal across alternative selections and events. Prior deployed snapshot `b96f260` measured roughly 738 ms for one root-readable evaluation; this is historical evidence, not a timing of this branch. Latest source keeps the same query shape. Batch recipient/readability selection for a bounded event page; deduplicate `(revision,account)` within a valid operation snapshot. Develop a set-based table-returning function resolving relevant account/scope/dependency sets once, using current [V172 authority semantics](../../plowshare-server/src/main/resources/db/migration/V172__substrate_knowledge_reads.sql#L59). Preserve immediate revocation and non-disclosure before account pushes.
+
+[V83](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L296) already keys recipients `(sequence,account)` and events by sequence. Extra indexing will not alone fix nested function repetition. Coordinate changes with catalogue `event`, which builds recipients through equivalent repeated predicates. Replace one-second idle discovery with LISTEN/NOTIFY wakeups plus bounded recovery/timers; retain durable events, lease token and completion semantics. Audit commit-order cursor correctness before reusing this stream as cache recovery evidence.
+
+Do not cache claims, cursors, leases or allow decisions. Eligible immutable event DTOs can use database/sequence/projection and redaction version, since deletion rewrites detail elsewhere. Recipients are retained history, not proof of current access. Catalogue event/redaction, recipient writes and lifecycle deletion must invalidate tracked display dependencies after commit; shared LRU reuse requires current authorization fences and reconnect recovery. Reuse page DTOs locally before shared caching.
+
+Mock tests should bound calls by distinct revision/account pairs and verify scoped push behavior. Later focused PostgreSQL tests cover batched predicate equivalence across scopes, revocation, competing publishers, rollback, commit ordering and notification loss. Measure SQL function calls separately from socket queue delay.
+
+Coordinate live permission evaluation with the [readability-function workstream](readability-functions.md) and apply the shared [delivery contracts](delivery.md).

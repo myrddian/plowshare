@@ -1,0 +1,13 @@
+# JdbcUsageReportRepository
+
+Status: proposed; no runtime implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[SQL owner](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageReportRepository.java#L75) · [caller/contract](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/UsageQueryService.java#L1) · [schema/routines](../../plowshare-server/src/main/resources/db/migration/V85__durable_inference_accounting.sql#L1). Cache mechanics and recovery follow the [shared strategy](../query-efficiency-and-cache-design.md#server-reuse-and-tracked-database-dtos).
+
+`UsageQueryService` invokes reports, call audit and attempt paging under read transactions. Confirmed N+1: `calls` selects a bounded call page, then invokes `attemptRows` once per call. `report` separately aggregates totals/groups, attaches run ancestors and reads health. `where` repeatedly resolves account/member/project/conversation ownership, sometimes casting identifiers to text; these predicates must remain authorization-correct. Group aggregate pagination uses offsets, while call audit already uses `(created_at,call_id)` keysets.
+
+Batch first 51 attempts for all selected calls using a window/lateral set query, preserving per-call truncation and attempt cursors. Resolve typed authorized selector context once per transaction and reuse it across totals/groups/ancestors. Compare one authorized materialized candidate CTE or a typed reporting function feeding totals/grouping sets, avoiding repeated scans. Replace internal raw-map conversion with typed projections when touching those paths. Review V85 dimension/time and ancestry GIN indexes against actual casted predicates, call tie-break ordering and later migrations before adding indexes. Preserve cursor account/filter binding and signed pagination semantics.
+
+Initially cache only immutable closed-call/attempt DTOs or explicitly watermarked report snapshots. Keys include database/account/authorized scope/filter/grouping/time range/page/projection and projection watermark. Active calls, health and current disclosure checks remain authoritative. Accounting projection/recovery, lineage and account/project membership changes invalidate call/attempt/report collection generations after commit, including newly inserted rows. A sum of journal sequences is not automatically a commit-ordered invalidation cursor; design durable recovery first. Use byte-bounded LRU and invalidate broad report namespaces when dependency fan-out exceeds budget.
+
+Mock constant call-page query count, selector reuse and authorization isolation. Focused PostgreSQL checks cover aggregate equivalence, batched attempt limits, index plans and consistent concurrent projection reads.

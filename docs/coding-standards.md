@@ -205,6 +205,53 @@ state transitions. Do not call remote services while holding a database
 transaction or publish a successful external effect before its durable state is
 committed. Use the system's existing durable delivery mechanisms.
 
+## Query efficiency and reuse
+
+Fetch-discard-refetch is an anti-pattern: do not query for an entity, discard its
+useful fields and query it again to make the same operation proceed. Reuse the
+authorized, immutable typed snapshot already available to the caller. A repeated
+read must have an explicit freshness, version, scope, transaction or concurrency
+reason. Reuse never turns an earlier permission check into an authorization lease.
+
+Review server repositories, service composition and client request sequences for:
+
+- Duplicate reads of the same entity or permission context within one operation,
+  including existence checks that hydrate metadata which is immediately refetched.
+- N+1 queries, per-item reloads of a whole collection, repeated aggregate scans and
+  recursive permission checks repeated for each facet or result row.
+- Unused columns, full-content reads to obtain metadata and reads after writes
+  where a suitable `RETURNING` projection can provide the committed result.
+- Indexes that do not match the actual predicate, expression or ordering, and
+  search vectors rebuilt from large content on every search.
+- Unconditional client refreshes, concurrent identical requests, stale responses
+  replacing newer selections and slow background reads blocking interactive work.
+- Polling unchanged state when an existing notification or durable change cursor
+  can trigger the necessary read.
+
+Fix redundant work at its owner. Prefer bounded projections, set-based operations,
+batch reads and request-local reuse before adding a shared cache. Use PostgreSQL
+indexes, stored functions/procedures and query features where they improve a
+measured query; keep SQL and typed result mapping in specialist repositories.
+Stored routines do not justify hiding row-by-row work or relaxing authorization.
+Add schema changes through new Flyway migrations.
+
+For performance changes, record the relevant query shape and request sequence,
+query/function call counts, representative cardinality, rows and bytes read, and
+separate database execution from queue, transport and rendering time. Use bounded
+`EXPLAIN (ANALYZE, BUFFERS)` for reads when permitted. Do not execute a write with
+`EXPLAIN ANALYZE` merely to inspect its plan. Apply the database test policy below;
+mocked query-count tests do not establish PostgreSQL performance.
+
+A shared cache tracks immutable database DTO snapshots with source identity,
+version and dependencies under a typed repository capability. Document key scope,
+authorization, consistency, admission and byte/entry limits, invalidation and
+reconnect behavior, concurrent fills and observability. LRU bookkeeping must have
+expected O(1) lookup, recency updates, removal and eviction of one entry; evicting
+k entries costs O(k). Reuse must not expose stale protected state. Notifications
+are invalidation hints; durable versions and recovery establish correctness.
+The [query efficiency and cache design](query-efficiency-and-cache-design.md)
+defines the proposed implementation and its acceptance criteria.
+
 ## Typed DTOs and secure conversion
 
 Raw JSON representations are confined to boundary parsing and serialization.

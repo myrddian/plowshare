@@ -1,0 +1,15 @@
+# JdbcDocumentPolicyRepository
+
+Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
+
+[Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcDocumentPolicyRepository.java#L36) implements quarantine review for `DocumentPolicyAssignments`. `inventory` separately pages quarantined documents and payloads. `inspect` checks a quarantined payload then reads conversation/entries and job detail. `lockPayload/requireReadable` enforce authoritative release fences. `assign` resolves the target project and conditionally assigns document/resource custody with an audit insert; adopt/release updates conversation ownership/quarantine and records reviewed revision evidence.
+
+Reuse the inspection's typed owner/log/project snapshot within one locked release operation; do not repeat project-name resolution per assigned item. Batch reviewed-source readability for a bounded release while preserving all-source requirements. Replace `SELECT` plus conditional ownership update with `UPDATE ... RETURNING` only if missing/other-owner/already-owned outcomes remain distinguishable. No measured expensive query is established here: collect counts and rows before broad optimization.
+
+[V82](../../plowshare-server/src/main/resources/db/migration/V82__information_document_policies.sql#L4) defines policy ownership/visibility and owner/project indexes; [V83](../../plowshare-server/src/main/resources/db/migration/V83__information_lifecycle.sql#L340) defines quarantine/release evidence. Inspect quarantined visibility ordering plans before a partial index `(document_id) WHERE visibility='quarantined'`. A typed bounded review snapshot function is optional; release remains an atomic permission-sensitive transaction.
+
+Do not cache current quarantine eligibility, assignment permission or release locks. If inspection display DTOs are cached, key by database, authorized reviewer, payload/revision, projection and durable review/content version. Dependencies include entries/jobs, document policy, conversation custody, reviewed input availability and quarantine membership. Assign/adopt/release/audit, catalogue redaction, conversation/job writers, project/account changes and external writers must invalidate after commit; current authority must be rechecked before any disclosure. The proposed tracked immutable DTO/LRU foundation needs byte limits for entry content and durable catch-up before this sensitive namespace is admitted.
+
+Mock tests should enforce one review snapshot per operation and bounded batch readability calls. Future focused PostgreSQL tests cover competing adoption, atomic rollback/audit, ownership conflicts, current revocation and notification recovery. Keep migration corrections separate from performance diagnosis: historical scope mismatches are not evidence that every slow read is mis-scoped.
+
+Coordinate live permission evaluation with the [readability-function workstream](readability-functions.md) and apply the shared [delivery contracts](delivery.md).
