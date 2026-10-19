@@ -20,6 +20,7 @@
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
+- [Excalibur: lightweight agile Application](lightweight-agile-application-design.md) (design, CLI, web board and Docker packaging)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
 - [Document navigation usage](authored-navigation.md) — relationships, paths and policy administration.
