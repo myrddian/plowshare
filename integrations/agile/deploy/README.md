@@ -36,8 +36,8 @@ The server must support manual document controls independently of background
 processing leases. Live testing on revision
 `1b9f8bbb550cff914da1957c3ea677f21c6deeca` exposed a server regression in
 `information.tags`, affecting epic membership and topic saves. The separate
-platform correction carries its own Decision 0032,
-`docs/decisions/0032-document-control-hook-authority.md`, in the platform branch.
+platform correction is described in
+[Decision 0032](../../../docs/decisions/0032-document-control-hook-authority.md).
 Excalibur continues to use that public operation; it preserves internal-error
 intents for explicit recovery. Verify the corrected operation before accepting
 the deployment. No alternate membership store or automatic processing is needed.
