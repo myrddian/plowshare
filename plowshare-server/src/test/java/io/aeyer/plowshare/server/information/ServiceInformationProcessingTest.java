@@ -514,6 +514,7 @@ class ServiceInformationProcessingTest {
                     InformationContext.Scope.PROJECT, "automation", false))
             .withView(true);
     UUID request = UUID.randomUUID();
+    var originalBudget = repository.budgetSource(revision);
     catalogue.tags(context, revision, List.of("sdk", "manual"), request);
     assertEquals(List.of("manual", "sdk"), catalogue.status(context, revision).tags());
     assertNull(
@@ -543,12 +544,21 @@ class ServiceInformationProcessingTest {
         jdbc.queryForObject(
             "SELECT count(*) FROM system_operations WHERE purpose='DOCUMENT_PREPARATION'",
             Integer.class));
+    // A second command on the same revision must not try to own its allowance again.
+    catalogue.tags(context, revision, List.of("sdk", "manual", "second"), UUID.randomUUID());
+    assertEquals(originalBudget, repository.budgetSource(revision));
+    assertEquals(
+        2,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM conversations WHERE agent='document_pipeline' AND budget_total=0 AND budget_spent=0 AND budget_id<>?",
+            Integer.class,
+            originalBudget.id()));
     jdbc.update("UPDATE service_tokens SET revoked_at=now() WHERE id=?", token);
     assertThrows(
         RuntimeException.class,
         () -> catalogue.tags(context, revision, List.of("changed"), UUID.randomUUID()));
     assertEquals(
-        "[\"manual\", \"sdk\"]",
+        "[\"manual\", \"sdk\", \"second\"]",
         jdbc.queryForObject(
             "SELECT tags::text FROM information_resources WHERE id=(SELECT resource_id FROM information_revisions WHERE id=?)",
             String.class,

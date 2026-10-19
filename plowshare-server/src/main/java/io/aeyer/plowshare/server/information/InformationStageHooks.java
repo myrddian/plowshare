@@ -180,16 +180,10 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
           var state = stages.logState(event.revision(), event.project());
           String project = state.project();
           Home home = project == null ? Home.global() : Home.of(project);
-          io.aeyer.plowshare.server.agents.Budget budget;
-          if (processing == null)
-            budget =
-                io.aeyer.plowshare.server.agents.Budget.resumed(state.allowance(), state.spent());
-          else {
-            var selected = processing.budgetSource(event.revision());
-            budget =
-                io.aeyer.plowshare.server.agents.Budget.restored(
-                    selected.id(), selected.limit(), selected.spent());
-          }
+          // A deterministic owner control grants no processing or inference work. Its audit log
+          // owns a fresh zero-call allowance; the revision's pot already belongs to its pipeline
+          // log and cannot be owned by a second conversation. Never reset or copy that pot.
+          var budget = io.aeyer.plowshare.server.agents.Budget.noCalls();
           String log;
           if (system == null)
             log =

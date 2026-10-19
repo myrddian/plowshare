@@ -30,10 +30,13 @@ an applied command. Changes such as rebuild may advance generation themselves;
 their command token, rather than a fabricated queue lease, owns this lifetime.
 
 Each manual command creates an independent SYSTEM hook log and hook snapshot.
-It retains the original caller's custody and input selection, uses the existing
-revision allowance and the existing model-only `DOCUMENT_PREPARATION` purpose
+It retains the original caller's custody and input selection, owns a fresh
+zero-call allowance and uses the existing model-only `DOCUMENT_PREPARATION` purpose
 with a distinct `control:` input binding. No new SYSTEM purpose or model, tool or
 embedding capability is added. It is never pinned as the background processing log.
+Manual controls authorize no inference and never copy, reset or acquire the
+revision's processing allowance. That identity already belongs to the pipeline
+conversation; reusing it for a control log violates conversation ownership.
 Background gates retain their existing source/generation/lease-token checks and
 continue independently of former creator permissions. Existing processing logs
 and accounting remain immutable.

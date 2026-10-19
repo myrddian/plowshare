@@ -35,9 +35,6 @@ class InformationControlHooksTest {
             UUID.randomUUID(), UUID.randomUUID(), 1, stage, 1, UUID.randomUUID(), "owner", 1L);
     when(stages.logState(event.revision(), 1L))
         .thenReturn(new InformationStageRepository.LogState("fixture", "worker-log", 5, 0, null));
-    when(processing.budgetSource(event.revision()))
-        .thenReturn(
-            new InformationProcessingRepository.BudgetSource(UUID.randomUUID(), 5, 0, null));
     var scope = new AuthorityIds.ScopeId(UUID.randomUUID());
     when(processing.home(event.revision())).thenReturn(scope);
     var captured = new AtomicReference<Runnable>();
@@ -90,6 +87,13 @@ class InformationControlHooksTest {
     verify(conversations, times(1))
         .logSystem(any(), any(), anyString(), isNull(), any(), anyString(), isNull(), any());
     verify(processing, never()).requireLease(any());
+    verify(processing, never()).budgetSource(any());
+    var budget = org.mockito.ArgumentCaptor.forClass(io.aeyer.plowshare.server.agents.Budget.class);
+    verify(conversations)
+        .logSystem(
+            any(), any(), anyString(), isNull(), budget.capture(), anyString(), isNull(), any());
+    assertEquals(0, budget.getValue().limit());
+    assertTrue(budget.getValue().tryClaim().isEmpty());
     verify(stages, never()).pinLog(any(), anyString());
     verify(stages, never()).replaceLog(any(), anyString(), anyString());
     allowed.set(false);
