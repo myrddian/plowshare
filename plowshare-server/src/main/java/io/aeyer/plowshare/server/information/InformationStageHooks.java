@@ -34,6 +34,7 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
   private final Harness harness;
   private final Supplier<AgentRegistry> agents;
   private final Map<UUID, HarnessRun> runs = new ConcurrentHashMap<>();
+  private final Map<UUID, HookContext> controls = new ConcurrentHashMap<>();
 
   private io.aeyer.plowshare.server.access.SystemOperations system;
   private InformationProcessingRepository processing;
@@ -152,6 +153,10 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
                 log, Origin.SUBMISSION, home, "document_pipeline", false, null, session, null));
       }
     }
+    return about(lease, project, log);
+  }
+
+  private HookContext about(InformationLifecycle.Lease lease, String project, String log) {
     return HookContext.forLog("submission", "document_pipeline", false, project, log)
         .withUsage(usageOwners.processing(log, UsageAttribution.Operation.HOOK_MODEL))
         .about(
@@ -164,6 +169,91 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
                 lease.generation(),
                 lease.stage(),
                 lease.attempt()));
+  }
+
+  private HookContext controlContext(InformationLifecycle.Control control) {
+    control.requireCurrent().run();
+    var event = control.event();
+    return controls.computeIfAbsent(
+        event.token(),
+        ignored -> {
+          var state = stages.logState(event.revision(), event.project());
+          String project = state.project();
+          Home home = project == null ? Home.global() : Home.of(project);
+          // A deterministic owner control grants no processing or inference work. Its audit log
+          // owns a fresh zero-call allowance; the revision's pot already belongs to its pipeline
+          // log and cannot be owned by a second conversation. Never reset or copy that pot.
+          var budget = io.aeyer.plowshare.server.agents.Budget.noCalls();
+          String log;
+          if (system == null)
+            log =
+                conversations
+                    .log(
+                        Origin.SUBMISSION,
+                        home,
+                        "document_pipeline",
+                        null,
+                        budget,
+                        event.owner(),
+                        null)
+                    .id();
+          else {
+            var definition =
+                new AgentDefinition(
+                    "document_pipeline",
+                    "Document control hooks",
+                    "system",
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    1,
+                    Math.max(1, state.allowance()),
+                    "Control hooks");
+            var work =
+                system.admit(
+                    io.aeyer.plowshare.server.access.SystemOperations.Purpose.DOCUMENT_PREPARATION,
+                    home,
+                    processing.home(event.revision()),
+                    definition,
+                    "control:" + event.revision() + ":" + event.stage() + ":" + event.token(),
+                    control.requireCurrent());
+            log =
+                conversations
+                    .logSystem(
+                        Origin.SUBMISSION,
+                        home,
+                        "document_pipeline",
+                        null,
+                        budget,
+                        event.owner(),
+                        null,
+                        work)
+                    .id();
+          }
+          inputs.bind(
+              log,
+              new InformationContext(
+                      event.owner(),
+                      project == null
+                          ? InformationContext.Selection.personal()
+                          : InformationAccess.projectSelection(event.owner(), project))
+                  .withView(true),
+              List.of(event.revision()));
+          // A manual command gets its own frozen hook snapshot and SYSTEM log.
+          // Never pin it as the processing log: queue workers must retain their
+          // independent lease authority even after the caller loses access.
+          logStages.opened(
+              new LogStages.LogOpened(
+                  log,
+                  Origin.SUBMISSION,
+                  home,
+                  "document_pipeline",
+                  false,
+                  null,
+                  state.session(),
+                  null));
+          return about(event, project, log);
+        });
   }
 
   private Hooks chain(InformationLifecycle.Lease lease) {
@@ -199,7 +289,22 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
   }
 
   @Override
+  public Gate beforeControl(InformationLifecycle.Control control) {
+    return chain(control.event())
+        .stagePre(controlContext(control), new StageStart(shown(control.event()), null, null));
+  }
+
+  @Override
+  public Gate afterControl(InformationLifecycle.Control control) {
+    return chain(control.event())
+        .stagePost(
+            controlContext(control),
+            new StageDone(shown(control.event()), "document control checkpoint committed", null));
+  }
+
+  @Override
   public void finished(InformationLifecycle.Lease lease) {
+    controls.remove(lease.token());
     HarnessRun run = runs.remove(lease.token());
     if (run != null) {
       var records = run.finish();
