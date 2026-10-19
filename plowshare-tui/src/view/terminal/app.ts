@@ -1,4 +1,4 @@
-import { Box, Static, Text, useInput, useStdout } from 'ink';
+import { Box, Static, Text, useInput, useStdin, useStdout } from 'ink';
 import { createElement as el, useEffect, useState } from 'react';
 import type { Key } from 'ink';
 import type { ReactElement, ReactNode } from 'react';
@@ -703,6 +703,12 @@ function Session(options: App): ReactElement {
   // One line, and that is the point: this component turns a keypress into a
   // call and decides nothing about it.
   useInput(options.onKey);
+  const { stdin } = useStdin();
+  useEffect(() => {
+    // Readline pauses stdin when the startup setup prompt closes. Resume only
+    // after Ink owns its input listener, including when setup was skipped.
+    stdin.resume();
+  }, [stdin]);
 
   if (options.exploring !== undefined) {
     // THE TRANSCRIPT STAYS MOUNTED, for the viewer's reason below. The lines were fitted to

@@ -86,6 +86,12 @@ def pump(seconds):
                 return False
             buf.extend(chunk)
     return True
+if env.get('PLOWSHARE_HARNESS_CLOSED_PROMPT'):
+    deadline = time.monotonic() + 10
+    while b'Setup alias (blank to skip):' not in buf and time.monotonic() < deadline:
+        if not pump(0.1):
+            break
+    os.write(fd, bytes([13]))
 ready = env.get('PLOWSHARE_PTY_DIALOG_READY', '').encode()
 if ready:
     deadline = time.monotonic() + 10
@@ -139,7 +145,7 @@ async function drawn(
       PLOWSHARE_PTY_DIALOG_GRACE: String(DIALOG_GRACE),
       ...env,
     },
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'inherit'],
   });
   const chunks: Buffer[] = [];
   child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -325,6 +331,13 @@ withAPty('what reaches the terminal', () => {
     const later = stream.indexOf('approval answered: left');
     expect(later).toBeGreaterThan(-1);
     expect(stream.indexOf('Ask anything…', later)).toBeGreaterThan(later);
+  }, 30_000);
+
+  it('takes input after the setup prompt closes', async () => {
+    const stream = await drawn(0, 'after setup\r', {
+      PLOWSHARE_HARNESS_CLOSED_PROMPT: '1',
+    });
+    expect(stream).toContain('after setup');
   }, 30_000);
 
   it('takes a typed line and shows it back', async () => {
