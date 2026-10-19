@@ -1,5 +1,6 @@
 import { background } from '../background.ts';
 import process from 'node:process';
+import { createInterface } from 'node:readline/promises';
 
 import {
   askingAbout,
@@ -58,6 +59,18 @@ const many = Number.parseInt(
 );
 
 const grace = process.env['PLOWSHARE_HARNESS_GRACE'];
+// The live client has an open server socket while the terminal takes stdin.
+const connection = setInterval(() => undefined, 60_000);
+if (process.env['PLOWSHARE_HARNESS_CLOSED_PROMPT'] !== undefined) {
+  // FileStore setup hands the same terminal from readline to Ink. Closing
+  // readline pauses stdin even when setup was skipped with an empty answer.
+  const prompt = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  await prompt.question('Setup alias (blank to skip): ');
+  prompt.close();
+}
 const surface = terminal({
   colour: true,
   ...(grace === undefined ? {} : { dialogGrace: Number.parseInt(grace, 10) }),
@@ -264,3 +277,4 @@ for (;;) {
   surface.show(entered(next, 'person', parse(line)));
 }
 surface.close();
+clearInterval(connection);
