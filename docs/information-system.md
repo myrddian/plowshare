@@ -13,11 +13,11 @@ a project only with current scoped READ; selecting one never creates membership.
 discovery to that project. Scoped Contributors can write in their area; Managers
 can change resource audiences through existing share/unshare commands.
 
-V155 stores immutable versions of each resource's current root audience. All
+V158 stores immutable versions of each resource's current root audience. All
 revisions, including pinned history and later content revisions, use that policy.
 An explicit share grants GLOBAL_READ to every active authenticated human,
 Application/service account and service credential; unshare restores HOME.
-V169 retires human-only LEGACY_SHARED: those roots narrow to HOME for deliberate
+V172 retires human-only LEGACY_SHARED: those roots narrow to HOME for deliberate
 Manager publication. Conflicting privacy subjects and unclassified homes stay
 quarantined. Original per-revision flags remain historical evidence and grant no
 access; rootless compatibility rows have no read fallback.

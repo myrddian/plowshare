@@ -6,9 +6,11 @@ import { activeJob, stoppedJob } from '../shared.ts';
 import type { DesktopState, Job } from '../shared.ts';
 import {
   turnsOf,
+  modelContextOf,
   stepKey,
   callStanding,
 } from 'plowshare-client-ts/operations/trajectory';
+import { inferenceTokens } from './inference-stats.ts';
 import type { Step } from 'plowshare-client-ts/operations/trajectory';
 import { icon, mountIcons } from './icons.ts';
 import type { Icon } from './icons.ts';
@@ -138,14 +140,22 @@ function fromStep(step: Step): Item {
   }[step.kind];
   return {
     key: stepKey(step),
-    label,
-    preview: step.entry.text ?? `${step.entry.state} entry`,
+    label: step.entry.dispatch ? 'Model' : label,
+    preview:
+      step.entry.text?.trim() ||
+      (step.entry.dispatch
+        ? step.entry.calls?.length
+          ? `Model requested ${step.entry.calls.length} tools`
+          : 'Model response without text'
+        : `${step.entry.state} entry`),
     standing:
-      step.entry.supersededBy !== undefined
-        ? 'folded for model'
-        : step.entry.state === 'stands'
-          ? 'recorded'
-          : step.entry.state,
+      step.kind === 'note' || step.kind === 'reasoning'
+        ? modelContextOf(step.entry.kind, step.entry.supersededBy).label
+        : step.entry.supersededBy !== undefined
+          ? 'folded for model'
+          : step.entry.state === 'stands'
+            ? 'recorded'
+            : step.entry.state,
     turn: step.turn,
     ...(step.entry.tookMillis === undefined
       ? {}
@@ -266,7 +276,7 @@ function render() {
       .map((row) => {
         const call = row.step?.kind === 'call' ? row.step : undefined,
           linked = call && navigableCall(call);
-        return `<div class="trajectory-step" role="listitem"><button class="trajectory-row ${row.step?.kind ?? 'event'} ${row.standing}" data-step="${esc(row.key)}" ${row.key === selected ? 'aria-current="true"' : ''}><span class="step-turn">${row.turn ?? '·'}</span><span class="step-kind">${linked ? '<span class="delegation-direction" title="Agent called">&gt;</span>' : icon(itemIcon(row))}<span>${esc(row.label)}</span></span><span class="step-preview">${esc(row.preview.replace(/\s+/g, ' '))}</span><span class="step-outcome">${linked && call.result ? '<span class="delegation-direction" title="Agent result received">&lt;</span> ' : ''}${row.millis === undefined ? esc(row.standing) : `${esc(row.standing)} · ${millis(row.millis)}`}</span></button>${linked ? delegationLink(call, 'row') : ''}</div>`;
+        return `<div class="trajectory-step" role="listitem"><button class="trajectory-row ${row.step?.kind ?? 'event'} ${row.standing}" data-step="${esc(row.key)}" ${row.key === selected ? 'aria-current="true"' : ''}><span class="step-turn">${row.turn ?? '·'}</span><span class="step-kind">${linked ? '<span class="delegation-direction" title="Agent called">&gt;</span>' : icon(itemIcon(row))}<span>${esc(row.label)}</span></span><span class="step-preview">${esc(row.preview.replace(/\s+/g, ' '))}</span><span class="step-outcome">${linked && call.result ? '<span class="delegation-direction" title="Agent result received">&lt;</span> ' : ''}${row.millis === undefined ? esc(row.standing) : `${esc(row.standing)} · ${millis(row.millis)}`}${row.step?.kind !== 'call' && row.step?.entry.dispatch ? ` · ${esc(inferenceTokens(row.step.entry))}` : ''}</span></button>${linked ? delegationLink(call, 'row') : ''}</div>`;
       })
       .join('') ||
     '<div class="trajectory-empty">No matching steps. Load earlier entries or refresh the conversation.</div>';
@@ -387,7 +397,11 @@ function renderDetail() {
       linked && call.result ? '<' : '',
     );
     for (const hook of call.hooks)
-      body += section('Hook', hook.text ?? '(content unavailable)');
+      body += section(
+        'Hook',
+        hook.text ?? '(content unavailable)',
+        modelContextOf(hook.kind).detail,
+      );
   } else if (row.step) {
     const entry = row.step.entry;
     body = section(
@@ -410,6 +424,20 @@ function renderDetail() {
     );
     if (row.job.detail && row.job.text)
       body += section('Status', row.job.detail);
+  }
+  if (row.step) {
+    const entry = row.step.entry;
+    const visibility = modelContextOf(entry.kind, entry.supersededBy);
+    body = section('Model context', visibility.label, visibility.detail) + body;
+  }
+  if (row.step && row.step.kind !== 'call' && row.step.entry.dispatch) {
+    const entry = row.step.entry;
+    body =
+      section(
+        'Model inference',
+        `${entry.wireModel ?? 'Model not recorded'} · ${entry.dispatch}\nResponse time: ${entry.tookMillis === undefined ? 'not recorded' : millis(entry.tookMillis)}\n${inferenceTokens(entry)}${entry.reasoningTokens === undefined ? '' : `\nReasoning tokens: ${entry.reasoningTokens.toLocaleString()} (included in output)`}\nCompletion: ${entry.completion ?? 'not recorded'}`,
+        'Token counts are reported by the provider. Missing counts are not estimated from the displayed text.',
+      ) + body;
   }
   if (row.step?.entry.supersededBy !== undefined)
     body += `<p class="history-note">Folded into model summary #${row.step.entry.supersededBy}. The original entry remains in your history.</p>`;

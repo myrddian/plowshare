@@ -81,6 +81,12 @@ class LogStagesConfigTest {
         .withBean(Delivery.class, () -> delivery)
         .withBean(Dispatcher.class, () -> dispatcher)
         .withBean(io.aeyer.plowshare.server.ws.ApprovalFrames.class, () -> approvalFrames)
+        .withBean(
+            io.aeyer.plowshare.server.approvals.RunApprovalContinuations.class,
+            () -> mock(io.aeyer.plowshare.server.approvals.RunApprovalContinuations.class))
+        .withBean(
+            io.aeyer.plowshare.server.approvals.SuspendedRunCalls.class,
+            () -> mock(io.aeyer.plowshare.server.approvals.SuspendedRunCalls.class))
         .run(
             context -> {
               assertNull(context.getStartupFailure());

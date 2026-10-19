@@ -75,6 +75,10 @@ class AuthorityCutoverRehearsalTest {
 
     Flyway.configure().dataSource(source).load().migrate();
     assertEquals(historical, history());
+    // New source references are schema additions, not edits to retained history. The source
+    // must nevertheless retain the old conversation's exact ceiling and usage.
+    assertEquals(8, new ConversationStore(jdbc).allowanceFor("old-log").orElseThrow().limit());
+    assertEquals(3, new ConversationStore(jdbc).allowanceFor("old-log").orElseThrow().spent());
     var identities = new JdbcIdentityRepository(jdbc);
     identities.verifyBuiltIns();
     var project = assertInstanceOf(AuthorityScope.Project.class, identities.project("global"));
@@ -341,7 +345,7 @@ class AuthorityCutoverRehearsalTest {
             "SELECT jsonb_agg(to_jsonb(r) ORDER BY request_id)::text FROM information_requests r",
             String.class),
         jdbc.queryForObject(
-            "SELECT jsonb_agg(to_jsonb(c)-'budget_id' ORDER BY id)::text FROM conversations c",
+            "SELECT jsonb_agg(to_jsonb(c)-ARRAY['budget_id','allowance_id','owns_allowance'] ORDER BY id)::text FROM conversations c",
             String.class),
         jdbc.queryForObject(
             "SELECT jsonb_agg(to_jsonb(a) ORDER BY attempt_id)::text FROM inference_attempts a",

@@ -1517,6 +1517,7 @@ AskedViewDtoOpened: TypeAlias = "None | OpenedViewDto"
 class EntryViewDto:
     """Validated fields of the EntryView protocol contract."""
     completion: TierDtoProject
+    completion_tokens: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
     cut: bool
     dispatch: TierDtoProject
     ejected_at: TierDtoProject
@@ -1527,6 +1528,8 @@ class EntryViewDto:
     length: float
     ordinal: float
     outcome: TierDtoProject
+    prompt_tokens: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    reasoning_tokens: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
     recorded_at: TierDtoProject
     source: EntryViewDtoSource | Unset = UNSET
     speaker: TierDtoProject
@@ -4072,6 +4075,7 @@ class ApprovalAnswerPayloadDto:
     decision: Literal["once", "conversation", "project", "deny"]
     id: str
     prefix: tuple[str, ...] | Unset = UNSET
+    reason: str | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
 class ApprovalListPayloadDto:
@@ -6341,6 +6345,7 @@ class ApprovalAnswerRequest(Request[ApprovalAnsweredDto]):
     decision: Literal["once", "conversation", "project", "deny"]
     id: str
     prefix: tuple[str, ...] | Unset = UNSET
+    reason: str | Unset = UNSET
     operation: ClassVar[str] = "approval.answer"
 
 @dataclass(frozen=True, kw_only=True)
@@ -9620,7 +9625,7 @@ _FIELDS = {
     SourceViewDto: {"kind": "kind", "reference": "reference"},
     OpenedViewDto: {"agent": "agent", "conversation": "conversation"},
     AskedViewDto: {"arguments": "arguments", "cut": "cut", "id": "id", "length": "length", "name": "name", "opened": "opened", "salient": "salient"},
-    EntryViewDto: {"completion": "completion", "cut": "cut", "dispatch": "dispatch", "ejectedAt": "ejected_at", "excerpt": "excerpt", "handle": "handle", "job": "job", "kind": "kind", "length": "length", "ordinal": "ordinal", "outcome": "outcome", "recordedAt": "recorded_at", "source": "source", "speaker": "speaker", "speakerName": "speaker_name", "supersededBy": "superseded_by", "tookMillis": "took_millis", "toolCallId": "tool_call_id", "toolCalls": "tool_calls", "turnOrdinal": "turn_ordinal", "wireModel": "wire_model"},
+    EntryViewDto: {"completion": "completion", "completionTokens": "completion_tokens", "cut": "cut", "dispatch": "dispatch", "ejectedAt": "ejected_at", "excerpt": "excerpt", "handle": "handle", "job": "job", "kind": "kind", "length": "length", "ordinal": "ordinal", "outcome": "outcome", "promptTokens": "prompt_tokens", "reasoningTokens": "reasoning_tokens", "recordedAt": "recorded_at", "source": "source", "speaker": "speaker", "speakerName": "speaker_name", "supersededBy": "superseded_by", "tookMillis": "took_millis", "toolCallId": "tool_call_id", "toolCalls": "tool_calls", "turnOrdinal": "turn_ordinal", "wireModel": "wire_model"},
     EntryPageViewDto: {"entries": "entries", "limit": "limit", "more": "more", "offset": "offset", "oldest": "oldest", "through": "through", "total": "total"},
     CompactionViewDto: {"summary": "summary", "throughOrdinal": "through_ordinal"},
     MeasuredTurnDto: {"grewBy": "grew_by", "promptTokens": "prompt_tokens", "since": "since", "turn": "turn"},
@@ -9889,7 +9894,7 @@ _FIELDS = {
     ApplicationStorageSetPayloadDto: {"applicationRoot": "application_root", "project": "project", "writableAreas": "writable_areas"},
     ApplicationTokenIssuePayloadDto: {"expiresInDays": "expires_in_days", "project": "project", "requestId": "request_id", "rotate": "rotate"},
     ApplicationTokenReceiptPayloadDto: {"project": "project", "requestId": "request_id"},
-    ApprovalAnswerPayloadDto: {"decision": "decision", "id": "id", "prefix": "prefix"},
+    ApprovalAnswerPayloadDto: {"decision": "decision", "id": "id", "prefix": "prefix", "reason": "reason"},
     ApprovalListPayloadDto: {"conversation": "conversation", "mine": "mine", "project": "project"},
     BoardMessagesPayloadDto: {"topic": "topic"},
     BoardOpenPayloadDto: {"body": "body", "label": "label", "maxModelCalls": "max_model_calls", "project": "project", "requestId": "request_id", "swarm": "swarm", "title": "title"},
@@ -10170,7 +10175,7 @@ _FIELDS = {
     ApplicationStorageSetRequest: {"applicationRoot": "application_root", "project": "project", "writableAreas": "writable_areas"},
     ApplicationTokenIssueRequest: {"expiresInDays": "expires_in_days", "project": "project", "requestId": "request_id", "rotate": "rotate"},
     ApplicationTokenReceiptRequest: {"project": "project", "requestId": "request_id"},
-    ApprovalAnswerRequest: {"decision": "decision", "id": "id", "prefix": "prefix"},
+    ApprovalAnswerRequest: {"decision": "decision", "id": "id", "prefix": "prefix", "reason": "reason"},
     ApprovalListRequest: {"conversation": "conversation", "mine": "mine", "project": "project"},
     ApprovalRevokeRequest: {"id": "id"},
     BoardMessagesRequest: {"topic": "topic"},

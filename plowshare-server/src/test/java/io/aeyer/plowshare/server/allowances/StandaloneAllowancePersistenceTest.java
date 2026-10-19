@@ -35,7 +35,7 @@ class StandaloneAllowancePersistenceTest {
   static void migrateIsolatedFixture() {
     DriverManagerDataSource source =
         new DriverManagerDataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword());
-    Flyway.configure().dataSource(source).target("169").load().migrate();
+    Flyway.configure().dataSource(source).target("172").load().migrate();
     jdbc = new JdbcTemplate(source);
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('migration-owner','fixture')");
     jdbc.update("INSERT INTO projects(name) VALUES('migration-project')");

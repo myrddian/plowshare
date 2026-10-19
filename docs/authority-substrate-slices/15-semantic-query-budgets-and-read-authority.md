@@ -46,7 +46,7 @@ are recorded below.
 | [DocumentFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/DocumentFrames.java), [InformationFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java), [DocumentController](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/api/DocumentController.java) | Existing authenticated selection and response contracts reach the same retrieval service. Information search/rank accept their existing corpus/filter/view context. The explicit Global account selector still refuses these operations. |
 | [InformationTool](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/InformationTool.java), [DocumentTools](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/DocumentTools.java), [JobRuntime](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java) | Run-bound tools derive their reader from the server-owned home/account and record consumed inputs. Runtime composition has the parent admission, cancellation and call identity; the tools do not currently carry a query allowance. Bind the search service internally rather than exposing authority or payer fields to model arguments. |
 | [DispatchingEmbeddingClient](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/DispatchingEmbeddingClient.java), [DispatchingDualEmbeddings](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/embedding/DispatchingDualEmbeddings.java) | Unbound query requests have attribution but no retained claim. The preparation-scoped dual client explicitly rejects queries. Dual retrieval captures one active corpus slot and batches stance's query/negation together; preparation's two-slot write behavior is not query behavior. |
-| [SystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/SystemOperations.java), [BoundSystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/BoundSystemOperations.java) | No declared query purpose exists. Embedding claim carriage permits DOCUMENT_PREPARATION only. Extend the shared SYSTEM machinery with bounded query-operation evidence rather than constructing a document-specific embedding authority. The immutable SYSTEM evidence table also allowlists purposes in V158. A Java enum change alone cannot activate this path. |
+| [SystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/SystemOperations.java), [BoundSystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/BoundSystemOperations.java) | No declared query purpose exists. Embedding claim carriage permits DOCUMENT_PREPARATION only. Extend the shared SYSTEM machinery with bounded query-operation evidence rather than constructing a document-specific embedding authority. The immutable SYSTEM evidence table also allowlists purposes in V161. A Java enum change alone cannot activate this path. |
 | [BoundPreparationEmbeddings](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/BoundPreparationEmbeddings.java), [EmbeddingAuthorization](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/embedding/EmbeddingAuthorization.java) | Preparation already binds exact model/input, retained allowance, lease/generation and output targets. Its permit combines dispatch authorization with preparation publication checkpoints. Reuse the dispatch portion through the foundation; keep publication/lease semantics with the preparation consumer. |
 | [JdbcInferenceAdmissions](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcInferenceAdmissions.java), [Budget](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Budget.java) | Existing operation/source binding, unique source/ordinal, one submission and accounting correlation are reusable. They do not configure or supply a query allowance. `Budget.retained` can restore a persisted identity/counter, but is not itself persistence. |
 | [DocumentStore](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/DocumentStore.java), [JdbcEmbeddingWorkRepository](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/embedding/JdbcEmbeddingWorkRepository.java) | Scoped SQL applies current selection/root/input policy before ranking/paging; the dual read fences its captured profile. Preserve both independently of SYSTEM inference authority. |
@@ -219,7 +219,7 @@ was independently filtered.
    distinguish preparation availability from search availability.
 
 Any needed schema change is a new Flyway migration selected against the current
-integration baseline. Do not edit V157, V158, V160 or V161 or reserve a version in
+integration baseline. Do not edit V160, V161, V163 or V164 or reserve a version in
 this plan. Retained query records must not cascade-delete historical inference or
 cost evidence when an account/project/request ends. Do not backfill old attribution
 as valid query authority or fabricate historical spending.
@@ -360,7 +360,7 @@ new behavior.
   cancellation, original call identity and consumed-input ledger. Socket query
   validity follows the originating connection; live query capabilities close at
   their owning operation boundary and cannot be rebuilt from historical rows.
-- V162 extends the closed SYSTEM purpose allowlist and adds only the missing
+- V165 extends the closed SYSTEM purpose allowlist and adds only the missing
   retained query source/counter and task binding on `inference_admissions`.
   Accounting and one-submission evidence remain in their existing stores.
   Counters/identity cannot be reset, rebound or deleted; known repeated tool
@@ -380,10 +380,10 @@ Configuration is `plowshare.embeddings.search-budget`, with environment override
 `PLOWSHARE_SEMANTIC_SEARCH_BUDGET`. The shipped default is `unlimited` (also unset/empty),
 `0` disables query inference, and positive integers limit calls per logical query.
 Each query captures its policy once; unlimited still has retained claims and a
-monotonic usage count. Invalid negative/non-integer values refuse binding. V163
+monotonic usage count. Invalid negative/non-integer values refuse binding. V166
 permits the ledger's existing nullable ceiling on query sources and uses null-safe
 checks for immutable policies and exact claim binding. Existing finite sources
-and claims are preserved; V162 is unchanged. This does not alter preparation's
+and claims are preserved; V165 is unchanged. This does not alter preparation's
 existing source or enable other embedding consumers.
 
 The public request/response graphs, operation names, roles and SDK methods are
@@ -440,10 +440,10 @@ it does not bypass coverage or enable independent repair to make queries pass.
   nullable claim ceiling after configuration conversion.
 - Selected PostgreSQL tests passed 18 cases with `-PfullDb --tests`:
   `GlobalPreparationPersistenceTest` (16) and
-  `InferenceAdmissionPersistenceTest` (2). PostgreSQL is required for V163's
+  `InferenceAdmissionPersistenceTest` (2). PostgreSQL is required for V166's
   upgrade, null-safe immutable source/claim constraints, atomic concurrent claims
-  and real disclosure fences. The upgrade case migrates a V162 database with a
-  submitted finite claim and proves its original limit and usage survive V163.
+  and real disclosure fences. The upgrade case migrates a V165 database with a
+  submitted finite claim and proves its original limit and usage survive V166.
 - The existing legacy/dual read and retained reader-tool acceptances now use the
   default unlimited policy. Finite/unlimited variants both retain claims, refuse
   known invocation replay and forbid rebinding the ceiling; concurrency permits

@@ -66,7 +66,9 @@ function fixture(nativeSessions?: NativeSessions) {
     code: 'OK',
     payload: [agentWire()],
   });
-  let onApprovals: (() => Outcome) | undefined;
+  let onApprovals:
+    | ((payload: Record<string, unknown>) => Outcome | Promise<Outcome>)
+    | undefined;
   let onContext: (
     payload: Record<string, unknown>,
   ) => Outcome | Promise<Outcome> = () => ({
@@ -118,7 +120,11 @@ function fixture(nativeSessions?: NativeSessions) {
             ].includes(type)
           )
             return onAdmin(type, payload);
-          if (type.startsWith('usage.')) return onUsage(type, payload);
+          if (
+            type.startsWith('usage.') ||
+            type === 'conversation.context.snapshot'
+          )
+            return onUsage(type, payload);
           if (
             [
               'application.deploy',
@@ -163,7 +169,7 @@ function fixture(nativeSessions?: NativeSessions) {
           if (type === 'conversation.follow') return onFollow(payload);
           if (type === 'approval.list')
             return onApprovals
-              ? onApprovals()
+              ? onApprovals(payload)
               : {
                   code: 'OK',
                   payload: {
@@ -207,7 +213,9 @@ function fixture(nativeSessions?: NativeSessions) {
     projects: (value: unknown) => {
       projects = value;
     },
-    rawApprovals: (value: () => Outcome) => {
+    rawApprovals: (
+      value: (payload: Record<string, unknown>) => Outcome | Promise<Outcome>,
+    ) => {
       onApprovals = value;
     },
     push: (value: unknown) => push(value),
@@ -466,6 +474,268 @@ await test('an unreadable approval push reports its refresh failure and preserve
     f.client.state.backgroundError ?? '',
     /unreadable approval.list/,
   );
+});
+
+await test('a log push discovers approvals for work started outside this window without an Inbox push', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.followView('chat', 'first');
+  f.conversationApprovals('first', [approvalWire()]);
+  f.history(() => ({
+    code: 'OK',
+    payload: entryPageWire([entryWire(1, 'answer', 'Waiting for approval')], 1),
+  }));
+  f.push({ kind: 'conversation.appended', conversation: 'first', through: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
+});
+
+await test('a failed account listing cannot swallow an independently readable conversation approval', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.followView('chat', 'first');
+  f.rawApprovals((payload) =>
+    payload.mine
+      ? {
+          code: 'INTERNAL_ERROR',
+          said: 'Account listing temporarily unavailable',
+        }
+      : { code: 'OK', payload: { approvals: [approvalWire()] } },
+  );
+  await f.client.dispatch({ action: 'approvals-refresh' });
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.match(
+    f.client.state.approvalError ?? '',
+    /Could not refresh command approvals/,
+  );
+  f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+  await f.client.dispatch({ action: 'approvals-refresh' });
+  assert.equal(f.client.state.approvalError, undefined);
+  assert.deepEqual(f.client.state.approvals, []);
+});
+
+await test('a bare Yes cannot approve a newly discovered command', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  assert.equal(f.client.state.approvals.length, 0);
+  f.conversationApprovals('first', [approvalWire()]);
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'run',
+      conversation: 'first',
+      agent: 'bot',
+      text: 'Yes',
+    }),
+    /Use Approve or Deny/,
+  );
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
+});
+
+await test('ambiguous approval replies retain the request and explain how to recover without calling the model', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  f.conversationApprovals('first', [approvalWire()]);
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'run',
+      conversation: 'first',
+      agent: 'bot',
+      text: 'Just run the command',
+    }),
+    /Use Approve or Deny/,
+  );
+  f.conversationApprovals('first', [
+    approvalWire(),
+    approvalWire({ id: 'second-approval' }),
+  ]);
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'run',
+      conversation: 'first',
+      agent: 'bot',
+      text: 'Yes',
+    }),
+    /waiting for 2 command approvals/,
+  );
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
+});
+
+await test('an explicit approval answer reports a busy continuation instead of silently losing its note', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  f.approvals([approvalWire()]);
+  await f.client.dispatch({ action: 'approvals-refresh' });
+  f.answer(() => ({
+    code: 'OK',
+    payload: {
+      id: 'approval-one',
+      state: 'allowed',
+      job: null,
+      busy: true,
+      note: 'The requesting turn is still closing.',
+    },
+  }));
+  const reply = await f.client.dispatch({
+    action: 'answer',
+    id: 'approval-one',
+    decision: 'once',
+  });
+  assert.match(reply.notice ?? '', /Approval recorded.*still closing/);
+  assert.equal(
+    f.calls.some((row) => row.type === 'agent.run'),
+    false,
+  );
+});
+
+await test('a failed approval read prevents chat from creating an unapproved competing turn', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  f.rawApprovals(() => ({
+    code: 'INTERNAL_ERROR',
+    said: 'Approval read unavailable',
+  }));
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'run',
+      conversation: 'first',
+      agent: 'bot',
+      text: 'Yes',
+    }),
+    /Approval read unavailable/,
+  );
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
+});
+
+await test('an acknowledged decision stays settled when the following discovery fails', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  f.answer(() => {
+    f.rawApprovals(() => ({
+      code: 'INTERNAL_ERROR',
+      said: 'Listing unavailable',
+    }));
+    return {
+      code: 'OK',
+      payload: {
+        id: 'approval-one',
+        state: 'denied',
+        job: null,
+        busy: true,
+        note: null,
+      },
+    };
+  });
+  await f.client.dispatch({
+    action: 'answer',
+    id: 'approval-one',
+    decision: 'deny',
+  });
+  assert.deepEqual(f.client.state.approvals, []);
+  assert.match(f.client.state.approvalError ?? '', /Listing unavailable/);
+  assert.equal(
+    f.calls.filter((row) => row.type === 'approval.answer').length,
+    1,
+  );
+});
+
+await test('an approval read from a previous connection cannot become a decision in the new view', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  let finish: (value: Outcome) => void = () => {
+    throw new Error('Approval read did not start');
+  };
+  f.rawApprovals(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const sending = f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Yes',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await f.client.dispatch({ action: 'demo' });
+  finish({
+    code: 'OK',
+    payload: { approvals: [approvalWire({ id: 'old-connection-approval' })] },
+  });
+  await assert.rejects(sending, /connection changed/i);
+  assert.equal(
+    f.client.state.approvals.some(
+      (row) => row.id === 'old-connection-approval',
+    ),
+    false,
+  );
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
+});
+
+await test('a discovery response overtaken by an answer cannot resurrect the settled request', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  let finish: (value: Outcome) => void = () => {
+    throw new Error('Listing did not start');
+  };
+  f.rawApprovals(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const reading = f.client.dispatch({ action: 'approvals-refresh' });
+  await new Promise((resolve) => setImmediate(resolve));
+  f.answer(() => {
+    f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+    return {
+      code: 'OK',
+      payload: {
+        id: 'approval-one',
+        state: 'denied',
+        job: null,
+        busy: true,
+        note: null,
+      },
+    };
+  });
+  const answering = f.client.dispatch({
+    action: 'answer',
+    id: 'approval-one',
+    decision: 'deny',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  finish({ code: 'OK', payload: { approvals: [approvalWire()] } });
+  await Promise.all([reading, answering]);
+  assert.deepEqual(f.client.state.approvals, []);
 });
 
 await test('the same approval cannot be submitted twice while another window is answering it', async (t) => {
@@ -1358,10 +1628,8 @@ await test('malformed lists and history preserve existing state instead of displ
   ]);
   await f.client.dispatch({ action: 'refresh' });
   f.rawApprovals(() => ({ code: 'OK', payload: {} }));
-  await assert.rejects(
-    f.client.dispatch({ action: 'refresh' }),
-    /unreadable approval.list/,
-  );
+  await f.client.dispatch({ action: 'refresh' });
+  assert.match(f.client.state.approvalError ?? '', /unreadable approval.list/);
   assert.equal(present(f.client.state.approvals[0]).id, 'a');
   f.history(() => ({
     code: 'OK',
@@ -1492,6 +1760,68 @@ await test('context measurements use model counts and remain scoped to conversat
   assert.equal(
     present(f.client.state.contexts[contextKey('first', 'bot')]).sent,
     15240,
+  );
+});
+
+await test('context inspection sends boolean flags and exposes the system block, tools and failures', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  const snapshot = {
+    conversation: 'first',
+    agent: 'bot',
+    projection: 'next',
+    captured_at: '2026-10-19T00:00:00Z',
+    model: 'fixture-model',
+    sampling: {},
+    messages: [
+      {
+        role: 'system',
+        parts: [{ type: 'text', text: 'The constructed system prompt' }],
+        tool_calls: [],
+        tool_call_id: null,
+      },
+    ],
+    tools: [
+      {
+        name: 'run',
+        description: 'Run a command',
+        parameters: { type: 'object' },
+      },
+    ],
+    count: null,
+  };
+  f.usage(() => ({ code: 'OK', payload: snapshot }));
+  for (const measure of [false, true]) {
+    await f.client.dispatch({
+      action: 'context-snapshot',
+      conversation: 'first',
+      agent: 'bot',
+      measure,
+    });
+    assert.deepEqual(f.calls.at(-1), {
+      type: 'conversation.context.snapshot',
+      payload: { conversation: 'first', agent: 'bot', measure },
+    });
+    assert.deepEqual(
+      f.client.state.contextSnapshots?.[contextKey('first', 'bot')],
+      { value: snapshot },
+    );
+  }
+  f.usage(() => ({ code: 'NOT_FOUND', said: 'Agent definition unavailable' }));
+  await f.client.dispatch({
+    action: 'context-snapshot',
+    conversation: 'first',
+    agent: 'bot',
+    measure: false,
+  });
+  const failed = f.client.state.contextSnapshots?.[contextKey('first', 'bot')];
+  assert.deepEqual(failed?.value, snapshot);
+  assert.match(failed?.error ?? '', /Agent definition unavailable/);
+  assert.equal(failed?.loading, undefined);
+  assert.equal(
+    f.calls.some((call) => call.type === 'agent.run'),
+    false,
   );
 });
 
@@ -2544,4 +2874,85 @@ await test('desktop native commands invoke directly and socket loss closes insta
     await f.client.shutdown();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+await test('chat preflight cannot resurrect a decision answered during its read', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  let finish: (value: Outcome) => void = () => {
+    throw new Error('Read did not start');
+  };
+  f.rawApprovals(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const sending = f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Continue investigating',
+  });
+  const rejected = assert.rejects(sending, /approvals changed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+  f.answer(() => ({
+    code: 'OK',
+    payload: {
+      id: 'approval-one',
+      state: 'denied',
+      job: null,
+      busy: true,
+      note: null,
+    },
+  }));
+  await f.client.dispatch({
+    action: 'answer',
+    id: 'approval-one',
+    decision: 'deny',
+  });
+  assert.deepEqual(f.client.state.approvals, []);
+  finish({ code: 'OK', payload: { approvals: [approvalWire()] } });
+  await rejected;
+  assert.deepEqual(
+    f.client.state.approvals,
+    [],
+    'An overtaken preflight must not restore the settled request',
+  );
+});
+
+await test('chat preflight cannot overwrite a newer snapshot after another client answers', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  let finish: (value: Outcome) => void = () => {
+    throw new Error('Read did not start');
+  };
+  f.rawApprovals(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const sending = f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Yes',
+  });
+  const rejected = assert.rejects(sending, /approvals changed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+  await f.client.dispatch({ action: 'approvals-refresh' });
+  finish({ code: 'OK', payload: { approvals: [approvalWire()] } });
+  await rejected;
+  assert.deepEqual(f.client.state.approvals, []);
+  assert.equal(
+    f.calls.some((row) => ['agent.run', 'approval.answer'].includes(row.type)),
+    false,
+  );
 });

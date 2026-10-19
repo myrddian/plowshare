@@ -52,7 +52,7 @@ class ScopedGrantPersistenceTest {
         .dataSource(source)
         .schemas(schema)
         .defaultSchema(schema)
-        .target("152")
+        .target("155")
         .load()
         .migrate();
     jdbc = new JdbcTemplate(source);
@@ -711,7 +711,7 @@ class ScopedGrantPersistenceTest {
     assertNull(jdbc.queryForObject("SELECT to_regclass('authority_grants')", String.class));
     assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM authority_roles", Integer.class));
     assertEquals(
-        "152",
+        "155",
         Flyway.configure().dataSource(source).load().info().current().getVersion().toString());
   }
 

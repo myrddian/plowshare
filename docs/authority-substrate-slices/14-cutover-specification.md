@@ -26,12 +26,12 @@ deployment. The implemented subset and outstanding acceptance gates are distinct
 
 | Existing meaning | Classification and action |
 | --- | --- |
-| `memories.project_id IS NULL` | Documented archive tier, already mapped by V154 to fixed Global knowledge scope `00000000-0000-0000-0000-000000000005`. Retain the legacy locator, memory IDs, formation evidence, tombstones and provenance links. |
+| `memories.project_id IS NULL` | Documented archive tier, already mapped by V157 to fixed Global knowledge scope `00000000-0000-0000-0000-000000000005`. Retain the legacy locator, memory IDs, formation evidence, tombstones and provenance links. |
 | Ordinary project named `global` | Ordinary project with its own scope UUID; never the Global account. |
 | Personal projects and account knowledge | Separate scopes. Source admission evidence supplies `created_by`; legacy custodian text cannot fabricate authorship. |
 | Information resource without a classified home | Preserve null home and quarantine. Neither its bytes, Shared flag nor manual name establishes Global custody. |
 | Consistent historical Shared revisions | Preserve human-only `LEGACY_SHARED`; current manager publication explicitly changes the root to `GLOBAL_READ`, including service readers. |
-| Mixed Shared/private flags | V155 narrows to HOME with review or QUARANTINED. Never union historical audiences. Root policy applies to all revisions, with mandatory input/privacy ceilings. |
+| Mixed Shared/private flags | V158 narrows to HOME with review or QUARANTINED. Never union historical audiences. Root policy applies to all revisions, with mandatory input/privacy ceilings. |
 | Historical null jobs/conversations/logs | Preserve IDs, owner/provenance, spending, outcomes and receipts. Null does not establish Global execution authority. Do not reconstruct missing admissions or replay effects. |
 | New project digest job | Persist the already selected project through `JobStore.submit(name, home, work)`. The previous closure-only selection loses attribution after restart. Global-tier jobs retain null compatibility storage. No new recovery/execution grant is introduced. |
 | Deployment `global/` files | Mixed definition overrides, images and private exports; location grants no audience or SYSTEM authority. Retain layout/version and verify bytes across reinitialization. |

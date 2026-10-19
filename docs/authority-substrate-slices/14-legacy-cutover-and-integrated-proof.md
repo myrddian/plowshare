@@ -130,7 +130,7 @@ universal service publication is inferred.
 
 ### Reuse and audit findings
 
-V152–V159 already own identity/grant mappings, provenance, root audience history,
+V155–V162 already own identity/grant mappings, provenance, root audience history,
 operation claims, SYSTEM purpose evidence and child lineage. They were exercised
 rather than replaced by another migration registry. Normal management still uses
 scoped RBAC helpers; no ACL editor or new permission is added.

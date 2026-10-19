@@ -33,7 +33,7 @@ extensions: SDK/client preservation was incorrectly labeled optional as a whole.
 Live-data classification/adoption and deployment restart/restore/forward-recovery
 acceptance remain required rollout gates and have not been performed locally.
 
-Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
+Slice 05 adds V158 root audience versions/history, deliberate legacy Shared and
 ownerOnly reconciliation, live filtering for every revision, and explicit general
 reads for active authenticated human, Application and service principals. Existing
 Manager share/unshare commands govern the root; private inputs, retained reference

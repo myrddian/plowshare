@@ -246,7 +246,7 @@ class ConversationFramesTest {
         .open(eq(Home.global()), allowance.capture(), isNull(), isNull());
     for (Budget given : allowance.getAllValues()) {
       assertEquals(
-          configured().getDefaultBudget(),
+          configured().defaultBudgetLimit(),
           given.limit(),
           "both surfaces opened with the operator's own default");
     }
@@ -1695,7 +1695,7 @@ class ConversationFramesTest {
    */
   private static ConversationsProperties configured() {
     ConversationsProperties properties = new ConversationsProperties();
-    properties.setDefaultBudget(77);
+    properties.setDefaultBudget("77");
     return properties;
   }
 

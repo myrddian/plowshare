@@ -16,9 +16,9 @@ class ConversationSpendingPolicyTest {
   @Test
   void omittedPolicyIsUnlimitedAndExplicitRequestLimitsRemainFinite() {
     ConversationsProperties properties = new ConversationsProperties();
-    assertNull(properties.getDefaultBudget());
-    assertFalse(RequestedBudget.in(null, null, properties.getDefaultBudget()).capped());
-    assertEquals(3, RequestedBudget.in(3, null, properties.getDefaultBudget()).limit());
+    assertNull(properties.defaultBudgetLimit());
+    assertFalse(RequestedBudget.in(null, null, properties.defaultBudgetLimit()).capped());
+    assertEquals(3, RequestedBudget.in(3, null, properties.defaultBudgetLimit()).limit());
   }
 
   @Test
@@ -31,9 +31,18 @@ class ConversationSpendingPolicyTest {
               context -> {
                 assertNull(context.getStartupFailure());
                 Integer selected =
-                    context.getBean(ConversationsProperties.class).getDefaultBudget();
+                    context.getBean(ConversationsProperties.class).defaultBudgetLimit();
                 if (policy.equals("unlimited")) assertNull(selected);
                 else assertEquals(Integer.valueOf(policy), selected);
               });
+  }
+
+  @Test
+  void invalidConfigurationRefusesStartupRatherThanSelectingUnlimited() {
+    for (String policy : java.util.List.of("-1", "invalid"))
+      new ApplicationContextRunner()
+          .withUserConfiguration(PropertiesConfiguration.class)
+          .withPropertyValues("plowshare.conversations.default-budget=" + policy)
+          .run(context -> assertNotNull(context.getStartupFailure()));
   }
 }

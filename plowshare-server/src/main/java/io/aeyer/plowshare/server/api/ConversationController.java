@@ -306,7 +306,7 @@ public class ConversationController {
             request.maxTurns(), request.noTurnCap(), "each turn in this conversation");
     Budget budget =
         RequestedBudget.in(
-            request.maxModelCalls(), request.noBudget(), properties.getDefaultBudget());
+            request.maxModelCalls(), request.noBudget(), properties.defaultBudgetLimit());
     // The signed-in account owns it: a hook's notify reaches them (amendment 2).
     ConversationRecord opened =
         conversations.open(

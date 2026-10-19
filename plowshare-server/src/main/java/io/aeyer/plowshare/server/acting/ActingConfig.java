@@ -48,7 +48,7 @@ public class ActingConfig {
         agents,
         executor,
         transactions,
-        properties.getDefaultBudget(),
+        properties.defaultBudgetLimit(),
         resources);
   }
 

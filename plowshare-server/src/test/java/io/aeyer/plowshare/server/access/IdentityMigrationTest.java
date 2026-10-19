@@ -48,14 +48,14 @@ class IdentityMigrationTest {
         .dataSource(source)
         .defaultSchema(schema)
         .schemas(schema)
-        .target("151")
+        .target("154")
         .load()
         .migrate();
     jdbc = new JdbcTemplate(source);
   }
 
   private void migrate() {
-    Flyway.configure().dataSource(source).target("152").load().migrate();
+    Flyway.configure().dataSource(source).target("155").load().migrate();
   }
 
   private void user(String name) {
@@ -191,7 +191,7 @@ class IdentityMigrationTest {
     assertThrows(RuntimeException.class, this::migrate);
     assertNull(jdbc.queryForObject("SELECT to_regclass('authority_accounts')", String.class));
     assertEquals(
-        "151",
+        "154",
         Flyway.configure().dataSource(source).load().info().current().getVersion().toString());
     assertEquals(
         existing,
@@ -235,7 +235,7 @@ class IdentityMigrationTest {
     bootstrap.afterSingletonsInstantiated();
     var before = jdbc.queryForList("SELECT id,kind,account_id FROM authority_scopes ORDER BY id");
     jdbc.execute("SELECT authority_bootstrap_builtins()");
-    Flyway.configure().dataSource(source).target("152").load().migrate();
+    Flyway.configure().dataSource(source).target("155").load().migrate();
     new IdentityBootstrap(new JdbcIdentityRepository(new JdbcTemplate(source)))
         .afterSingletonsInstantiated();
     assertEquals(

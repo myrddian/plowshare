@@ -28,7 +28,7 @@ try {
   await main.locator('#handle').fill('fixture');
   await main.locator('#password').fill('fixture-password');
   await main.locator('#submit-connection').click();
-  await expect(main.locator('#connection-label')).toHaveText('Connected');
+  await expect(main.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
   await main.locator('#manual-open').click();
   await expect.poll(() => app.windows().some(page => page.url() === 'plowshare://app/library.html')).toBe(true);
   const library = app.windows().find(page => page.url() === 'plowshare://app/library.html');

@@ -17,6 +17,10 @@ const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
 const approvalQuestion = {id:'approval-fixture',conversation:'conversation-fixture',askedIn:'conversation-fixture',agent:'worker',side:'local',command:['echo','fixture'],cwd:'/fixture',reason:null,state:'asked',scope:null,prefix:null,defaultPrefix:['echo'],createdAt:'2026-10-17T00:00:00Z',answeredAt:null,commands:null,judged:null};
 for (const reason of [null, '', 'Review the command']) result('approval.list',{approvals:[{...approvalQuestion,reason}]},true);
 for (const reason of [false, 1, [], {}]) result('approval.list',{approvals:[{...approvalQuestion,reason}]},false);
+input('approval.answer', {id:'approval-fixture',decision:'deny',reason:'Publishing is unnecessary'}, true);
+for (const reason of ['', '  ', null, 5, 'x'.repeat(4001), 'bad\0reason'])
+  input('approval.answer', {id:'approval-fixture',decision:'deny',reason}, false);
+input('approval.answer', {id:'approval-fixture',decision:'once',reason:'not a denial'}, false);
 
 const receipt = '11111111-1111-1111-1111-111111111111';
 
@@ -177,6 +181,13 @@ result('conversation.trajectory', originPage({ ...originEntry, job: null, source
 for (const source of [{ kind: 'message', reference: null }, { kind: 'unknown', reference: 'msg_fixture' }, { kind: 'forged', reference: 'msg_fixture' }, { kind: 'message', reference: ' ' }])
   result('conversation.trajectory', originPage({ ...originEntry, source }), false);
 result('conversation.trajectory', originPage({ ...originEntry, job: ' ' }), false);
+// Provider usage is additive: unknown differs from a measured zero in every SDK.
+for (const tokens of [null, 0, 1200])
+  result('conversation.trajectory', originPage({ ...originEntry, promptTokens: tokens, completionTokens: tokens, reasoningTokens: tokens }), true);
+for (const key of ['promptTokens', 'completionTokens', 'reasoningTokens'])
+  for (const tokens of [-1, 1.5, '12'])
+    result('conversation.trajectory', originPage({ ...originEntry, [key]: tokens }), false);
+
 const messageDelivery = { message: 'msg_fixture', sender: 'sender', recipient: 'recipient',
   replyTo: null, replyExpected: false, finalReply: false, generated: false, state: 'handled',
   ending: 'ANSWERED', reply: null, job: 'job_fixture', deadlineAt: null,

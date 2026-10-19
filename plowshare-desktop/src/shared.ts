@@ -178,6 +178,8 @@ export interface DesktopState {
     uncertain?: boolean;
   };
   backgroundError?: string;
+  /** Pending decisions remain visible while a read fails; the user can retry discovery. */
+  approvalError?: string | undefined;
   usage?: UsageViewState;
   mode: 'demo' | 'live';
   connected: boolean;

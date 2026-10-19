@@ -303,6 +303,10 @@ describe('the two readings', () => {
     // The kinds the chat drops are only reachable through the second read.
     expect(row(4).dataset['kind']).toBe('diagnostic');
     expect(row(5).dataset['kind']).toBe('attempt_failed');
+    expect(row(4).textContent).toContain('Not sent to model');
+    expect(row(5).textContent).toContain('Not sent to model');
+    expect(row(3).textContent).toContain('Model context eligible');
+    expect(row(2).textContent).toContain('Folded for model');
   });
 
   it('reports each reading its own total, because they count different things', async () => {

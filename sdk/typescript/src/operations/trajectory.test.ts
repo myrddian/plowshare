@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Entry } from './client-views.ts';
-import { stepsOf, turnsOf } from './trajectory.ts';
+import { modelContextOf, stepsOf, turnsOf } from './trajectory.ts';
 
 describe('human trajectory after model compaction', () => {
   it('retains folded messages and paired tool results across repeated folds', () => {
@@ -102,5 +102,119 @@ describe('human trajectory after model compaction', () => {
         },
       ])[0],
     ).toMatchObject({ kind: 'note', entry: { text: 'Original evidence' } });
+  });
+});
+
+describe('per-inference trajectory', () => {
+  it('retains a tool-only model response and counts parallel tools as one inference', () => {
+    const entries: Entry[] = [
+      {
+        ordinal: 1,
+        turnOrdinal: 1,
+        kind: 'answer',
+        state: 'stands',
+        dispatch: 'primary',
+        completion: 'called_tools',
+        text: '',
+        tookMillis: 250,
+        promptTokens: 1200,
+        completionTokens: 40,
+        calls: ['first', 'second'].map((id) => ({
+          id,
+          name: 'run',
+          arguments: '{}',
+          length: 2,
+          cut: false,
+        })),
+      },
+      ...['first', 'second'].map((id, index) => ({
+        ordinal: index + 2,
+        turnOrdinal: 1,
+        kind: 'tool_result',
+        state: 'stands',
+        toolCallId: id,
+        tookMillis: 10,
+        outcome: 'ok',
+      })),
+      {
+        ordinal: 4,
+        turnOrdinal: 1,
+        kind: 'answer',
+        state: 'stands',
+        text: 'Approve running ... [apr_fake]',
+      },
+    ];
+    const steps = stepsOf(entries);
+    expect(steps.map((s) => s.kind)).toEqual([
+      'answer',
+      'call',
+      'call',
+      'answer',
+    ]);
+    expect(steps[0]?.entry.promptTokens).toBe(1200);
+    expect(turnsOf(steps)[0]).toMatchObject({
+      modelCalls: 1,
+      modelMillis: 250,
+      toolMillis: 20,
+      calls: 2,
+    });
+  });
+});
+
+it('does not count an orphaned timed tool result as model inference', () => {
+  const steps = stepsOf([
+    {
+      ordinal: 3,
+      turnOrdinal: 1,
+      kind: 'tool_result',
+      state: 'stands',
+      tookMillis: 50,
+      toolCallId: 'earlier',
+    },
+  ]);
+  expect(turnsOf(steps)[0]).toMatchObject({ modelCalls: 0, modelMillis: 0 });
+});
+
+describe('model context labels', () => {
+  it('distinguishes approval audit from the denial tool result the model receives', () => {
+    const audit: Entry = {
+      ordinal: 1,
+      turnOrdinal: 1,
+      kind: 'diagnostic',
+      state: 'stands',
+      text: 'Command denied by person_1: outside the approved scope',
+    };
+    const denial: Entry = {
+      ...audit,
+      ordinal: 2,
+      kind: 'tool_result',
+      toolCallId: 'run_1',
+    };
+    expect(modelContextOf(audit.kind).label).toBe('Not sent to model');
+    expect(modelContextOf(denial.kind).label).toBe('Model context eligible');
+    expect(modelContextOf(denial.kind).detail).toContain('not a receipt');
+  });
+
+  it('does not describe already delivered runtime notes or hook effects as invisible', () => {
+    expect(modelContextOf('runtime_note').label).toBe('Active run only');
+    expect(modelContextOf('runtime_note').detail).toContain(
+      'Delivered as context during the active run',
+    );
+    expect(modelContextOf('hook').detail).toContain(
+      'may affect the model request',
+    );
+    expect(modelContextOf('thinking').label).toBe(
+      'Model output · not replayed',
+    );
+  });
+
+  it('distinguishes compaction from never sent, and leaves unfamiliar kinds unknown', () => {
+    expect(modelContextOf('utterance', 17).detail).toContain(
+      'may have been sent before compaction',
+    );
+    expect(modelContextOf('diagnostic', 17).label).toBe('Not sent to model');
+    expect(modelContextOf('future_kind').label).toBe(
+      'Model visibility unknown',
+    );
   });
 });

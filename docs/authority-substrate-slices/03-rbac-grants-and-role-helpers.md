@@ -77,7 +77,7 @@ changing enforcement. It defines the compatibility table, fixed role UUIDs,
 exercise versus delegation ceilings, permitted scope coverage, human exception
 authority and transaction/recovery rules.
 
-[`V153__scoped_rbac_grants.sql`](../../plowshare-server/src/main/resources/db/migration/V153__scoped_rbac_grants.sql)
+[`V156__scoped_rbac_grants.sql`](../../plowshare-server/src/main/resources/db/migration/V156__scoped_rbac_grants.sql)
 adds immutable version-1 role action policy, durable scoped bindings and audit.
 `ScopedGrantRepository` owns persistence; `ScopedRoleGrants` is the internal
 management contract. `AuthorizedRoleGrants` checks the specific issuing grant,
@@ -114,7 +114,7 @@ Preserve role/grant history and explicit mappings. Never return to an older auth
 ## Verification record
 
 Verification uses synthetic fixtures and mocks, not a deployed system. PostgreSQL
-was selected for V153/Flyway rollback, live SQL admission, immutable audit,
+was selected for V156/Flyway rollback, live SQL admission, immutable audit,
 credential binding, scope deletion and actual concurrent persistence.
 
 - `ScopedGrantPersistenceTest`: **16 passed**, including role/Global ADMIN action
@@ -133,7 +133,7 @@ credential binding, scope deletion and actual concurrent persistence.
   issuance of its two control bindings) and the existing shared schedule registry's
   owner invariant. They bring the distinct selected PostgreSQL total to **74**;
   no scheduling implementation changed.
-  Slice 02's migration tests explicitly target V152; V153 has its own migration
+  Slice 02's migration tests explicitly target V155; V156 has its own migration
   and interrupted-bootstrap proof. The full database suite was not run.
 - Mock policy/lineage, Application, membership transport, information composition
   and reserved-identity cases run in the default test suite. They do not prove

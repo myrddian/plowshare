@@ -25,7 +25,7 @@ are available; it does not grant authority to a caller or enable an unmigrated p
 - Adapt existing supported create/update/import/move/retire paths only. A home/control transfer needs applicable source/destination authority; audience changes remain separate.
 - Classify document versus conversation/session/credential/receipt ownership. Preserve specialized exact-subject/private-record rules and existing input/reference/lifecycle gates.
 
-V154 adds home scope UUIDs to resources/memories and evidence-labelled, immutable
+V157 adds home scope UUIDs to resources/memories and evidence-labelled, immutable
 creator UUIDs to resources/revisions. Existing project/account keys, revision
 authorship, document attribution, formation/source history and receipt ownership
 remain separate. Unclassified document homes remain unavailable for ordinary
@@ -93,7 +93,7 @@ locking. **103 distinct selected PostgreSQL cases passed** across the stages:
 | Selected DocumentPoliciesTest methods | 6 |
 | Selected InformationFacetsTest methods | 2 |
 
-These cover creator evidence/conflicts/unknowns across V153→V154 and restart,
+These cover creator evidence/conflicts/unknowns across V156→V157 and restart,
 non-creator writes and immutable provenance, wrong home/Reader refusal, mandatory
 ownerOnly/private inputs/reference obligations, stable scope through project
 rename, head conflicts, rollback, revocation fencing, service-token

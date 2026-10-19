@@ -72,7 +72,7 @@ below; mocked checks do not prove live deployment behavior.
 ## Specification and implemented boundary
 
 The [root-policy specification](05-root-policy-specification.md) was written before
-enforcement changes. V155 adds root-policy versions and immutable history without
+enforcement changes. V158 adds root-policy versions and immutable history without
 rewriting shipped migrations or inferring authorship from home. Consistent legacy
 Shared stays human-only LEGACY_SHARED until explicit Manager review through the
 existing share command; mixed histories narrow to HOME for review. Conflicting
@@ -114,7 +114,7 @@ cutover remain deferred to their documented slices.
   KnowledgeScopePersistenceTest, InformationFacetsTest, InformationCollectionsTest,
   InformationEventConcurrencyTest, AuthoredInformationPersistenceTest and
   ServiceInformationProcessingTest. The full database suite was not run.
-- PostgreSQL evidence includes V154-to-V155 reconciliation/restart, legacy flags
+- PostgreSQL evidence includes V157-to-V158 reconciliation/restart, legacy flags
   remaining evidence, current-root historical/pinned reads, universal principal
   eligibility/revocation, private inputs/references/logs, counts/facets/event
   filtering, policy audit rollback and concurrent audience/read transactions.

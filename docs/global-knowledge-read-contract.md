@@ -77,7 +77,7 @@ repository clients and integration consumers move together. Externally installed
 clients must update their selectors. Existing account-target operation support is
 unchanged; this does not promise every SDK exposes every client feature.
 
-V169 replaces the active read decision chain with substrate checks. Rootless
+V172 replaces the active read decision chain with substrate checks. Rootless
 compatibility rows must be admitted through the supported knowledge lifecycle;
 assigning an old revision policy alone cannot make them readable. LEGACY_SHARED
 root policies narrow to HOME, require review, and record the change in immutable
@@ -94,7 +94,7 @@ revisions. No live corpus transfer or publication is performed by this code chan
 ## Verification
 
 Mocked tests cover strict selectors, retained ceiling propagation, service/human
-parity and runtime tool binding. Focused PostgreSQL coverage verifies V169,
+parity and runtime tool binding. Focused PostgreSQL coverage verifies V172,
 current-root publication/revocation, explicit Global custody, project/general
 selection, retained ceilings before counts/navigation, and denial of rootless
 legacy sharing. SDK generation and repository checks verify the wire cutover.

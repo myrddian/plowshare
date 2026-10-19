@@ -63,7 +63,7 @@ match the eventual change:
 
 ### Implementation and verification record
 
-[`V152__explicit_authority_identities.sql`](../../plowshare-server/src/main/resources/db/migration/V152__explicit_authority_identities.sql) adds `authority_accounts`,
+[`V155__explicit_authority_identities.sql`](../../plowshare-server/src/main/resources/db/migration/V155__explicit_authority_identities.sql) adds `authority_accounts`,
 `authority_roles` and `authority_scopes`. `IdentityRepository` is the read-only
 typed compatibility boundary, implemented by `JdbcIdentityRepository`;
 `IdentityBootstrap` validates the migrated built-ins at startup. Runtime startup

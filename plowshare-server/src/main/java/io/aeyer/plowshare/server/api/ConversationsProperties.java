@@ -13,18 +13,22 @@ public class ConversationsProperties {
   /** "unlimited", zero (no inference), or a positive model-call ceiling. */
   private String defaultBudget = "unlimited";
 
-  public Integer getDefaultBudget() {
-    return io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
-        defaultBudget, "default-budget");
-  }
-
-  public void setDefaultBudget(int value) {
-    setDefaultBudget(Integer.toString(value));
+  public String getDefaultBudget() {
+    return defaultBudget;
   }
 
   public void setDefaultBudget(String value) {
     io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(value, "default-budget");
     defaultBudget = value;
+  }
+
+  /**
+   * Validated runtime ceiling; null is unlimited. Keep this separate from the String bean property
+   * so configuration binding never tries to convert "unlimited" into an integer.
+   */
+  public Integer defaultBudgetLimit() {
+    return io.aeyer.plowshare.server.embedding.SpendingPolicy.limit(
+        defaultBudget, "default-budget");
   }
 
   /**

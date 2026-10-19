@@ -1322,7 +1322,7 @@ class ConversationControllerTest {
    */
   private static ConversationsProperties configured() {
     ConversationsProperties properties = new ConversationsProperties();
-    properties.setDefaultBudget(77);
+    properties.setDefaultBudget("77");
     return properties;
   }
 

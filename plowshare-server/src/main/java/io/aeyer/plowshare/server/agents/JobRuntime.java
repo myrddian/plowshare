@@ -639,6 +639,22 @@ public final class JobRuntime {
    */
   private volatile io.aeyer.plowshare.server.approvals.RunApprovalStore approvals;
 
+  private volatile io.aeyer.plowshare.server.approvals.SuspendedRunCalls suspendedRunCalls;
+  private volatile io.aeyer.plowshare.server.approvals.ActiveRunApprovals activeRunApprovals =
+      new io.aeyer.plowshare.server.approvals.ActiveRunApprovals();
+
+  public void useActiveRunApprovals(io.aeyer.plowshare.server.approvals.ActiveRunApprovals active) {
+    activeRunApprovals = Objects.requireNonNull(active);
+  }
+
+  public boolean waitingForApprovalIn(String conversation) {
+    return activeRunApprovals.waitingIn(conversation);
+  }
+
+  public void useSuspendedRunCalls(io.aeyer.plowshare.server.approvals.SuspendedRunCalls calls) {
+    suspendedRunCalls = Objects.requireNonNull(calls);
+  }
+
   private volatile java.util.function.Function<
           String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
       approvalRoots = ignored -> Optional.empty();
@@ -1722,6 +1738,33 @@ public final class JobRuntime {
       String callerHandle,
       boolean incoming,
       io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+    // A local approval belongs to its original bridge session. Never redirect its command to the
+    // machine/session of the person who happened to click Approve.
+    if (suspendedRunCalls != null && transcript.conversationId() != null) {
+      var pending = suspendedRunCalls.pending(transcript.conversationId());
+      if (!pending.isEmpty()
+          && (!Objects.equals(sessionId, pending.getFirst().session())
+              || !Objects.equals(callerHandle, pending.getFirst().owner()))) {
+        if (confined
+            && (pending.getFirst().session() != null
+                || !Objects.equals(pending.getFirst().owner(), admittedSubject)))
+          throw new CallerFault("Acting work cannot borrow another execution identity");
+        return execute(
+            definition,
+            userPrompt,
+            home,
+            budget,
+            cancelled,
+            pending.getFirst().session(),
+            watch,
+            transcript,
+            cap,
+            images,
+            pending.getFirst().owner(),
+            incoming,
+            operation);
+      }
+    }
     Objects.requireNonNull(cap, "cap");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(watch, "watch");
@@ -2418,6 +2461,19 @@ public final class JobRuntime {
     // the turn keeps it word for word and may take what is in front of it, so it moves; see
     // Transcript.stepEnded.
     int openedAt = history.size() - 1;
+    boolean approvalContinuation =
+        transcript.speaker() != null
+            && transcript.speaker().kind() == Speaker.Kind.HARNESS
+            && transcript.speaker().name().startsWith("approval ");
+    approvalContinuation |=
+        !incoming
+            && suspendedRunCalls != null
+            && transcript.conversationId() != null
+            && !suspendedRunCalls.pending(transcript.conversationId()).isEmpty();
+    if (approvalContinuation) {
+      history.remove(openedAt);
+      openedAt = Math.max(0, history.size() - 1);
+    }
     if (bound != null && bound.notice() != null) history.add(ChatMessage.user(bound.notice()));
     // A NOTICE: after the utterance and BEFORE the reminder, appended rather than folded.
     // EntryKind.NOTICE projects to ChatMessage.Role.USER -- not SYSTEM, though a notice is the
@@ -2480,7 +2536,10 @@ public final class JobRuntime {
     // after an unrecorded message would move up a place and end the shared
     // prefix there. A volatile addition is not recorded as a message, so it goes
     // last, where the reminder's own placement argument applies to it too.
-    PromptPre pre = promptPre(activeHooks(route, harnessRun, skillChecks), hookContext, userPrompt);
+    PromptPre pre =
+        approvalContinuation
+            ? PromptPre.NOTHING
+            : promptPre(activeHooks(route, harnessRun, skillChecks), hookContext, userPrompt);
     // After, not before: the profile just asked for heard it through the chain, and
     // only one a reroute builds later still needs telling.
     harnessRun.spoke(hookContext, userPrompt);
@@ -2562,7 +2621,10 @@ public final class JobRuntime {
     // again. From here down, every message this loop appends is recorded as
     // it is appended, which is what makes what a model can be shown exactly
     // what was written down.
-    transcript.record(LoggedEntry.utterance(userPrompt, transcript.speaker()));
+    transcript.record(
+        approvalContinuation
+            ? LoggedEntry.diagnostic(userPrompt)
+            : LoggedEntry.utterance(userPrompt, transcript.speaker()));
     if (bound != null && bound.notice() != null)
       transcript.record(LoggedEntry.notice(bound.notice()));
     // Recorded AFTER the utterance, matching the log-order requirement:
@@ -2603,6 +2665,69 @@ public final class JobRuntime {
                         0))));
     pre.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
     List<String> trail = new ArrayList<>();
+    if (suspendedRunCalls != null && transcript.conversationId() != null) {
+      var resumption = new io.aeyer.plowshare.server.approvals.RunCallResumption(suspendedRunCalls);
+      for (var pending : suspendedRunCalls.pending(transcript.conversationId())) {
+        boolean resumed;
+        try {
+          if (pending.released()
+              && !io.aeyer.plowshare.server.approvals.RunApproval.ASKED.equals(pending.decision()))
+            recordApprovalDecision(pending.approval(), transcript);
+          resumed =
+              resumption.resume(
+                  pending,
+                  retained -> {
+                    RunActivity.Call resumedActivity =
+                        activity.called(
+                            transcript.conversationId(),
+                            definition.name(),
+                            RunTool.NAME,
+                            () -> ToolLines.salient(RunTool.NAME, retained.tool().arguments()));
+                    String completed =
+                        resumeRunCall(
+                            retained,
+                            offered,
+                            home,
+                            cancelled,
+                            transcript,
+                            definition,
+                            hookContext,
+                            route,
+                            harnessRun,
+                            skillChecks,
+                            watch,
+                            resumedActivity,
+                            operation);
+                    resumedActivity.returned(ToolLines.outcome(RunTool.NAME, completed));
+                    return completed;
+                  },
+                  result -> {
+                    transcript.recordDurably(
+                        LoggedEntry.toolResult(pending.tool().id(), result)
+                            .told(ToolLines.outcome(RunTool.NAME, result)));
+                    replaceRetainedResult(history, pending.tool(), result);
+                  });
+        } catch (RuntimeException interrupted) {
+          return stopped(
+              interrupted instanceof SessionGoneException
+                  ? Ending.SESSION_GONE
+                  : Ending.UNAVAILABLE,
+              "The retained command result could not be reconciled. No uncertain command was replayed.",
+              trail,
+              0,
+              0,
+              describe(interrupted));
+        }
+        if (!resumed)
+          return new Outcome(
+              Ending.AWAITING,
+              "Waiting for command approval [" + pending.approval() + "]",
+              0,
+              0,
+              "");
+        trail.add(RunTool.NAME);
+      }
+    }
     // Per run, and that is the whole of its lifetime rule; see Repeats.
     Repeats repeats = new Repeats();
     // Counts across the whole run rather than within a batch, so two steps
@@ -3230,11 +3355,26 @@ public final class JobRuntime {
       if (madeForTheModel == null) {
         route.called(asking, modelCallTook);
       }
-      transcript.record(
+      LoggedEntry requestedCall =
           LoggedEntry.answer(post.reply(), asked)
               .naming(salientsOf(asked))
               .took(modelCallTook)
-              .by(asking));
+              .by(asking);
+      if (suspendedRunCalls != null
+          && transcript.conversationId() != null
+          && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name()))) {
+        try {
+          transcript.recordDurably(requestedCall);
+        } catch (RuntimeException unrecorded) {
+          return stopped(
+              Ending.UNAVAILABLE,
+              "The command request could not be retained durably; no command was dispatched.",
+              trail,
+              steps - 1,
+              modelCalls,
+              describe(unrecorded));
+        }
+      } else transcript.record(requestedCall);
       post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       // Collected across the batch and appended after it, never between
       // two results. The contract describes an assistant turn's tool
@@ -3365,15 +3505,109 @@ public final class JobRuntime {
                       (context, arguments) -> toolPre(active, context, wanted.name(), arguments))
                   : toolPre(active, hookContext, wanted.name(), wanted.arguments());
           toolRecords.addAll(preTool.records());
+          if (tool instanceof RunTool run
+              && run.waitingApproval().isPresent()
+              && suspendedRunCalls != null) {
+            var question = run.waitingApproval().orElseThrow();
+            String approval = question.id();
+            suspendedRunCalls.retain(
+                approval,
+                transcript.conversationId(),
+                sessionId,
+                question.side(),
+                callerHandle,
+                new ToolCall(
+                    wanted.id(), wanted.name(), run.retainedArguments(preTool.arguments(), home)));
+            // The model's original stack, including all delegated parents and sibling calls,
+            // remains suspended. Neither waiting nor an approval answer enters its prompt.
+            toolRecords.forEach(r -> transcript.record(LoggedEntry.hook(r)));
+            toolRecords.clear();
+            String root = question.conversation();
+            var resumption =
+                new io.aeyer.plowshare.server.approvals.RunCallResumption(suspendedRunCalls);
+            var executedAt = new java.util.concurrent.atomic.AtomicReference<Instant>();
+            Optional<String> output;
+            try {
+              output =
+                  resumption.await(
+                      approval,
+                      root,
+                      activeRunApprovals,
+                      cancelled,
+                      () -> {
+                        if (approvalDelivery != null) approvalDelivery.drain(root);
+                      },
+                      observed -> recordApprovalDecision(observed.approval(), transcript),
+                      retainedCall -> {
+                        executedAt.set(clock.get());
+                        return resumeRunCall(
+                            retainedCall,
+                            offered,
+                            home,
+                            cancelled,
+                            transcript,
+                            definition,
+                            hookContext,
+                            route,
+                            harnessRun,
+                            skillChecks,
+                            watch,
+                            recording,
+                            operation);
+                      },
+                      text -> {
+                        transcript.recordDurably(
+                            LoggedEntry.toolResult(wanted.id(), text)
+                                .told(ToolLines.outcome(RunTool.NAME, text))
+                                .took(
+                                    executedAt.get() == null
+                                        ? Duration.ZERO
+                                        : Duration.between(executedAt.get(), clock.get())));
+                      });
+            } catch (RuntimeException interrupted) {
+              return stopped(
+                  interrupted instanceof SessionGoneException
+                      ? Ending.SESSION_GONE
+                      : Ending.UNAVAILABLE,
+                  "The command continuation was interrupted. Its retained execution record will be reconciled without replaying an uncertain command.",
+                  trail,
+                  steps - 1,
+                  modelCalls,
+                  describe(interrupted));
+            }
+            if (output.isEmpty()) {
+              String cancelledResult =
+                  "The harness cancelled this retained command because its requesting run ended. Nothing ran.";
+              approvals.deny(
+                  approval,
+                  io.aeyer.plowshare.server.approvals.RunApproval.RUN_ENDED,
+                  "The requesting run was cancelled before execution.");
+              suspendedRunCalls.complete(approval, cancelledResult);
+              transcript.recordDurably(
+                  LoggedEntry.toolResult(wanted.id(), cancelledResult).told(ToolLines.DENIED));
+              suspendedRunCalls.acknowledged(approval);
+              extras.end().approvalResumed(approval);
+              recording.returned(ToolLines.DENIED);
+              return stopped(Ending.CANCELLED, cancelledResult, trail, steps, modelCalls, "");
+            }
+            extras.end().approvalResumed(approval);
+            result = output.get();
+            history.add(ChatMessage.tool(wanted.id(), result));
+            results.add(result);
+            told = ToolLines.outcome(RunTool.NAME, result);
+            outcomes.add(told);
+            recording.returned(told);
+            if (executedAt.get() != null) trail.add(RunTool.NAME);
+            continue;
+          }
           if (preTool.isDenied()) {
             // Refused before it ran, in words the model can act on. Not
             // added to the trail: nothing ran.
             // A question put to a person is not a refusal, and reads as what it is.
+            boolean awaiting = tool instanceof RunTool run && run.waitingApproval().isPresent();
             result =
-                RunTool.isWaiting(preTool)
-                    ? preTool.denied()
-                    : "the call was refused by a hook: " + preTool.denied();
-            told = RunTool.isWaiting(preTool) ? ToolLines.ASKED : ToolLines.DENIED;
+                awaiting ? preTool.denied() : "the call was refused by a hook: " + preTool.denied();
+            told = awaiting ? ToolLines.ASKED : ToolLines.DENIED;
           } else {
             trail.add(wanted.name());
             // THE TOOL'S OWN SCHEMA NAME, AND NOT wanted.name(). The two
@@ -3630,6 +3864,117 @@ public final class JobRuntime {
       // The step is whole and the turn goes on: the boundary a fold inside it may run at.
       aStepEnded = true;
     }
+  }
+
+  /** Decision details are audit-only; an approved call contributes only its result to the model. */
+  private void recordApprovalDecision(String id, Transcript transcript) {
+    var decision = suspendedRunCalls.find(id).orElseThrow();
+    transcript.recordDurably(
+        LoggedEntry.diagnostic(
+            "Approval "
+                + id
+                + " "
+                + decision.decision()
+                + " by "
+                + Objects.requireNonNullElse(decision.answeredBy(), "the harness")
+                + (decision.denialReason() == null ? "" : ". Reason: " + decision.denialReason())));
+  }
+
+  /**
+   * Execute one retained run through the same authority, environment and hook fences as a new call.
+   */
+  private String resumeRunCall(
+      io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call retained,
+      Map<String, AgentTool> offered,
+      Home home,
+      BooleanSupplier cancelled,
+      Transcript transcript,
+      AgentDefinition definition,
+      HookContext context,
+      Rerouting route,
+      HarnessRun harnessRun,
+      Hooks skillChecks,
+      JobWatch watch,
+      RunActivity.Call recording,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+    if (cancelled.getAsBoolean())
+      return "The retained command was cancelled before execution; nothing ran.";
+    AgentTool held = offered.get(RunTool.NAME);
+    if (!(held instanceof RunTool run)) return "The run tool is no longer granted; nothing ran.";
+    admittedAuthority.run();
+    if (operation != null) operations.require(operation);
+    if (confined)
+      retainedResources.require(
+          home, RetainedToolAccess.resources(RunTool.NAME, retained.tool().arguments()));
+    Instant started = clock.get();
+    String result;
+    try {
+      ToolPre checked =
+          run.gateRetained(
+              retained.tool().arguments(),
+              retained.side(),
+              home,
+              context,
+              (at, arguments) ->
+                  toolPre(
+                      activeHooks(route, harnessRun, skillChecks), at, RunTool.NAME, arguments));
+      checked.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
+      if (checked.isDenied()) result = "The retained command was refused: " + checked.denied();
+      else {
+        admittedAuthority.run();
+        // An approval grants consent for this command, not fresh account authority. Recheck
+        // the retained operation after the wait and after tool.pre has rewritten its input.
+        if (operation != null) operations.require(operation);
+        requireOperationTool(operation, home, RunTool.NAME, checked.arguments());
+        run.calledAs(retained.tool().id());
+        watch.toolCalled(definition.name(), RunTool.NAME);
+        result =
+            usable(
+                transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                    ? run.run(checked.arguments(), home)
+                    : run.run(checked.arguments(), home, usageFor(transcript, definition, 0)),
+                RunTool.NAME);
+        admittedAuthority.run();
+        ToolPost after =
+            toolPost(
+                activeHooks(route, harnessRun, skillChecks),
+                context,
+                RunTool.NAME,
+                checked.arguments(),
+                result);
+        after.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
+        result = usable(after.result(), RunTool.NAME);
+      }
+    } catch (RuntimeException failed) {
+      // A lost bridge can mean a command ran but its response was lost. Do not manufacture a
+      // retryable tool error. The durable started fence remains authoritative for no-replay.
+      recording.returned(ToolLines.ERROR);
+      throw failed;
+    }
+    transcript.record(
+        LoggedEntry.diagnostic(
+            "Retained command "
+                + retained.approval()
+                + " settled after "
+                + Duration.between(started, clock.get()).toMillis()
+                + " ms"));
+    return result;
+  }
+
+  /** Replace the suspended result in its original slot; never invent another assistant call. */
+  private static void replaceRetainedResult(
+      List<ChatMessage> history, ToolCall tool, String result) {
+    for (int i = 0; i < history.size(); i++) {
+      ChatMessage message = history.get(i);
+      if (message.role() == ChatMessage.Role.TOOL && tool.id().equals(message.toolCallId())) {
+        history.set(i, ChatMessage.tool(tool.id(), result));
+        return;
+      }
+    }
+    // Some agents deliberately omit previous tool working from their projection. Reinstate the
+    // original request/result pair in that case, without submitting another inference.
+    history.add(ChatMessage.assistant("", List.of(tool)));
+    history.add(ChatMessage.tool(tool.id(), result));
   }
 
   // --- what the agent may reach ------------------------------------------------

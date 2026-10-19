@@ -286,7 +286,7 @@ public final class Runs {
             conversations.open(
                 home,
                 io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
-                    conversationProperties.getDefaultBudget()),
+                    conversationProperties.defaultBudgetLimit()),
                 turnCap,
                 ask.callerHandle());
         logStages.getObject().opened(LogStages.LogOpened.ofConversation(opened, session));

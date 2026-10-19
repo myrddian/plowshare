@@ -84,7 +84,8 @@ public final class ConversationOpenHandler implements FrameHandler {
     TurnCap turnCap =
         RequestedTurnCap.in(asked.maxTurns(), asked.noTurnCap(), "each turn in this conversation");
     Budget budget =
-        RequestedBudget.in(asked.maxModelCalls(), asked.noBudget(), properties.getDefaultBudget());
+        RequestedBudget.in(
+            asked.maxModelCalls(), asked.noBudget(), properties.defaultBudgetLimit());
     var home =
         personal == null
             ? RequestedHome.in(asked.project())

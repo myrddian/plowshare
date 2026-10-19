@@ -1743,7 +1743,7 @@ class GlobalPreparationPersistenceTest {
         .dataSource(upgrade)
         .schemas(schema)
         .defaultSchema(schema)
-        .target("162")
+        .target("165")
         .load()
         .migrate();
     var old = new JdbcTemplate(upgrade);

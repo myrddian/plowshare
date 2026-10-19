@@ -541,7 +541,7 @@ class KnowledgeScopePersistenceTest {
         .dataSource(upgrade)
         .schemas(schema)
         .defaultSchema(schema)
-        .target("153")
+        .target("156")
         .load()
         .migrate();
     var old = new JdbcTemplate(upgrade);

@@ -94,7 +94,7 @@ checks run before queueing, on the lane worker and before result disclosure.
 Bounded streaming buffers output until that final check. Metadata and model
 selectors confer no authority.
 
-V157 retains immutable operation-to-budget identities, claimed ordinals/ceiling
+V160 retains immutable operation-to-budget identities, claimed ordinals/ceiling
 snapshots, single-submission fences and optional durable accounting call IDs.
 Existing shared `Budget` claims now return their exact ordinal under the claim
 lock; rechecking never spends again, including the last permitted call. Existing

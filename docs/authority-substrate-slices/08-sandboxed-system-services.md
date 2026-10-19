@@ -85,7 +85,7 @@ Retain SYSTEM operation identity, bounds, stage receipts and costs. An older own
 The [purpose specification](08-system-purpose-specification.md) records trigger,
 executor, input/output, budget and disclosure boundaries. `SystemOperations`
 retains a purpose, exact scope, original intrinsic root grant, worker/model and
-input-binding digest in V158. It issues no SYSTEM grant. Model-only requests cannot
+input-binding digest in V161. It issues no SYSTEM grant. Model-only requests cannot
 change home/model/materialized inputs or acquire tools. Runtime views preserve
 configured worker hooks and exclude user/project agent-rule injection.
 

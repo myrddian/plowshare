@@ -80,7 +80,7 @@ SYSTEM service authority model.
 
 ## Rollout boundaries
 
-V155 is additive; V154 and earlier migrations are immutable. Old per-revision
+V158 is additive; V157 and earlier migrations are immutable. Old per-revision
 share writers fail closed. Historical flags and policy versions remain available
 for reconciliation. Downgrade cannot restore a historical permissive revision as
 an authorization fallback. Full tenant entities, arbitrary group grants, Global

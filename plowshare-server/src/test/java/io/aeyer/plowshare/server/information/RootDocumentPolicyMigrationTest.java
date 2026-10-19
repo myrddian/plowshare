@@ -12,7 +12,7 @@ import org.springframework.jdbc.datasource.*;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
-/** Migrates real V154 revision flags without manufacturing universal service grants. */
+/** Migrates real V157 revision flags without manufacturing universal service grants. */
 @Tag("full-db")
 @Testcontainers
 class RootDocumentPolicyMigrationTest {
@@ -22,7 +22,7 @@ class RootDocumentPolicyMigrationTest {
   @Test
   void legacy_shared_mixed_and_conflicting_privacy_are_reconciled_without_audience_union() {
     var source = new DriverManagerDataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword());
-    Flyway.configure().dataSource(source).target("154").load().migrate();
+    Flyway.configure().dataSource(source).target("157").load().migrate();
     var jdbc = new JdbcTemplate(source);
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,must_change_password) VALUES('manager','fixture',false),('outside','fixture',false),('other','fixture',false)");

@@ -168,7 +168,7 @@ authority, exact-input, cancellation, tokenizer or capacity checks.
    admitted source and validity. Add a closed MEMORY_WRITE embedding purpose
    with DOCUMENT mode for write-time indexing, alongside existing preparation.
    Extend the SYSTEM purpose allowlist with a new Flyway migration at the then
-   current version; never edit V162/V163 or relabel historical claims.
+   current version; never edit V165/V166 or relabel historical claims.
 4. Bind Scribe's existing SCRIBE chat purpose to the same retained source and live
    write. Keep the optional judgement behavior, but move authority/cancellation
    failures outside the catch-all flat-filing fallback. A fallback is a filing
@@ -307,7 +307,7 @@ or given these permits.
   one retained source across candidates, consult and indexing. The common parser
   preserves read-policy syntax. Search and conversation ceilings do not apply
   merely because they exist. Actual requests retain monotonic claims and usage.
-- Existing source/claim tables are reused. V164 adds the closed MEMORY_WRITE
+- Existing source/claim tables are reused. V167 adds the closed MEMORY_WRITE
   purpose and immutable consumer classification; only memory-write sources may
   retain a zero-call admission. Disabled/no-model writes therefore retain replay
   evidence too. Old query sources keep their policy and constraints. No parallel
@@ -352,14 +352,14 @@ or given these permits.
   and refusal to classify old null-project windows as Global knowledge.
 - The selected `-PfullDb --tests` invocation passed 20 cases in
   GlobalPreparationPersistenceTest: 15 write cases plus five reused query-claim
-  regressions. PostgreSQL is required for V164, actual role/privacy predicates,
+  regressions. PostgreSQL is required for V167, actual role/privacy predicates,
   source/claim immutability and concurrency, transaction rollback and versioned
   publication. Both encoder modes prove candidate privacy, same-home selection,
   claims/usage and publication. Cases also prove Global administration, finite/
   disabled policy, invocation replay/concurrent admission, creator revocation,
   stale output/target refusal, merge/supersession and atomic learning provenance.
   Deterministic providers assert IO occurs outside database transactions.
-- All 164 local Flyway versions are unique; only V164 is new. Existing migrations
+- All 164 local Flyway versions are unique; only V167 is new. Existing migrations
   were not edited. Documentation link targets and diff whitespace pass.
 
 - Final `./gradlew formatCheck check sdkContractCheck` passed after Java `format`.

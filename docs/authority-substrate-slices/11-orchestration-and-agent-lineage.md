@@ -88,7 +88,7 @@ This records the original slice 11 activation. The
 supersedes its nested/model-triggered budget restriction: orchestration runs keep
 their own selected allowance while deriving retained caller authority.
 
-V159 adds immutable parent-admission edges and conversation envelopes to the existing
+V162 adds immutable parent-admission edges and conversation envelopes to the existing
 operation records. Envelopes retain agent identity/capability fingerprints, executor,
 exact scope, parent conversation, at-most-CONTRIBUTOR actions and original budget
 source. Repositories own atomic writes, ancestry locks/constraints, bounded reads and
@@ -145,7 +145,7 @@ ancestry, replacement-grant refusal, builtin SYSTEM rejection, unchanged claim
 identity/ordinals and budget, executor-versus-custodian separation, capability
 changes on resume, current authority before recovery receipts, and unsupported
 child-orchestration refusal. Existing acting/calls/cancellation/uncertainty suites
-remain regression owners. PostgreSQL tests exercise V159 retention, exact supporting
+remain regression owners. PostgreSQL tests exercise V162 retention, exact supporting
 grants, immutable bindings, concurrent original start keys, restart reads and late
 start rollback in the existing transaction.
 

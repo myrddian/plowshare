@@ -16,7 +16,7 @@ slices or claim that their supported paths never worked.
 ## Implementation mapping
 
 - **A:** `AllowanceId`, `AllowanceSnapshot` and `AllowanceRepository` define the
-  internal contract. `JdbcAllowanceRepository` and migration V170 own standalone
+  internal contract. `JdbcAllowanceRepository` and migration V173 own standalone
   `execution_allowances` rows and immutable `execution_allowance_claims`. A claim
   atomically increments one counter and retains its ordinal/ceiling before
   inference admission; admission validates the claim without charging twice. Source
@@ -79,7 +79,7 @@ source allocation does not authorize processing outside the existing lifecycle.
 
 ### Cutover and retained evidence
 
-V170 preserves existing conversation, processing and query UUIDs/usage. Board
+V173 preserves existing conversation, processing and query UUIDs/usage. Board
 roots receive one canonical ID; existing seat/delegate references migrate to that
 root. Historical per-wake inference UUIDs/ordinals stay separate because merging
 them would collide. Historical input conversation attribution is retained as
@@ -107,7 +107,7 @@ session, token and capability restrictions. Separate funding grants no extra acc
 Slice 18 (`4271689`) incorrectly replaced independent child budgets with caller
 sharing; `bef9fb2` carried that behavior into standalone allowance storage. This
 correction restores independent allocation and removes the board-source refusal.
-V171 allows an independently funded conductor to retain its actual caller while
+V174 allows an independently funded conductor to retain its actual caller while
 still rejecting unrelated authority ancestry, another source's allowance and
 replacement funding for ordinary delegates. The active shared-conductor creation
 helper is removed. Existing immutable envelopes, usage and claims are not rebound:
@@ -460,7 +460,7 @@ Those changes are part of this plan, not already implemented capabilities.
    Preserve those historical identities/bindings; new claims use the canonical
    source with operation attribution.
 4. Replace active inference/source validation together with its writers.
-   Migrations V157, V161–V164, V166 and V168 contain relevant admission/source
+   Migrations V160, V164–V167, V169 and V171 contain relevant admission/source
    rules; verify the full current schema when designing the successor. Preserve
    actual resource fences, immutable prior submissions and unknown outcomes.
 5. Cut over writers and readers without two independently authoritative counters.

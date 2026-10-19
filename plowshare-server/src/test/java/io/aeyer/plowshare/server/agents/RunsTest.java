@@ -107,7 +107,7 @@ class RunsTest {
   void new_conversations_use_global_or_selected_home_and_the_existing_budget_and_hooks() {
     var conversations = mock(io.aeyer.plowshare.server.archive.ConversationStore.class);
     var properties = new io.aeyer.plowshare.server.api.ConversationsProperties();
-    properties.setDefaultBudget(17);
+    properties.setDefaultBudget("17");
     var hooks = mock(LogStages.class);
     runs.useConversations(conversations, properties, hooksProvider(hooks));
     when(turns.speak(anyString(), any(), anyString(), any(), any(), any(Speaker.class), any()))

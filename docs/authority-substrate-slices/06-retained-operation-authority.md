@@ -81,7 +81,7 @@ Keep retained operation records and ceilings. A consumer unable to interpret the
 ## Implementation evidence
 
 Ordinary conversation/run admission now captures executor, immutable scope, actual
-actions and exact supporting grants in V156. Grant replacement cannot widen old
+actions and exact supporting grants in V159. Grant replacement cannot widen old
 work. Queued starts, model dispatch, reviewed resource targets and settled answer
 disclosure recheck that envelope. The existing acting proof remains an additional
 intersection; child tools retain their parent's limits. HTTP and WebSocket resume

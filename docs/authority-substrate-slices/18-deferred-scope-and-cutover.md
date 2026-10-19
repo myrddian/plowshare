@@ -193,7 +193,7 @@ are not authority and are not removed just to eliminate NULL values:
   allowance identities govern writes/inference. Old authority-free execution
   cannot acquire fresh permissions by being reopened. Historical inference
   receipts, provenance and payloads are preserved; new columns add evidence.
-- New Flyway migrations V165–V168 add closed internal purposes, retained shared
+- New Flyway migrations V168–V171 add closed internal purposes, retained shared
   conductor constraints, immutable Global-read ceilings and durable allowance
   identities. They neither fabricate prior admissions nor replay effects.
 

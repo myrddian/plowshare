@@ -2887,6 +2887,9 @@
           },
           "prefix": {
             "$ref": "#/$defs/shape47"
+          },
+          "reason": {
+            "$ref": "#/$defs/shape1"
           }
         },
         "required": [
@@ -14059,6 +14062,9 @@
           "completion": {
             "$ref": "#/$defs/shape43"
           },
+          "completionTokens": {
+            "$ref": "#/$defs/shape535"
+          },
           "cut": {
             "$ref": "#/$defs/shape8"
           },
@@ -14088,6 +14094,12 @@
           },
           "outcome": {
             "$ref": "#/$defs/shape43"
+          },
+          "promptTokens": {
+            "$ref": "#/$defs/shape535"
+          },
+          "reasoningTokens": {
+            "$ref": "#/$defs/shape535"
           },
           "recordedAt": {
             "$ref": "#/$defs/shape43"

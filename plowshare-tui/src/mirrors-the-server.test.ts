@@ -827,10 +827,11 @@ describe("the frame types a conversation is made of are the server's own", () =>
       'note',
     ]);
     expect(componentsOf(source, 'Revoked')).toEqual(['id', 'revoked']);
-    // And what an answer is sent as: the body's three fields, and the four
+    // And what an answer is sent as: its identity, decision, scope and optional denial reason.
+    // The four
     // decisions in the words the server reads.
     expect(source).toMatch(
-      /record AnswerBody\(String id, String decision, List<String> prefix\)/,
+      /record AnswerBody\(String id, String decision, List<String> prefix, String reason\)/,
     );
     // `mine` is what listingMyApprovals sends, for the questions no screen has open.
     expect(source).toMatch(
