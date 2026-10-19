@@ -41,7 +41,7 @@ public class ArchiveConfig {
 
   @Bean
   public Archive archive(
-      MemoryStore store,
+      MemoryRepository store,
       ReasonLog reasons,
       EmbeddingClient embeddings,
       UnitOfWork unitOfWork,
