@@ -271,75 +271,9 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         args);
   }
 
-  private Information.Facets facetCounts(
-      io.aeyer.plowshare.server.information.InformationSql.Filter selected, boolean typedView) {
-    String from =
-        " FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id WHERE "
-            + selected.sql();
-    var counts = new java.util.LinkedHashMap<String, List<Information.FacetCount>>();
-    var more = new java.util.LinkedHashMap<String, Boolean>();
-    var names = new ArrayList<>(InformationFacets.NAMES);
-    if (typedView) names.addAll(List.of("contentType", "contentTypeVersion"));
-    for (String name : names) {
-      String expression =
-          switch (name) {
-            case "contentType" ->
-                "(SELECT v.type_id::text FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version WHERE c.revision_id=r.id AND NOT c.redacted)";
-            case "contentTypeVersion" ->
-                "(SELECT c.type_version::text FROM information_revision_content c WHERE c.revision_id=r.id AND NOT c.redacted)";
-            case "kind" -> "q.kind";
-            case "author" -> "q.owner_handle";
-            case "documentAuthor" ->
-                io.aeyer.plowshare.server.information.InformationFacetSql.documentAuthor("r", "q");
-            case "tagGroup" -> InformationFacetSql.visibleGroups("r", "q");
-            case "subtype" -> "r.document_subtype";
-            case "when" -> "to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM')";
-            case "tags" -> "q.tags";
-            default -> io.aeyer.plowshare.server.information.InformationFacetSql.readyTags("r");
-          };
-      String sql =
-          name.equals("tags") || name.equals("autoTag")
-              ? "SELECT value,count(*) AS count FROM (SELECT "
-                  + expression
-                  + " AS tags"
-                  + from
-                  + ") candidates CROSS JOIN LATERAL jsonb_array_elements_text(candidates.tags) AS tag(value) GROUP BY value ORDER BY count(*) DESC,value LIMIT 101"
-              : name.equals("tagGroup")
-                  ? "SELECT value,count(*) AS count FROM (SELECT "
-                      + expression
-                      + " AS groups"
-                      + from
-                      + ") candidates CROSS JOIN LATERAL jsonb_object_keys(candidates.groups) AS g(value) GROUP BY value ORDER BY count(*) DESC,value LIMIT 101"
-                  : "SELECT "
-                      + expression
-                      + " AS value,count(*) AS count"
-                      + from
-                      + " GROUP BY value HAVING "
-                      + expression
-                      + " IS NOT NULL ORDER BY count(*) DESC,value LIMIT 101";
-      var rows = jdbc.queryForList(sql, selected.arguments().toArray());
-      more.put(name, rows.size() > 100);
-      counts.put(
-          name,
-          rows.stream().limit(100).map(row -> decode(row, Information.FacetCount.class)).toList());
-    }
-    var edges =
-        jdbc.queryForList(
-            "SELECT g.key AS \"group\",t.tag,count(*) AS count FROM (SELECT "
-                + InformationFacetSql.visibleGroups("r", "q")
-                + " AS groups"
-                + from
-                + ") candidates"
-                + " CROSS JOIN LATERAL jsonb_each(candidates.groups) g CROSS JOIN LATERAL jsonb_array_elements_text(g.value) t(tag)"
-                + " GROUP BY g.key,t.tag ORDER BY count(*) DESC,g.key,t.tag LIMIT 1001",
-            selected.arguments().toArray());
-    return new Information.Facets(
-        jdbc.queryForObject("SELECT count(*)" + from, Long.class, selected.arguments().toArray()),
-        counts,
-        more,
-        new Information.TagGraph(
-            edges.stream().limit(1000).map(row -> decode(row, Information.TagEdge.class)).toList(),
-            edges.size() > 1000));
+  private Information.Facets facetCounts(InformationSql.Filter selected, boolean typedView) {
+    return new JdbcInformationFacets(jdbc)
+        .read(selected, JdbcInformationFacets.Candidates.REVISIONS, typedView);
   }
 
   public List<Information.Revision> inventory(InformationContext context, int limit, int offset) {

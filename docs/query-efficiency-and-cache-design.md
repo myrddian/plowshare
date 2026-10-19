@@ -2,8 +2,10 @@
 
 Status: proposed implementation strategy. The
 [query efficiency rules](coding-standards.md#query-efficiency-and-reuse) apply to
-new and changed code. The cache, database notification bridge and dispatch changes
-described here require separate implementation and verification.
+new and changed code. The [first implementation slice](query-efficiency-first-slice.md)
+consolidates facets, separates list rendering from facets and permits bounded
+independent reads. The cache and database notification bridge remain proposed;
+the broader changes described here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)
 apply this strategy to the latest reviewed source baseline. The

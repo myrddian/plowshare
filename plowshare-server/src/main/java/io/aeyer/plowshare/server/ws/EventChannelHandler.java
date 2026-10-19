@@ -281,13 +281,28 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * Nothing about {@code JobEvent} changes: it has no temporal component, so a push is written
    * exactly as it always was.
    */
+  private final ObjectMapper json = FrameJson.answering();
+
+  private EventReadCapacity readCapacity = new EventReadCapacity(2, 8);
+  private boolean readDispatchStarted;
+
+  /** Configure one shared server read bound before attaching segmented sockets. */
+  synchronized void useReadConcurrency(int perConnection, int global) {
+    if (readDispatchStarted)
+      throw new IllegalStateException("Event read concurrency cannot change after dispatch starts");
+    readCapacity = new EventReadCapacity(perConnection, global);
+  }
+
+  private synchronized EventReadCapacity readCapacity() {
+    readDispatchStarted = true;
+    return readCapacity;
+  }
+
   private volatile UsageSubscriptions usageSubscriptions;
 
   public void useUsageSubscriptions(UsageSubscriptions source) {
     usageSubscriptions = source;
   }
-
-  private final ObjectMapper json = FrameJson.answering();
 
   /**
    * The shape a correlation read wants: whatever the frame's top level is, untyped, because the
@@ -475,7 +490,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   }
                   throw failure;
                 }
-              });
+              },
+              readCapacity());
     }
     UsageSubscriptions usage = usageSubscriptions;
     if (usage != null) {
@@ -525,12 +541,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * the honest signal to a client whose events are about to stop arriving is the socket closing.
    * {@link FrameRouter#route(Envelope, Asking)} draws the same line for the same reason.
    *
-   * <p>Segmented operations run serially on a bounded connection-owned dispatcher. The container's
-   * reader must remain free to receive packet credits while an operation waits on persistence;
-   * otherwise an unrelated push times out and closes a healthy connection. Legacy JSON keeps its
-   * existing inline routing. Neither routing path writes the answer inline: {@link Delivery#answer}
-   * queues. Queued operations recheck socket authority before execution, and closing discards
-   * queued work without replaying or cancelling an operation already started.
+   * <p>Segmented operations use a bounded connection-owned dispatcher with audited independent
+   * reads. The container's reader must remain free to receive packet credits while an operation
+   * waits on persistence; otherwise an unrelated push times out and closes a healthy connection.
+   * Legacy JSON keeps its existing inline routing. Neither routing path writes the answer inline:
+   * {@link Delivery#answer} queues. Queued operations recheck socket authority before execution,
+   * and closing discards queued work without replaying or cancelling an operation already started.
    *
    * <p><b>The correlation read is separate from the routing read, and is allowed to fail.</b>
    * {@link FrameRouter#route(String, Asking)} is the one place that decides what a malformed frame

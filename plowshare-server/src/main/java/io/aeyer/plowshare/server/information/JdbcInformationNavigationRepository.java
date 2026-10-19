@@ -380,59 +380,11 @@ public final class JdbcInformationNavigationRepository implements InformationNav
 
   public Information.Facets facets(
       InformationContext c, UUID relatedTo, String relation, String direction) {
-    var f = selected(c, relatedTo, relation, direction);
-    String from = HEADS + " WHERE " + f.sql();
-    long total =
-        Objects.requireNonNull(
-            jdbc.queryForObject("SELECT count(*)" + from, Long.class, f.arguments().toArray()));
-    var counts = new LinkedHashMap<String, List<Information.FacetCount>>();
-    var truncated = new LinkedHashMap<String, Boolean>();
-    var names = new ArrayList<>(InformationFacets.NAMES);
-    names.addAll(List.of("contentType", "contentTypeVersion"));
-    for (String name : names) {
-      String expression =
-          switch (name) {
-            case "tags" -> "jsonb_array_elements_text(q.tags)";
-            case "autoTag" ->
-                "jsonb_array_elements_text(" + InformationFacetSql.readyTags("r") + ")";
-            case "tagGroup" ->
-                "jsonb_object_keys(" + InformationFacetSql.visibleGroups("r", "q") + ")";
-            case "documentAuthor" -> InformationFacetSql.documentAuthor("r", "q");
-            case "subtype" -> "r.document_subtype";
-            case "when" -> "to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM')";
-            case "kind" -> "q.kind";
-            case "author" -> "q.owner_handle";
-            case "contentType" ->
-                "(SELECT v.type_id::text FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version WHERE c.revision_id=r.id AND NOT c.redacted)";
-            default ->
-                "(SELECT c.type_version::text FROM information_revision_content c WHERE c.revision_id=r.id AND NOT c.redacted)";
-          };
-      var values =
-          jdbc.query(
-              "SELECT value,count(*) AS count FROM (SELECT "
-                  + expression
-                  + " AS value"
-                  + from
-                  + ") x WHERE value IS NOT NULL GROUP BY value ORDER BY count(*) DESC,value LIMIT 101",
-              (rs, n) -> new Information.FacetCount(rs.getString(1), rs.getLong(2)),
-              f.arguments().toArray());
-      counts.put(name, values.stream().limit(100).toList());
-      truncated.put(name, values.size() > 100);
-    }
-    var edges =
-        jdbc.query(
-            "SELECT category,tag,count(*) FROM (SELECT "
-                + InformationFacetSql.visibleGroups("r", "q")
-                + " AS groups"
-                + from
-                + ") candidates CROSS JOIN LATERAL jsonb_each(candidates.groups) g(category,tags) CROSS JOIN LATERAL jsonb_array_elements_text(g.tags) t(tag) GROUP BY category,tag ORDER BY count(*) DESC,category,tag LIMIT 1001",
-            (rs, n) -> new Information.TagEdge(rs.getString(1), rs.getString(2), rs.getLong(3)),
-            f.arguments().toArray());
-    return new Information.Facets(
-        total,
-        counts,
-        truncated,
-        new Information.TagGraph(edges.stream().limit(1000).toList(), edges.size() > 1000));
+    return new JdbcInformationFacets(jdbc)
+        .read(
+            selected(c, relatedTo, relation, direction),
+            JdbcInformationFacets.Candidates.HEADS,
+            true);
   }
 
   public Selection select(InformationContext c, Target target) {

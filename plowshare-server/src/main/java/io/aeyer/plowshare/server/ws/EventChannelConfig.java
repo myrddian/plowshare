@@ -143,6 +143,14 @@ public class EventChannelConfig implements WebSocketConfigurer {
       "${plowshare.transport.packet-memory-bytes:2147483648}")
   private long packetMemoryBytes = 2147483648L;
 
+  @org.springframework.beans.factory.annotation.Value(
+      "${plowshare.transport.event-read-concurrency:2}")
+  private int eventReadConcurrency = 2;
+
+  @org.springframework.beans.factory.annotation.Value(
+      "${plowshare.transport.event-read-global-concurrency:8}")
+  private int eventReadGlobalConcurrency = 8;
+
   /**
    * The fixed wire ceiling must remain readable after a deployment lowers its admission policy.
    * Reserve capacity is not eagerly allocated. Explicit budgets must fit one complete portable
@@ -222,6 +230,7 @@ public class EventChannelConfig implements WebSocketConfigurer {
       packetBudget =
           new io.aeyer.plowshare.protocol.transport.PacketBudget(resolvedPacketMemoryBytes());
     channel.usePacketBudget(packetBudget);
+    channel.useReadConcurrency(eventReadConcurrency, eventReadGlobalConcurrency);
     if (usageSubscriptions != null) usageSubscriptions.ifAvailable(channel::useUsageSubscriptions);
     return channel;
   }
