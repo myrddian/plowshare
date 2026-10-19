@@ -221,6 +221,10 @@ Global resources through current-root audience filtering. The manual installer
 already supports `--global`, a destination-bound journal and readiness checks.
 The existing collection UI still offers Personal/Project/Shared selections;
 a new Global-management UI or identical methods in every SDK were never required.
+The [post–slice 18 TODO list](../post-slice-18-follow-up-todos.md) records the
+remaining Desktop Global account administration workflow and delegated runtime
+capability repair. The later read cutover renamed the Shared UI selection to
+“Available to everyone”; it did not add the Global custody destination.
 Human ADMIN authorization is enforced by existing server operations, independent
 of client identity. No new server API or universal SDK parity was added.
 

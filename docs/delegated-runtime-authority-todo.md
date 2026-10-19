@@ -104,11 +104,13 @@ relationships needed for authorization, revocation, cancellation and safe recove
 - Update the slice 12/18 support and completion claims to reflect actual coverage.
   Do not claim full delegated-agent support solely because an admission check passes.
 
-## Separate consistency issue
+## Related follow-ups
 
-Global knowledge reads still have a separate mapping mismatch: memory tools use a
-captured Global-read ceiling, while document tools build information selections
-independently and service-account project selections omit general/shared discovery.
-Do not solve that by turning on all legacy Shared access or widening acting proofs.
-Keep this issue visible when designing the common per-run read authority, but do
-not silently absorb its implementation into this handoff's scope.
+The separate memory/document read-selection mismatch recorded with this handoff
+was subsequently resolved by the [Global knowledge read contract](global-knowledge-read-contract.md).
+Preserve that common retained ceiling and live authorization; do not restore
+legacy Shared access or widen acting proofs while repairing runtime composition.
+
+The [post–slice 18 TODO list](post-slice-18-follow-up-todos.md) tracks this handoff
+alongside the still-open Desktop Global account administration workflow. Neither
+the read cutover nor the allowance fixes close the runtime capability limitation.
