@@ -47,7 +47,7 @@ import org.springframework.stereotype.Repository;
  * that could.
  */
 @Repository
-public class MemoryStore implements MemoryReadRepository, MemoryWriteRepository {
+public class MemoryStore implements MemoryRepository {
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {

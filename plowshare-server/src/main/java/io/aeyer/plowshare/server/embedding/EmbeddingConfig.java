@@ -55,7 +55,7 @@ public class EmbeddingConfig {
   public SmartInitializingSingleton dualEmbeddingBinding(
       DualEmbeddings dual,
       Archive archive,
-      MemoryStore memories,
+      MemoryRepository memories,
       DocumentStore documents,
       RetrievalService retrieval,
       IngestService ingest,
