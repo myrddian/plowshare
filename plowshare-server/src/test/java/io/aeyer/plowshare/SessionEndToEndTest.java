@@ -1079,7 +1079,12 @@ class SessionEndToEndTest {
           new Pictures(ImageStore.NONE),
           new Passes(jobs, mock(Curator.class), new AgentsProperties()),
           new Limits(jobs),
-          new Definitions(mock(DefinitionWriter.class), resolver, projects, callers));
+          new Definitions(
+              mock(DefinitionWriter.class),
+              resolver,
+              projects,
+              callers,
+              io.aeyer.plowshare.server.agents.ApplicationResources.NONE));
     }
   }
 }

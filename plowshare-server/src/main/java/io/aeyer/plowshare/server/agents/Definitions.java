@@ -45,16 +45,20 @@ public final class Definitions {
   private final DefinitionResolver resolver;
   private final ProjectStore projects;
   private final Callers callers;
+  private final ApplicationResources applicationResources;
 
   public Definitions(
       DefinitionWriter writer,
       DefinitionResolver resolver,
       ProjectStore projects,
-      Callers callers) {
+      Callers callers,
+      ApplicationResources applicationResources) {
     this.writer = Objects.requireNonNull(writer, "writer");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.projects = Objects.requireNonNull(projects, "projects");
     this.callers = Objects.requireNonNull(callers, "callers");
+    this.applicationResources =
+        Objects.requireNonNull(applicationResources, "applicationResources");
   }
 
   /**
@@ -157,7 +161,8 @@ public final class Definitions {
    * @param ask what the caller asked for
    * @return where it landed, and either the view it resolves to or the reason it does not
    * @throws CallerFault for a body this server can name as wrong: an unknown project, a missing
-   *     {@code name} or {@code text}, or anything {@link DefinitionWriter#write} refuses
+   *     {@code name} or {@code text}, an Application requiring its owning source deployment, or
+   *     anything {@link DefinitionWriter#write} refuses
    * @throws DefinitionAlreadyExistsException if the name is taken and the caller did not ask to
    *     replace it
    */
@@ -165,6 +170,16 @@ public final class Definitions {
     Long projectId = RequestedProjectId.forWrite(projects, ask.project());
     RequestedDefinition.name(ask.name());
     RequestedDefinition.text(ask.text());
+
+    // Applications resolve their deployed root, never the ordinary project data tier.
+    // Refuse before the writer creates an inert file or bypasses retained release ownership.
+    // An unavailable Application boundary also fails here, before any filesystem mutation.
+    if (projectId != null && applicationResources.root(projectId).isPresent()) {
+      throw new CallerFault(
+          "Application agent definitions belong to their source package; "
+              + "update agents/ or bots/ through the owning deployment workflow "
+              + "(application.deploy for managed source). Nothing was written");
+    }
 
     DefinitionWriter.Written written =
         writer.write(projectId, ask.name(), ask.text(), ask.overwrite());

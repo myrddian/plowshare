@@ -560,7 +560,12 @@ class AgentDefinitionApiTest {
         new Pictures(ImageStore.NONE),
         new Passes(jobs, mock(Curator.class), new AgentsProperties()),
         new Limits(jobs),
-        new Definitions(writing, resolver, projects, callers));
+        new Definitions(
+            writing,
+            resolver,
+            projects,
+            callers,
+            io.aeyer.plowshare.server.agents.ApplicationResources.NONE));
   }
 
   /**

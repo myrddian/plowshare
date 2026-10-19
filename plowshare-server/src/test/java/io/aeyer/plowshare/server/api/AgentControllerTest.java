@@ -202,7 +202,12 @@ class AgentControllerTest {
                     new Pictures(images),
                     new Passes(jobs, curator, new AgentsProperties()),
                     new Limits(jobs),
-                    new Definitions(mock(DefinitionWriter.class), resolver, projects, callers)))
+                    new Definitions(
+                        mock(DefinitionWriter.class),
+                        resolver,
+                        projects,
+                        callers,
+                        io.aeyer.plowshare.server.agents.ApplicationResources.NONE)))
             .setControllerAdvice(new ApiExceptionHandler())
             .setMessageConverters(new MappingJackson2HttpMessageConverter(json))
             .build();
