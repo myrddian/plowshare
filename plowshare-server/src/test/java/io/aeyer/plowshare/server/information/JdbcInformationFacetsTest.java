@@ -111,8 +111,13 @@ class JdbcInformationFacetsTest {
 
     verifySingleStatement();
     assertTrue(statement.contains("r.id=information_navigation_head(q.id)"));
-    assertTrue(statement.contains("information_navigation_own_readable(r.id,?,?)"));
-    assertTrue(statement.contains("information_reference_readable(r.id,?,?)"));
+    assertTrue(statement.contains("knowledge_dependencies_readable(r.id,?)"));
+    assertEquals(
+        statement.indexOf("knowledge_dependencies_readable("),
+        statement.lastIndexOf("knowledge_dependencies_readable("));
+    assertFalse(statement.contains("information_navigation_own_readable("));
+    assertFalse(statement.contains("information_reference_readable("));
+    assertTrue(statement.contains("(SELECT information_readable(information_navigation_head(?)"));
     assertTrue(statement.contains("e.source=? AND e.target=q.id AND e.relation=?"));
     assertTrue(statement.contains("LEFT JOIN information_revision_content facet_binding"));
     assertEquals(2, Arrays.stream(arguments).filter(related::equals).count());

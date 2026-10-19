@@ -10,6 +10,11 @@ The [shared readability function plan](readability-functions.md) traces the nest
 
 The subsequent [source and measured query analysis](../query-efficiency-analysis/README.md) checks these proposals against execution paths, branch-specific query counts, current DTO/version semantics and refreshed read-only measurements. Use its evidence and corrections when implementing a plan.
 
+The [Manual and facet implementation receipt](../query-efficiency-manual-slice.md)
+records the subsequent collection-cache adoption and permission-query reuse.
+The baseline owner plans below remain historical proposals; use the receipt and
+current source to determine what has since shipped locally.
+
 ## Inventory and coverage
 
 The inventory covers **102 persistence owners, adapters, SQL helpers and database probes** in the server. It includes legacy stores that own SQL, `RuntimeConfig` despite its name, the nested `TodoNotices.Jdbc`, the shared `ProjectIds` SQL helper and its `JdbcProjectDirectories` adapter. Each entry has an individual plan. Configuration that only constructs repositories, domain callers that mention JDBC in comments, and row-mapping/SQL-construction helpers without database execution are not separate persistence owners; their effects belong in the owning plans.

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.protocol.InformationNavigation.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.Readable;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import java.util.*;
@@ -16,11 +17,24 @@ public final class JdbcInformationNavigationRepository implements InformationNav
       new PolicySettings(Policy.DEFAULT, Policy.NONE, true, "Restricted document");
   private final JdbcTemplate jdbc;
   private final io.aeyer.plowshare.server.archive.ProjectMembers members;
+  private final ProjectionCache<Documents> documentsCache;
+  private final ProjectionCache<Information.Facets> facetsCache;
 
   public JdbcInformationNavigationRepository(
       JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
+    this(jdbc, members, ProjectionCache.direct(), ProjectionCache.direct());
+  }
+
+  /** Composition owns typed DOCUMENTS/AUTHORITY caches; standalone callers retain direct reads. */
+  public JdbcInformationNavigationRepository(
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
+      ProjectionCache<Documents> documentsCache,
+      ProjectionCache<Information.Facets> facetsCache) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.members = Objects.requireNonNull(members);
+    this.documentsCache = Objects.requireNonNull(documentsCache);
+    this.facetsCache = Objects.requireNonNull(facetsCache);
   }
 
   public void requireActive(String account) {
@@ -38,6 +52,12 @@ public final class JdbcInformationNavigationRepository implements InformationNav
 
   public void snapshot() {
     jdbc.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  }
+
+  public void snapshotSingleProjection() {
+    // Do not downgrade a caller's historical snapshot. Version admission independently requires
+    // READ COMMITTED, so an ambient REPEATABLE READ transaction preserves its direct SQL reads.
+    jdbc.execute("SET TRANSACTION READ ONLY");
   }
 
   public String fingerprint(io.aeyer.plowshare.protocol.InformationRequest command) {
@@ -295,17 +315,15 @@ public final class JdbcInformationNavigationRepository implements InformationNav
 
   private InformationSql.Filter selected(
       InformationContext c, UUID relatedTo, String relation, String direction) {
-    var a =
-        relatedTo == null
-            ? args(c)
-            : new ArrayList<Object>(
-                Arrays.asList(
-                    c.account(), c.selection().project(), c.account(), c.selection().project()));
+    requireTraversal(c, relatedTo, relation, direction);
+    var a = relatedTo == null ? args(c) : new ArrayList<Object>(List.of(c.account()));
     var filter = InformationFacetSql.facets(c.facets(), "r", "q");
     String sql =
         (relatedTo == null
                 ? "information_readable(r.id,?,?,?,?)"
-                : "information_navigation_own_readable(r.id,?,?) AND information_reference_readable(r.id,?,?)")
+                // V172 defines both former own/reference predicates as this same dependency
+                // check. Evaluate it once per candidate without granting additional authority.
+                : "knowledge_dependencies_readable(r.id,?)")
             + " AND r.document_type='document' AND NOT r.excluded AND "
             + filter.sql();
     a.addAll(filter.arguments());
@@ -314,8 +332,13 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     a.addAll(boundary.arguments());
     if (relatedTo != null) {
       boolean outgoing = !"backlinks".equals(direction);
+      var sourceBoundary = InformationSql.boundary(c, "information_navigation_head(?)");
       sql +=
-          " AND information_readable(information_navigation_head(?),?,?,?,?) AND EXISTS(SELECT 1 FROM information_relationships e WHERE NOT e.removed AND e."
+          // This uncorrelated scalar subquery is a PostgreSQL InitPlan: parent readability and
+          // its retained boundary are invariant for the whole page, rather than per candidate.
+          " AND (SELECT information_readable(information_navigation_head(?),?,?,?,?) AND "
+              + sourceBoundary.sql()
+              + ") AND EXISTS(SELECT 1 FROM information_relationships e WHERE NOT e.removed AND e."
               + (outgoing ? "source" : "target")
               + "=? AND e."
               + (outgoing ? "target" : "source")
@@ -324,14 +347,21 @@ public final class JdbcInformationNavigationRepository implements InformationNav
               + ")";
       a.add(relatedTo);
       a.addAll(args(c));
-      a.add(relatedTo);
-      if (relation != null) a.add(relation);
-      var sourceBoundary = InformationSql.boundary(c, "information_navigation_head(?)");
-      sql += " AND " + sourceBoundary.sql();
       if (c.readBoundary() != null) a.add(relatedTo);
       a.addAll(sourceBoundary.arguments());
+      a.add(relatedTo);
+      if (relation != null) a.add(relation);
     }
     return new InformationSql.Filter(sql, a);
+  }
+
+  private static void requireTraversal(
+      InformationContext context, UUID relatedTo, String relation, String direction) {
+    Objects.requireNonNull(context);
+    if (relatedTo == null && (relation != null || direction != null))
+      throw new IllegalArgumentException("traversal needs a source");
+    if (relation != null) io.aeyer.plowshare.protocol.InformationNavigation.relation(relation);
+    if (direction != null) io.aeyer.plowshare.protocol.InformationNavigation.direction(direction);
   }
 
   private static Document document(java.sql.ResultSet rs, boolean includeGlobal)
@@ -354,6 +384,27 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   private static final String DOCUMENT =
       "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT CASE WHEN audience='GLOBAL_READ' THEN 'shared' ELSE 'home' END FROM information_resource_policies WHERE resource_id=q.id),'pending') AS visibility";
 
+  /**
+   * The original bounded page is materialized once; only accepted text crosses the JDBC boundary.
+   */
+  private static final String BOUNDED_DOCUMENTS =
+      """
+      SELECT p.resource,p.revision,
+        CASE WHEN length(p.title)<=cap.chars THEN p.title END AS title,
+        CASE WHEN length(p.source_name)<=cap.chars THEN p.source_name END AS source_name,
+        CASE WHEN length(p.owner)<=cap.chars THEN p.owner END AS owner,
+        CASE WHEN length(p.tags)<=cap.chars THEN p.tags END AS tags,
+        CASE WHEN length(p.project_name)<=cap.chars THEN p.project_name END AS project_name,
+        p.visibility,
+        (coalesce(length(p.title),0)>cap.chars
+          OR coalesce(length(p.source_name),0)>cap.chars
+          OR coalesce(length(p.owner),0)>cap.chars
+          OR coalesce(length(p.tags),0)>cap.chars
+          OR coalesce(length(p.project_name),0)>cap.chars) AS cache_oversized
+      FROM navigation_page p CROSS JOIN (SELECT ?::integer AS chars) cap
+      ORDER BY p.sort_created_at DESC,p.resource
+      """;
+
   public Documents documents(
       InformationContext c,
       UUID relatedTo,
@@ -361,30 +412,88 @@ public final class JdbcInformationNavigationRepository implements InformationNav
       String direction,
       int limit,
       int offset) {
+    requireTraversal(c, relatedTo, relation, direction);
+    if (limit < 1 || limit > 100 || offset < 0)
+      throw new IllegalArgumentException("invalid document page bounds");
+    if (!documentsCache.enabled())
+      return documents(c, relatedTo, relation, direction, limit, offset, 0);
+    var key =
+        InformationCatalogueFingerprint.readKey(
+            "navigation-documents-v1",
+            c,
+            Arrays.asList(relatedTo, relation, direction, limit, offset));
+    // Row overhead includes immutable DTO/list/tag nodes. Tags' JSON and every other variable
+    // string are gated in SQL; the generous per-character charge also covers decoded tag strings.
+    long allowance = documentsCache.maxWeight() - 8192L - 4096L * limit;
+    int chars = (int) Math.min(8192L, Math.max(1L, allowance / (48L * limit)));
+    return documentsCache.read(
+        key,
+        allowance > 0,
+        () -> documents(c, relatedTo, relation, direction, limit, offset, chars),
+        () -> documents(c, relatedTo, relation, direction, limit, offset, 0),
+        JdbcInformationNavigationRepository::documentsWeight);
+  }
+
+  private Documents documents(
+      InformationContext c,
+      UUID relatedTo,
+      String relation,
+      String direction,
+      int limit,
+      int offset,
+      int chars) {
     var f = selected(c, relatedTo, relation, direction);
     var a = new ArrayList<>(f.arguments());
     a.add(limit);
     a.add(offset);
+    String page =
+        DOCUMENT
+            + (chars == 0 ? "" : ",r.created_at AS sort_created_at")
+            + HEADS
+            + " WHERE "
+            + f.sql()
+            + " ORDER BY r.created_at DESC,q.id LIMIT ? OFFSET ?";
+    String sql = page;
+    if (chars > 0) {
+      sql = "WITH navigation_page AS MATERIALIZED (" + page + ") " + BOUNDED_DOCUMENTS;
+      a.add(chars);
+    }
     return new Documents(
         jdbc.query(
-            DOCUMENT
-                + HEADS
-                + " WHERE "
-                + f.sql()
-                + " ORDER BY r.created_at DESC,q.id LIMIT ? OFFSET ?",
-            (rs, n) -> document(rs, c.selection().includeGlobal()),
+            sql,
+            (rs, n) -> {
+              if (chars > 0 && rs.getBoolean("cache_oversized")) throw new ProjectionCache.Bypass();
+              return document(rs, c.selection().includeGlobal());
+            },
             a.toArray()),
         limit,
         offset);
   }
 
+  private static long documentsWeight(Documents page) {
+    long weight = 8192;
+    for (Document document : page.documents()) {
+      weight += 4096;
+      for (String text :
+          Arrays.asList(
+              document.title(),
+              document.sourceName(),
+              document.owner(),
+              document.scope().project())) if (text != null) weight += 4L * text.length();
+      for (String tag : document.tags()) weight += 4L * tag.length();
+    }
+    return weight;
+  }
+
   public Information.Facets facets(
       InformationContext c, UUID relatedTo, String relation, String direction) {
-    return new JdbcInformationFacets(jdbc)
+    return new JdbcInformationFacets(jdbc, facetsCache)
         .read(
             selected(c, relatedTo, relation, direction),
             JdbcInformationFacets.Candidates.HEADS,
-            true);
+            true,
+            InformationCatalogueFingerprint.readKey(
+                "navigation-facets-v1", c, Arrays.asList(relatedTo, relation, direction)));
   }
 
   public Selection select(InformationContext c, Target target) {

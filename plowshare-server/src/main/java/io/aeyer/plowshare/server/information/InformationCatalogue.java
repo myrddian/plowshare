@@ -901,26 +901,30 @@ public final class InformationCatalogue implements InformationReadAccess {
   /** Bounded, syntax-only outline; source/evidence continue to use the existing read API. */
   public io.aeyer.plowshare.server.documents.CodeProjection codeProjection(
       InformationContext context, UUID revision, String rawHash) {
-    requireCode(context);
     return transactions.inTransaction(
-        () -> repository.codeProjection(access.admitted(context), revision, rawHash));
+        () -> {
+          requireCode(context);
+          return repository.codeProjection(context, revision, rawHash);
+        });
   }
 
   /** Bounded, syntax-only outline; source/evidence continue to use the existing read API. */
   public Information.Outline outline(
       InformationContext context, UUID revision, int offset, int limit) {
     requireCode(context);
-    return repository.outline(access.admitted(context), revision, offset, limit);
+    return repository.outline(context, revision, offset, limit);
   }
 
   /** Literal, case-insensitive declaration-name prefix search, with permissions before LIMIT. */
   public Information.Symbols symbols(
       InformationContext context, String query, UUID revision, int offset, int limit) {
     requireCode(context);
-    return repository.symbols(access.admitted(context), query, revision, offset, limit);
+    return repository.symbols(context, query, revision, offset, limit);
   }
 
   private void requireCode(InformationContext context) {
+    // Reuse this admission only for the immediately following repository call. It is not a lease:
+    // later operations and checks after other work must observe current Application authority.
     access.requireSelection(context);
     if (context.corpus() != InformationContext.Corpus.CODE)
       throw new CallerFault("select corpus code for syntax navigation");

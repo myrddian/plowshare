@@ -23,6 +23,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final Clock clock;
   private final ProjectionCache<Optional<AuthorizedMetadata>> metadataCache;
   private final ProjectionCache<Optional<AuthorizedText>> textCache;
+  private final ProjectionCache<List<Information.Revision>> listCache;
+  private final ProjectionCache<Information.Facets> facetsCache;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   public JdbcInformationCatalogueRepository(JdbcTemplate jdbc, Clock clock) {
@@ -40,11 +42,31 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       AllowanceRepository allowances,
       ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
       ProjectionCache<Optional<AuthorizedText>> textCache) {
+    this(
+        jdbc,
+        clock,
+        allowances,
+        metadataCache,
+        textCache,
+        ProjectionCache.direct(),
+        ProjectionCache.direct());
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache,
+      ProjectionCache<List<Information.Revision>> listCache,
+      ProjectionCache<Information.Facets> facetsCache) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
     this.allowances = Objects.requireNonNull(allowances);
     this.metadataCache = Objects.requireNonNull(metadataCache);
     this.textCache = Objects.requireNonNull(textCache);
+    this.listCache = Objects.requireNonNull(listCache);
+    this.facetsCache = Objects.requireNonNull(facetsCache);
   }
 
   private static NotFoundFault absent() {
@@ -412,7 +434,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       selected =
           new InformationSql.Filter(selected.sql() + " AND r.id=ANY(CAST(? AS uuid[]))", args);
     }
-    return facetCounts(selected, context.typedView());
+    var reader = new JdbcInformationFacets(jdbc, facetsCache);
+    // The run's complete pin list remains part of selection. Oversized pin bookkeeping bypasses
+    // sharing rather than shortening the key or changing the existing SQL intersection.
+    if (!facetsCache.enabled() || pinned != null && pinned.size() > 1024)
+      return reader.read(selected, JdbcInformationFacets.Candidates.REVISIONS, context.typedView());
+    return reader.read(
+        selected,
+        JdbcInformationFacets.Candidates.REVISIONS,
+        context.typedView(),
+        InformationCatalogueFingerprint.readKey(
+            "catalogue-facets-v1", context, Arrays.asList(kind, pinned)));
   }
 
   public List<Information.Revision> list(
@@ -421,19 +453,56 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (kind != null && !List.of("source", "report").contains(kind))
       throw new CallerFault("kind must be source or report");
     var selected = discovery(context, kind);
+    int applied = Math.max(1, Math.min(limit, 100));
+    if (!listCache.enabled()) return loadList(selected, applied, offset, null);
+    long maximum = listCache.maxWeight() <= 4096 ? 0 : (listCache.maxWeight() - 4096) / 32;
+    return listCache.read(
+        InformationCatalogueFingerprint.readKey(
+            "catalogue-list-v1", context, Arrays.asList(kind, applied, offset)),
+        maximum > 0,
+        () -> loadList(selected, applied, offset, maximum),
+        () -> loadList(selected, applied, offset, null),
+        revisions -> {
+          long weight = 4096;
+          for (var revision : revisions)
+            weight += metadataWeight(Optional.of(new AuthorizedMetadata(context, revision)));
+          return weight;
+        });
+  }
+
+  private List<Information.Revision> loadList(
+      InformationSql.Filter selected, int limit, int offset, Long maximumBytes) {
     var args = new ArrayList<Object>(selected.arguments());
-    args.add(Math.max(1, Math.min(limit, 100)));
+    args.add(limit);
     args.add(offset);
-    return jdbc
-        .queryForList(
-            SELECT
-                + " WHERE "
-                + selected.sql()
-                + " ORDER BY r.created_at DESC,r.id LIMIT ? OFFSET ?",
-            args.toArray())
-        .stream()
-        .map(row -> decode(row, Information.Revision.class))
-        .toList();
+    String sql =
+        SELECT + " WHERE " + selected.sql() + " ORDER BY r.created_at DESC,r.id LIMIT ? OFFSET ?";
+    if (maximumBytes == null)
+      return jdbc.queryForList(sql, args.toArray()).stream()
+          .map(row -> decode(row, Information.Revision.class))
+          .toList();
+    // Limit/page first, then bound the complete selected projection. The left-join sentinel never
+    // transfers oversized text and still represents an empty page without a second query.
+    sql =
+        "WITH catalogue_page AS MATERIALIZED ("
+            + sql
+            + "), page_bounds AS (SELECT count(*) AS cache_rows,"
+            + "COALESCE(sum(256::bigint+octet_length(to_jsonb(catalogue_page)::text)),0) AS cache_bytes FROM catalogue_page)"
+            + " SELECT catalogue_page.*,page_bounds.cache_rows,page_bounds.cache_bytes FROM page_bounds LEFT JOIN catalogue_page"
+            + " ON page_bounds.cache_bytes<=? ORDER BY catalogue_page.created_at DESC,catalogue_page.id";
+    args.add(maximumBytes);
+    var rows = jdbc.queryForList(sql, args.toArray());
+    var revisions = new ArrayList<Information.Revision>();
+    for (var row : rows) {
+      if (((Number) row.get("cache_bytes")).longValue() > maximumBytes)
+        throw new ProjectionCache.Bypass();
+      if (((Number) row.get("cache_rows")).longValue() == 0) continue;
+      var value = new LinkedHashMap<String, Object>(row);
+      value.remove("cache_bytes");
+      value.remove("cache_rows");
+      revisions.add(decode(value, Information.Revision.class));
+    }
+    return List.copyOf(revisions);
   }
 
   private io.aeyer.plowshare.server.information.InformationSql.Filter discovery(
@@ -454,11 +523,6 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             + " AND NOT EXISTS(SELECT 1 FROM information_reports report WHERE report.revision_id=r.id AND report.status NOT IN ('draft','final')) AND "
             + facets.sql(),
         args);
-  }
-
-  private Information.Facets facetCounts(InformationSql.Filter selected, boolean typedView) {
-    return new JdbcInformationFacets(jdbc)
-        .read(selected, JdbcInformationFacets.Candidates.REVISIONS, typedView);
   }
 
   public List<Information.Revision> inventory(InformationContext context, int limit, int offset) {

@@ -108,6 +108,11 @@ public interface InformationCatalogueRepository {
 
   Information.Revision metadata(UUID revision);
 
+  /**
+   * Immutable discovery page with readability and filters applied before pagination. The caller
+   * admits the selection on each operation. Shared implementations fence the complete context and
+   * page with DOCUMENTS and AUTHORITY versions; historical or dirty transactions read directly.
+   */
   List<Information.Revision> list(InformationContext context, int limit, int offset, String kind);
 
   List<Information.Revision> inventory(InformationContext context, int limit, int offset);
@@ -132,6 +137,11 @@ public interface InformationCatalogueRepository {
 
   List<UUID> discoveryRevisions(InformationContext context);
 
+  /**
+   * All dimensions, graph and total consume one authorized candidate snapshot. Null pins leave the
+   * selection unrestricted; empty pins select nothing. Sharing preserves this distinction and
+   * requires the same document/authority fences as discovery pages.
+   */
   Information.Facets facets(InformationContext context, String kind, List<UUID> pinned);
 
   Information.Events events(InformationContext context, long after, int limit);

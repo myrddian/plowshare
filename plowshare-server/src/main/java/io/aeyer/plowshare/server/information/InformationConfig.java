@@ -53,8 +53,15 @@ public class InformationConfig {
 
   @Bean
   public InformationNavigationRepository informationNavigationRepository(
-      JdbcTemplate jdbc, io.aeyer.plowshare.server.archive.ProjectMembers members) {
-    return new JdbcInformationNavigationRepository(jdbc, members);
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
+      ProjectionCaches caches) {
+    return new JdbcInformationNavigationRepository(
+        jdbc,
+        members,
+        caches.create("manual-heads-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create(
+            "manual-head-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -133,7 +140,9 @@ public class InformationConfig {
         allowances,
         caches.create("document-metadata-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create(
-            "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
+            "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create("catalogue-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create("catalogue-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
   }
 
   @Bean

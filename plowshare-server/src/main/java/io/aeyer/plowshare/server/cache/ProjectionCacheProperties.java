@@ -19,7 +19,7 @@ public record ProjectionCacheProperties(
     @DefaultValue("1s") Duration notificationPoll,
     @DefaultValue("1s") Duration reconnectDelay,
     @DefaultValue("128") int maxPendingTransactions,
-    @DefaultValue("8") int maxProjections,
+    @DefaultValue("12") int maxProjections,
     @DefaultValue("4") int versionConnections) {
   public ProjectionCacheProperties {
     new SnapshotCache.Limits(

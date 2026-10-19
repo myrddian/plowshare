@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.protocol.DocumentType;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -9,6 +11,17 @@ import java.util.UUID;
 /** Receipt identity codec preserves the shipped tuple encoding across the typed migration. */
 final class InformationCatalogueFingerprint {
   private InformationCatalogueFingerprint() {}
+
+  /**
+   * Repository-owned tuple positions contain the exact validated selection, never receipt state.
+   */
+  static SnapshotCache.Key readKey(
+      String projection, InformationContext context, List<?> parameters) {
+    return new SnapshotCache.Key(
+        projection,
+        ProjectionCache.fingerprint(
+            InformationJson.json(context), InformationJson.json(parameters)));
+  }
 
   static String command(
       String operation,

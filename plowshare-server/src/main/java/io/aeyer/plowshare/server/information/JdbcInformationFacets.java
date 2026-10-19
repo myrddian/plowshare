@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.protocol.Information;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -89,22 +91,73 @@ final class JdbcInformationFacets {
   private record Edge(Information.TagEdge value) implements Aggregate {}
 
   private final JdbcTemplate jdbc;
+  private final ProjectionCache<Information.Facets> cache;
 
   JdbcInformationFacets(JdbcTemplate jdbc) {
+    this(jdbc, ProjectionCache.direct());
+  }
+
+  JdbcInformationFacets(JdbcTemplate jdbc, ProjectionCache<Information.Facets> cache) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.cache = Objects.requireNonNull(cache);
   }
 
   Information.Facets read(
       InformationSql.Filter selected, Candidates candidates, boolean typedView) {
+    return load(selected, candidates, typedView, null);
+  }
+
+  /**
+   * The owning repository supplies a complete selection key; its service retains live selection
+   * admission. Complete document/authority version fences cover candidate-set and policy changes,
+   * so a warm hit needs no discarded per-candidate read. Loads stay on the caller's transaction.
+   */
+  Information.Facets read(
+      InformationSql.Filter selected,
+      Candidates candidates,
+      boolean typedView,
+      SnapshotCache.Key key) {
+    if (!cache.enabled()) return load(selected, candidates, typedView, null);
+    long maximum = cache.maxWeight() <= 4096 ? 0 : (cache.maxWeight() - 4096) / 8;
+    return cache.read(
+        key,
+        maximum > 0,
+        () -> load(selected, candidates, typedView, maximum),
+        () -> load(selected, candidates, typedView, null),
+        JdbcInformationFacets::weight);
+  }
+
+  private Information.Facets load(
+      InformationSql.Filter selected, Candidates candidates, boolean typedView, Long maximumBytes) {
     var dimensions =
         java.util.Arrays.stream(Dimension.values())
             .filter(dimension -> typedView || !dimension.typed())
             .toList();
+    String sql = statement(selected, candidates, dimensions, typedView);
+    var arguments = new ArrayList<Object>(selected.arguments());
+    if (maximumBytes != null) {
+      // The existing candidate CTE still runs once. Bound only its already limited aggregate rows;
+      // an oversized result returns a scalar sentinel with no category/value text to hydrate.
+      sql =
+          "WITH facet_rows AS MATERIALIZED ("
+              + sql
+              + "), facet_bounds AS (SELECT COALESCE(sum("
+              + "256::bigint+COALESCE(octet_length(facet_name),0)+COALESCE(octet_length(category),0)"
+              + "+COALESCE(octet_length(value),0)),0) AS projection_bytes FROM facet_rows)"
+              + " SELECT facet_rows.*,facet_bounds.projection_bytes FROM facet_bounds LEFT JOIN facet_rows"
+              + " ON facet_bounds.projection_bytes<=?"
+              + " ORDER BY row_kind,facet_name,result_count DESC,category,value";
+      arguments.add(maximumBytes);
+    }
     var rows =
         jdbc.query(
-            statement(selected, candidates, dimensions, typedView),
-            JdbcInformationFacets::aggregate,
-            selected.arguments().toArray());
+            sql,
+            (row, index) -> {
+              if (maximumBytes != null && row.getLong("projection_bytes") > maximumBytes)
+                throw new ProjectionCache.Bypass();
+              return aggregate(row, index);
+            },
+            arguments.toArray());
     var values = new LinkedHashMap<Dimension, List<Information.FacetCount>>();
     dimensions.forEach(dimension -> values.put(dimension, new ArrayList<>()));
     var edges = new ArrayList<Information.TagEdge>();
@@ -140,6 +193,17 @@ final class JdbcInformationFacets {
         counts,
         more,
         new Information.TagGraph(edges.stream().limit(1000).toList(), edges.size() > 1000));
+  }
+
+  private static long weight(Information.Facets facets) {
+    long weight = 4096;
+    for (var dimension : facets.facets().entrySet()) {
+      weight += 256L + 4L * dimension.getKey().length();
+      for (var count : dimension.getValue()) weight += 128L + 4L * count.value().length();
+    }
+    for (var edge : facets.tagGraph().edges())
+      weight += 192L + 4L * (edge.category().length() + edge.tag().length());
+    return weight;
   }
 
   private static String statement(

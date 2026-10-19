@@ -13,6 +13,8 @@ document metadata/extraction, admitted search and schedule file reads to durable
 versions and PostgreSQL notification/recovery infrastructure. The
 [Relay slice](query-efficiency-relay-slice.md) adds narrow/indexed topic/message
 reads, tracked inspection DTOs and cross-process consumer/discovery wakeups.
+The [Manual and facet slice](query-efficiency-manual-slice.md) adds versioned
+catalogue/navigation collections, facet DTO reuse and scoped permission-query reuse.
 The broader owner plans described here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)

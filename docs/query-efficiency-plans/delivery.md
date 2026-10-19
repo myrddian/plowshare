@@ -11,6 +11,8 @@ The [initial adoption receipt](../query-efficiency-cache-adoption.md) records
 document/search/schedule bindings and the PostgreSQL version/notification bridge.
 The [Relay receipt](../query-efficiency-relay-slice.md) records indexed/narrow
 inspection reads, DTO caches and recoverable consumer/discovery wakeups.
+The [Manual and facet receipt](../query-efficiency-manual-slice.md) records scoped
+collection caches, bounded facet admission and operation-local permission reuse.
 
 ## Start with operation costs and ownership
 
