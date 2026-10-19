@@ -378,7 +378,15 @@ class JdbcRelayPortRepositoryTest {
                       "subject", "fixture", UsageAttribution.Operation.AGENT_CHAT));
       var held = executor.submit(() -> filter.input(request, () -> false));
       try (var connection =
-          Plowshare.connect(server.url("/").toString(), "fixture", Duration.ofSeconds(5), null)) {
+          // This fixture is a legacy JSON endpoint; segmented framing is tested by transport
+          // fixtures.
+          Plowshare.connect(
+              server.url("/").toString(),
+              "fixture",
+              UUID.randomUUID().toString(),
+              Duration.ofSeconds(5),
+              null,
+              Plowshare.TransportMode.LEGACY)) {
         var sdk = new RelayClient(connection);
         var consumption =
             new RelayPort.Consume(
@@ -444,7 +452,7 @@ class JdbcRelayPortRepositoryTest {
               null,
               new RelayPayload.Text("\u0001".repeat(43680))));
     var request = consume("detectors", UUID.randomUUID().toString(), 100);
-    var first = ports.consume(topic, "reviewer", request);
+    var first = ports.consume(topic, "reviewer", request, RelayReadBudget.LEGACY);
     assertEquals(2, first.events().size());
     var mapper =
         com.fasterxml.jackson.databind.json.JsonMapper.builder()
@@ -463,9 +471,9 @@ class JdbcRelayPortRepositoryTest {
                         java.util.Map.of("code", "OK", "payload", first)))
                 .length
             < 1024 * 1024);
-    assertEquals(first, ports.consume(topic, "reviewer", request));
+    assertEquals(first, ports.consume(topic, "reviewer", request, RelayReadBudget.LEGACY));
     assertEquals("2", ports.acknowledge(topic, "reviewer", ack(first)).through());
-    var second = ports.consume(topic, "reviewer", request);
+    var second = ports.consume(topic, "reviewer", request, RelayReadBudget.LEGACY);
     assertEquals("large-2", second.events().getFirst().eventId());
     assertEquals("4", second.through());
   }

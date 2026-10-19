@@ -24,6 +24,7 @@
 - [Second query-efficiency slice](query-efficiency-second-slice.md) (document/search snapshot reuse, keyed schedule reads and typed cache linkage contracts)
 - [Tracked DTO cache foundation](query-efficiency-cache-foundation.md) (bounded LRU, coalesced loads, invalidation and recovery fences)
 - [Versioned document, search and schedule caches](query-efficiency-cache-adoption.md) (durable version fences, live checks, transactional notifications and reconnect recovery)
+- [Relay topic/message query, cache and wakeup slice](query-efficiency-relay-slice.md) (narrow projections, indexed reads, tracked snapshots and recoverable database wakeups)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
 - [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled policy and implementation boundaries)

@@ -220,7 +220,8 @@ public final class RelayWorkers
         }
         // Idle waits are independent. Failed passes back off even under continuous publication.
         if (failed) TimeUnit.NANOSECONDS.sleep(properties.getFailureBackoff().toNanos());
-        else if (!progressed) waiting.await(properties.getIdleInterval());
+        else if (!progressed)
+          waiting.await(signals.reconciliationWait(properties.getIdleInterval()));
       }
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();

@@ -2,6 +2,10 @@
 
 Status: Proposed. Source baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
 
+The [Relay implementation receipt](../query-efficiency-relay-slice.md) records the
+locally implemented projection/index/cache/wakeup subset and verification. The
+remaining candidates below retain their original proposal/baseline context.
+
 [Relay log inspection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java#L23) lists bounded topics, reads latest topic/publication, or assembles a topic-locked snapshot of byte-bounded events, subscriptions, delivery branches and gap recoveries. ScopedRelayInspection checks project/Personal/system authority; hosted tools use latest catalogues. The shared topic lock keeps append/retention boundaries coherent, and branch mapping withholds another account's private execution receipt/conversation. Keep these distinctions when optimizing.
 
 No N+1 exists inside `read`: its five queries return separate bounded projections. Replace `SELECT *` with exact mapped columns, and consider explicit event-only versus diagnostic snapshot capabilities where a caller truly does not need subscribers/branches/recoveries. A combined stored snapshot function could reduce round trips while preserving empty-event responses, byte-prefix semantics, bounded windows and topic locking; measure before making mapping more complex. [V117](../../plowshare-server/src/main/resources/db/migration/V117__relay_log.sql#L15) keys, renamed to scope keys by [V120](../../plowshare-server/src/main/resources/db/migration/V120__relay_scopes.sql#L20), support event position/subscriber order. Evaluate delivery `(scope_key,topic,publication_position DESC,branch_index)` against existing subscriber-leading indexes for the newest branch window. Previous fast isolated Relay reads and slow shared-socket waits are not proof these SQL statements are dominant.

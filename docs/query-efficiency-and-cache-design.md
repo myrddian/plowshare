@@ -10,8 +10,10 @@ contracts. The [cache foundation](query-efficiency-cache-foundation.md) implemen
 bounded tracked DTO storage, load coalescing and local invalidation/recovery fences.
 The [first repository adoption](query-efficiency-cache-adoption.md) connects
 document metadata/extraction, admitted search and schedule file reads to durable
-versions and PostgreSQL notification/recovery infrastructure. The broader owner
-plans described here require separate implementation and verification.
+versions and PostgreSQL notification/recovery infrastructure. The
+[Relay slice](query-efficiency-relay-slice.md) adds narrow/indexed topic/message
+reads, tracked inspection DTOs and cross-process consumer/discovery wakeups.
+The broader owner plans described here require separate implementation and verification.
 
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)
 apply this strategy to the latest reviewed source baseline. The

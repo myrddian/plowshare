@@ -84,7 +84,7 @@ public class ProjectionCacheConfiguration {
     return new ListeningProjectionChangeSignals(
         new PostgresProjectionNotificationSource(notificationSource),
         versions,
-        properties.maxProjections(),
+        properties.maxProjections() + 1, // One additional bounded Relay wakeup bridge.
         properties.notificationPoll(),
         properties.reconnectDelay());
   }

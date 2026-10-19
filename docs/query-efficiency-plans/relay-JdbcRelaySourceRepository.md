@@ -2,6 +2,10 @@
 
 Status: Proposed; no implementation. Baseline: `fc36351f239b62984363ababaa1de1139402aafb`.
 
+The [Relay implementation receipt](../query-efficiency-relay-slice.md) records the
+locally implemented projection/index/cache/wakeup subset and verification. The
+remaining candidates below retain their original proposal/baseline context.
+
 [Source](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelaySourceRepository.java#L34) implements owning-row outbox publication for `RelayInternalWorkers`. Pending topics selects distinct computed scope/topic keys with a keyset cursor. Publish-next takes a nonblocking partition advisory lock, selects the oldest source event `FOR UPDATE`, rechecks private board-message exclusion, registers the broker topic, binds native wakes when applicable, publishes with stable source-event identity and deletes the outbox row atomically. No handler effects execute in this transaction.
 
 **Confirmed index/query mismatch candidate:** [V124](../../plowshare-server/src/main/resources/db/migration/V124__relay_lifecycle_outbox.sql#L20) indexes `COALESCE(project_id,0),topic,sequence`, while publish-next uses `project_id IS NOT DISTINCT FROM ?`. Check representative plans before selecting an exact matching expression predicate or separate null/non-null query variants and indexes. Pending discovery computes/concatenates scope per row and deduplicates every pass; evaluate a stored/generated scope key and tuple keyset projection, or a bounded distinct partition index. No claim of current latency is justified from this source alone.

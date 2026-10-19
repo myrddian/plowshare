@@ -9,6 +9,8 @@ The [first implementation receipt](../query-efficiency-first-slice.md),
 completed local slices, verification and remaining cache-admission gates.
 The [initial adoption receipt](../query-efficiency-cache-adoption.md) records
 document/search/schedule bindings and the PostgreSQL version/notification bridge.
+The [Relay receipt](../query-efficiency-relay-slice.md) records indexed/narrow
+inspection reads, DTO caches and recoverable consumer/discovery wakeups.
 
 ## Start with operation costs and ownership
 

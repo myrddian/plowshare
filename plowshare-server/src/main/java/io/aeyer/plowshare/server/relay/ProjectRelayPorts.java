@@ -18,6 +18,7 @@ public final class ProjectRelayPorts implements RelayPorts {
   private final ProjectMembers members;
   private final ProjectWorkspaces projects;
   private final int maxDepth;
+  private final RelayPublicationSignals signals;
   private final io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools;
 
   public ProjectRelayPorts(
@@ -45,6 +46,30 @@ public final class ProjectRelayPorts implements RelayPorts {
       ProjectWorkspaces projects,
       int maxDepth,
       io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools) {
+    this(
+        relay,
+        repository,
+        properties,
+        members,
+        projects,
+        maxDepth,
+        tools,
+        new LocalRelayPublicationSignals());
+  }
+
+  /**
+   * Registers before reading, then awaits committed local/remote hints with bounded reconciliation.
+   */
+  public ProjectRelayPorts(
+      Relay relay,
+      RelayPortRepository repository,
+      RelayPortProperties properties,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      int maxDepth,
+      io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools,
+      RelayPublicationSignals signals) {
+    this.signals = Objects.requireNonNull(signals);
     this.tools = Objects.requireNonNull(tools);
     this.relay = Objects.requireNonNull(relay);
     this.repository = Objects.requireNonNull(repository);
@@ -146,21 +171,42 @@ public final class ProjectRelayPorts implements RelayPorts {
         System.nanoTime()
             + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(
                 request.waitMs() == null ? 0 : request.waitMs());
-    while (true) {
-      var topic =
-          require(
-              account,
-              request.project(),
-              request.topic(),
-              RelayPortProperties.Direction.EGRESS,
-              request.group());
-      var batch = repository.consume(topic, account, request, budget);
-      if (batch.status() != RelayPort.Status.EMPTY || System.nanoTime() >= deadline) return batch;
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        throw new CallerFault("Relay consumption interrupted");
+    var selected =
+        require(
+            account,
+            request.project(),
+            request.topic(),
+            RelayPortProperties.Direction.EGRESS,
+            request.group());
+    if (deadline - System.nanoTime() <= 0)
+      return repository.consume(selected, account, request, budget);
+    // This is only an in-memory waiter address; it creates no durable subscriber or cursor.
+    try (var waiting = signals.listen(new Relay.SubscriptionKey(selected, "port.wait"))) {
+      var topic = selected;
+      while (true) {
+        var batch = repository.consume(topic, account, request, budget);
+        long remaining = deadline - System.nanoTime();
+        if (batch.status() != RelayPort.Status.EMPTY || remaining <= 0) return batch;
+        try {
+          // Clock-only lease expiry and missed hints still reconcile. Transport health never
+          // authorizes delivery; every subsequent read repeats current port/membership checks.
+          long interval =
+              Math.min(
+                  java.time.Duration.ofSeconds(5).toNanos(),
+                  signals.reconciliationWait(java.time.Duration.ofMillis(100)).toNanos());
+          waiting.await(java.time.Duration.ofNanos(Math.min(remaining, interval)));
+          topic =
+              require(
+                  account,
+                  request.project(),
+                  request.topic(),
+                  RelayPortProperties.Direction.EGRESS,
+                  request.group());
+          if (!selected.equals(topic)) throw new CallerFault("Relay consumption project changed");
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new CallerFault("Relay consumption interrupted");
+        }
       }
     }
   }

@@ -2,7 +2,9 @@
 
 This slice connects the [tracked DTO cache foundation](query-efficiency-cache-foundation.md)
 to document metadata/extraction, admitted search snapshots and schedule file UI
-reads. Deployment is separate. PostgreSQL remains authoritative; cached objects
+reads. The [following Relay slice](query-efficiency-relay-slice.md) adds a fifth
+version domain and two inspection caches; this receipt describes the original
+five-cache delivery. Deployment is separate. PostgreSQL remains authoritative; cached objects
 do not retain permission to read, execute or mutate anything.
 
 ## Reads and transaction ownership
