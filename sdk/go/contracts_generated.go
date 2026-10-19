@@ -2410,6 +2410,18 @@ func (v *IntegrationReadingDtoContext) UnmarshalJSON(data []byte) error {
 	return errors.New("invalid union")
 }
 
+// ProcQueryDto is the explicit ProcQuery protocol shape.
+type ProcQueryDto struct {
+	Active       *bool    `json:"active,omitempty"`
+	After        *string  `json:"after,omitempty"`
+	Causation    *string  `json:"causation,omitempty"`
+	Conversation *string  `json:"conversation,omitempty"`
+	Limit        *float64 `json:"limit,omitempty"`
+	Project      *string  `json:"project,omitempty"`
+	Root         *string  `json:"root,omitempty"`
+	Visibility   *string  `json:"visibility,omitempty"`
+}
+
 // ProviderOAuthSettingsDto is the explicit ProviderOAuthSettings protocol shape.
 type ProviderOAuthSettingsDto struct {
 	AuthorizationEndpoint string   `json:"authorizationEndpoint"`
@@ -2474,7 +2486,7 @@ func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte)
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape484", data) {
+	if matches("shape488", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2482,7 +2494,7 @@ func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte)
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape485", data) {
+	if matches("shape489", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2490,7 +2502,7 @@ func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte)
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape486", data) {
+	if matches("shape490", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2533,7 +2545,7 @@ func (v *ProviderConnectionDefinitionDtoOauth) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape492", data) {
+	if matches("shape496", data) {
 		var chosen ProviderOAuthSettingsDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2677,7 +2689,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape530", data) {
+	if matches("shape534", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2685,7 +2697,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape531", data) {
+	if matches("shape535", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2693,7 +2705,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape532", data) {
+	if matches("shape536", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2701,7 +2713,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape533", data) {
+	if matches("shape537", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2962,7 +2974,7 @@ func (v *PricingCardDtoRates) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape636", data) {
+	if matches("shape638", data) {
 		var chosen PricingRatesDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3017,7 +3029,7 @@ func (v *PricingEntryDtoCard) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape633", data) {
+	if matches("shape635", data) {
 		var chosen PricingCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3403,7 +3415,7 @@ func (v *ApplicationIdentityStatusDtoIdentity) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape672", data) {
+	if matches("shape674", data) {
 		var chosen ApplicationIdentityBindingDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3495,7 +3507,7 @@ func (v *ApprovalViewDtoCommands) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape685", data) {
+	if matches("shape687", data) {
 		var chosen [][]string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3607,7 +3619,7 @@ func (v *BoardTopicDtoSwarm) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape694", data) {
+	if matches("shape696", data) {
 		var chosen SwarmSelectionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3763,7 +3775,7 @@ func (v *AskedViewDtoOpened) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape715", data) {
+	if matches("shape717", data) {
 		var chosen OpenedViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3834,7 +3846,7 @@ func (v *EntryViewDtoSource) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape711", data) {
+	if matches("shape713", data) {
 		var chosen SourceViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3948,7 +3960,7 @@ func (v *ContextViewDtoMessageTokens) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape722", data) {
+	if matches("shape724", data) {
 		var chosen TokenCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3991,7 +4003,7 @@ func (v *ContextViewDtoPrefix) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape724", data) {
+	if matches("shape726", data) {
 		var chosen PrefixDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4048,7 +4060,7 @@ func (v ProjectionMessageDtoPartsItem) MarshalJSON() ([]byte, error) {
 }
 func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 	*v = ProjectionMessageDtoPartsItem{}
-	if matches("shape743", data) {
+	if matches("shape745", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4056,7 +4068,7 @@ func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape745", data) {
+	if matches("shape747", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4176,7 +4188,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape758", data) {
+	if matches("shape760", data) {
 		var chosen []ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4184,7 +4196,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape759", data) {
+	if matches("shape761", data) {
 		var chosen map[string]ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4256,7 +4268,7 @@ func (v *ContextSnapshotDtoCount) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape738", data) {
+	if matches("shape740", data) {
 		var chosen ContextSnapshotDtoCountVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4399,7 +4411,7 @@ func (v *SearchRetrievalDtoCoverage) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape777", data) {
+	if matches("shape779", data) {
 		var chosen PassageCoverageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4484,7 +4496,7 @@ func (v *ChunkDetailResponseDtoChapter) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape782", data) {
+	if matches("shape784", data) {
 		var chosen UnitViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4821,7 +4833,7 @@ func (v *InformationAcquisitionDtoPostGate) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape820", data) {
+	if matches("shape822", data) {
 		var chosen InformationGateDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5183,7 +5195,7 @@ func (v *MigrationEntryDtoToolCalls) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape914", data) {
+	if matches("shape916", data) {
 		var chosen []MigrationEntryDtoToolCallsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5431,7 +5443,7 @@ func (v DocumentConnectionDtoSelection) MarshalJSON() ([]byte, error) {
 }
 func (v *DocumentConnectionDtoSelection) UnmarshalJSON(data []byte) error {
 	*v = DocumentConnectionDtoSelection{}
-	if matches("shape852", data) {
+	if matches("shape854", data) {
 		var chosen DocumentConnectionDtoSelectionVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5439,7 +5451,7 @@ func (v *DocumentConnectionDtoSelection) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape855", data) {
+	if matches("shape857", data) {
 		var chosen DocumentConnectionDtoSelectionVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5447,7 +5459,7 @@ func (v *DocumentConnectionDtoSelection) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape857", data) {
+	if matches("shape859", data) {
 		var chosen DocumentConnectionDtoSelectionVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5517,7 +5529,7 @@ func (v InformationSearchPlacementDtoChapterTitle) MarshalJSON() ([]byte, error)
 }
 func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchPlacementDtoChapterTitle{}
-	if matches("shape951", data) {
+	if matches("shape953", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5525,7 +5537,7 @@ func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) e
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape952", data) {
+	if matches("shape954", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5589,7 +5601,7 @@ func (v InformationSearchChunkDtoPlacement) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchChunkDtoPlacement{}
-	if matches("shape949", data) {
+	if matches("shape951", data) {
 		var chosen InformationSearchPlacementDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5597,7 +5609,7 @@ func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape953", data) {
+	if matches("shape955", data) {
 		var chosen InformationUnplacedDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5754,7 +5766,7 @@ func (v *ObservedOutcomeDtoPace) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape982", data) {
+	if matches("shape984", data) {
 		var chosen PartialDto2
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5808,7 +5820,7 @@ func (v *ObservedJobDtoLimits) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape978", data) {
+	if matches("shape980", data) {
 		var chosen PartialDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5851,7 +5863,7 @@ func (v *ObservedJobDtoOutcome) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape980", data) {
+	if matches("shape982", data) {
 		var chosen ObservedOutcomeDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5938,7 +5950,7 @@ func (v *MemoryRecordDtoInvalidation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape990", data) {
+	if matches("shape992", data) {
 		var chosen MemoryInvalidationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6226,7 +6238,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1031", data) {
+	if matches("shape1033", data) {
 		var chosen MessageViewDtoStructureVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6234,7 +6246,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape1036", data) {
+	if matches("shape1038", data) {
 		var chosen MessageViewDtoStructureVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6491,6 +6503,180 @@ type OutgoingWorkDtoResultVariant6Dto struct {
 	Diagnostic string `json:"diagnostic"`
 }
 
+// ProcAttemptDto is the explicit ProcAttempt protocol shape.
+type ProcAttemptDto struct {
+	CostAmount   TierDtoProject                              `json:"costAmount"`
+	CostKind     string                                      `json:"costKind"`
+	Currency     TierDtoProject                              `json:"currency"`
+	EndedAt      TierDtoProject                              `json:"endedAt"`
+	FinishReason TierDtoProject                              `json:"finishReason"`
+	HttpStatus   ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"httpStatus"`
+	Id           string                                      `json:"id"`
+	InputTokens  TierDtoProject                              `json:"inputTokens"`
+	Number       float64                                     `json:"number"`
+	OutputTokens TierDtoProject                              `json:"outputTokens"`
+	StartedAt    string                                      `json:"startedAt"`
+	State        string                                      `json:"state"`
+}
+
+// ProcCallDto is the explicit ProcCall protocol shape.
+type ProcCallDto struct {
+	Agent        TierDtoProject   `json:"agent"`
+	Attempts     float64          `json:"attempts"`
+	Conversation TierDtoProject   `json:"conversation"`
+	CreatedAt    string           `json:"createdAt"`
+	EndedAt      TierDtoProject   `json:"endedAt"`
+	Id           string           `json:"id"`
+	Lane         string           `json:"lane"`
+	Model        string           `json:"model"`
+	Observations []ProcAttemptDto `json:"observations"`
+	Operation    string           `json:"operation"`
+	Owner        TierDtoProject   `json:"owner"`
+	Pool         string           `json:"pool"`
+	Principal    TierDtoProject   `json:"principal"`
+	Project      TierDtoProject   `json:"project"`
+	Root         TierDtoProject   `json:"root"`
+	Route        string           `json:"route"`
+	Run          TierDtoProject   `json:"run"`
+	Runtime      string           `json:"runtime"`
+	State        string           `json:"state"`
+}
+
+// ProcSelectionDto is the explicit ProcSelection protocol shape.
+type ProcSelectionDto struct {
+	Active       Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"active"`
+	After        TierDtoProject                                                                                   `json:"after"`
+	Causation    TierDtoProject                                                                                   `json:"causation"`
+	Conversation TierDtoProject                                                                                   `json:"conversation"`
+	Limit        float64                                                                                          `json:"limit"`
+	Project      TierDtoProject                                                                                   `json:"project"`
+	Root         TierDtoProject                                                                                   `json:"root"`
+	Visibility   string                                                                                           `json:"visibility"`
+}
+
+// ProcCallsDto is the explicit ProcCalls protocol shape.
+type ProcCallsDto struct {
+	Calls      []ProcCallDto    `json:"calls"`
+	Coverage   []string         `json:"coverage"`
+	Cursor     TierDtoProject   `json:"cursor"`
+	Selection  ProcSelectionDto `json:"selection"`
+	SnapshotAt string           `json:"snapshotAt"`
+}
+
+// ProcConversationDto is the explicit ProcConversation protocol shape.
+type ProcConversationDto struct {
+	ActingSubject   TierDtoProject                              `json:"actingSubject"`
+	ActiveCalls     float64                                     `json:"activeCalls"`
+	Actor           TierDtoProject                              `json:"actor"`
+	Agent           TierDtoProject                              `json:"agent"`
+	Application     TierDtoProject                              `json:"application"`
+	Attempts        float64                                     `json:"attempts"`
+	Calls           float64                                     `json:"calls"`
+	CausationDepth  ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"causationDepth"`
+	CausationParent TierDtoProject                              `json:"causationParent"`
+	CausationRoot   TierDtoProject                              `json:"causationRoot"`
+	Cause           TierDtoProject                              `json:"cause"`
+	Children        float64                                     `json:"children"`
+	CreatedAt       string                                      `json:"createdAt"`
+	Ending          TierDtoProject                              `json:"ending"`
+	Evidence        string                                      `json:"evidence"`
+	Id              string                                      `json:"id"`
+	LastTurnAt      TierDtoProject                              `json:"lastTurnAt"`
+	LatestJob       TierDtoProject                              `json:"latestJob"`
+	Lifecycle       string                                      `json:"lifecycle"`
+	Origin          string                                      `json:"origin"`
+	Owner           TierDtoProject                              `json:"owner"`
+	Parent          TierDtoProject                              `json:"parent"`
+	Principal       string                                      `json:"principal"`
+	Project         TierDtoProject                              `json:"project"`
+	RepeatedCalls   float64                                     `json:"repeatedCalls"`
+	Resource        TierDtoProject                              `json:"resource"`
+	Revision        TierDtoProject                              `json:"revision"`
+	Root            string                                      `json:"root"`
+	State           string                                      `json:"state"`
+}
+
+// ProcConversationsDto is the explicit ProcConversations protocol shape.
+type ProcConversationsDto struct {
+	Conversations []ProcConversationDto `json:"conversations"`
+	Coverage      []string              `json:"coverage"`
+	Cursor        TierDtoProject        `json:"cursor"`
+	Selection     ProcSelectionDto      `json:"selection"`
+	SnapshotAt    string                `json:"snapshotAt"`
+	Total         float64               `json:"total"`
+}
+
+// ProcQueueDto is the explicit ProcQueue protocol shape.
+type ProcQueueDto struct {
+	Blocked         float64                                     `json:"blocked"`
+	Completed       float64                                     `json:"completed"`
+	Conversation    TierDtoProject                              `json:"conversation"`
+	Coverage        string                                      `json:"coverage"`
+	Failed          float64                                     `json:"failed"`
+	Id              string                                      `json:"id"`
+	LeaseUntil      TierDtoProject                              `json:"leaseUntil"`
+	OldestPendingAt TierDtoProject                              `json:"oldestPendingAt"`
+	Owner           TierDtoProject                              `json:"owner"`
+	Pending         float64                                     `json:"pending"`
+	Project         TierDtoProject                              `json:"project"`
+	Resource        TierDtoProject                              `json:"resource"`
+	Revision        TierDtoProject                              `json:"revision"`
+	Running         ScheduleDefinitionDtoLimitsDtoMaxModelCalls `json:"running"`
+	Skipped         float64                                     `json:"skipped"`
+	Stage           string                                      `json:"stage"`
+	Total           float64                                     `json:"total"`
+	Unit            string                                      `json:"unit"`
+}
+
+// ProcQueuesDto is the explicit ProcQueues protocol shape.
+type ProcQueuesDto struct {
+	Coverage   []string                    `json:"coverage"`
+	Cursor     TierDtoProject              `json:"cursor"`
+	Pools      []ProcQueuesDtoPoolsItemDto `json:"pools"`
+	Queues     []ProcQueueDto              `json:"queues"`
+	Selection  ProcSelectionDto            `json:"selection"`
+	SnapshotAt string                      `json:"snapshotAt"`
+	Summaries  []ProcQueueDto              `json:"summaries"`
+}
+
+// ProcQueuesDtoPoolsItemDto is the explicit ProcQueuesDtoPoolsItemDto protocol shape.
+type ProcQueuesDtoPoolsItemDto struct {
+	Capacity float64 `json:"capacity"`
+	Lane     string  `json:"lane"`
+	Name     string  `json:"name"`
+	Queued   float64 `json:"queued"`
+	Running  float64 `json:"running"`
+}
+
+// ProcToolDto is the explicit ProcTool protocol shape.
+type ProcToolDto struct {
+	Conversation string         `json:"conversation"`
+	Id           string         `json:"id"`
+	Job          TierDtoProject `json:"job"`
+	Name         string         `json:"name"`
+	RecordedAt   TierDtoProject `json:"recordedAt"`
+	State        string         `json:"state"`
+}
+
+// ProcInspectionDto is the explicit ProcInspection protocol shape.
+type ProcInspectionDto struct {
+	Calls          ProcCallsDto         `json:"calls"`
+	Conversations  ProcConversationsDto `json:"conversations"`
+	Queues         ProcQueuesDto        `json:"queues"`
+	Signals        []string             `json:"signals"`
+	Tools          []ProcToolDto        `json:"tools"`
+	ToolsTruncated bool                 `json:"toolsTruncated"`
+}
+
+// ProcToolsDto is the explicit ProcTools protocol shape.
+type ProcToolsDto struct {
+	Coverage   []string         `json:"coverage"`
+	Cursor     TierDtoProject   `json:"cursor"`
+	Selection  ProcSelectionDto `json:"selection"`
+	SnapshotAt string           `json:"snapshotAt"`
+	Tools      []ProcToolDto    `json:"tools"`
+}
+
 // ProjectGrantChangeDto is the explicit ProjectGrantChange protocol shape.
 type ProjectGrantChangeDto struct {
 	Action     string             `json:"action"`
@@ -6612,7 +6798,7 @@ func (v *ProviderMutationReceiptDtoCredential) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1074", data) {
+	if matches("shape1094", data) {
 		var chosen ProviderCredentialStatusDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6711,7 +6897,7 @@ func (v *RelayEventDtoCausation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1099", data) {
+	if matches("shape1119", data) {
 		var chosen RelayCausationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6765,7 +6951,7 @@ func (v *RelayEventDtoPayloadDtoLifecycle) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1108", data) {
+	if matches("shape1128", data) {
 		var chosen RelayEventDtoPayloadDtoLifecycleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6817,7 +7003,7 @@ func (v *RelayEventDtoPayloadDtoWake) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1110", data) {
+	if matches("shape1130", data) {
 		var chosen RelayEventDtoPayloadDtoWakeVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6957,7 +7143,7 @@ func (v *ScheduleFileDtoDefinition) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape525", data) {
+	if matches("shape529", data) {
 		var chosen ScheduleDefinitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7140,7 +7326,7 @@ func (v *HostedToolWorkerStatusDtoRegistration) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1176", data) {
+	if matches("shape1196", data) {
 		var chosen HostedToolRegistrationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7358,7 +7544,7 @@ func (v *UsageCallDtoPreflightObservation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape730", data) {
+	if matches("shape732", data) {
 		var chosen ContextCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7902,7 +8088,7 @@ func (v *ConversationLatestResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape764", data) {
+	if matches("shape766", data) {
 		var chosen ConversationViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8784,7 +8970,7 @@ func (v InformationStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 	*v = InformationStatusResult{}
-	if matches("shape817", data) {
+	if matches("shape819", data) {
 		var chosen InformationAcquisitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8792,7 +8978,7 @@ func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape880", data) {
+	if matches("shape882", data) {
 		var chosen InformationRevisionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9308,7 +9494,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1052", data) {
+	if matches("shape1054", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9316,7 +9502,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape1053", data) {
+	if matches("shape1055", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9324,7 +9510,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape1054", data) {
+	if matches("shape1056", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9367,7 +9553,7 @@ func (v *OutgoingClaimResultDtoWork) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1039", data) {
+	if matches("shape1041", data) {
 		var chosen OutgoingWorkDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9627,7 +9813,7 @@ func (v RelayLogPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayLogPayload{}
-	if matches("shape504", data) {
+	if matches("shape508", data) {
 		var chosen RelayLogPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9635,7 +9821,7 @@ func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape505", data) {
+	if matches("shape509", data) {
 		var chosen RelayLogPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9754,7 +9940,7 @@ func (v RelayTopicsPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayTopicsPayload{}
-	if matches("shape516", data) {
+	if matches("shape520", data) {
 		var chosen RelayTopicsPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9762,7 +9948,7 @@ func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape517", data) {
+	if matches("shape521", data) {
 		var chosen RelayTopicsPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10088,7 +10274,7 @@ func (v UnionStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 	*v = UnionStatusResult{}
-	if matches("shape1189", data) {
+	if matches("shape1209", data) {
 		var chosen IneligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10096,7 +10282,7 @@ func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1190", data) {
+	if matches("shape1210", data) {
 		var chosen EligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10169,7 +10355,7 @@ func (v UsageCallsResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 	*v = UsageCallsResult{}
-	if matches("shape1198", data) {
+	if matches("shape1218", data) {
 		var chosen UsageAuditDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10177,7 +10363,7 @@ func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1206", data) {
+	if matches("shape1226", data) {
 		var chosen UsageAttemptsDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10367,7 +10553,7 @@ func (v Notification) MarshalJSON() ([]byte, error) {
 }
 func (v *Notification) UnmarshalJSON(data []byte) error {
 	*v = Notification{}
-	if matches("shape1213", data) {
+	if matches("shape1233", data) {
 		var chosen JobEventDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10375,7 +10561,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1214", data) {
+	if matches("shape1234", data) {
 		var chosen JobDeltaDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10383,7 +10569,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape1218", data) {
+	if matches("shape1238", data) {
 		var chosen NotificationVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10391,7 +10577,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape1220", data) {
+	if matches("shape1240", data) {
 		var chosen NotificationVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10399,7 +10585,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape1222", data) {
+	if matches("shape1242", data) {
 		var chosen NotificationVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10407,7 +10593,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape1229", data) {
+	if matches("shape1249", data) {
 		var chosen NotificationVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10415,7 +10601,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape1231", data) {
+	if matches("shape1251", data) {
 		var chosen NotificationVariant7Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10423,7 +10609,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant7 = &chosen
 		return nil
 	}
-	if matches("shape1233", data) {
+	if matches("shape1253", data) {
 		var chosen NotificationVariant8Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10431,7 +10617,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant8 = &chosen
 		return nil
 	}
-	if matches("shape1235", data) {
+	if matches("shape1255", data) {
 		var chosen NotificationVariant9Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10439,7 +10625,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant9 = &chosen
 		return nil
 	}
-	if matches("shape1237", data) {
+	if matches("shape1257", data) {
 		var chosen NotificationVariant10Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10447,7 +10633,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant10 = &chosen
 		return nil
 	}
-	if matches("shape1239", data) {
+	if matches("shape1259", data) {
 		var chosen NotificationVariant11Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -12904,6 +13090,91 @@ type OutgoingStatusRequest struct {
 // OutgoingStatus validates before submission and returns the paired result DTO.
 func (c *Client) OutgoingStatus(ctx context.Context, request OutgoingStatusRequest) (Reply[OutgoingWorkDto], error) {
 	return requestTyped[OutgoingWorkDto](ctx, c, "outgoing.status", request)
+}
+
+// ProcCallsRequest is the explicit ProcQuery protocol shape.
+type ProcCallsRequest struct {
+	Active       *bool    `json:"active,omitempty"`
+	After        *string  `json:"after,omitempty"`
+	Causation    *string  `json:"causation,omitempty"`
+	Conversation *string  `json:"conversation,omitempty"`
+	Limit        *float64 `json:"limit,omitempty"`
+	Project      *string  `json:"project,omitempty"`
+	Root         *string  `json:"root,omitempty"`
+	Visibility   *string  `json:"visibility,omitempty"`
+}
+
+// ProcCalls validates before submission and returns the paired result DTO.
+func (c *Client) ProcCalls(ctx context.Context, request ProcCallsRequest) (Reply[ProcCallsDto], error) {
+	return requestTyped[ProcCallsDto](ctx, c, "proc.calls", request)
+}
+
+// ProcInspectRequest is the explicit ProcQuery protocol shape.
+type ProcInspectRequest struct {
+	Active       *bool    `json:"active,omitempty"`
+	After        *string  `json:"after,omitempty"`
+	Causation    *string  `json:"causation,omitempty"`
+	Conversation *string  `json:"conversation,omitempty"`
+	Limit        *float64 `json:"limit,omitempty"`
+	Project      *string  `json:"project,omitempty"`
+	Root         *string  `json:"root,omitempty"`
+	Visibility   *string  `json:"visibility,omitempty"`
+}
+
+// ProcInspect validates before submission and returns the paired result DTO.
+func (c *Client) ProcInspect(ctx context.Context, request ProcInspectRequest) (Reply[ProcInspectionDto], error) {
+	return requestTyped[ProcInspectionDto](ctx, c, "proc.inspect", request)
+}
+
+// ProcListRequest is the explicit ProcQuery protocol shape.
+type ProcListRequest struct {
+	Active       *bool    `json:"active,omitempty"`
+	After        *string  `json:"after,omitempty"`
+	Causation    *string  `json:"causation,omitempty"`
+	Conversation *string  `json:"conversation,omitempty"`
+	Limit        *float64 `json:"limit,omitempty"`
+	Project      *string  `json:"project,omitempty"`
+	Root         *string  `json:"root,omitempty"`
+	Visibility   *string  `json:"visibility,omitempty"`
+}
+
+// ProcList validates before submission and returns the paired result DTO.
+func (c *Client) ProcList(ctx context.Context, request ProcListRequest) (Reply[ProcConversationsDto], error) {
+	return requestTyped[ProcConversationsDto](ctx, c, "proc.list", request)
+}
+
+// ProcQueuesRequest is the explicit ProcQuery protocol shape.
+type ProcQueuesRequest struct {
+	Active       *bool    `json:"active,omitempty"`
+	After        *string  `json:"after,omitempty"`
+	Causation    *string  `json:"causation,omitempty"`
+	Conversation *string  `json:"conversation,omitempty"`
+	Limit        *float64 `json:"limit,omitempty"`
+	Project      *string  `json:"project,omitempty"`
+	Root         *string  `json:"root,omitempty"`
+	Visibility   *string  `json:"visibility,omitempty"`
+}
+
+// ProcQueues validates before submission and returns the paired result DTO.
+func (c *Client) ProcQueues(ctx context.Context, request ProcQueuesRequest) (Reply[ProcQueuesDto], error) {
+	return requestTyped[ProcQueuesDto](ctx, c, "proc.queues", request)
+}
+
+// ProcToolsRequest is the explicit ProcQuery protocol shape.
+type ProcToolsRequest struct {
+	Active       *bool    `json:"active,omitempty"`
+	After        *string  `json:"after,omitempty"`
+	Causation    *string  `json:"causation,omitempty"`
+	Conversation *string  `json:"conversation,omitempty"`
+	Limit        *float64 `json:"limit,omitempty"`
+	Project      *string  `json:"project,omitempty"`
+	Root         *string  `json:"root,omitempty"`
+	Visibility   *string  `json:"visibility,omitempty"`
+}
+
+// ProcTools validates before submission and returns the paired result DTO.
+func (c *Client) ProcTools(ctx context.Context, request ProcToolsRequest) (Reply[ProcToolsDto], error) {
+	return requestTyped[ProcToolsDto](ctx, c, "proc.tools", request)
 }
 
 // ProjectAccessRequest is the explicit ProjectAccessRequest protocol shape.

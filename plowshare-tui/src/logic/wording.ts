@@ -740,6 +740,7 @@ export const SEARCH_COMMAND = '/search';
 export const JOB_COMMAND = '/job';
 
 export const COMMANDS: readonly string[] = [
+  '/proc',
   '/admin',
   '/message',
   MEMORY_COMMAND,
@@ -814,6 +815,8 @@ export function describeHelp(): string[] {
  */
 export function describeArguments(command: string): string {
   switch (command) {
+    case '/proc':
+      return '[list|inspect|calls|tools|queues JSON]';
     case '/admin':
       return ' status|accounts|account|sessions|session|audit|pricing|service [JSON]';
     case USAGE_COMMAND:
@@ -877,6 +880,8 @@ export function describeArguments(command: string): string {
  */
 export function describeCommand(command: string): string {
   switch (command) {
+    case '/proc':
+      return 'Audit all non-archived conversations, calls and processing queues';
     case '/admin':
       return 'manage server users, service accounts, scoped tokens, model pricing, roles, password recovery, sessions and audit history';
     case USAGE_COMMAND:

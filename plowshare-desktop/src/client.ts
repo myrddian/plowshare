@@ -963,6 +963,30 @@ export class DesktopClient {
           relay,
         };
       }
+      case 'proc-read': {
+        const answer = await this.ask(request.type, request.payload);
+        if (answer.code !== 'OK')
+          throw new Error(answer.said ?? 'PROC audit unavailable');
+        const proc = decodeReply(request.type, answer.payload);
+        const rows =
+          'conversations' in proc
+            ? 'tools' in proc
+              ? proc.conversations.conversations
+              : proc.conversations
+            : [];
+        for (const row of rows)
+          if (
+            request.type === 'proc.inspect' &&
+            row.id === request.payload.conversation &&
+            row.owner === this.state.handle
+          )
+            this.retainConversation({
+              id: row.id,
+              ...(row.project ? { project: row.project } : {}),
+              title: row.agent ?? row.id,
+            });
+        return { state: structuredClone(this.state), proc };
+      }
       case 'usage-open':
         await this.usage.open(request.type, request.filter);
         break;

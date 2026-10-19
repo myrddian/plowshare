@@ -1,6 +1,10 @@
 import type { ImportRecovery } from './import-recovery-contract.ts';
 import type { NativeCommandResult } from 'plowshare-mcp-integration';
 import type {
+  ProcRequest,
+  ProcReplies,
+} from 'plowshare-client-ts/operations/proc';
+import type {
   ManagementOperation,
   ManagementValue,
   ManagementIntent,
@@ -121,6 +125,7 @@ export interface WorkspaceRoute {
     | 'memories'
     | 'manage'
     | 'usage'
+    | 'proc'
     | 'relay';
   label: string;
   project?: string;
@@ -413,6 +418,9 @@ export type Request =
       revision: string;
     }
   | { action: 'usage' }
+  | { action: 'proc' }
+  | (ProcRequest & { action: 'proc-read' })
+  | { action: 'proc-trajectory'; conversation: string }
   | {
       action: 'context-snapshot';
       conversation: string;
@@ -727,6 +735,7 @@ export interface Reply {
   relayControl?: RelayReplies['relay.operate'];
   administration?: Replies[ServerAdminOperation | ProjectAccessOperation];
   usage?: Replies[UsageOperation];
+  proc?: ProcReplies[keyof ProcReplies];
   information?: Replies[`information.${InformationOperation}`];
   state: DesktopState;
   conversation?: string;

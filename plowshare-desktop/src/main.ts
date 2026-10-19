@@ -54,6 +54,7 @@ const boardUrl = 'plowshare://app/board.html';
 const trajectoryUrl = 'plowshare://app/trajectory.html';
 const relayUrl = 'plowshare://app/relay.html';
 const usageUrl = 'plowshare://app/usage.html';
+const procUrl = 'plowshare://app/proc.html';
 const libraryUrl = 'plowshare://app/library.html';
 const libraryActions = [
   'library-view',
@@ -100,6 +101,7 @@ let activityRunRead = 0;
 const libraries = new Map<'library' | 'memories', WorkspacePage>();
 const boards = new Map<BoardView, WorkspacePage>();
 let usagePage: WorkspacePage | undefined;
+let procPage: WorkspacePage | undefined;
 let relayPage: WorkspacePage | undefined;
 const relayConversations = new Set<string>();
 let identity = '';
@@ -125,6 +127,7 @@ const client = new DesktopWorkspace(
       showChat();
       closeTrajectories();
       usagePage?.close();
+      procPage?.close();
       relayPage?.close();
       relayConversations.clear();
       for (const page of activities.values()) page.window.close();
@@ -140,6 +143,7 @@ const client = new DesktopWorkspace(
       ...boards.values(),
       ...libraries.values(),
       ...(usagePage ? [usagePage] : []),
+      ...(procPage ? [procPage] : []),
       ...(relayPage ? [relayPage] : []),
     ])
       if (!page.isDestroyed()) page.webContents.send('plowshare:state', state);
@@ -282,6 +286,22 @@ function openRelay() {
     }
   });
   background(page.loadURL(relayUrl));
+}
+
+function openProc() {
+  if (procPage && !procPage.isDestroyed()) {
+    procPage.show();
+    procPage.focus();
+    return;
+  }
+  const page = makePage(() => ({ kind: 'proc', label: 'Processes' }));
+  procPage = page;
+  secureWindow(page);
+  page.show();
+  page.on('closed', () => {
+    if (procPage === page) procPage = undefined;
+  });
+  background(page.loadURL(procUrl));
 }
 
 function openUsage() {
@@ -506,6 +526,9 @@ background(
           'relay.html',
           'relay.js',
           'relay.css',
+          'proc.html',
+          'proc.js',
+          'proc.css',
           'usage.html',
           'usage.js',
           'usage.css',
@@ -536,6 +559,10 @@ background(
         relayPage &&
         !relayPage.isDestroyed() &&
         event.sender === relayPage.webContents;
+      const proc =
+        procPage &&
+        !procPage.isDestroyed() &&
+        event.sender === procPage.webContents;
       const usage =
         usagePage &&
         !usagePage.isDestroyed() &&
@@ -546,6 +573,7 @@ background(
           !account &&
           !board &&
           !library &&
+          !proc &&
           !usage &&
           !relay) ||
         event.senderFrame !== event.sender.mainFrame ||
@@ -560,9 +588,11 @@ background(
                   ? boardUrl
                   : relay
                     ? relayUrl
-                    : usage
-                      ? usageUrl
-                      : libraryUrl)
+                    : proc
+                      ? procUrl
+                      : usage
+                        ? usageUrl
+                        : libraryUrl)
       ) {
         throw new Error(
           'Desktop requests must come from a registered application window.',
@@ -678,6 +708,22 @@ background(
         request.action === 'relay-trajectory'
       )
         throw new Error('Open Relay to inspect its logs.');
+      if (proc) {
+        if (request.action === 'bootstrap') return { state: client.state };
+        if (request.action === 'proc-read') return client.dispatch(request);
+        if (request.action === 'proc-trajectory') {
+          openTrajectory(request.conversation);
+          return { state: client.state };
+        }
+        throw new Error(
+          'Processes can only audit work and open available trajectories.',
+        );
+      }
+      if (
+        request.action === 'proc-read' ||
+        request.action === 'proc-trajectory'
+      )
+        throw new Error('Open Processes to audit work.');
       if (usage) {
         if (request?.action === 'bootstrap') return { state: client.state };
         if (
@@ -1068,6 +1114,10 @@ background(
       if (request.action === 'relay') {
         if (!main) throw new Error('Open Relay from the workspace sidebar.');
         openRelay();
+        return { state: client.state };
+      }
+      if (request.action === 'proc') {
+        openProc();
         return { state: client.state };
       }
       if (request?.action === 'usage') {

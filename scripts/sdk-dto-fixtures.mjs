@@ -516,6 +516,26 @@ result('tool.scope.connect', { ...scopeConnection, sourceProvider: 'linear', pro
 result('tool.scope.list', { connections: [] }, true);
 result('tool.scope.disconnect', { project: 'fixture', scope: 'linear', disconnected: true }, true);
 
+const procSelection={visibility:'mine',project:null,conversation:null,root:null,causation:null,active:null,after:null,limit:50};
+const procPage={snapshotAt:'2026-10-19T01:00:00Z',selection:procSelection,conversations:[],total:0,cursor:null,coverage:[]};
+for(const operation of ['proc.list','proc.calls','proc.queues','proc.tools']) {
+  input(operation,{},true);
+  input(operation,{visibility:'server',limit:100,active:true},true);
+  input(operation,{conversation:'cnv_fixture',after:'cursor:fixture'},true);
+  input(operation,{after:'x'.repeat(257)},false);
+  for(const change of [{limit:0},{limit:101},{limit:1.5},{active:'true'},{account:'other'},{conversation:'bad\u0000id'},{visibility:'admin'}])input(operation,change,false);
+}
+input('proc.inspect',{},false);
+input('proc.inspect',{root:'cnv_fixture'},true);
+input('proc.inspect',{conversation:'cnv_fixture',after:'cursor:fixture'},true);
+input('proc.inspect',{causation:'chain-fixture',visibility:'server'},true);
+result('proc.list',procPage,true);
+result('proc.list',{...procPage,total:-1},false);
+result('proc.list',{...procPage,snapshotAt:'yesterday'},false);
+result('proc.tools',{snapshotAt:procPage.snapshotAt,selection:procSelection,tools:[],cursor:null,coverage:[]},true);
+result('proc.calls',{snapshotAt:procPage.snapshotAt,selection:procSelection,calls:[],cursor:null,coverage:[]},true);
+result('proc.queues',{snapshotAt:procPage.snapshotAt,selection:procSelection,queues:[],summaries:[],pools:[],cursor:null,coverage:[]},true);
+
 for (const test of cases) {
   let accepted = true;
   try {

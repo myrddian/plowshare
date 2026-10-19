@@ -270,7 +270,7 @@ def inventory():
     bound_catalog = read(administrative_source).split("export const BOUND_OPERATIONS = {", 1)[1].split("} as const", 1)[0]
     bound_frames = dict(re.findall(r"'([a-z.]+)': '([^']+)'", bound_catalog))
     typed_frames = set()
-    for source in [direct_source, cli_source, administrative_source, "sdk/typescript/src/operations/information-payloads.ts", "sdk/typescript/src/operations/information-navigation.ts", "sdk/typescript/src/operations/information-interchange.ts", "sdk/typescript/src/operations/usage.ts", "sdk/typescript/src/operations/messaging.ts", "sdk/typescript/src/operations/relay.ts", "sdk/typescript/src/operations/relay-ports.ts", "sdk/typescript/src/operations/tool-scopes.ts", "sdk/typescript/src/operations/provider-credentials.ts", "sdk/typescript/src/operations/hosted-tool-scopes.ts"]:
+    for source in [direct_source, cli_source, administrative_source, "sdk/typescript/src/operations/information-payloads.ts", "sdk/typescript/src/operations/information-navigation.ts", "sdk/typescript/src/operations/information-interchange.ts", "sdk/typescript/src/operations/usage.ts", "sdk/typescript/src/operations/proc.ts", "sdk/typescript/src/operations/messaging.ts", "sdk/typescript/src/operations/relay.ts", "sdk/typescript/src/operations/relay-ports.ts", "sdk/typescript/src/operations/tool-scopes.ts", "sdk/typescript/src/operations/provider-credentials.ts", "sdk/typescript/src/operations/hosted-tool-scopes.ts"]:
         typed_frames.update(re.findall(r"^\s*'([a-z]+(?:\.[a-z]+)+)':", read(source), re.M))
     assert typed_frames == set(areas), "typed payload catalog differs from the registered WS surface"
     assert one_shot_frames.isdisjoint(bound_frames) and cli_frames | set(bound_frames) == typed_frames
@@ -307,6 +307,8 @@ def inventory():
     reply_extra = set(re.findall(r"^\s*'([^']+)':", read(reply_source), re.M))
     usage_replies = re.search(r"export interface UsageReplies \{(.*?)\}", read(usage_source), re.S).group(1)
     response_operations = set(retrieval_operations) | reply_extra | set(re.findall(r"'([^']+)':", usage_replies))
+    proc_replies = re.search(r"export interface ProcReplies \{(.*?)\n\}", read("sdk/typescript/src/operations/proc.ts"), re.S).group(1)
+    response_operations.update(re.findall(r"'([^']+)':", proc_replies))
     relay_replies = re.search(r"export interface RelayReplies(?: extends RelayPortReplies)? \{(.*?)\n\}", read("sdk/typescript/src/operations/relay.ts"), re.S).group(1)
     response_operations.update(re.findall(r"'([^']+)':", relay_replies))
     response_operations.update(re.findall(r"^\s*'([^']+)':", read("sdk/typescript/src/operations/relay-ports.ts"), re.M))

@@ -1,4 +1,5 @@
 import type { HostedToolPayloads } from './hosted-tool-scopes.ts';
+import type { ProcPayloads } from './proc.ts';
 import type { ProviderCredentialPayloads } from './provider-credentials.ts';
 import type { ToolScopePayloads } from './tool-scopes.ts';
 import type { ApplicationSourceFile } from './application-deployments.ts';
@@ -18,6 +19,7 @@ type Turns = { readonly maxTurns?: number; readonly noTurnCap?: boolean };
 type Budget = { readonly maxModelCalls?: number };
 export interface ExtendedPayloads
   extends
+    ProcPayloads,
     HostedToolPayloads,
     ProviderCredentialPayloads,
     MessagingPayloads,
@@ -274,6 +276,11 @@ export interface ExtendedPayloads
 
 /** Explicit operator verbs; no arbitrary frame forwarding or local filesystem claims. */
 export const CLI_OPERATIONS = {
+  'proc list': 'proc.list',
+  'proc inspect': 'proc.inspect',
+  'proc calls': 'proc.calls',
+  'proc queues': 'proc.queues',
+  'proc tools': 'proc.tools',
   'tool scope host save': 'tool.scope.host.save',
   'tool scope host change': 'tool.scope.host.change',
   'tool scope host list': 'tool.scope.host.list',

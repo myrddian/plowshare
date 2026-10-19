@@ -8,6 +8,17 @@ import { usageCommand, type UsageCommand } from './usage.ts';
 import { informationCommand } from './information.ts';
 import type { InformationCommand } from './information.ts';
 import { flagAt } from 'plowshare-client-ts/operations/inspection';
+type ProcRequest = Extract<
+  MessageRequest,
+  {
+    type:
+      | 'proc.list'
+      | 'proc.inspect'
+      | 'proc.calls'
+      | 'proc.queues'
+      | 'proc.tools';
+  }
+>;
 export {
   inboxPageOf,
   runsOf,
@@ -1000,6 +1011,7 @@ export type Progress =
  * answer.
  */
 export type Typed =
+  | { readonly kind: 'proc'; readonly command: ProcRequest | null }
   | { readonly kind: 'messaging'; readonly command: MessageRequest }
   | { readonly kind: 'usage-report'; readonly command: UsageCommand }
   | { readonly kind: 'information'; readonly command: InformationCommand }
@@ -1530,6 +1542,26 @@ export function typed(
   // `/project` with a stray `s` glued to the front of its argument.
   const [word = '', ...rest] = text.split(/\s+/);
   const argument = rest.length === 0 ? '' : text.slice(word.length).trim();
+  if (word === '/proc') {
+    if (!argument) return { kind: 'proc', command: null };
+    const parsed = parseCommand(text.slice(1));
+    if (
+      parsed.kind === 'request' &&
+      (parsed.request.type === 'proc.list' ||
+        parsed.request.type === 'proc.inspect' ||
+        parsed.request.type === 'proc.calls' ||
+        parsed.request.type === 'proc.queues' ||
+        parsed.request.type === 'proc.tools')
+    )
+      return { kind: 'proc', command: parsed.request };
+    return {
+      kind: 'retrieval-error',
+      text:
+        parsed.kind === 'usage'
+          ? parsed.said
+          : 'Use /proc or /proc list|inspect|calls|queues|tools with a JSON selector.',
+    };
+  }
   if (word === '/message') {
     const parsed = parseCommand(text.slice(1), project);
     if (parsed.kind === 'request' && parsed.request.type.startsWith('message.'))

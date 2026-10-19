@@ -1226,6 +1226,18 @@ internal sealed class IntegrationReadingDtoContextConverter : JsonConverter<Inte
  public override void Write(Utf8JsonWriter writer,IntegrationReadingDtoContext value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
+/// <summary>Fields of the ProcQuery protocol contract.</summary>
+public sealed record ProcQueryDto {
+ [JsonPropertyName("active")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Active { get; init; }
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("causation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Causation { get; init; }
+ [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Conversation { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
+ [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
+ [JsonPropertyName("root")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Root { get; init; }
+ [JsonPropertyName("visibility")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Visibility { get; init; }
+}
+
 /// <summary>Fields of the ProviderOAuthSettings protocol contract.</summary>
 public sealed record ProviderOAuthSettingsDto {
  [JsonPropertyName("authorizationEndpoint")] public required string AuthorizationEndpoint { get; init; }
@@ -1263,7 +1275,7 @@ public sealed record ProviderConnectionDefinitionDtoApiKeyHeader {
 }
 internal sealed class ProviderConnectionDefinitionDtoApiKeyHeaderConverter : JsonConverter<ProviderConnectionDefinitionDtoApiKeyHeader> {
  public override bool HandleNull => true;
- public override ProviderConnectionDefinitionDtoApiKeyHeader Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape484",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape485",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant3(value.Deserialize<string>(options)!);if(Codec.Matches("shape486",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant4(value.Deserialize<string>(options)!);throw new JsonException("Invalid union");}
+ public override ProviderConnectionDefinitionDtoApiKeyHeader Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape488",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape489",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant3(value.Deserialize<string>(options)!);if(Codec.Matches("shape490",value))return ProviderConnectionDefinitionDtoApiKeyHeader.FromVariant4(value.Deserialize<string>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ProviderConnectionDefinitionDtoApiKeyHeader value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -1278,7 +1290,7 @@ public sealed record ProviderConnectionDefinitionDtoOauth {
 }
 internal sealed class ProviderConnectionDefinitionDtoOauthConverter : JsonConverter<ProviderConnectionDefinitionDtoOauth> {
  public override bool HandleNull => true;
- public override ProviderConnectionDefinitionDtoOauth Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ProviderConnectionDefinitionDtoOauth.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape492",value))return ProviderConnectionDefinitionDtoOauth.FromVariant2(value.Deserialize<ProviderOAuthSettingsDto>(options)!);throw new JsonException("Invalid union");}
+ public override ProviderConnectionDefinitionDtoOauth Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ProviderConnectionDefinitionDtoOauth.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape496",value))return ProviderConnectionDefinitionDtoOauth.FromVariant2(value.Deserialize<ProviderOAuthSettingsDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ProviderConnectionDefinitionDtoOauth value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -1385,7 +1397,7 @@ public sealed record ScheduleDefinitionDtoActionDtoMode {
 }
 internal sealed class ScheduleDefinitionDtoActionDtoModeConverter : JsonConverter<ScheduleDefinitionDtoActionDtoMode> {
  public override bool HandleNull => true;
- public override ScheduleDefinitionDtoActionDtoMode Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape530",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape531",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant3(value.Deserialize<string>(options)!);if(Codec.Matches("shape532",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant4(value.Deserialize<string>(options)!);if(Codec.Matches("shape533",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant5(value.Deserialize<string>(options)!);throw new JsonException("Invalid union");}
+ public override ScheduleDefinitionDtoActionDtoMode Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape534",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape535",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant3(value.Deserialize<string>(options)!);if(Codec.Matches("shape536",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant4(value.Deserialize<string>(options)!);if(Codec.Matches("shape537",value))return ScheduleDefinitionDtoActionDtoMode.FromVariant5(value.Deserialize<string>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ScheduleDefinitionDtoActionDtoMode value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}if(value.Variant5.IsSet){JsonSerializer.Serialize(writer,value.Variant5.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -1590,7 +1602,7 @@ public sealed record PricingCardDtoRates {
 }
 internal sealed class PricingCardDtoRatesConverter : JsonConverter<PricingCardDtoRates> {
  public override bool HandleNull => true;
- public override PricingCardDtoRates Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return PricingCardDtoRates.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape636",value))return PricingCardDtoRates.FromVariant2(value.Deserialize<PricingRatesDto>(options)!);throw new JsonException("Invalid union");}
+ public override PricingCardDtoRates Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return PricingCardDtoRates.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape638",value))return PricingCardDtoRates.FromVariant2(value.Deserialize<PricingRatesDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,PricingCardDtoRates value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -1617,7 +1629,7 @@ public sealed record PricingEntryDtoCard {
 }
 internal sealed class PricingEntryDtoCardConverter : JsonConverter<PricingEntryDtoCard> {
  public override bool HandleNull => true;
- public override PricingEntryDtoCard Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return PricingEntryDtoCard.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape633",value))return PricingEntryDtoCard.FromVariant2(value.Deserialize<PricingCardDto>(options)!);throw new JsonException("Invalid union");}
+ public override PricingEntryDtoCard Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return PricingEntryDtoCard.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape635",value))return PricingEntryDtoCard.FromVariant2(value.Deserialize<PricingCardDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,PricingEntryDtoCard value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -1869,7 +1881,7 @@ public sealed record ApplicationIdentityStatusDtoIdentity {
 }
 internal sealed class ApplicationIdentityStatusDtoIdentityConverter : JsonConverter<ApplicationIdentityStatusDtoIdentity> {
  public override bool HandleNull => true;
- public override ApplicationIdentityStatusDtoIdentity Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ApplicationIdentityStatusDtoIdentity.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape672",value))return ApplicationIdentityStatusDtoIdentity.FromVariant2(value.Deserialize<ApplicationIdentityBindingDto>(options)!);throw new JsonException("Invalid union");}
+ public override ApplicationIdentityStatusDtoIdentity Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ApplicationIdentityStatusDtoIdentity.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape674",value))return ApplicationIdentityStatusDtoIdentity.FromVariant2(value.Deserialize<ApplicationIdentityBindingDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ApplicationIdentityStatusDtoIdentity value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -1929,7 +1941,7 @@ public sealed record ApprovalViewDtoCommands {
 }
 internal sealed class ApprovalViewDtoCommandsConverter : JsonConverter<ApprovalViewDtoCommands> {
  public override bool HandleNull => true;
- public override ApprovalViewDtoCommands Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ApprovalViewDtoCommands.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape685",value))return ApprovalViewDtoCommands.FromVariant2(value.Deserialize<IReadOnlyList<IReadOnlyList<string>>>(options)!);throw new JsonException("Invalid union");}
+ public override ApprovalViewDtoCommands Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ApprovalViewDtoCommands.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape687",value))return ApprovalViewDtoCommands.FromVariant2(value.Deserialize<IReadOnlyList<IReadOnlyList<string>>>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ApprovalViewDtoCommands value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2013,7 +2025,7 @@ public sealed record BoardTopicDtoSwarm {
 }
 internal sealed class BoardTopicDtoSwarmConverter : JsonConverter<BoardTopicDtoSwarm> {
  public override bool HandleNull => true;
- public override BoardTopicDtoSwarm Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return BoardTopicDtoSwarm.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape694",value))return BoardTopicDtoSwarm.FromVariant2(value.Deserialize<SwarmSelectionDto>(options)!);throw new JsonException("Invalid union");}
+ public override BoardTopicDtoSwarm Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return BoardTopicDtoSwarm.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape696",value))return BoardTopicDtoSwarm.FromVariant2(value.Deserialize<SwarmSelectionDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,BoardTopicDtoSwarm value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2141,7 +2153,7 @@ public sealed record AskedViewDtoOpened {
 }
 internal sealed class AskedViewDtoOpenedConverter : JsonConverter<AskedViewDtoOpened> {
  public override bool HandleNull => true;
- public override AskedViewDtoOpened Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return AskedViewDtoOpened.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape715",value))return AskedViewDtoOpened.FromVariant2(value.Deserialize<OpenedViewDto>(options)!);throw new JsonException("Invalid union");}
+ public override AskedViewDtoOpened Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return AskedViewDtoOpened.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape717",value))return AskedViewDtoOpened.FromVariant2(value.Deserialize<OpenedViewDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,AskedViewDtoOpened value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2184,7 +2196,7 @@ public sealed record EntryViewDtoSource {
 }
 internal sealed class EntryViewDtoSourceConverter : JsonConverter<EntryViewDtoSource> {
  public override bool HandleNull => true;
- public override EntryViewDtoSource Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return EntryViewDtoSource.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape711",value))return EntryViewDtoSource.FromVariant2(value.Deserialize<SourceViewDto>(options)!);throw new JsonException("Invalid union");}
+ public override EntryViewDtoSource Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return EntryViewDtoSource.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape713",value))return EntryViewDtoSource.FromVariant2(value.Deserialize<SourceViewDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,EntryViewDtoSource value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2270,7 +2282,7 @@ public sealed record ContextViewDtoMessageTokens {
 }
 internal sealed class ContextViewDtoMessageTokensConverter : JsonConverter<ContextViewDtoMessageTokens> {
  public override bool HandleNull => true;
- public override ContextViewDtoMessageTokens Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ContextViewDtoMessageTokens.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape722",value))return ContextViewDtoMessageTokens.FromVariant2(value.Deserialize<TokenCountDto>(options)!);throw new JsonException("Invalid union");}
+ public override ContextViewDtoMessageTokens Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ContextViewDtoMessageTokens.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape724",value))return ContextViewDtoMessageTokens.FromVariant2(value.Deserialize<TokenCountDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ContextViewDtoMessageTokens value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2285,7 +2297,7 @@ public sealed record ContextViewDtoPrefix {
 }
 internal sealed class ContextViewDtoPrefixConverter : JsonConverter<ContextViewDtoPrefix> {
  public override bool HandleNull => true;
- public override ContextViewDtoPrefix Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ContextViewDtoPrefix.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape724",value))return ContextViewDtoPrefix.FromVariant2(value.Deserialize<PrefixDto>(options)!);throw new JsonException("Invalid union");}
+ public override ContextViewDtoPrefix Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ContextViewDtoPrefix.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape726",value))return ContextViewDtoPrefix.FromVariant2(value.Deserialize<PrefixDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ContextViewDtoPrefix value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2322,7 +2334,7 @@ public sealed record ProjectionMessageDtoPartsItem {
 }
 internal sealed class ProjectionMessageDtoPartsItemConverter : JsonConverter<ProjectionMessageDtoPartsItem> {
  public override bool HandleNull => true;
- public override ProjectionMessageDtoPartsItem Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape743",value))return ProjectionMessageDtoPartsItem.FromVariant1(value.Deserialize<ProjectionMessageDtoPartsItemVariant1Dto>(options)!);if(Codec.Matches("shape745",value))return ProjectionMessageDtoPartsItem.FromVariant2(value.Deserialize<ProjectionMessageDtoPartsItemVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override ProjectionMessageDtoPartsItem Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape745",value))return ProjectionMessageDtoPartsItem.FromVariant1(value.Deserialize<ProjectionMessageDtoPartsItemVariant1Dto>(options)!);if(Codec.Matches("shape747",value))return ProjectionMessageDtoPartsItem.FromVariant2(value.Deserialize<ProjectionMessageDtoPartsItemVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ProjectionMessageDtoPartsItem value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2367,7 +2379,7 @@ public sealed record ToolParameterSchemaEntry {
 }
 internal sealed class ToolParameterSchemaEntryConverter : JsonConverter<ToolParameterSchemaEntry> {
  public override bool HandleNull => true;
- public override ToolParameterSchemaEntry Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ToolParameterSchemaEntry.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1",value))return ToolParameterSchemaEntry.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape16",value))return ToolParameterSchemaEntry.FromVariant3(value.Deserialize<double>(options)!);if(Codec.Matches("shape9",value))return ToolParameterSchemaEntry.FromVariant4(value.Deserialize<bool>(options)!);if(Codec.Matches("shape10",value))return ToolParameterSchemaEntry.FromVariant5(value.Deserialize<bool>(options)!);if(Codec.Matches("shape758",value))return ToolParameterSchemaEntry.FromVariant6(value.Deserialize<IReadOnlyList<ToolParameterSchemaEntry>>(options)!);if(Codec.Matches("shape759",value))return ToolParameterSchemaEntry.FromVariant7(value.Deserialize<IReadOnlyDictionary<string, ToolParameterSchemaEntry>>(options)!);throw new JsonException("Invalid union");}
+ public override ToolParameterSchemaEntry Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ToolParameterSchemaEntry.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1",value))return ToolParameterSchemaEntry.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape16",value))return ToolParameterSchemaEntry.FromVariant3(value.Deserialize<double>(options)!);if(Codec.Matches("shape9",value))return ToolParameterSchemaEntry.FromVariant4(value.Deserialize<bool>(options)!);if(Codec.Matches("shape10",value))return ToolParameterSchemaEntry.FromVariant5(value.Deserialize<bool>(options)!);if(Codec.Matches("shape760",value))return ToolParameterSchemaEntry.FromVariant6(value.Deserialize<IReadOnlyList<ToolParameterSchemaEntry>>(options)!);if(Codec.Matches("shape761",value))return ToolParameterSchemaEntry.FromVariant7(value.Deserialize<IReadOnlyDictionary<string, ToolParameterSchemaEntry>>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ToolParameterSchemaEntry value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}if(value.Variant5.IsSet){JsonSerializer.Serialize(writer,value.Variant5.Value,options);return;}if(value.Variant6.IsSet){JsonSerializer.Serialize(writer,value.Variant6.Value,options);return;}if(value.Variant7.IsSet){JsonSerializer.Serialize(writer,value.Variant7.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2411,7 +2423,7 @@ public sealed record ContextSnapshotDtoCount {
 }
 internal sealed class ContextSnapshotDtoCountConverter : JsonConverter<ContextSnapshotDtoCount> {
  public override bool HandleNull => true;
- public override ContextSnapshotDtoCount Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ContextSnapshotDtoCount.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape738",value))return ContextSnapshotDtoCount.FromVariant2(value.Deserialize<ContextSnapshotDtoCountVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override ContextSnapshotDtoCount Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ContextSnapshotDtoCount.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape740",value))return ContextSnapshotDtoCount.FromVariant2(value.Deserialize<ContextSnapshotDtoCountVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ContextSnapshotDtoCount value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2526,7 +2538,7 @@ public sealed record SearchRetrievalDtoCoverage {
 }
 internal sealed class SearchRetrievalDtoCoverageConverter : JsonConverter<SearchRetrievalDtoCoverage> {
  public override bool HandleNull => true;
- public override SearchRetrievalDtoCoverage Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return SearchRetrievalDtoCoverage.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape777",value))return SearchRetrievalDtoCoverage.FromVariant2(value.Deserialize<PassageCoverageDto>(options)!);throw new JsonException("Invalid union");}
+ public override SearchRetrievalDtoCoverage Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return SearchRetrievalDtoCoverage.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape779",value))return SearchRetrievalDtoCoverage.FromVariant2(value.Deserialize<PassageCoverageDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,SearchRetrievalDtoCoverage value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2583,7 +2595,7 @@ public sealed record ChunkDetailResponseDtoChapter {
 }
 internal sealed class ChunkDetailResponseDtoChapterConverter : JsonConverter<ChunkDetailResponseDtoChapter> {
  public override bool HandleNull => true;
- public override ChunkDetailResponseDtoChapter Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ChunkDetailResponseDtoChapter.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape782",value))return ChunkDetailResponseDtoChapter.FromVariant2(value.Deserialize<UnitViewDto>(options)!);throw new JsonException("Invalid union");}
+ public override ChunkDetailResponseDtoChapter Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ChunkDetailResponseDtoChapter.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape784",value))return ChunkDetailResponseDtoChapter.FromVariant2(value.Deserialize<UnitViewDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ChunkDetailResponseDtoChapter value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -2864,7 +2876,7 @@ public sealed record InformationAcquisitionDtoPostGate {
 }
 internal sealed class InformationAcquisitionDtoPostGateConverter : JsonConverter<InformationAcquisitionDtoPostGate> {
  public override bool HandleNull => true;
- public override InformationAcquisitionDtoPostGate Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return InformationAcquisitionDtoPostGate.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape820",value))return InformationAcquisitionDtoPostGate.FromVariant2(value.Deserialize<InformationGateDto>(options)!);throw new JsonException("Invalid union");}
+ public override InformationAcquisitionDtoPostGate Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return InformationAcquisitionDtoPostGate.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape822",value))return InformationAcquisitionDtoPostGate.FromVariant2(value.Deserialize<InformationGateDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,InformationAcquisitionDtoPostGate value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3198,7 +3210,7 @@ public sealed record MigrationEntryDtoToolCalls {
 }
 internal sealed class MigrationEntryDtoToolCallsConverter : JsonConverter<MigrationEntryDtoToolCalls> {
  public override bool HandleNull => true;
- public override MigrationEntryDtoToolCalls Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return MigrationEntryDtoToolCalls.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape914",value))return MigrationEntryDtoToolCalls.FromVariant2(value.Deserialize<IReadOnlyList<MigrationEntryDtoToolCallsVariant2ItemDto>>(options)!);throw new JsonException("Invalid union");}
+ public override MigrationEntryDtoToolCalls Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return MigrationEntryDtoToolCalls.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape916",value))return MigrationEntryDtoToolCalls.FromVariant2(value.Deserialize<IReadOnlyList<MigrationEntryDtoToolCallsVariant2ItemDto>>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,MigrationEntryDtoToolCalls value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3384,7 +3396,7 @@ public sealed record DocumentConnectionDtoSelection {
 }
 internal sealed class DocumentConnectionDtoSelectionConverter : JsonConverter<DocumentConnectionDtoSelection> {
  public override bool HandleNull => true;
- public override DocumentConnectionDtoSelection Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape852",value))return DocumentConnectionDtoSelection.FromVariant1(value.Deserialize<DocumentConnectionDtoSelectionVariant1Dto>(options)!);if(Codec.Matches("shape855",value))return DocumentConnectionDtoSelection.FromVariant2(value.Deserialize<DocumentConnectionDtoSelectionVariant2Dto>(options)!);if(Codec.Matches("shape857",value))return DocumentConnectionDtoSelection.FromVariant3(value.Deserialize<DocumentConnectionDtoSelectionVariant3Dto>(options)!);throw new JsonException("Invalid union");}
+ public override DocumentConnectionDtoSelection Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape854",value))return DocumentConnectionDtoSelection.FromVariant1(value.Deserialize<DocumentConnectionDtoSelectionVariant1Dto>(options)!);if(Codec.Matches("shape857",value))return DocumentConnectionDtoSelection.FromVariant2(value.Deserialize<DocumentConnectionDtoSelectionVariant2Dto>(options)!);if(Codec.Matches("shape859",value))return DocumentConnectionDtoSelection.FromVariant3(value.Deserialize<DocumentConnectionDtoSelectionVariant3Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,DocumentConnectionDtoSelection value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3434,7 +3446,7 @@ public sealed record InformationSearchPlacementDtoChapterTitle {
 }
 internal sealed class InformationSearchPlacementDtoChapterTitleConverter : JsonConverter<InformationSearchPlacementDtoChapterTitle> {
  public override bool HandleNull => true;
- public override InformationSearchPlacementDtoChapterTitle Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape951",value))return InformationSearchPlacementDtoChapterTitle.FromVariant1(value.Deserialize<InformationSearchPlacementDtoChapterTitleVariant1Dto>(options)!);if(Codec.Matches("shape952",value))return InformationSearchPlacementDtoChapterTitle.FromVariant2(value.Deserialize<InformationSearchPlacementDtoChapterTitleVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override InformationSearchPlacementDtoChapterTitle Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape953",value))return InformationSearchPlacementDtoChapterTitle.FromVariant1(value.Deserialize<InformationSearchPlacementDtoChapterTitleVariant1Dto>(options)!);if(Codec.Matches("shape954",value))return InformationSearchPlacementDtoChapterTitle.FromVariant2(value.Deserialize<InformationSearchPlacementDtoChapterTitleVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,InformationSearchPlacementDtoChapterTitle value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3478,7 +3490,7 @@ public sealed record InformationSearchChunkDtoPlacement {
 }
 internal sealed class InformationSearchChunkDtoPlacementConverter : JsonConverter<InformationSearchChunkDtoPlacement> {
  public override bool HandleNull => true;
- public override InformationSearchChunkDtoPlacement Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape949",value))return InformationSearchChunkDtoPlacement.FromVariant1(value.Deserialize<InformationSearchPlacementDto>(options)!);if(Codec.Matches("shape953",value))return InformationSearchChunkDtoPlacement.FromVariant2(value.Deserialize<InformationUnplacedDto>(options)!);throw new JsonException("Invalid union");}
+ public override InformationSearchChunkDtoPlacement Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape951",value))return InformationSearchChunkDtoPlacement.FromVariant1(value.Deserialize<InformationSearchPlacementDto>(options)!);if(Codec.Matches("shape955",value))return InformationSearchChunkDtoPlacement.FromVariant2(value.Deserialize<InformationUnplacedDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,InformationSearchChunkDtoPlacement value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3607,7 +3619,7 @@ public sealed record ObservedOutcomeDtoPace {
 }
 internal sealed class ObservedOutcomeDtoPaceConverter : JsonConverter<ObservedOutcomeDtoPace> {
  public override bool HandleNull => true;
- public override ObservedOutcomeDtoPace Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ObservedOutcomeDtoPace.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape982",value))return ObservedOutcomeDtoPace.FromVariant2(value.Deserialize<PartialDto2>(options)!);throw new JsonException("Invalid union");}
+ public override ObservedOutcomeDtoPace Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ObservedOutcomeDtoPace.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape984",value))return ObservedOutcomeDtoPace.FromVariant2(value.Deserialize<PartialDto2>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ObservedOutcomeDtoPace value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3633,7 +3645,7 @@ public sealed record ObservedJobDtoLimits {
 }
 internal sealed class ObservedJobDtoLimitsConverter : JsonConverter<ObservedJobDtoLimits> {
  public override bool HandleNull => true;
- public override ObservedJobDtoLimits Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ObservedJobDtoLimits.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape978",value))return ObservedJobDtoLimits.FromVariant2(value.Deserialize<PartialDto>(options)!);throw new JsonException("Invalid union");}
+ public override ObservedJobDtoLimits Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ObservedJobDtoLimits.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape980",value))return ObservedJobDtoLimits.FromVariant2(value.Deserialize<PartialDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ObservedJobDtoLimits value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3648,7 +3660,7 @@ public sealed record ObservedJobDtoOutcome {
 }
 internal sealed class ObservedJobDtoOutcomeConverter : JsonConverter<ObservedJobDtoOutcome> {
  public override bool HandleNull => true;
- public override ObservedJobDtoOutcome Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ObservedJobDtoOutcome.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape980",value))return ObservedJobDtoOutcome.FromVariant2(value.Deserialize<ObservedOutcomeDto>(options)!);throw new JsonException("Invalid union");}
+ public override ObservedJobDtoOutcome Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ObservedJobDtoOutcome.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape982",value))return ObservedJobDtoOutcome.FromVariant2(value.Deserialize<ObservedOutcomeDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ObservedJobDtoOutcome value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3707,7 +3719,7 @@ public sealed record MemoryRecordDtoInvalidation {
 }
 internal sealed class MemoryRecordDtoInvalidationConverter : JsonConverter<MemoryRecordDtoInvalidation> {
  public override bool HandleNull => true;
- public override MemoryRecordDtoInvalidation Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return MemoryRecordDtoInvalidation.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape990",value))return MemoryRecordDtoInvalidation.FromVariant2(value.Deserialize<MemoryInvalidationDto>(options)!);throw new JsonException("Invalid union");}
+ public override MemoryRecordDtoInvalidation Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return MemoryRecordDtoInvalidation.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape992",value))return MemoryRecordDtoInvalidation.FromVariant2(value.Deserialize<MemoryInvalidationDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,MemoryRecordDtoInvalidation value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -3964,7 +3976,7 @@ public sealed record MessageViewDtoStructure {
 }
 internal sealed class MessageViewDtoStructureConverter : JsonConverter<MessageViewDtoStructure> {
  public override bool HandleNull => true;
- public override MessageViewDtoStructure Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return MessageViewDtoStructure.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1031",value))return MessageViewDtoStructure.FromVariant2(value.Deserialize<MessageViewDtoStructureVariant2Dto>(options)!);if(Codec.Matches("shape1036",value))return MessageViewDtoStructure.FromVariant3(value.Deserialize<MessageViewDtoStructureVariant3Dto>(options)!);throw new JsonException("Invalid union");}
+ public override MessageViewDtoStructure Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return MessageViewDtoStructure.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1033",value))return MessageViewDtoStructure.FromVariant2(value.Deserialize<MessageViewDtoStructureVariant2Dto>(options)!);if(Codec.Matches("shape1038",value))return MessageViewDtoStructure.FromVariant3(value.Deserialize<MessageViewDtoStructureVariant3Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,MessageViewDtoStructure value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4092,6 +4104,180 @@ public sealed record OutgoingWorkDtoResultVariant6Dto {
  [JsonPropertyName("diagnostic")] public required string Diagnostic { get; init; }
 }
 
+/// <summary>Fields of the ProcAttempt protocol contract.</summary>
+public sealed record ProcAttemptDto {
+ [JsonPropertyName("costAmount")] public required TierDtoProject CostAmount { get; init; }
+ [JsonPropertyName("costKind")] public required string CostKind { get; init; }
+ [JsonPropertyName("currency")] public required TierDtoProject Currency { get; init; }
+ [JsonPropertyName("endedAt")] public required TierDtoProject EndedAt { get; init; }
+ [JsonPropertyName("finishReason")] public required TierDtoProject FinishReason { get; init; }
+ [JsonPropertyName("httpStatus")] public required ScheduleDefinitionDtoLimitsDtoMaxModelCalls HttpStatus { get; init; }
+ [JsonPropertyName("id")] public required string Id { get; init; }
+ [JsonPropertyName("inputTokens")] public required TierDtoProject InputTokens { get; init; }
+ [JsonPropertyName("number")] public required double Number { get; init; }
+ [JsonPropertyName("outputTokens")] public required TierDtoProject OutputTokens { get; init; }
+ [JsonPropertyName("startedAt")] public required string StartedAt { get; init; }
+ [JsonPropertyName("state")] public required string State { get; init; }
+}
+
+/// <summary>Fields of the ProcCall protocol contract.</summary>
+public sealed record ProcCallDto {
+ [JsonPropertyName("agent")] public required TierDtoProject Agent { get; init; }
+ [JsonPropertyName("attempts")] public required double Attempts { get; init; }
+ [JsonPropertyName("conversation")] public required TierDtoProject Conversation { get; init; }
+ [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+ [JsonPropertyName("endedAt")] public required TierDtoProject EndedAt { get; init; }
+ [JsonPropertyName("id")] public required string Id { get; init; }
+ [JsonPropertyName("lane")] public required string Lane { get; init; }
+ [JsonPropertyName("model")] public required string Model { get; init; }
+ [JsonPropertyName("observations")] public required IReadOnlyList<ProcAttemptDto> Observations { get; init; }
+ [JsonPropertyName("operation")] public required string Operation { get; init; }
+ [JsonPropertyName("owner")] public required TierDtoProject Owner { get; init; }
+ [JsonPropertyName("pool")] public required string Pool { get; init; }
+ [JsonPropertyName("principal")] public required TierDtoProject Principal { get; init; }
+ [JsonPropertyName("project")] public required TierDtoProject Project { get; init; }
+ [JsonPropertyName("root")] public required TierDtoProject Root { get; init; }
+ [JsonPropertyName("route")] public required string Route { get; init; }
+ [JsonPropertyName("run")] public required TierDtoProject Run { get; init; }
+ [JsonPropertyName("runtime")] public required string Runtime { get; init; }
+ [JsonPropertyName("state")] public required string State { get; init; }
+}
+
+/// <summary>Fields of the ProcSelection protocol contract.</summary>
+public sealed record ProcSelectionDto {
+ [JsonPropertyName("active")] public required Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired Active { get; init; }
+ [JsonPropertyName("after")] public required TierDtoProject After { get; init; }
+ [JsonPropertyName("causation")] public required TierDtoProject Causation { get; init; }
+ [JsonPropertyName("conversation")] public required TierDtoProject Conversation { get; init; }
+ [JsonPropertyName("limit")] public required double Limit { get; init; }
+ [JsonPropertyName("project")] public required TierDtoProject Project { get; init; }
+ [JsonPropertyName("root")] public required TierDtoProject Root { get; init; }
+ [JsonPropertyName("visibility")] public required string Visibility { get; init; }
+}
+
+/// <summary>Fields of the ProcCalls protocol contract.</summary>
+public sealed record ProcCallsDto {
+ [JsonPropertyName("calls")] public required IReadOnlyList<ProcCallDto> Calls { get; init; }
+ [JsonPropertyName("coverage")] public required IReadOnlyList<string> Coverage { get; init; }
+ [JsonPropertyName("cursor")] public required TierDtoProject Cursor { get; init; }
+ [JsonPropertyName("selection")] public required ProcSelectionDto Selection { get; init; }
+ [JsonPropertyName("snapshotAt")] public required string SnapshotAt { get; init; }
+}
+
+/// <summary>Fields of the ProcConversation protocol contract.</summary>
+public sealed record ProcConversationDto {
+ [JsonPropertyName("actingSubject")] public required TierDtoProject ActingSubject { get; init; }
+ [JsonPropertyName("activeCalls")] public required double ActiveCalls { get; init; }
+ [JsonPropertyName("actor")] public required TierDtoProject Actor { get; init; }
+ [JsonPropertyName("agent")] public required TierDtoProject Agent { get; init; }
+ [JsonPropertyName("application")] public required TierDtoProject Application { get; init; }
+ [JsonPropertyName("attempts")] public required double Attempts { get; init; }
+ [JsonPropertyName("calls")] public required double Calls { get; init; }
+ [JsonPropertyName("causationDepth")] public required ScheduleDefinitionDtoLimitsDtoMaxModelCalls CausationDepth { get; init; }
+ [JsonPropertyName("causationParent")] public required TierDtoProject CausationParent { get; init; }
+ [JsonPropertyName("causationRoot")] public required TierDtoProject CausationRoot { get; init; }
+ [JsonPropertyName("cause")] public required TierDtoProject Cause { get; init; }
+ [JsonPropertyName("children")] public required double Children { get; init; }
+ [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+ [JsonPropertyName("ending")] public required TierDtoProject Ending { get; init; }
+ [JsonPropertyName("evidence")] public required string Evidence { get; init; }
+ [JsonPropertyName("id")] public required string Id { get; init; }
+ [JsonPropertyName("lastTurnAt")] public required TierDtoProject LastTurnAt { get; init; }
+ [JsonPropertyName("latestJob")] public required TierDtoProject LatestJob { get; init; }
+ [JsonPropertyName("lifecycle")] public required string Lifecycle { get; init; }
+ [JsonPropertyName("origin")] public required string Origin { get; init; }
+ [JsonPropertyName("owner")] public required TierDtoProject Owner { get; init; }
+ [JsonPropertyName("parent")] public required TierDtoProject Parent { get; init; }
+ [JsonPropertyName("principal")] public required string Principal { get; init; }
+ [JsonPropertyName("project")] public required TierDtoProject Project { get; init; }
+ [JsonPropertyName("repeatedCalls")] public required double RepeatedCalls { get; init; }
+ [JsonPropertyName("resource")] public required TierDtoProject Resource { get; init; }
+ [JsonPropertyName("revision")] public required TierDtoProject Revision { get; init; }
+ [JsonPropertyName("root")] public required string Root { get; init; }
+ [JsonPropertyName("state")] public required string State { get; init; }
+}
+
+/// <summary>Fields of the ProcConversations protocol contract.</summary>
+public sealed record ProcConversationsDto {
+ [JsonPropertyName("conversations")] public required IReadOnlyList<ProcConversationDto> Conversations { get; init; }
+ [JsonPropertyName("coverage")] public required IReadOnlyList<string> Coverage { get; init; }
+ [JsonPropertyName("cursor")] public required TierDtoProject Cursor { get; init; }
+ [JsonPropertyName("selection")] public required ProcSelectionDto Selection { get; init; }
+ [JsonPropertyName("snapshotAt")] public required string SnapshotAt { get; init; }
+ [JsonPropertyName("total")] public required double Total { get; init; }
+}
+
+/// <summary>Fields of the ProcQueue protocol contract.</summary>
+public sealed record ProcQueueDto {
+ [JsonPropertyName("blocked")] public required double Blocked { get; init; }
+ [JsonPropertyName("completed")] public required double Completed { get; init; }
+ [JsonPropertyName("conversation")] public required TierDtoProject Conversation { get; init; }
+ [JsonPropertyName("coverage")] public required string Coverage { get; init; }
+ [JsonPropertyName("failed")] public required double Failed { get; init; }
+ [JsonPropertyName("id")] public required string Id { get; init; }
+ [JsonPropertyName("leaseUntil")] public required TierDtoProject LeaseUntil { get; init; }
+ [JsonPropertyName("oldestPendingAt")] public required TierDtoProject OldestPendingAt { get; init; }
+ [JsonPropertyName("owner")] public required TierDtoProject Owner { get; init; }
+ [JsonPropertyName("pending")] public required double Pending { get; init; }
+ [JsonPropertyName("project")] public required TierDtoProject Project { get; init; }
+ [JsonPropertyName("resource")] public required TierDtoProject Resource { get; init; }
+ [JsonPropertyName("revision")] public required TierDtoProject Revision { get; init; }
+ [JsonPropertyName("running")] public required ScheduleDefinitionDtoLimitsDtoMaxModelCalls Running { get; init; }
+ [JsonPropertyName("skipped")] public required double Skipped { get; init; }
+ [JsonPropertyName("stage")] public required string Stage { get; init; }
+ [JsonPropertyName("total")] public required double Total { get; init; }
+ [JsonPropertyName("unit")] public required string Unit { get; init; }
+}
+
+/// <summary>Fields of the ProcQueues protocol contract.</summary>
+public sealed record ProcQueuesDto {
+ [JsonPropertyName("coverage")] public required IReadOnlyList<string> Coverage { get; init; }
+ [JsonPropertyName("cursor")] public required TierDtoProject Cursor { get; init; }
+ [JsonPropertyName("pools")] public required IReadOnlyList<ProcQueuesDtoPoolsItemDto> Pools { get; init; }
+ [JsonPropertyName("queues")] public required IReadOnlyList<ProcQueueDto> Queues { get; init; }
+ [JsonPropertyName("selection")] public required ProcSelectionDto Selection { get; init; }
+ [JsonPropertyName("snapshotAt")] public required string SnapshotAt { get; init; }
+ [JsonPropertyName("summaries")] public required IReadOnlyList<ProcQueueDto> Summaries { get; init; }
+}
+
+/// <summary>Fields of the ProcQueuesDtoPoolsItemDto protocol contract.</summary>
+public sealed record ProcQueuesDtoPoolsItemDto {
+ [JsonPropertyName("capacity")] public required double Capacity { get; init; }
+ [JsonPropertyName("lane")] public required string Lane { get; init; }
+ [JsonPropertyName("name")] public required string Name { get; init; }
+ [JsonPropertyName("queued")] public required double Queued { get; init; }
+ [JsonPropertyName("running")] public required double Running { get; init; }
+}
+
+/// <summary>Fields of the ProcTool protocol contract.</summary>
+public sealed record ProcToolDto {
+ [JsonPropertyName("conversation")] public required string Conversation { get; init; }
+ [JsonPropertyName("id")] public required string Id { get; init; }
+ [JsonPropertyName("job")] public required TierDtoProject Job { get; init; }
+ [JsonPropertyName("name")] public required string Name { get; init; }
+ [JsonPropertyName("recordedAt")] public required TierDtoProject RecordedAt { get; init; }
+ [JsonPropertyName("state")] public required string State { get; init; }
+}
+
+/// <summary>Fields of the ProcInspection protocol contract.</summary>
+public sealed record ProcInspectionDto {
+ [JsonPropertyName("calls")] public required ProcCallsDto Calls { get; init; }
+ [JsonPropertyName("conversations")] public required ProcConversationsDto Conversations { get; init; }
+ [JsonPropertyName("queues")] public required ProcQueuesDto Queues { get; init; }
+ [JsonPropertyName("signals")] public required IReadOnlyList<string> Signals { get; init; }
+ [JsonPropertyName("tools")] public required IReadOnlyList<ProcToolDto> Tools { get; init; }
+ [JsonPropertyName("toolsTruncated")] public required bool ToolsTruncated { get; init; }
+}
+
+/// <summary>Fields of the ProcTools protocol contract.</summary>
+public sealed record ProcToolsDto {
+ [JsonPropertyName("coverage")] public required IReadOnlyList<string> Coverage { get; init; }
+ [JsonPropertyName("cursor")] public required TierDtoProject Cursor { get; init; }
+ [JsonPropertyName("selection")] public required ProcSelectionDto Selection { get; init; }
+ [JsonPropertyName("snapshotAt")] public required string SnapshotAt { get; init; }
+ [JsonPropertyName("tools")] public required IReadOnlyList<ProcToolDto> Tools { get; init; }
+}
+
 /// <summary>Fields of the ProjectGrantChange protocol contract.</summary>
 public sealed record ProjectGrantChangeDto {
  [JsonPropertyName("action")] public required string Action { get; init; }
@@ -4192,7 +4378,7 @@ public sealed record ProviderMutationReceiptDtoCredential {
 }
 internal sealed class ProviderMutationReceiptDtoCredentialConverter : JsonConverter<ProviderMutationReceiptDtoCredential> {
  public override bool HandleNull => true;
- public override ProviderMutationReceiptDtoCredential Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ProviderMutationReceiptDtoCredential.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1074",value))return ProviderMutationReceiptDtoCredential.FromVariant2(value.Deserialize<ProviderCredentialStatusDto>(options)!);throw new JsonException("Invalid union");}
+ public override ProviderMutationReceiptDtoCredential Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ProviderMutationReceiptDtoCredential.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1094",value))return ProviderMutationReceiptDtoCredential.FromVariant2(value.Deserialize<ProviderCredentialStatusDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ProviderMutationReceiptDtoCredential value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4259,7 +4445,7 @@ public sealed record RelayEventDtoCausation {
 }
 internal sealed class RelayEventDtoCausationConverter : JsonConverter<RelayEventDtoCausation> {
  public override bool HandleNull => true;
- public override RelayEventDtoCausation Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return RelayEventDtoCausation.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1099",value))return RelayEventDtoCausation.FromVariant2(value.Deserialize<RelayCausationDto>(options)!);throw new JsonException("Invalid union");}
+ public override RelayEventDtoCausation Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return RelayEventDtoCausation.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1119",value))return RelayEventDtoCausation.FromVariant2(value.Deserialize<RelayCausationDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,RelayEventDtoCausation value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4285,7 +4471,7 @@ public sealed record RelayEventDtoPayloadDtoLifecycle {
 }
 internal sealed class RelayEventDtoPayloadDtoLifecycleConverter : JsonConverter<RelayEventDtoPayloadDtoLifecycle> {
  public override bool HandleNull => true;
- public override RelayEventDtoPayloadDtoLifecycle Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return RelayEventDtoPayloadDtoLifecycle.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1108",value))return RelayEventDtoPayloadDtoLifecycle.FromVariant2(value.Deserialize<RelayEventDtoPayloadDtoLifecycleVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override RelayEventDtoPayloadDtoLifecycle Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return RelayEventDtoPayloadDtoLifecycle.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1128",value))return RelayEventDtoPayloadDtoLifecycle.FromVariant2(value.Deserialize<RelayEventDtoPayloadDtoLifecycleVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,RelayEventDtoPayloadDtoLifecycle value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4309,7 +4495,7 @@ public sealed record RelayEventDtoPayloadDtoWake {
 }
 internal sealed class RelayEventDtoPayloadDtoWakeConverter : JsonConverter<RelayEventDtoPayloadDtoWake> {
  public override bool HandleNull => true;
- public override RelayEventDtoPayloadDtoWake Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return RelayEventDtoPayloadDtoWake.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1110",value))return RelayEventDtoPayloadDtoWake.FromVariant2(value.Deserialize<RelayEventDtoPayloadDtoWakeVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override RelayEventDtoPayloadDtoWake Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return RelayEventDtoPayloadDtoWake.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1130",value))return RelayEventDtoPayloadDtoWake.FromVariant2(value.Deserialize<RelayEventDtoPayloadDtoWakeVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,RelayEventDtoPayloadDtoWake value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4421,7 +4607,7 @@ public sealed record ScheduleFileDtoDefinition {
 }
 internal sealed class ScheduleFileDtoDefinitionConverter : JsonConverter<ScheduleFileDtoDefinition> {
  public override bool HandleNull => true;
- public override ScheduleFileDtoDefinition Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ScheduleFileDtoDefinition.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape525",value))return ScheduleFileDtoDefinition.FromVariant2(value.Deserialize<ScheduleDefinitionDto>(options)!);throw new JsonException("Invalid union");}
+ public override ScheduleFileDtoDefinition Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ScheduleFileDtoDefinition.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape529",value))return ScheduleFileDtoDefinition.FromVariant2(value.Deserialize<ScheduleDefinitionDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ScheduleFileDtoDefinition value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4572,7 +4758,7 @@ public sealed record HostedToolWorkerStatusDtoRegistration {
 }
 internal sealed class HostedToolWorkerStatusDtoRegistrationConverter : JsonConverter<HostedToolWorkerStatusDtoRegistration> {
  public override bool HandleNull => true;
- public override HostedToolWorkerStatusDtoRegistration Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return HostedToolWorkerStatusDtoRegistration.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1176",value))return HostedToolWorkerStatusDtoRegistration.FromVariant2(value.Deserialize<HostedToolRegistrationDto>(options)!);throw new JsonException("Invalid union");}
+ public override HostedToolWorkerStatusDtoRegistration Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return HostedToolWorkerStatusDtoRegistration.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1196",value))return HostedToolWorkerStatusDtoRegistration.FromVariant2(value.Deserialize<HostedToolRegistrationDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,HostedToolWorkerStatusDtoRegistration value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -4762,7 +4948,7 @@ public sealed record UsageCallDtoPreflightObservation {
 }
 internal sealed class UsageCallDtoPreflightObservationConverter : JsonConverter<UsageCallDtoPreflightObservation> {
  public override bool HandleNull => true;
- public override UsageCallDtoPreflightObservation Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return UsageCallDtoPreflightObservation.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape730",value))return UsageCallDtoPreflightObservation.FromVariant2(value.Deserialize<ContextCountDto>(options)!);throw new JsonException("Invalid union");}
+ public override UsageCallDtoPreflightObservation Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return UsageCallDtoPreflightObservation.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape732",value))return UsageCallDtoPreflightObservation.FromVariant2(value.Deserialize<ContextCountDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,UsageCallDtoPreflightObservation value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -5246,7 +5432,7 @@ public sealed record ConversationLatestResult {
 }
 internal sealed class ConversationLatestResultConverter : JsonConverter<ConversationLatestResult> {
  public override bool HandleNull => true;
- public override ConversationLatestResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ConversationLatestResult.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape764",value))return ConversationLatestResult.FromVariant2(value.Deserialize<ConversationViewDto>(options)!);throw new JsonException("Invalid union");}
+ public override ConversationLatestResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return ConversationLatestResult.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape766",value))return ConversationLatestResult.FromVariant2(value.Deserialize<ConversationViewDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,ConversationLatestResult value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -6013,7 +6199,7 @@ public sealed record InformationStatusResult {
 }
 internal sealed class InformationStatusResultConverter : JsonConverter<InformationStatusResult> {
  public override bool HandleNull => true;
- public override InformationStatusResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape817",value))return InformationStatusResult.FromVariant1(value.Deserialize<InformationAcquisitionDto>(options)!);if(Codec.Matches("shape880",value))return InformationStatusResult.FromVariant2(value.Deserialize<InformationRevisionDto>(options)!);throw new JsonException("Invalid union");}
+ public override InformationStatusResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape819",value))return InformationStatusResult.FromVariant1(value.Deserialize<InformationAcquisitionDto>(options)!);if(Codec.Matches("shape882",value))return InformationStatusResult.FromVariant2(value.Deserialize<InformationRevisionDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,InformationStatusResult value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -6439,7 +6625,7 @@ public sealed record OutgoingClaimResultDtoAction {
 }
 internal sealed class OutgoingClaimResultDtoActionConverter : JsonConverter<OutgoingClaimResultDtoAction> {
  public override bool HandleNull => true;
- public override OutgoingClaimResultDtoAction Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return OutgoingClaimResultDtoAction.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1052",value))return OutgoingClaimResultDtoAction.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape1053",value))return OutgoingClaimResultDtoAction.FromVariant3(value.Deserialize<string>(options)!);if(Codec.Matches("shape1054",value))return OutgoingClaimResultDtoAction.FromVariant4(value.Deserialize<string>(options)!);throw new JsonException("Invalid union");}
+ public override OutgoingClaimResultDtoAction Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return OutgoingClaimResultDtoAction.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1054",value))return OutgoingClaimResultDtoAction.FromVariant2(value.Deserialize<string>(options)!);if(Codec.Matches("shape1055",value))return OutgoingClaimResultDtoAction.FromVariant3(value.Deserialize<string>(options)!);if(Codec.Matches("shape1056",value))return OutgoingClaimResultDtoAction.FromVariant4(value.Deserialize<string>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,OutgoingClaimResultDtoAction value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -6454,7 +6640,7 @@ public sealed record OutgoingClaimResultDtoWork {
 }
 internal sealed class OutgoingClaimResultDtoWorkConverter : JsonConverter<OutgoingClaimResultDtoWork> {
  public override bool HandleNull => true;
- public override OutgoingClaimResultDtoWork Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return OutgoingClaimResultDtoWork.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1039",value))return OutgoingClaimResultDtoWork.FromVariant2(value.Deserialize<OutgoingWorkDto>(options)!);throw new JsonException("Invalid union");}
+ public override OutgoingClaimResultDtoWork Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape44",value))return OutgoingClaimResultDtoWork.FromVariant1(value.Deserialize<Unit>(options)!);if(Codec.Matches("shape1041",value))return OutgoingClaimResultDtoWork.FromVariant2(value.Deserialize<OutgoingWorkDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,OutgoingClaimResultDtoWork value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -6662,7 +6848,7 @@ public sealed record RelayLogPayload {
 }
 internal sealed class RelayLogPayloadConverter : JsonConverter<RelayLogPayload> {
  public override bool HandleNull => true;
- public override RelayLogPayload Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape504",value))return RelayLogPayload.FromVariant1(value.Deserialize<RelayLogPayloadVariant1Dto>(options)!);if(Codec.Matches("shape505",value))return RelayLogPayload.FromVariant2(value.Deserialize<RelayLogPayloadVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override RelayLogPayload Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape508",value))return RelayLogPayload.FromVariant1(value.Deserialize<RelayLogPayloadVariant1Dto>(options)!);if(Codec.Matches("shape509",value))return RelayLogPayload.FromVariant2(value.Deserialize<RelayLogPayloadVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,RelayLogPayload value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -6761,7 +6947,7 @@ public sealed record RelayTopicsPayload {
 }
 internal sealed class RelayTopicsPayloadConverter : JsonConverter<RelayTopicsPayload> {
  public override bool HandleNull => true;
- public override RelayTopicsPayload Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape516",value))return RelayTopicsPayload.FromVariant1(value.Deserialize<RelayTopicsPayloadVariant1Dto>(options)!);if(Codec.Matches("shape517",value))return RelayTopicsPayload.FromVariant2(value.Deserialize<RelayTopicsPayloadVariant2Dto>(options)!);throw new JsonException("Invalid union");}
+ public override RelayTopicsPayload Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape520",value))return RelayTopicsPayload.FromVariant1(value.Deserialize<RelayTopicsPayloadVariant1Dto>(options)!);if(Codec.Matches("shape521",value))return RelayTopicsPayload.FromVariant2(value.Deserialize<RelayTopicsPayloadVariant2Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,RelayTopicsPayload value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -7067,7 +7253,7 @@ public sealed record UnionStatusResult {
 }
 internal sealed class UnionStatusResultConverter : JsonConverter<UnionStatusResult> {
  public override bool HandleNull => true;
- public override UnionStatusResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1189",value))return UnionStatusResult.FromVariant1(value.Deserialize<IneligibleUnionDto>(options)!);if(Codec.Matches("shape1190",value))return UnionStatusResult.FromVariant2(value.Deserialize<EligibleUnionDto>(options)!);throw new JsonException("Invalid union");}
+ public override UnionStatusResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1209",value))return UnionStatusResult.FromVariant1(value.Deserialize<IneligibleUnionDto>(options)!);if(Codec.Matches("shape1210",value))return UnionStatusResult.FromVariant2(value.Deserialize<EligibleUnionDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,UnionStatusResult value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -7120,7 +7306,7 @@ public sealed record UsageCallsResult {
 }
 internal sealed class UsageCallsResultConverter : JsonConverter<UsageCallsResult> {
  public override bool HandleNull => true;
- public override UsageCallsResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1198",value))return UsageCallsResult.FromVariant1(value.Deserialize<UsageAuditDto>(options)!);if(Codec.Matches("shape1206",value))return UsageCallsResult.FromVariant2(value.Deserialize<UsageAttemptsDto>(options)!);throw new JsonException("Invalid union");}
+ public override UsageCallsResult Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1218",value))return UsageCallsResult.FromVariant1(value.Deserialize<UsageAuditDto>(options)!);if(Codec.Matches("shape1226",value))return UsageCallsResult.FromVariant2(value.Deserialize<UsageAttemptsDto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,UsageCallsResult value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -7263,7 +7449,7 @@ public sealed record Notification {
 }
 internal sealed class NotificationConverter : JsonConverter<Notification> {
  public override bool HandleNull => true;
- public override Notification Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1213",value))return Notification.FromVariant1(value.Deserialize<JobEventDto>(options)!);if(Codec.Matches("shape1214",value))return Notification.FromVariant2(value.Deserialize<JobDeltaDto>(options)!);if(Codec.Matches("shape1218",value))return Notification.FromVariant3(value.Deserialize<NotificationVariant3Dto>(options)!);if(Codec.Matches("shape1220",value))return Notification.FromVariant4(value.Deserialize<NotificationVariant4Dto>(options)!);if(Codec.Matches("shape1222",value))return Notification.FromVariant5(value.Deserialize<NotificationVariant5Dto>(options)!);if(Codec.Matches("shape1229",value))return Notification.FromVariant6(value.Deserialize<NotificationVariant6Dto>(options)!);if(Codec.Matches("shape1231",value))return Notification.FromVariant7(value.Deserialize<NotificationVariant7Dto>(options)!);if(Codec.Matches("shape1233",value))return Notification.FromVariant8(value.Deserialize<NotificationVariant8Dto>(options)!);if(Codec.Matches("shape1235",value))return Notification.FromVariant9(value.Deserialize<NotificationVariant9Dto>(options)!);if(Codec.Matches("shape1237",value))return Notification.FromVariant10(value.Deserialize<NotificationVariant10Dto>(options)!);if(Codec.Matches("shape1239",value))return Notification.FromVariant11(value.Deserialize<NotificationVariant11Dto>(options)!);throw new JsonException("Invalid union");}
+ public override Notification Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options) {using var document=JsonDocument.ParseValue(ref reader);var value=document.RootElement;if(Codec.Matches("shape1233",value))return Notification.FromVariant1(value.Deserialize<JobEventDto>(options)!);if(Codec.Matches("shape1234",value))return Notification.FromVariant2(value.Deserialize<JobDeltaDto>(options)!);if(Codec.Matches("shape1238",value))return Notification.FromVariant3(value.Deserialize<NotificationVariant3Dto>(options)!);if(Codec.Matches("shape1240",value))return Notification.FromVariant4(value.Deserialize<NotificationVariant4Dto>(options)!);if(Codec.Matches("shape1242",value))return Notification.FromVariant5(value.Deserialize<NotificationVariant5Dto>(options)!);if(Codec.Matches("shape1249",value))return Notification.FromVariant6(value.Deserialize<NotificationVariant6Dto>(options)!);if(Codec.Matches("shape1251",value))return Notification.FromVariant7(value.Deserialize<NotificationVariant7Dto>(options)!);if(Codec.Matches("shape1253",value))return Notification.FromVariant8(value.Deserialize<NotificationVariant8Dto>(options)!);if(Codec.Matches("shape1255",value))return Notification.FromVariant9(value.Deserialize<NotificationVariant9Dto>(options)!);if(Codec.Matches("shape1257",value))return Notification.FromVariant10(value.Deserialize<NotificationVariant10Dto>(options)!);if(Codec.Matches("shape1259",value))return Notification.FromVariant11(value.Deserialize<NotificationVariant11Dto>(options)!);throw new JsonException("Invalid union");}
  public override void Write(Utf8JsonWriter writer,Notification value,JsonSerializerOptions options) {if(value.Variant1.IsSet){JsonSerializer.Serialize(writer,value.Variant1.Value,options);return;}if(value.Variant2.IsSet){JsonSerializer.Serialize(writer,value.Variant2.Value,options);return;}if(value.Variant3.IsSet){JsonSerializer.Serialize(writer,value.Variant3.Value,options);return;}if(value.Variant4.IsSet){JsonSerializer.Serialize(writer,value.Variant4.Value,options);return;}if(value.Variant5.IsSet){JsonSerializer.Serialize(writer,value.Variant5.Value,options);return;}if(value.Variant6.IsSet){JsonSerializer.Serialize(writer,value.Variant6.Value,options);return;}if(value.Variant7.IsSet){JsonSerializer.Serialize(writer,value.Variant7.Value,options);return;}if(value.Variant8.IsSet){JsonSerializer.Serialize(writer,value.Variant8.Value,options);return;}if(value.Variant9.IsSet){JsonSerializer.Serialize(writer,value.Variant9.Value,options);return;}if(value.Variant10.IsSet){JsonSerializer.Serialize(writer,value.Variant10.Value,options);return;}if(value.Variant11.IsSet){JsonSerializer.Serialize(writer,value.Variant11.Value,options);return;}throw new JsonException("Select a union variant");}
 }
 
@@ -8970,6 +9156,71 @@ public sealed record OutgoingStatusRequest {
  [JsonPropertyName("id")] public required string Id { get; init; }
 }
 public static partial class Operations { public static Task<Reply<OutgoingWorkDto>> OutgoingStatusAsync(this Client client,OutgoingStatusRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<OutgoingStatusRequest,OutgoingWorkDto>("outgoing.status",request,cancellationToken,options); }
+
+/// <summary>Fields of the ProcQuery protocol contract.</summary>
+public sealed record ProcCallsRequest {
+ [JsonPropertyName("active")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Active { get; init; }
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("causation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Causation { get; init; }
+ [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Conversation { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
+ [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
+ [JsonPropertyName("root")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Root { get; init; }
+ [JsonPropertyName("visibility")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Visibility { get; init; }
+}
+public static partial class Operations { public static Task<Reply<ProcCallsDto>> ProcCallsAsync(this Client client,ProcCallsRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ProcCallsRequest,ProcCallsDto>("proc.calls",request,cancellationToken,options); }
+
+/// <summary>Fields of the ProcQuery protocol contract.</summary>
+public sealed record ProcInspectRequest {
+ [JsonPropertyName("active")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Active { get; init; }
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("causation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Causation { get; init; }
+ [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Conversation { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
+ [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
+ [JsonPropertyName("root")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Root { get; init; }
+ [JsonPropertyName("visibility")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Visibility { get; init; }
+}
+public static partial class Operations { public static Task<Reply<ProcInspectionDto>> ProcInspectAsync(this Client client,ProcInspectRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ProcInspectRequest,ProcInspectionDto>("proc.inspect",request,cancellationToken,options); }
+
+/// <summary>Fields of the ProcQuery protocol contract.</summary>
+public sealed record ProcListRequest {
+ [JsonPropertyName("active")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Active { get; init; }
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("causation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Causation { get; init; }
+ [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Conversation { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
+ [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
+ [JsonPropertyName("root")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Root { get; init; }
+ [JsonPropertyName("visibility")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Visibility { get; init; }
+}
+public static partial class Operations { public static Task<Reply<ProcConversationsDto>> ProcListAsync(this Client client,ProcListRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ProcListRequest,ProcConversationsDto>("proc.list",request,cancellationToken,options); }
+
+/// <summary>Fields of the ProcQuery protocol contract.</summary>
+public sealed record ProcQueuesRequest {
+ [JsonPropertyName("active")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Active { get; init; }
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("causation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Causation { get; init; }
+ [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Conversation { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
+ [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
+ [JsonPropertyName("root")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Root { get; init; }
+ [JsonPropertyName("visibility")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Visibility { get; init; }
+}
+public static partial class Operations { public static Task<Reply<ProcQueuesDto>> ProcQueuesAsync(this Client client,ProcQueuesRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ProcQueuesRequest,ProcQueuesDto>("proc.queues",request,cancellationToken,options); }
+
+/// <summary>Fields of the ProcQuery protocol contract.</summary>
+public sealed record ProcToolsRequest {
+ [JsonPropertyName("active")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Active { get; init; }
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("causation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Causation { get; init; }
+ [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Conversation { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
+ [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
+ [JsonPropertyName("root")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Root { get; init; }
+ [JsonPropertyName("visibility")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Visibility { get; init; }
+}
+public static partial class Operations { public static Task<Reply<ProcToolsDto>> ProcToolsAsync(this Client client,ProcToolsRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ProcToolsRequest,ProcToolsDto>("proc.tools",request,cancellationToken,options); }
 
 /// <summary>Fields of the ProjectAccessRequest protocol contract.</summary>
 public sealed record ProjectAccessRequest {

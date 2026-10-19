@@ -11961,5 +11961,524 @@
       "disconnected": true
     },
     "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.list",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.calls",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.queues",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "visibility": "server",
+      "limit": 100,
+      "active": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "active": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "conversation": "bad\u0000id"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.tools",
+    "value": {
+      "visibility": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {},
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {
+      "root": "cnv_fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {
+      "conversation": "cnv_fixture",
+      "after": "cursor:fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "proc.inspect",
+    "value": {
+      "causation": "chain-fixture",
+      "visibility": "server"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.list",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "conversations": [],
+      "total": 0,
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.list",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "conversations": [],
+      "total": -1,
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.list",
+    "value": {
+      "snapshotAt": "yesterday",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "conversations": [],
+      "total": 0,
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.tools",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "tools": [],
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.calls",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "calls": [],
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "proc.queues",
+    "value": {
+      "snapshotAt": "2026-10-19T01:00:00Z",
+      "selection": {
+        "visibility": "mine",
+        "project": null,
+        "conversation": null,
+        "root": null,
+        "causation": null,
+        "active": null,
+        "after": null,
+        "limit": 50
+      },
+      "queues": [],
+      "summaries": [],
+      "pools": [],
+      "cursor": null,
+      "coverage": []
+    },
+    "valid": true
   }
 ]
