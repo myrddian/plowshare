@@ -41,6 +41,25 @@ public final class InformationLifecycle implements AutoCloseable {
     }
 
     default void finished(Lease lease) {}
+
+    /** Manual controls carry caller/command validity, never a background queue lease. */
+    default Gate beforeControl(Control control) {
+      control.requireCurrent().run();
+      return before(control.event());
+    }
+
+    default Gate afterControl(Control control) {
+      control.requireCurrent().run();
+      return after(control.event());
+    }
+  }
+
+  /** Event presentation and a server-owned live fence for an admitted manual mutation. */
+  public record Control(Lease event, Runnable requireCurrent) {
+    public Control {
+      java.util.Objects.requireNonNull(event);
+      java.util.Objects.requireNonNull(requireCurrent);
+    }
   }
 
   public record Lease(

@@ -1259,6 +1259,20 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       throw new CallerFault("information command lease expired; retry the same requestId");
   }
 
+  @Override
+  public void requireCommand(InformationContext context, UUID revision, Command command) {
+    if (command != null
+        && jdbc.queryForList(
+                "SELECT request_id FROM information_commands WHERE account=? AND request_id=? AND revision_id=? AND token=? AND state IN ('reserved','applied') AND lease_until>=? FOR UPDATE",
+                context.account(),
+                command.request(),
+                revision,
+                command.token(),
+                clock.instant().atOffset(java.time.ZoneOffset.UTC))
+            .isEmpty())
+      throw new CallerFault("information command lease expired; recover the same requestId");
+  }
+
   public UUID recordEvidence(
       InformationContext context,
       UUID revision,
