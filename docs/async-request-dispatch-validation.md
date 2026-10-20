@@ -75,9 +75,14 @@ queued-disclosure check may itself require repository-backed authority reads and
 can delay the serialized writer; the execution-concurrency proof does not establish
 production authority-query latency. Count/total/max queue, execution, encoding,
 reply queue, write and drain durations, plus admission/contention/count/byte gauges,
-are emitted as fixed aggregate telemetry when changed. The configurable interval
-is `plowshare.transport.request-metrics-interval` (default `PT30S`); no request,
-resource or account identities are retained in those measurements. Transport byte
+are available at TRACE when changed. The configurable TRACE interval is
+`plowshare.transport.request-metrics-interval` (default `PT30S`). An INFO summary
+contains the same metrics every ten minutes, including idle periods, starting after
+the first interval. Its configurable interval is
+`plowshare.transport.request-metrics-summary-interval` (default `PT10M`). Counters
+and timing totals/maxima are cumulative for the dispatcher lifetime; gauges reflect
+current ownership, and reporting never resets them. No request, resource or account
+identities are retained in those measurements. Transport byte
 budgets bound owned buffers and conversion concurrency, not total JVM/process RSS
 or caller-owned DTO objects.
 

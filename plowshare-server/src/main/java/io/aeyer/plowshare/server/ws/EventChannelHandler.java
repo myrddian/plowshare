@@ -296,18 +296,32 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private volatile boolean accepting = true;
   private final AtomicBoolean drainRecorded = new AtomicBoolean();
   private final DispatchTelemetry telemetry = new DispatchTelemetry();
-  private volatile DispatchTelemetry.Snapshot lastMetrics;
+  private volatile DispatchTelemetry.Snapshot lastTraceMetrics;
 
   /** Aggregate measurements have fixed fields and never include operation/resource identifiers. */
   @org.springframework.scheduling.annotation.Scheduled(
       fixedDelayString = "${plowshare.transport.request-metrics-interval:PT30S}")
   public void reportDispatchMetrics() {
+    if (!log.isTraceEnabled()) return;
     var snapshot = telemetry.snapshot();
     if (snapshot.admitted() == 0 && snapshot.encoding().count() == 0) return;
-    if (!snapshot.equals(lastMetrics)) {
-      lastMetrics = snapshot;
-      log.info("Event request dispatch measurements {}", snapshot);
+    if (!snapshot.equals(lastTraceMetrics)) {
+      lastTraceMetrics = snapshot;
+      log.trace("Event request dispatch measurements {}", snapshot);
     }
+  }
+
+  /**
+   * Low-frequency operational summary, including idle periods. Counters and timings are cumulative;
+   * gauges describe current ownership. Reporting never resets the measurements.
+   */
+  @org.springframework.scheduling.annotation.Scheduled(
+      initialDelayString = "${plowshare.transport.request-metrics-summary-interval:PT10M}",
+      fixedDelayString = "${plowshare.transport.request-metrics-summary-interval:PT10M}")
+  public void summarizeDispatchMetrics() {
+    log.info(
+        "Event request dispatch summary (cumulative counters/timings, current gauges) {}",
+        telemetry.snapshot());
   }
 
   DispatchTelemetry.Snapshot dispatchMeasurements() {
