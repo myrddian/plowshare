@@ -142,6 +142,25 @@ The server refuses commands for projects with restricted writable areas because
 those commands cannot honor the policy without an appropriate filesystem sandbox.
 Do not try another execution side to evade a denied command.
 
+Ordinary file writes stage complete content beside the destination and replace it
+atomically where the filesystem supports that operation. A failed publication does
+not fall back to truncating the target. Existing targets must remain writable;
+multiply linked files are refused because replacement would break alias behavior.
+Java copies supported file attributes; the Node provider preserves owner, group
+and mode and refuses Windows replacements where it cannot retain file security.
+Runtime-specific extended metadata is not a portable guarantee.
+
+Provider-owned write, create, edit, delete and move operations serialize within
+each provider process, including separate per-run instances. This prevents lost
+read/transform/write updates between participating edits. Commands, external
+editors and other provider processes do not share that lock. Edits retain their
+existing no-create write path: an unconditional rename could recreate a target
+removed concurrently. They therefore do not yet promise atomic visibility.
+Create-only remains an exclusive kernel operation. Neither staging, file flushing
+nor a content hash establishes machine-failure durability or external-writer CAS.
+File-channel disconnects still leave uncertain mutation outcomes; never replay
+them automatically.
+
 ## Runtime settings and overrides
 
 The project manifest can carry caps, command policy, selected default bot and

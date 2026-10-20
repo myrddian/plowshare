@@ -39,7 +39,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * A {@link FileProvider} over the server's own disk, bounded by the directories its project names.
@@ -112,6 +114,19 @@ import java.util.function.BooleanSupplier;
  * them sent readers to fix the wrong thing. {@link Leash#absence} is where the five sentences are.
  */
 public final class LocalProvider implements FileProvider {
+  // Shared across per-run providers, including overlapping roots and hard-link aliases. Commands
+  // and external editors do not participate. One lock avoids unbounded path-lock retention and
+  // source/destination ordering problems; it covers only local filesystem mutations.
+  private static final ReentrantLock MUTATIONS = new ReentrantLock();
+
+  private static Changed mutation(Supplier<Changed> work) {
+    MUTATIONS.lock();
+    try {
+      return work.get();
+    } finally {
+      MUTATIONS.unlock();
+    }
+  }
 
   /**
    * The most this provider will read into memory as one string.
@@ -838,12 +853,12 @@ public final class LocalProvider implements FileProvider {
 
   @Override
   public Changed write(Path path, String content) {
-    return put(path, content, false);
+    return mutation(() -> put(path, content, false));
   }
 
   @Override
   public Changed create(Path path, String content) {
-    return put(path, content, true);
+    return mutation(() -> put(path, content, true));
   }
 
   /**
@@ -902,14 +917,21 @@ public final class LocalProvider implements FileProvider {
           throw refused(FileResult.refused(op, FileResult.EXISTS, path.toString()));
         }
       } else {
-        Files.writeString(
+        AtomicFileWrites.replace(
             target,
             content,
-            StandardCharsets.UTF_8,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.WRITE,
-            StandardOpenOption.TRUNCATE_EXISTING,
-            LinkOption.NOFOLLOW_LINKS);
+            () -> {
+              // Publication is a separate freshness boundary after staging: revoke/move must not
+              // publish bytes into the workspace that used to be authorized.
+              if (!target.equals(writable(reachable(leash()), path, "write", "written")))
+                throw refused(
+                    FileResult.failed(
+                        op,
+                        FileResult.FAILED,
+                        path.toString(),
+                        null,
+                        "The writable workspace changed while preparing the replacement"));
+            });
       }
     } catch (IOException failed) {
       // Refused, with `read`'s residue and its argument: a full disk lands
@@ -936,6 +958,10 @@ public final class LocalProvider implements FileProvider {
    */
   @Override
   public Changed edit(Path path, String old, String replacement) {
+    return mutation(() -> editFile(path, old, replacement));
+  }
+
+  private Changed editFile(Path path, String old, String replacement) {
     String op = FileRequest.EDIT;
     String named = path.toString();
     Path target = writable(reachable(leash()), path, "edit", "edited");
@@ -989,6 +1015,10 @@ public final class LocalProvider implements FileProvider {
    */
   @Override
   public Changed delete(Path path) {
+    return mutation(() -> deleteFile(path));
+  }
+
+  private Changed deleteFile(Path path) {
     String op = FileRequest.DELETE;
     String named = path.toString();
     Path target = writable(reachable(leash()), path, "delete", "deleted");
@@ -1019,6 +1049,10 @@ public final class LocalProvider implements FileProvider {
 
   @Override
   public Changed move(Path from, Path to) {
+    return mutation(() -> moveFile(from, to));
+  }
+
+  private Changed moveFile(Path from, Path to) {
     String op = FileRequest.MOVE;
     // One leash for both paths: `leash` reads the projects row, and two reads
     // are a window a `forget` can land in between the source's check and

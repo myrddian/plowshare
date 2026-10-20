@@ -2,6 +2,7 @@ import type * as FileSystem from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import {
   chmod,
+  link,
   lstat,
   mkdtemp,
   mkdir,
@@ -1900,4 +1901,69 @@ it('protects application authority even before the root manifest exists', async 
     (await asking('move', { from: 'plowshare.json', to: 'old.json' })).outcome,
   ).toBe('refused');
   expect(allows(root, join(root, 'plowshare.json'), 'definitions')).toBe(true);
+});
+
+describe('mutation publication and participating writers', () => {
+  it('preserves mode, refuses hard links, and removes unpublished staging files', async () => {
+    const target = join(root, 'atomic.txt');
+    await writeFile(target, 'original');
+    await chmod(target, 0o740);
+    expect(
+      (await asking('write', { path: 'atomic.txt', content: 'complete' }))
+        .outcome,
+    ).toBe('ok');
+    expect((await lstat(target)).mode & 0o777).toBe(0o740);
+    await link(target, join(root, 'alias.txt'));
+    expect(
+      (await asking('write', { path: 'atomic.txt', content: 'unsafe' }))
+        .outcome,
+    ).toBe('refused');
+    expect(await readFile(target, 'utf8')).toBe('complete');
+    expect(
+      (await (await import('node:fs/promises')).readdir(root)).filter((name) =>
+        name.startsWith('.plowshare-write-'),
+      ),
+    ).toEqual([]);
+  });
+
+  it.skipIf(permissive)(
+    'does not bypass read-only target permissions through rename',
+    async () => {
+      const target = join(root, 'readonly.txt');
+      await writeFile(target, 'original');
+      await chmod(target, 0o400);
+      locked.push(target);
+      expect(
+        (await asking('write', { path: 'readonly.txt', content: 'changed' }))
+          .outcome,
+      ).toBe('refused');
+      expect(await readFile(target, 'utf8')).toBe('original');
+    },
+  );
+
+  it('coordinates edits across separate enforcers without losing the other edit', async () => {
+    const first = enforcing(root);
+    const second = enforcing(root);
+    await writeFile(join(root, 'concurrent.txt'), '\ufeffone\r\ntwo');
+    const replies = await Promise.all([
+      first({
+        id: 'first',
+        op: 'edit',
+        path: 'concurrent.txt',
+        replacing: 'one',
+        content: 'ONE',
+      }),
+      second({
+        id: 'second',
+        op: 'edit',
+        path: 'concurrent.txt',
+        replacing: 'two',
+        content: 'TWO',
+      }),
+    ]);
+    expect(replies.map((reply) => reply.outcome)).toEqual(['ok', 'ok']);
+    expect(await readFile(join(root, 'concurrent.txt'), 'utf8')).toBe(
+      '\ufeffONE\r\nTWO',
+    );
+  });
 });

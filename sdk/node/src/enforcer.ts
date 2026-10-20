@@ -62,6 +62,7 @@ import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import {
+  copyFile,
   lstat,
   mkdir,
   mkdtemp,
@@ -286,6 +287,25 @@ class Vanished extends Error {
   }
 }
 
+// Shared by every enforcer in this process, including overlapping roots. This
+// serializes read/transform/write against provider-owned delete/move/write. It
+// cannot coordinate shells, external editors or another provider process. Reads
+// and commands remain independent; only filesystem mutation requests queue here.
+let mutationTail: Promise<void> = Promise.resolve();
+async function mutation<T>(work: () => Promise<T>): Promise<T> {
+  const prior = mutationTail;
+  let release: () => void = () => {};
+  mutationTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await prior;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
 export function enforcing(
   root: string,
   attendance: boolean | AbortSignal = true,
@@ -301,17 +321,22 @@ export function enforcing(
   const running = new Map<string, AbortController>();
   const answer: Answering = async (request) => {
     try {
-      if (lifetime?.aborted)
-        throw new Refused('this file presence has been withdrawn');
-      return await answered(
-        root,
-        request,
-        running,
-        defaults,
-        environmentLines,
-        isolation,
-        lifetime,
-      );
+      const execute = (): Promise<FileReply> => {
+        if (lifetime?.aborted)
+          throw new Refused('this file presence has been withdrawn');
+        return answered(
+          root,
+          request,
+          running,
+          defaults,
+          environmentLines,
+          isolation,
+          lifetime,
+        );
+      };
+      return await ([WRITE, EDIT, DELETE, MOVE].includes(request.op)
+        ? mutation(execute)
+        : execute());
     } catch (trouble) {
       // Facts on every path but a run's own consent and bounds.
       if (trouble instanceof Refused && trouble.result !== undefined) {
@@ -1134,24 +1159,23 @@ async function write(root: string, request: FileRequest): Promise<FileResult> {
   }
   try {
     await mkdir(dirname(target), { recursive: true });
-    // `wx` is what makes create-only hold: the check above is a courtesy, and a
-    // file made between it and this line is refused here by the kernel.
-    if (request.purpose === 'schedules' && !creating) {
-      const staging = await mkdtemp(join(dirname(target), '.schedule-'));
-      try {
-        const staged = join(staging, 'definition');
-        await writeFile(staged, request.content, {
-          encoding: 'utf8',
-          flag: 'wx',
-        });
-        await rename(staged, target);
-      } finally {
-        await rm(staging, { recursive: true, force: true });
-      }
-    } else
+    // Exclusive creation remains a kernel-enforced no-clobber operation. Atomic
+    // replacement has different semantics and must never be used for create-only.
+    if (creating)
       await writeFile(target, request.content, {
         encoding: 'utf8',
-        flag: creating ? 'wx' : 'w',
+        flag: 'wx',
+      });
+    else
+      await replaceFile(target, request.content, async () => {
+        const current = await permitted(
+          root,
+          request.path,
+          request.purpose === 'schedules' ? 'schedules' : 'writing',
+          WRITE,
+        );
+        if (current !== target)
+          throw new Error('The writable path changed during staging');
       });
   } catch (trouble) {
     if (creating && codeOf(trouble) === 'EEXIST') {
@@ -1169,6 +1193,73 @@ async function write(root: string, request: FileRequest): Promise<FileResult> {
     bytes: utf8Length(request.content),
     lines: linesOf(request.content).length,
   };
+}
+
+/** Publish complete bytes beside their destination; no truncating fallback.
+ * Edits do not use rename: it could recreate a concurrently deleted file.
+ * Flushing this file is not a promise of directory durability or external-writer CAS.
+ */
+async function replaceFile(
+  target: string,
+  content: string,
+  recheck: () => Promise<void>,
+): Promise<void> {
+  const before = await lstat(target).catch((error: unknown) => {
+    if (codeOf(error) !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (before !== undefined) {
+    if (!before.isFile() || before.nlink !== 1)
+      throw new Error(
+        'Atomic replacement requires a regular file with one link',
+      );
+    if (process.platform === 'win32')
+      throw new Error(
+        'Atomic replacement cannot preserve Windows file security metadata',
+      );
+    // Directory rename permission must not bypass the target's write permission.
+    const writable = await open(
+      target,
+      constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+    await writable.close();
+  }
+  const staging = await mkdtemp(join(dirname(target), '.plowshare-write-'));
+  try {
+    const staged = join(staging, 'content');
+    if (before !== undefined)
+      await copyFile(target, staged, constants.COPYFILE_EXCL);
+    const output = await open(staged, before === undefined ? 'wx' : 'r+');
+    try {
+      await output.truncate(0);
+      await output.writeFile(content, 'utf8');
+      if (before !== undefined) {
+        const copied = await output.stat();
+        if (copied.uid !== before.uid || copied.gid !== before.gid)
+          await output.chown(before.uid, before.gid);
+        await output.chmod(before.mode & 0o7777);
+      }
+      await output.sync();
+    } finally {
+      await output.close();
+    }
+    const current = await lstat(target).catch((error: unknown) => {
+      if (codeOf(error) !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (
+      (before === undefined) !== (current === undefined) ||
+      (before !== undefined &&
+        (before.dev !== current?.dev || before.ino !== current.ino))
+    )
+      throw new Error(
+        'The destination changed while preparing its replacement',
+      );
+    await recheck();
+    await rename(staged, target);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
 }
 
 /**
