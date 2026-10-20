@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.information;
 
+import static io.aeyer.plowshare.protocol.InformationNavigation.METADATA_PROJECTION;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -33,6 +34,36 @@ class DocumentNavigationReadsTest {
               "reader",
               new InformationContext.Selection(InformationContext.Scope.PROJECT, "research", false))
           .withView(true);
+
+  @Test
+  void projectedPageUsesOneRepositoryCapabilityAndRechecksMembershipOnEveryRead() {
+    when(members.role("research", "reader"))
+        .thenReturn(Optional.of(ProjectRole.VIEWER))
+        .thenReturn(Optional.empty());
+    var request =
+        new InformationRequest.DocumentList(
+            new InformationRequest.Selection(
+                project.scope(), "documents", null, "content-types-v1"),
+            null,
+            null,
+            null,
+            20,
+            0,
+            METADATA_PROJECTION);
+    when(repository.documentsWithMetadata(context, null, null, null, 20, 0))
+        .thenReturn(new Documents(List.of(), 20, 0, METADATA_PROJECTION));
+    var result =
+        assertInstanceOf(
+            io.aeyer.plowshare.protocol.InformationResponse.NavigationDocuments.class,
+            service.execute("reader", request));
+    assertEquals(METADATA_PROJECTION, result.value().projection());
+    assertThrows(CallerFault.class, () -> service.execute("reader", request));
+    verify(repository, times(2)).snapshotSingleProjection();
+    verify(repository, times(2)).requireActive("reader");
+    verify(members, times(2)).role("research", "reader");
+    verify(repository).documentsWithMetadata(context, null, null, null, 20, 0);
+    verifyNoMoreInteractions(repository, members);
+  }
 
   @Test
   void listsAndFacetsChooseSingleProjectionBoundaryBeforeLiveAdmission() {

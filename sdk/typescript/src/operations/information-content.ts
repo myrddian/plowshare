@@ -66,6 +66,12 @@ export interface InformationContentBinding {
   readonly metadataHash: string;
   readonly metadata: SchemaObject;
 }
+/** Revision instance fields without repeating its schema or source body. */
+export interface InformationContentMetadata {
+  readonly type: InformationTypeIdentity;
+  readonly metadataHash: string;
+  readonly metadata: SchemaObject;
+}
 export type InformationProcessingStage =
   | 'extract'
   | 'derive'

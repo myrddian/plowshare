@@ -2,8 +2,11 @@ package io.aeyer.plowshare.server.information;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.aeyer.plowshare.protocol.Information;
+import io.aeyer.plowshare.protocol.InformationContent;
+import io.aeyer.plowshare.protocol.InformationNavigation;
 import io.aeyer.plowshare.protocol.InformationNavigation.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.Readable;
+import io.aeyer.plowshare.protocol.SchemaValue;
 import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
@@ -13,6 +16,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** SQL owns filtering before counts/pages and rechecks authority inside mutation transactions. */
 public final class JdbcInformationNavigationRepository implements InformationNavigationRepository {
   private static final JsonMapper JSON = JsonMapper.builder().build();
+  private static final JsonMapper METADATA_JSON =
+      JsonMapper.builder()
+          .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final PolicySettings DEFAULT =
       new PolicySettings(Policy.DEFAULT, Policy.NONE, true, "Restricted document");
   private final JdbcTemplate jdbc;
@@ -346,6 +354,12 @@ public final class JdbcInformationNavigationRepository implements InformationNav
 
   private static Document document(java.sql.ResultSet rs, boolean includeGlobal)
       throws java.sql.SQLException {
+    return document(rs, includeGlobal, null);
+  }
+
+  private static Document document(
+      java.sql.ResultSet rs, boolean includeGlobal, InformationContent.Metadata metadata)
+      throws java.sql.SQLException {
     return new Document(
         rs.getObject("resource", UUID.class),
         rs.getObject("revision", UUID.class),
@@ -358,7 +372,8 @@ public final class JdbcInformationNavigationRepository implements InformationNav
                 : rs.getString("project_name") == null ? "personal" : "project",
             rs.getString("visibility").equals("shared") ? null : rs.getString("project_name"),
             rs.getString("visibility").equals("shared") ? null : includeGlobal),
-        rs.getString("owner"));
+        rs.getString("owner"),
+        metadata);
   }
 
   private static final String DOCUMENT =
@@ -448,6 +463,78 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             a.toArray()),
         limit,
         offset);
+  }
+
+  public Documents documentsWithMetadata(
+      InformationContext c,
+      UUID relatedTo,
+      String relation,
+      String direction,
+      int limit,
+      int offset) {
+    requireTraversal(c, relatedTo, relation, direction);
+    if (limit < 1 || limit > 100 || offset < 0)
+      throw new IllegalArgumentException("invalid document page bounds");
+    var selected = selected(c, relatedTo, relation, direction);
+    var arguments = new ArrayList<>(selected.arguments());
+    arguments.add(limit);
+    arguments.add(offset);
+    arguments.add(InformationNavigation.METADATA_PAGE_BYTES);
+    // Materialize the authorized, ordered page once. Joining a revision's immutable binding after
+    // LIMIT does not re-run access closure or fetch schemas/source/extractions for every result.
+    // Gate aggregate metadata bytes in SQL so oversized JSON never crosses the JDBC boundary.
+    String sql =
+        "WITH navigation_page AS MATERIALIZED ("
+            + DOCUMENT
+            + ",r.created_at AS sort_created_at"
+            + HEADS
+            + " WHERE "
+            + selected.sql()
+            + " ORDER BY r.created_at DESC,q.id LIMIT ? OFFSET ?), metadata_page AS MATERIALIZED ("
+            + "SELECT p.*,c.metadata,c.metadata_hash,v.id AS type_version,v.type_id,v.ordinal,"
+            + "v.definition_hash,t.slug,t.label,"
+            + "sum(coalesce(octet_length(c.metadata::text),0)) OVER () AS metadata_bytes"
+            + " FROM navigation_page p"
+            + " LEFT JOIN information_revision_content c ON c.revision_id=p.revision AND NOT c.redacted"
+            + " LEFT JOIN information_content_type_versions v ON v.id=c.type_version"
+            + " LEFT JOIN information_content_types t ON t.id=v.type_id)"
+            + " SELECT p.resource,p.revision,p.title,p.source_name,p.owner,p.tags,p.project_name,p.visibility,"
+            + "p.metadata_hash,p.type_version,p.type_id,p.ordinal,p.definition_hash,p.slug,p.label,p.metadata_bytes,"
+            + "CASE WHEN p.metadata_bytes<=? THEN p.metadata::text END AS metadata_json"
+            + " FROM metadata_page p ORDER BY p.sort_created_at DESC,p.resource";
+    return new Documents(
+        jdbc.query(
+            sql,
+            (row, index) -> {
+              if (row.getLong("metadata_bytes") > InformationNavigation.METADATA_PAGE_BYTES)
+                throw new CallerFault(
+                    "Metadata page exceeds 512 KiB; reduce the document page limit");
+              return document(row, c.selection().includeGlobal(), metadata(row));
+            },
+            arguments.toArray()),
+        limit,
+        offset,
+        InformationNavigation.METADATA_PROJECTION);
+  }
+
+  private static InformationContent.Metadata metadata(java.sql.ResultSet row)
+      throws java.sql.SQLException {
+    UUID version = row.getObject("type_version", UUID.class);
+    if (version == null) return null;
+    try {
+      return new InformationContent.Metadata(
+          new InformationContent.Identity(
+              row.getObject("type_id", UUID.class),
+              version,
+              row.getInt("ordinal"),
+              row.getString("slug"),
+              row.getString("label"),
+              row.getString("definition_hash")),
+          row.getString("metadata_hash"),
+          METADATA_JSON.readValue(row.getString("metadata_json"), SchemaValue.ObjectValue.class));
+    } catch (java.io.IOException invalid) {
+      throw new IllegalStateException("Invalid retained metadata", invalid);
+    }
   }
 
   private static long documentsWeight(Documents page) {

@@ -928,10 +928,25 @@ public sealed interface InformationRequest {
       String relation,
       String direction,
       Integer limit,
-      Integer offset)
+      Integer offset,
+      String projection)
       implements InformationRequest {
+    public DocumentList(
+        Selection selection,
+        UUID relatedTo,
+        String relation,
+        String direction,
+        Integer limit,
+        Integer offset) {
+      this(selection, relatedTo, relation, direction, limit, offset, null);
+    }
+
     public DocumentList {
       navigation(selection);
+      if (projection != null
+          && (!InformationNavigation.METADATA_PROJECTION.equals(projection)
+              || !InformationContent.VIEW.equals(selection.view())))
+        throw new IllegalArgumentException("Metadata projection requires its supporting view");
       page(limit, offset, 100);
       if (relatedTo == null && (relation != null || direction != null))
         throw new IllegalArgumentException("traversal needs a source");

@@ -533,7 +533,15 @@ export const SHAPES: Record<
   'information.navigation.capabilities': [['scope'], []],
   'information.documents.list': [
     ['scope'],
-    ['filter', 'relatedTo', 'relation', 'direction', 'limit', 'offset'],
+    [
+      'filter',
+      'relatedTo',
+      'relation',
+      'direction',
+      'limit',
+      'offset',
+      'projection',
+    ],
   ],
   'information.documents.facets': [
     ['scope'],

@@ -66,6 +66,27 @@ for(const changed of [{expectedVersion:-1},{expectedVersion:1.5},{id:'short'},{p
 input('information.documents.list',{scope:navScope},true);
 input('information.documents.list',{scope:navScope,relation:'runbook'},false);
 input('information.documents.list',{scope:navScope,limit:101},false);
+const metadataRequest={scope:navScope,view:'content-types-v1',projection:'metadata-v1',limit:50};
+input('information.documents.list',metadataRequest,true);
+for(const change of [{view:undefined},{projection:null},{projection:'body'},{limit:101}]) {
+  const request={...metadataRequest,...change};
+  if(request.view===undefined) delete request.view;
+  input('information.documents.list',request,false);
+}
+const metadataDocument={resource:receipt,revision:receipt,title:'Discovery',sourceName:'fixture.md',owner:'fixture',tags:[],scope:navScope,
+  contentMetadata:{type:{type:receipt,version:receipt,ordinal:1,slug:'incident',label:'Incident',definitionHash:'a'.repeat(64)},metadataHash:'b'.repeat(64),metadata:{title:'Typed title',note:null}}};
+const metadataPage={documents:[metadataDocument],limit:50,offset:0,projection:'metadata-v1'};
+result('information.documents.list',metadataPage,true);
+result('information.documents.list',{...metadataPage,documents:[]},true);
+const {contentMetadata,...legacyDocument}=metadataDocument;
+result('information.documents.list',{documents:[legacyDocument],limit:50,offset:0},true);
+for(const changed of [
+  {...contentMetadata,metadataHash:'bad'},
+  {...contentMetadata,metadata:'text'},
+  {...contentMetadata,metadata:{title:'x'.repeat(4097)}},
+  {...contentMetadata,type:{...contentMetadata.type,version:'not-a-uuid'}},
+  {...contentMetadata,type:{...contentMetadata.type,ordinal:0}},
+]) result('information.documents.list',{...metadataPage,documents:[{...metadataDocument,contentMetadata:changed}]},false);
 input('information.documents.get',{scope:navScope,target:{resource:receipt,revision:receipt}},true);
 input('information.documents.get',{scope:navScope,target:{resource:receipt,revision:null}},false);
 input('information.documents.get',{scope:navScope,target:{resource:'short'}},false);

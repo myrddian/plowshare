@@ -97,13 +97,21 @@ public final class DocumentNavigation implements InformationNavigationService {
               account,
               () ->
                   new InformationResponse.NavigationDocuments(
-                      repository.documents(
-                          context(account, q.selection()),
-                          q.relatedTo(),
-                          q.relation(),
-                          q.direction(),
-                          limit(q.limit()),
-                          offset(q.offset()))));
+                      q.projection() == null
+                          ? repository.documents(
+                              context(account, q.selection()),
+                              q.relatedTo(),
+                              q.relation(),
+                              q.direction(),
+                              limit(q.limit()),
+                              offset(q.offset()))
+                          : repository.documentsWithMetadata(
+                              context(account, q.selection()),
+                              q.relatedTo(),
+                              q.relation(),
+                              q.direction(),
+                              limit(q.limit()),
+                              offset(q.offset()))));
       case DocumentFacets q ->
           readProjection(
               account,
