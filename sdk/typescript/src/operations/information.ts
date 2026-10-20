@@ -36,6 +36,7 @@ export const INFORMATION_OPERATIONS = [
   'list',
   'facets',
   'tags',
+  'tags.replace',
   'tags.groups',
   'inventory',
   'acquisitions',

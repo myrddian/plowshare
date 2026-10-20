@@ -111,7 +111,21 @@ public final class InformationNavigation {
       List<String> tags,
       InformationRequest.Scope scope,
       String owner,
-      InformationContent.Metadata contentMetadata) {
+      InformationContent.Metadata contentMetadata,
+      Long tagsVersion) {
+    /** Older callers may construct discovery snapshots without tag concurrency support. */
+    public Document(
+        UUID resource,
+        UUID revision,
+        String title,
+        String sourceName,
+        List<String> tags,
+        InformationRequest.Scope scope,
+        String owner,
+        InformationContent.Metadata contentMetadata) {
+      this(resource, revision, title, sourceName, tags, scope, owner, contentMetadata, null);
+    }
+
     public Document(
         UUID resource,
         UUID revision,
@@ -124,6 +138,8 @@ public final class InformationNavigation {
     }
 
     public Document {
+      if (tagsVersion != null && (tagsVersion < 0 || tagsVersion > 9007199254740991L))
+        throw new IllegalArgumentException("invalid tag version");
       Objects.requireNonNull(resource);
       Objects.requireNonNull(revision);
       Objects.requireNonNull(scope);

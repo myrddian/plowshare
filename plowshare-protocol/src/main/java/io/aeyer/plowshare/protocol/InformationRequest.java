@@ -744,6 +744,29 @@ public sealed interface InformationRequest {
     }
   }
 
+  /** Guarded user-tag replacement; tags are resource state, independent of revision heads. */
+  record TagsReplace(
+      Selection selection,
+      UUID revision,
+      UUID requestId,
+      List<String> tags,
+      Long expectedTagsVersion)
+      implements InformationRequest {
+    public TagsReplace {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(revision);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(expectedTagsVersion);
+      if (expectedTagsVersion < 0 || expectedTagsVersion > 9007199254740991L)
+        throw new IllegalArgumentException("invalid expected tag version");
+      tags = InformationRequest.tags(tags);
+    }
+
+    public String operation() {
+      return "tags.replace";
+    }
+  }
+
   record TagGroups(
       Selection selection, UUID revision, UUID requestId, Map<String, List<String>> groups)
       implements InformationRequest {

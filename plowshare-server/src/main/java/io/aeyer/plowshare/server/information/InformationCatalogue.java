@@ -822,6 +822,33 @@ public final class InformationCatalogue implements InformationReadAccess {
         });
   }
 
+  /** Resource tags have a separate version; a content revision is only the resource selector. */
+  public void replaceTags(
+      InformationContext context,
+      UUID revision,
+      List<String> raw,
+      long expectedVersion,
+      UUID request) {
+    var parameters = new InformationCommandParameters.TagsReplace(raw, expectedVersion);
+    managed(
+        context,
+        revision,
+        "tags",
+        request,
+        parameters,
+        () -> {
+          var current = requireWrite(context, revision);
+          repository.replaceTags(current, parameters.values(), expectedVersion);
+          event(
+              revision,
+              generation(revision),
+              context.account(),
+              "tags",
+              "updated",
+              InformationJson.json(parameters.values()));
+        });
+  }
+
   public List<Information.Revision> inventory(InformationContext context, int limit, int offset) {
     access.requireSelection(context);
     return repository.inventory(context, limit, offset);

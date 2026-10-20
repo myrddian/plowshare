@@ -305,6 +305,162 @@
   },
   {
     "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ],
+      "expectedTagsVersion": 0
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ],
+      "expectedTagsVersion": -1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ],
+      "expectedTagsVersion": 0.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ],
+      "expectedTagsVersion": "0"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ],
+      "expectedTagsVersion": 9007199254740992
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ],
+      "expectedTagsVersion": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.tags.replace",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tags": [
+        "topic"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.status",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "tagsVersion": 0
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "information.status",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "tagsVersion": -1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.status",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "tagsVersion": 0.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.status",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "tagsVersion": 9007199254740992
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.status",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "tagsVersion": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "information.interchange.import",
     "value": {
       "scope": {

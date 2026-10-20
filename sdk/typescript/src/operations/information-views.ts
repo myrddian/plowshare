@@ -27,6 +27,8 @@ export interface InformationRevision {
   readonly source_name?: string;
   readonly kind?: 'source' | 'report';
   readonly author?: string;
+  /** Absent on older peers; guarded replacement must refuse without this snapshot version. */
+  readonly tagsVersion?: number;
   readonly tags?: readonly string[];
   readonly autoTag?: readonly string[];
   readonly auto_tag_generated?: boolean;

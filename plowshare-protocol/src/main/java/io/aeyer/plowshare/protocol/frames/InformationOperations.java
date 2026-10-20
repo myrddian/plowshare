@@ -41,6 +41,7 @@ public final class InformationOperations {
           "list",
           "facets",
           "tags",
+          "tags.replace",
           "tags.groups",
           "status",
           "await",

@@ -351,6 +351,7 @@ export const CLI_OPERATIONS = {
   'information facets': 'information.facets',
   'information tags.groups': 'information.tags.groups',
   'information tags': 'information.tags',
+  'information tags.replace': 'information.tags.replace',
   'information list': 'information.list',
   'information status': 'information.status',
   'information await': 'information.await',

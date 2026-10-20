@@ -135,6 +135,7 @@ var operationNames = []string{
 	"information.symbols",
 	"information.tags",
 	"information.tags.groups",
+	"information.tags.replace",
 	"information.types.activate",
 	"information.types.capabilities",
 	"information.types.deprecate",

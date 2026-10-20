@@ -159,6 +159,15 @@ export interface InformationPayloads
     readonly requestId: string;
     readonly tags: readonly string[];
   };
+  'information.tags.replace': {
+    readonly view?: 'content-types-v1';
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly revision: string;
+    readonly requestId: string;
+    readonly expectedTagsVersion: number;
+    readonly tags: readonly string[];
+  };
   'information.list': {
     readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;

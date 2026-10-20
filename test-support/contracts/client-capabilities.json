@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 281,
+    "registeredRequestFrames": 282,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 268,
-    "headlessCliOneShotFrames": 258,
+    "headlessCliRequestFrames": 269,
+    "headlessCliOneShotFrames": 259,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 281,
+    "typedRequestFrames": 282,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -1478,6 +1478,7 @@
           "information.list",
           "information.facets",
           "information.tags",
+          "information.tags.replace",
           "information.tags.groups",
           "information.status",
           "information.await",
@@ -4831,6 +4832,25 @@
     },
     {
       "frame": "information.tags.groups",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.tags.replace",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -8456,6 +8476,7 @@
             "information.facets",
             "information.tags.groups",
             "information.tags",
+            "information.tags.replace",
             "information.list",
             "information.status",
             "information.read",
@@ -8659,6 +8680,7 @@
           "information.symbols",
           "information.tags",
           "information.tags.groups",
+          "information.tags.replace",
           "information.types.activate",
           "information.types.capabilities",
           "information.types.deprecate",
@@ -8796,7 +8818,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 258,
+        "count": 259,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -8808,9 +8830,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 281 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 282 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "268 WS operations: 258 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "269 WS operations: 259 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "acting.context.open": "physical-connection-subject-context",
         "acting.context.close": "physical-connection-subject-context",
@@ -8979,6 +9001,7 @@
       "information.list",
       "information.facets",
       "information.tags",
+      "information.tags.replace",
       "information.tags.groups",
       "information.status",
       "information.await",

@@ -111,6 +111,7 @@ public final class InformationFrames implements FrameArea {
                     "search",
                     "rank",
                     "tags",
+                    "tags.replace",
                     "tags.groups",
                     "exclude",
                     "unexclude",
@@ -342,6 +343,16 @@ public final class InformationFrames implements FrameArea {
                 : io.aeyer.plowshare.server.information.InformationTagGroups.from(
                     payload.get("groups"), null),
             uuid(payload, "requestId"));
+        result = Map.of("changed", true);
+      }
+      case "tags.replace" -> {
+        var command = InformationTagInputs.replacement(payload);
+        catalogue.replaceTags(
+            context,
+            command.revision(),
+            command.tags(),
+            command.expectedVersion(),
+            command.request());
         result = Map.of("changed", true);
       }
       case "tags" -> {

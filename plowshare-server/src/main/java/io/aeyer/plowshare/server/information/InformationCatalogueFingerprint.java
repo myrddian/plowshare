@@ -39,6 +39,8 @@ final class InformationCatalogueFingerprint {
           case InformationCommandParameters.Rebuild value -> List.of(value.stage());
           case InformationCommandParameters.Allowance value -> List.of(value.total());
           case InformationCommandParameters.Tags value -> value.values();
+          case InformationCommandParameters.TagsReplace value ->
+              List.of(value.values(), value.expectedVersion());
           case InformationCommandParameters.Groups value -> Arrays.asList(value.values());
         };
     return hash(InformationJson.json(Arrays.asList(operation, revision, selection, tuple)));

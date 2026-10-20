@@ -624,6 +624,10 @@ export const SHAPES: Record<
   'information.facets': [['scope'], ['kind', 'filter']],
   'information.tags.groups': [['scope', 'revision', 'requestId', 'groups'], []],
   'information.tags': [['scope', 'revision', 'requestId', 'tags'], []],
+  'information.tags.replace': [
+    ['scope', 'revision', 'requestId', 'tags', 'expectedTagsVersion'],
+    [],
+  ],
   'information.list': [['scope'], ['kind', 'filter', 'limit', 'offset']],
   'information.await': [['scope', 'sources'], ['waitMs']],
   'information.status': [['scope'], ['revision', 'acquisition']],

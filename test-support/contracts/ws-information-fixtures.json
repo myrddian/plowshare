@@ -939,5 +939,11 @@
         "title": "Source"
       }
     }
+  },
+  "information.tags.replace": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
   }
 }

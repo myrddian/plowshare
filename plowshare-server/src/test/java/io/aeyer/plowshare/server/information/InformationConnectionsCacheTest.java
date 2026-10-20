@@ -41,6 +41,7 @@ class InformationConnectionsCacheTest {
     assertEquals(2, result.connections().size()); // Unavailable neighbours drop after the raw page.
     var readable = result.connections().getFirst();
     assertInstanceOf(Readable.class, readable.selection());
+    assertEquals(3L, ((Readable) readable.selection()).document().tagsVersion());
     assertNotNull(readable.relationship().pinnedRevision());
     var locked = result.connections().get(1);
     assertEquals("Restricted document", ((Locked) locked.selection()).label());
@@ -220,6 +221,13 @@ class InformationConnectionsCacheTest {
                                 .getObject(invocation.getArgument(0, String.class), UUID.class))
                     .when(cursor)
                     .getObject(anyString(), eq(UUID.class));
+                doAnswer(
+                        invocation ->
+                            selected
+                                .get(position.get())
+                                .getObject(invocation.getArgument(0, String.class), Long.class))
+                    .when(cursor)
+                    .getObject(anyString(), eq(Long.class));
                 ResultSetExtractor<Connections> extractor = call.getArgument(1);
                 return extractor.extractData(cursor);
               })
@@ -250,6 +258,7 @@ class InformationConnectionsCacheTest {
         when(row.getString("source_name")).thenReturn("manual.md");
         when(row.getString("owner")).thenReturn("alice");
         when(row.getString("tags")).thenReturn("[\"guide\"]");
+        when(row.getObject("tags_version", Long.class)).thenReturn(3L);
         when(row.getString("visibility")).thenReturn("home");
         when(row.getString("project_name")).thenReturn("research");
       }
