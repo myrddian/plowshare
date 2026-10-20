@@ -106,13 +106,22 @@ public interface BoardMessagingRepository {
 
   boolean queued(String id);
 
-  List<String> priorSend(String sender, String call);
+  /**
+   * Original intent for conflict validation under the existing send lock. NULL fingerprint is
+   * legacy.
+   */
+  record PriorSend(String message, String fingerprint) {}
+
+  Optional<PriorSend> priorSend(String sender, String call);
+
+  /** Upgrade fence: old handling turns cannot safely acquire a different invocation-key scheme. */
+  boolean legacySendTurn(String sender, int turn);
 
   boolean terminated(String message);
 
   int pendingCount(String recipient);
 
-  void insertRoute(Route route, String call);
+  void insertRoute(Route route, String call, String fingerprint);
 
   void deadline(String message, Instant deadline);
 

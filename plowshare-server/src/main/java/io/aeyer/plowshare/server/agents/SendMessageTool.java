@@ -61,10 +61,24 @@ public final class SendMessageTool implements AgentTool {
     String send(Request request, Home home);
   }
 
-  private final Sender sender;
+  /** Existing authenticated execution owner, separate from all model-supplied arguments. */
+  @FunctionalInterface
+  public interface AttributedSender {
+    String send(
+        Request request,
+        Home home,
+        io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner);
+  }
+
+  private final AttributedSender sender;
   private String callId;
 
   public SendMessageTool(Sender sender) {
+    Objects.requireNonNull(sender);
+    this.sender = (request, home, owner) -> sender.send(request, home);
+  }
+
+  public SendMessageTool(AttributedSender sender) {
     this.sender = Objects.requireNonNull(sender);
   }
 
@@ -127,6 +141,17 @@ public final class SendMessageTool implements AgentTool {
 
   @Override
   public String run(String json, Home home) {
+    return execute(json, home, null);
+  }
+
+  @Override
+  public String run(
+      String json, Home home, io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
+    return execute(json, home, owner);
+  }
+
+  private String execute(
+      String json, Home home, io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
     String opening = callId;
     callId = null;
     try {
@@ -218,7 +243,8 @@ public final class SendMessageTool implements AgentTool {
               timeout,
               toProject,
               route),
-          home);
+          home,
+          owner);
     } catch (ToolArguments.BadArguments bad) {
       return bad.getMessage();
     }
