@@ -75,6 +75,13 @@ from general memory/digest export, and their model tools cannot write findings t
 the shared board. This is a document dependency policy, not universal data-loss
 prevention for every explicitly authorized file/command extension.
 
+V181 repairs older input ledgers that recorded an owner's account-knowledge reads
+under that same owner's Personal runtime project. It normalizes those entries to
+the Personal information selector, preserving every input revision, owner and
+include-Global setting. It does not change document audiences or ordinary/foreign
+project selections. Current source withdrawal, dependency, privacy and quarantine
+checks still apply; rebuilding Desktop does not apply this server migration.
+
 ## Authored metadata
 
 [Authored information](authored-information.md) adds scoped immutable schema versions and
