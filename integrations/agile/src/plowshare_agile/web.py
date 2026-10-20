@@ -231,6 +231,7 @@ class WebUI:
                 web.get("/health", self.health),
                 web.get("/app.mjs", self.asset),
                 web.get("/model.mjs", self.asset),
+                web.get("/reads.mjs", self.asset),
                 web.get("/styles.css", self.asset),
                 web.get("/markdown.js", self.asset),
                 web.post("/session", self.login),
@@ -260,6 +261,7 @@ class WebUI:
             "styles.css": "text/css",
             "app.mjs": "application/javascript",
             "model.mjs": "application/javascript",
+            "reads.mjs": "application/javascript",
             "markdown.js": "application/javascript",
         }
         return web.Response(

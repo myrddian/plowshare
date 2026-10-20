@@ -42,9 +42,7 @@ def parser() -> argparse.ArgumentParser:
         help="Private TOML configuration; required for server commands",
     )
     commands = root.add_subparsers(dest="command", required=True)
-    commands.add_parser(
-        "check", help="Probe public schema and document navigation capabilities"
-    )
+    commands.add_parser("check", help="Probe public typed-document support")
     serve = commands.add_parser(
         "serve", help="Run the separate single-maintainer web UI"
     )
@@ -226,7 +224,11 @@ async def execute(args: argparse.Namespace) -> None:
             or args.command == "request"
             and args.action == "recover"
         )
-        await port.check(writing=writing)
+        # Read operations enforce their own availability and current authority.
+        # Only explicit probes and writes need a typed-write readiness request;
+        # serve's watchdog owns its startup and ongoing readiness checks.
+        if writing or args.command == "check":
+            await port.check(writing=writing)
         board = Board(port, journal)
         if args.command == "check":
             output(

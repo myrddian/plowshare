@@ -15,12 +15,12 @@ from plowshare.contracts import (
     InformationAcquirePayloadDtoTypingVariant2Dto,
     InformationContentBindingDto,
     InformationContentGetRequest,
+    InformationContentMetadataDto,
     InformationContentReviseRequest,
     InformationDocumentsGetRequest,
     InformationDocumentsListRequest,
     InformationFilterDto,
     InformationInterchangeReadableRequest,
-    InformationNavigationCapabilitiesRequest,
     InformationReadRequest,
     InformationReviseRequest,
     InformationTagsRequest,
@@ -53,6 +53,7 @@ class SdkConnection(Protocol):
 class BoardPort(Protocol):
     async def check(self, *, writing: bool = False) -> None: ...
     async def list(self, kind: str, tags: tuple[str, ...]) -> tuple[Document, ...]: ...
+    async def validate_epics(self, resources: tuple[str, ...]) -> None: ...
     async def get(
         self,
         kind: str,
@@ -104,21 +105,22 @@ class SdkBoardPort:
         ).require_payload()
         if writing and not capabilities.typed_writes:
             raise ValueError("The server has disabled typed document writes")
-        (
-            await self.client.request(
-                InformationNavigationCapabilitiesRequest(
-                    scope=self.scope, view="content-types-v1"
-                )
-            )
-        ).require_payload()
+        # Actual navigation calls enforce navigation availability. Fetching its
+        # capabilities here discarded the projection on every write/probe.
 
-    async def _document(self, kind: str, entry: CurrentDocumentDto) -> Document:
+    def _entry(self, entry: CurrentDocumentDto) -> None:
         if (
             not isinstance(entry.scope, SelectionDtoScopeVariant3Dto)
             or entry.scope.project != self.config.project
             or entry.scope.include_global is True
         ):
             raise ValueError("Foreign document scope")
+        identity(entry.resource)
+        identity(entry.revision)
+
+    async def _read_fields(
+        self, kind: str, entry: CurrentDocumentDto
+    ) -> TicketFields | EpicFields:
         content = (
             await self.client.request(
                 InformationContentGetRequest(
@@ -129,18 +131,54 @@ class SdkBoardPort:
             )
         ).require_payload()
         binding = content.content_type
-        if (
-            content.revision != entry.revision
-            or not isinstance(binding, InformationContentBindingDto)
-            or binding.contract.type_ != self.config.type_id(kind)
-            or binding.contract.slug != "agile-" + kind
+        if content.revision != entry.revision or not isinstance(
+            binding, InformationContentBindingDto
         ):
             raise ValueError("Document does not have the configured Application type")
-        fields = (
-            TicketFields.decode(binding.metadata)
-            if kind == "ticket"
-            else EpicFields.decode(binding.metadata)
+        return self._decode_fields(kind, binding)
+
+    def _decode_fields(
+        self, kind: str, binding: InformationContentBindingDto
+    ) -> TicketFields | EpicFields:
+        return self._decode_metadata(
+            kind, binding.contract.type_, binding.contract.slug, binding.metadata
         )
+
+    def _decode_metadata(
+        self,
+        kind: str,
+        type_id: str,
+        slug: str,
+        values: Mapping[str, SchemaObjectEntry],
+    ) -> TicketFields | EpicFields:
+        if type_id != self.config.type_id(kind) or slug != "agile-" + kind:
+            raise ValueError("Document does not have the configured Application type")
+        return (
+            TicketFields.decode(values)
+            if kind == "ticket"
+            else EpicFields.decode(values)
+        )
+
+    def _projected_document(self, kind: str, entry: CurrentDocumentDto) -> Document:
+        self._entry(entry)
+        binding = entry.content_metadata
+        if not isinstance(binding, InformationContentMetadataDto):
+            raise ValueError(
+                "The server omitted the requested typed metadata projection"
+            )
+        return Document(
+            entry.resource,
+            entry.revision,
+            entry.owner,
+            entry.tags,
+            self._decode_metadata(
+                kind, binding.type_.type_, binding.type_.slug, binding.metadata
+            ),
+        )
+
+    async def _document(self, kind: str, entry: CurrentDocumentDto) -> Document:
+        self._entry(entry)
+        fields = await self._read_fields(kind, entry)
         return Document(
             identity(entry.resource),
             identity(entry.revision),
@@ -149,7 +187,9 @@ class SdkBoardPort:
             fields,
         )
 
-    async def list(self, kind: str, tags: tuple[str, ...]) -> tuple[Document, ...]:
+    async def _entries(
+        self, kind: str, tags: tuple[str, ...]
+    ) -> tuple[CurrentDocumentDto, ...]:
         maximum = 100 if kind == "ticket" else 20
         entries: list[CurrentDocumentDto] = []
         # Fetch one more than capacity to prove completeness, including the exact
@@ -166,9 +206,14 @@ class SdkBoardPort:
                         ),
                         limit=limit,
                         offset=len(entries),
+                        projection="metadata-v1",
                     )
                 )
             ).require_payload()
+            if page.projection != "metadata-v1":
+                raise ValueError(
+                    "The server does not support the requested metadata projection"
+                )
             if (
                 page.offset != len(entries)
                 or page.limit != limit
@@ -184,16 +229,30 @@ class SdkBoardPort:
                 break
         if len({v.resource for v in entries}) != len(entries):
             raise ValueError("Document selection changed while paging; refresh")
-        return tuple([await self._document(kind, entry) for entry in entries])
+        for entry in entries:
+            self._entry(entry)
+        return tuple(entries)
 
-    async def get(
-        self,
-        kind: str,
-        resource: str,
-        revision: str | None = None,
-        *,
-        body: bool = False,
-    ) -> Document:
+    async def list(self, kind: str, tags: tuple[str, ...]) -> tuple[Document, ...]:
+        entries = await self._entries(kind, tags)
+        return tuple(self._projected_document(kind, entry) for entry in entries)
+
+    async def validate_epics(self, resources: tuple[str, ...]) -> None:
+        """Validate one selected set without per-epic current-head requests."""
+        requested = tuple(identity(resource) for resource in resources)
+        if len(set(requested)) != len(requested):
+            raise ValueError("Duplicate epic selection")
+        if not requested:
+            return
+        entries = {entry.resource: entry for entry in await self._entries("epic", ())}
+        if any(resource not in entries for resource in requested):
+            raise ValueError("An epic is unavailable")
+        for resource in requested:
+            self._projected_document("epic", entries[resource])
+
+    async def _select(
+        self, resource: str, revision: str | None = None
+    ) -> CurrentDocumentDto:
         target = (
             DocumentTargetDto(resource=identity(resource))
             if revision is None
@@ -217,6 +276,18 @@ class SdkBoardPort:
             and entry.revision != revision
         ):
             raise ValueError("Document selection returned a different identity")
+        self._entry(entry)
+        return entry
+
+    async def get(
+        self,
+        kind: str,
+        resource: str,
+        revision: str | None = None,
+        *,
+        body: bool = False,
+    ) -> Document:
+        entry = await self._select(resource, revision)
         document = await self._document(kind, entry)
         if not body:
             return document
@@ -258,27 +329,39 @@ class SdkBoardPort:
 
     async def editable(self, kind: str, resource: str) -> Document:
         """Return original Markdown for editing; extracted text is never source bytes."""
-        document = await self.get(kind, resource)
+        entry = await self._select(resource)
         source = (
             await self.client.request(
                 InformationInterchangeReadableRequest(
                     scope=self.scope,
                     view="content-types-v1",
-                    revision=document.revision,
+                    revision=entry.revision,
                 )
             )
         ).require_payload()
         if (
             source.representation != "original_markdown"
-            or source.sidecar.resource != document.resource
-            or source.sidecar.revision != document.revision
+            or source.sidecar.resource != entry.resource
+            or source.sidecar.revision != entry.revision
             or hashlib.sha256(source.markdown.encode("utf-8")).hexdigest()
             != source.text_hash
         ):
             raise ValueError(
                 "Original Markdown is unavailable; extraction cannot be used as editable source"
             )
-        return replace(document, body=body_text(source.markdown))
+        binding = source.sidecar.content_type
+        if not isinstance(binding, InformationContentBindingDto):
+            raise ValueError("Original Markdown has no typed binding")
+        # The public readable projection already includes this exact revision's
+        # binding; do not fetch content.get merely to discard duplicate fields.
+        return Document(
+            entry.resource,
+            entry.revision,
+            entry.owner,
+            entry.tags,
+            self._decode_fields(kind, binding),
+            body_text(source.markdown),
+        )
 
     async def submit(self, intent: Intent) -> MutationResult:
         if intent.action == "create":
