@@ -1231,9 +1231,9 @@ async function replaceFile(
     if (before !== undefined) {
       const option =
         process.platform === 'darwin'
-          ? '-p'
+          ? '-Pp'
           : process.platform === 'linux'
-            ? '--preserve=all'
+            ? '--preserve=all,xattr'
             : undefined;
       if (option === undefined)
         throw new Error(
@@ -1243,11 +1243,29 @@ async function replaceFile(
       if (!program.trim() || program !== program.trim())
         throw new Error('Configure a valid metadata-preserving copy program');
       // Native preserving copy is required: fs.copyFile drops ACLs and extended attributes.
-      await promisify(execFile)(program, [option, '--', target, staged], {
-        timeout: 30000,
-      });
+      const copied = await promisify(execFile)(
+        program,
+        [
+          ...(process.platform === 'linux' ? ['--no-dereference'] : []),
+          option,
+          '--',
+          target,
+          staged,
+        ],
+        {
+          timeout: 30000,
+        },
+      );
+      // GNU "all" alone tolerates some metadata failures; warnings must also refuse publication.
+      if (copied.stderr.length !== 0)
+        throw new Error('Metadata-preserving file copy failed');
     }
-    const output = await open(staged, before === undefined ? 'wx' : 'r+');
+    const output = await open(
+      staged,
+      before === undefined
+        ? 'wx'
+        : constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0),
+    );
     try {
       await output.truncate(0);
       await output.writeFile(content, 'utf8');

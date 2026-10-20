@@ -146,11 +146,11 @@ Ordinary file writes stage complete content beside the destination and replace i
 atomically where the filesystem supports that operation. A failed publication does
 not fall back to truncating the target. Existing targets must remain writable;
 multiply linked files are refused because replacement would break alias behavior.
-Existing-file replacement requires a native metadata-preserving copy (`cp -p`
-on macOS, GNU `cp --preserve=all` on Linux). Both providers accept
-`PLOWSHARE_FILE_COPY_PROGRAM` to select that executable explicitly. Missing tools,
-copy failures and unsupported platforms refuse before publication; there is no
-copy fallback that strips ACLs, ownership or extended metadata.
+Existing-file replacement requires a native metadata-preserving copy (`cp -Pp`
+on macOS, GNU `cp --no-dereference --preserve=all,xattr` on Linux). Both providers
+accept `PLOWSHARE_FILE_COPY_PROGRAM` to select that executable explicitly. Missing
+tools, copy failures, metadata diagnostics and unsupported platforms refuse before
+publication; there is no copy fallback that strips ACLs, ownership or extended metadata.
 
 Provider-owned write, create, edit, delete and move operations serialize within
 each provider process, including separate per-run instances. This prevents lost

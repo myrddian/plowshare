@@ -92,28 +92,40 @@ final class AtomicFileWrites {
   private static void copyPreservingMetadata(Path source, Path target) throws IOException {
     String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
     String option;
-    if (os.contains("mac") || os.contains("darwin")) option = "-p";
-    else if (os.contains("linux")) option = "--preserve=all";
+    if (os.contains("mac") || os.contains("darwin")) option = "-Pp";
+    else if (os.contains("linux")) option = "--preserve=all,xattr";
     else throw new IOException("Atomic replacement cannot preserve file security on this platform");
     String configured = System.getenv("PLOWSHARE_FILE_COPY_PROGRAM");
     String program = configured == null ? "cp" : configured;
     if (program.isBlank() || !program.equals(program.strip()))
       throw new IOException("Configure a valid metadata-preserving copy program");
-    Process copying =
-        new ProcessBuilder(program, option, "--", source.toString(), target.toString())
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start();
+    var command = new java.util.ArrayList<String>();
+    command.add(program);
+    if (os.contains("linux")) command.add("--no-dereference");
+    command.addAll(java.util.List.of(option, "--", source.toString(), target.toString()));
+    Path diagnostics = target.resolveSibling("copy-diagnostics");
     try {
-      if (!copying.waitFor(30, TimeUnit.SECONDS)) {
+      Process copying =
+          new ProcessBuilder(command)
+              .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+              .redirectError(diagnostics.toFile())
+              .start();
+      try {
+        if (!copying.waitFor(30, TimeUnit.SECONDS)) {
+          copying.destroyForcibly();
+          throw new IOException("Metadata-preserving file copy timed out");
+        }
+        // GNU's "all" alone tolerates some metadata failures. Require xattrs explicitly and
+        // reject diagnostics too, including a security-context warning despite a zero exit code.
+        if (copying.exitValue() != 0 || Files.size(diagnostics) != 0)
+          throw new IOException("Metadata-preserving file copy failed");
+      } catch (InterruptedException interrupted) {
         copying.destroyForcibly();
-        throw new IOException("Metadata-preserving file copy timed out");
+        Thread.currentThread().interrupt();
+        throw new IOException("Metadata-preserving file copy interrupted", interrupted);
       }
-      if (copying.exitValue() != 0) throw new IOException("Metadata-preserving file copy failed");
-    } catch (InterruptedException interrupted) {
-      copying.destroyForcibly();
-      Thread.currentThread().interrupt();
-      throw new IOException("Metadata-preserving file copy interrupted", interrupted);
+    } finally {
+      Files.deleteIfExists(diagnostics);
     }
   }
 }
