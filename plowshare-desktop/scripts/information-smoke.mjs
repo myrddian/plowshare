@@ -66,8 +66,8 @@ try {
   await sources.locator('.information-tag-metadata > summary').click();
   await sources.locator('[data-tags] input').fill('my project, reviewed');await sources.locator('[data-tags] button').click();
   await expect(sources.locator('.information-tags')).toContainText('Your tags: my project, reviewed');
-  const updated=fixture.frames.filter(frame=>frame.type==='information.tags').at(-1).payload;
-  assert.deepEqual(updated.tags,['my project','reviewed']);assert.equal('autoTag' in updated,false);assert.ok(updated.requestId);
+  const updated=fixture.frames.filter(frame=>frame.type==='information.tags.replace').at(-1).payload;
+  assert.equal(updated.expectedTagsVersion,0);assert.equal(count('information.tags'),0);assert.deepEqual(updated.tags,['my project','reviewed']);assert.equal('autoTag' in updated,false);assert.ok(updated.requestId);
   await sources.locator('[data-facet-clear]').click();
   await sources.locator('.information-row').click();
   if (await sources.locator('.information-tag-metadata').getAttribute('open') === null) await sources.locator('.information-tag-metadata > summary').click();
@@ -86,6 +86,9 @@ try {
   await sources.locator('[data-facet-search] input').fill('nothing matches');await sources.locator('[data-facet-search] button').first().click();
   await expect(sources.locator('[data-facet-total]')).toHaveText('· 0 versions');await expect(sources.locator('.information-row')).toHaveCount(0);
   await sources.locator('[data-facet-remove="search"]').click();await expect(sources.locator('.information-row')).toHaveCount(1);
+  fixture.setInformationTagVersions(false);await sources.locator('[data-refresh]').click();
+  await sources.locator('.information-row').click();await expect(sources.locator('.information-tags')).toContainText('Your tags: my project, reviewed');
+  await expect(sources.locator('[data-tags]')).toHaveCount(0);assert.equal(count('information.tags'),0);
   assert.deepEqual(errors,[]);
   await library.screenshot({path:'build/smoke/information-facets.png'});
   console.log('PASS: failed/pending extraction states, no absent-text reads or paid submissions, accurate pending labels, replacement-text recovery, readable recovery no polling loop after a refused read, intersected facet filters/counts, document-author display/filtering, distinct user/automatic tags, category graph browsing, owner group overrides and returning to automatic grouping.');

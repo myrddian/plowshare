@@ -44,7 +44,7 @@ export async function protocolFixture(options = {}) {
   const jobs = new Map(), schedules = new Map(), triggers = new Map(), scheduleFiles = new Map();
   let refuseTriggerDefinition = false;
   const timers = new Set();
-  let informationTags=['my project'];
+  let informationTags=['my project'], informationTagsVersion=0, informationTagVersions=true;
   let informationGroups=null;
   const currentGroups=()=>informationGroups ?? {databases:['postgresql']};
   const frames = [], httpPaths = [];
@@ -302,7 +302,10 @@ export async function protocolFixture(options = {}) {
           result.payload={total:matching?1:0,facets:Object.fromEntries(names.map(name=>[name,matching?({kind:[{value:payload.kind??'source',count:1}],tags:informationTags.map(value=>({value,count:1})),autoTag:[{value:'postgresql',count:1}],tagGroup:Object.keys(currentGroups()).map(value=>({value,count:1})),author:[{value:'fixture',count:1}],documentAuthor:[{value:'Ada Lovelace',count:1}],when:[{value:'2024-10',count:1}],subtype:[{value:'text',count:1}]}[name]):[]])),hasMore:Object.fromEntries(names.map(name=>[name,false])),tagGraph:{edges:matching?Object.entries(currentGroups()).flatMap(([group,tags])=>tags.map(tag=>({group,tag,count:1}))):[],hasMore:false}};break;
         }
         case 'information.tags.groups': informationGroups=payload.groups;result.payload={changed:true};break;
-        case 'information.tags': informationTags=payload.tags;result.payload={changed:true};break;
+        case 'information.tags': if(JSON.stringify(informationTags)!==JSON.stringify(payload.tags)) informationTagsVersion++;informationTags=payload.tags;result.payload={changed:true};break;
+        case 'information.tags.replace':
+          if(payload.expectedTagsVersion!==informationTagsVersion){result={code:'BAD_REQUEST',said:'INFORMATION_TAGS_CONFLICT: Tags changed; refresh and review before replacing'};break;}
+          if(JSON.stringify(informationTags)!==JSON.stringify(payload.tags)) informationTagsVersion++;informationTags=payload.tags;result.payload={changed:true};break;
         case 'information.list': case 'information.inventory':
           if (payload.filter?.tags?.includes('plowshare-manual')) {
             assert.equal(payload.scope.kind, 'global_read');
@@ -320,7 +323,7 @@ export async function protocolFixture(options = {}) {
             break;
           }
         }
-        result.payload={...(payload.revision === options.retainedReport ? {kind:'report',report:{status:'draft',details:{objectives:[],findings:[],reviews:[],scopeChanges:[]}}} : {}),id:payload.revision,tags:informationTags,autoTag:['postgresql'],tagGroups:currentGroups(),tagGroupsSource:informationGroups===null?'automatic':'manual',auto_tag_generated:true,documentAuthor:'Ada Lovelace',documentAuthorSource:'person',title:options.informationTitle ?? 'Retained research source',ordinal:1,availability:'active',generation:1,can_manage:true,allowance_total:20,allowance_spent:informationExtraction==='ready'?5:0,steps:['extract','derive','embed','summarise','summary_embed'].map(stage=>({stage,state:stage==='extract'?informationExtraction:informationExtraction==='ready'?'ready':'pending',attempt:stage==='extract'||informationExtraction==='ready'?1:0,generation:1,compatible:informationExtraction==='ready',...(stage==='extract'&&informationExtraction==='failed'?{error:'a document whose extracted text is blank has nothing to ingest'}:{})})),events:[],inputs:[],citations:[]};break;
+        result.payload={...(payload.revision === options.retainedReport ? {kind:'report',report:{status:'draft',details:{objectives:[],findings:[],reviews:[],scopeChanges:[]}}} : {}),id:payload.revision,tags:informationTags,...(informationTagVersions?{tagsVersion:informationTagsVersion}:{}),autoTag:['postgresql'],tagGroups:currentGroups(),tagGroupsSource:informationGroups===null?'automatic':'manual',auto_tag_generated:true,documentAuthor:'Ada Lovelace',documentAuthorSource:'person',title:options.informationTitle ?? 'Retained research source',ordinal:1,availability:'active',generation:1,can_manage:true,allowance_total:20,allowance_spent:informationExtraction==='ready'?5:0,steps:['extract','derive','embed','summarise','summary_embed'].map(stage=>({stage,state:stage==='extract'?informationExtraction:informationExtraction==='ready'?'ready':'pending',attempt:stage==='extract'||informationExtraction==='ready'?1:0,generation:1,compatible:informationExtraction==='ready',...(stage==='extract'&&informationExtraction==='failed'?{error:'a document whose extracted text is blank has nothing to ingest'}:{})})),events:[],inputs:[],citations:[]};break;
         case 'information.read': {
           const chapter = manualChapters.find(row => row.id === payload.revision);
           if (chapter) {
@@ -696,6 +699,7 @@ export async function protocolFixture(options = {}) {
   return { eventSessions: () => eventSockets.size, loseRunReply() { dropRunReply = true; }, loseAuthoringReply() { dropAuthoringReply = true; }, setMalformedLibrary: value=>{malformedLibrary=value;}, fileClaims, loginCount: () => logins,
     setManualChapters(value) { manualChapters = structuredClone(value); },
     setInformationExtraction(value) { informationExtraction=value; },
+    setInformationTagVersions(value) { informationTagVersions=value; },
     setInformationReadError(value) { informationReadError=value; },
     setRefuseInformationStatus(value) { refuseInformationStatus=value; },
     get eventSession() { return eventSession; },
