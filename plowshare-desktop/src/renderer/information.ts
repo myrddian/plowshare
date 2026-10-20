@@ -237,9 +237,12 @@ export function installInformation(
     dialog.classList.add('information-reports');
     // Collection filters belong with the catalogue rather than consuming the report's
     // reading height. They remain keyboard-accessible when the catalogue scrolls.
-    dialog
-      .querySelector('.information-list-pane')!
-      .prepend(authoredControls, dialog.querySelector('[data-faceting]')!);
+    const catalogue = dialog.querySelector('.information-list-pane')!;
+    catalogue.prepend(
+      authoredControls,
+      dialog.querySelector('[data-faceting]')!,
+    );
+    catalogue.append(capabilityNote);
     select.parentElement!.firstChild!.textContent = '';
     select.title = 'Filter report collection';
     dialog.querySelector<HTMLElement>('[data-scope-note]')!.hidden = true;
@@ -630,6 +633,14 @@ export function installInformation(
           dialog.querySelector<HTMLButtonElement>('[data-next]')!.disabled =
             data.length < 20;
           if (selected) await inspect(selected, acquisition, stamp);
+          else if (!detail.hasChildNodes()) {
+            // Scope invalidation clears protected text synchronously. Once this
+            // collection is authorised, restore its static selection prompt without
+            // replacing a retained draft from a refresh in the same scope.
+            detail.innerHTML = emptyDetail;
+            detail.dataset.sourceId = '';
+            question.hidden = true;
+          }
           if (current()) revealReadSurfaces();
         },
       });
@@ -900,6 +911,13 @@ export function installInformation(
           : ''
       }</details>
       </details>`;
+    if (options.kind === 'report') {
+      // Keep secondary disclosures on one wrapping tools row below the text.
+      // A separate Tags footer otherwise takes a full reading row at every size.
+      detail
+        .querySelector('.information-source-tools')!
+        .append(detail.querySelector('.information-tag-metadata')!);
+    }
     Array.from(detail.querySelectorAll<HTMLDetailsElement>('details')).forEach(
       (node, i) => {
         node.open = expanded[i] ?? false;

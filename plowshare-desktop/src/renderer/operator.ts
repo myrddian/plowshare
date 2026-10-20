@@ -214,15 +214,11 @@ export function installOperator(
       const instances = data.instances ?? [];
       fields += `<div class="operator-items">${instances.map((r) => `<article><strong>${esc(r.agent)}</strong> · ${esc(r.state)}${r.defaultInstance ? ' · Default' : ''}<p>${esc(r.id)} · ${esc(r.pending)} pending</p></article>`).join('') || '<p>No message instances in this project.</p>'}</div>`;
       if (view.kind === 'message-deliveries') {
+        // Inspection selection belongs to the read command, not FormData for
+        // the separately reviewed message cancellation DTO.
         fields +=
-          select(
-            'instance',
-            'Instance to inspect',
-            instances.map((r) => [
-              String(r.id),
-              `${displayText(r.agent)} · ${displayText(r.state)} · ${displayText(r.id)}`,
-            ]),
-          ) + '<button data-message-read type="button">Read messages</button>';
+          `<label>Instance to inspect<select data-message-instance>${instances.map((r) => `<option value="${esc(r.id)}">${esc(r.agent)} · ${esc(r.state)} · ${esc(r.id)}</option>`).join('')}</select></label>` +
+          '<button data-message-read type="button">Read messages</button>';
         const deliveries = data.deliveries ?? [];
         if (data.messageInstance)
           fields += `<div class="operator-items">${deliveries.map((r) => `<article><strong>${esc(r.state)}</strong> · ${esc(r.message)}${r.replyExpected ? ' · Reply expected' : ''}${r.generated ? ' · Harness outcome' : ''}<p>${esc(r.sender)} → ${esc(r.recipient)}${r.ending ? ` · ${esc(r.ending)}` : ''}</p><pre>${esc(r.body)}</pre></article>`).join('') || '<p>No messages on this page.</p>'}</div>${data.messageMore ? '<button data-message-more type="button">Older messages</button>' : ''}`;
@@ -417,8 +413,9 @@ export function installOperator(
               ])
             : '<label>Value<input type="number" name="value" required min="0" max="1000000" value="10"></label>';
     });
-    const messageSelector =
-      content.querySelector<HTMLSelectElement>('[name="instance"]');
+    const messageSelector = content.querySelector<HTMLSelectElement>(
+      '[data-message-instance]',
+    );
     if (messageSelector && typeof view.data.messageInstance === 'string')
       messageSelector.value = view.data.messageInstance;
     if (
@@ -500,7 +497,8 @@ export function installOperator(
       if (!view) return;
       const instance = button.hasAttribute('data-message-more')
         ? String(view.data.messageInstance)
-        : content.querySelector<HTMLSelectElement>('[name="instance"]')?.value;
+        : content.querySelector<HTMLSelectElement>('[data-message-instance]')
+            ?.value;
       if (!instance) return;
       const offset = button.hasAttribute('data-message-more')
         ? Number(view.data.messageOffset ?? 0) + 200
@@ -546,25 +544,30 @@ export function installOperator(
   });
   dialog.addEventListener('submit', (event) => {
     event.preventDefault();
-    const form = event.target as HTMLFormElement,
-      input = Object.fromEntries(new FormData(form));
-    for (const name of ['maxTurns', 'maxModelCalls', 'value'])
-      if (input[name] !== undefined)
-        (input as Record<string, unknown>)[name] = Number(input[name]);
-    if (input.prefix !== undefined)
-      input.prefix = JSON.stringify(
-        displayText(input.prefix)
-          .split('\n')
-          .filter((s) => s.trim().length > 0),
-      );
-    void api
-      .request({
-        action: 'operator-preview',
-        identity: selectedIdentity,
-        input: decodeOperatorInput(input),
-      })
-      .then(render)
-      .catch(fail);
+    error.hidden = true;
+    try {
+      const form = event.target as HTMLFormElement,
+        input = Object.fromEntries(new FormData(form));
+      for (const name of ['maxTurns', 'maxModelCalls', 'value'])
+        if (input[name] !== undefined)
+          (input as Record<string, unknown>)[name] = Number(input[name]);
+      if (input.prefix !== undefined)
+        input.prefix = JSON.stringify(
+          displayText(input.prefix)
+            .split('\n')
+            .filter((s) => s.trim().length > 0),
+        );
+      void api
+        .request({
+          action: 'operator-preview',
+          identity: selectedIdentity,
+          input: decodeOperatorInput(input),
+        })
+        .then(render)
+        .catch(fail);
+    } catch (reason) {
+      fail(reason);
+    }
   });
   dialog.addEventListener('close', () => {
     readRevision++;

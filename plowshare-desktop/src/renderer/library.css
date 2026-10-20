@@ -75,7 +75,7 @@
 .information-reports .information-reader-toolbar { padding-left:calc(var(--sources-width,24%) + 16px); }
 .information-reports .information-workspace { grid-template-columns:var(--sources-width,minmax(220px,24%)) minmax(0,1fr); }
 .information-reports .information-list-pane { padding-top:12px; }
-.information-reports [data-detail] { display:flex; flex-direction:column; gap:6px; padding:8px 16px; }
+.information-reports [data-detail] { display:flex; flex-direction:column; gap:4px; padding:8px 16px; }
 .information-reports .information-source-heading { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 12px; flex-shrink:0; }
 .information-reports .information-source-heading h2 { flex-basis:100%; font-size:19px; line-height:1.25; }
 .information-reports .information-source-heading p { margin:0; font-size:11px; line-height:1.5; }
@@ -83,8 +83,8 @@
 /* Closed collection controls must not reserve the expanded form's padding. This
    matters when Library shares the main window with the sidebar and titlebar. */
 .information-reports :is(.information-faceting,.information-types):not([open]) { margin:0; padding:4px 0; border-top:0; }
-.information-reports>.information-capability-note { flex-shrink:0; margin:0; padding:4px 0; }
-.information-reports>.information-capability-note[open] { max-height:min(22vh,150px); overflow:auto; }
+.information-reports .information-capability-note { flex-shrink:0; margin:0; padding:4px 0; }
+.information-reports .information-capability-note[open] { max-height:min(22vh,150px); overflow:auto; }
 .information-reports>[data-error], .information-reports>[data-notice] { margin:4px 0; line-height:1.5; }
 .information-reports .information-reader-toolbar .information-ask { margin-bottom:6px; }
 .information-reports [data-source] { display:flex; flex-direction:column; flex:1 0 180px; min-height:180px; gap:8px; }
@@ -108,7 +108,7 @@
   .information-reader-toolbar { flex-wrap:wrap; }
   .information-reports .information-reader-toolbar { padding-left:0; }
   .information-reader-toolbar .information-ask { grid-template-columns:minmax(0,1fr) auto; }
-  .information-reports [data-detail] { padding:10px 12px; }
+  .information-reports [data-detail] { padding:6px 12px; }
 }
 .information-reports .information-ask label { display:flex; align-items:center; gap:10px; }
 .information-reports .information-ask input { flex:1; width:0; }
