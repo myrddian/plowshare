@@ -27,6 +27,7 @@
 - [Relay topic/message query, cache and wakeup slice](query-efficiency-relay-slice.md) (narrow projections, indexed reads, tracked snapshots and recoverable database wakeups)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
+- [Discord web management and account linking plan](discord-integration-plan.md) (proposed; separate runtime, platform consent and SDK integration tracks)
 - [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled policy and implementation boundaries)
 - [Global knowledge read contract](global-knowledge-read-contract.md) (implemented read boundaries and selector cutover)
 - [Standalone allowances and execution recovery](standalone-allowance-and-recovery-plan.md) (standalone Budget storage, policy preservation, swarm/operator recovery and cutover verification)

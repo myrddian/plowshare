@@ -8,6 +8,10 @@ or impersonate human Plowshare accounts. The server owns execution, grants,
 accounting, approvals, contexts, tasks and cancellation. This module contains no
 server imports, database access, core API changes or inference loop.
 
+The proposed [web management, account linking and DM plan](../../docs/discord-integration-plan.md)
+separates SDK integration work from generic platform consent contracts and core
+delegated runtime repairs. Those planned features are not enabled by this version.
+
 ## Configure and run
 
 1. Create a Discord application and bot in the Developer Portal. Enable **Message
