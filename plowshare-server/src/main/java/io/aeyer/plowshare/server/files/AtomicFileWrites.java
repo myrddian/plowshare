@@ -11,7 +11,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.UUID;
+import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Filesystem publication helper; callers own authorization and participating-writer serialization.
@@ -20,14 +21,15 @@ final class AtomicFileWrites {
   private AtomicFileWrites() {}
 
   /**
-   * Publishes a complete replacement, or fails without truncating the destination. COPY_ATTRIBUTES
-   * retains the platform's supported metadata; the original must also be writable. This changes
-   * inode identity, so multiply linked files are refused. An atomic move is mandatory: no in-place
-   * fallback. Neither this move nor flushing the staged file promises directory-entry durability
-   * across machine failure, or compare-and-swap against an external filesystem writer.
+   * Publishes a complete replacement, or fails without truncating the destination. A native
+   * preserving copy retains ACLs and extended metadata; the original must also be writable. This
+   * changes inode identity, so multiply linked files are refused. An atomic move is mandatory: no
+   * in-place fallback. Neither this move nor flushing the staged file promises directory-entry
+   * durability across machine failure, or compare-and-swap against an external filesystem writer.
    */
   static void replace(Path target, String content, Runnable recheck) throws IOException {
-    Path staged = target.resolveSibling(".plowshare-write-" + UUID.randomUUID() + ".tmp");
+    Path staging = Files.createTempDirectory(target.getParent(), ".plowshare-write-");
+    Path staged = staging.resolve("content");
     BasicFileAttributes before = null;
     try {
       try {
@@ -47,7 +49,7 @@ final class AtomicFileWrites {
             FileChannel.open(target, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
           if (writable.size() != before.size())
             throw new IOException("The destination changed before staging");
-          Files.copy(target, staged, StandardCopyOption.COPY_ATTRIBUTES, LinkOption.NOFOLLOW_LINKS);
+          copyPreservingMetadata(target, staged);
         }
       }
       try (var output =
@@ -76,7 +78,42 @@ final class AtomicFileWrites {
       Files.move(
           staged, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } finally {
-      Files.deleteIfExists(staged);
+      try {
+        Files.deleteIfExists(staged);
+      } finally {
+        Files.deleteIfExists(staging);
+      }
+    }
+  }
+
+  /**
+   * Standard Node/Java copies can silently discard ACLs. Refuse without a native preserving copy.
+   */
+  private static void copyPreservingMetadata(Path source, Path target) throws IOException {
+    String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
+    String option;
+    if (os.contains("mac") || os.contains("darwin")) option = "-p";
+    else if (os.contains("linux")) option = "--preserve=all";
+    else throw new IOException("Atomic replacement cannot preserve file security on this platform");
+    String configured = System.getenv("PLOWSHARE_FILE_COPY_PROGRAM");
+    String program = configured == null ? "cp" : configured;
+    if (program.isBlank() || !program.equals(program.strip()))
+      throw new IOException("Configure a valid metadata-preserving copy program");
+    Process copying =
+        new ProcessBuilder(program, option, "--", source.toString(), target.toString())
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start();
+    try {
+      if (!copying.waitFor(30, TimeUnit.SECONDS)) {
+        copying.destroyForcibly();
+        throw new IOException("Metadata-preserving file copy timed out");
+      }
+      if (copying.exitValue() != 0) throw new IOException("Metadata-preserving file copy failed");
+    } catch (InterruptedException interrupted) {
+      copying.destroyForcibly();
+      Thread.currentThread().interrupt();
+      throw new IOException("Metadata-preserving file copy interrupted", interrupted);
     }
   }
 }

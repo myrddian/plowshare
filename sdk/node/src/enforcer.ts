@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 /**
  * What this machine lends a run: one root, read and written through a fence.
@@ -62,7 +64,6 @@ import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import {
-  copyFile,
   lstat,
   mkdir,
   mkdtemp,
@@ -1227,8 +1228,25 @@ async function replaceFile(
   const staging = await mkdtemp(join(dirname(target), '.plowshare-write-'));
   try {
     const staged = join(staging, 'content');
-    if (before !== undefined)
-      await copyFile(target, staged, constants.COPYFILE_EXCL);
+    if (before !== undefined) {
+      const option =
+        process.platform === 'darwin'
+          ? '-p'
+          : process.platform === 'linux'
+            ? '--preserve=all'
+            : undefined;
+      if (option === undefined)
+        throw new Error(
+          'Atomic replacement cannot preserve file security on this platform',
+        );
+      const program = process.env['PLOWSHARE_FILE_COPY_PROGRAM'] ?? 'cp';
+      if (!program.trim() || program !== program.trim())
+        throw new Error('Configure a valid metadata-preserving copy program');
+      // Native preserving copy is required: fs.copyFile drops ACLs and extended attributes.
+      await promisify(execFile)(program, [option, '--', target, staged], {
+        timeout: 30000,
+      });
+    }
     const output = await open(staged, before === undefined ? 'wx' : 'r+');
     try {
       await output.truncate(0);
@@ -1237,7 +1255,8 @@ async function replaceFile(
         const copied = await output.stat();
         if (copied.uid !== before.uid || copied.gid !== before.gid)
           await output.chown(before.uid, before.gid);
-        await output.chmod(before.mode & 0o7777);
+        if ((copied.mode & 0o7777) !== (before.mode & 0o7777))
+          await output.chmod(before.mode & 0o7777);
       }
       await output.sync();
     } finally {

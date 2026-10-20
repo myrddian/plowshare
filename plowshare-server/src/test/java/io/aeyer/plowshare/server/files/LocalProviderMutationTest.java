@@ -35,6 +35,38 @@ class LocalProviderMutationTest {
   }
 
   @Test
+  void replacementRetainsExtendedMetadataAndAcl() throws Exception {
+    Path file = Files.writeString(root.resolve("metadata"), "original");
+    var attributes =
+        Files.getFileAttributeView(
+            file, java.nio.file.attribute.UserDefinedFileAttributeView.class);
+    org.junit.jupiter.api.Assumptions.assumeTrue(attributes != null);
+    attributes.write("plowshare.fixture", java.nio.ByteBuffer.wrap(new byte[] {1, 2, 3}));
+    boolean mac = System.getProperty("os.name").startsWith("Mac");
+    if (mac)
+      assertEquals(
+          0,
+          new ProcessBuilder("chmod", "+a", "everyone deny execute", file.toString())
+              .start()
+              .waitFor());
+    provider().write(file, "changed");
+    var retained =
+        Files.getFileAttributeView(
+            file, java.nio.file.attribute.UserDefinedFileAttributeView.class);
+    var value = java.nio.ByteBuffer.allocate(3);
+    assertEquals(3, retained.read("plowshare.fixture", value));
+    assertArrayEquals(new byte[] {1, 2, 3}, value.array());
+    if (mac) {
+      var listing = new ProcessBuilder("ls", "-le", file.toString()).start();
+      assertTrue(
+          new String(
+                  listing.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+              .contains("deny execute"));
+      assertEquals(0, listing.waitFor());
+    }
+  }
+
+  @Test
   void invalidEncodingDoesNotTruncateAndUnpublishedStagesAreRemoved() throws Exception {
     Path file = Files.writeString(root.resolve("file"), "original");
     assertThrows(WorkspaceRefusedException.class, () -> provider().write(file, "\ud800"));

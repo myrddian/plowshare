@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import type * as FileSystem from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import {
@@ -1904,6 +1905,35 @@ it('protects application authority even before the root manifest exists', async 
 });
 
 describe('mutation publication and participating writers', () => {
+  it.skipIf(process.platform !== 'darwin')(
+    'retains ACLs and extended attributes during replacement',
+    async () => {
+      const target = join(root, 'metadata.txt');
+      await writeFile(target, 'original');
+      execFileSync('xattr', [
+        '-w',
+        'com.plowshare.fixture',
+        'metadata',
+        target,
+      ]);
+      execFileSync('chmod', ['+a', 'everyone deny execute', target]);
+      const result = await asking('write', {
+        path: 'metadata.txt',
+        content: 'changed',
+      });
+      expect(result.outcome).toBe('ok');
+      expect(
+        execFileSync('ls', ['-le', target], { encoding: 'utf8' }),
+      ).toContain('deny execute');
+      expect(
+        execFileSync('xattr', ['-p', 'com.plowshare.fixture', target], {
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe('metadata');
+      expect(await readFile(target, 'utf8')).toBe('changed');
+    },
+  );
+
   it('preserves mode, refuses hard links, and removes unpublished staging files', async () => {
     const target = join(root, 'atomic.txt');
     await writeFile(target, 'original');

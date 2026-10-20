@@ -146,9 +146,11 @@ Ordinary file writes stage complete content beside the destination and replace i
 atomically where the filesystem supports that operation. A failed publication does
 not fall back to truncating the target. Existing targets must remain writable;
 multiply linked files are refused because replacement would break alias behavior.
-Java copies supported file attributes; the Node provider preserves owner, group
-and mode and refuses Windows replacements where it cannot retain file security.
-Runtime-specific extended metadata is not a portable guarantee.
+Existing-file replacement requires a native metadata-preserving copy (`cp -p`
+on macOS, GNU `cp --preserve=all` on Linux). Both providers accept
+`PLOWSHARE_FILE_COPY_PROGRAM` to select that executable explicitly. Missing tools,
+copy failures and unsupported platforms refuse before publication; there is no
+copy fallback that strips ACLs, ownership or extended metadata.
 
 Provider-owned write, create, edit, delete and move operations serialize within
 each provider process, including separate per-run instances. This prevents lost
