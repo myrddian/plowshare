@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
 import { ConnectionFault, connectPlowshare } from 'plowshare-client-node';
-import { decodeConfig } from './config.ts';
+import { decodeConfig, botTargets } from './config.ts';
 import { DiscordAdapter } from './adapter.ts';
 import { DiscordNetwork } from './discord.ts';
 import { SdkGateway } from './gateway.ts';
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
             repository = await FileState.open(config, principal, botId);
           if (repository.state.principal !== principal)
             throw new Error('Authenticated service principal changed');
-          for (const route of config.routes) await gateway.catalog(route);
+          for (const route of botTargets(config)) await gateway.catalog(route);
           const active = new DiscordAdapter(
             config,
             repository,

@@ -1,5 +1,11 @@
 import { isAbsolute } from 'node:path';
-import type { Configuration, NotificationRoute, Route } from './contracts.ts';
+import type {
+  Configuration,
+  NotificationRoute,
+  Route,
+  DirectMessagePolicy,
+  BotTarget,
+} from './contracts.ts';
 
 export function object(
   value: unknown,
@@ -118,6 +124,7 @@ export function decodeConfig(value: unknown): Configuration {
     'pollMs',
     'requestTimeoutMs',
     'maxRecords',
+    'dm',
   ]);
   if (Object.values(raw).some((field) => field === null))
     throw new Error('Null configuration fields are not supported');
@@ -139,9 +146,10 @@ export function decodeConfig(value: unknown): Configuration {
     throw new Error('Configure an absolute private state directory');
   const allowedUserIds = array(raw.allowedUserIds, 1000).map(snowflake);
   const routes = array(raw.routes, 100).map(route);
-  if (!allowedUserIds.length || !routes.length)
+  const dm = directMessages(raw.dm);
+  if (!allowedUserIds.length || (!routes.length && dm.mode !== 'service'))
     throw new Error(
-      'At least one allowed Discord user and channel route are required',
+      'Configure allowed Discord users and at least one channel or service DM route',
     );
   if (
     new Set(allowedUserIds).size !== allowedUserIds.length ||
@@ -184,5 +192,30 @@ export function decodeConfig(value: unknown): Configuration {
     pollMs: integer(raw.pollMs ?? 2000, 250, 60000),
     requestTimeoutMs: integer(raw.requestTimeoutMs ?? 30000, 1000, 60000),
     maxRecords: integer(raw.maxRecords ?? 500, 1, 1000),
+    dm,
   };
+}
+function directMessages(value: unknown): DirectMessagePolicy {
+  if (value === undefined) return { mode: 'disabled' };
+  const raw = object(value, ['mode', 'project', 'bot']);
+  if (raw.mode === 'disabled' && Object.keys(raw).length === 1)
+    return { mode: 'disabled' };
+  if (raw.mode !== 'service')
+    throw new Error('Choose an explicit DM service mapping or disable DMs');
+  return {
+    mode: 'service',
+    project: text(raw.project),
+    bot: text(raw.bot, 256),
+  };
+}
+/** Verify distinct concrete receiving bots once, including a DM-only installation. */
+export function botTargets(config: Configuration): readonly BotTarget[] {
+  const targets: BotTarget[] = [...config.routes];
+  if (config.dm.mode === 'service') targets.push(config.dm);
+  return targets.filter(
+    (target, index) =>
+      targets.findIndex(
+        (other) => other.project === target.project && other.bot === target.bot,
+      ) === index,
+  );
 }

@@ -24,6 +24,13 @@ export interface NotificationRoute {
   readonly group: string;
   readonly start: 'LATEST' | 'OLDEST_RETAINED';
 }
+export interface BotTarget {
+  readonly project: string;
+  readonly bot: string;
+}
+/** Disabled unless explicitly mapped. DMs use service authority, never human delegation. */
+export type DirectMessagePolicy =
+  { readonly mode: 'disabled' } | ({ readonly mode: 'service' } & BotTarget);
 export interface Configuration {
   readonly origin: string;
   readonly serviceTokenEnvironment: string;
@@ -35,33 +42,38 @@ export interface Configuration {
   readonly pollMs: number;
   readonly requestTimeoutMs: number;
   readonly maxRecords: number;
+  readonly dm: DirectMessagePolicy;
 }
 /** Only native Discord events, decoded by the platform boundary, enter routing. */
-export interface DiscordInput {
+export type DiscordInput = Destination & {
   readonly messageId: string;
-  readonly guildId: string;
-  readonly channelId: string;
-  readonly parentId: string | null;
   readonly userId: string;
   readonly content: string;
   readonly bot: boolean;
   readonly webhook: boolean;
-}
+};
 /** The adapter receives validated public SDK DTOs, never internal services. */
 export interface Gateway {
   identity(): Promise<string>;
-  catalog(route: Route): Promise<void>;
+  catalog(route: BotTarget): Promise<void>;
   receive(request: Submission): Promise<IncomingTask>;
   status(reference: TaskReference): Promise<IncomingTask>;
   cancel(reference: TaskReference): Promise<IncomingTask>;
   consume(request: RelayConsumeRequest): Promise<RelayBatch>;
   acknowledge(request: RelayAckRequest): Promise<void>;
 }
-export interface Destination {
+export interface GuildDestination {
+  readonly kind: 'guild';
   readonly guildId: string;
   readonly channelId: string;
   readonly parentId: string | null;
 }
+export interface DirectDestination {
+  readonly kind: 'dm';
+  readonly channelId: string;
+  readonly recipientId: string;
+}
+export type Destination = GuildDestination | DirectDestination;
 /** A missing send receipt is uncertain. Implementations must disable effect retries. */
 export interface DiscordDelivery {
   send(
@@ -104,7 +116,7 @@ export interface ContextBinding {
 }
 /** Private delivery coordinates and receipts; credentials and inbound prompts are never retained. */
 export interface State {
-  readonly version: 1;
+  readonly version: 2;
   readonly origin: string;
   readonly principal: string;
   readonly discordBotId: string;

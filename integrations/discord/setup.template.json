@@ -28,6 +28,7 @@
       }
     ],
     "notifications": [],
+    "dm": {"mode": "disabled"},
     "pollMs": 2000,
     "requestTimeoutMs": 30000,
     "maxRecords": 500

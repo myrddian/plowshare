@@ -6,6 +6,12 @@ export { DiscordSetup } from './setup-engine.ts';
 export { decodeSetupConfig } from './setup-config.ts';
 export { FileSetup } from './setup-store.ts';
 export { SdkSetupGateway } from './setup-gateway.ts';
+export { ConfigurationManager } from './management.ts';
+export type {
+  ConfigurationRevision,
+  ConfigurationRepository,
+  ConfigurationVerifier,
+} from './management.ts';
 export type {
   SetupConfiguration,
   SetupGateway,

@@ -8,12 +8,17 @@ or impersonate human Plowshare accounts. The server owns execution, grants,
 accounting, approvals, contexts, tasks and cancellation. This module contains no
 server imports, database access, core API changes or inference loop.
 
+The [web management, account linking and DM plan](../../docs/discord-integration-plan.md)
+separates SDK integration work from generic platform consent contracts and core
+delegated runtime repairs. This version provides headless configuration management
+and optional service-mode DMs. Web management and account linking remain planned.
+
 ## Configure and run
 
 1. Create a Discord application and bot in the Developer Portal. Enable **Message
    Content Intent**. Invite the bot only to the intended server, with View Channels,
    Send Messages, Read Message History and Send Messages in Threads for the selected
-   channels. The adapter requests Guilds, Guild Messages and Message Content;
+   channels. The adapter requests Guilds, Guild Messages, Direct Messages and Message Content;
    it does not request Server Members or Presence. It does not register slash commands.
 2. Use [automated setup](#automated-application-setup), or configure and deploy the
    [Discord Application](#discord-application) as a server
@@ -89,6 +94,7 @@ the owned credential. It verifies the service principal and each configured bot
 catalog without sending a chat or starting inference. Only then does it publish:
 
 - `adapter.json`: ready-to-run Discord routing configuration.
+- `configuration.json`: revisioned operational configuration, created on the first edit.
 - `service-credential.json`: the current secret plus its receipt metadata.
 - `setup-state.json`: immutable deployment coordinates/source snapshot, credential
   attempt metadata and receipts; no bearer secrets.
@@ -139,13 +145,59 @@ process has stopped before deliberately removing that lock, and preserve all
 receipt/credential artifacts. Changing the setup configuration (including server,
 administrator or directories) cannot adopt another installation's journal.
 
+## Configuration management
+
+For automated installations, retain the original `setup.json` unchanged. It binds
+the installation journal and credential receipts. Stop the adapter before editing
+operational settings, then read the current revision:
+
+```sh
+node integrations/discord/build/discord/setup.js config /absolute/path/to/private/setup.json
+```
+
+Copy the returned `adapter` object into a separate private JSON file, edit it,
+then submit that **object only** with the returned revision UUID:
+
+```sh
+node integrations/discord/build/discord/setup.js configure /absolute/path/to/private/setup.json <expected-revision> /absolute/path/to/private/adapter-edit.json
+node integrations/discord/build/discord/setup.js start /absolute/path/to/private/setup.json
+```
+
+Editable settings include channel/bot mappings, allowed Discord IDs, notifications,
+DM policy and limits. Routes and DM targets stay within the owned Application
+project. Server origin, state directory and credential environment names remain
+fixed. Receiving bots must already be exported by the deployed Application;
+configuration editing does not deploy source, issue credentials or widen access.
+
+The headless manager uses filesystem operator authority. `config` reads private
+metadata offline; `configure` verifies the retained service identity and receiving
+catalogues through the SDK. Neither loads the administrator session. There is no
+HTTP listener or browser authentication in this slice.
+
+An edit holds both `setup.lock` and the runtime's `adapter.lock`, excluding managed
+and direct runtime owners. It refuses stale revisions, malformed settings, foreign
+scope and limits too small to retain the existing journal. After validation it
+atomically replaces `configuration.json`. It preserves original setup intents,
+credential receipts, conversations, deliveries and uncertainty holds. A route
+change or user removal fences retained output; it does not reroute that output or
+cancel existing server work. Locks are never stolen automatically.
+
+`adapter.json` is a derived launch snapshot. `start` regenerates it from the
+current configuration before checking credentials and starting the adapter.
+After an interrupted edit, run `config` to inspect the committed revision; do not
+blindly repeat an old revision. After an interrupted launch, restart explicitly.
+The original setup file remains the input to `install`, `recover` and `rotate`;
+those commands preserve operational edits when repairing runtime publication.
+Direct `main.js` deployments still use their explicitly supplied configuration;
+they do not read the setup manager's revision document.
+
 ## Chat, threads and controls
 
 Set `requireMention` explicitly for every channel. When true, mention the bot in
 each message, including controls and thread follow-ups. When false, each allowed
 user's text in that channel is input. An exact channel mapping wins over a parent
 mapping; otherwise an existing Discord thread inherits its parent's route.
-Unmapped guilds/channels, unlisted users, DMs, other bots and webhook messages do
+Unmapped guilds/channels, unlisted users, other bots and webhook messages do
 not submit work. Only text is forwarded; attachment-only messages are ignored.
 
 Each `(guild, channel or thread, thread parent, Discord user, project, bot)` has
@@ -160,7 +212,7 @@ Bindings survive adapter restarts when private state and the same service token
 principal are preserved. Another user, channel/thread, parent, project or bot gets
 a separate context. Sharing a Discord channel does not share model history.
 Replies stay in the original channel/thread and reference the triggering message.
-Actual Discord DMs are unsupported in this version. There is no automatic thread
+For direct messages, enable the separate service policy below. There is no automatic thread
 creation, linked-user mode, native conversation adoption, agent picker or arbitrary
 project/bot selection from message text.
 
@@ -189,6 +241,43 @@ controls who can see its answers. Select projects and channels whose contents ma
 be disclosed to that audience. Routing and sender separation do not create
 server-enforced permissions for individual Discord people. The shared token
 retains its project authority; per-bot exposure is adapter policy.
+
+## Service-mode direct messages
+
+DMs default to `{"mode":"disabled"}`, including configurations written before DM
+support. Enable them deliberately in the adapter configuration:
+
+```json
+{
+  "dm": {"mode": "service", "project": "discord", "bot": "discord_assistant"}
+}
+```
+
+This is the `dm` field of the full configuration, not a complete configuration
+file. The same `allowedUserIds` list applies. No mention is required in DMs.
+Guild routes may be empty for a DM-only installation. One-to-one DMs use the
+explicit project and exported bot under the Application service identity; a
+Discord sender acquires no Plowshare account or Personal authority. Linking and
+onboarding consent commands are deferred to the separate public consent contracts.
+
+Each `(DM channel, Discord user, project, bot)` retains its own server context,
+independent of guild and other users' conversations. Follow-ups, restart,
+status/cancel and uncertain delivery follow the same journal rules as channel
+chat. Removing the user, disabling DMs or changing the target fences retained
+results. Every send rereads Discord channel metadata and requires the exact
+one-to-one recipient. Group DMs are refused. See Discord's
+[channel contract](https://docs.discord.com/developers/resources/channel#channel-object).
+
+The Gateway requests DM events and enables uncached DM channels; it opens no
+public callback. Discord still carries all DM content. Discord privacy settings
+and bot availability must permit the conversation. Notifications remain restricted
+to explicitly mapped guild channels.
+
+Existing version-1 guild journals load as version 2 without changing context keys,
+tasks, receipts or holds. Subsequent saves use version 2 with explicit destination
+kinds. Keep a private stopped-installation backup before upgrading; an older
+binary cannot read the new journal format. Never remove uncertain records to
+roll back or migrate an installation.
 
 ## Discord Application
 
@@ -298,8 +387,8 @@ Existing manual-token adapter deployments remain supported by the unchanged SDK 
 The server deploys the manifest and bot definitions. Run the external Discord
 adapter process separately with its owned credential and configured mapping.
 Deployment does not launch the Node process. No core changes are required.
-Linked-user execution remains deferred until the public SDK exposes acting contexts
-and subject delegation; this Application declares no acting grants and continues
+Linked-user execution remains deferred until public consent and credential lifecycle
+contracts land and delegated runtime restrictions are repaired; this Application declares no acting grants and continues
 to execute Discord-only requests under its own service principal.
 
 ## Optional proactive notifications
@@ -388,7 +477,9 @@ stops intake, waits for owned work, closes connections, then releases the lock.
 
 Typed fakes test routing, input refusal, per-user/thread isolation, receipt
 ordering, duplicate admission, uncertainty, cancellation boundaries, notification
-fencing and restart behavior. Filesystem tests check exclusive/private state.
+fencing, DM recipient isolation and restart behavior. Filesystem tests check
+exclusive/private state, revision conflicts, legacy journal migration and
+configuration edits that preserve credentials and uncertain work.
 Test-only Java dependencies exercise current manifest and bot loaders, including
 owned service declarations, execution-principal resolution, explicit human grants,
 role ceilings and the initial bot's absence of tool authority. Setup tests also cover

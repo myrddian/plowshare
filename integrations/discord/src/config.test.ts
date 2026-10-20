@@ -65,3 +65,36 @@ await test('Discord IDs are canonical unsigned 64-bit strings, independent of ag
   for (const invalid of ['0', '01', '-1', '18446744073709551616', 123])
     assert.throws(() => snowflake(invalid));
 });
+
+await test('DM service mode is explicit, permits DM-only operation and has no implicit project or bot', () => {
+  const config = configuration();
+  assert.deepEqual(config.dm, { mode: 'disabled' });
+  assert.equal(
+    decodeConfig({
+      ...config,
+      routes: [],
+      dm: {
+        mode: 'service',
+        project: 'research',
+        bot: 'researcher',
+      },
+    }).routes.length,
+    0,
+  );
+  for (const dm of [
+    null,
+    {},
+    { mode: 'linked' },
+    { mode: 'service', project: 'research' },
+    { mode: 'service', project: 'research', bot: '' },
+    { mode: 'disabled', project: 'research' },
+    {
+      mode: 'service',
+      project: 'research',
+      bot: 'researcher',
+      token: 'forbidden',
+    },
+  ])
+    assert.throws(() => decodeConfig({ ...config, dm }));
+  assert.throws(() => decodeConfig({ ...config, routes: [] }));
+});

@@ -47,6 +47,16 @@ export function separateSetupDirectories(
 export function setupHash(config: SetupConfiguration): string {
   return createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
+/** Previous setup DTOs had no DM policy. Accept that digest only with DMs still disabled. */
+export function legacySetupHash(
+  config: SetupConfiguration,
+): string | undefined {
+  if (config.adapter.dm.mode !== 'disabled') return undefined;
+  const { dm: _dm, ...adapter } = config.adapter;
+  return createHash('sha256')
+    .update(JSON.stringify({ ...config, adapter }))
+    .digest('hex');
+}
 /** Closed installer configuration. A single owned token cannot gain another project's ceiling. */
 export function decodeSetupConfig(value: unknown): SetupConfiguration {
   const raw = object(value, [
@@ -82,7 +92,10 @@ export function decodeSetupConfig(value: unknown): SetupConfiguration {
     throw new SetupProblem(
       'The service credential environment name cannot control the process loader or shell',
     );
-  if (adapter.routes.some((r) => r.project !== project))
+  if (
+    adapter.routes.some((r) => r.project !== project) ||
+    (adapter.dm.mode === 'service' && adapter.dm.project !== project)
+  )
     throw new SetupProblem(
       'Owned setup routes must use the Application project',
     );

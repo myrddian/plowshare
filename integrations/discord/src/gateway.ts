@@ -3,7 +3,7 @@ import type { Plowshare } from 'plowshare-client-node';
 import type {
   Gateway,
   IncomingTask,
-  Route,
+  BotTarget,
   Submission,
   TaskReference,
 } from './contracts.ts';
@@ -46,7 +46,7 @@ export class SdkGateway implements Gateway {
     uuid(result.handle.slice('@service/'.length));
     return result.handle;
   }
-  async catalog(route: Route): Promise<void> {
+  async catalog(route: BotTarget): Promise<void> {
     const result = requirePayload(
       await this.client.request('incoming.catalog', {
         project: route.project,

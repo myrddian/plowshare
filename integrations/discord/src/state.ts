@@ -38,9 +38,29 @@ function optional(
 ): string | null {
   return value === null ? null : decode(value);
 }
-function destination(value: unknown): Destination {
-  const raw = object(value, ['guildId', 'channelId', 'parentId']);
+function destination(value: unknown, legacy: boolean): Destination {
+  const raw = object(value, [
+    'kind',
+    'guildId',
+    'channelId',
+    'parentId',
+    'recipientId',
+  ]);
+  if (raw.kind === 'dm') {
+    if (legacy)
+      throw new Error('Legacy journals cannot contain DM destinations');
+    object(value, ['kind', 'channelId', 'recipientId']);
+    return {
+      kind: 'dm',
+      channelId: snowflake(raw.channelId),
+      recipientId: snowflake(raw.recipientId),
+    };
+  }
+  object(value, ['kind', 'guildId', 'channelId', 'parentId']);
+  if (raw.kind !== 'guild' && !(legacy && raw.kind === undefined))
+    throw new Error('Invalid retained destination kind');
   return {
+    kind: 'guild',
     guildId: snowflake(raw.guildId),
     channelId: snowflake(raw.channelId),
     parentId: optional(raw.parentId, snowflake),
@@ -71,7 +91,7 @@ function output(value: unknown): Output {
     messageId,
   };
 }
-function record(value: unknown): RecordEntry {
+function record(value: unknown, legacy: boolean): RecordEntry {
   const raw = object(value, [
     'key',
     'kind',
@@ -112,6 +132,12 @@ function record(value: unknown): RecordEntry {
   const taskId = optional(raw.taskId, uuid);
   const contextId = optional(raw.contextId, uuid);
   const userId = optional(raw.userId, snowflake);
+  const target = destination(raw.destination, legacy);
+  if (
+    target.kind === 'dm' &&
+    (raw.kind === 'NOTICE' || target.recipientId !== userId)
+  )
+    throw new Error('Retained DM does not belong to its sender');
   const notice =
     raw.notification === null ? null : notification(raw.notification);
   if (
@@ -139,7 +165,7 @@ function record(value: unknown): RecordEntry {
     key: text(raw.key, 128),
     kind: raw.kind,
     userId,
-    destination: destination(raw.destination),
+    destination: target,
     project: text(raw.project),
     bot: text(raw.bot, 256),
     client,
@@ -173,7 +199,7 @@ export function decodeState(
     'heldNotifications',
   ]);
   if (
-    raw.version !== 1 ||
+    (raw.version !== 1 && raw.version !== 2) ||
     raw.origin !== config.origin ||
     raw.principal !== principal ||
     raw.discordBotId !== discordBotId
@@ -181,7 +207,9 @@ export function decodeState(
     throw new Error(
       'State belongs to another server, service principal or Discord bot',
     );
-  const records = list(raw.records, config.maxRecords).map(record);
+  const records = list(raw.records, config.maxRecords).map((value) =>
+    record(value, raw.version === 1),
+  );
   const contexts = list(raw.contexts, config.maxRecords).map((v) => {
     const item = object(v, ['key', 'contextId']);
     return { key: text(item.key, 64), contextId: uuid(item.contextId) };
@@ -207,7 +235,7 @@ export function decodeState(
   )
     throw new Error('Duplicate retained identity');
   return {
-    version: 1,
+    version: 2,
     origin: config.origin,
     principal,
     discordBotId: snowflake(discordBotId),
@@ -219,6 +247,7 @@ export function decodeState(
 }
 /** One process owns this directory until clean shutdown. Stale locks require operator inspection. */
 export class FileState implements StateRepository {
+  private closed = false;
   private constructor(
     readonly state: State,
     private readonly file: string,
@@ -248,7 +277,7 @@ export class FileState implements StateRepository {
         ))
           throw error;
         state = {
-          version: 1,
+          version: 2,
           origin: config.origin,
           principal,
           discordBotId,
@@ -267,6 +296,7 @@ export class FileState implements StateRepository {
     }
   }
   async save(): Promise<void> {
+    if (this.closed) throw new Error('Runtime state repository is closed');
     await atomicPrivateWrite(this.file, this.state);
     // Persist the renamed directory entry, in addition to the SDK's file fsync.
     const directory = await open(join(this.file, '..'), 'r');
@@ -277,6 +307,10 @@ export class FileState implements StateRepository {
     }
   }
   async close(): Promise<void> {
+    // A later configuration/runtime owner may already hold the same lock path.
+    // Repeated cleanup by this closed owner must never release that owner's lock.
+    if (this.closed) return;
+    this.closed = true;
     await rm(this.lock, { recursive: true });
   }
 }

@@ -4,6 +4,7 @@ import type { Plowshare, Payloads } from 'plowshare-client-node';
 import type { Configuration } from './contracts.ts';
 import type { SetupGateway } from './setup-contracts.ts';
 import { SdkGateway } from './gateway.ts';
+import { botTargets } from './config.ts';
 
 /** Verify only identity and catalog access. Setup never sends a test message or starts agent work. */
 export async function verifyServiceCredential(
@@ -22,7 +23,7 @@ export async function verifyServiceCredential(
       throw new SetupProblem(
         'Credential authenticated as another service principal',
       );
-    for (const route of config.routes) await gateway.catalog(route);
+    for (const route of botTargets(config)) await gateway.catalog(route);
   } finally {
     client.close();
   }
