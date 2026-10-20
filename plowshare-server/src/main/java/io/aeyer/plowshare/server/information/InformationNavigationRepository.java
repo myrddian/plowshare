@@ -46,6 +46,20 @@ public interface InformationNavigationRepository {
       int limit,
       int offset);
 
+  /**
+   * One SQL statement selects readable heads before paging and joins only their non-redacted
+   * instance metadata. No body, definition, per-row authorization or nested repository reads.
+   * Returns metadata-v1 even for an empty page; excessive aggregate metadata fails explicitly. This
+   * first projection uses direct reads rather than a second shared cache.
+   */
+  Documents documentsWithMetadata(
+      InformationContext context,
+      UUID relatedTo,
+      String relation,
+      String direction,
+      int limit,
+      int offset);
+
   io.aeyer.plowshare.protocol.Information.Facets facets(
       InformationContext context, UUID relatedTo, String relation, String direction);
 

@@ -6,6 +6,8 @@ import java.util.*;
  * Document identities and policy controls, separate from immutable revision and collection APIs.
  */
 public final class InformationNavigation {
+  public static final String METADATA_PROJECTION = "metadata-v1";
+  public static final int METADATA_PAGE_BYTES = 524288;
   public static final String CAPABILITY = "document-navigation-v1";
   public static final int MAX_CLOSURE = 1024;
   public static final int MAX_STEPS = 32;
@@ -96,9 +98,11 @@ public final class InformationNavigation {
   }
 
   /**
-   * Only discovery metadata is returned here. Body and typed content use the ordinary revision
-   * APIs.
+   * Discovery metadata, with a compact typed snapshot only when explicitly projected by list.
+   * Missing typing deliberately does not distinguish untyped and redacted bindings.
    */
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   public record Document(
       UUID resource,
       UUID revision,
@@ -106,7 +110,19 @@ public final class InformationNavigation {
       String sourceName,
       List<String> tags,
       InformationRequest.Scope scope,
-      String owner) {
+      String owner,
+      InformationContent.Metadata contentMetadata) {
+    public Document(
+        UUID resource,
+        UUID revision,
+        String title,
+        String sourceName,
+        List<String> tags,
+        InformationRequest.Scope scope,
+        String owner) {
+      this(resource, revision, title, sourceName, tags, scope, owner, null);
+    }
+
     public Document {
       Objects.requireNonNull(resource);
       Objects.requireNonNull(revision);
@@ -118,10 +134,20 @@ public final class InformationNavigation {
     }
   }
 
-  public record Documents(List<Document> documents, int limit, int offset) {
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  public record Documents(List<Document> documents, int limit, int offset, String projection) {
+    public Documents(List<Document> documents, int limit, int offset) {
+      this(documents, limit, offset, null);
+    }
+
     public Documents {
       documents = ContractValues.list(documents, "documents", 100);
       page(limit, offset);
+      if (projection != null && !METADATA_PROJECTION.equals(projection))
+        throw new IllegalArgumentException("Unsupported document projection");
+      if (projection == null && documents.stream().anyMatch(d -> d.contentMetadata() != null))
+        throw new IllegalArgumentException("Typed snapshots require a metadata projection");
     }
   }
 

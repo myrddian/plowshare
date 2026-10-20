@@ -139,6 +139,200 @@ class DocumentNavigationPersistenceTest {
   }
 
   @Test
+  void metadataProjectionBatchesFiftyInstancesAndRetainsLegacyPagesAndAbsentBindings() {
+    var types = new JdbcInformationContentTypeRepository(jdbc);
+    var draft =
+        work.inTransaction(
+            () ->
+                types.create(
+                    "project:operations",
+                    "alice",
+                    null,
+                    null,
+                    "incident",
+                    "Incident",
+                    "",
+                    io.aeyer.plowshare.protocol.SchemaDefinition.fromWire(Map.of("type", "object")),
+                    io.aeyer.plowshare.protocol.DocumentMetadata.empty()));
+    var contract =
+        work.inTransaction(
+                () ->
+                    types.transition(
+                        "project:operations",
+                        draft.contract().version(),
+                        draft.controlRevision(),
+                        true))
+            .contract();
+    var fields =
+        new io.aeyer.plowshare.protocol.SchemaValue.ObjectValue(
+            Map.of(
+                "severity", new io.aeyer.plowshare.protocol.SchemaValue.Text("high"),
+                "note", new io.aeyer.plowshare.protocol.SchemaValue.Null()));
+    var binding =
+        new io.aeyer.plowshare.protocol.InformationContent.Binding(
+            contract, io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(fields), fields);
+    var content = new JdbcInformationContentRepository(jdbc, types);
+    for (int i = 0; i < 50; i++)
+      content.attach(head(resource("alice", "operations", "incident-" + i)), binding);
+    resource("alice", "operations", "untyped");
+    UUID redacted = resource("alice", "operations", "redacted");
+    content.attach(head(redacted), binding);
+    jdbc.update(
+        "UPDATE information_revisions SET availability='deleted' WHERE id=?", head(redacted));
+    jdbc.update(
+        "UPDATE information_revision_content SET redacted=true,metadata='{}'::jsonb WHERE revision_id=?",
+        head(redacted));
+    var statements = new java.util.concurrent.atomic.AtomicInteger();
+    var statement = new java.util.concurrent.atomic.AtomicReference<String>();
+    var parameters = new java.util.concurrent.atomic.AtomicReference<Object[]>();
+    var counted =
+        new JdbcTemplate(source) {
+          @Override
+          public <T> List<T> query(
+              String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... arguments) {
+            statements.incrementAndGet();
+            statement.set(sql);
+            parameters.set(arguments.clone());
+            return super.query(sql, mapper, arguments);
+          }
+        };
+    var projection =
+        new JdbcInformationNavigationRepository(counted, new JdbcProjectMembers(counted));
+    var page = projection.documentsWithMetadata(viewer, null, null, null, 100, 0);
+    assertEquals(1, statements.get());
+    String explained =
+        jdbc.queryForObject(
+            "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement.get(),
+            String.class,
+            parameters.get());
+    assertNotNull(explained);
+    assertTrue(explained.contains("Actual Rows"));
+    assertEquals("metadata-v1", page.projection());
+    assertEquals(51, page.documents().size());
+    assertTrue(page.documents().stream().noneMatch(d -> d.resource().equals(redacted)));
+    assertEquals(50, page.documents().stream().filter(d -> d.contentMetadata() != null).count());
+    page.documents().stream()
+        .filter(d -> d.contentMetadata() != null)
+        .forEach(
+            d -> {
+              assertEquals(contract.version(), d.contentMetadata().type().version());
+              assertEquals(fields, d.contentMetadata().metadata());
+            });
+    var legacy = repository.documents(viewer, null, null, null, 100, 0);
+    assertEquals(
+        legacy.documents().stream().map(Document::resource).toList(),
+        page.documents().stream().map(Document::resource).toList());
+    assertTrue(legacy.documents().stream().allMatch(d -> d.contentMetadata() == null));
+    var second = projection.documentsWithMetadata(viewer, null, null, null, 2, 2);
+    assertEquals(page.documents().subList(2, 4), second.documents());
+    assertEquals(2, statements.get());
+    var empty = projection.documentsWithMetadata(viewer, null, null, null, 20, 52);
+    assertEquals("metadata-v1", empty.projection());
+    assertTrue(empty.documents().isEmpty());
+  }
+
+  @Test
+  void metadataProjectionNeverSubstitutesAnOlderBindingAndUsesCurrentScopeAndDependencyAuthority() {
+    var types = new JdbcInformationContentTypeRepository(jdbc);
+    var draft =
+        work.inTransaction(
+            () ->
+                types.create(
+                    "project:operations",
+                    "alice",
+                    null,
+                    null,
+                    "incident",
+                    "Incident",
+                    "",
+                    io.aeyer.plowshare.protocol.SchemaDefinition.fromWire(Map.of("type", "object")),
+                    io.aeyer.plowshare.protocol.DocumentMetadata.empty()));
+    var contract =
+        work.inTransaction(
+                () ->
+                    types.transition(
+                        "project:operations",
+                        draft.contract().version(),
+                        draft.controlRevision(),
+                        true))
+            .contract();
+    var fields =
+        new io.aeyer.plowshare.protocol.SchemaValue.ObjectValue(
+            Map.of("secret", new io.aeyer.plowshare.protocol.SchemaValue.Text("retained")));
+    var binding =
+        new io.aeyer.plowshare.protocol.InformationContent.Binding(
+            contract, io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(fields), fields);
+    var content = new JdbcInformationContentRepository(jdbc, types);
+    UUID current = resource("alice", "operations", "current");
+    content.attach(head(current), binding);
+    UUID replacement = revision(current, 2, "alice", "operations", "current");
+    var page = repository.documentsWithMetadata(viewer, null, null, null, 20, 0);
+    assertEquals(replacement, page.documents().getFirst().revision());
+    assertNull(page.documents().getFirst().contentMetadata());
+    UUID dependent = resource("alice", "operations", "dependent");
+    UUID privateSource = resource("bob", "restricted", "restricted-source");
+    content.attach(head(dependent), binding);
+    link(dependent, privateSource);
+    page = repository.documentsWithMetadata(viewer, null, null, null, 20, 0);
+    assertEquals(List.of(current), page.documents().stream().map(Document::resource).toList());
+    var ceiling =
+        viewer.within(
+            io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(
+                io.aeyer.plowshare.protocol.Home.of("restricted")));
+    assertTrue(
+        repository.documentsWithMetadata(ceiling, null, null, null, 20, 0).documents().isEmpty());
+    jdbc.update("DELETE FROM project_members WHERE handle='viewer'");
+    assertTrue(
+        repository.documentsWithMetadata(viewer, null, null, null, 20, 0).documents().isEmpty());
+  }
+
+  @Test
+  void metadataProjectionRejectsAggregateByteOverflowWithoutTruncatingRowsOrFields() {
+    var types = new JdbcInformationContentTypeRepository(jdbc);
+    var draft =
+        work.inTransaction(
+            () ->
+                types.create(
+                    "project:operations",
+                    "alice",
+                    null,
+                    null,
+                    "large-instance",
+                    "Large instance",
+                    "",
+                    io.aeyer.plowshare.protocol.SchemaDefinition.fromWire(Map.of("type", "object")),
+                    io.aeyer.plowshare.protocol.DocumentMetadata.empty()));
+    var contract =
+        work.inTransaction(
+                () ->
+                    types.transition(
+                        "project:operations",
+                        draft.contract().version(),
+                        draft.controlRevision(),
+                        true))
+            .contract();
+    var fields =
+        new io.aeyer.plowshare.protocol.SchemaValue.ObjectValue(
+            Map.of(
+                "one", new io.aeyer.plowshare.protocol.SchemaValue.Text("x".repeat(4000)),
+                "two", new io.aeyer.plowshare.protocol.SchemaValue.Text("x".repeat(4000)),
+                "three", new io.aeyer.plowshare.protocol.SchemaValue.Text("x".repeat(4000))));
+    var binding =
+        new io.aeyer.plowshare.protocol.InformationContent.Binding(
+            contract, io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(fields), fields);
+    var content = new JdbcInformationContentRepository(jdbc, types);
+    for (int i = 0; i < 50; i++)
+      content.attach(head(resource("alice", "operations", "large-" + i)), binding);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> repository.documentsWithMetadata(viewer, null, null, null, 50, 0));
+    var bounded = repository.documentsWithMetadata(viewer, null, null, null, 20, 0);
+    assertEquals(20, bounded.documents().size());
+    assertTrue(
+        bounded.documents().stream().allMatch(d -> fields.equals(d.contentMetadata().metadata())));
+  }
+
+  @Test
   void boundedConnectionsReuseWarmDtoButDurableRoleAndBoundaryFencesRemainCurrent() {
     UUID a = resource("alice", "operations", "service");
     UUID b = resource("alice", "operations", "manual");

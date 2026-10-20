@@ -68,6 +68,42 @@ locked references; this does not create a global directory of private documents.
 Cross-project traversal checks the target's durable scope. Service identities retain
 the selected project and no-Shared ceiling.
 
+## Read typed instance fields in a page
+
+Public SDK callers can request `projection:"metadata-v1"` on
+`information.documents.list`, together with `view:"content-types-v1"`. The same
+scope, filters, traversal and limit/offset apply. The response echoes the
+projection marker, including on empty pages. Typed rows include `contentMetadata`:
+
+```json
+{
+  "type": {
+    "type": "11111111-1111-4111-8111-111111111111",
+    "version": "22222222-2222-4222-8222-222222222222",
+    "ordinal": 1,
+    "slug": "incident",
+    "label": "Incident",
+    "definitionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "metadataHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "metadata": {"severity": "high", "note": null}
+}
+```
+
+The UUIDs and digests above illustrate shape only. This projection omits bodies,
+schema definitions, presentation and processing state. Missing contentMetadata
+does not distinguish untyped and redacted bindings. It grants no additional
+access. Omit projection for the unchanged discovery-only response.
+
+At most 100 rows and 512 KiB of aggregate stored metadata JSONB text can be read
+per page; each instance retains its existing 16-KiB metadata limit. An oversized
+page fails explicitly: reduce limit and start the read again. No fields or rows
+are silently truncated. Clients should verify the projection marker and require
+support rather than hydrate each row as an implicit fallback. For internal
+agents, `information_read` accepts the same projection and records returned
+revisions through its normal consumed-input path. See
+[ADR 0033](decisions/0033-paged-document-metadata-projection.md).
+
 ## Configure policy
 
 Each policy has three independent controls:

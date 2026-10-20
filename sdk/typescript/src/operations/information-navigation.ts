@@ -1,6 +1,7 @@
 import type { InformationScope } from './information.ts';
 import type { InformationFilter } from './information-payloads.ts';
 import type { InformationFacetCounts } from './information-replies.ts';
+import type { InformationContentMetadata } from './information-content.ts';
 
 export interface ReferencePolicy {
   readonly ownerOnly: boolean;
@@ -50,6 +51,8 @@ export interface CurrentDocument {
   readonly owner: string;
   readonly tags: readonly string[];
   readonly scope: InformationScope;
+  /** Only returned for an explicit metadata-v1 list projection; absent for untyped/redacted rows. */
+  readonly contentMetadata?: InformationContentMetadata;
 }
 export type DocumentSelection =
   | { readonly kind: 'readable'; readonly document: CurrentDocument }
@@ -117,6 +120,7 @@ export interface NavigationPayloads {
       readonly relatedTo?: string;
       readonly relation?: string;
       readonly direction?: 'outgoing' | 'backlinks';
+      readonly projection?: 'metadata-v1';
     };
   'information.documents.facets': Common & {
     readonly filter?: InformationFilter;
@@ -170,6 +174,7 @@ export interface NavigationReplies {
     readonly documents: readonly CurrentDocument[];
     readonly limit: number;
     readonly offset: number;
+    readonly projection?: 'metadata-v1';
   };
   'information.documents.facets': InformationFacetCounts;
   'information.documents.get': DocumentSelection;
