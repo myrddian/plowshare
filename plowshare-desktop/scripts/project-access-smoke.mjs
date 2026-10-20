@@ -14,7 +14,7 @@ let app;
 try {
   app=await electron.launch({executablePath,args:[resolve('.')],env});const page=await app.firstWindow();
   await page.locator('#connect-sidebar').click();await page.locator('#server-url').fill(fixture.base);await page.locator('#handle').fill('fixture');await page.locator('#password').fill('fixture-password');await page.locator('#submit-connection').click();
-  await expect(page.locator('#connection-label')).toHaveText('Connected');await expect(page.locator('#server-admin-open')).toBeHidden();
+  await expect(page.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);await expect(page.locator('#server-admin-open')).toBeHidden();
   await page.locator('[data-project-access="Integration"]').click();await expect(page.locator('#project-access-dialog [data-role]')).toContainText('manager');
   await page.locator('#project-access-dialog input[name="handle"]').fill('worker');await page.locator('#project-access-dialog select[name="role"]').selectOption('VIEWER');await page.locator('#project-access-dialog [data-add] button').click();
   await expect(page.locator('#project-access-dialog [data-members]')).toContainText('worker');assert.equal(fixture.frames.filter(row=>row.type==='project.member.add').length,1);

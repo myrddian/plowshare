@@ -17,8 +17,13 @@ try {
   main.on('pageerror',error=>errors.push(error.message));
   await main.locator('#connect-sidebar').click(); await main.locator('#server-url').fill(fixture.base);
   await main.locator('#handle').fill('fixture'); await main.locator('#password').fill('fixture-password');
-  await main.locator('#submit-connection').click(); await expect(main.locator('#connection-label')).toHaveText('Connected');
-  const activityOpening = app.waitForEvent('window'); await main.evaluate(()=>window.plowshare.request({action:'activity',view:'runs'}));
+  await main.locator('#submit-connection').click(); await expect(main.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
+  // The fixture has an in-scope pending question. Defer it through the visible
+  // prompt before opening an inspector: modals intentionally hide embedded views.
+  const question=main.locator('#question-dialog');await expect(question).toBeVisible();
+  await question.locator('[data-question-defer]').click();await expect(question).not.toBeVisible();
+  assert.equal(fixture.frames.some(frame=>['orchestration.answer','orchestration.cancel'].includes(frame.type)),false,'Deferring a question submits no server decision');
+  const activityOpening = app.waitForEvent('window'); await main.locator('#runs-open').click();
   const runs = await activityOpening; runs.on('pageerror',error=>errors.push(error.message));
   await expect(runs.locator('[data-run-stage="reading"]')).toBeEnabled();
   await expect(runs.locator('[data-run-stage="objective_review"]')).toBeEnabled();
@@ -26,6 +31,9 @@ try {
   await expect(review).toContainText('Review marker.'); await expect(review.locator('#run-answer-send')).toBeEnabled();
   assert.equal(await runs.locator('#activity-detail').evaluate(node=>node.textContent.split('Review marker.').length-1),1);
   await expect(runs.locator('.run-agent-tree')).toHaveCount(0);
+  // Embedded views can finish loading before their owner publishes workspace
+  // bounds. Require a visible laid-out document before native screenshot capture.
+  await expect.poll(() => runs.evaluate(() => innerWidth > 0 && innerHeight > 0 && document.visibilityState === 'visible')).toBe(true);
   await mkdir('build/smoke',{recursive:true}); await runs.screenshot({path:'build/smoke/run-navigation.png'});
   await review.scrollIntoViewIfNeeded(); await runs.screenshot({path:'build/smoke/stage-question.png'});
   await runs.locator('#activity-detail').evaluate(node=>{node.scrollTop=0;});

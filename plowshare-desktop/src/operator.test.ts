@@ -113,6 +113,21 @@ await test('memory creation records account provenance, exact body and server ju
   assert.equal(f.state.operator!.notice, 'Change confirmed.');
   await assert.rejects(f.client.apply('obsolete'), /Review/);
 });
+await test('conversation controls select Global explicitly and retain a selected project on both history reads', async () => {
+  for (const project of [undefined, 'p']) {
+    const f = fixture();
+    await f.client.prepare('conversation-lifecycle', project);
+    const history = f.calls.filter((ask) => ask.type === 'conversation.list');
+    assert.deepEqual(
+      history.map((ask) => ask.payload),
+      [
+        { project: project ?? null },
+        { project: project ?? null, lifecycle: 'archived' },
+      ],
+    );
+    assert.equal(f.state.operator!.error, undefined);
+  }
+});
 await test('a changed command approval is withheld before the mutation; arbitrary ids cannot be reviewed', async () => {
   const f = fixture();
   await f.client.prepare('approval-grant');

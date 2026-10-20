@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { protocolFixture } from './protocol-fixture.mjs';
 const temporary = await mkdtemp(join(tmpdir(), 'plowshare-transport-'));
 const fixture = await protocolFixture();
+fixture.addServerProject({ name: 'Research' });
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(temporary, 'credentials'), PLOWSHARE_DESKTOP_CONFIG: join(temporary, 'config'), PLOWSHARE_DESKTOP_PROFILE: join(temporary, 'profile') };
 delete env.ELECTRON_RUN_AS_NODE;
 let app;
@@ -18,7 +19,7 @@ try {
     const page = await app.firstWindow();
     const request = value => page.evaluate(value => window.plowshare.request(value), value);
     await request({ action: 'connect', base: fixture.base, handle: 'fixture', password: 'fixture-password' });
-    const created = await request({ action: 'create' });
+    const created = await request({ action: 'create', project: 'Research' });
     await request({ action: 'run', conversation: created.conversation, agent: 'fixture-bot', text: 'Transport acceptance' });
     fixture.completeLatest('Transport acceptance finished.');
     await page.waitForFunction(async () => (await window.plowshare.request({ action: 'bootstrap' })).state.jobs.some(job => job.status === 'finished' && job.text.includes('Transport acceptance finished.')));

@@ -263,7 +263,7 @@ function openTrajectory(conversation: string, stageScope?: StageScope) {
       )
     )
       client.runs.followNavigation(stageScope.run, false);
-    background(client.followView(`trajectory:${key}`));
+    if (!quitting) background(client.followView(`trajectory:${key}`));
   });
   background(view.loadURL(trajectoryUrl));
 }
@@ -317,7 +317,9 @@ function openUsage() {
   page.on('closed', () => {
     if (usagePage === page) {
       usagePage = undefined;
-      background(client.dispatch({ action: 'usage-close' }));
+      // Shutdown already invalidates the subscription and closes its socket.
+      // Reentering public dispatch after admission stops is an expected refusal.
+      if (!quitting) background(client.dispatch({ action: 'usage-close' }));
     }
   });
   background(page.loadURL(usageUrl));
@@ -352,11 +354,11 @@ function openActivity(tab: ActivityView, project?: string) {
     activities.delete(group);
     if (group === 'runs' || group === 'studio') {
       activityRunRead++;
-      background(client.followView(`activity-run:${group}`));
+      if (!quitting) background(client.followView(`activity-run:${group}`));
     }
     if (!activities.size) {
       client.runs.pause();
-      background(client.activity.open());
+      if (!quitting) background(client.activity.open());
     }
   });
   background(prepare());
@@ -450,7 +452,7 @@ function openBoard(view: BoardView, project?: string) {
   page.on('closed', () => {
     if (boards.get(view) === page) {
       boards.delete(view);
-      if (!boards.size) background(client.board.open());
+      if (!quitting && !boards.size) background(client.board.open());
     }
   });
   background(client.board.open(view, project));
@@ -485,7 +487,7 @@ function openWindow() {
   window.once('ready-to-show', () => window?.show());
   window.on('closed', () => {
     window = undefined;
-    background(client.followView('chat'));
+    if (!quitting) background(client.followView('chat'));
     closeTrajectories();
     for (const page of activities.values()) page.window.close();
     for (const page of boards.values()) page.close();
@@ -1271,9 +1273,14 @@ app.on('before-quit', (event) => {
   background(client.shutdown().finally(() => app.quit()));
 });
 
-/** Native event work reports unexpected errors through the main-window error dialog. */
+/** Report failures without opening a modal that can block process shutdown. */
 function background(work: Promise<unknown>): void {
-  void work.catch((reason: unknown) =>
-    dialog.showErrorBox('Background task failed', errorMessage(reason)),
-  );
+  void work.catch((reason: unknown) => {
+    if (quitting)
+      console.error(
+        'Background task failed during shutdown:',
+        errorMessage(reason),
+      );
+    else dialog.showErrorBox('Background task failed', errorMessage(reason));
+  });
 }

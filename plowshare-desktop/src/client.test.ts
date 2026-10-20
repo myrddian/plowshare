@@ -91,6 +91,14 @@ function fixture(nativeSessions?: NativeSessions) {
   let onRelay: typeof onUsage = () => ({ code: 'OK' });
   let onProvider: typeof onUsage = () => ({ code: 'OK' });
   let onDeployment: typeof onUsage = () => ({ code: 'OK' });
+  let onConversations: typeof onUsage = () => ({
+    code: 'OK',
+    payload: [conversationWire('first'), conversationWire('second')],
+  });
+  let onLifecycle: typeof onUsage = (_type, payload) => ({
+    code: 'OK',
+    payload: { id: payload.conversation, lifecycle: payload.lifecycle },
+  });
   const connector: Connector = async (
     _base,
     _handle,
@@ -161,10 +169,9 @@ function fixture(nativeSessions?: NativeSessions) {
             };
           if (type === 'project.list') return { code: 'OK', payload: projects };
           if (type === 'conversation.list')
-            return {
-              code: 'OK',
-              payload: [conversationWire('first'), conversationWire('second')],
-            };
+            return onConversations(type, payload);
+          if (type === 'conversation.lifecycle')
+            return onLifecycle(type, payload);
           if (type === 'conversation.trajectory') return onTrajectory(payload);
           if (type === 'conversation.follow') return onFollow(payload);
           if (type === 'approval.list')
@@ -198,6 +205,12 @@ function fixture(nativeSessions?: NativeSessions) {
   return {
     client,
     calls,
+    conversations: (value: typeof onConversations) => {
+      onConversations = value;
+    },
+    lifecycle: (value: typeof onLifecycle) => {
+      onLifecycle = value;
+    },
     provider: (value: typeof onProvider) => {
       onProvider = value;
     },
@@ -271,6 +284,149 @@ const connect = (client: DesktopClient) =>
     handle: 'tester',
     password: 'fixture-password',
   });
+
+await test('confirmed archive retires retained active-chat metadata while preserving history and restore', async () => {
+  const f = fixture();
+  let archived = false;
+  f.conversations((_type, payload) => ({
+    code: 'OK',
+    payload:
+      (payload.lifecycle === 'archived') === archived
+        ? [conversationWire('retained')]
+        : [],
+  }));
+  f.lifecycle((_type, payload) => {
+    archived = payload.lifecycle === 'archived';
+    return {
+      code: 'OK',
+      payload: { id: payload.conversation, lifecycle: payload.lifecycle },
+    };
+  });
+  try {
+    await connect(f.client);
+    f.client.retainConversation({ id: 'retained' });
+    const history = { entries: [], more: false };
+    f.client.state.history['retained'] = history;
+    for (const lifecycle of ['archived', 'active'] as const) {
+      await f.client.operator.prepare('conversation-lifecycle');
+      f.client.operator.preview(f.client.state.operator!.identity, {
+        id: 'retained',
+        lifecycle,
+      });
+      await f.client.operator.apply(f.client.state.operator!.preview!.identity);
+      await f.client.dispatch({ action: 'refresh' });
+      assert.equal(
+        f.client.state.conversations.some((row) => row.id === 'retained'),
+        lifecycle === 'active',
+      );
+      assert.equal(f.client.state.history['retained'], history);
+    }
+  } finally {
+    f.client.dispose();
+  }
+});
+
+for (const acknowledgement of [
+  { code: 'CONFLICT' },
+  { code: 'OK', payload: { id: 'retained' } },
+  { code: 'OK', payload: { id: 'foreign', lifecycle: 'archived' } },
+  { code: 'OK', payload: { id: 'retained', lifecycle: 'active' } },
+] satisfies readonly Outcome[]) {
+  await test(`unconfirmed archive retains inspector metadata: ${JSON.stringify(acknowledgement)}`, async () => {
+    const f = fixture();
+    let listed = true;
+    f.conversations((_type, payload) => ({
+      code: 'OK',
+      payload:
+        listed && payload.lifecycle !== 'archived'
+          ? [conversationWire('retained')]
+          : [],
+    }));
+    f.lifecycle(() => acknowledgement);
+    try {
+      await connect(f.client);
+      f.client.retainConversation({ id: 'retained' });
+      await f.client.operator.prepare('conversation-lifecycle');
+      f.client.operator.preview(f.client.state.operator!.identity, {
+        id: 'retained',
+        lifecycle: 'archived',
+      });
+      await assert.rejects(
+        f.client.operator.apply(f.client.state.operator!.preview!.identity),
+      );
+      listed = false;
+      await f.client.dispatch({ action: 'refresh' });
+      assert.equal(
+        f.client.state.conversations.some((row) => row.id === 'retained'),
+        true,
+      );
+      assert.equal(
+        f.calls.filter((row) => row.type === 'conversation.lifecycle').length,
+        1,
+      );
+    } finally {
+      f.client.dispose();
+    }
+  });
+}
+
+await test('an archive acknowledgement from a previous connection cannot retire new retained metadata or refresh it', async () => {
+  const f = fixture();
+  f.conversations((_type, payload) => ({
+    code: 'OK',
+    payload:
+      payload.lifecycle === 'archived' ? [] : [conversationWire('retained')],
+  }));
+  let deliver: ((value: Outcome) => void) | undefined;
+  let entered: (() => void) | undefined;
+  const submitted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  f.lifecycle(
+    () =>
+      new Promise<Outcome>((resolve) => {
+        deliver = resolve;
+        entered!();
+      }),
+  );
+  try {
+    await connect(f.client);
+    f.client.retainConversation({ id: 'retained' });
+    await f.client.operator.prepare('conversation-lifecycle');
+    f.client.operator.preview(f.client.state.operator!.identity, {
+      id: 'retained',
+      lifecycle: 'archived',
+    });
+    const pending = assert.rejects(
+      f.client.operator.apply(f.client.state.operator!.preview!.identity),
+    );
+    await submitted;
+    await f.client.dispatch({ action: 'disconnect' });
+    await connect(f.client);
+    f.client.retainConversation({ id: 'retained' });
+    const reads = f.calls.filter(
+      (row) => row.type === 'conversation.list',
+    ).length;
+    deliver!({
+      code: 'OK',
+      payload: { id: 'retained', lifecycle: 'archived' },
+    });
+    await pending;
+    assert.equal(
+      f.calls.filter((row) => row.type === 'conversation.list').length,
+      reads,
+      'Old acknowledgement cannot trigger new-connection refresh',
+    );
+    f.conversations(() => ({ code: 'OK', payload: [] }));
+    await f.client.dispatch({ action: 'refresh' });
+    assert.equal(
+      f.client.state.conversations.some((row) => row.id === 'retained'),
+      true,
+    );
+  } finally {
+    f.client.dispose();
+  }
+});
 
 await test('Relay receipts register unlisted owned logs with project metadata before following', async (t) => {
   const f = fixture();

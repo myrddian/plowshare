@@ -80,6 +80,8 @@ try {
   await usage.screenshot({path:'build/smoke/usage-pricing.png'});
   await usage.getByRole('tab',{name:'Calls',exact:true}).click();await expect(usage.locator('[data-usage-view="calls"]')).toContainText('No recorded calls');
   assert.ok(fixture.frames.some(f=>f.type==='usage.calls'));
+  fixture.setRefuseUsageCalls(true);await usage.getByRole('button',{name:'Refresh calls',exact:true}).click();await expect(usage.locator('[data-usage-view="calls"]')).toContainText('Could not read calls');
+  fixture.setRefuseUsageCalls(false);await usage.getByRole('button',{name:'Refresh calls',exact:true}).click();await expect(usage.locator('[data-usage-view="calls"]')).toContainText('No recorded calls');await expect(usage.locator('[data-usage-view="calls"]')).not.toContainText('Could not read calls');
   await usage.getByRole('tab',{name:'Recording',exact:true}).click();await expect(usage.locator('[data-usage-recording]')).toContainText('On · automatic');
   await usage.getByRole('tab',{name:'Overview',exact:true}).click();
   await usage.screenshot({path:'build/smoke/usage.png'});
@@ -89,7 +91,7 @@ try {
   await fixture.disconnect();await expect(usage.locator('#usage-connection')).toContainText('Disconnected');
   await main.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:''}),fixture.base);
   await expect(usage.locator('[data-usage-status]')).toContainText('Live usage snapshot');
-  await main.locator('#conversations [data-conversation="fixture-first"]').click();await main.locator('#usage-open').click();await expect(main.locator('#title-caption')).toHaveText('Usage');assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
+  await main.locator('[data-project="Usage test"]').click();await main.locator('#conversations [data-conversation="fixture-first"]').click();await main.locator('#usage-open').click();await expect(main.locator('#title-caption')).toHaveText('Usage');assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
   await assert.rejects(usage.evaluate(()=>window.plowshare.request({action:'run',conversation:'fixture-first',agent:'fixture-bot',text:'forbidden'})),/Usage can only read/);
   assert.deepEqual([...new Set(fixture.httpPaths)].filter(path => path !== '/v1/auth/refresh').sort(),['/v1/auth/login','/v1/auth/ticket']);assert.deepEqual(errors,[]);
   console.log('PASS: repeated live Usage updates keep chat hidden and unchanged project navigation and agent controls mounted. Tabbed Usage with local provider/model and custom cost comparisons, live comparison updates, readable coverage, and narrow layout. Full-size Usage from Connection and sidebar, initial and replacement snapshots, visible capture-disabled/errors, retained data and reconnect. Context preserves constructed text/tool schemas, excludes draft, counts only explicitly, and retains failed snapshots. All operational traffic uses WS.');

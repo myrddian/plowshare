@@ -14,7 +14,7 @@ try {
   fixture.setInformationExtraction('failed');
   app=await electron.launch({executablePath,args:[resolve('.')],env});
   const main=await app.firstWindow(),errors=[];main.on('pageerror',error=>errors.push(error.message));
-  await main.locator('#connect-sidebar').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
+  await main.locator('#connect-sidebar').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
   await main.locator('#library-open').click();
   // Library is an embedded WebContentsView; observe the loaded page rather than a native-window event.
   await expect.poll(()=>app.windows().some(page=>page.url()==='plowshare://app/library.html'),{timeout:30000}).toBe(true);
@@ -29,14 +29,18 @@ try {
   await sources.locator('[data-ask] input').fill('Read this failed source');await sources.locator('[data-ask]').dispatchEvent('submit');
   assert.equal(count('information.ask'),0);assert.equal(count('information.read'),0);
   await library.evaluate(()=>document.activeElement?.blur());
-  const statuses=count('information.status');await expect.poll(()=>count('information.status'),{timeout:8000}).toBeGreaterThan(statuses);
-  assert.equal(count('information.read'),0,'Polling a failed extraction never reads absent text.');
+  const statuses=count('information.status');
+  for(let i=0;i<3;i++)fixture.publish({kind:'information.invalidated'});
+  await expect.poll(()=>count('information.status'),{timeout:8000}).toBe(statuses+1);
+  await expect(sources.locator('[data-source]')).toContainText('No readable text was extracted');
+  assert.equal(count('information.read'),0,'Coalesced invalidation refetches status without reading absent text.');
   await sources.locator('[data-repair-source]').click();await expect(sources.locator('[data-revise] textarea')).toBeFocused();await expect(sources.locator('[data-manage-source]')).toHaveAttribute('open','');
   await mkdir('build/smoke',{recursive:true});await library.screenshot({path:'build/smoke/information-extraction-failed.png'});
   fixture.setInformationExtraction('pending');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('Preparing source text');assert.equal(count('information.read'),0);
   fixture.setInformationExtraction('ready');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-passage]')).toContainText('A retained claim.');await expect(sources.locator('[data-ask] button')).toBeEnabled();
   fixture.setInformationReadError('this revision has not been extracted');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('no saved extraction');await expect(sources.locator('[data-source]')).not.toContainText('Error invoking remote method');
-  const reads=count('information.read'),afterFailure=count('information.status');await library.evaluate(()=>document.activeElement?.blur());await expect.poll(()=>count('information.status'),{timeout:8000}).toBeGreaterThan(afterFailure);
+  const reads=count('information.read'),afterFailure=count('information.status');await library.evaluate(()=>document.activeElement?.blur());fixture.publish({kind:'information.invalidated'});await expect.poll(()=>count('information.status'),{timeout:8000}).toBe(afterFailure+1);
+  await expect(sources.locator('[data-source]')).toContainText('no saved extraction');
   assert.equal(count('information.read'),reads,'Unchanged status does not replay a refused read.');
   fixture.setInformationReadError('');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-passage]')).toContainText('A retained claim.');assert.equal(count('information.read'),reads+1,'Explicit refresh can recover after a read failure.');
   assert.equal(count('information.retry'),0);assert.equal(count('information.ask'),0);assert.deepEqual(errors,[]);
