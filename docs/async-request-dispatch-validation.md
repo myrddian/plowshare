@@ -122,7 +122,11 @@ The remaining Controls assertion expected an obsolete YAML caps file. The curren
 project marker owner writes versioned JSON; its corrected smoke checks exact
 preview and saved JSON, review-before-apply, absence of the obsolete file and an
 unsubmitted changed preview that leaves saved caps untouched. Runtime source is
-unchanged by that fixture correction. The focused rerun is recorded separately.
+unchanged by that fixture correction. The focused Controls rerun passed at
+`615f4aadca76db771efde3f6788e0870efd6dbf3`. All 28 scenarios therefore have
+passing evidence across the unchanged runtime batch and corrected fixture rerun;
+this is not a claim of a single 28-of-28 batch. The repository
+`formatCheck check` gate also passed at that revision (132 tasks; 38 seconds).
 
 The production server was deployed from merged PR #88 revision
 `14583cf4f79be4fa4207917a66395b2dc41e00ae`, using a registry-verified immutable
