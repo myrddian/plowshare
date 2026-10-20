@@ -113,33 +113,45 @@ def content(
     )
 
 
-def original(current: CurrentDocumentDto, source: str) -> PortableReadableDto:
+def original(
+    current: CurrentDocumentDto, source: str, *, typed: bool = True
+) -> PortableReadableDto:
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    sidecar = PortableDescriptorDto(
+        content_hash=digest,
+        media_type="text/markdown",
+        ordinal=1.0,
+        path="documents/fixture.md",
+        resource=current.resource,
+        revision=current.revision,
+        source_name=current.source_name,
+        tags=current.tags,
+        title=current.title,
+        provenance=PortableProvenanceDto(
+            created_at="2026-10-19T00:00:00Z",
+            dependencies=(),
+            evidence=(),
+            kind="source",
+            owner=current.owner,
+            source_hash=digest,
+        ),
+    )
+    if typed:
+        sidecar = replace(
+            sidecar,
+            content_type=InformationContentBindingDto(
+                contract=contract(configuration(Path("unused"))),
+                metadata=metadata(TicketFields("Retained title")),
+                metadata_hash="b" * 64,
+            ),
+        )
     return PortableReadableDto(
         format="plowshare-information-bundle/1",
         markdown=source,
         path="documents/fixture.md",
         representation="original_markdown",
         text_hash=digest,
-        sidecar=PortableDescriptorDto(
-            content_hash=digest,
-            media_type="text/markdown",
-            ordinal=1.0,
-            path="documents/fixture.md",
-            resource=current.resource,
-            revision=current.revision,
-            source_name=current.source_name,
-            tags=current.tags,
-            title=current.title,
-            provenance=PortableProvenanceDto(
-                created_at="2026-10-19T00:00:00Z",
-                dependencies=(),
-                evidence=(),
-                kind="source",
-                owner=current.owner,
-                source_hash=digest,
-            ),
-        ),
+        sidecar=sidecar,
     )
 
 
@@ -163,6 +175,10 @@ class FakePort:
 
     async def list(self, kind: str, tags: tuple[str, ...]) -> tuple[Document, ...]:
         return (self.ticket,) if kind == "ticket" else (self.epic,)
+
+    async def validate_epics(self, resources: tuple[str, ...]) -> None:
+        for resource in resources:
+            await self.get("epic", resource)
 
     async def get(
         self,
@@ -578,6 +594,9 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(
             self.client.request.call_args.args[0], InformationTypesCapabilitiesRequest
         )
+        self.assertEqual(self.client.request.await_count, 1)
+        await self.port.check()
+        self.assertEqual(self.client.request.await_count, 2)
 
     async def test_create_and_move_emit_public_typed_requests(self) -> None:
         self.client.request.side_effect = [
@@ -636,7 +655,30 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 replace(portable, sidecar=replace(portable.sidecar, resource=uid(99))),
                 False,
             ),
+            (
+                replace(portable, sidecar=replace(portable.sidecar, revision=uid(99))),
+                False,
+            ),
+            (
+                original(current, source, typed=False),
+                False,
+            ),
+            (
+                replace(
+                    portable,
+                    sidecar=replace(
+                        portable.sidecar,
+                        content_type=InformationContentBindingDto(
+                            contract=contract(self.config, "epic"),
+                            metadata={"title": "Foreign"},
+                            metadata_hash="b" * 64,
+                        ),
+                    ),
+                ),
+                False,
+            ),
         ):
+            self.client.request.reset_mock()
             self.client.request.side_effect = [
                 Reply(
                     "OK",
@@ -645,7 +687,6 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         kind="readable", document=current
                     ),
                 ),
-                Reply("OK", None, content(self.config, current)),
                 Reply("OK", None, result),
             ]
             if accepted:
@@ -659,6 +700,7 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 self.client.request.call_args.args[0],
                 InformationInterchangeReadableRequest,
             )
+            self.assertEqual(self.client.request.await_count, 2)
 
     async def test_body_revision_preserves_exact_input_and_expected_head(self) -> None:
         self.client.request.return_value = Reply(

@@ -6,6 +6,7 @@ import {
   decodeSnapshot,
   decodeDocument,
   decodeResult,
+  replaceDocument,
   emptyFilters,
   visibleTickets,
   epicProgress,
@@ -15,6 +16,7 @@ import {
   requestIdentity,
   uuid,
 } from './model.mjs';
+import { PendingReads } from './reads.mjs';
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -52,6 +54,8 @@ function notice(message, error = false) {
   $('status').dataset.kind = error ? 'error' : 'success';
 }
 function report(error) {
+  // Logout and confirmed writes deliberately cancel superseded reads.
+  if (error?.name === 'AbortError') return;
   const message =
     error instanceof Error
       ? error.message
@@ -78,7 +82,7 @@ class ApiError extends Error {
     this.pending = value?.pending !== false;
   }
 }
-async function api(path, { method = 'GET', payload, requestId } = {}) {
+async function api(path, { method = 'GET', payload, requestId, signal } = {}) {
   const headers = { Accept: 'application/json' };
   if (payload !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET' && state.csrf) headers['X-Agile-CSRF'] = state.csrf;
@@ -90,8 +94,10 @@ async function api(path, { method = 'GET', payload, requestId } = {}) {
       headers,
       credentials: 'same-origin',
       body: payload === undefined ? undefined : JSON.stringify(payload),
+      signal,
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     throw new Error(
       'The app connection was interrupted. Any save in progress still needs checking.',
     );
@@ -99,7 +105,8 @@ async function api(path, { method = 'GET', payload, requestId } = {}) {
   let data;
   try {
     data = await response.json();
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     throw new Error(
       'The app returned an unreadable reply. Any save in progress still needs checking.',
     );
@@ -107,6 +114,7 @@ async function api(path, { method = 'GET', payload, requestId } = {}) {
   if (!response.ok) throw new ApiError(response.status, data);
   return data;
 }
+const reads = new PendingReads((path, signal) => api(path, { signal }));
 function pendingKey() {
   return `plowshare-agile-pending:${state.project}`;
 }
@@ -124,7 +132,7 @@ function setPending(value) {
 }
 function updateBusy() {
   for (const button of document.querySelectorAll('[data-write]'))
-    button.disabled = state.busy || !!state.pending;
+    button.disabled = state.busy || !!state.pending || !state.snapshot;
   $('recover').disabled = state.busy;
   for (const control of document.querySelectorAll(
     '#metadataForm input, #metadataForm select, #metadataForm textarea, .membership-form input, #createForm input, #createForm select, #createForm textarea, #cancelCreate, #cancelCreateBottom, #logout, #reloadDetail, #closeDetail',
@@ -136,6 +144,8 @@ function updateBusy() {
     : '';
 }
 async function mutate(path, payload) {
+  if (!state.snapshot)
+    throw new Error('Load the board before starting a save.');
   if (state.pending || state.busy)
     throw new Error('Check the saved request before starting another save.');
   const id = requestIdentity(crypto);
@@ -154,6 +164,16 @@ async function sendMutation(path, payload, id) {
       throw new Error(
         'The save returned another request identity. Check the retained request.',
       );
+    // A pre-write GET cannot be reused as post-write evidence. Invalidate only
+    // the collection and this resource; unrelated document reads can complete.
+    state.generation += 1;
+    reads.invalidate([
+      '/api/board',
+      ...['ticket', 'epic'].flatMap((kind) => [
+        `/api/documents/${kind}/${result.resource}`,
+        `/api/documents/${kind}/${result.resource}?body=1`,
+      ]),
+    ]);
     setPending(null);
     notice('Saved.');
     return result;
@@ -167,17 +187,41 @@ async function sendMutation(path, payload, id) {
 }
 async function refreshBoard() {
   const generation = ++state.generation;
-  const snapshot = decodeSnapshot(await api('/api/board'));
+  const snapshot = decodeSnapshot(await reads.read('/api/board'));
   if (generation !== state.generation) return;
+  applySnapshot(snapshot);
+}
+function applySnapshot(snapshot) {
   state.snapshot = snapshot;
   $('loading').hidden = true;
   if (state.selected?.document) {
     const current = [...snapshot.tickets, ...snapshot.epics].find(
       (v) => v.resource === state.selected.document.resource,
     );
-    if (current) state.selected.document.tags = current.tags;
+    if (current?.revision === state.selected.document.revision)
+      state.selected.document.tags = current.tags;
   }
   render();
+}
+async function refreshDocument(kind, resource) {
+  // Keep the single-writer UI fenced until its committed replacement is read.
+  // A successful receipt alone does not contain the actual fields/tags.
+  state.busy = true;
+  updateBusy();
+  const generation = ++state.generation;
+  try {
+    const document = decodeDocument(
+      await reads.read(`/api/documents/${kind}/${resource}`),
+      kind,
+    );
+    if (generation !== state.generation) return;
+    if (document.resource !== resource)
+      throw new Error('The read returned another document.');
+    applySnapshot(replaceDocument(state.snapshot, kind, document));
+  } finally {
+    state.busy = false;
+    updateBusy();
+  }
 }
 function toggle(values, value) {
   return values.includes(value)
@@ -395,7 +439,7 @@ function renderColumns(tickets) {
           fields,
           body: null,
         });
-        await refreshBoard();
+        await refreshDocument('ticket', ticket.resource);
       });
       footer.append(move);
       card.append(footer);
@@ -517,7 +561,11 @@ function formFields(form, kind) {
       }
     : { title };
 }
-async function openDocument(kind, resource, force = false) {
+async function openDocument(
+  kind,
+  resource,
+  { force = false, reload = false } = {},
+) {
   if (state.busy) throw new Error('Wait for the current save to finish.');
   if (!force && !discard()) return;
   state.selected = {
@@ -531,11 +579,19 @@ async function openDocument(kind, resource, force = false) {
   $('detail').hidden = false;
   $('detailKind').textContent = kind.toUpperCase();
   $('detailContent').replaceChildren(node('p', 'Opening document…', 'muted'));
+  const selection = state.selected;
+  const cached = state.snapshot?.[kind === 'ticket' ? 'tickets' : 'epics'].find(
+    (document) => document.resource === resource,
+  );
+  // All metadata is already on the board. Reusing visible fields discloses no
+  // new data; body reads, explicit Reload and every write still go to the server.
   const selected = decodeDocument(
-    await api(`/api/documents/${kind}/${resource}`),
+    !reload && cached
+      ? cached
+      : await reads.read(`/api/documents/${kind}/${resource}`),
     kind,
   );
-  if (state.selected?.resource !== resource) return;
+  if (state.selected !== selection) return;
   state.selected.document = selected;
   renderDetail();
 }
@@ -585,12 +641,13 @@ function renderDetail() {
   bodyArea.append(loadBody, bodyContent);
   form.append(bodyArea);
   on(loadBody, 'click', async () => {
+    const selection = state.selected;
     const selectedResource = doc.resource;
     const loaded = decodeDocument(
-      await api(`/api/documents/${kind}/${selectedResource}?body=1`),
+      await reads.read(`/api/documents/${kind}/${selectedResource}?body=1`),
       kind,
     );
-    if (state.selected?.document?.resource !== selectedResource) return;
+    if (state.selected !== selection) return;
     if (loaded.revision !== state.selected.document.revision)
       throw new Error(
         'A newer document revision is available. Reload and review before editing its body.',
@@ -643,7 +700,7 @@ function renderDetail() {
     state.dirty.delete('fields');
     heading.textContent = fields.title;
     revision.textContent = `Revision ${result.revision.slice(0, 8)}`;
-    await refreshBoard();
+    await refreshDocument(kind, doc.resource);
   });
   container.append(form);
   if (kind === 'ticket') renderMembership(container, doc);
@@ -701,7 +758,7 @@ function renderMembership(container, doc) {
       epics: selected,
     });
     state.dirty.delete('epics');
-    await refreshBoard();
+    await refreshDocument('ticket', doc.resource);
   });
   container.append(epicsForm);
   const topicForm = node('form', undefined, 'membership-form');
@@ -728,7 +785,7 @@ function renderMembership(container, doc) {
       tags: selected,
     });
     state.dirty.delete('tags');
-    await refreshBoard();
+    await refreshDocument('ticket', doc.resource);
   });
   container.append(topicForm);
 }
@@ -765,12 +822,17 @@ function openCreate(kind, status = 'backlog') {
 async function signedIn(session) {
   if (typeof session.csrf !== 'string' || typeof session.project !== 'string')
     throw new Error('Invalid workspace session.');
+  reads.invalidate();
+  state.generation += 1;
+  state.snapshot = null;
+  state.selected = null;
   state.csrf = session.csrf;
   state.project = session.project;
   state.pending = loadPending();
   $('workspace').textContent = session.project;
   $('login').hidden = true;
   $('shell').hidden = false;
+  updateBusy();
   await refreshBoard();
   updateBusy();
 }
@@ -827,7 +889,9 @@ on(
   'click',
   () =>
     state.selected &&
-    openDocument(state.selected.kind, state.selected.resource),
+    openDocument(state.selected.kind, state.selected.resource, {
+      reload: true,
+    }),
 );
 on($('cancelCreate'), 'click', () => $('createDialog').close());
 on($('cancelCreateBottom'), 'click', () => $('createDialog').close());
@@ -844,8 +908,8 @@ on($('createForm'), 'submit', async (event) => {
     body: value(form, 'body'),
   });
   $('createDialog').close();
-  await refreshBoard();
-  await openDocument(kind, result.resource, true);
+  await refreshDocument(kind, result.resource);
+  await openDocument(kind, result.resource, { force: true });
 });
 on($('recover'), 'click', async () => {
   const id = state.pending?.id;
@@ -859,6 +923,8 @@ on($('recover'), 'click', async () => {
 on($('logout'), 'click', async () => {
   if (!discard()) return;
   await api('/session', { method: 'DELETE' });
+  reads.invalidate();
+  state.generation += 1;
   state.csrf = '';
   state.snapshot = null;
   state.selected = null;
