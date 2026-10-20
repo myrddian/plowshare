@@ -4,6 +4,8 @@ import type {
   Destination,
   DiscordDelivery,
   DiscordInput,
+  DirectDestination,
+  GuildDestination,
   Gateway,
   IncomingTask,
   State,
@@ -46,7 +48,7 @@ export function configuration(): Configuration {
 }
 export function emptyState(config = configuration()): State {
   return {
-    version: 1,
+    version: 2,
     origin: config.origin,
     principal: PRINCIPAL,
     discordBotId: BOT,
@@ -69,12 +71,46 @@ export class MemoryState implements StateRepository {
     this.persisted = JSON.stringify(this.state);
   }
 }
-export function input(overrides: Partial<DiscordInput> = {}): DiscordInput {
+export function input(
+  overrides: Partial<
+    GuildDestination & {
+      messageId: string;
+      userId: string;
+      content: string;
+      bot: boolean;
+      webhook: boolean;
+    }
+  > = {},
+): DiscordInput {
   return {
+    kind: 'guild',
     messageId: '200000000000000001',
     guildId: GUILD,
     channelId: CHANNEL,
     parentId: null,
+    userId: USER,
+    content: 'Investigate the evidence.',
+    bot: false,
+    webhook: false,
+    ...overrides,
+  };
+}
+export function directInput(
+  overrides: Partial<
+    DirectDestination & {
+      messageId: string;
+      userId: string;
+      content: string;
+      bot: boolean;
+      webhook: boolean;
+    }
+  > = {},
+): DiscordInput {
+  return {
+    kind: 'dm',
+    channelId: '100000000000000006',
+    recipientId: USER,
+    messageId: '200000000000000001',
     userId: USER,
     content: 'Investigate the evidence.',
     bot: false,

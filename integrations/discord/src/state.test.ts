@@ -128,3 +128,81 @@ await test('bounded intake refuses overflow without executing it and recovers af
   });
   assert.equal(executed, 33);
 });
+
+await test('v1 guild journals migrate without changing conversation, task or receipt identities', async () => {
+  const config = configuration();
+  const state = emptyState(config);
+  await new DiscordAdapter(
+    config,
+    { state, async save() {} },
+    new FakeGateway(),
+    new FakeDiscord(),
+  ).accept(input());
+  const original = state.records[0];
+  assert.ok(original && original.destination.kind === 'guild');
+  const { kind: _kind, ...oldDestination } = original.destination;
+  const legacy = {
+    ...state,
+    version: 1,
+    records: [{ ...original, destination: oldDestination }],
+  };
+  const migrated = decodeState(legacy, config, PRINCIPAL, BOT);
+  assert.equal(migrated.version, 2);
+  assert.deepEqual(migrated.contexts, state.contexts);
+  assert.deepEqual(migrated.records, state.records);
+  const gateway = new FakeGateway();
+  await new DiscordAdapter(
+    config,
+    { state: migrated, async save() {} },
+    gateway,
+    new FakeDiscord(),
+  ).accept(input({ messageId: '200000000000000002' }));
+  assert.equal(gateway.submissions[0]?.context, original.contextId);
+  const interrupted = decodeState(
+    { ...legacy, records: [{ ...legacy.records[0], admission: 'ADMITTING' }] },
+    config,
+    PRINCIPAL,
+    BOT,
+  );
+  assert.equal(interrupted.records[0]?.admission, 'UNKNOWN');
+});
+await test('v2 destinations are explicit and DM journals cannot forge recipients or notification audiences', async () => {
+  const config = configuration();
+  const state = emptyState(config);
+  await new DiscordAdapter(
+    config,
+    { state, async save() {} },
+    new FakeGateway(),
+    new FakeDiscord(),
+  ).accept(input());
+  const original = state.records[0];
+  assert.ok(original);
+  const dm = {
+    kind: 'dm',
+    channelId: original.destination.channelId,
+    recipientId: original.userId,
+  };
+  const direct = { ...original, destination: dm };
+  assert.equal(
+    decodeState({ ...state, records: [direct] }, config, PRINCIPAL, BOT)
+      .records[0]?.destination.kind,
+    'dm',
+  );
+  for (const record of [
+    { ...direct, destination: { ...dm, recipientId: '100000000000000004' } },
+    { ...direct, destination: { ...dm, guildId: '100000000000000001' } },
+    { ...direct, kind: 'NOTICE' },
+    { ...original, destination: { channelId: original.destination.channelId } },
+  ])
+    assert.throws(() =>
+      decodeState({ ...state, records: [record] }, config, PRINCIPAL, BOT),
+    );
+  assert.throws(() =>
+    decodeState(
+      { ...state, version: 1, records: [direct] },
+      config,
+      PRINCIPAL,
+      BOT,
+    ),
+  );
+});

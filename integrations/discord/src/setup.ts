@@ -11,12 +11,17 @@ import { decodeSetupConfig } from './setup-config.ts';
 import { DiscordSetup } from './setup-engine.ts';
 import { SdkSetupGateway, verifyServiceCredential } from './setup-gateway.ts';
 import type { SetupConfiguration } from './setup-contracts.ts';
+import { ConfigurationManager } from './management.ts';
+
+const usage =
+  'Usage: node build/discord/setup.js install|recover|rotate|start|config /absolute/path/setup.json\n       node build/discord/setup.js configure /absolute/path/setup.json <expected-revision> /absolute/path/adapter.json';
 
 /** Only the explicit start command opens Discord; tokens travel in the child environment, not argv. */
 async function start(
   config: SetupConfiguration,
   repository: FileSetup,
 ): Promise<void> {
+  const adapter = await repository.prepareRuntime();
   if (!process.env[config.adapter.discordTokenEnvironment])
     throw new SetupProblem(
       'Supply the configured Discord bot token environment variable before start',
@@ -25,7 +30,7 @@ async function start(
   await verifyServiceCredential(
     value.credential,
     value.receipt.principal,
-    config.adapter,
+    adapter,
   );
   const child = spawn(
     process.execPath,
@@ -65,29 +70,60 @@ async function start(
 }
 async function main(): Promise<void> {
   if (process.argv.length === 3 && process.argv[2] === '--help') {
-    console.info(
-      'Usage: node build/discord/setup.js install|recover|rotate|start /absolute/path/setup.json',
-    );
+    console.info(usage);
     return;
   }
   const mode = process.argv[2];
   const path = process.argv[3];
   if (
-    process.argv.length !== 4 ||
-    !['install', 'recover', 'rotate', 'start'].includes(mode ?? '') ||
+    (mode === 'configure'
+      ? process.argv.length !== 6
+      : process.argv.length !== 4) ||
+    !['install', 'recover', 'rotate', 'start', 'config', 'configure'].includes(
+      mode ?? '',
+    ) ||
     path === undefined ||
     !isAbsolute(path)
   )
-    throw new SetupProblem(
-      'Usage: node build/discord/setup.js install|recover|rotate|start /absolute/path/setup.json',
-    );
+    throw new SetupProblem(usage);
   const bytes = await readFile(path);
   if (bytes.length > 65536)
     throw new SetupProblem('Setup configuration exceeds its bound');
   const raw: unknown = JSON.parse(bytes.toString('utf8'));
   const config = decodeSetupConfig(raw);
-  const repository = await FileSetup.open(config);
+  const repository = await FileSetup.open(
+    config,
+    mode === 'configure' ? 'configuration' : 'setup',
+  );
   try {
+    if (mode === 'config') {
+      console.info(JSON.stringify(await repository.configuration(), null, 2));
+      return;
+    }
+    if (mode === 'configure') {
+      const revision = process.argv[4];
+      const file = process.argv[5];
+      if (revision === undefined || file === undefined || !isAbsolute(file))
+        throw new SetupProblem(usage);
+      const bytes = await readFile(file);
+      if (bytes.length > 65536)
+        throw new SetupProblem('Adapter configuration exceeds its bound');
+      const next: unknown = JSON.parse(bytes.toString('utf8'));
+      const manager = new ConfigurationManager(repository, {
+        async verify(adapter) {
+          const credential = await repository.serviceCredential();
+          await verifyServiceCredential(
+            credential.credential,
+            credential.receipt.principal,
+            adapter,
+          );
+        },
+      });
+      console.info(
+        JSON.stringify(await manager.update(revision, next), null, 2),
+      );
+      return;
+    }
     if (mode === 'start') {
       await start(config, repository);
       return;

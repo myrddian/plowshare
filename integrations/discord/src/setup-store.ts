@@ -12,8 +12,18 @@ import {
 } from 'plowshare-client-ts/operations/schema';
 import { object, text, decodeConfig } from './config.ts';
 import { sameTokenReceipt } from './setup-contracts.ts';
-import { uuid } from './state.ts';
-import { separateSetupDirectories, setupHash } from './setup-config.ts';
+import { uuid, decodeState } from './state.ts';
+import {
+  separateSetupDirectories,
+  setupHash,
+  legacySetupHash,
+} from './setup-config.ts';
+import { snowflake } from './config.ts';
+import { decodeConfigurationRevision } from './management.ts';
+import type {
+  ConfigurationRevision,
+  ConfigurationRepository,
+} from './management.ts';
 import type {
   SavedCredential,
   SetupConfiguration,
@@ -79,7 +89,14 @@ export function decodeSetupState(
     'deploymentReceipt',
     'credentials',
   ]);
-  if (raw.version !== 1 || raw.configurationHash !== setupHash(config))
+  if (
+    raw.version !== 1 ||
+    (raw.configurationHash !== setupHash(config) &&
+      !(
+        typeof raw.configurationHash === 'string' &&
+        raw.configurationHash === legacySetupHash(config)
+      ))
+  )
     throw new SetupProblem(
       'Setup state belongs to another configuration, server or administrator',
     );
@@ -159,13 +176,22 @@ export function decodeSetupState(
 }
 
 /** A setup lock is independent of adapter runtime state. Crashes leave it for operator inspection. */
-export class FileSetup implements SetupRepository {
+export class FileSetup implements SetupRepository, ConfigurationRepository {
+  private closed = false;
+  private configurationWriting = false;
+  private assertOpen(): void {
+    if (this.closed) throw new SetupProblem('Setup repository is closed');
+  }
   private constructor(
     private readonly directory: string,
     readonly config: SetupConfiguration,
     public state: SetupState | null,
+    private readonly runtimeLock: string | null,
   ) {}
-  static async open(config: SetupConfiguration): Promise<FileSetup> {
+  static async open(
+    config: SetupConfiguration,
+    mode: 'setup' | 'configuration' = 'setup',
+  ): Promise<FileSetup> {
     separateSetupDirectories(
       await storagePath(config.sourceDirectory),
       await storagePath(config.outputDirectory),
@@ -173,7 +199,14 @@ export class FileSetup implements SetupRepository {
     );
     await privateDirectory(config.outputDirectory);
     await mkdir(join(config.outputDirectory, 'setup.lock'), { mode: 0o700 });
+    let runtimeLock: string | null = null;
     try {
+      if (mode === 'configuration') {
+        await privateDirectory(config.adapter.stateDirectory);
+        const lock = join(config.adapter.stateDirectory, 'adapter.lock');
+        await mkdir(lock, { mode: 0o700 });
+        runtimeLock = lock;
+      }
       const value = await read(
         join(config.outputDirectory, 'setup-state.json'),
       );
@@ -188,13 +221,88 @@ export class FileSetup implements SetupRepository {
         config.outputDirectory,
         config,
         value === undefined ? null : decodeSetupState(value, config),
+        runtimeLock,
       );
     } catch (error) {
+      if (runtimeLock !== null) await rm(runtimeLock, { recursive: true });
       await rm(join(config.outputDirectory, 'setup.lock'), { recursive: true });
       throw error;
     }
   }
+  async configuration(): Promise<ConfigurationRevision> {
+    this.assertOpen();
+    if (this.state?.deploymentReceipt == null)
+      throw new SetupProblem(
+        'A confirmed installation is required for configuration management',
+      );
+    const raw = await read(join(this.directory, 'configuration.json'));
+    return raw === undefined
+      ? {
+          version: 1,
+          installation: setupHash(this.config),
+          revision: this.state.deployment.requestId,
+          adapter: this.config.adapter,
+        }
+      : decodeConfigurationRevision(raw, this.config);
+  }
+  async validateRuntimeState(adapter: Configuration): Promise<void> {
+    this.assertOpen();
+    if (this.runtimeLock === null)
+      throw new SetupProblem('Stop the adapter before configuration changes');
+    const raw = await read(
+      join(this.config.adapter.stateDirectory, 'state.json'),
+    );
+    if (raw === undefined) return;
+    const metadata = object(raw, [
+      'version',
+      'origin',
+      'principal',
+      'discordBotId',
+      'consumerId',
+      'contexts',
+      'records',
+      'heldNotifications',
+    ]);
+    const principal = this.state?.credentials.at(-1)?.principal;
+    if (principal === undefined)
+      throw new SetupProblem('The retained service identity is unavailable');
+    // Validate the existing journal with the new limits, without rewriting or discarding any evidence.
+    decodeState(raw, adapter, principal, snowflake(metadata.discordBotId));
+  }
+  async saveConfiguration(
+    expectedRevision: string,
+    value: ConfigurationRevision,
+  ): Promise<void> {
+    // The process locks exclude other owners; this guard also excludes overlapping calls by this owner.
+    if (this.configurationWriting)
+      throw new SetupProblem('A configuration edit is already being published');
+    if (this.runtimeLock === null)
+      throw new SetupProblem('Stop the adapter before configuration changes');
+    this.configurationWriting = true;
+    try {
+      if ((await this.configuration()).revision !== uuid(expectedRevision))
+        throw new SetupProblem(
+          'Configuration revision changed before publication',
+        );
+      const checked = decodeConfigurationRevision(value, this.config);
+      if (checked.revision === expectedRevision)
+        throw new SetupProblem(
+          'Configuration replacement needs a fresh revision',
+        );
+      await this.validateRuntimeState(checked.adapter);
+      await this.write('configuration.json', checked);
+    } finally {
+      this.configurationWriting = false;
+    }
+  }
+  /** adapter.json is a derived launch snapshot. configuration.json is the revisioned source of edits. */
+  async prepareRuntime(): Promise<Configuration> {
+    const adapter = (await this.configuration()).adapter;
+    await this.write('adapter.json', adapter);
+    return adapter;
+  }
   private async write(name: string, value: unknown): Promise<void> {
+    this.assertOpen();
     await atomicPrivateWrite(join(this.directory, name), value);
     const directory = await open(this.directory, 'r');
     try {
@@ -237,6 +345,7 @@ export class FileSetup implements SetupRepository {
     );
   }
   async credential(requestId: string): Promise<SavedCredential | null> {
+    this.assertOpen();
     const value = await read(
       join(this.directory, `credential-${uuid(requestId)}.json`),
     );
@@ -259,11 +368,12 @@ export class FileSetup implements SetupRepository {
       throw new SetupProblem(
         'Runtime publication does not match the confirmed installation',
       );
-    await this.write('adapter.json', adapter);
+    await this.write('adapter.json', (await this.configuration()).adapter);
     // Last write is the publication point. A crash never exposes a secret for another request.
     await this.write('service-credential.json', checked);
   }
-  async published(): Promise<SavedCredential> {
+  async serviceCredential(): Promise<SavedCredential> {
+    this.assertOpen();
     const state = this.state;
     const attempt = state?.credentials.at(-1);
     const raw = await read(join(this.directory, 'service-credential.json'));
@@ -283,11 +393,15 @@ export class FileSetup implements SetupRepository {
       throw new SetupProblem(
         'Published credential is stale; recover or explicitly rotate',
       );
+    return value;
+  }
+  async published(): Promise<SavedCredential> {
+    const value = await this.serviceCredential();
     const adapter = await read(join(this.directory, 'adapter.json'));
     // JSON field order is irrelevant to an existing artifact; decode before comparing canonical DTOs.
     if (
       JSON.stringify(decodeConfig(adapter)) !==
-      JSON.stringify(this.config.adapter)
+      JSON.stringify((await this.configuration()).adapter)
     )
       throw new SetupProblem(
         'Published runtime configuration differs from setup',
@@ -295,6 +409,10 @@ export class FileSetup implements SetupRepository {
     return value;
   }
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.runtimeLock !== null)
+      await rm(this.runtimeLock, { recursive: true });
     await rm(join(this.directory, 'setup.lock'), { recursive: true });
   }
 }

@@ -7,6 +7,7 @@ import { decodeState } from './state.ts';
 import {
   configuration,
   input,
+  directInput,
   FakeGateway,
   FakeDiscord,
   MemoryState,
@@ -453,4 +454,156 @@ await test('editing a notification destination cannot bypass uncertain sends or 
     assert.equal(restarted.gateway.acknowledgements.length, 0);
     assert.equal(restarted.repository.state.heldNotifications.length, 1);
   }
+});
+
+function serviceDm() {
+  return {
+    ...configuration(),
+    dm: { mode: 'service' as const, project: 'research', bot: 'researcher' },
+  };
+}
+await test('DM intake is disabled by default and service mode requires an allowed human with an exact recipient', async () => {
+  const disabled = fixture();
+  await disabled.adapter.accept(directInput());
+  assert.equal(disabled.gateway.submissions.length, 0);
+  const f = fixture(serviceDm());
+  for (const message of [
+    directInput({ bot: true }),
+    directInput({ webhook: true }),
+    directInput({
+      userId: '900000000000000009',
+      recipientId: '900000000000000009',
+    }),
+    directInput({ recipientId: OTHER }),
+  ])
+    await f.adapter.accept(message);
+  assert.equal(f.gateway.submissions.length, 0);
+  await f.adapter.accept(directInput());
+  assert.equal(f.gateway.submissions.length, 1);
+  assert.equal(f.gateway.submissions[0]?.project, 'research');
+  assert.equal(f.gateway.submissions[0]?.agent, 'researcher');
+  assert.equal(f.gateway.submissions[0]?.body, 'Investigate the evidence.');
+});
+await test('DM contexts survive restart and remain separate from guilds and other users', async () => {
+  const f = fixture(serviceDm());
+  await f.adapter.accept(directInput());
+  const first = f.repository.state.records[0];
+  assert.ok(first?.contextId);
+  const restarted = fixture(
+    f.config,
+    new MemoryState(decodeState(f.repository.state, f.config, PRINCIPAL, BOT)),
+  );
+  await restarted.adapter.accept(
+    directInput({ messageId: '200000000000000002' }),
+  );
+  assert.equal(restarted.gateway.submissions[0]?.context, first.contextId);
+  assert.equal(restarted.gateway.submissions[0]?.client, first.client);
+  await restarted.adapter.accept(
+    directInput({
+      messageId: '200000000000000003',
+      userId: OTHER,
+      recipientId: OTHER,
+      channelId: '100000000000000007',
+    }),
+  );
+  await restarted.adapter.accept(input({ messageId: '200000000000000004' }));
+  assert.equal(restarted.gateway.submissions[1]?.context, null);
+  assert.equal(restarted.gateway.submissions[2]?.context, null);
+  assert.equal(
+    new Set(restarted.gateway.submissions.map((s) => s.client)).size,
+    3,
+  );
+  assert.equal(restarted.repository.state.contexts.length, 3);
+});
+await test('DM controls cannot look up or cancel another user or a guild task', async () => {
+  const f = fixture(serviceDm());
+  await f.adapter.accept(input());
+  const guildTask = f.repository.state.records[0]?.taskId;
+  await f.adapter.accept(directInput({ messageId: '200000000000000002' }));
+  const dmTask = f.repository.state.records[1]?.taskId;
+  assert.ok(guildTask && dmTask);
+  for (const action of ['status', 'cancel']) {
+    await f.adapter.accept(
+      directInput({
+        messageId: `20000000000000000${action === 'status' ? 3 : 4}`,
+        content: `!plowshare ${action} ${guildTask}`,
+      }),
+    );
+    await f.adapter.accept(
+      directInput({
+        messageId: `20000000000000000${action === 'status' ? 5 : 6}`,
+        userId: OTHER,
+        recipientId: OTHER,
+        channelId: '100000000000000007',
+        content: `!plowshare ${action} ${dmTask}`,
+      }),
+    );
+  }
+  assert.equal(f.gateway.statuses.length, 0);
+  assert.equal(f.gateway.cancellations.length, 0);
+  await f.adapter.accept(
+    directInput({
+      messageId: '200000000000000007',
+      content: '!plowshare status',
+    }),
+  );
+  await f.adapter.accept(
+    directInput({
+      messageId: '200000000000000008',
+      content: '!plowshare cancel',
+    }),
+  );
+  assert.equal(f.gateway.statuses[0]?.id, dmTask);
+  assert.equal(f.gateway.cancellations[0]?.id, dmTask);
+});
+await test('revoking DM policy, user or target fences retained results without discarding receipts', async () => {
+  const f = fixture(serviceDm());
+  await f.adapter.accept(directInput());
+  const before = JSON.stringify(f.repository.state);
+  for (const config of [
+    { ...f.config, dm: { mode: 'disabled' as const } },
+    { ...f.config, allowedUserIds: [OTHER] },
+    {
+      ...f.config,
+      dm: { mode: 'service' as const, project: 'research', bot: 'different' },
+    },
+  ]) {
+    await new DiscordAdapter(config, f.repository, f.gateway, f.discord).poll();
+  }
+  assert.equal(f.gateway.statuses.length, 0);
+  assert.equal(f.discord.sends.length, 0);
+  assert.equal(JSON.stringify(f.repository.state), before);
+});
+await test('DM admission and outbound uncertainty survive restart without replay', async () => {
+  const f = fixture(serviceDm());
+  f.gateway.failure = new ConnectionFault('RESPONSE_LOST', 'Lost admission');
+  await f.adapter.accept(directInput());
+  const restarted = fixture(
+    f.config,
+    new MemoryState(decodeState(f.repository.state, f.config, PRINCIPAL, BOT)),
+  );
+  await restarted.adapter.accept(
+    directInput({ messageId: '200000000000000002' }),
+  );
+  await restarted.adapter.poll();
+  assert.equal(restarted.gateway.submissions.length, 0);
+  assert.equal(restarted.gateway.statuses.length, 0);
+  const sending = fixture(serviceDm());
+  await sending.adapter.accept(directInput());
+  sending.discord.failure = new Error('Lost Discord receipt');
+  await sending.adapter.poll();
+  const resumed = fixture(
+    sending.config,
+    new MemoryState(
+      decodeState(sending.repository.state, sending.config, PRINCIPAL, BOT),
+    ),
+  );
+  resumed.gateway.result = sending.gateway.result;
+  await resumed.adapter.poll();
+  assert.equal(resumed.discord.sends.length, 0);
+  assert.equal(resumed.gateway.submissions.length, 0);
+  assert.equal(
+    resumed.repository.state.records[0]?.outputs[0]?.state,
+    'UNKNOWN',
+  );
 });

@@ -37,7 +37,7 @@ val discordTest by tasks.registering(Exec::class) {
     workingDir = projectDir
     dependsOn(discordBuild)
     inputs.dir("build/discord").withPathSensitivity(PathSensitivity.RELATIVE)
-    commandLine("node", "--test", "build/discord/adapter.test.js", "build/discord/config.test.js", "build/discord/state.test.js", "build/discord/gateway.test.js", "build/discord/discord.test.js", "build/discord/setup.test.js", "build/discord/setup-gateway.test.js")
+    commandLine("node", "--test", "build/discord/adapter.test.js", "build/discord/config.test.js", "build/discord/state.test.js", "build/discord/gateway.test.js", "build/discord/discord.test.js", "build/discord/setup.test.js", "build/discord/setup-gateway.test.js", "build/discord/management.test.js")
 }
 tasks.named("assemble") { dependsOn(discordBuild) }
 tasks.named("check") { dependsOn(discordTest) }

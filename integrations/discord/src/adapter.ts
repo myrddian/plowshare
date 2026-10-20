@@ -9,7 +9,6 @@ import type {
   IncomingTask,
   NotificationRoute,
   RecordEntry,
-  Route,
   StateRepository,
 } from './contracts.ts';
 import { chunks } from './render.ts';
@@ -36,7 +35,21 @@ function outcome(error: unknown): RecordEntry['admission'] {
 function destinationRoute(
   config: Configuration,
   destination: Destination,
-): Route | undefined {
+):
+  | {
+      readonly project: string;
+      readonly bot: string;
+      readonly requireMention: boolean;
+    }
+  | undefined {
+  if (destination.kind === 'dm')
+    return config.dm.mode === 'service'
+      ? {
+          project: config.dm.project,
+          bot: config.dm.bot,
+          requireMention: false,
+        }
+      : undefined;
   return (
     config.routes.find(
       (r) =>
@@ -54,11 +67,12 @@ function destinationRoute(
 export function selectedRoute(
   config: Configuration,
   input: DiscordInput,
-): Route | undefined {
+): ReturnType<typeof destinationRoute> {
   if (
     input.bot ||
     input.webhook ||
-    !config.allowedUserIds.includes(input.userId)
+    !config.allowedUserIds.includes(input.userId) ||
+    (input.kind === 'dm' && input.recipientId !== input.userId)
   )
     return undefined;
   return destinationRoute(config, input);
@@ -95,6 +109,8 @@ export class DiscordAdapter {
     }
     return (
       record.userId !== null &&
+      (record.destination.kind !== 'dm' ||
+        record.destination.recipientId === record.userId) &&
       this.config.allowedUserIds.includes(record.userId)
     );
   }
@@ -161,14 +177,24 @@ export class DiscordAdapter {
     if (!body || Buffer.byteLength(body) > 65536) return;
     const key = `discord:${input.messageId}`;
     if (this.repository.state.records.some((r) => r.key === key)) return;
-    const contextKey = digest(
-      input.guildId,
-      input.channelId,
-      input.parentId ?? '',
-      input.userId,
-      route.project,
-      route.bot,
-    );
+    // Preserve existing guild keys; DM conversations occupy an independent namespace.
+    const contextKey =
+      input.kind === 'guild'
+        ? digest(
+            input.guildId,
+            input.channelId,
+            input.parentId ?? '',
+            input.userId,
+            route.project,
+            route.bot,
+          )
+        : digest(
+            'dm',
+            input.channelId,
+            input.recipientId,
+            route.project,
+            route.bot,
+          );
     const command = /^!plowshare (status|cancel)(?: ([0-9a-f-]{36}))?$/i.exec(
       body,
     );
@@ -197,14 +223,22 @@ export class DiscordAdapter {
       key,
       kind,
       userId: input.userId,
-      destination: {
-        guildId: input.guildId,
-        channelId: input.channelId,
-        parentId: input.parentId,
-      },
+      destination:
+        input.kind === 'guild'
+          ? {
+              kind: 'guild',
+              guildId: input.guildId,
+              channelId: input.channelId,
+              parentId: input.parentId,
+            }
+          : {
+              kind: 'dm',
+              channelId: input.channelId,
+              recipientId: input.recipientId,
+            },
       project: route.project,
       bot: route.bot,
-      client: `discord_${digest(botId, input.guildId, input.userId).slice(0, 32)}`,
+      client: `discord_${digest(botId, input.kind === 'guild' ? input.guildId : 'dm', input.userId).slice(0, 32)}`,
       contextKey,
       requestId: randomUUID(),
       replyTo: input.messageId,
@@ -421,6 +455,7 @@ export class DiscordAdapter {
           kind: 'NOTICE',
           userId: null,
           destination: {
+            kind: 'guild',
             guildId: channel.guildId,
             channelId: channel.channelId,
             parentId: null,

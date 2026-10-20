@@ -3,6 +3,13 @@
 Status: proposed implementation plan, 21 October 2026. Source baseline:
 `2cf4db4c2d72e9f99e43e343a38ff603278e8329`.
 
+C1 and the service-chat portion of C2 are now implemented in the external adapter:
+revisioned, stopped-only headless configuration edits and opt-in one-to-one DMs.
+See the [operator workflow](../integrations/discord/README.md#configuration-management).
+Legacy setup hashes and guild conversation keys are preserved on upgrade. This
+slice adds no web listener, account linking, consent contract or delegated runtime
+change. Onboarding commands remain dependent on track B; C3/C4 remain planned.
+
 Provide an optional internal web app for managing the Discord integration, link
 individual Discord users to their own Plowshare accounts, and support direct
 messages to authorised agents. Preserve the existing Discord-only service mode.
@@ -49,12 +56,12 @@ The baseline source provides these starting points:
 | --- | --- |
 | Application install, service identity, private credential output, recover and rotate | [Setup engine](../integrations/discord/src/setup-engine.ts) and [repository](../integrations/discord/src/setup-store.ts); already implemented through public SDK contracts |
 | Guild channels and threads, persistent contexts, status/cancel and Relay notifications | [Discord adapter](../integrations/discord/src/adapter.ts); already implemented in service mode |
-| Discord DMs | [Discord boundary](../integrations/discord/src/discord.ts) does not request DM events, drops messages without a guild and only accepts guild destinations; routing/state DTOs also require a guild |
+| Discord DMs at baseline | Required DM events, separate destination DTOs and journal migration; the C2 service-chat slice now implements these in the [Discord boundary](../integrations/discord/src/discord.ts) |
 | Public delegated execution | [SDK requests](../sdk/typescript/src/operations/administration.ts) and [server dispatch](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ActingRequests.java) support context open/close, Personal turn start/receipt, history and correlated job status/cancel |
 | Token issue, revocation, metadata, receipts and eligibility | [ActingTokens](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/ActingTokens.java) exists internally; public lifecycle operations and CLI commands are missing |
 | Browser linking and web management authentication | No completed public contract establishes this workflow; platform contract work must supply it before authenticated shared web management ships |
 | Agent capabilities under delegation | [RetainedAgent](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetainedAgent.java) still refuses skills, orchestrations and other unsupported capabilities; use the existing [runtime handoff](delegated-runtime-authority-todo.md) |
-| Setup updates | The current setup hash freezes configuration and the basic manifest decoder rejects `acting`; a web editor needs a deliberate configuration revision/update lifecycle |
+| Setup updates | C1 now separates operational revisions from the frozen setup hash. The basic manifest decoder still rejects `acting`; source updates and browser authority remain separate work |
 
 The current delegated turn target is Personal. Existing project history reads do
 not provide project acting execution. Do not attach `actingFor` to `incoming.*`,
