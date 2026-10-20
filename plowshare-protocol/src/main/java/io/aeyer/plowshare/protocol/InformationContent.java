@@ -109,6 +109,17 @@ public final class InformationContent {
     }
   }
 
+  /** Compact immutable instance projection; definitions and source bodies are separate reads. */
+  public record Metadata(Identity type, String metadataHash, SchemaValue.ObjectValue metadata) {
+    public Metadata {
+      Objects.requireNonNull(type);
+      metadata = DocumentMetadata.instance(metadata);
+      metadataHash = digest(metadataHash);
+      if (!metadataHash.equals(SchemaCodec.fingerprint(metadata)))
+        throw new IllegalArgumentException("Metadata hash differs from instance");
+    }
+  }
+
   public record Reuse(String stage, UUID revision, long generation, String fingerprint) {
     public Reuse {
       if (!List.of(

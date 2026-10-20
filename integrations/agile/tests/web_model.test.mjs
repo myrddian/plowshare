@@ -10,6 +10,7 @@ import {
   topicTags,
   bodyForSave,
   requestIdentity,
+  replaceDocument,
 } from '../src/plowshare_agile/web/model.mjs';
 
 test('request identities work without secure-context randomUUID and remain distinct', () => {
@@ -49,6 +50,38 @@ const tickets = [
   ticket(2, [`epic:${id(20)}`, 'sdk'], { status: 'done' }),
   ticket(3, [`epic:${id(21)}`, 'websocket'], { assignee: 'Sam' }),
 ];
+
+test('a targeted authorized read replaces one document and preserves other rows', () => {
+  const snapshot = decodeSnapshot({ project: 'fixture', tickets, epics: [] });
+  const updated = { ...tickets[0], revision: id(999), tags: ['changed'] };
+  const result = replaceDocument(snapshot, 'ticket', updated);
+  assert.deepEqual(result.tickets[0], updated);
+  assert.deepEqual(result.tickets.slice(1), tickets.slice(1));
+  assert.deepEqual(snapshot.tickets, tickets);
+  const added = replaceDocument(result, 'epic', {
+    resource: id(20),
+    revision: id(120),
+    owner: 'fixture',
+    fields: { title: 'Epic' },
+    tags: [],
+    body: null,
+  });
+  assert.equal(added.epics.length, 1);
+  assert.equal(added.tickets.length, 3);
+  assert.throws(
+    () => replaceDocument(added, 'ticket', ticket(20, [])),
+    /duplicate/,
+  );
+  const full = decodeSnapshot({
+    project: 'fixture',
+    tickets: Array.from({ length: 100 }, (_, n) => ticket(n + 1, [])),
+    epics: [],
+  });
+  assert.throws(
+    () => replaceDocument(full, 'ticket', ticket(101, [])),
+    /board size/,
+  );
+});
 
 test('epics and topics intersect without duplicating a shared ticket', () => {
   const filters = {

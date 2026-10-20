@@ -44,6 +44,62 @@ class InformationToolTest {
   }
 
   @Test
+  void projectedInstanceFieldsUseTheRetainedReadBoundaryAndConsumedRevisionLedger()
+      throws Exception {
+    var navigation = mock(InformationNavigationService.class);
+    var metadata = io.aeyer.plowshare.protocol.DocumentMetadata.empty();
+    var binding =
+        new io.aeyer.plowshare.protocol.InformationContent.Metadata(
+            new io.aeyer.plowshare.protocol.InformationContent.Identity(
+                UUID.randomUUID(), UUID.randomUUID(), 1, "incident", "Incident", "a".repeat(64)),
+            io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(metadata),
+            metadata);
+    var doc =
+        new io.aeyer.plowshare.protocol.InformationNavigation.Document(
+            UUID.randomUUID(),
+            REVISION,
+            "Discovery",
+            "fixture.md",
+            List.of(),
+            io.aeyer.plowshare.protocol.InformationRequest.Scope.personal(),
+            "alice",
+            binding);
+    when(navigation.execute(
+            eq("alice"),
+            isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentList.class),
+            eq(context.readBoundary())))
+        .thenReturn(
+            new io.aeyer.plowshare.protocol.InformationResponse.NavigationDocuments(
+                new io.aeyer.plowshare.protocol.InformationNavigation.Documents(
+                    List.of(doc), 50, 0, "metadata-v1")));
+    when(access.resolve(eq("alice"), any())).thenReturn(context);
+    when(inputs.reads(eq("cnv_reader"), any())).thenReturn(read::add);
+    var result =
+        json.readTree(
+            reader(navigation)
+                .run(
+                    "{\"operation\":\"documents.list\",\"projection\":\"metadata-v1\"}",
+                    Home.global()));
+    assertEquals("metadata-v1", result.path("projection").asText());
+    assertEquals(
+        "incident",
+        result.path("documents").get(0).path("contentMetadata").path("type").path("slug").asText());
+    assertEquals(List.of(REVISION), read);
+    verify(navigation)
+        .execute(
+            eq("alice"),
+            argThat(
+                request ->
+                    request
+                            instanceof
+                            io.aeyer.plowshare.protocol.InformationRequest.DocumentList page
+                        && "metadata-v1".equals(page.projection())
+                        && "content-types-v1".equals(page.selection().view())),
+            eq(context.readBoundary()));
+    verifyNoMoreInteractions(navigation);
+  }
+
+  @Test
   void navigationMetadataIsTrackedButLockedReferencesAreNotBodyInputs() throws Exception {
     var navigation = mock(InformationNavigationService.class);
     var root = UUID.randomUUID();

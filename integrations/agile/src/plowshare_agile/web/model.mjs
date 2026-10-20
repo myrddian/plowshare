@@ -100,6 +100,21 @@ export function decodeSnapshot(value) {
     throw new Error('Workspace contains duplicate documents.');
   return { project: string(row.project), tickets, epics };
 }
+export function replaceDocument(snapshot, kind, document) {
+  const key = kind === 'ticket' ? 'tickets' : 'epics';
+  const current = snapshot[key];
+  const found = current.some((value) => value.resource === document.resource);
+  // Re-run the normal bounds/identity decoder, including cross-kind duplicates.
+  // Replace from an authorized read, never from an optimistic mutation payload.
+  return decodeSnapshot({
+    ...snapshot,
+    [key]: found
+      ? current.map((value) =>
+          value.resource === document.resource ? document : value,
+        )
+      : [...current, document],
+  });
+}
 export function decodeResult(value) {
   const row = record(value);
   return {

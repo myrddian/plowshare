@@ -52,8 +52,9 @@ plowshare-agile --config "$AGILE_CONFIG" epics list
 
 Set the configured bearer variable privately. The CLI never accepts a bearer on
 its command line, logs it, logs in through HTTP, or silently selects a local server.
-`check` probes typed and navigation reads; admission and schema assignment remain
-server-authorized and may be disabled even when reads succeed.
+`check` probes public typed-document support. Document reads enforce navigation
+availability and current authority themselves; admission and schema assignment
+remain server-authorized and may be disabled even when reads succeed.
 
 ## Commands
 
@@ -159,6 +160,15 @@ The app's own small HTTP interface serves the browser; all Plowshare traffic
 still passes through `SdkBoardPort` and the public authenticated WebSocket SDK.
 The CLI and browser share `Board.update`, creation intents, membership actions
 and the same private journal. This adds no core HTTP endpoint or ticket database.
+
+Opening details reuses the visible board metadata. **Reload** and original
+Markdown reads fetch current authorized documents. A confirmed save refreshes
+only its document; **Refresh** and explicit receipt recovery reload the board.
+Board discovery requests the public `metadata-v1` document projection and reads
+fields directly from each authorized page, with no per-item hydration or field
+cache. Install the matching SDK and a server supporting that projection before
+using this version; unsupported or damaged responses fail explicitly. See the
+[query-efficiency review](query-efficiency.md) for request budgets and boundaries.
 
 ## Recovery and private state
 

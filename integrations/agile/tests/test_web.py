@@ -56,7 +56,14 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         return {"X-Agile-CSRF": self.csrf, "X-Agile-Request": request}
 
     async def test_assets_are_safe_and_workspace_requires_a_session(self) -> None:
-        for path in ("/", "/app.mjs", "/model.mjs", "/styles.css", "/markdown.js"):
+        for path in (
+            "/",
+            "/app.mjs",
+            "/model.mjs",
+            "/reads.mjs",
+            "/styles.css",
+            "/markdown.js",
+        ):
             response = await self.client.get(path)
             self.assertEqual(response.status, 200)
             self.assertIn(

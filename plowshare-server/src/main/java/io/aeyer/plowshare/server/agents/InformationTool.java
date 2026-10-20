@@ -197,6 +197,15 @@ public final class InformationTool implements AgentTool {
             "Select the document or code corpus. Defaults to documents; permissions still come from the run."));
     if (!writing) {
       fields.put(
+          "projection",
+          Map.of(
+              "type",
+              "string",
+              "enum",
+              List.of("metadata-v1"),
+              "description",
+              "For documents.list, include bounded instance metadata without source bodies or schemas."));
+      fields.put(
           "filter",
           Map.of(
               "type",

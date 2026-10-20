@@ -151,6 +151,10 @@ class PreviewPort:
             raise Refusal("CONFLICT", None)
         return document if body else replace(document, body=None)
 
+    async def validate_epics(self, resources: tuple[str, ...]) -> None:
+        for resource in resources:
+            await self.get("epic", resource)
+
     async def editable(self, kind: str, resource: str) -> Document:
         return await self.get(kind, resource, body=True)
 

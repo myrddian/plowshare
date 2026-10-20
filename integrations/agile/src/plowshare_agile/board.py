@@ -106,21 +106,14 @@ class Board:
     ) -> MutationResult:
         if len(set(epics)) != len(epics):
             raise ValueError("Duplicate epic selection")
-        for epic in epics:
-            selected = await self.port.get("epic", identity(epic))
-            if not isinstance(selected.fields, EpicFields):
-                raise ValueError("Expected epic fields")
+        await self.port.validate_epics(epics)
         document = await self.expected_ticket(resource, expected)
         # Tags have their own server control, not the metadata expected-head CAS.
-        # Refresh and refuse an already stale selection before taking a snapshot;
-        # another writer can still race. This first board is single-maintainer.
-        current = await self.port.get("ticket", resource)
-        if current.revision != expected:
-            raise RevisionConflict(
-                "Ticket changed; refresh before replacing epic membership"
-            )
+        # The ticket was read AFTER epic validation, immediately before this
+        # snapshot. Reuse it; another writer can still race the native tag set.
+        # This first board remains single-maintainer.
         updated = tags(
-            tuple(v for v in current.tags if not v.startswith("epic:"))
+            tuple(v for v in document.tags if not v.startswith("epic:"))
             + tuple("epic:" + identity(epic) for epic in epics)
         )
         return await self.submit(
@@ -142,13 +135,8 @@ class Board:
         if any(v.startswith("epic:") for v in checked):
             raise ValueError("Use set-epics to edit epic membership")
         document = await self.expected_ticket(resource, expected)
-        current = await self.port.get("ticket", resource)
-        if current.revision != expected:
-            raise RevisionConflict(
-                "Ticket changed; refresh before replacing topic tags"
-            )
         updated = tags(
-            tuple(v for v in current.tags if v.startswith("epic:")) + checked
+            tuple(v for v in document.tags if v.startswith("epic:")) + checked
         )
         return await self.submit(
             Intent(

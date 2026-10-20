@@ -1,8 +1,48 @@
 import { isList, isObject, hasControlCharacters } from '../binding/values.ts';
 import { informationPayloadProblem } from './information-validation.ts';
+import { decodeSchemaInstance } from './schema-instances.ts';
+import { utf8Length } from '../binding/files.ts';
 const uuid = /^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$/;
 function identifier(value: unknown): boolean {
   return typeof value === 'string' && uuid.test(value);
+}
+
+/** Compact projected fields remain bounded untrusted values at the response boundary. */
+export function validateNavigationMetadata(type: string, value: unknown): void {
+  if (type !== 'information.documents.list' || !isObject(value)) return;
+  const rows = value['documents'];
+  if (!isList(rows) || rows.length > 100)
+    throw new Error('Invalid document page');
+  for (const row of rows) {
+    if (!isObject(row) || !('contentMetadata' in row)) continue;
+    const binding = row['contentMetadata'];
+    if (!isObject(binding)) throw new Error('Invalid projected metadata');
+    const identity = binding['type'];
+    if (
+      !isObject(identity) ||
+      !identifier(identity['type']) ||
+      !identifier(identity['version']) ||
+      typeof identity['ordinal'] !== 'number' ||
+      !Number.isSafeInteger(identity['ordinal']) ||
+      identity['ordinal'] < 1 ||
+      typeof identity['slug'] !== 'string' ||
+      !/^[a-z](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(identity['slug']) ||
+      typeof identity['label'] !== 'string' ||
+      !identity['label'].trim() ||
+      identity['label'].length > 120 ||
+      identity['label'].includes('\0')
+    )
+      throw new Error('Invalid metadata type identity');
+    for (const hash of [identity['definitionHash'], binding['metadataHash']])
+      if (typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))
+        throw new Error('Invalid metadata digest');
+    if (
+      !isObject(binding['metadata']) ||
+      utf8Length(JSON.stringify(binding['metadata'])) > 16384
+    )
+      throw new Error('Invalid metadata instance');
+    decodeSchemaInstance(binding['metadata']);
+  }
 }
 function bounded(value: unknown, max: number): boolean {
   return (
@@ -44,6 +84,12 @@ export function navigationPayloadProblem(
     if (key in body) common[key] = body[key];
   const commonProblem = informationPayloadProblem(type, common, []);
   if (commonProblem) return commonProblem;
+  if (
+    'projection' in body &&
+    (body['projection'] !== 'metadata-v1' ||
+      body['view'] !== 'content-types-v1')
+  )
+    return 'metadata projection requires its supporting view';
   if ('corpus' in body && body['corpus'] !== 'documents')
     return 'navigation requires documents corpus';
   for (const key of [
