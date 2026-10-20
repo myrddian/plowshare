@@ -49,9 +49,10 @@ The plain-Spring boot composition regression now passes. The final refreshed
 server/client gate also includes physical handoff/refill races in both encodings.
 
 The refreshed server/client tests, `formatCheck`, `check` and `sdkCheck` all passed.
-Remote workflow and release acceptance remain pending. Database tests
-are not required for these transport changes: no persistence SQL, transaction or
-migration behavior is changed by this slice.
+Remote workflow and release evidence is recorded below. Database tests were
+not required for the transport changes themselves. The previously implemented
+schedule pagination migration was separately rehearsed against a restored
+production database before deployment.
 
 The TUI's detached sync cleanup race was introduced in `f78e4f048`; shutdown
 now joins the same bounded leave after it detaches from the active view. Its
@@ -80,8 +81,8 @@ resource or account identities are retained in those measurements. Transport byt
 budgets bound owned buffers and conversion concurrency, not total JVM/process RSS
 or caller-owned DTO objects.
 
-Publication and deployment receipts will record the final committed source revision
-and remote acceptance separately from these successful source gates.
+Private operational receipts record exact image manifests, backup, migration,
+configuration, health and restart evidence separately from these source gates.
 
 ## Remote workflow follow-up
 
@@ -101,10 +102,58 @@ scenario covers Usage, Board, Activity and trajectory views. The MCP deadline
 regression now controls credential entry/release and expiry instead of racing a
 20 ms wall-clock window (test originally added in `71dfe880`).
 
-The refreshed `formatCheck check` gate passed after these changes. The new VM
-workflow acceptance remains pending. Report filters and metadata now preserve the
+The refreshed `formatCheck check` gate passed after these changes. Report filters and metadata now preserve the
 reading area at embedded-window sizes while scope, errors and processing warnings
 stay visible. Confirmed archive acknowledgements retire only the corresponding
 retained active-chat metadata; history remains available, and stale connection
 completions cannot alter the replacement view. The subsequent `formatCheck check`
 gate passed with these changes (132 tasks; 43 seconds).
+
+
+## Final remote acceptance
+
+The full Linux VM fixture batch on runtime revision
+`bfe5072862a1049f18f44d2e610513a43623ad5b` passed 27 of 28 scenarios:
+all 14 Desktop feature scenarios, the TUI baseline and seven targeted workflows,
+plus five of six Desktop baseline scenarios. Targeted coverage includes both
+transport encodings, Manual, Relay, schedule/run navigation, report handoff,
+report reader geometry at three window sizes, scope reset and inspector shutdown.
+The remaining Controls assertion expected an obsolete YAML caps file. The current
+project marker owner writes versioned JSON; its corrected smoke checks exact
+preview and saved JSON, review-before-apply, absence of the obsolete file and an
+unsubmitted changed preview that leaves saved caps untouched. Runtime source is
+unchanged by that fixture correction. The focused rerun is recorded separately.
+
+The production server was deployed from merged PR #88 revision
+`14583cf4f79be4fa4207917a66395b2dc41e00ae`, using a registry-verified immutable
+Linux/amd64 image. A restored-database migration rehearsal preserved all 192
+application table fingerprints and all 179 historical migration records; V180
+added three valid indexes. A fresh quiesced backup preceded cutover. Existing
+Compose inputs, companion services and Application FileStore state were retained.
+The controlled restart preserved FileStore bytes, ownership and permissions; all
+five services were healthy and the running JVM heap and container limit were
+verified. Operational receipts own the private paths, digests and configuration.
+
+Authenticated public-SDK reads passed before and after the controlled restart:
+122 reads per stage, split across segmented and legacy encodings, covering Manual,
+facets, document search, Relay, schedules, files, authorization and reconnect.
+Schedule pagination traversed two actual rows without duplicates or omissions.
+After restart, schedule replies completed in 8.5–8.7 ms while concurrent search
+requests remained in flight for 374–444 ms. These observations establish independent
+completion for this account and dataset, rather than a latency guarantee.
+
+The live remote GUI restored its saved session with the password field blank.
+After server restart it displayed connection loss, then reconnected through its
+visible Connect control. The TUI recovered on the next read-only `/proc` command
+and returned fresh state while withholding uncertain submissions. The evaluation
+account's Personal Relay and schedules were empty; populated workflows were
+covered by isolated fixtures and separate authenticated API reads. Current Global
+Manual publication is empty even though the administrative account has private
+Manual sources. Publication and account policy require separate content work;
+this release does not move private content into Global scope.
+
+The new server's startup, API workflows and controlled restart produced no error
+or warning records in the monitored release window. The retiring old server did
+emit its existing interrupted JDBC shutdown errors; expected informational socket
+EOF/disconnect notices are recorded separately. Linux source-built VM workflows
+do not establish packaged macOS or Windows client coverage.
