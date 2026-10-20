@@ -18,7 +18,7 @@ try {
     const page = await app.firstWindow();
     const request = value => page.evaluate(value => window.plowshare.request(value), value);
     await request({ action: 'connect', base: fixture.base, handle: 'fixture', password: 'fixture-password' });
-    const created = await request({ action: 'create' });
+    const created = await request({ action: 'create', project: 'Research' });
     await request({ action: 'run', conversation: created.conversation, agent: 'fixture-bot', text: 'Transport acceptance' });
     fixture.completeLatest('Transport acceptance finished.');
     await page.waitForFunction(async () => (await window.plowshare.request({ action: 'bootstrap' })).state.jobs.some(job => job.status === 'finished' && job.text.includes('Transport acceptance finished.')));

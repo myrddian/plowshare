@@ -140,10 +140,13 @@ export class OperatorClient {
     if (kind.startsWith('memory-') || kind === 'agent-curate')
       return { memories: await this.checked(request('memory.index', tier)) };
     if (kind.startsWith('conversation-')) {
-      const active = await this.checked(request('conversation.list', tier)),
+      // Global history is an explicit read scope; omitting it is not equivalent
+      // to selecting Global and must not inherit a connection's project.
+      const history = { project: project ?? null };
+      const active = await this.checked(request('conversation.list', history)),
         archived = await this.checked(
           request('conversation.list', {
-            ...tier,
+            ...history,
             lifecycle: 'archived' as const,
           }),
         );

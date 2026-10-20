@@ -195,7 +195,7 @@ try {
   await page.locator('#password').fill('fixture-password');
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-dialog')).not.toBeVisible();
-  await expect(page.locator('#connection-label')).toHaveText('Connected');
+  await expect(page.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
   const sourceOpening=app.waitForEvent('window');await page.locator('#library-open').click();
   const sourcePage=await sourceOpening;sourcePage.on('pageerror',error=>errors.push(error.message));
   await sourcePage.locator('#library-documents').click();await sourcePage.locator('#document-sources > summary').click();
@@ -369,7 +369,7 @@ try {
   fixture.setSupportsFollowing(false);
   await page.locator('#refresh').click();
   await expect(page.locator('#conversation-alerts')).toContainText('Live updates unavailable');
-  await expect(page.locator('#connection-label')).toHaveText('Connected');
+  await expect(page.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
   await page.screenshot({ path: 'build/smoke/subscription-warning.png' });
   fixture.setSupportsFollowing(true);
   await page.locator('#refresh').click();
@@ -581,7 +581,7 @@ try {
   await page.locator('#connect-sidebar').click();
   await page.locator('#password').fill('');
   await page.locator('#submit-connection').click();
-  await expect(page.locator('#connection-label')).toHaveText('Connected');
+  await expect(page.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
   await expect(reconnectActivity.locator('#activity-list')).toContainText('An inbox notice from another session.');
   await expect(page.locator('#inbox-count')).toHaveText('26');
   await expect.poll(() => fixture.frames.filter(frame => frame.type === 'conversation.follow').at(-1)?.payload.conversations).toContain('fixture-first');

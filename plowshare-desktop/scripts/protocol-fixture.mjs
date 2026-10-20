@@ -11,6 +11,7 @@ import { WebSocketServer } from 'ws';
 
 export async function protocolFixture(options = {}) {
   let access = 'fixture-access', refresh = 'fixture-refresh', rotations = 0;
+  let expiredAccess = false, ticketRefusals = 0;
   let informationExtraction='ready', informationReadError='';
   let manualChapters = [];
   const manualRows = filter => manualChapters.filter(row => (filter?.tags ?? []).every(tag => row.tags.includes(tag)));
@@ -149,10 +150,13 @@ export async function protocolFixture(options = {}) {
       if (!(options.loginHandles ?? ['fixture']).includes(body.handle) || body.password !== 'fixture-password') { res.writeHead(401).end(); return; }
       logins++;
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ access, refresh, mustChangePassword: false }));
-    } else if (req.url === '/v1/auth/refresh' && req.headers.cookie === `ps_refresh=${refresh}`) {
+    } else if (req.url === '/v1/auth/refresh') {
+      if (req.headers.cookie !== `ps_refresh=${refresh}`) { res.writeHead(401).end(); return; }
       if (options.rotateTokens) { rotations++; access = `fixture-access-${rotations}`; refresh = `fixture-refresh-${rotations}`; }
+      expiredAccess = false;
       res.writeHead(204, { 'Set-Cookie': [`ps_access=${access}; Path=/`, `ps_refresh=${refresh}; Path=/`] }).end();
-    } else if (req.url === '/v1/auth/ticket' && req.headers.authorization === `Bearer ${access}`) {
+    } else if (req.url === '/v1/auth/ticket') {
+      if (expiredAccess || req.headers.authorization !== `Bearer ${access}`) { ticketRefusals++; res.writeHead(401).end(); return; }
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ticket: 'fixture-ticket' }));
     } else res.writeHead(404).end();
   });
@@ -695,6 +699,8 @@ export async function protocolFixture(options = {}) {
     get fileClaim() { return fileClaim; },
     get liveFileClaims() { return [...filePeers.values()].flat().map(row => row.claim); },
     get rotations() { return rotations; },
+    expireAccess() { expiredAccess = true; },
+    get ticketRefusals() { return ticketRefusals; },
     setApplicationFile(project, path, text, writable = false, location) { const key = location ? JSON.stringify([project, location.store, location.path]) : project; const files = applicationSources.get(key) ?? new Map(); files.set(path, { text, writable }); applicationSources.set(key, files); },
     removeServerProject(project) { projectRows.delete(project); },
     addServerProject(row) { projectRows.set(row.name, row); },

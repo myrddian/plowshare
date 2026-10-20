@@ -82,3 +82,24 @@ or caller-owned DTO objects.
 
 Publication and deployment receipts will record the final committed source revision
 and remote acceptance separately from these successful source gates.
+
+## Remote workflow follow-up
+
+PR #88 merged the implementation at `14583cf4f79be4fa4207917a66395b2dc41e00ae`.
+The first isolated Linux VM fixture run retained all 27 scenario results:
+14 passed and 13 failed. Manual, Relay and TUI passed. Failures identified an
+operator Global-history caller missing explicit `project: null` (introduced with
+the scope validation in `9a3d100d`) and a quit-time command reentry/modal race
+(`f78e4f048`). The follow-up fixes those callers while preserving authorization,
+shutdown cleanup and visible reporting of unexpected errors.
+
+Fixtures now follow current connection captions, versioned project markers and
+pending-approval fences. The project reconnect scenario explicitly expires access,
+requires an HTTP 401, proves one shared refresh rotation across concurrent project
+connections and checks that no agent turn is replayed. A real Electron quit
+scenario covers Usage, Board, Activity and trajectory views. The MCP deadline
+regression now controls credential entry/release and expiry instead of racing a
+20 ms wall-clock window (test originally added in `71dfe880`).
+
+The refreshed `formatCheck check` gate passed after these changes. The new VM
+workflow run and the report-reader layout investigation remain pending.

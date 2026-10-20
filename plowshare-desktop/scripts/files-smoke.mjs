@@ -45,7 +45,7 @@ try {
   await expect(page.locator('#files-label')).toHaveText('Files connected');
   await expect(page.locator('#file-access-prompt')).toBeHidden();
   assert.equal(fixture.fileClaim.root, root);
-  assert.equal(await readFile(join(root, '.plowshare/project'), 'utf8'), 'Research\n');
+  assert.deepEqual(JSON.parse(await readFile(join(root, '.plowshare/project'), 'utf8')), { version: 1, name: 'Research' });
   assert.equal(fixture.fileClaim.session, fixture.eventSession);
   assert.deepEqual((await fixture.file({ op: 'roots' })).paths, [root]);
   assert.deepEqual((await fixture.file({ op: 'read', path: 'notes.md' })).span.lines, ['Original notes']);

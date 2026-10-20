@@ -25,13 +25,16 @@ try{
  await panel.locator('[data-change] button[type="submit"]').click();await expect(panel.locator('[data-content]')).toContainText('reviewed command');assert.equal(fixture.frames.some(f=>f.type==='memory.write'),false);await panel.locator('[data-confirm]').check();await panel.locator('[data-apply]').click();await expect(panel.locator('[data-notice]')).toContainText('confirmed');assert.equal(await main.evaluate(()=>window.fixtureInjection),undefined);
  await choose('memory-digest','Research');await apply();await expect(panel.locator('[data-jobs]')).toContainText('finished');
  await choose('agent-curate','Research');await apply();await expect(panel.locator('[data-jobs]')).toContainText('Improve project agents');
+ // Resolve the seeded command request before exercising conversation work; the
+ // production approval fence correctly withholds sends until it is answered.
+ await choose('approval-grant');await panel.locator('[name="decision"]').selectOption('project');await panel.locator('[name="prefix"]').fill('echo\nfixture approval');await apply();assert.deepEqual(fixture.frames.find(f=>f.type==='approval.answer').payload.prefix,['echo','fixture approval']);
+ await expect.poll(async()=>main.evaluate(async()=>(await window.plowshare.request({action:'bootstrap'})).state.jobs.filter(j=>['starting','running','cancelling','unknown'].includes(j.status)&&j.conversation==='fixture-first').length)).toBe(0);
  await choose('conversation-lifecycle');await panel.locator('[name="id"]').selectOption('fixture-first');await apply();assert.equal(fixture.frames.find(f=>f.type==='conversation.lifecycle').payload.lifecycle,'archived');assert.equal(await main.evaluate(async()=>(await window.plowshare.request({action:'bootstrap'})).state.conversations.some(row=>row.id==='fixture-first')),false);
  await choose('conversation-lifecycle');await panel.locator('[name="id"]').selectOption('fixture-first');await panel.locator('[name="lifecycle"]').selectOption('active');await apply();
  await choose('conversation-resume');await panel.locator('[name="id"]').selectOption('fixture-first');await apply();
  await expect.poll(async()=>main.evaluate(async()=>(await window.plowshare.request({action:'bootstrap'})).state.jobs.filter(j=>['starting','running','cancelling','unknown'].includes(j.status)&&j.conversation==='fixture-first').length)).toBe(0);
  await main.evaluate(()=>window.plowshare.request({action:'run',conversation:'fixture-first',agent:'fixture-bot',text:'Adjust this active job'}));
  await choose('job-limits');await apply();assert.equal(fixture.frames.some(f=>f.type==='job.limits'),true);fixture.completeLatest('Active job limits adjusted.');
- await choose('approval-grant');await panel.locator('[name="decision"]').selectOption('project');await panel.locator('[name="prefix"]').fill('echo\nfixture approval');await apply();assert.deepEqual(fixture.frames.find(f=>f.type==='approval.answer').payload.prefix,['echo','fixture approval']);
  await choose('approval-revoke','Research');await apply();await expect(panel.locator('[data-content]')).toContainText('Grant revoked');
  await choose('board-topup');await panel.locator('[name="maxModelCalls"]').fill('140');await apply();assert.equal(fixture.frames.find(f=>f.type==='board.topup').payload.maxModelCalls,140);
  await choose('message-open','Research');await panel.locator('[name="agent"]').selectOption('fixture-bot');await panel.locator('[name="makeDefault"]').selectOption('true');await apply();

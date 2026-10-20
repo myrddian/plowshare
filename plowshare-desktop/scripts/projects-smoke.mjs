@@ -82,10 +82,18 @@ try {
   await expect.poll(async () => (await state(page)).projectFolders.find(row => row.name === 'Research').connected).toBe(false);
   assert.equal((await state(page)).connected, true);
   assert.deepEqual((await fixture.file({ op: 'read', path: 'notes.md' }, 'Writing')).span.lines, ['Writing notes']);
+  assert.equal(fixture.rotations, 0, 'Live access opens project event/file channels without needless renewal');
+  // Expire only access, retain the shared single-use refresh pair, and reopen
+  // both project clients concurrently. One owner renews; siblings reuse it.
+  fixture.expireAccess();
+  fixture.disconnectProject('Writing');
+  await expect.poll(async () => (await state(page)).projectFolders.find(row => row.name === 'Writing').connected).toBe(false);
   const runCalls = fixture.frames.filter(frame => frame.type === 'agent.run').length;
-  await page.evaluate(() => window.plowshare.request({ action: 'project-open', project: 'Research' }));
+  await page.evaluate(() => Promise.all(['Research', 'Writing'].map(project => window.plowshare.request({ action: 'project-open', project }))));
+  await expect.poll(() => fixture.liveFileClaims.length).toBe(2);
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, runCalls, 'Project reconnect never resubmits an agent turn');
-  assert.ok(fixture.rotations >= 6, 'Concurrent project sessions use the shared rotating refresh chain');
+  assert.ok(fixture.ticketRefusals >= 1, 'The fixture explicitly refused expired access before renewal');
+  assert.equal(fixture.rotations, 1, 'Concurrent project reconnects share one refresh rotation');
   await app.close(); app = undefined;
   await expect.poll(() => fixture.liveFileClaims.length).toBe(0);
   // A fresh process restores the saved token and project clients without another login.

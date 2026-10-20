@@ -19,7 +19,6 @@ import {
 import { decodeMcpTool, object } from './codec.ts';
 import { DEFAULT_LIMITS } from './settings.ts';
 import { rawTool } from './wire.test-support.ts';
-import { setTimeout as pause } from 'node:timers/promises';
 
 await test('failed discovery refresh retires the direct client instead of retaining stale execution authority', async () => {
   const sessions = new Sessions();
@@ -314,17 +313,35 @@ await test('upstream descriptions and read-only hints cannot waive exact server 
   }
 });
 
-await test('late credential release cannot dispatch after the invocation deadline or shutdown', async () => {
+await test('late credential release cannot dispatch after the invocation deadline or shutdown', async (t) => {
   const credentials = new Credentials(),
     sessions = new Sessions();
   const stop = new AbortController();
+  const expired = new AbortController();
+  const gate = () => {
+    let open: (() => void) | undefined;
+    const promise = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    assert.ok(open);
+    return { promise, open };
+  };
+  const entered = gate(),
+    release = gate(),
+    finished = gate();
   let blocked = false;
   const adapter = await McpProvider.discover(
     registration,
     {
       async release(invocation) {
-        if (blocked) await pause(80);
-        return credentials.release(invocation);
+        if (!blocked) return credentials.release(invocation);
+        entered.open();
+        await release.promise;
+        try {
+          return await credentials.release(invocation);
+        } finally {
+          finished.open();
+        }
       },
     },
     sessions,
@@ -334,21 +351,31 @@ await test('late credential release cannot dispatch after the invocation deadlin
   try {
     const tool = adapter.tools[0];
     assert.ok(tool);
+    // Control the deadline signal after the credential boundary is entered.
+    // A wall-clock 20ms race could reject before that boundary on a busy runner.
+    const start = Date.now();
+    t.mock.timers.enable({ apis: ['Date'], now: start });
+    t.mock.method(AbortSignal, 'timeout', () => expired.signal);
     blocked = true;
-    const result = await tool.handler({
+    const pending = tool.handler({
       ...invocation(tool.declaration.name),
-      deadline: new Date(Date.now() + 20).toISOString(),
+      deadline: new Date(start + 20).toISOString(),
     });
-    assert.equal(result.state, 'REJECTED');
+    await entered.promise;
+    t.mock.timers.setTime(start + 21);
+    expired.abort();
+    assert.equal((await pending).state, 'REJECTED');
     stop.abort();
     assert.equal(
       (await tool.handler(invocation(tool.declaration.name))).state,
       'REJECTED',
     );
-    await pause(100);
+    release.open();
+    await finished.promise;
     assert.equal(sessions.calls, 0);
     assert.deepEqual(credentials.invocations, [null, id]);
   } finally {
+    release.open();
     await adapter.close();
   }
 });

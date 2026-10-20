@@ -16,11 +16,18 @@ const journal=async()=>JSON.parse(await readFile(join(directory,'desktop-jobs.js
 try{
  let page=await launch();
  await page.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
+ // Resolve the fixture's unrelated command request through its public prompt
+ // before starting the work whose restart/unknown-delivery lifecycle is tested.
+ const approval=page.locator('#approval-bar [data-approval-prompt="fixture-approval"]');
+ await approval.getByRole('button',{name:'Deny',exact:true}).click();
+ await expect(approval).toHaveCount(0);
+ fixture.completeLatest('Fixture command request denied before the recovery scenario.');
+ await expect.poll(async()=>(await state(page)).jobs.filter(row=>row.conversation==='fixture-first'&&['starting','running','cancelling','unknown'].includes(row.status)).length).toBe(0);
  await page.evaluate(()=>window.plowshare.request({action:'run',agent:'fixture-bot',text:'Work that survives closing the desktop',conversation:'fixture-first'}));
  const id=fixture.latestJob;
  await expect.poll(async()=>JSON.stringify(await journal())).toContain(id);
  await close();
- assert.equal(Object.values((await journal()).accounts).flat()[0].handle,id);
+ assert.ok(Object.values((await journal()).accounts).flat().some(row=>row.handle===id));
  fixture.completeLatest('Completed while the desktop was closed.');
  page=await launch();
  await expect.poll(async()=>(await state(page)).jobs.find(row=>row.id===id)?.status).toBe('finished');
