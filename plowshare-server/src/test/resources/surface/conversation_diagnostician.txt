@@ -784,6 +784,13 @@ parameters:
     "otherResource": {
       "type": "string"
     },
+    "projection": {
+      "type": "string",
+      "description": "For documents.list, include bounded instance metadata without source bodies or schemas.",
+      "enum": [
+        "metadata-v1"
+      ]
+    },
     "query": {
       "type": "string"
     },

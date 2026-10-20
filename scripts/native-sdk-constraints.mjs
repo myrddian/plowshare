@@ -304,6 +304,7 @@ export function constrain(graph) {
       field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
       field(s,'reason',{...text(4096),nonblank:true});
       if(['information.documents.list','information.documents.facets'].includes(op)) rules(s,implies(or(present('relation'),present('direction')),present('relatedTo')));
+      if(op==='information.documents.list') rules(s,implies(present('projection'),eq('view','content-types-v1')));
     }
     if (op.startsWith('information.interchange.')) {
       field(s,'revisions',{minItems:1,maxItems:16,uniqueItems:true,element:canonicalUuid});
@@ -436,7 +437,13 @@ export function constrain(graph) {
       field(shape,'definitionHash',{pattern:'^[a-f0-9]{64}$'});
       field(shape,'schema',{documentSchema:true,maxJsonBytes:65536});field(shape,'presentation',{schemaInstance:true,maxJsonBytes:8192});
     }
-    if (title === 'InformationContentBinding') {field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});field(shape,'metadataHash',{pattern:'^[a-f0-9]{64}$'});}
+    if (['InformationContentBinding','InformationContentMetadata'].includes(title)) {field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});field(shape,'metadataHash',{pattern:'^[a-f0-9]{64}$'});}
+    if (title === 'InformationTypeIdentity') {
+      for(const key of ['type','version']) field(shape,key,canonicalUuid);
+      field(shape,'ordinal',integer(1)); field(shape,'label',{...text(120,1),nonblank:true});
+      field(shape,'slug',{pattern:'^[a-z](?:[a-z0-9-]{0,62}[a-z0-9])?$',maxLength:64});
+      field(shape,'definitionHash',{pattern:'^[a-f0-9]{64}$'});
+    }
     if (title === 'InformationTypeVersion') {field(shape,'controlRevision',integer(1,9007199254740991));field(shape,'createdAt',instant);}
     if (title === 'InformationContentView') {field(shape,'revision',canonicalUuid);field(shape,'startingRevision',canonicalUuid);field(shape,'reused',{maxItems:7});field(shape,'authorisedStages',{maxItems:7,uniqueItems:true});}
     if (title === 'MetadataValidationResult') field(shape,'issues',{maxItems:32});
