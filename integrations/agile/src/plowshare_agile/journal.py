@@ -19,6 +19,7 @@ from .model import (
     identity,
     object_fields,
     read_json,
+    tag_version,
     tags,
 )
 
@@ -33,6 +34,7 @@ class Intent:
     expected_revision: str | None = None
     body: str | None = None
     tags: tuple[str, ...] = ()
+    expected_tags_version: int | None = None
 
     def __post_init__(self) -> None:
         choice(self.action, ("create", "revise", "body", "tags"), "action")
@@ -64,6 +66,10 @@ class Intent:
                 body_text(self.body)
             elif self.body is not None:
                 raise ValueError("This update cannot replace body bytes")
+        if self.expected_tags_version is not None:
+            tag_version(self.expected_tags_version)
+            if self.action != "tags":
+                raise ValueError("Tag preconditions belong only to tag mutations")
         if self.action == "tags":
             if self.tags != tags(self.tags):
                 raise ValueError("Retained tags must use canonical ordering")
@@ -74,8 +80,19 @@ class Intent:
 
     @classmethod
     def decode(cls, value: object) -> Intent:
+        if not isinstance(value, dict):
+            raise ValueError("Invalid retained intent")
+        # Historical intents retain the legacy operation and its original fingerprint.
+        version = (
+            tag_version(value["expected_tags_version"])
+            if "expected_tags_version" in value
+            else None
+        )
+        fields_with_version = {
+            k: v for k, v in value.items() if k != "expected_tags_version"
+        }
         row = object_fields(
-            value,
+            fields_with_version,
             {
                 "action",
                 "kind",
@@ -116,6 +133,7 @@ class Intent:
             else identity(row["expected_revision"]),
             body,
             tags(checked_tags),
+            None if version is None else tag_version(version),
         )
 
 
@@ -148,12 +166,15 @@ class Journal:
         return self.root / (identity(request) + ".json")
 
     def _record(self, intent: Intent, outcome: str) -> bytes:
+        retained = asdict(intent)
+        if intent.expected_tags_version is None:
+            retained.pop("expected_tags_version")
         return (
             json.dumps(
                 {
                     "version": 1,
                     "binding": self.binding,
-                    "intent": asdict(intent),
+                    "intent": retained,
                     "outcome": outcome,
                 },
                 ensure_ascii=False,

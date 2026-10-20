@@ -5,7 +5,16 @@ from dataclasses import replace
 from plowshare import Refusal
 
 from .journal import Intent, Journal
-from .model import STATUSES, Document, EpicFields, TicketFields, choice, identity, tags
+from .model import (
+    STATUSES,
+    Document,
+    EpicFields,
+    TicketFields,
+    choice,
+    identity,
+    tag_version,
+    tags,
+)
 from .sdk import BoardPort, MutationResult
 
 # Infrastructure/model failures do not establish whether a mutation committed.
@@ -102,16 +111,18 @@ class Board:
         )
 
     async def set_epics(
-        self, resource: str, expected: str, request: str, epics: tuple[str, ...]
+        self,
+        resource: str,
+        expected: str,
+        request: str,
+        epics: tuple[str, ...],
+        expected_tags_version: int | None = None,
     ) -> MutationResult:
         if len(set(epics)) != len(epics):
             raise ValueError("Duplicate epic selection")
         await self.port.validate_epics(epics)
         document = await self.expected_ticket(resource, expected)
-        # Tags have their own server control, not the metadata expected-head CAS.
-        # The ticket was read AFTER epic validation, immediately before this
-        # snapshot. Reuse it; another writer can still race the native tag set.
-        # This first board remains single-maintainer.
+        self.expected_tags(document, expected_tags_version)
         updated = tags(
             tuple(v for v in document.tags if not v.startswith("epic:"))
             + tuple("epic:" + identity(epic) for epic in epics)
@@ -125,16 +136,23 @@ class Board:
                 resource,
                 expected,
                 tags=updated,
+                expected_tags_version=tag_version(expected_tags_version),
             )
         )
 
     async def set_topics(
-        self, resource: str, expected: str, request: str, topics: tuple[str, ...]
+        self,
+        resource: str,
+        expected: str,
+        request: str,
+        topics: tuple[str, ...],
+        expected_tags_version: int | None = None,
     ) -> MutationResult:
         checked = tags(topics)
         if any(v.startswith("epic:") for v in checked):
             raise ValueError("Use set-epics to edit epic membership")
         document = await self.expected_ticket(resource, expected)
+        self.expected_tags(document, expected_tags_version)
         updated = tags(
             tuple(v for v in document.tags if v.startswith("epic:")) + checked
         )
@@ -147,5 +165,15 @@ class Board:
                 resource,
                 expected,
                 tags=updated,
+                expected_tags_version=tag_version(expected_tags_version),
             )
         )
+
+    @staticmethod
+    def expected_tags(document: Document, expected: int | None) -> None:
+        if expected is None or document.tags_version is None:
+            raise RevisionConflict(
+                "Guarded tag editing requires the displayed tag version and server support"
+            )
+        if tag_version(expected) != document.tags_version:
+            raise RevisionConflict("Tags changed; refresh and review before replacing")

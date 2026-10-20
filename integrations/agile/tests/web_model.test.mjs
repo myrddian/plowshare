@@ -51,6 +51,28 @@ const tickets = [
   ticket(3, [`epic:${id(21)}`, 'websocket'], { assignee: 'Sam' }),
 ];
 
+test('displayed tag versions stay exact and malformed preconditions are refused', () => {
+  for (const version of [0, 4, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(
+      decodeDocument({ ...tickets[0], tags_version: version }, 'ticket')
+        .tags_version,
+      version,
+    );
+  }
+  for (const version of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, '4', true]) {
+    assert.throws(
+      () => decodeDocument({ ...tickets[0], tags_version: version }, 'ticket'),
+      /tag version/,
+    );
+  }
+  assert.equal(decodeDocument(tickets[0], 'ticket').tags_version, undefined);
+  assert.equal(
+    decodeDocument({ ...tickets[0], tags_version: null }, 'ticket')
+      .tags_version,
+    undefined,
+  );
+});
+
 test('a targeted authorized read replaces one document and preserves other rows', () => {
   const snapshot = decodeSnapshot({ project: 'fixture', tickets, epics: [] });
   const updated = { ...tickets[0], revision: id(999), tags: ['changed'] };

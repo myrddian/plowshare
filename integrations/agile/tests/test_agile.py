@@ -26,6 +26,8 @@ from plowshare.contracts import (
     InformationDocumentsListResultDto,
     InformationInterchangeReadableRequest,
     InformationReviseRequest,
+    InformationTagsReplaceRequest,
+    InformationTagsRequest,
     InformationTypeContractDto,
     InformationTypesCapabilitiesRequest,
     InformationUploadRequest,
@@ -78,6 +80,7 @@ def entry(number: int = 10) -> CurrentDocumentDto:
         ),
         source_name=f"agile-ticket/{uid(number)}.md",
         tags=("sdk",),
+        tags_version=0,
         title="Extraction title",
     )
 
@@ -163,6 +166,7 @@ class FakePort:
             "fixture-owner",
             ("sdk", "epic:" + uid(20)),
             TicketFields("Ticket"),
+            tags_version=0,
         )
         self.epic = Document(
             uid(20), uid(1020), "fixture-owner", (), EpicFields("Epic")
@@ -277,6 +281,28 @@ class ModelTests(unittest.TestCase):
 
 
 class JournalTests(unittest.TestCase):
+    def test_null_tag_precondition_cannot_downgrade_a_retained_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = configuration(Path(folder))
+            journal = Journal(config, "fixture-bearer")
+            legacy = Intent(
+                "tags",
+                "ticket",
+                uid(32),
+                TicketFields("Ticket"),
+                uid(10),
+                uid(1010),
+                tags=("topic",),
+            )
+            journal.prepare(legacy)
+            self.assertEqual(journal.read(uid(32))[0], legacy)
+            path = config.state_directory / (uid(32) + ".json")
+            row = json.loads(path.read_text())
+            row["intent"]["expected_tags_version"] = None
+            path.write_text(json.dumps(row))
+            with self.assertRaises(ValueError):
+                journal.read(uid(32))
+
     def test_private_roundtrip_rejects_duplicate_request_and_changed_binding(
         self,
     ) -> None:
@@ -384,11 +410,11 @@ class BoardTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             port = FakePort()
             board = Board(port, Journal(configuration(Path(folder)), "fixture-bearer"))
-            await board.set_epics(uid(10), uid(1010), uid(34), ())
+            await board.set_epics(uid(10), uid(1010), uid(34), (), 0)
             self.assertEqual(port.calls[-1].tags, ("sdk",))
-            await board.set_epics(uid(10), uid(1010), uid(35), (uid(20),))
+            await board.set_epics(uid(10), uid(1010), uid(35), (uid(20),), 0)
             self.assertEqual(port.calls[-1].tags, ("epic:" + uid(20), "sdk"))
-            await board.set_topics(uid(10), uid(1010), uid(36), ("websocket",))
+            await board.set_topics(uid(10), uid(1010), uid(36), ("websocket",), 0)
             self.assertEqual(port.calls[-1].tags, ("epic:" + uid(20), "websocket"))
 
     async def test_unknown_epic_cannot_produce_a_tag_mutation(self) -> None:
@@ -400,7 +426,77 @@ class BoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(port.calls, [])
 
 
+class GuardedTagTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stale_or_missing_displayed_versions_refuse_without_submission(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            port = FakePort()
+            port.ticket = replace(port.ticket, tags_version=4)
+            journal = Journal(configuration(Path(folder)), "fixture-bearer")
+            board = Board(port, journal)
+            for expected in (None, 0, 3):
+                with self.assertRaises(ValueError):
+                    await board.set_topics(
+                        uid(10), uid(1010), uid(60), ("topic",), expected
+                    )
+            self.assertEqual(port.calls, [])
+            self.assertFalse((journal.root / (uid(60) + ".json")).exists())
+            await board.set_topics(uid(10), uid(1010), uid(60), ("topic",), 4)
+            retained, _ = journal.read(uid(60))
+            self.assertEqual(retained.expected_tags_version, 4)
+            self.assertEqual(retained.tags, ("epic:" + uid(20), "topic"))
+            port.ticket = replace(port.ticket, tags_version=5)
+            await board.recover(uid(60))
+            self.assertEqual(port.calls, [retained, retained])
+
+    async def test_older_server_without_versions_never_downgrades_new_edits(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            port = FakePort()
+            port.ticket = replace(port.ticket, tags_version=None)
+            board = Board(port, Journal(configuration(Path(folder)), "fixture-bearer"))
+            with self.assertRaises(ValueError):
+                await board.set_epics(uid(10), uid(1010), uid(61), (), 0)
+            self.assertEqual(port.calls, [])
+
+
 class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tag_submission_retains_guarded_or_historical_operation(self) -> None:
+        from plowshare.contracts import ChangedInformationDto
+
+        self.client.request.return_value = Reply(
+            "OK", None, ChangedInformationDto(changed=True)
+        )
+        for version, expected in (
+            (4, InformationTagsReplaceRequest),
+            (None, InformationTagsRequest),
+        ):
+            intent = Intent(
+                "tags",
+                "ticket",
+                uid(42),
+                TicketFields("Ticket"),
+                uid(10),
+                uid(1010),
+                tags=("topic",),
+                expected_tags_version=version,
+            )
+            result = await self.port.submit(intent)
+            request = self.client.request.call_args.args[0]
+            self.assertIsInstance(request, expected)
+            self.assertEqual(request.request_id, intent.request_id)
+            self.assertEqual(request.tags, intent.tags)
+            if version is not None:
+                self.assertEqual(request.expected_tags_version, version)
+            self.assertEqual(
+                result.operation,
+                "information.tags.replace"
+                if version is not None
+                else "information.tags",
+            )
+
     def setUp(self) -> None:
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
