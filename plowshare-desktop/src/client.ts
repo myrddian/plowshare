@@ -464,7 +464,26 @@ export class DesktopClient {
       'approval.answer',
     ].includes(ask.type);
     if (!submits) {
+      const generation = this.generation;
       const answer = ok(await this.send(ask));
+      if (generation !== this.generation)
+        throw new Error(
+          'The connection changed before the control acknowledgement.',
+        );
+      if (ask.type === 'conversation.lifecycle') {
+        const receipt = decodeReply('conversation.lifecycle', answer.payload);
+        if (
+          receipt.id !== ask.payload.conversation ||
+          receipt.lifecycle !== ask.payload.lifecycle
+        )
+          throw new Error(
+            'The conversation lifecycle acknowledgement does not match the reviewed change.',
+          );
+        // Retained inspector metadata is not evidence that an archived chat is
+        // active. Keep its history and jobs, but let the fresh listing remove it.
+        if (receipt.lifecycle === 'archived')
+          this.retainedConversations.delete(receipt.id);
+      }
       await this.refreshAfterControl(ask);
       return answer;
     }

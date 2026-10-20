@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { protocolFixture } from './protocol-fixture.mjs';
 const temporary = await mkdtemp(join(tmpdir(), 'plowshare-transport-'));
 const fixture = await protocolFixture();
+fixture.addServerProject({ name: 'Research' });
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(temporary, 'credentials'), PLOWSHARE_DESKTOP_CONFIG: join(temporary, 'config'), PLOWSHARE_DESKTOP_PROFILE: join(temporary, 'profile') };
 delete env.ELECTRON_RUN_AS_NODE;
 let app;

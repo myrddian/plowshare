@@ -108,8 +108,10 @@ try {
   assert.ok(fixture.fileClaim);
   await page.evaluate(() => window.plowshare.request({ action: 'disconnect' }));
   await page.evaluate(({ base }) => window.plowshare.request({ action: 'connect', base, handle: 'fixture', password: 'fixture-password' }), { base: fixture.base });
-  assert.equal((await bootstrap()).state.files.status, 'ready');
-  assert.equal(fixture.fileClaim.project, 'Research', 'Remembered enabled projects restore after login');
+  await expect.poll(async () => (await bootstrap()).state.projectFolders.find(row => row.name === 'Research')?.files.status).toBe('ready');
+  assert.ok(fixture.liveFileClaims.some(row => row.project === 'Research'), 'Remembered enabled projects restore after login');
+  await page.locator('[data-project="Research"]').click();
+  await expect.poll(async () => (await bootstrap()).state.files.status).toBe('ready');
   // Quit must withdraw an active claim too.
   await page.evaluate(() => window.plowshare.request({ action: 'files-choose' }));
   assert.ok(fixture.fileClaim);

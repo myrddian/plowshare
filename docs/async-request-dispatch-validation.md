@@ -102,4 +102,9 @@ regression now controls credential entry/release and expiry instead of racing a
 20 ms wall-clock window (test originally added in `71dfe880`).
 
 The refreshed `formatCheck check` gate passed after these changes. The new VM
-workflow run and the report-reader layout investigation remain pending.
+workflow acceptance remains pending. Report filters and metadata now preserve the
+reading area at embedded-window sizes while scope, errors and processing warnings
+stay visible. Confirmed archive acknowledgements retire only the corresponding
+retained active-chat metadata; history remains available, and stale connection
+completions cannot alter the replacement view. The subsequent `formatCheck check`
+gate passed with these changes (132 tasks; 43 seconds).

@@ -93,6 +93,12 @@ export function installInformation(
   authoredControls.className = 'information-types';
   authoredControls.innerHTML = `<summary>Document types</summary><p>Types validate metadata structure. They do not verify factual claims.</p><label>Filter by active type<select data-type-filter><option value="">All document types</option><option value="untyped">Untyped</option></select></label><div data-type-manager hidden><form data-type-create><label>Slug<input name="slug" required maxlength="64" pattern="[a-z][a-z0-9-]*"></label><label>Label<input name="label" required maxlength="120"></label><label>Description<textarea name="description" maxlength="4096"></textarea></label><label>Object schema<textarea name="schema" rows="7" required maxlength="65536">{ "type": "object", "properties": {}, "additionalProperties": false }</textarea></label><button>Create immutable draft</button></form><div data-type-versions></div></div></details>`;
   dialog.querySelector('[data-faceting]')!.before(authoredControls);
+  const capabilityNote = document.createElement('details');
+  capabilityNote.className = 'information-capability-note';
+  capabilityNote.hidden = true;
+  capabilityNote.innerHTML =
+    '<summary>Server document capabilities</summary><p role="status"></p>';
+  dialog.querySelector('.information-workspace')!.after(capabilityNote);
   const authorFields = `<fieldset data-typed-author hidden><label>Document type<select name="contentVersion"><option value="">Untyped</option></select></label><label>Complete metadata object<textarea name="metadata" rows="5" maxlength="16384">{}</textarea></label><p>Defaults in a schema are annotations. Enter every required field explicitly.</p></fieldset>`;
   for (const form of dialog.querySelectorAll<HTMLFormElement>(
     '[data-add],[data-report]',
@@ -229,6 +235,11 @@ export function installInformation(
   });
   if (options.kind === 'report') {
     dialog.classList.add('information-reports');
+    // Collection filters belong with the catalogue rather than consuming the report's
+    // reading height. They remain keyboard-accessible when the catalogue scrolls.
+    dialog
+      .querySelector('.information-list-pane')!
+      .prepend(authoredControls, dialog.querySelector('[data-faceting]')!);
     select.parentElement!.firstChild!.textContent = '';
     select.title = 'Filter report collection';
     dialog.querySelector<HTMLElement>('[data-scope-note]')!.hidden = true;
@@ -336,7 +347,7 @@ export function installInformation(
       ? undefined
       : installDocumentNavigation(
           api,
-          authoredControls.parentElement!,
+          dialog,
           scope,
           () => JSON.stringify([state().base, state().handle, state().mode]),
           () => state().handle,
@@ -351,7 +362,7 @@ export function installInformation(
     ? undefined
     : installInformationInterchange(
         api,
-        authoredControls.parentElement!,
+        dialog,
         scope,
         () => JSON.stringify([state().base, state().handle, state().mode]),
         () => selected,
@@ -388,6 +399,7 @@ export function installInformation(
       if (authoredIdentity !== connectionIdentity) {
         authoredIdentity = connectionIdentity;
         authored = undefined;
+        capabilityNote.hidden = true;
         typeIdentity = '';
         availableTypes = [];
         try {
@@ -396,9 +408,15 @@ export function installInformation(
           authored = capabilities;
         } catch {
           if (!current()) return;
-          notice.hidden = false;
-          notice.textContent =
+          const unavailable =
             'This server has not advertised authored document types. Existing untyped sources remain available.';
+          if (options.kind === 'report') {
+            capabilityNote.hidden = false;
+            capabilityNote.querySelector('p')!.textContent = unavailable;
+          } else {
+            notice.hidden = false;
+            notice.textContent = unavailable;
+          }
         }
       }
       const portableContext = JSON.stringify([connectionIdentity, scope()]);
@@ -830,11 +848,20 @@ export function installInformation(
                   : 'Processing complete';
     question.hidden = false;
     question.innerHTML = `<form data-ask data-ready="${sourceCanAsk}" class="information-ask"><label>Ask about this source<input name="question" aria-describedby="source-question-help-${host.id}" placeholder="What does this source say about…?" required></label><button class="primary-button" title="${escape(questionHelp)}" ${questionBusy || !sourceCanAsk ? 'disabled' : ''}>${questionBusy ? 'Reading…' : 'Ask source'}</button><p class="information-help" id="source-question-help-${host.id}">${escape(questionHelp)}</p></form>`;
+    const metadata = content
+      ? contentHtml(
+          content,
+          availableTypes,
+          manage,
+          !!authored?.typedWrites,
+          !!pendingMetadataEdit,
+        )
+      : '';
     detail.innerHTML = `<header class="information-source-heading"><h2>${escape(value.title ?? value.source_name)}</h2>${value.documentAuthor ? `<p class="information-document-author">Document author: ${escape(value.documentAuthor)}${value.documentAuthorSource === 'organisation' ? ' · issuing organisation' : value.documentAuthorSource === 'account' ? ' · owner account (fallback)' : ''}</p>` : ''}<p>Version ${escape(value.ordinal)} · ${escape(status)}${report?.status ? ` · ${escape(report?.status)} report` : ''}</p>${attention ? '<p role="status">Some processing needs attention. Open Processing details below for the reason and recovery options.</p>' : ''}</header>
-      ${content ? contentHtml(content, availableTypes, manage, !!authored?.typedWrites, !!pendingMetadataEdit) : ''}
+      ${options.kind === 'report' ? '' : metadata}
       <div data-answer role="status">${answerJob ? `<p>${escape(answerJob.status === 'finished' ? 'Answer' : answerJob.status === 'running' ? 'Finding an answer…' : answerJob.status)}</p><div class="markdown-body">${markdownHtml(answerJob.text || answerJob.detail || 'Waiting for the source answer.')}</div>` : ''}</div>
       <div data-source>${textUnavailable || (cachedText?.key === textKey ? cachedText.html : '<p>Loading source text…</p>')}</div>
-      <div class="information-source-tools"><details><summary>${options.kind === 'report' ? 'Evidence' : 'Evidence and source references'}</summary><p>Saved quotations connect findings to the exact text they came from.</p>${(isList(value.inputs) ? value.inputs : []).map((id) => `<button data-open-revision="${escape(id)}">Read source version ${escape(id)}</button>`).join('')}${(isList(value.citations) ? value.citations : []).map((id) => `<button data-evidence="${escape(id)}">Read saved quotation ${escape(id)}</button>`).join('')}<div data-evidence-detail></div></details>
+      <div class="information-source-tools">${options.kind === 'report' ? metadata : ''}<details><summary>${options.kind === 'report' ? 'Evidence' : 'Evidence and source references'}</summary><p>Saved quotations connect findings to the exact text they came from.</p>${(isList(value.inputs) ? value.inputs : []).map((id) => `<button data-open-revision="${escape(id)}">Read source version ${escape(id)}</button>`).join('')}${(isList(value.citations) ? value.citations : []).map((id) => `<button data-evidence="${escape(id)}">Read saved quotation ${escape(id)}</button>`).join('')}<div data-evidence-detail></div></details>
       <details data-manage-source ${manage ? '' : 'hidden'}><summary>Manage source</summary><div class="information-toolbar">${management}</div>
       ${
         manage
@@ -1763,6 +1790,7 @@ export function installInformation(
     cachedText = undefined;
     detailSignature = '';
     sourceCanAsk = false;
+    capabilityNote.hidden = true;
     authoredControls.hidden = true;
     authoredControls
       .querySelector<HTMLElement>('[data-type-versions]')!

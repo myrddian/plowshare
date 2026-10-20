@@ -8,6 +8,7 @@ import { protocolFixture } from './protocol-fixture.mjs';
 
 const profile = await mkdtemp(join(tmpdir(), 'plowshare-quit-smoke-'));
 const fixture = await protocolFixture();
+fixture.addServerProject({ name: 'Research' });
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(profile, 'credentials'),
   PLOWSHARE_DESKTOP_CONFIG: join(profile, 'config'), PLOWSHARE_DESKTOP_PROFILE: profile };
 delete env.ELECTRON_RUN_AS_NODE;

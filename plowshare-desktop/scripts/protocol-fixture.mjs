@@ -12,7 +12,7 @@ import { WebSocketServer } from 'ws';
 export async function protocolFixture(options = {}) {
   let access = 'fixture-access', refresh = 'fixture-refresh', rotations = 0;
   let expiredAccess = false, ticketRefusals = 0;
-  let informationExtraction='ready', informationReadError='';
+  let informationExtraction='ready', informationReadError='', refuseInformationStatus=false;
   let manualChapters = [];
   const manualRows = filter => manualChapters.filter(row => (filter?.tags ?? []).every(tag => row.tags.includes(tag)));
 
@@ -49,7 +49,7 @@ export async function protocolFixture(options = {}) {
   const currentGroups=()=>informationGroups ?? {databases:['postgresql']};
   const frames = [], httpPaths = [];
   const usageSubscriptions = new Map();
-  let refuseUsage = false, refuseSnapshot = false, usageRevision = 1, captureEnabled = true;
+  let refuseUsage = false, refuseUsageCalls = false, refuseSnapshot = false, usageRevision = 1, captureEnabled = true;
   function usageReport(type, filter, input = '2400') {
     const totals = {calls:captureEnabled?'2':'0',attempts:captureEnabled?'2':'0',active_calls:'0',incomplete_attempts:'1',unknown_cost_attempts:'1',input_tokens:input,output_tokens:'300',input_tokens_known:'2',output_tokens_known:'1',costs:{USD:'0.01234'},usage_complete:false,cost_complete:false,complete:false};
     return {filters:{type,filter},totals,groups:[{...totals,model:'fixture-model'}],cursor:null,health:{watermark:String(usageRevision),as_of:new Date().toISOString(),capture_enabled:captureEnabled,historical_usage:'not_imported',tracking_started_at:'2026-10-02T00:00:00Z'}};
@@ -311,6 +311,7 @@ export async function protocolFixture(options = {}) {
           }
           result.payload=(payload.scope.kind==='global_read'||payload.filter?.tags?.some(tag=>!informationTags.includes(tag))||payload.filter?.autoTag?.some(tag=>tag!=='postgresql')||payload.filter?.tagGroup&&!(payload.filter.tagGroup in currentGroups())||payload.filter?.documentAuthor&&payload.filter.documentAuthor!=='Ada Lovelace'||payload.filter?.search&&!('A retained claim'.toLowerCase().includes(payload.filter.search.toLowerCase())))?[]:[{id:'aaaaaaaa-0000-0000-0000-000000000001',title:payload.kind==='report'?'Generated research report':'Retained research source',source_name:'source.txt',tags:informationTags,autoTag:['postgresql'],kind:payload.kind ?? 'source',...(payload.kind==='report'?{report_status:'draft'}:{}),ordinal:1,availability:'active'}];break;
         case 'information.status': {
+          if(refuseInformationStatus){result={code:'BAD_REQUEST',said:'This account cannot read this retained revision.'};break;}
           const chapter = manualChapters.find(row => row.id === payload.revision);
           if (chapter) {
             assert.equal(payload.scope.kind, 'global_read');
@@ -319,7 +320,7 @@ export async function protocolFixture(options = {}) {
             break;
           }
         }
-        result.payload={...(payload.revision === options.retainedReport ? {kind:'report',report:{status:'draft'}} : {}),id:payload.revision,tags:informationTags,autoTag:['postgresql'],tagGroups:currentGroups(),tagGroupsSource:informationGroups===null?'automatic':'manual',auto_tag_generated:true,documentAuthor:'Ada Lovelace',documentAuthorSource:'person',title:options.informationTitle ?? 'Retained research source',ordinal:1,availability:'active',generation:1,can_manage:true,allowance_total:20,allowance_spent:informationExtraction==='ready'?5:0,steps:['extract','derive','embed','summarise','summary_embed'].map(stage=>({stage,state:stage==='extract'?informationExtraction:informationExtraction==='ready'?'ready':'pending',attempt:stage==='extract'||informationExtraction==='ready'?1:0,generation:1,compatible:informationExtraction==='ready',...(stage==='extract'&&informationExtraction==='failed'?{error:'a document whose extracted text is blank has nothing to ingest'}:{})})),events:[],inputs:[],citations:[]};break;
+        result.payload={...(payload.revision === options.retainedReport ? {kind:'report',report:{status:'draft',details:{objectives:[],findings:[],reviews:[],scopeChanges:[]}}} : {}),id:payload.revision,tags:informationTags,autoTag:['postgresql'],tagGroups:currentGroups(),tagGroupsSource:informationGroups===null?'automatic':'manual',auto_tag_generated:true,documentAuthor:'Ada Lovelace',documentAuthorSource:'person',title:options.informationTitle ?? 'Retained research source',ordinal:1,availability:'active',generation:1,can_manage:true,allowance_total:20,allowance_spent:informationExtraction==='ready'?5:0,steps:['extract','derive','embed','summarise','summary_embed'].map(stage=>({stage,state:stage==='extract'?informationExtraction:informationExtraction==='ready'?'ready':'pending',attempt:stage==='extract'||informationExtraction==='ready'?1:0,generation:1,compatible:informationExtraction==='ready',...(stage==='extract'&&informationExtraction==='failed'?{error:'a document whose extracted text is blank has nothing to ingest'}:{})})),events:[],inputs:[],citations:[]};break;
         case 'information.read': {
           const chapter = manualChapters.find(row => row.id === payload.revision);
           if (chapter) {
@@ -428,7 +429,8 @@ export async function protocolFixture(options = {}) {
         }
         case 'usage.unsubscribe': usageSubscriptions.delete(payload.subscription);result.payload={};break;
         case 'usage.models': case 'usage.project': case 'usage.agent': case 'usage.run': case 'usage.orchestration': case 'usage.pools': case 'usage.conversation': result.payload=usageReport(frame.type,payload);break;
-        case 'usage.calls': result.payload={filters:{type:frame.type,filter:payload},calls:[],cursor:null,health:{watermark:'1',capture_enabled:true}};break;
+        case 'usage.calls':
+          result=refuseUsageCalls?{code:'BAD_REQUEST',said:'Call history is unavailable to this account.'}:{code:'OK',payload:{filters:{type:frame.type,filter:payload},calls:[],cursor:null,health:usageReport('usage.models',payload).health}};break;
         case 'conversation.context.snapshot': {
           if(refuseSnapshot){result={code:'BAD_REQUEST',said:'Context snapshot unavailable. Update the server.'};break;}
           result.payload={conversation:payload.conversation,agent:payload.agent,projection:'next',captured_at:new Date().toISOString(),model:'fixture-model',sampling:{temperature:0.2},
@@ -695,6 +697,7 @@ export async function protocolFixture(options = {}) {
     setManualChapters(value) { manualChapters = structuredClone(value); },
     setInformationExtraction(value) { informationExtraction=value; },
     setInformationReadError(value) { informationReadError=value; },
+    setRefuseInformationStatus(value) { refuseInformationStatus=value; },
     get eventSession() { return eventSession; },
     get fileClaim() { return fileClaim; },
     get liveFileClaims() { return [...filePeers.values()].flat().map(row => row.claim); },
@@ -738,6 +741,7 @@ export async function protocolFixture(options = {}) {
     publish: push,
     setUsageCapture: value => {captureEnabled=value;},
     setRefuseUsage: value => {refuseUsage=value;},
+    setRefuseUsageCalls: value => {refuseUsageCalls=value;},
     setRefuseSnapshot: value => {refuseSnapshot=value;},
     publishUsage(input='3600') { ++usageRevision; for(const [subscription,row] of usageSubscriptions) if(row.connection.readyState===1) row.connection.send(JSON.stringify({id:null,type:'usage.updated',protocol_version:'plowshare-v1',payload:{subscription,revision:usageRevision,report:usageReport(row.type,row.filter,input)}})); },
     failBoardMember(member) {

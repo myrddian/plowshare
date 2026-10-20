@@ -80,6 +80,8 @@ try {
   await usage.screenshot({path:'build/smoke/usage-pricing.png'});
   await usage.getByRole('tab',{name:'Calls',exact:true}).click();await expect(usage.locator('[data-usage-view="calls"]')).toContainText('No recorded calls');
   assert.ok(fixture.frames.some(f=>f.type==='usage.calls'));
+  fixture.setRefuseUsageCalls(true);await usage.getByRole('button',{name:'Refresh calls',exact:true}).click();await expect(usage.locator('[data-usage-view="calls"]')).toContainText('Could not read calls');
+  fixture.setRefuseUsageCalls(false);await usage.getByRole('button',{name:'Refresh calls',exact:true}).click();await expect(usage.locator('[data-usage-view="calls"]')).toContainText('No recorded calls');await expect(usage.locator('[data-usage-view="calls"]')).not.toContainText('Could not read calls');
   await usage.getByRole('tab',{name:'Recording',exact:true}).click();await expect(usage.locator('[data-usage-recording]')).toContainText('On · automatic');
   await usage.getByRole('tab',{name:'Overview',exact:true}).click();
   await usage.screenshot({path:'build/smoke/usage.png'});

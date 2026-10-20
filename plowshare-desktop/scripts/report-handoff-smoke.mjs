@@ -29,8 +29,18 @@ try {
  assert.ok(read);assert.deepEqual(read.payload.scope,{kind:'project',project:'Other project',includeGlobal:true});
  assert.equal(fixture.frames.filter(frame=>['information.finalise','information.share','information.ask','information.retry'].includes(frame.type)).length,0);
  await library.screenshot({path:'build/smoke/report-handoff.png'});
- // Reusing the existing Library window must reopen the exact revision.
- await library.locator('#library-documents').click();await runs.locator('[data-report-revision]').click();await expect(library.locator('#library-source-panel [data-passage]')).toHaveValue(/A retained claim\./);
+ // A new authorization refusal hides retained text instead of disclosing the
+ // preceding read. Return through the real sidebar to activate the embedded run.
+ await library.locator('#library-documents').click();fixture.setRefuseInformationStatus(true);
+ const beforeDenied=fixture.frames.filter(frame=>frame.type==='information.read').length;
+ await main.locator('#runs-open').click();await runs.locator('[data-report-revision]').click();
+ await expect(library.locator('#library-source-panel [data-error]')).toContainText('This account cannot read this retained revision');
+ await expect(library.locator('#library-source-panel [data-source]')).not.toBeVisible();
+ assert.equal(fixture.frames.filter(frame=>frame.type==='information.read').length,beforeDenied,'A refused scoped status cannot expose or refetch retained source text');
+ // Reusing the existing Library view must reopen the exact revision after a
+ // fresh successful authorization, without creating another reader window.
+ fixture.setRefuseInformationStatus(false);await main.locator('#runs-open').click();await runs.locator('[data-report-revision]').click();await expect(library.locator('#library-source-panel [data-passage]')).toHaveValue(/A retained claim\./);
+ assert.equal(app.windows().filter(page=>page.url()==='plowshare://app/library.html').length,1);
  await assert.rejects(runs.evaluate(()=>window.plowshare.request({action:'library',view:'sources',revision:'00000000-0000-0000-0000-000000000098',project:'Other project'})),/displayed run/);
  assert.deepEqual(errors,[]);console.log('PASS: friendly bot identity, resolved definition origin/access, retained report handoff, exact revision/project, draft preservation and reused reader window.');
 }catch(error){if(app){const main=await app.firstWindow();console.error('Visible errors:',await main.locator('[role=alert]').allTextContents());}throw error;}finally{if(app)await app.close();await fixture.close();await rm(profile,{recursive:true,force:true});}
