@@ -305,7 +305,10 @@ public final class DocumentStore {
    * Explicit markers keep predicates and their bindings before ranking/paging, without parsing SQL.
    */
   private ReadQuery guarded(String sql, String documentExpression, Object... arguments) {
-    boolean discovery = sql.contains("/*information:discover*/");
+    // Collection discovery shares authority across roots/passages. An exact source-name lookup
+    // still hides excluded/non-final documents, but must not evaluate an entire corpus for one row.
+    boolean batchedDiscovery = sql.contains("/*information:discover*/");
+    boolean discovery = batchedDiscovery || sql.contains("/*information:discover-one*/");
     String vectorStage =
         sql.contains("/*information:summary-vector*/")
             ? "summary_embed"
@@ -313,7 +316,7 @@ public final class DocumentStore {
     sql =
         sql.replace("/*information:summary-vector*/", "")
             .replace("/*information:passage-vector*/", "");
-    sql = sql.replace("/*information:discover*/", "");
+    sql = sql.replace("/*information:discover*/", "").replace("/*information:discover-one*/", "");
     String and = "/*information:and*/";
     String where = "/*information:where*/";
     boolean hasWhere = sql.contains(and);
@@ -334,8 +337,11 @@ public final class DocumentStore {
       return new ReadQuery(sql.replace(marker, ""), arguments);
     }
     io.aeyer.plowshare.server.information.InformationSql.Filter filter =
-        io.aeyer.plowshare.server.information.InformationSql.read(
-            access.admitted(context), "information_row");
+        batchedDiscovery
+            ? io.aeyer.plowshare.server.information.InformationSql.discovery(
+                access.admitted(context), "information_row")
+            : io.aeyer.plowshare.server.information.InformationSql.read(
+                access.admitted(context), "information_row");
     String predicate =
         "EXISTS (SELECT 1 FROM documents information_row WHERE"
             + " information_row.id = "
@@ -478,7 +484,7 @@ public final class DocumentStore {
     return readRows(
             "documents.id",
             SELECT_DOCUMENT
-                + " WHERE source_name = ? /*information:discover*/ /*information:and*/ ORDER BY ingested_at DESC, id LIMIT 1",
+                + " WHERE source_name = ? /*information:discover-one*/ /*information:and*/ ORDER BY ingested_at DESC, id LIMIT 1",
             DOCUMENT,
             sourceName)
         .stream()
@@ -2164,6 +2170,24 @@ public final class DocumentStore {
           + ANCESTOR_COLUMNS
           + ANCESTOR_JOINS
           + " WHERE c.id = ? /*information:and*/";
+
+  /**
+   * A bounded, authorized existence gate for the exact retrieval selection and captured profile.
+   * This is not cached: it can skip an embedding only when this statement observes no eligible
+   * passage. Nonempty reads still authorize again after provider IO; a gate grants no read lease.
+   */
+  boolean hasRetrievable(UUID documentId) {
+    String sql =
+        "SELECT EXISTS(SELECT 1 FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id"
+            + " WHERE c.embedding IS NOT NULL"
+            + (documentId == null ? "" : " AND p.document_id=?")
+            + (documentId == null ? " /*information:discover*/" : "")
+            + " /*information:passage-vector*/ /*information:and*/)";
+    return Boolean.TRUE.equals(
+        documentId == null
+            ? readScalar("p.document_id", sql, Boolean.class)
+            : readScalar("p.document_id", sql, Boolean.class, documentId));
+  }
 
   /**
    * The chunks nearest this vector, nearest first, each carrying everything above it.

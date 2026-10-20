@@ -182,6 +182,25 @@ async function fixture(
         const bytes = event.data as string;
         void (async () => {
           const frame = JSON.parse(bytes) as Frame;
+          if (frame.type === 'transport.dispatch') {
+            assert.deepEqual(frame.payload, { mode: 'concurrent-v1' });
+            messages.send(
+              JSON.stringify({
+                id: frame.id,
+                type: frame.type,
+                protocol_version: frame.protocol_version,
+                payload: {
+                  code: 'OK',
+                  payload: {
+                    mode: 'concurrent-v1',
+                    maxPending: 64,
+                    maxIdBytes: 128,
+                  },
+                },
+              }),
+            );
+            return;
+          }
           frames.push(frame);
           const outcome = await script(frame);
           if (socket.readyState === WebSocket.OPEN)

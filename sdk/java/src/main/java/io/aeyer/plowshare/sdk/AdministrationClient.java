@@ -34,14 +34,43 @@ public final class AdministrationClient {
   }
 
   public Status status() throws IOException {
-    return connection.request("admin.status", Map.of(), Status.class);
+    return AsyncSupport.await(connection.defaultOptions(), options -> statusAsync(options));
   }
 
   public List<Account> accounts() throws IOException {
-    var node = connection.request("admin.accounts", Map.of()).requirePayload();
-    if (!node.isArray() || node.size() > 10000) throw new IOException("Invalid account listing");
-    var accounts = new ArrayList<Account>();
-    for (var item : node) accounts.add(SdkJson.decode(SdkJson.mapper(), item, Account.class));
-    return List.copyOf(accounts);
+    return AsyncSupport.await(connection.defaultOptions(), options -> accountsAsync(options));
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Status> statusAsync(RequestOptions options) {
+
+    return AsyncSupport.map(
+        connection.requestAsync("admin.status", Map.of(), Status.class, options),
+        asyncResult -> {
+          return asyncResult;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Status> statusAsync() {
+    return statusAsync(null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<List<Account>> accountsAsync(RequestOptions options) {
+
+    return AsyncSupport.map(
+        connection.requestAsync("admin.accounts", Map.of(), options),
+        asyncResult -> {
+          var node = asyncResult.requirePayload();
+          if (!node.isArray() || node.size() > 10000)
+            throw new IOException("Invalid account listing");
+          var accounts = new ArrayList<Account>();
+          for (var item : node) accounts.add(SdkJson.decode(SdkJson.mapper(), item, Account.class));
+          return List.copyOf(accounts);
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<List<Account>> accountsAsync() {
+    return accountsAsync(null);
   }
 }

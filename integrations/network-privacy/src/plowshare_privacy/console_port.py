@@ -14,12 +14,11 @@ from plowshare.contracts import (
     OrchestrationListRequest,
     OrchestrationReceiptRequest,
     OrchestrationStartRequest,
-    ScheduleFilesRequest,
-    ScheduleListRequest,
 )
 
 from .contracts import Configuration, identifier, text, uuid
 from .journal import Receipt
+from .schedule_pages import schedule_files, schedules
 
 
 @dataclass(frozen=True)
@@ -67,12 +66,9 @@ class SdkConsolePort:
         self.client, self.config = client, config
 
     async def schedule(self) -> ScheduleView | None:
-        files = (
-            await self.client.request(ScheduleFilesRequest(project=self.config.project))
-        ).require_payload()
         source = [
             row
-            for row in files
+            async for row in schedule_files(self.client, self.config.project)
             if row.project == self.config.project
             and row.source == "server"
             and row.name == "network_scan"
@@ -84,10 +80,11 @@ class SdkConsolePort:
             raise ValueError("Ambiguous project schedule source")
         if self.config.schedule != source[0].internal_name:
             raise ValueError("Collector schedule differs from the project source")
-        schedules = (
-            await self.client.request(ScheduleListRequest(project=self.config.project))
-        ).require_payload()
-        selected = [row for row in schedules if row.name == self.config.schedule]
+        selected = [
+            row
+            async for row in schedules(self.client, self.config.project)
+            if row.name == self.config.schedule
+        ]
         if not selected:
             return None
         if len(selected) != 1:

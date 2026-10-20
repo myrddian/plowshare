@@ -223,6 +223,108 @@ class ScheduleDefinitionsTest {
   }
 
   @Test
+  void pagedInspectionAuthorizesUniqueProjectSourcesBeforeAnyDefinitionHydration() {
+    var workspace = new ScheduleDefinitionStore.Source(2, "owner", 7L, "project", "workspace");
+    var denied = new ScheduleDefinitionStore.Source(3, "owner", 8L, "denied", "server");
+    when(store.sourcesForInspection("owner", null)).thenReturn(List.of(source, workspace, denied));
+    when(members.readableProjects(java.util.Set.of("project", "denied"), "owner"))
+        .thenReturn(java.util.Set.of("project"));
+    when(members.readableProjects(java.util.Set.of("project"), "owner"))
+        .thenReturn(java.util.Set.of("project"));
+    var page = new SchedulePage("scheduled-1-before", 2);
+    var selection =
+        new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source, workspace));
+    when(store.filesPage(selection, page)).thenReturn(List.of(prior));
+    assertEquals(List.of(prior), service.page("owner", null, page));
+    verify(members).readableProjects(java.util.Set.of("project", "denied"), "owner");
+    verify(members).readableProjects(java.util.Set.of("project"), "owner");
+    verify(members, never()).mayUse(anyString(), anyString());
+    verify(store).filesPage(selection, page);
+    verify(store, never()).files(any());
+    verify(store, never()).sources();
+    verifyNoInteractions(files);
+  }
+
+  @Test
+  void unscopedPageRefusesWhenAnAdmittedProjectIsRevokedDuringItsRead() {
+    when(store.sourcesForInspection("owner", null)).thenReturn(List.of(source));
+    when(members.readableProjects(java.util.Set.of("project"), "owner"))
+        .thenReturn(java.util.Set.of("project"))
+        .thenReturn(java.util.Set.of());
+    var page = new SchedulePage(null, 1);
+    var selection = new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source));
+    when(store.filesPage(selection, page)).thenReturn(List.of(prior));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> service.page("owner", null, page));
+    verify(members, times(2)).readableProjects(java.util.Set.of("project"), "owner");
+    verify(store).filesPage(selection, page);
+    verify(members, never()).mayUse(anyString(), anyString());
+  }
+
+  @Test
+  void unscopedPageRejectsAFileWhoseSourceMovedIntoAnUnreadableProjectDuringLoad() {
+    when(store.sourcesForInspection("owner", null)).thenReturn(List.of(source));
+    when(members.readableProjects(java.util.Set.of("project"), "owner"))
+        .thenReturn(java.util.Set.of("project"));
+    when(members.readableProjects(java.util.Set.of("moved-project"), "owner"))
+        .thenReturn(java.util.Set.of());
+    var moved =
+        new ScheduledWork.File(
+            prior.name(),
+            "moved-project",
+            prior.source(),
+            prior.path(),
+            prior.internalName(),
+            prior.definition(),
+            prior.status(),
+            prior.error());
+    var selection = new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source));
+    var page = new SchedulePage(null, 1);
+    when(store.filesPage(selection, page)).thenReturn(List.of(moved));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> service.page("owner", null, page));
+    verify(members).readableProjects(java.util.Set.of("project"), "owner");
+    verify(members).readableProjects(java.util.Set.of("moved-project"), "owner");
+    verify(store).filesPage(selection, page);
+  }
+
+  @Test
+  void unscopedDisclosureRechecksOnlyActualReturnedProjectsWithinThePageBound() {
+    var other = new ScheduleDefinitionStore.Source(2, "owner", 8L, "another-project", "server");
+    when(store.sourcesForInspection("owner", null)).thenReturn(List.of(source, other));
+    var candidates = java.util.Set.of("project", "another-project");
+    when(members.readableProjects(candidates, "owner")).thenReturn(candidates);
+    when(members.readableProjects(java.util.Set.of("project"), "owner"))
+        .thenReturn(java.util.Set.of("project"));
+    var selection =
+        new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source, other));
+    var page = new SchedulePage(null, 1);
+    when(store.filesPage(selection, page)).thenReturn(List.of(prior));
+    assertEquals(List.of(prior), service.page("owner", null, page));
+    verify(members).readableProjects(candidates, "owner");
+    verify(members).readableProjects(java.util.Set.of("project"), "owner");
+    verifyNoMoreInteractions(members);
+  }
+
+  @Test
+  void pagedProjectInspectionKeepsForeignRegistrarAndRefusesWithdrawalAfterCacheRead() {
+    when(store.sourcesForInspection("viewer", "project")).thenReturn(List.of(source));
+    var page = new SchedulePage(null, 1);
+    var selection = new ScheduleDefinitionStore.FileSelection("viewer", "project", List.of(source));
+    when(store.filesPage(selection, page)).thenReturn(List.of(prior));
+    assertEquals(List.of(prior), service.page("viewer", "project", page));
+    verify(members, times(2)).requireRole("project", "viewer", ProjectRole.VIEWER);
+    doNothing()
+        .doThrow(new io.aeyer.plowshare.server.faults.CallerFault("revoked"))
+        .when(members)
+        .requireRole("project", "viewer", ProjectRole.VIEWER);
+    assertThrows(RuntimeException.class, () -> service.page("viewer", "project", page));
+    verify(store, never()).files(any());
+  }
+
+  @Test
   void projectInspectionRefusesPrivateGlobalAndUntrimmedNamesBeforeReading() {
     for (String project :
         new String[] {"", " project", "personal:owner", "Personal:owner", "client:owner"})

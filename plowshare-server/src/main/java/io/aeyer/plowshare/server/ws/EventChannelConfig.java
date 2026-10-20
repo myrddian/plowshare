@@ -151,6 +151,10 @@ public class EventChannelConfig implements WebSocketConfigurer {
       "${plowshare.transport.event-read-global-concurrency:8}")
   private int eventReadGlobalConcurrency = 8;
 
+  @org.springframework.beans.factory.annotation.Value(
+      "${plowshare.transport.request-shutdown-drain:10s}")
+  private String requestShutdownDrain = "10s";
+
   /**
    * The fixed wire ceiling must remain readable after a deployment lowers its admission policy.
    * Reserve capacity is not eagerly allocated. Explicit budgets must fit one complete portable
@@ -231,6 +235,8 @@ public class EventChannelConfig implements WebSocketConfigurer {
           new io.aeyer.plowshare.protocol.transport.PacketBudget(resolvedPacketMemoryBytes());
     channel.usePacketBudget(packetBudget);
     channel.useReadConcurrency(eventReadConcurrency, eventReadGlobalConcurrency);
+    channel.useRequestDrain(
+        org.springframework.boot.convert.DurationStyle.detectAndParse(requestShutdownDrain));
     if (usageSubscriptions != null) usageSubscriptions.ifAvailable(channel::useUsageSubscriptions);
     return channel;
   }

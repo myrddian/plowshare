@@ -48,6 +48,54 @@ a mutation after negotiation or delivery failure. Neutral TypeScript consumers
 wrap their explicitly negotiated platform socket with `packetSocket`; the Node
 SDK and console/desktop compositions supply platform codecs and timers.
 
+## Concurrent request dispatch
+
+New public SDK connections select `concurrent-v1` with a private
+`transport.dispatch` exchange before submitting application operations. The server
+acknowledges the mode and its pending-request/ID bounds. This selection is
+independent of segmented versus legacy message encoding. An unsupported server
+fails opening clearly; the SDK never silently downgrades or replays a request.
+
+| SDK | Explicit ordered dispatch |
+| --- | --- |
+| Java | `Plowshare.DispatchMode.ORDERED` on the transport/dispatch overload |
+| Node | `connectPlowshare({ ..., dispatchMode: 'ordered' })`; platform sessions accept the same option |
+| Python | `Client.connect(..., dispatch_mode="ordered")` |
+| Go | `Options{DispatchMode: OrderedDispatch}` |
+| .NET | `Client.ConnectAsync(..., dispatchMode: DispatchMode.Ordered)` |
+
+Ordered dispatch preserves the previous server scheduling policy. Connections
+without selection retain that policy too. Concurrent dispatch permits independent
+responses to overtake each other; conflicting resources and unaudited operations
+retain explicit ordering. Neither a request ID nor concurrent admission grants
+access. Authentication, account/scope checks and disclosure fences remain on the
+server. Physical logical-message writes remain serialized, including large replies.
+
+Java offers `connectAsync`, `closeAsync`, `AsyncServerClient` and typed `*Async`
+facade methods returning `CompletionStage`. Blocking methods await the same
+exchange engine. Completions run off the socket reader and coordination locks;
+reserved completion capacity bounds callbacks that block. `RequestOptions`
+provides a per-call deadline and `RequestCancellation` detaches a caller without
+cancelling durable server work.
+
+TypeScript/Node expose `closeAsync()` to await transport-owned physical buffers;
+`close()` retains immediate stop semantics. Python `close`, .NET `DisposeAsync`,
+and Go `Close` share their shutdown drain and wait for admitted converters,
+writers and byte leases, without waiting for application code to consume results.
+
+TypeScript requests accept local `signal` and `timeoutMs` options; neither appears
+in the wire payload or acting selection. `timeoutMs` overrides the connection's
+default for that call. Neutral TypeScript compositions supply a deadline scheduler
+and await `ready()` when selecting concurrent mode. Python accepts an optional
+per-request timeout and task cancellation; .NET uses cancellation tokens, and Go
+uses contexts. Admission includes calls waiting for the writer and retained
+physical transfers, with count and byte limits. Cancellation before a possible
+write is `NOT_SUBMITTED`; after a possible write the outcome remains `UNKNOWN`.
+Late replies cannot settle a later request, and cancellation never triggers replay.
+
+See the [dispatch implementation and validation record](async-request-dispatch-validation.md)
+for scope, checks and rollout status.
+
 Provider declarations also share the [typed schema vocabulary](tool-schemas.md)
 with model dispatch. All SDKs support recursive arguments and schema-pinned
 requests while retaining the scalar provider facade.
@@ -305,8 +353,17 @@ schedule source/projection even when its owner differs from the caller. Service
 tokens must select a granted project; omission does not grant global enumeration.
 `schedule.list` returns effective pause/timing state, while `schedule.files` explains
 source registration and refusals. Both are read-only and do not resume schedules.
-Java exposes these reads through `ScheduleClient.list(project)` and
-`ScheduleClient.files(project)`. `document.detail` likewise supports Information
+Both operations return arrays with a default maximum of 50 rows. Optional `limit`
+is 1..100; `after` is an exclusive stable key (`name` for `schedule.list`, unique
+`internalName` for `schedule.files`). Each page checks current authority and does
+not retain a cross-request snapshot. Java exposes bounded reads through
+`ScheduleClient.listPage(project, after, limit)` and `filesPage(project, after, limit)`;
+null cursors start at the beginning and null limits use 50. Its existing
+`list(project)` and `files(project)` conveniences explicitly traverse pages of 100,
+retain at most 10,000 rows, and fail rather than return partial data on refusal,
+non-progress or overflow. Prefer pages for UI reads. See [schedule inspection
+pages](scheduling.md#inspection-pages) for lookahead and concurrent-edit behavior.
+`document.detail` likewise supports Information
 project scope for metadata/outline; Java offers the scoped `describeDocument`
 overload, and the other SDKs use their typed operation/request DTOs.
 

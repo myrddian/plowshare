@@ -48,11 +48,11 @@ internal sealed class Packets : IDisposable
         }
     }
     private void Release(int bytes) { lock (processGate) { held -= bytes; processHeld -= bytes * 3L; } }
-    private async Task WriteAsync<T>(T packet, CancellationToken cancellationToken)
+    private async Task WriteAsync<T>(T packet, CancellationToken cancellationToken, Action? submitted = null)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(packet);
         await writer.WaitAsync(cancellationToken);
-        try { await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, cancellationToken); }
+        try { cancellationToken.ThrowIfCancellationRequested(); submitted?.Invoke(); await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, cancellationToken); }
         finally { writer.Release(); }
     }
     // The lease starts before waiting for the logical writer and ends when the caller drops its
@@ -72,11 +72,12 @@ internal sealed class Packets : IDisposable
         }
     }
     // The Client owns the logical writer; this class's writer only locks small physical messages.
-    internal async Task SendAsync(byte[] bytes, CancellationToken cancellationToken)
+    internal async Task SendAsync(byte[] bytes, CancellationToken cancellationToken, Action? submitted = null)
     {
         lock (gate) { if (closed) throw new IOException("Packet connection closed"); }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        bool started = false;
         try
         {
             var id = Guid.NewGuid().ToString();
@@ -87,11 +88,11 @@ internal sealed class Packets : IDisposable
                 var offset = (number - 1) * Chunk;
                 TaskCompletionSource received = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 lock (gate) { if (closed) throw new IOException("Packet connection closed"); sending = id; expected = number; credit = received; }
-                await WriteAsync(new { kind = "transport.segment", version = 1, transferId = id, segmentNumber = number, segmentCount = count, byteOffset = offset, totalBytes = bytes.Length, sha256 = hash, data = Convert.ToBase64String(bytes, offset, Math.Min(Chunk, bytes.Length - offset)) }, deadline.Token);
+                await WriteAsync(new { kind = "transport.segment", version = 1, transferId = id, segmentNumber = number, segmentCount = count, byteOffset = offset, totalBytes = bytes.Length, sha256 = hash, data = Convert.ToBase64String(bytes, offset, Math.Min(Chunk, bytes.Length - offset)) }, deadline.Token, number == 1 ? () => { started = true; submitted?.Invoke(); } : null);
                 await received.Task.WaitAsync(TimeSpan.FromSeconds(15), deadline.Token);
             }
         }
-        catch { Dispose(); socket.Abort(); throw; }
+        catch { if (started) { Dispose(); socket.Abort(); } throw; }
         finally { lock (gate) { sending = null; credit = null; } }
     }
     private static string Text(JsonElement frame, string key)

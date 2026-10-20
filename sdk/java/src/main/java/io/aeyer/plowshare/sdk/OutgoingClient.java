@@ -26,68 +26,24 @@ public final class OutgoingClient {
   }
 
   public Outgoing.Work send(Outgoing.Send send) throws IOException {
-    Objects.requireNonNull(send, "send");
-    Outgoing.Work receipt =
-        work(
-            connection
-                .request(
-                    "outgoing.send",
-                    fields(
-                        "requestId",
-                        send.requestId(),
-                        "peer",
-                        send.peer(),
-                        "message",
-                        send.message(),
-                        "project",
-                        send.project(),
-                        "conversation",
-                        send.conversation()))
-                .requirePayload(),
-            null);
-    if (!receipt.requestId().equals(send.requestId())
-        || !receipt.peer().equals(send.peer())
-        || !Objects.equals(receipt.project(), send.project())
-        || !Objects.equals(receipt.conversation(), send.conversation())
-        || !receipt.message().equals(send.message()))
-      throw new IOException("foreign outgoing send receipt; outcome is unknown");
-    return receipt;
+    return AsyncSupport.await(connection.defaultOptions(), options -> sendAsync(send, options));
   }
 
   public Outgoing.Work status(UUID id) throws IOException {
-    return work(
-        connection
-            .request("outgoing.status", Map.of("id", new Outgoing.Id(id).id()))
-            .requirePayload(),
-        id);
+    return AsyncSupport.await(connection.defaultOptions(), options -> statusAsync(id, options));
   }
 
   public Outgoing.Work cancel(UUID id) throws IOException {
-    return work(
-        connection
-            .request("outgoing.cancel", Map.of("id", new Outgoing.Id(id).id()))
-            .requirePayload(),
-        id);
+    return AsyncSupport.await(connection.defaultOptions(), options -> cancelAsync(id, options));
   }
 
   public Outgoing.Peers peers(String project) throws IOException {
-    var query = new Outgoing.PeerQuery(project);
-    JsonNode result =
-        connection.request("outgoing.peers", fields("project", query.project())).requirePayload();
-    if (!result.path("peers").isArray()) throw new IOException("unreadable outgoing peers");
-    for (JsonNode peer : result.path("peers"))
-      if (!peer.isTextual() || peer.asText().isBlank())
-        throw new IOException("unreadable outgoing peer");
-    return SdkJson.decode(
-        JSON.copy()
-            .enable(
-                com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES),
-        result,
-        Outgoing.Peers.class);
+    return AsyncSupport.await(connection.defaultOptions(), options -> peersAsync(project, options));
   }
 
   public void advertise(String project, List<String> peers) throws IOException {
-    advertise(project, peers, null);
+    AsyncSupport.await(
+        connection.defaultOptions(), options -> advertiseAsync(project, peers, options));
   }
 
   public void advertise(
@@ -95,78 +51,18 @@ public final class OutgoingClient {
       List<String> peers,
       Map<String, io.aeyer.plowshare.protocol.AgentCard> agentCards)
       throws IOException {
-    var request = new Outgoing.Advertise(project, peers, agentCards);
-    var answer =
-        connection.request(
-            "outgoing.advertise",
-            fields(
-                "project",
-                request.project(),
-                "peers",
-                request.peers(),
-                "agentCards",
-                request.agentCards()));
-    if (!answer.successful()) throw new IOException("outgoing advertise refused: " + answer.code());
+    AsyncSupport.await(
+        connection.defaultOptions(),
+        options -> advertiseAsync(project, peers, agentCards, options));
   }
 
   public Outgoing.Claimed claim(String project, List<String> peers) throws IOException {
-    var request = new Outgoing.Claim(project, peers);
-    JsonNode result =
-        connection
-            .request(
-                "outgoing.claim", fields("project", request.project(), "peers", request.peers()))
-            .requirePayload();
-    if (!result.has("work")) throw new IOException("unreadable outgoing claim");
-    if (result.get("work").isNull()) {
-      if (result.has("action") && !result.get("action").isNull())
-        throw new IOException("empty outgoing claim cannot have an action");
-      return new Outgoing.Claimed(null, null);
-    }
-    Outgoing.Work work = work(result.get("work"), null);
-    if (!Objects.equals(work.project(), request.project())
-        || !request.peers().contains(work.peer()))
-      throw new IOException("foreign outgoing claim scope; delivery remains unknown");
-    String action = result.path("action").asText();
-    if (!Set.of("send", "observe", "cancel").contains(action)
-        || action.equals("send")
-            && (!work.state().equals("DISPATCHED") || work.remoteTask() != null)
-        || !action.equals("send") && (work.remoteTask() == null || work.remoteTask().isBlank()))
-      throw new IOException("unreadable outgoing claim action");
-    return new Outgoing.Claimed(work, action);
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> claimAsync(project, peers, options));
   }
 
   public Outgoing.Work report(Outgoing.Report report) throws IOException {
-    Objects.requireNonNull(report, "report");
-    Outgoing.Work receipt =
-        work(
-            connection
-                .request(
-                    "outgoing.report",
-                    fields(
-                        "id",
-                        report.id(),
-                        "revision",
-                        report.revision(),
-                        "state",
-                        report.state(),
-                        "remoteTask",
-                        report.remoteTask(),
-                        "remoteContext",
-                        report.remoteContext(),
-                        "result",
-                        report.result(),
-                        "error",
-                        report.error()))
-                .requirePayload(),
-            report.id());
-    if (receipt.revision() != report.revision() + 1
-        || !receipt.state().equals(report.state())
-        || !Objects.equals(receipt.remoteTask(), report.remoteTask())
-        || !Objects.equals(receipt.remoteContext(), report.remoteContext())
-        || !Objects.equals(receipt.result(), report.result())
-        || !Objects.equals(receipt.error(), report.error()))
-      throw new IOException("foreign outgoing report receipt; delivery remains unknown");
-    return receipt;
+    return AsyncSupport.await(connection.defaultOptions(), options -> reportAsync(report, options));
   }
 
   private static Outgoing.Work work(JsonNode value, UUID expected) throws IOException {
@@ -205,5 +101,226 @@ public final class OutgoingClient {
     } catch (IllegalArgumentException invalid) {
       throw new IOException("unreadable outgoing work identity", invalid);
     }
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Outgoing.Work> sendAsync(
+      Outgoing.Send send, RequestOptions options) {
+
+    Objects.requireNonNull(send, "send");
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "outgoing.send",
+            fields(
+                "requestId",
+                send.requestId(),
+                "peer",
+                send.peer(),
+                "message",
+                send.message(),
+                "project",
+                send.project(),
+                "conversation",
+                send.conversation()),
+            options),
+        asyncResult -> {
+          Outgoing.Work receipt = work(asyncResult.requirePayload(), null);
+          if (!receipt.requestId().equals(send.requestId())
+              || !receipt.peer().equals(send.peer())
+              || !Objects.equals(receipt.project(), send.project())
+              || !Objects.equals(receipt.conversation(), send.conversation())
+              || !receipt.message().equals(send.message()))
+            throw new IOException("foreign outgoing send receipt; outcome is unknown");
+          return receipt;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Work> sendAsync(Outgoing.Send send) {
+    return sendAsync(send, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Outgoing.Work> statusAsync(
+      UUID id, RequestOptions options) {
+
+    return AsyncSupport.map(
+        connection.requestAsync("outgoing.status", Map.of("id", new Outgoing.Id(id).id()), options),
+        asyncResult -> {
+          return work(asyncResult.requirePayload(), id);
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Work> statusAsync(UUID id) {
+    return statusAsync(id, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Outgoing.Work> cancelAsync(
+      UUID id, RequestOptions options) {
+
+    return AsyncSupport.map(
+        connection.requestAsync("outgoing.cancel", Map.of("id", new Outgoing.Id(id).id()), options),
+        asyncResult -> {
+          return work(asyncResult.requirePayload(), id);
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Work> cancelAsync(UUID id) {
+    return cancelAsync(id, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Outgoing.Peers> peersAsync(
+      String project, RequestOptions options) {
+
+    var query = new Outgoing.PeerQuery(project);
+    return AsyncSupport.map(
+        connection.requestAsync("outgoing.peers", fields("project", query.project()), options),
+        asyncResult -> {
+          JsonNode result = asyncResult.requirePayload();
+          if (!result.path("peers").isArray()) throw new IOException("unreadable outgoing peers");
+          for (JsonNode peer : result.path("peers"))
+            if (!peer.isTextual() || peer.asText().isBlank())
+              throw new IOException("unreadable outgoing peer");
+          return SdkJson.decode(
+              JSON.copy()
+                  .enable(
+                      com.fasterxml.jackson.databind.DeserializationFeature
+                          .FAIL_ON_UNKNOWN_PROPERTIES),
+              result,
+              Outgoing.Peers.class);
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Peers> peersAsync(String project) {
+    return peersAsync(project, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Outgoing.Work> reportAsync(
+      Outgoing.Report report, RequestOptions options) {
+
+    Objects.requireNonNull(report, "report");
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "outgoing.report",
+            fields(
+                "id",
+                report.id(),
+                "revision",
+                report.revision(),
+                "state",
+                report.state(),
+                "remoteTask",
+                report.remoteTask(),
+                "remoteContext",
+                report.remoteContext(),
+                "result",
+                report.result(),
+                "error",
+                report.error()),
+            options),
+        asyncResult -> {
+          Outgoing.Work receipt = work(asyncResult.requirePayload(), report.id());
+          if (receipt.revision() != report.revision() + 1
+              || !receipt.state().equals(report.state())
+              || !Objects.equals(receipt.remoteTask(), report.remoteTask())
+              || !Objects.equals(receipt.remoteContext(), report.remoteContext())
+              || !Objects.equals(receipt.result(), report.result())
+              || !Objects.equals(receipt.error(), report.error()))
+            throw new IOException("foreign outgoing report receipt; delivery remains unknown");
+          return receipt;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Work> reportAsync(Outgoing.Report report) {
+    return reportAsync(report, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Void> advertiseAsync(
+      String project, List<String> peers, RequestOptions options) {
+
+    return AsyncSupport.map(
+        advertiseAsync(project, peers, null, options),
+        asyncResult -> {
+          return null;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Void> advertiseAsync(
+      String project, List<String> peers) {
+    return advertiseAsync(project, peers, (RequestOptions) null);
+  }
+
+  public java.util.concurrent.CompletionStage<Void> advertiseAsync(
+      String project,
+      List<String> peers,
+      Map<String, io.aeyer.plowshare.protocol.AgentCard> agentCards,
+      RequestOptions options) {
+
+    var request = new Outgoing.Advertise(project, peers, agentCards);
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "outgoing.advertise",
+            fields(
+                "project",
+                request.project(),
+                "peers",
+                request.peers(),
+                "agentCards",
+                request.agentCards()),
+            options),
+        asyncResult -> {
+          var answer = asyncResult;
+          if (!answer.successful())
+            throw new IOException("outgoing advertise refused: " + answer.code());
+
+          return null;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Void> advertiseAsync(
+      String project,
+      List<String> peers,
+      Map<String, io.aeyer.plowshare.protocol.AgentCard> agentCards) {
+    return advertiseAsync(project, peers, agentCards, null);
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Claimed> claimAsync(
+      String project, List<String> peers, RequestOptions options) {
+
+    var request = new Outgoing.Claim(project, peers);
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "outgoing.claim",
+            fields("project", request.project(), "peers", request.peers()),
+            options),
+        asyncResult -> {
+          JsonNode result = asyncResult.requirePayload();
+          if (!result.has("work")) throw new IOException("unreadable outgoing claim");
+          if (result.get("work").isNull()) {
+            if (result.has("action") && !result.get("action").isNull())
+              throw new IOException("empty outgoing claim cannot have an action");
+            return new Outgoing.Claimed(null, null);
+          }
+          Outgoing.Work work = work(result.get("work"), null);
+          if (!Objects.equals(work.project(), request.project())
+              || !request.peers().contains(work.peer()))
+            throw new IOException("foreign outgoing claim scope; delivery remains unknown");
+          String action = result.path("action").asText();
+          if (!Set.of("send", "observe", "cancel").contains(action)
+              || action.equals("send")
+                  && (!work.state().equals("DISPATCHED") || work.remoteTask() != null)
+              || !action.equals("send")
+                  && (work.remoteTask() == null || work.remoteTask().isBlank()))
+            throw new IOException("unreadable outgoing claim action");
+          return new Outgoing.Claimed(work, action);
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Outgoing.Claimed> claimAsync(
+      String project, List<String> peers) {
+    return claimAsync(project, peers, null);
   }
 }

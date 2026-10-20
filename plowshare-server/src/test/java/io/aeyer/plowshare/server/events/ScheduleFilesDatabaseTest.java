@@ -93,6 +93,140 @@ class ScheduleFilesDatabaseTest {
   }
 
   @Test
+  void keysetPagesFilterOwnershipAndProjectBeforeBoundsWhileCompleteScansRemainComplete() {
+    for (var index :
+        java.util.Map.of(
+                "schedules_owner_name", "(defined_by, name)",
+                "schedule_sources_owner_id", "(account, id)",
+                "schedule_files_source_internal", "(source_id, internal_name)")
+            .entrySet()) {
+      String definition =
+          jdbc.queryForObject("SELECT pg_get_indexdef(?::regclass)", String.class, index.getKey());
+      assertTrue(definition.contains("USING btree " + index.getValue()), definition);
+    }
+    var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    var expected = new java.util.ArrayList<String>();
+    for (int i = 0; i < 5; i++)
+      expected.add(store.apply(source, "daily-" + i, definition, NOW).internalName());
+    var otherSource = store.register("other", source.projectId(), "workspace");
+    expected.add(store.apply(otherSource, "different-registrar", definition, NOW).internalName());
+    expected.sort(String::compareTo);
+    Long outside =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name) VALUES('outside') RETURNING id", Long.class);
+    var outsideSource = store.register("owner", outside, "server");
+    var outsideFile = store.apply(outsideSource, "outside", definition, NOW);
+    schedules.define(
+        "a-foreign-before-all", CronSchedule.parse("0 0 9 * * *", "UTC"), "event", "other", NOW);
+    var owned = schedules.page("owner", null, new SchedulePage(null, 1));
+    assertEquals(1, owned.size());
+    assertEquals("owner", owned.getFirst().definedBy());
+    assertEquals(
+        expected.subList(0, 2),
+        schedules.page("viewer", "project", new SchedulePage(null, 2)).stream()
+            .map(ScheduleRecord::name)
+            .toList());
+
+    var selection =
+        new ScheduleDefinitionStore.FileSelection(
+            "viewer", "project", store.sourcesForInspection("viewer", "project"));
+    var observed = new java.util.ArrayList<String>();
+    String after = null;
+    for (; ; ) {
+      var page = store.filesPage(selection, new SchedulePage(after, 2));
+      if (page.isEmpty()) break;
+      page.forEach(file -> observed.add(file.internalName()));
+      after = page.getLast().internalName();
+    }
+    assertEquals(expected, observed);
+    assertFalse(observed.contains(outsideFile.internalName()));
+    assertTrue(store.filesPage(selection, new SchedulePage(observed.getLast(), 2)).isEmpty());
+    assertEquals(5, store.files(source).size());
+    assertEquals(8, schedules.list().size());
+    store.remove(source, "daily-1");
+    assertEquals(
+        expected.stream().filter(name -> !name.endsWith("daily-1")).toList(),
+        store.filesPage(selection, new SchedulePage(null, 100)).stream()
+            .map(ScheduledWork.File::internalName)
+            .toList());
+  }
+
+  @Test
+  void pagedCachedProjectFilesKeepViewerAndRegistrarBoundariesAndObservePauseAndRevocation() {
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,server_admin) VALUES('viewer','fixture',false)");
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES(?,'viewer','VIEWER')",
+        source.projectId());
+    var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    var file = store.apply(source, "daily", definition, NOW);
+    var counted = new CountingJdbc();
+    try (var caches = caches(counted)) {
+      var configured = cached(counted, caches);
+      var service =
+          new FileScheduleDefinitions(
+              configured,
+              mock(ScheduleFiles.class),
+              mock(ProjectStore.class),
+              new JdbcProjectMembers(jdbc),
+              mock(ScheduleDefinitions.Authority.class),
+              mock(ScheduleControlAuthority.class));
+      var page = new SchedulePage(null, 1);
+      assertEquals(List.of(file), service.page("viewer", "project", page));
+      assertEquals(List.of(file), service.page("viewer", "project", page));
+      assertTrue(service.page("viewer", null, page).isEmpty());
+      assertEquals(List.of(file), service.page("owner", null, page));
+      assertEquals(List.of(file), service.page("owner", null, page));
+      assertFalse(service.page("viewer", "project", page).getFirst().definition().paused());
+      store.pause(source, "daily", definition, true, NOW);
+      assertTrue(service.page("viewer", "project", page).getFirst().definition().paused());
+      jdbc.update(
+          "DELETE FROM project_members WHERE project_id=? AND handle='viewer'", source.projectId());
+      assertThrows(RuntimeException.class, () -> service.page("viewer", "project", page));
+      assertTrue(store.managed(file.internalName(), "owner").isPresent());
+      jdbc.update(
+          "DELETE FROM project_members WHERE project_id=? AND handle='owner'", source.projectId());
+      assertTrue(service.page("owner", null, page).isEmpty());
+    }
+  }
+
+  @Test
+  void retainedFilePageSourceIdentityRefusesMovedOrRelabelledSourcesBeforeHydration() {
+    var file =
+        store.apply(
+            source, "daily", ScheduleDefinitionCodecTest.definition("agent", null, null), NOW);
+    var selection = new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source));
+    var page = new SchedulePage(null, 1);
+    assertEquals(List.of(file), store.filesPage(selection, page));
+    jdbc.update("UPDATE projects SET name='renamed' WHERE id=?", source.projectId());
+    assertTrue(
+        store.filesPage(selection, page).isEmpty(),
+        "Direct fallback must retain the admitted project label");
+    var counted = new CountingJdbc();
+    try (var caches = caches(counted)) {
+      var configured = cached(counted, caches);
+      assertTrue(
+          configured.filesPage(selection, page).isEmpty(),
+          "Cold version capture after the move grants no new scope");
+      assertEquals(1, counted.boundedLoads);
+      jdbc.update("UPDATE projects SET name='project' WHERE id=?", source.projectId());
+      assertEquals(List.of(file), configured.filesPage(selection, page));
+      jdbc.update("UPDATE schedule_sources SET source='workspace' WHERE id=?", source.id());
+      assertTrue(store.filesPage(selection, page).isEmpty());
+      assertTrue(configured.filesPage(selection, page).isEmpty());
+      jdbc.update("UPDATE schedule_sources SET source='server' WHERE id=?", source.id());
+      Long moved =
+          jdbc.queryForObject(
+              "INSERT INTO projects(name) VALUES('moved') RETURNING id", Long.class);
+      jdbc.update("UPDATE schedule_sources SET project_id=? WHERE id=?", moved, source.id());
+      assertTrue(
+          store.filesPage(selection, page).isEmpty(),
+          "Source ID and account alone cannot authorize its new home");
+      assertTrue(configured.filesPage(selection, page).isEmpty());
+    }
+  }
+
+  @Test
   void noUnchangedScanResetsTimingAndRejectedFilesRecover() {
     var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
     var file = store.apply(source, "daily", definition, NOW);

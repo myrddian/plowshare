@@ -9,6 +9,7 @@ import {
 import { builderPanel, builderForm } from './authoring.ts';
 import {
   scheduledPanel,
+  schedulePagingControls,
   rememberSchedule,
   scheduledAction,
 } from './schedule-controls.ts';
@@ -185,7 +186,15 @@ function render() {
         ? runs.error
         : view === 'definitions'
           ? activity.definitions?.error
-          : activity.schedules?.error,
+          : [
+              activity.schedules?.error,
+              ...Object.entries(activity.schedules?.panels ?? {}).map(
+                ([name, panel]) =>
+                  panel?.error ? `${name}: ${panel.error}` : '',
+              ),
+            ]
+              .filter(Boolean)
+              .join(' · '),
     state.mode === 'live' && !state.connected
       ? 'Reconnect in the main window to update activity. Shown information may be out of date.'
       : '',
@@ -358,10 +367,12 @@ function render() {
           const key = JSON.stringify([kind, row.name]);
           return `<button class="activity-row" data-item="${esc(key)}" aria-current="${key === scheduledId}"><span><strong>${esc(row.name)}</strong><small>${kind} · ${row.paused ? 'Paused' : 'Active'}</small></span></button>`;
         })
-        .join('');
-    $('#activity-list-note').textContent = activity.schedules?.loading
-      ? 'Updating scheduled work…'
-      : `${rows.length} shown · up to 100 recent account firings loaded`;
+        .join('') +
+      schedulePagingControls(state, 'schedules');
+    $('#activity-list-note').textContent = activity.schedules?.schedulePage
+      ?.loading
+      ? 'Updating schedules…'
+      : `${rows.length} shown on this page · filter applies to this page · up to 100 recent account firings loaded`;
   }
   $('#inbox-older').hidden = view !== 'inbox' || !inbox.more;
   $<HTMLButtonElement>('#inbox-older').disabled =

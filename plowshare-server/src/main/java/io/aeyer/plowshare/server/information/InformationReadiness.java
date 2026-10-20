@@ -23,11 +23,23 @@ public final class InformationReadiness {
       InformationContext context,
       List<Source> sources,
       int waitMs) {
+    return await(catalogue, context, sources, waitMs, () -> {});
+  }
+
+  /** Observer validity is rechecked between short reads; waiting owns no transaction/DB permit. */
+  public static Information.Readiness await(
+      InformationCatalogue catalogue,
+      InformationContext context,
+      List<Source> sources,
+      int waitMs,
+      Runnable validity) {
     if (waitMs < 0 || waitMs > 30000)
       throw new CallerFault("readiness waitMs must be between 0 and 30000");
     long deadline = System.nanoTime() + waitMs * 1_000_000L;
     while (true) {
+      validity.run();
       var snapshot = snapshot(catalogue, context, sources);
+      validity.run();
       if (snapshot.complete() || System.nanoTime() >= deadline) return snapshot;
       try {
         Thread.sleep(Math.min(1000, Math.max(1, (deadline - System.nanoTime()) / 1_000_000)));

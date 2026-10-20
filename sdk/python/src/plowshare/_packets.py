@@ -154,7 +154,13 @@ class Packets:
     def release_outgoing(self, size: int) -> None:
         self._release(size)
 
-    async def send(self, data: bytes, write: Callable[[str], Awaitable[None]]) -> None:
+    async def send(
+        self,
+        data: bytes,
+        write: Callable[[str], Awaitable[None]],
+        submitted: Callable[[], None] | None = None,
+    ) -> None:
+        started = False
         # The client holds the outgoing reservation until its request stops retaining these bytes.
         try:
             async with asyncio.timeout(60):
@@ -169,6 +175,10 @@ class Packets:
                         asyncio.get_running_loop().create_future()
                     )
                     self._waiting = (transfer, number, credit)
+                    if not started:
+                        started = True
+                        if submitted is not None:
+                            submitted()
                     await write(
                         json.dumps(
                             {
@@ -189,7 +199,8 @@ class Packets:
                     await asyncio.wait_for(credit, 15)
                     self._waiting = None
         except BaseException:
-            self._expire()
+            if started:
+                self._expire()
             raise
         finally:
             if self._waiting is not None:

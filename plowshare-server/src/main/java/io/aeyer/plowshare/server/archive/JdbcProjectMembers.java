@@ -152,6 +152,43 @@ public class JdbcProjectMembers implements ProjectMembers {
             : ProjectRole.parse(roles.getFirst()));
   }
 
+  @Override
+  public java.util.Set<String> readableProjects(
+      java.util.Collection<String> projects, String account) {
+    var selection =
+        new ReadSelection(account, projects == null ? null : new java.util.ArrayList<>(projects));
+    if (selection.projects().isEmpty()) return java.util.Set.of();
+    // Keep role().isPresent semantics exactly: machine principals use their live token ceiling;
+    // foreign Personal spaces fail closed; client projects use enabled raw membership; ordinary
+    // projects use the existing live RBAC function. This batches round trips, not policy caching.
+    return ArchiveUnavailableException.translating(
+        "read candidate project membership",
+        () ->
+            java.util.Set.copyOf(
+                jdbc.queryForList(
+                    """
+            WITH actor AS (SELECT ?::text AS handle, ?::text AS personal, ?::boolean AS service),
+                 requested AS (SELECT value AS project FROM jsonb_array_elements_text(?::jsonb))
+            SELECT requested.project FROM requested CROSS JOIN actor
+            WHERE CASE
+              WHEN actor.service THEN service_project_role(requested.project,actor.handle) IS NOT NULL
+              WHEN requested.project LIKE 'personal:%' AND requested.project<>actor.personal THEN FALSE
+              WHEN requested.project LIKE 'client:%' THEN EXISTS (
+                SELECT 1 FROM project_members m JOIN projects p ON p.id=m.project_id
+                JOIN admins a ON a.handle=m.handle AND a.enabled
+                WHERE p.name=requested.project AND m.handle=actor.handle)
+              ELSE authority_project_role(requested.project,actor.handle) IS NOT NULL
+            END
+            """,
+                    String.class,
+                    selection.account(),
+                    io.aeyer.plowshare.server.personal.PersonalSpaces.name(selection.account()),
+                    io.aeyer.plowshare.server.auth.ServiceCredentials.principal(
+                        selection.account()),
+                    io.aeyer.plowshare.server.information.InformationJson.json(
+                        selection.projects()))));
+  }
+
   public boolean mayWork(String project, String handle) {
     return role(project, handle).filter(role -> role.allows(ProjectRole.CONTRIBUTOR)).isPresent();
   }

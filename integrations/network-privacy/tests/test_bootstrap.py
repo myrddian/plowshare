@@ -6,10 +6,11 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from plowshare import Client, Delivery, Reply, TransportError
+from plowshare import Client, Delivery, Refusal, Reply, TransportError
 from plowshare.contracts import (
     AdminStatusDto,
     ApplicationDeploymentReceiptDto,
@@ -20,6 +21,7 @@ from plowshare.contracts import (
     FileStoreOptionDto,
     FileStoreReferenceDto,
     ScheduleFileDto,
+    ScheduleFilesRequest,
     ServerAccountDto,
 )
 from support import EXAMPLES, STAMP, CountingCollector, configuration
@@ -33,6 +35,7 @@ from plowshare_privacy.bootstrap import (
     inspect,
     install,
     private_root,
+    resolve_schedule,
     serve,
     start,
     wait_for_schedule,
@@ -71,6 +74,72 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         )
         self.destination = FileStoreReferenceDto(
             store="chosen-store", path="network-privacy-watch"
+        )
+
+    async def test_schedule_resolution_finds_later_page_and_never_mutates_server(
+        self,
+    ) -> None:
+        client = AsyncMock(spec=Client)
+        target = ScheduleFileDto(
+            project="network-privacy-watch",
+            source="server",
+            name="network_scan",
+            internal_name="actual-later-schedule",
+            status="active",
+            error=None,
+            definition=None,
+            path="schedules/network_scan.json",
+        )
+        page = tuple(
+            replace(target, name=f"other-{i}", internal_name=f"file-{i:03}")
+            for i in range(100)
+        )
+        client.request.side_effect = [
+            Reply("OK", None, page),
+            Reply("OK", None, (target,)),
+        ]
+        self.assertTrue(await resolve_schedule(self.setup, client))
+        self.assertEqual(Configuration.read(self.config).schedule, target.internal_name)
+        self.assertEqual(client.request.await_count, 2)
+        for call in client.request.call_args_list:
+            self.assertIsInstance(call.args[0], ScheduleFilesRequest)
+            self.assertEqual(call.args[0].limit, 100)
+        self.assertEqual(
+            client.request.call_args_list[1].args[0].after, page[-1].internal_name
+        )
+
+    async def test_schedule_resolution_revocation_leaves_config_and_admissions_untouched(
+        self,
+    ) -> None:
+        client = AsyncMock(spec=Client)
+        target = ScheduleFileDto(
+            project="network-privacy-watch",
+            source="server",
+            name="network_scan",
+            internal_name="actual-later-schedule",
+            status="active",
+            error=None,
+            definition=None,
+            path="schedules/network_scan.json",
+        )
+        page = tuple(
+            replace(target, name=f"other-{i}", internal_name=f"file-{i:03}")
+            for i in range(100)
+        )
+        before = self.config.read_bytes()
+        client.request.side_effect = [
+            Reply("OK", None, page),
+            Reply("FORBIDDEN", "revoked", ()),
+        ]
+        with self.assertRaises(Refusal):
+            await resolve_schedule(self.setup, client)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(client.request.await_count, 2)
+        self.assertTrue(
+            all(
+                isinstance(call.args[0], ScheduleFilesRequest)
+                for call in client.request.call_args_list
+            )
         )
 
     def client(self, *, lost: bool = False, writable: bool = True) -> AsyncMock:

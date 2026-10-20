@@ -14,6 +14,9 @@ public final class InformationEventPublisher implements AutoCloseable {
   private final AccountPushes pushes;
   private final Clock clock;
   private ScheduledExecutorService worker;
+  private boolean closed;
+  private final java.util.concurrent.CompletableFuture<Void> stopped =
+      new java.util.concurrent.CompletableFuture<>();
 
   public InformationEventPublisher(
       InformationEventRepository events, AccountPushes pushes, Clock clock) {
@@ -42,7 +45,7 @@ public final class InformationEventPublisher implements AutoCloseable {
   }
 
   public synchronized void start() {
-    if (worker != null) return;
+    if (closed || worker != null) return;
     worker =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("information-events").factory());
@@ -61,7 +64,24 @@ public final class InformationEventPublisher implements AutoCloseable {
   }
 
   @Override
-  public synchronized void close() {
-    if (worker != null) worker.shutdownNow();
+  public void close() {
+    ScheduledExecutorService stopping;
+    synchronized (this) {
+      if (closed) return;
+      closed = true;
+      stopping = worker;
+    }
+    try {
+      io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "information-events");
+      stopped.complete(null);
+    } catch (RuntimeException | Error failure) {
+      stopped.completeExceptionally(failure);
+      throw failure;
+    }
+  }
+
+  /** Acknowledges the owning close, including when another caller already started the drain. */
+  java.util.concurrent.CompletionStage<Void> shutdownCompletion() {
+    return stopped.minimalCompletionStage();
   }
 }

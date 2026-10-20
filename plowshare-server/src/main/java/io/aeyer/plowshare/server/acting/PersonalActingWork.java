@@ -141,6 +141,13 @@ public final class PersonalActingWork implements ActingWork {
   }
 
   @Override
+  public void requireReceipt(RequestAuthority.Delegated authority, Receipt retained) {
+    var binding =
+        repository.binding(retained.conversation()).orElseThrow(PersonalActingWork::refused);
+    requireBinding(authority, binding, ActingPermission.READ);
+  }
+
+  @Override
   public void requireJob(
       RequestAuthority.Delegated authority, String job, ActingPermission permission) {
     var admitted = repository.job(job).orElseThrow(PersonalActingWork::refused);
@@ -151,14 +158,21 @@ public final class PersonalActingWork implements ActingWork {
       RequestAuthority.Delegated caller,
       ActingWorkRepository.Admission admitted,
       ActingPermission permission) {
-    var retained = admitted.binding().authority();
+    requireBinding(caller, admitted.binding(), permission);
+  }
+
+  private void requireBinding(
+      RequestAuthority.Delegated caller,
+      ActingWorkRepository.Binding binding,
+      ActingPermission permission) {
+    var retained = binding.authority();
     if (!caller.actor().equals(retained.actor())
         || !caller.subject().equals(retained.subject())
         || !caller.delegation().application().equals(retained.delegation().application())
         || !caller.delegation().grant().equals(retained.delegation().grant())
         || !caller.delegation().proof().equals(retained.delegation().proof())) throw refused();
     require(caller, permission);
-    require(admitted.binding(), permission);
+    require(binding, permission);
   }
 
   private void require(ActingWorkRepository.Binding binding, ActingPermission permission) {

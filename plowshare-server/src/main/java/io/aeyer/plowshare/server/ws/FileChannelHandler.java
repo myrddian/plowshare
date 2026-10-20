@@ -317,22 +317,10 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   private final ProjectMembers members;
 
   /**
-   * Everything else that must forget a session once its file channel closes — asked for lazily, and
-   * never held as a fixed list.
-   *
-   * <h2>Why a {@code Supplier} and not the list itself</h2>
-   *
-   * <p><b>Breaks a cycle in the object graph, not merely in the package diagram.</b> {@code
-   * DefinitionResolver} is one of these listeners and is built from a {@link SessionChannel} — this
-   * class itself — so a constructor that demanded the list eagerly would need {@code
-   * DefinitionResolver} fully built before {@code FileChannelHandler} could finish being built,
-   * which needs {@code FileChannelHandler} fully built first. Neither bean could go first. A {@code
-   * Supplier} is called only from {@link #afterConnectionClosed}, long after the whole context has
-   * finished starting, so by the time it is ever invoked every listener genuinely exists.
-   *
-   * <p>{@code agents/} knows nothing of this field or of this class — see {@link
-   * SessionCloseListener}'s own javadoc for why the interface it implements lives in {@code files/}
-   * rather than in either package that actually uses it.
+   * Session cleanup callbacks. The supplier breaks the construction cycle with DefinitionResolver,
+   * which itself uses this SessionChannel. Production composition resolves an immutable snapshot
+   * after singleton initialization; this supplier must never look up beans during socket cleanup,
+   * which can occur after the Spring context closes.
    */
   private final Supplier<List<SessionCloseListener>> closeListeners;
 

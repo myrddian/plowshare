@@ -210,3 +210,21 @@ describe('portable SHA-256', () => {
     }
   });
 });
+
+it('does not retain or send a buffer encoded during reentrant transport close', () => {
+  const wire = new Wire();
+  const socket: Socket = packetSocket({
+    socket: wire,
+    codec: {
+      ...codec,
+      encode: (text) => {
+        socket.close();
+        return codec.encode(text);
+      },
+    },
+    schedule: () => () => undefined,
+  });
+  expect(() => socket.send('closed by encoder')).toThrow(/closed/);
+  expect(wire.closed).toBe(true);
+  expect(wire.sent).toHaveLength(0);
+});

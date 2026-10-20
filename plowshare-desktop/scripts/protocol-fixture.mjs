@@ -240,8 +240,30 @@ export async function protocolFixture(options = {}) {
     const client = { socket: connection, following: new Set() };
     eventSockets.set(sessionId, client);
     connection.on('close', () => eventSockets.delete(sessionId));
+    let domainSeen = false, concurrent = false;
     connection.on('message', async bytes => {
-      const frame = JSON.parse(bytes.toString()); frames.push(frame);
+      const frame = JSON.parse(bytes.toString());
+      // Connection control is not a domain operation: keep smoke assertions and scripted
+      // operation counts unchanged while exercising the production connector's opening.
+      const validId = typeof frame.id === 'string' && frame.id.length > 0
+        && frame.id === frame.id.trim() && Buffer.byteLength(frame.id, 'utf8') <= 128
+        && !/[\u0000-\u001f\u007f-\u009f\uD800-\uDFFF]/u.test(frame.id);
+      if (frame.type === 'transport.dispatch') {
+        if (domainSeen || concurrent || !validId || frame.protocol_version !== 'plowshare-v1'
+          || Object.hasOwn(frame, 'actingFor') || frame.payload === null
+          || typeof frame.payload !== 'object' || Array.isArray(frame.payload)
+          || Object.keys(frame.payload).length !== 1 || frame.payload.mode !== 'concurrent-v1') {
+          connection.close(1008, 'Invalid dispatch selection');
+          return;
+        }
+        concurrent = true;
+        connection.send(JSON.stringify({id: frame.id, type: frame.type, protocol_version: 'plowshare-v1',
+          payload: {code: 'OK', payload: {mode: 'concurrent-v1', maxPending: 64, maxIdBytes: 128}}}));
+        return;
+      }
+      if (concurrent && !validId) { connection.close(1008, 'Invalid request correlation ID'); return; }
+      domainSeen = true;
+      frames.push(frame);
       const payload = frame.payload;
       let result = { code: 'OK' };
       if (options.ownerProvider && (frame.type.startsWith('provider.') || frame.type.startsWith('tool.scope.'))) {

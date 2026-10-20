@@ -99,6 +99,6 @@ try {
   await library.locator('#library-documents').click();
   await expect(library.locator('#report-filter')).toBeHidden();
   assert.deepEqual(errors,[]);
-  assert.deepEqual([...new Set(fixture.httpPaths)].sort(),['/v1/auth/login','/v1/auth/refresh','/v1/auth/ticket']);
+  assert.deepEqual([...new Set(fixture.httpPaths)].filter(path => path !== '/v1/auth/refresh').sort(),['/v1/auth/login','/v1/auth/ticket']);
   console.log('PASS: compact report filters, question toolbar, dominant reading area at three sizes, complete Markdown across WS read boundaries, safe links and HTML, rendered and raw quotation offsets, retained drafts, duplicate question guard and collection reset over WS.');
 } finally { await app?.close(); await fixture.close(); await rm(profile,{recursive:true,force:true}); }

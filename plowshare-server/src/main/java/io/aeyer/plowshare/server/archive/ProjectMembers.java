@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.archive;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Durable project membership and live role grants. Callers supply authenticated principals.
@@ -54,6 +56,42 @@ public interface ProjectMembers {
   void remove(String project, String handle, String actor);
 
   boolean mayUse(String project, String handle);
+
+  /**
+   * Resolve this candidate set under current read authority in one operation. Implementations may
+   * batch database work; the immutable result is not an authorization lease or a shared cache.
+   * Application/issuance boundaries remain part of each implementation's effective mayUse policy.
+   */
+  default Set<String> readableProjects(Collection<String> projects, String account) {
+    var selection =
+        new ReadSelection(account, projects == null ? null : new java.util.ArrayList<>(projects));
+    return selection.projects().stream()
+        .filter(project -> mayUse(project, account))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  /** Exact authenticated principal and deduplicated project identities; no coercion or trimming. */
+  record ReadSelection(String account, List<String> projects) {
+    public ReadSelection {
+      if (account == null
+          || account.isBlank()
+          || !account.equals(account.strip())
+          || account.length() > 256
+          || account.codePoints().anyMatch(Character::isISOControl))
+        throw new IllegalArgumentException("Authenticated project account required");
+      if (projects == null
+          || projects.stream()
+              .anyMatch(
+                  project ->
+                      project == null
+                          || project.isBlank()
+                          || !project.equals(project.strip())
+                          || project.length() > 1024
+                          || project.codePoints().anyMatch(Character::isISOControl)))
+        throw new IllegalArgumentException("Exact bounded project identities required");
+      projects = projects.stream().distinct().sorted().toList();
+    }
+  }
 
   public record Grant(String handle, ProjectRole role) {}
 

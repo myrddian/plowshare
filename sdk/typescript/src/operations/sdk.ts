@@ -1,5 +1,9 @@
 import type { RequestOptions } from '../binding/acting.ts';
-export type { RequestOptions, ActingSelection } from '../binding/acting.ts';
+export type {
+  RequestOptions,
+  ActingSelection,
+  RequestSignal,
+} from '../binding/acting.ts';
 import {
   decodeMetadataValidation,
   type MetadataValidationResult,
@@ -33,7 +37,7 @@ export type {
 import { decodeServerPush, type ServerPush } from './push.ts';
 import { connect, ConnectionFault } from '../binding/connection.ts';
 import type {
-  Connection,
+  Connected,
   ConnectOptions as WireConnectOptions,
 } from '../binding/connection.ts';
 import type { Code } from '../binding/codes.ts';
@@ -169,11 +173,12 @@ export function requirePayload<K extends Operation>(
  * Raw envelope diagnostics remain in the transport, outside application APIs.
  */
 export class Plowshare {
-  private readonly connection: Connection;
+  private readonly connection: Connected;
   readonly session: string | undefined;
   constructor(options: ConnectOptions & { readonly session?: string }) {
     this.connection = connect({
       ...options,
+      dispatchMode: options.dispatchMode ?? 'concurrent-v1',
       onPush: (value) => {
         let push: ServerPush;
         try {
@@ -192,6 +197,10 @@ export class Plowshare {
       },
     });
     this.session = options.session;
+  }
+  /** Confirm dispatch capabilities before submitting dependent application work. */
+  ready(): Promise<void> {
+    return this.connection.ready();
   }
   async request<K extends Operation>(
     type: K,
@@ -297,6 +306,10 @@ export class Plowshare {
   }
   close(): void {
     this.connection.close();
+  }
+  /** Close and wait for transport-owned physical request buffers to retire. */
+  closeAsync(): Promise<void> {
+    return this.connection.closeAsync();
   }
 }
 

@@ -53,6 +53,32 @@ const failed = assert.rejects(abandoned, error => error.delivery === 'UNKNOWN')
 assert.equal((await submitted).kind, 'fixture-submitted')
 cancelled.close()
 await failed
+// A public typed connection must complete B while the fixture still holds A.
+let firstArrived;
+const arrived = new Promise(resolve => { firstArrived = resolve });
+const concurrent = await connectPlowshare({origin,token:'sdk-fixture-token',session:'typed-node/multiplex',onPush:() => firstArrived()});
+try {
+    let firstDone = false;
+    const first = concurrent.request('project.list',{}).then(reply => {firstDone = true; return reply});
+    await arrived;
+    const second = await concurrent.request('project.list',{});
+    assert.equal(requirePayload(second)[0].name,'second');
+    assert.equal(firstDone,false,'A completed before the explicit release request');
+    assert.equal(requirePayload(await concurrent.request('project.list',{}))[0].name,'third');
+    assert.equal(requirePayload(await first)[0].name,'first');
+} finally { concurrent.close() }
+
+let capacityReached;
+const full = new Promise(resolve => {capacityReached = resolve});
+const capacity = await connectPlowshare({origin,token:'sdk-fixture-token',session:'typed-node/capacity',timeoutMs:5000,
+    onPush:push => {if(push.kind==='inbox.changed' && push.unread===64)capacityReached()}});
+const calls = Array.from({length:64},() => capacity.request('project.list',{}).then(
+    () => {throw new Error('Held capacity call unexpectedly succeeded')}, error => error));
+await full;
+await assert.rejects(capacity.request('project.list',{}), error => error.delivery==='NOT_SUBMITTED');
+capacity.close();
+assert.ok((await Promise.all(calls)).every(error => error.delivery==='UNKNOWN'));
+
 const management = await connectPlowshare({ origin, token: 'sdk-fixture-token', session: 'typed-node/provider-owner-compat' });
 try {
     for(const operation of ['provider.connection.list','tool.scope.host.list']) {

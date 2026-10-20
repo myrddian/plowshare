@@ -107,8 +107,18 @@ export interface AdministrativePayloads {
     readonly project?: string | null;
     readonly source: 'server' | 'workspace';
   };
-  'schedule.files': { readonly project?: string };
-  'schedule.list': { readonly project?: string };
+  /** Exclusive internalName cursor; default 50, maximum 100; each page rechecks authority. */
+  'schedule.files': {
+    readonly project?: string;
+    readonly after?: string;
+    readonly limit?: number;
+  };
+  /** Exclusive schedule-name cursor; default 50, maximum 100. */
+  'schedule.list': {
+    readonly project?: string;
+    readonly after?: string;
+    readonly limit?: number;
+  };
   'schedule.define': {
     readonly schedule: string;
     readonly cron: string;

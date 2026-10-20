@@ -107,6 +107,36 @@ public interface ScheduleDefinitionStore {
 
   List<Source> sources();
 
+  /** Lightweight source identities only: owner selection, or every registrar in one project. */
+  List<Source> sourcesForInspection(String account, String project);
+
+  /**
+   * Operation-local source admission. Services establish current authority; repositories retain
+   * these complete source identities and scope predicates before LIMIT. The DTO is not an
+   * authorization lease.
+   */
+  record FileSelection(String account, String project, List<Source> sources) {
+    public FileSelection {
+      if (account == null || account.isBlank() || account.length() > 256)
+        throw new IllegalArgumentException("Authenticated schedule account required");
+      sources = sources.stream().sorted(java.util.Comparator.comparingLong(Source::id)).toList();
+      if (sources.stream().map(Source::id).distinct().count() != sources.size()
+          || sources.stream()
+              .anyMatch(
+                  s ->
+                      s.id() < 1
+                          || (project == null
+                              ? !account.equals(s.account())
+                              : !project.equals(s.project()))))
+        throw new IllegalArgumentException("Schedule sources differ from the admitted selection");
+    }
+  }
+
+  /**
+   * Bounded typed file projection ordered by its unique internal name, under the supplied scope.
+   */
+  List<ScheduledWork.File> filesPage(FileSelection selection, SchedulePage page);
+
   List<ScheduledWork.File> files(Source source);
 
   /** Current keyed projection; transaction callers must obtain the source lock before reuse. */

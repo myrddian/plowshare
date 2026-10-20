@@ -25,6 +25,15 @@ public final class AuthorizedActingHistory implements ActingHistory {
   }
 
   @Override
+  public void requireReadable(RequestAuthority.Delegated authority, String conversation) {
+    var resource =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, conversation);
+    if (!resource.id().equals(conversation))
+      throw new CallerFault("Choose an exact conversation ID");
+    check(authority, project(resource));
+  }
+
+  @Override
   public List<TurnRecord> turns(RequestAuthority.Delegated authority, String conversation) {
     var resource =
         new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, conversation);

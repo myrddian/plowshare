@@ -110,7 +110,7 @@ test('single executable with no runtime on PATH: shared login, CLI/MCP/TUI opera
     tui.child.stdin.end();
     assert.equal((await tui.finished).code, 0, tui.error() + plain());
     for (const operation of ['agent.list', 'memory.index', 'memory.navigate', 'conversation.open']) assert.ok(fixture.frames.some(frame => frame.type === operation), operation);
-    assert.deepEqual([...new Set(fixture.httpPaths)].sort(), ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket']);
+    assert.deepEqual([...new Set(fixture.httpPaths)].filter(path => path !== '/v1/auth/refresh').sort(), ['/v1/auth/login', '/v1/auth/ticket']);
     assert.equal(fixture.httpPaths.filter(path => path === '/v1/auth/login').length, 1, 'all subsequent clients must reuse the saved token');
     assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 2, 'each TUI entry starts exactly one agent run');
     assert.ok(fixture.frames.some(frame => frame.type === 'agent.list' && frame.payload?.project === 'Empty workspace'), 'project discovery must use the caller directory, not the installed executable directory');

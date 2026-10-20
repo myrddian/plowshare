@@ -54,14 +54,15 @@ class ScopedInspectionTest {
   void scopedInspectionCannotEnumerateAnotherProjectsProjection() {
     var schedules = mock(ScheduleStore.class);
     var definitions = mock(ScheduleDefinitions.class);
-    when(definitions.list("owner", "app")).thenReturn(List.of());
-    when(schedules.list()).thenReturn(List.of(mock(ScheduleRecord.class)));
+    when(schedules.page("owner", "app", new SchedulePage(null, 50))).thenReturn(List.of());
     assertEquals(
         List.of(),
         new ScheduleListHandler(schedules, () -> definitions)
             .handle(Map.of("project", "app"), new Asking("session", "owner"))
             .payload());
-    verify(definitions).list("owner", "app");
+    verify(definitions, times(2)).requireRead("owner", "app");
+    verify(definitions, never()).list(anyString(), anyString());
+    verify(schedules, never()).list();
   }
 
   @Test

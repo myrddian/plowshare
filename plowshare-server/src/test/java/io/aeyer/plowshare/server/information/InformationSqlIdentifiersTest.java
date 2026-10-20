@@ -15,6 +15,7 @@ class InformationSqlIdentifiersTest {
           IllegalArgumentException.class,
           () -> InformationFacetSql.facets(InformationFacets.NONE, value, "q"));
       assertThrows(IllegalArgumentException.class, () -> InformationSql.read(null, value));
+      assertThrows(IllegalArgumentException.class, () -> InformationSql.discovery(null, value));
     }
   }
 }

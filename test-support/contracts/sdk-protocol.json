@@ -10556,6 +10556,12 @@
       "shape523": {
         "type": "object",
         "properties": {
+          "after": {
+            "$ref": "#/$defs/shape1"
+          },
+          "limit": {
+            "$ref": "#/$defs/shape16"
+          },
           "project": {
             "$ref": "#/$defs/shape1"
           }
@@ -10577,6 +10583,12 @@
       "shape525": {
         "type": "object",
         "properties": {
+          "after": {
+            "$ref": "#/$defs/shape1"
+          },
+          "limit": {
+            "$ref": "#/$defs/shape16"
+          },
           "project": {
             "$ref": "#/$defs/shape1"
           }

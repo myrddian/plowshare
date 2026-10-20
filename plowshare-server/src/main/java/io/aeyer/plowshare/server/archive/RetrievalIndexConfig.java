@@ -53,21 +53,25 @@ public class RetrievalIndexConfig {
   @Bean
   public SmartLifecycle passageRepairWorker(PassageIndex index, Environment env) {
     return new SmartLifecycle() {
-      private ScheduledExecutorService worker;
+      private volatile ScheduledExecutorService worker;
+      private boolean closed;
+      private volatile boolean running;
+      private final CompletableFuture<Void> stopped = new CompletableFuture<>();
 
       public boolean isRunning() {
-        return worker != null && !worker.isShutdown();
+        return running;
       }
 
       public boolean isAutoStartup() {
         return env.getProperty("plowshare.retrieval.worker-enabled", Boolean.class, true);
       }
 
-      public void start() {
-        if (isRunning()) return;
+      public synchronized void start() {
+        if (closed || isRunning()) return;
         worker =
             Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("retrieval-repair").factory());
+        running = true;
         worker.scheduleWithFixedDelay(
             () -> {
               try {
@@ -83,7 +87,26 @@ public class RetrievalIndexConfig {
       }
 
       public void stop() {
-        if (worker != null) worker.shutdownNow();
+        ScheduledExecutorService stopping;
+        synchronized (this) {
+          if (closed) return;
+          closed = true;
+          stopping = worker;
+        }
+        try {
+          io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "retrieval-repair");
+          running = false;
+          stopped.complete(null);
+        } catch (RuntimeException | Error failure) {
+          running = false;
+          stopped.completeExceptionally(failure);
+          throw failure;
+        }
+      }
+
+      public void stop(Runnable callback) {
+        stopped.whenComplete((ignored, failure) -> callback.run());
+        Thread.ofVirtual().name("retrieval-repair-shutdown").start(this::stop);
       }
     };
   }

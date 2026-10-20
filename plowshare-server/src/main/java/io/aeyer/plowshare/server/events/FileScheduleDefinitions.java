@@ -66,6 +66,14 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   }
 
   public List<ScheduledWork.File> list(String account, String project) {
+    requireRead(account, project);
+    return store.sources().stream()
+        .filter(s -> project.equals(s.project()))
+        .flatMap(s -> store.files(s).stream())
+        .toList();
+  }
+
+  public void requireRead(String account, String project) {
     if (project == null
         || project.isBlank()
         || !project.equals(project.strip())
@@ -76,10 +84,43 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
         || io.aeyer.plowshare.server.archive.ClientProjects.privateProject(project))
       throw new CallerFault("Choose an ordinary project for schedule inspection");
     members.requireRole(project, account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
-    return store.sources().stream()
-        .filter(s -> project.equals(s.project()))
-        .flatMap(s -> store.files(s).stream())
-        .toList();
+  }
+
+  public List<ScheduledWork.File> page(String account, String project, SchedulePage page) {
+    Objects.requireNonNull(page);
+    if (project != null) requireRead(account, project);
+    var sources = store.sourcesForInspection(account, project);
+    if (project == null) {
+      sources = sources.stream().filter(s -> s.account().equals(account)).toList();
+      var candidates =
+          sources.stream()
+              .map(ScheduleDefinitionStore.Source::project)
+              .filter(Objects::nonNull)
+              .collect(java.util.stream.Collectors.toSet());
+      Set<String> readable =
+          candidates.isEmpty() ? Set.of() : members.readableProjects(candidates, account);
+      sources =
+          sources.stream()
+              .filter(s -> s.project() == null || readable.contains(s.project()))
+              .toList();
+    }
+    var selected = new ScheduleDefinitionStore.FileSelection(account, project, sources);
+    var result = store.filesPage(selected, page);
+    if (project != null) requireRead(account, project);
+    else {
+      // The source can move after its lightweight admission and before the cache's version
+      // capture/load. Authorize the DTOs' actual projects, not their earlier source labels. This
+      // disclosure batch is bounded by the page, regardless of the number of registered folders.
+      var disclosedProjects =
+          result.stream()
+              .map(ScheduledWork.File::project)
+              .filter(Objects::nonNull)
+              .collect(java.util.stream.Collectors.toSet());
+      if (!disclosedProjects.isEmpty()
+          && !members.readableProjects(disclosedProjects, account).containsAll(disclosedProjects))
+        throw new CallerFault("Schedule read authority changed; request the page again");
+    }
+    return result;
   }
 
   public void poll() {

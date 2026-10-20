@@ -31,6 +31,8 @@ Information: all scoped source/evidence/report/lifecycle/migration operations.
 Approval: list, answer, revoke. Orchestration: definitions, list, status, answer,
      start, receipt, wait, resume, cancel, caps, record. Inbox: list, read. Todos: read.
 Schedule: list, define, read, pause, forget. Trigger: list, define, pause, forget.
+     Schedule list/files accept JSON {project?,after?,limit?}: default 50, maximum 100.
+     Continue after the last name (list) or internalName (files); short pages end traversal.
 Event: fire. Firing: list. Provider: list, deregister. Board: topup.
 Provider connection: list, status, save, change, receipt [JSON].
 Provider credential: status, put, authorize, refresh, revoke, rekey [JSON].

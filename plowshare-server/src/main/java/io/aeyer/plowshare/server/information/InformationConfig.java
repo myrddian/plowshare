@@ -417,18 +417,11 @@ public class InformationConfig {
   }
 
   @Bean
-  public org.springframework.context.ApplicationListener<
-          org.springframework.boot.context.event.ApplicationReadyEvent>
-      informationQueueStart(
-          InformationLifecycle lifecycle,
-          InformationAcquisitions acquisitions,
-          InformationEventPublisher events,
-          InformationInvalidationPublisher invalidations) {
-    return ready -> {
-      lifecycle.start();
-      acquisitions.start();
-      events.start();
-      invalidations.start();
-    };
+  public InformationQueueLifecycle informationQueueStart(
+      InformationLifecycle lifecycle,
+      InformationAcquisitions acquisitions,
+      InformationEventPublisher events,
+      InformationInvalidationPublisher invalidations) {
+    return new InformationQueueLifecycle(lifecycle, acquisitions, events, invalidations);
   }
 }

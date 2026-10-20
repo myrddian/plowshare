@@ -78,17 +78,21 @@ public class EmbeddingConfig {
   public SmartLifecycle dualEmbeddingRepairWorker(
       EmbeddingMaintenance dual, EmbeddingProperties properties) {
     return new SmartLifecycle() {
-      private ScheduledExecutorService executor;
+      private volatile ScheduledExecutorService executor;
+      private boolean closed;
+      private volatile boolean running;
+      private final CompletableFuture<Void> stopped = new CompletableFuture<>();
 
       public boolean isRunning() {
-        return executor != null && !executor.isShutdown();
+        return running;
       }
 
-      public void start() {
-        if (isRunning()) return;
+      public synchronized void start() {
+        if (closed || isRunning()) return;
         executor =
             Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("dual-embedding-repair").factory());
+        running = true;
         executor.scheduleWithFixedDelay(
             () -> {
               if (properties.paused()) return;
@@ -107,7 +111,27 @@ public class EmbeddingConfig {
       }
 
       public void stop() {
-        if (executor != null) executor.shutdownNow();
+        ScheduledExecutorService stopping;
+        synchronized (this) {
+          if (closed) return;
+          closed = true;
+          stopping = executor;
+        }
+        try {
+          io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(
+              stopping, "dual-embedding-repair");
+          running = false;
+          stopped.complete(null);
+        } catch (RuntimeException | Error failure) {
+          running = false;
+          stopped.completeExceptionally(failure);
+          throw failure;
+        }
+      }
+
+      public void stop(Runnable callback) {
+        stopped.whenComplete((ignored, failure) -> callback.run());
+        Thread.ofVirtual().name("dual-embedding-repair-shutdown").start(this::stop);
       }
     };
   }

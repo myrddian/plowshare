@@ -34,6 +34,24 @@ public final class InformationSql {
     return new Filter(predicate, args);
   }
 
+  /**
+   * Select a corpus through one statement-local authority relation before paging, coverage or
+   * ranking. Unlike a targeted read, discovery must not repeat recursive grant and dependency
+   * resolution for every document or passage. The retained ceiling is evaluated by the selection
+   * routine; typed-content exclusion remains the same as {@link #read}.
+   */
+  public static Filter discovery(InformationContext context, String documentAlias) {
+    if (!java.util.Set.of("d", "r", "information_row")
+        .contains(documentAlias == null ? "" : documentAlias))
+      throw new IllegalArgumentException("document alias must belong to the repository vocabulary");
+    var selected = InformationSelectionSql.catalogue(context, null);
+    var content = content(context, documentAlias);
+    var args = new java.util.ArrayList<>(selected.arguments());
+    args.addAll(content.arguments());
+    return new Filter(
+        selected.sql().replace("r.id", documentAlias + ".id") + " AND " + content.sql(), args);
+  }
+
   /** Intersect every read path with the operation ceiling, including dependency closure. */
   public static Filter boundary(InformationContext context, String revision) {
     if (!java.util.Set.of(

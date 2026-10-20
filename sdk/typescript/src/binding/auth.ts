@@ -1,5 +1,5 @@
 import { connect } from './connection.ts';
-import type { Connection, Socket } from './connection.ts';
+import type { Connection, Socket, ConnectOptions } from './connection.ts';
 import { FILES_PATH } from './files.ts';
 
 /**
@@ -155,8 +155,11 @@ export interface Standing {
 
 /** What {@link openSocket} is given on top of a {@link Door}. */
 export interface SocketDoor extends Door {
-  /** A platform credential store may coordinate and persist renewal. */
-  readonly renew?: () => Promise<Tokens>;
+  readonly dispatchMode?: 'concurrent-v1' | 'ordered';
+  readonly deadline?: ConnectOptions['deadline'];
+  /** Coordinate/persist rotation. A rejected access token lets the store reuse
+   * a newer pair another client already saved; omitted means explicit renewal. */
+  readonly renew?: (rejectedAccess?: string) => Promise<Tokens>;
   readonly open: Opening;
 
   /**
@@ -191,8 +194,7 @@ export interface SocketDoor extends Door {
   readonly onClose?: () => void;
 }
 
-/** What {@link openSocket} hands back: the connection, and the pair the
- *  refresh rotated to. See that function for why the tokens are returned. */
+/** The opened connection and its current pair, including any persisted rotation. */
 export interface Opened {
   readonly connection: Connection;
   readonly tokens: Tokens;
@@ -510,6 +512,9 @@ export async function ticket(door: Door, tokens: Tokens): Promise<string> {
   if (answer.status === 403) {
     throw new MustChangePassword();
   }
+  if (answer.status === 401) {
+    throw new AccessTokenRejected();
+  }
   if (answer.status !== 200) {
     throw new Error(`POST /v1/auth/ticket answered ${answer.status}`);
   }
@@ -531,9 +536,9 @@ export async function ticket(door: Door, tokens: Tokens): Promise<string> {
  * question and not the second, since the must-change header is otherwise
  * written only on a login response nobody has kept.
  *
- * <p>{@link openSocket} does <b>not</b> call this, deliberately: it would be a
- * third round trip to learn something the tokens in hand already say, and the
- * 403 that `ticket` answers covers the case where they are wrong.
+ * <p>{@link openSocket} uses the ticket response directly instead of adding
+ * this probe: only an explicit 401 requires renewal, while 403 identifies
+ * a restricted session and transport failures leave the saved pair untouched.
  */
 export async function standing(door: Door, tokens: Tokens): Promise<Standing> {
   const answer = await door.fetch(`${door.base}/v1/auth/session`, {
@@ -553,43 +558,44 @@ export async function standing(door: Door, tokens: Tokens): Promise<Standing> {
   };
 }
 
+/** An explicit ticket refusal is the only reason to rotate during connection bootstrap. */
+class AccessTokenRejected extends Error {
+  constructor() {
+    super('POST /v1/auth/ticket answered 401');
+    this.name = 'AccessTokenRejected';
+  }
+}
+
 /**
- * <b>Refresh, then ticket, then open. In that order, every time, and this
- * function is where the order lives.</b>
- *
- * <h2>Why the order is the whole point</h2>
- *
- * <p>A ticket is minted against a live access token and is good for seconds.
- * After an idle period the access token is the stale half, so a reconnect that
- * goes straight for a ticket fails <b>at the ticket step, not at the socket
- * step</b> — and a client that reads that failure as "the ticket did not work"
- * retries the ticket, which fails again, forever. The spec calls this the one
- * ordering a TUI author will get wrong, and asks for a function rather than a
- * note in a README, which is this one: nothing above it has to remember,
- * because nothing above it has an opportunity to get it wrong.
- *
- * <p><b>It refreshes unconditionally rather than when the access token looks
- * expired</b>, because a client cannot tell. The token is opaque — it carries
- * no expiry a client can read — so the only way to find out is to spend a
- * request asking, and that request costs exactly what the refresh that makes
- * the question moot costs. One round trip, spent on the answer rather than on
- * the question.
- *
- * <h2>Why the rotated tokens come back</h2>
- *
- * <p>Refreshing <i>rotates</i>: the refresh token just presented is retired and
- * a new one issued. A caller that kept its original pair would present a
- * retired token on the next reconnect, and this server's `TokenStore` treats a
- * retired token being presented again as reuse — theft — and kills the whole
- * chain. So {@link Opened} carries the new pair, and dropping it on the floor
- * is not something a caller can do by accident: `connection` and `tokens`
- * arrive together.
- *
- * @throws MustChangePassword before any request when the pair has no refresh
- *     half, since both steps below would fail and the honest reason for both is
- *     the flag
+ * Try the current access token before rotating the single-use refresh token.
+ * A refused access token permits one renewal and one new ticket request. Network
+ * failures, malformed replies and other statuses never trigger rotation or replay.
+ * The renewal owner must retain the pair before a subsequent ticket/upgrade fails.
  */
-/** `rotated` retains the new pair even if ticketing or opening the socket subsequently fails. */
+async function connectionTicket(
+  door: Door & {
+    readonly renew?: (rejectedAccess?: string) => Promise<Tokens>;
+  },
+  tokens: Tokens,
+  rotated?: (tokens: Tokens) => void,
+): Promise<{ pass: string; tokens: Tokens }> {
+  if (tokens.refresh === undefined) throw new MustChangePassword();
+  try {
+    return { pass: await ticket(door, tokens), tokens };
+  } catch (error) {
+    if (!(error instanceof AccessTokenRejected)) throw error;
+  }
+  const renewed = await (door.renew?.(tokens.access) ?? refresh(door, tokens));
+  rotated?.(renewed);
+  return { pass: await ticket(door, renewed), tokens: renewed };
+}
+
+/**
+ * Open with a fresh single-use ticket, renewing only after an explicit access
+ * refusal. Unavailable servers cannot poison an otherwise valid saved session.
+ * `rotated` retains a new pair before any later ticket or upgrade can fail;
+ * `tokens` always returns the pair the connection used, whether rotated or reused.
+ */
 export async function openSocket(
   door: SocketDoor,
   tokens: Tokens,
@@ -599,26 +605,21 @@ export async function openSocket(
   // cannot become one after two round trips either, and discovering it there
   // would report a mistyped configuration as a socket that would not open.
   const socketBase = schemed(door.base);
-  if (tokens.refresh === undefined) {
-    // Ahead of the refresh rather than inside it, so that nothing goes out
-    // on the wire for a session that cannot possibly succeed: the ticket
-    // would be a 403 and the refresh a 401, and neither status is the
-    // sentence a person needs to read.
-    throw new MustChangePassword();
-  }
-  const renewed = await (door.renew?.() ?? refresh(door, tokens));
-  rotated?.(renewed);
-  const pass = await ticket(door, renewed);
+  const authorized = await connectionTicket(door, tokens, rotated);
+  const pass = authorized.pass;
   const socket = await door.open(eventsUrl(socketBase, pass, door.session));
   // Spread-or-nothing on each listener rather than a property holding
   // `undefined`, which `exactOptionalPropertyTypes` refuses and which is the
   // same discipline `Tokens.refresh` is kept to: absent means absent.
   const connection = connect({
     socket,
+    dispatchMode: door.dispatchMode ?? 'ordered',
+    ...(door.deadline === undefined ? {} : { deadline: door.deadline }),
     ...(door.onPush === undefined ? {} : { onPush: door.onPush }),
     ...(door.onClose === undefined ? {} : { onClose: door.onClose }),
   });
-  return { connection, tokens: renewed };
+  await connection.ready();
+  return { connection, tokens: authorized.tokens };
 }
 
 /** Machine credentials do not refresh or enter the interactive password-change flow. */
@@ -634,9 +635,12 @@ export async function openServiceSocket(
   const socket = await door.open(eventsUrl(socketBase, pass, door.session));
   const connection = connect({
     socket,
+    dispatchMode: door.dispatchMode ?? 'ordered',
+    ...(door.deadline === undefined ? {} : { deadline: door.deadline }),
     ...(door.onPush === undefined ? {} : { onPush: door.onPush }),
     ...(door.onClose === undefined ? {} : { onClose: door.onClose }),
   });
+  await connection.ready();
   return { connection, tokens };
 }
 
@@ -700,51 +704,34 @@ export interface Claim {
 
 export interface FilesOpened {
   readonly socket: Socket;
-  /** The rotated pair. The one passed in is retired and must not be presented again. */
+  /** The current pair, including any renewal performed before opening. */
   readonly tokens: Tokens;
 }
 
 /**
- * The file channel, opened with a claim — {@link openSocket}'s three steps for the
- * other path.
+ * Open file presence with a single-use ticket and an explicit claim. As with
+ * events, reuse the live access token and rotate only after a ticket's 401.
+ * Returns the raw socket for the caller's file-serving owner.
  *
- * <p><b>It refreshes too, and has to.</b> A person roots a project minutes or hours
- * after signing in, and the access token that signed them in has long expired by
- * then; a ticket asked for with it would be a 401 that reads as "your session is
- * gone". The cost is the one {@link Opened} already documents: the pair rotates,
- * and a caller that kept the old one kills its own chain on the next open.
- *
- * <p>Returns the raw socket rather than a served one: what answers is the view's to
- * choose, and `channel.serve` takes it from there.
- *
- * @param renewed told the rotated pair the moment the refresh returns it — before
- *     the ticket and the open, either of which can still throw
+ * @param renewed retains a rotated pair before ticketing or opening can fail
  */
 export async function openFiles(
   door: Door & {
     readonly open: Opening;
     readonly session: string;
-    readonly renew?: () => Promise<Tokens>;
+    readonly renew?: (rejectedAccess?: string) => Promise<Tokens>;
   },
   tokens: Tokens,
   claim: Claim,
   renewed?: (tokens: Tokens) => void,
 ): Promise<FilesOpened> {
   const socketBase = schemed(door.base);
-  if (tokens.refresh === undefined) {
-    throw new MustChangePassword();
-  }
-  const rotated = await (door.renew?.() ?? refresh(door, tokens));
-  // HANDED OVER BEFORE ANYTHING ELSE CAN FAIL. Once the refresh has answered,
-  // the pair passed in is retired whatever happens next; a ticket or an open
-  // that throws would otherwise take the only copy of the new pair with it,
-  // and the caller's next open would present a dead token and end the chain.
-  renewed?.(rotated);
-  const pass = await ticket(door, rotated);
+  const authorized = await connectionTicket(door, tokens, renewed);
+  const pass = authorized.pass;
   const socket = await door.open(
     filesUrl(socketBase, pass, door.session, claim),
   );
-  return { socket, tokens: rotated };
+  return { socket, tokens: authorized.tokens };
 }
 
 /**

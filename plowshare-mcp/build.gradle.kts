@@ -43,7 +43,7 @@ val mcpTest by tasks.registering(Exec::class) {
     group = "verification"
     mcpSources()
     dependsOn(mcpTestTypes)
-    commandLine("node", "--test", "build-tests/compatibility.test.js", "build-tests/evidence.test.js", "build-tests/socket.test.js")
+    commandLine("node", "--test", "build-tests/compatibility.test.js", "build-tests/evidence.test.js", "build-tests/socket.test.js", "build-tests/requests.test.js")
 }
 tasks.named("assemble") { dependsOn(mcpBuild) }
 tasks.named("check") { dependsOn(mcpTest, ":plowshare-server:nodeSourceTest") }

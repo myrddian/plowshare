@@ -88,8 +88,10 @@ node scripts/install-manual.mjs --url https://plowshare.example --global
 ```
 
 The authenticated human remains the creator; Global is the custodian. New
-Global-held roots use their existing GLOBAL_READ audience. Global does not become
-an ordinary conversation/run destination, and no Global type registry is created.
+Global-held roots use their existing GLOBAL_READ audience. The installer verifies
+each chapter with a separate `global_read` read before reporting Help availability;
+access through the administering account alone does not prove publication. Global
+does not become an ordinary conversation/run destination, and no Global type registry is created.
 The installer supports the Markdown/manual path, not arbitrary cross-account or
 multipart imports.
 

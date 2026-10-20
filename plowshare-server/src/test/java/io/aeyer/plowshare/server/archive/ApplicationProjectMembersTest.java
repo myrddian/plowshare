@@ -85,4 +85,81 @@ class ApplicationProjectMembersTest {
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
     assertFalse(effective.mayUse("chatbot", principal));
   }
+
+  @Test
+  void
+      batched_read_presence_preserves_manifest_and_lineage_intersections_without_stored_role_reads() {
+    var lineage = mock(io.aeyer.plowshare.server.access.GrantLineage.class);
+    var effective = new ApplicationProjectMembers(stored, policy, lineage);
+    var candidates =
+        java.util.List.of(
+            "viewer", "worker", "manager", "external", "invalid", "removed", "broken-chain");
+    when(stored.readableProjects(candidates.stream().sorted().toList(), "reader"))
+        .thenReturn(java.util.Set.copyOf(candidates));
+    when(lineage.projectRole(anyString(), eq("reader"), any()))
+        .thenAnswer(invocation -> invocation.<Optional<ProjectRole>>getArgument(2));
+    when(lineage.projectRole(eq("broken-chain"), eq("reader"), any())).thenReturn(Optional.empty());
+    for (var role : ProjectRole.values()) {
+      String project =
+          switch (role) {
+            case VIEWER -> "viewer";
+            case CONTRIBUTOR -> "worker";
+            case MANAGER -> "manager";
+          };
+      when(stored.role(project, "reader")).thenReturn(Optional.of(role));
+      when(policy.read(project))
+          .thenReturn(
+              new ApplicationPolicy.Boundary(
+                  ApplicationPolicy.Kind.APPLICATION, Map.of("reader", ProjectRole.MANAGER)));
+    }
+    when(stored.role("external", "reader")).thenReturn(Optional.of(ProjectRole.VIEWER));
+    when(policy.read("external"))
+        .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of()));
+    for (String project : java.util.List.of("invalid", "removed", "broken-chain"))
+      when(stored.role(project, "reader")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(policy.read("invalid"))
+        .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.INVALID, Map.of()));
+    when(policy.read("removed"))
+        .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
+    when(policy.read("broken-chain"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("reader", ProjectRole.MANAGER)));
+    var expected =
+        candidates.stream()
+            .filter(project -> effective.mayUse(project, "reader"))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    clearInvocations(stored, lineage, policy);
+    var actual = effective.readableProjects(candidates, "reader");
+    assertEquals(java.util.Set.of("viewer", "worker", "manager", "external"), actual);
+    assertEquals(expected, actual);
+    verify(stored).readableProjects(candidates.stream().sorted().toList(), "reader");
+    verify(stored, never()).role(anyString(), anyString());
+    when(policy.read("viewer"))
+        .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.INVALID, Map.of()));
+    assertFalse(effective.readableProjects(candidates, "reader").contains("viewer"));
+  }
+
+  @Test
+  void batched_machine_read_resolves_owner_once_and_never_inherits_missing_manifest_grants() {
+    var lineage = mock(io.aeyer.plowshare.server.access.GrantLineage.class);
+    var effective = new ApplicationProjectMembers(stored, policy, lineage);
+    String principal = "@service/fixture";
+    var projects = java.util.List.of("allowed", "denied");
+    when(stored.readableProjects(projects, principal)).thenReturn(java.util.Set.copyOf(projects));
+    when(stored.authorityAccount(principal)).thenReturn(Optional.of("integration"));
+    when(lineage.projectRole(anyString(), eq("integration"), any()))
+        .thenReturn(Optional.of(ProjectRole.VIEWER));
+    when(policy.read("allowed"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("integration", ProjectRole.MANAGER)));
+    when(policy.read("denied"))
+        .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
+    assertEquals(java.util.Set.of("allowed"), effective.readableProjects(projects, principal));
+    verify(stored).authorityAccount(principal);
+    verify(stored, never()).role(anyString(), anyString());
+    when(stored.authorityAccount(principal)).thenReturn(Optional.empty());
+    assertTrue(effective.readableProjects(projects, principal).isEmpty());
+  }
 }

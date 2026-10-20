@@ -50,7 +50,7 @@ class Wire implements Socket {
 describe('validated public SDK contracts', () => {
   it('exposes typed Relay methods without acknowledging reads or replaying foreign replies', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     const id = '11111111-1111-1111-1111-111111111111';
     const published = client.publishRelay({
       requestId: id,
@@ -116,7 +116,7 @@ describe('validated public SDK contracts', () => {
   });
   it('pairs typed results with their operation and strips unknown output fields', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     const waiting = client.request('project.list', {});
     wire.answer('OK', []);
     const rows = requirePayload(await waiting);
@@ -134,7 +134,7 @@ describe('validated public SDK contracts', () => {
   });
   it('preserves the explicit no-content success contract', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     const waiting = client.request('project.move', { project: 'p', to: 'new' });
     wire.answer('NO_CONTENT');
     expect(requirePayload(await waiting)).toBeNull();
@@ -173,7 +173,7 @@ describe('validated public SDK contracts', () => {
   });
   it('does not submit invalid in-process values or replay unreadable acknowledgements', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     await expect(client.request('job.status', { job: '' })).rejects.toThrow();
     expect(wire.sent).toHaveLength(0);
     const pending = client.request('project.list', {});
@@ -186,7 +186,7 @@ describe('validated public SDK contracts', () => {
   });
   it('returns checked refusals without exposing arbitrary refusal payloads', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     const pending = client.request('project.list', {});
     wire.answer('BAD_REQUEST', { opaque: 'server detail' });
     const reply = await pending;
@@ -230,7 +230,7 @@ describe('validated public SDK contracts', () => {
 describe('external DTOs and typed notifications', () => {
   it('rejects raw or inconsistent external messages without sending', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     expect(() =>
       decodePayload('outgoing.send', {
         requestId: '00000000-0000-4000-8000-000000000001',
@@ -288,6 +288,7 @@ describe('external DTOs and typed notifications', () => {
       pushes: unknown[] = [],
       faults: unknown[] = [];
     const client = new Plowshare({
+      dispatchMode: 'ordered',
       socket: wire,
       onPush: (p) => pushes.push(p),
       onPushFault: (p) => faults.push(p),
@@ -344,7 +345,7 @@ describe('existing socket owners use the same typed boundary', () => {
   });
   it('rejects inconsistent report evidence and objectives before sending', async () => {
     const wire = new Wire(),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     const report = {
       scope: { kind: 'personal' as const },
       requestId: '00000000-0000-4000-8000-000000000001',

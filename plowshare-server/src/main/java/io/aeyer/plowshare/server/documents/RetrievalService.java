@@ -599,13 +599,11 @@ public final class RetrievalService implements UsageAware {
    *   <li><b>No {@link #MAX_HITS} cap.</b> Ten is the bound on the tool a model calls out of a
    *       conversation's allowance; this is a read a caller pays for itself, and Anchor clamps it
    *       at a hundred. {@code DocumentStore.MOST_RETRIEVED} is the bound that applies.
-   *   <li><b>No {@code coverage} short-circuit and no {@code Found} envelope.</b> {@link Found}
-   *       exists to say which kind of empty an empty answer is, and it can, because {@link #search}
-   *       is always over the whole corpus. This read is over the corpus <em>or</em> one document,
-   *       and one corpus-wide number said of a document-scoped answer would be a claim nothing
-   *       checked — the objection {@link #within} raises against the same short-circuit. A caller
-   *       that wants it asks {@link DocumentStore#coverage} or {@code countUnembedded} and gets the
-   *       one that matches its scope.
+   *   <li><b>No corpus-wide {@code coverage} count and no {@code Found} envelope.</b> {@link Found}
+   *       exists to describe corpus-wide search. This read can name one document, so its bounded
+   *       existence gate uses that exact selection and captured embedding profile instead of a
+   *       whole-corpus count. No eligible passage means no provider request or inference charge; a
+   *       nonempty gate is followed by normal post-provider disclosure and profile fences.
    * </ul>
    *
    * @param query what is being asked, in prose. Embedded here
@@ -643,9 +641,24 @@ public final class RetrievalService implements UsageAware {
               + " chunks; it must be at least 1."
               + " Asking for none is not the same as finding none");
     }
-    if (dualEmbeddings != null)
+    if (dualEmbeddings != null) {
+      var profile = dualEmbeddings.active(querySlot());
+      boolean available =
+          dualEmbeddings.read(profile, () -> store.profiled(profile).hasRetrievable(documentId));
+      if (!available) return dualEmbeddings.read(profile, () -> disclose(List::of));
       return dualRead(
-          query, owner, List.of(query), reader -> reader.retrieve(query, documentId, limit, owner));
+          profile,
+          owner,
+          List.of(query),
+          reader -> reader.retrievePrepared(query, documentId, limit, owner));
+    }
+    if (!store.hasRetrievable(documentId)) return disclose(List::of);
+    return retrievePrepared(query, documentId, limit, owner);
+  }
+
+  /** The exact eligible selection was checked before dispatch; disclosure still fences results. */
+  private List<DocumentStore.Retrieved> retrievePrepared(
+      String query, UUID documentId, int limit, UsageAttribution owner) {
     float[] vector =
         EmbeddingClient.owned(
             embeddings,

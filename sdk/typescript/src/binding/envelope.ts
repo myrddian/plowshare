@@ -39,7 +39,7 @@ export const CURRENT_VERSION = 'plowshare-v1';
  * test asserts that it still does.
  *
  * @property id client-generated, and the only thing that correlates an answer
- *     to the request that caused it. The server keeps no record of it
+ *     to the request that caused it; unique for the physical connection generation
  * @property type a dotted discriminator, such as `conversation.turns`
  * @property protocol_version always {@link CURRENT_VERSION} on a frame this
  *     client sends
@@ -120,11 +120,12 @@ export function asking(
   payload: unknown,
   options?: RequestOptions,
 ): Envelope {
+  const selection = actingOptions(options).actingFor;
   return {
     id,
     type,
     protocol_version: CURRENT_VERSION,
-    ...actingOptions(options),
+    ...(selection === undefined ? {} : { actingFor: selection }),
     // `{}` rather than an omitted key when a caller has nothing to send: the
     // server hands `Envelope.payload()` to a handler that reads fields off
     // it, and a null map there is a different thing to be wrong about than

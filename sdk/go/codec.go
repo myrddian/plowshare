@@ -217,6 +217,14 @@ func matches(key string, data []byte) bool {
 }
 func requestTyped[T any](ctx context.Context, c *Client, operation string, request any) (Reply[T], error) {
 	var result Reply[T]
+	reservation, err := c.admit()
+	if err != nil {
+		return result, err
+	}
+	defer reservation.release()
+	if err = reservation.convert(ctx); err != nil {
+		return result, err
+	}
 	data, err := json.Marshal(request)
 	if err != nil {
 		return result, err
@@ -225,7 +233,7 @@ func requestTyped[T any](ctx context.Context, c *Client, operation string, reque
 	if err != nil {
 		return result, err
 	}
-	outcome, err := c.request(ctx, operation, data)
+	outcome, err := c.requestReserved(ctx, operation, data, reservation)
 	if err != nil {
 		return result, err
 	}

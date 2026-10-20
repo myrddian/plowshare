@@ -60,8 +60,8 @@ type packetAssembly struct {
 type packets struct {
 	socket    *websocket.Conn
 	mu        sync.Mutex
-	sender    sync.Mutex
-	writer    sync.Mutex
+	sender    chan struct{}
+	writer    chan struct{}
 	incoming  map[string]*packetAssembly
 	completed map[string]bool
 	held      int
@@ -74,7 +74,7 @@ type packets struct {
 }
 
 func newPackets(socket *websocket.Conn) *packets {
-	p := &packets{socket: socket, incoming: map[string]*packetAssembly{}, completed: map[string]bool{}, credit: make(chan struct{}, 1), done: make(chan struct{})}
+	p := &packets{socket: socket, sender: make(chan struct{}, 1), writer: make(chan struct{}, 1), incoming: map[string]*packetAssembly{}, completed: map[string]bool{}, credit: make(chan struct{}, 1), done: make(chan struct{})}
 	go p.expire()
 	return p
 }
@@ -94,16 +94,28 @@ func (p *packets) release(size int) {
 	processPackets.held -= size * 3
 	processPackets.Unlock()
 }
-func (p *packets) write(ctx context.Context, value any) error {
+func (p *packets) write(ctx context.Context, value any, submitted ...func()) error {
 	wire, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	p.writer.Lock()
-	defer p.writer.Unlock()
+	select {
+	case p.writer <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.done:
+		return errors.New("packet connection closed")
+	}
+	defer func() { <-p.writer }()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	for _, mark := range submitted {
+		mark()
+	}
 	return p.socket.Write(ctx, websocket.MessageText, wire)
 }
-func (p *packets) send(ctx context.Context, wire []byte) error {
+func (p *packets) send(ctx context.Context, wire []byte, submitted ...func()) error {
 	if len(wire) == 0 || len(wire) > packetMessage || !utf8.Valid(wire) {
 		return packetCapacity
 	}
@@ -118,8 +130,17 @@ func (p *packets) send(ctx context.Context, wire []byte) error {
 		return err
 	}
 	defer func() { p.mu.Lock(); p.release(len(wire)); p.mu.Unlock() }()
-	p.sender.Lock()
-	defer p.sender.Unlock()
+	select {
+	case p.sender <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.done:
+		return errors.New("packet connection closed")
+	}
+	defer func() { <-p.sender }()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	defer func() { p.mu.Lock(); p.sending = ""; p.mu.Unlock() }()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -131,15 +152,27 @@ func (p *packets) send(ctx context.Context, wire []byte) error {
 	p.sending = id
 	p.credited = 0
 	p.mu.Unlock()
+	started := false
 	for n := 1; n <= count; n++ {
 		offset := (n - 1) * packetChunk
 		end := min(len(wire), offset+packetChunk)
 		p.mu.Lock()
 		p.expected = n
 		p.mu.Unlock()
-		if err = p.write(ctx, messageSegment{"transport.segment", 1, id, n, count, offset, len(wire), hex.EncodeToString(hash[:]), base64.StdEncoding.EncodeToString(wire[offset:end])}); err != nil {
-			p.close()
-			_ = p.socket.CloseNow()
+		var marks []func()
+		if n == 1 {
+			marks = []func(){func() {
+				started = true
+				for _, mark := range submitted {
+					mark()
+				}
+			}}
+		}
+		if err = p.write(ctx, messageSegment{"transport.segment", 1, id, n, count, offset, len(wire), hex.EncodeToString(hash[:]), base64.StdEncoding.EncodeToString(wire[offset:end])}, marks...); err != nil {
+			if started {
+				p.close()
+				_ = p.socket.CloseNow()
+			}
 			return err
 		}
 		timer := time.NewTimer(15 * time.Second)

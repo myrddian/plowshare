@@ -49,6 +49,11 @@ public interface ActingWork {
    */
   Receipt receipt(RequestAuthority.Delegated authority, UUID requestId);
 
+  /**
+   * Current disclosure authority for a retained receipt, without reloading its state projection.
+   */
+  void requireReceipt(RequestAuthority.Delegated authority, Receipt retained);
+
   /** Resolve a job's retained authority before status/cancellation on the existing job store. */
   void requireJob(RequestAuthority.Delegated authority, String job, ActingPermission permission);
 }

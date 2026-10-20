@@ -53,6 +53,8 @@ import { inspectionConversation } from './shared.ts';
 import {
   Credentials,
   CredentialError,
+  authenticationFetch,
+  AuthenticationUnavailable as ConnectionUnavailable,
   savedOrLogin,
 } from 'plowshare-client-node/credentials';
 import { fieldsOf } from 'plowshare-client-ts/operations/response';
@@ -220,7 +222,7 @@ export type Connector = (
 ) => Promise<Connected>;
 
 /** Use the shared neutral auth/envelope/operation code; Electron stays outside it. */
-export class ConnectionUnavailable extends Error {}
+export { AuthenticationUnavailable as ConnectionUnavailable } from 'plowshare-client-node/credentials';
 
 export const serverConnector: Connector = async (
   base,
@@ -231,19 +233,8 @@ export const serverConnector: Connector = async (
 ) => {
   const door = {
     base,
-    fetch: async (url: string, init: Parameters<typeof fetch>[1]) => {
-      try {
-        return await fetch(url, {
-          ...init,
-          signal: AbortSignal.timeout(15_000),
-          redirect: 'error',
-        });
-      } catch {
-        throw new ConnectionUnavailable(
-          `Could not reach ${base}. Check that your Plowshare server is running.`,
-        );
-      }
-    },
+    fetch: (url: string, sent: Parameters<typeof authenticationFetch>[1]) =>
+      authenticationFetch(url, sent, AbortSignal.timeout(15_000)),
   };
   const store = new Credentials(
     base,
@@ -323,7 +314,15 @@ export const serverConnector: Connector = async (
       openSocket(
         {
           ...door,
-          renew: () => store.renew(door),
+          dispatchMode: 'concurrent-v1',
+          deadline: {
+            milliseconds: 30_000,
+            schedule: (expired, milliseconds) => {
+              const timer = setTimeout(expired, milliseconds);
+              return () => clearTimeout(timer);
+            },
+          },
+          renew: (rejectedAccess?: string) => store.renew(door, rejectedAccess),
           session,
           onPush: incoming,
           onClose: gone,
@@ -358,7 +357,13 @@ export const serverConnector: Connector = async (
       openFiles: (claim) =>
         serial(async () => {
           const files = await openFiles(
-            { ...door, renew: () => store.renew(door), session, open },
+            {
+              ...door,
+              renew: (rejectedAccess?: string) =>
+                store.renew(door, rejectedAccess),
+              session,
+              open,
+            },
             tokens,
             claim,
             (rotated) => {
@@ -1653,7 +1658,12 @@ export class DesktopClient {
         );
         break;
       case 'schedule-refresh':
-        await this.schedules.refresh();
+        if (request.section)
+          await this.schedules.page(
+            request.section,
+            request.direction ?? 'first',
+          );
+        else await this.schedules.refresh();
         break;
       case 'schedule-preview':
         await this.schedules.preview(

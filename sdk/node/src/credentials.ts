@@ -27,7 +27,13 @@ import {
   refresh,
   signIn,
 } from 'plowshare-client-ts/binding/auth';
-import type { Door, Session, Tokens } from 'plowshare-client-ts/binding/auth';
+import type {
+  Answer,
+  Door,
+  Sent,
+  Session,
+  Tokens,
+} from 'plowshare-client-ts/binding/auth';
 
 export class CredentialError extends Error {}
 export class LoginRequired extends CredentialError {
@@ -502,25 +508,53 @@ export class Credentials {
       return signed;
     }, true);
   }
-  async renew(door: Door): Promise<Tokens> {
+  /** Reload under the account lock. When a caller's rejected access is older
+   * than the stored pair, another client already renewed it; reuse that pair.
+   * Explicit renewal without rejectedAccess always rotates once. */
+  async renew(door: Door, rejectedAccess?: string): Promise<Tokens> {
+    if (
+      rejectedAccess !== undefined &&
+      (typeof rejectedAccess !== 'string' || !rejectedAccess)
+    )
+      throw new CredentialError('A rejected access token must be nonempty.');
     const inferred = await this.inferred();
-    if (inferred) return inferred.renew(door);
+    if (inferred) return inferred.renew(door, rejectedAccess);
     return this.locked(async () => {
       const saved = await this.load();
-      let tokens: Tokens;
-      await this.save({ ...saved, renewing: true });
-      try {
-        tokens = await refresh(door, saved.tokens);
-      } catch (error) {
-        throw new CredentialError(
-          'Saved-session renewal did not complete. Sign in again; an uncertain refresh is never retried.',
+      // Decode/load must run before the comparison: an interrupted rotation
+      // remains fenced even when the caller holds a different stale access token.
+      if (
+        rejectedAccess !== undefined &&
+        saved.tokens.access !== rejectedAccess
+      )
+        return saved.tokens;
+      return this.rotate(door, saved);
+    });
+  }
+  /** Called under the credential lock; never replay an ambiguous rotation. */
+  private async rotate(door: Door, saved: Saved): Promise<Tokens> {
+    await this.save({ ...saved, renewing: true });
+    let tokens: Tokens;
+    try {
+      tokens = await refresh(door, saved.tokens);
+    } catch (error) {
+      // Only the owning native transport can prove no HTTP request reached the
+      // server. Injected fetch errors and ambiguous native failures stay fenced.
+      if (error instanceof AuthenticationNotSubmitted) {
+        await this.save(saved);
+        throw new AuthenticationUnavailable(
+          'The server could not be reached. The saved session was retained; retry when it is available.',
           { cause: error },
         );
       }
-      // Persist BEFORE ticket/upgrade: those may fail after rotation succeeded.
-      await this.save({ ...saved, tokens });
-      return tokens;
-    });
+      throw new CredentialError(
+        'Saved-session renewal did not complete. Sign in again; an uncertain refresh is never retried.',
+        { cause: error },
+      );
+    }
+    // Persist BEFORE ticket/upgrade: those may fail after rotation succeeded.
+    await this.save({ ...saved, tokens });
+    return tokens;
   }
   async logout(door: Door): Promise<void> {
     const inferred = await this.inferred();
@@ -535,9 +569,7 @@ export class Credentials {
       }
       // Refresh is necessary if the saved access token expired. Retain the new
       // pair if revocation fails, so logout can be retried without token reuse.
-      await this.save({ ...saved, renewing: true });
-      const tokens = await refresh(door, saved.tokens);
-      await this.save({ ...saved, tokens });
+      const tokens = await this.rotate(door, saved);
       const answer = await door.fetch(`${door.base}/v1/auth/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${tokens.access}` },
@@ -551,6 +583,48 @@ export class Credentials {
     });
   }
 }
+/** A native authentication HTTP request failed; its saved session may still be usable. */
+export class AuthenticationUnavailable extends Error {}
+
+/** Only authenticationFetch may attest that its own native request was not submitted. */
+class AuthenticationNotSubmitted extends AuthenticationUnavailable {}
+
+/**
+ * Native authentication HTTP boundary. Redirects are refused and no request is
+ * retried. Only DNS and connection-refused failures prove no HTTP request was
+ * submitted. Timeouts, aborts, resets and response failures remain ambiguous.
+ * Injected/custom Fetching implementations cannot manufacture this private proof
+ * just by attaching an errno to an error.
+ */
+export async function authenticationFetch(
+  url: string,
+  sent: Sent,
+  signal?: AbortSignal,
+): Promise<Answer> {
+  try {
+    return await fetch(url, {
+      ...sent,
+      redirect: 'error',
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    const connectFailure = (failure: unknown): boolean =>
+      ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(
+        errorCode(failure) ?? '',
+      );
+    const cause: unknown = error instanceof TypeError ? error.cause : undefined;
+    const notSubmitted =
+      cause instanceof AggregateError
+        ? cause.errors.length > 0 && cause.errors.every(connectFailure)
+        : connectFailure(cause);
+    const message =
+      'Could not reach the Plowshare server. Check that it is running.';
+    if (notSubmitted)
+      throw new AuthenticationNotSubmitted(message, { cause: error });
+    throw new AuthenticationUnavailable(message, { cause: error });
+  }
+}
+
 export async function savedOrLogin(
   door: Door,
   store: Credentials,

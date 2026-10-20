@@ -73,6 +73,35 @@ public final class ApplicationProjectMembers implements ProjectMembers {
   }
 
   @Override
+  public java.util.Set<String> readableProjects(
+      java.util.Collection<String> projects, String handle) {
+    var selection =
+        new ReadSelection(handle, projects == null ? null : new java.util.ArrayList<>(projects));
+    var admitted = stored.readableProjects(selection.projects(), selection.account());
+    if (admitted.isEmpty()) return java.util.Set.of();
+    String account =
+        io.aeyer.plowshare.server.auth.ServiceCredentials.principal(handle)
+            ? stored.authorityAccount(handle).orElse(null)
+            : handle;
+    if (account == null) return java.util.Set.of();
+    // Only role presence is requested. All project data roles include VIEWER, so intersecting
+    // the live manifest/issuance chain with a VIEWER ceiling preserves readability without
+    // reloading each stored role. The underlying JDBC admission is batched, while these live
+    // filesystem and lineage decisions deliberately remain per project; no authorization is cached.
+    return selection.projects().stream()
+        .filter(admitted::contains)
+        .filter(
+            project ->
+                applications
+                    .read(project)
+                    .limit(
+                        account,
+                        lineage.projectRole(project, account, Optional.of(ProjectRole.VIEWER)))
+                    .isPresent())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  @Override
   public boolean mayWork(String project, String handle) {
     return role(project, handle).filter(role -> role.allows(ProjectRole.CONTRIBUTOR)).isPresent();
   }

@@ -20,9 +20,29 @@ await using (var selected = await Open("acting-selection"))
 await using (var client = await Open("multiplex"))
 {
     var one = client.ProjectListAsync(new ProjectListRequest());
-    var two = client.ProjectListAsync(new ProjectListRequest());
-    var results = await Task.WhenAll(one, two);
-    Check(results[0].RequirePayload()[0].Name == "first" && results[1].RequirePayload()[0].Name == "second", "correlation failed");
+    var arrived = await client.Pushes.ReadAsync();
+    Check(arrived.Notification.Variant3.IsSet, "first request arrival hint missing");
+    var two = await client.ProjectListAsync(new ProjectListRequest());
+    Check(two.RequirePayload()[0].Name == "second" && !one.IsCompleted, "B must complete while A remains held");
+    var three = await client.ProjectListAsync(new ProjectListRequest());
+    Check(three.RequirePayload()[0].Name == "third" && (await one).RequirePayload()[0].Name == "first", "correlation failed");
+}
+await using (var capacity = await Client.ConnectAsync(origin, "sdk-fixture-token", "typed-dotnet/capacity", TimeSpan.FromSeconds(5)))
+{
+    var calls = Enumerable.Range(0, 64).Select(_ => capacity.ProjectListAsync(new ProjectListRequest())).ToArray();
+    for (var count = 1; count <= 64; count++)
+    {
+        var hint = await capacity.Pushes.ReadAsync();
+        Check(hint.Notification.Variant3.IsSet && hint.Notification.Variant3.Value.Unread == count, "capacity arrival hint missing");
+    }
+    try { await capacity.ProjectListAsync(new ProjectListRequest()); throw new Exception("65th request was submitted"); }
+    catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "capacity refusal was not local"); }
+    await Task.WhenAll(capacity.DisposeAsync().AsTask(), capacity.DisposeAsync().AsTask());
+    foreach (var call in calls)
+    {
+        try { await call; throw new Exception("closed pending request succeeded"); }
+        catch (TransportException e) { Check(e.Delivery == Delivery.Unknown, "submitted close lost uncertainty"); }
+    }
 }
 var tests = fixture.RootElement.GetProperty("cases").EnumerateArray().Select(t => (Name: t.GetProperty("name").GetString()!, Delivery: t.TryGetProperty("delivery", out var d) ? d.GetString() : null)).ToList();
 tests.Add(("malformed-nested", "INVALID_RESPONSE")); tests.Add(("missing-payload", "INVALID_RESPONSE")); tests.Add(("bad-packet", "UNKNOWN"));

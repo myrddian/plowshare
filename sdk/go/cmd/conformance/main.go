@@ -68,16 +68,46 @@ func main() {
 		reply, err := client.ProjectList(ctx, plowshare.ProjectListRequest{})
 		first <- result{reply, err}
 	}()
-	// The fixture labels requests by arrival, so assert the pair independently of goroutine scheduling.
+	arrived, ok := <-client.Pushes()
+	check(ok && arrived.Variant3 != nil, "first request arrival hint missing")
 	two, err := client.ProjectList(ctx, plowshare.ProjectListRequest{})
-	one := <-first
-	check(err == nil && one.err == nil, "multiplex failed")
-	a, err := one.reply.RequirePayload()
-	check(err == nil, "missing first")
+	check(err == nil, "second request failed")
 	b, err := two.RequirePayload()
-	check(err == nil, "missing second")
-	check(a[0].Name != b[0].Name && (a[0].Name == "first" || a[0].Name == "second"), "correlation failed")
+	check(err == nil && b[0].Name == "second", "second request correlation failed")
+	select {
+	case <-first:
+		panic("A completed before its explicit release request")
+	default:
+	}
+	third, err := client.ProjectList(ctx, plowshare.ProjectListRequest{})
+	check(err == nil, "third request failed")
+	c, err := third.RequirePayload()
+	check(err == nil && c[0].Name == "third", "third request correlation failed")
+	one := <-first
+	check(one.err == nil, "first request failed")
+	a, err := one.reply.RequirePayload()
+	check(err == nil && a[0].Name == "first", "first request correlation failed")
 	client.Close()
+	capacity, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "typed-go/capacity", Timeout: 5 * time.Second})
+	check(err == nil, "capacity connection failed")
+	calls := make(chan result, 64)
+	for range 64 {
+		go func() {
+			reply, err := capacity.ProjectList(ctx, plowshare.ProjectListRequest{})
+			calls <- result{reply, err}
+		}()
+	}
+	for count := 1; count <= 64; count++ {
+		hint, ok := <-capacity.Pushes()
+		check(ok && hint.Variant3 != nil && hint.Variant3.Unread == float64(count), "capacity arrival hint missing")
+	}
+	_, err = capacity.ProjectList(ctx, plowshare.ProjectListRequest{})
+	check(errors.As(err, &delivery) && delivery.Delivery == plowshare.NotSubmitted, "65th request was submitted")
+	capacity.Close()
+	for range 64 {
+		call := <-calls
+		check(errors.As(call.err, &delivery) && delivery.Delivery == plowshare.Unknown, "submitted close lost uncertainty")
+	}
 	for _, extra := range []string{"malformed-nested", "missing-payload"} {
 		fixture.Cases = append(fixture.Cases, struct {
 			Name     string             `json:"name"`

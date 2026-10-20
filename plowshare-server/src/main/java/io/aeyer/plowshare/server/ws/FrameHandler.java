@@ -55,4 +55,14 @@ public interface FrameHandler {
    *     neither writes anything anywhere
    */
   Outcome handle(Map<String, Object> payload, Asking asking);
+
+  /**
+   * Transport adapter for incrementally migrated handlers. The dispatcher invokes this on admitted
+   * execution capacity, never the socket reader. Implementations decode their typed DTO before
+   * entering domain services; the envelope map remains confined to this existing codec boundary.
+   */
+  default java.util.concurrent.CompletionStage<Outcome> handleAsync(
+      Map<String, Object> payload, Asking asking) {
+    return java.util.concurrent.CompletableFuture.completedFuture(handle(payload, asking));
+  }
 }

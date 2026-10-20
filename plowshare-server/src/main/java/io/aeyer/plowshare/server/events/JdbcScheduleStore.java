@@ -92,6 +92,30 @@ public class JdbcScheduleStore implements ScheduleStore {
         "SELECT " + COLUMNS + " FROM schedules ORDER BY name", JdbcScheduleStore::row);
   }
 
+  public List<ScheduleRecord> page(String account, String project, SchedulePage page) {
+    if (account == null || account.isBlank() || account.length() > 256)
+      throw new IllegalArgumentException("Authenticated schedule account required");
+    java.util.Objects.requireNonNull(page);
+    var args = new java.util.ArrayList<Object>();
+    args.add(project == null ? account : project);
+    if (page.after() != null) args.add(page.after());
+    args.add(page.limit());
+    // Timing and pause state are operational projections. This bounded current read deliberately
+    // bypasses the definition cache so a page cannot retain an earlier next-fire/claim decision.
+    return List.copyOf(
+        jdbc.query(
+            "SELECT "
+                + COLUMNS
+                + " FROM schedules WHERE "
+                + (project == null
+                    ? "defined_by=?"
+                    : "EXISTS(SELECT 1 FROM schedule_files f JOIN schedule_sources source ON source.id=f.source_id JOIN projects p ON p.id=source.project_id WHERE f.internal_name=schedules.name AND p.name=?)")
+                + (page.after() == null ? "" : " AND schedules.name>?")
+                + " ORDER BY schedules.name LIMIT ?",
+            JdbcScheduleStore::row,
+            args.toArray()));
+  }
+
   public Optional<ScheduleRecord> find(String name) {
     return jdbc
         .query("SELECT " + COLUMNS + " FROM schedules WHERE name = ?", JdbcScheduleStore::row, name)

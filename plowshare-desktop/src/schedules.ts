@@ -26,6 +26,11 @@ export class ScheduleClient {
   private epoch = 0;
   private reading = 0;
   private previewing = 0;
+  private scheduleReading = 0;
+  private fileReading = 0;
+  private scheduleCursors: (string | undefined)[] = [undefined];
+  private fileCursors: (string | undefined)[] = [undefined];
+  private readonly pageSize = 50;
   private busy = false;
   private state: () => DesktopState;
   private send: (ask: WsRequest) => Promise<Outcome>;
@@ -50,9 +55,16 @@ export class ScheduleClient {
     this.epoch++;
     this.reading++;
     this.previewing++;
+    this.scheduleReading++;
+    this.fileReading++;
+    this.scheduleCursors = [undefined];
+    this.fileCursors = [undefined];
     this.busy = false;
     const value = this.value;
+    value.schedulePage = { number: 1, more: false };
+    value.filePage = { number: 1, more: false };
     value.loading = false;
+    delete value.panels;
     value.previewing = false;
     value.busy = false;
     delete value.proposal;
@@ -72,37 +84,264 @@ export class ScheduleClient {
       );
     return answer;
   }
+  private identity() {
+    return JSON.stringify([this.state().base, this.state().handle]);
+  }
+  private current(epoch: number, identity: string) {
+    return (
+      epoch === this.epoch &&
+      identity === this.identity() &&
+      this.state().connected &&
+      this.state().mode === 'live'
+    );
+  }
+  /** Validate bounded, unique keys before replacing a visible page. Ordering belongs
+   * to PostgreSQL's collation; client string comparison cannot establish SQL order. */
+  private pageRows<T>(
+    rows: readonly T[],
+    key: (row: T) => string,
+    after?: string,
+  ): readonly T[] {
+    if (rows.length > this.pageSize + 1)
+      throw new Error('The server returned an oversized schedule page.');
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const name = key(row);
+      if (
+        typeof name !== 'string' ||
+        !name.trim() ||
+        name.length > 512 ||
+        name === after ||
+        seen.has(name)
+      )
+        throw new Error(
+          'The server returned an invalid or repeated schedule page key.',
+        );
+      seen.add(name);
+    }
+    return rows;
+  }
+  /** Refresh starts both lists from their first page; failed reads retain all shown rows. */
   async refresh() {
     this.live();
     const epoch = this.epoch,
+      identity = this.identity(),
       revision = ++this.reading,
+      scheduleRevision = ++this.scheduleReading,
+      fileRevision = ++this.fileReading,
       value = this.value;
     value.loading = true;
+    if (value.schedulePage) value.schedulePage.loading = false;
+    if (value.filePage) value.filePage.loading = false;
+    this.emit();
+    const panels: Record<
+      'schedules' | 'files' | 'triggers' | 'firings',
+      { loading: boolean; error?: string }
+    > = {
+      schedules: { loading: true },
+      files: { loading: true },
+      triggers: { loading: true },
+      firings: { loading: true },
+    };
+    value.panels = panels;
+    value.schedulePage = {
+      ...(value.schedulePage ?? { number: 1, more: false }),
+      loading: true,
+    };
+    value.filePage = {
+      ...(value.filePage ?? { number: 1, more: false }),
+      loading: true,
+    };
+    this.emit();
+    // Register all outcomes before waiting. Each collection publishes independently;
+    // one refused/slow source must not hide another collection's confirmed snapshot.
+    await Promise.all(
+      (
+        [
+          ['schedules', request('schedule.list', { limit: this.pageSize + 1 })],
+          ['triggers', request('trigger.list', {})],
+          ['firings', request('firing.list', { limit: 100 })],
+          ['files', request('schedule.files', { limit: this.pageSize + 1 })],
+        ] as const
+      ).map(async ([section, ask]) => {
+        const current = () =>
+          this.current(epoch, identity) &&
+          revision === this.reading &&
+          (section === 'schedules'
+            ? scheduleRevision === this.scheduleReading
+            : section === 'files'
+              ? fileRevision === this.fileReading
+              : true);
+        try {
+          const answer = await this.checked(ask);
+          if (!current()) return;
+          if (section === 'schedules') {
+            const rows = this.pageRows(
+              answer.payload as ScheduleRecord[],
+              (row) => row.name,
+            );
+            value.schedules = rows.slice(0, this.pageSize);
+            value.schedulePage = {
+              number: 1,
+              more: rows.length > this.pageSize,
+            };
+            this.scheduleCursors = [undefined];
+          } else if (section === 'files') {
+            const rows = this.pageRows(
+              answer.payload as ScheduleFile[],
+              (row) => row.internalName,
+            );
+            value.files = rows.slice(0, this.pageSize);
+            value.filePage = { number: 1, more: rows.length > this.pageSize };
+            this.fileCursors = [undefined];
+          } else if (section === 'triggers')
+            value.triggers = answer.payload as TriggerRecord[];
+          else value.firings = answer.payload as FiringRecord[];
+        } catch (error) {
+          if (current()) {
+            panels[section].error = problem(error);
+            const page =
+              section === 'schedules'
+                ? value.schedulePage
+                : section === 'files'
+                  ? value.filePage
+                  : undefined;
+            if (page) page.error = problem(error);
+          }
+        } finally {
+          if (current()) {
+            panels[section].loading = false;
+            const page =
+              section === 'schedules'
+                ? value.schedulePage
+                : section === 'files'
+                  ? value.filePage
+                  : undefined;
+            if (page) page.loading = false;
+            value.loading = Object.values(panels).some(
+              (panel) => panel.loading,
+            );
+            this.emit();
+          }
+        }
+      }),
+    );
+  }
+
+  /** Each collection has its own cursor history and response generation. The extra row is
+   * lookahead only; the next cursor always comes from the last displayed, authorized DTO. */
+  async page(
+    section: 'schedules' | 'files',
+    direction: 'next' | 'previous' | 'first',
+  ) {
+    this.live();
+    if (
+      !['schedules', 'files'].includes(section) ||
+      !['next', 'previous', 'first'].includes(direction)
+    )
+      throw new Error('Choose a schedule collection and page direction.');
+    const value = this.value;
+    if (this.busy)
+      throw new Error('Wait for the scheduled-work request to finish.');
+    const schedule = section === 'schedules';
+    const page = (schedule ? value.schedulePage : value.filePage) ?? {
+      number: 1,
+      more: false,
+    };
+    if (page.loading) return;
+    if (
+      (direction === 'next' && !page.more) ||
+      (direction === 'previous' && page.number <= 1)
+    )
+      return;
+    const cursors = schedule ? this.scheduleCursors : this.fileCursors;
+    const index =
+      direction === 'first'
+        ? 0
+        : direction === 'next'
+          ? page.number
+          : page.number - 2;
+    const after =
+      direction === 'next'
+        ? schedule
+          ? value.schedules.at(-1)?.name
+          : value.files?.at(-1)?.internalName
+        : cursors[index];
+    if (direction === 'next' && after === undefined) return;
+    const epoch = this.epoch,
+      identity = this.identity();
+    const revision = schedule ? ++this.scheduleReading : ++this.fileReading;
+    const paging = { ...page, loading: true };
+    if (schedule) value.schedulePage = paging;
+    else value.filePage = paging;
     this.emit();
     try {
-      const [schedules, triggers, firings, files] = await Promise.all([
-        this.checked(request('schedule.list', {})),
-        this.checked(request('trigger.list', {})),
-        this.checked(request('firing.list', { limit: 100 })),
-        this.checked(request('schedule.files', {})),
-      ]);
-      if (epoch !== this.epoch || revision !== this.reading) return;
-      Object.assign(value, {
-        schedules: schedules.payload as ScheduleRecord[],
-        triggers: triggers.payload as TriggerRecord[],
-        firings: firings.payload as FiringRecord[],
-        files: files.payload as ScheduleFile[],
-      });
-      delete value.error;
+      const answer = await this.checked(
+        schedule
+          ? request('schedule.list', {
+              limit: this.pageSize + 1,
+              ...(after === undefined ? {} : { after }),
+            })
+          : request('schedule.files', {
+              limit: this.pageSize + 1,
+              ...(after === undefined ? {} : { after }),
+            }),
+      );
+      if (
+        !this.current(epoch, identity) ||
+        revision !== (schedule ? this.scheduleReading : this.fileReading)
+      )
+        return;
+      const rows = schedule
+        ? this.pageRows(
+            answer.payload as ScheduleRecord[],
+            (row) => row.name,
+            after,
+          )
+        : this.pageRows(
+            answer.payload as ScheduleFile[],
+            (row) => row.internalName,
+            after,
+          );
+      if (schedule)
+        value.schedules = (rows as readonly ScheduleRecord[]).slice(
+          0,
+          this.pageSize,
+        );
+      else
+        value.files = (rows as readonly ScheduleFile[]).slice(0, this.pageSize);
+      const next = { number: index + 1, more: rows.length > this.pageSize };
+      if (schedule) value.schedulePage = next;
+      else value.filePage = next;
+      cursors[index] = after;
+      cursors.length = index + 1;
     } catch (error) {
-      if (epoch === this.epoch && revision === this.reading)
-        value.error = problem(error);
+      if (
+        this.current(epoch, identity) &&
+        revision === (schedule ? this.scheduleReading : this.fileReading)
+      ) {
+        paging.error = problem(error);
+      }
     } finally {
-      if (epoch === this.epoch && revision === this.reading) {
-        value.loading = false;
+      if (
+        this.current(epoch, identity) &&
+        revision === (schedule ? this.scheduleReading : this.fileReading)
+      ) {
+        paging.loading = false;
         this.emit();
       }
     }
+  }
+  private pagePayload(section: 'schedules' | 'files') {
+    const page =
+      section === 'schedules' ? this.value.schedulePage : this.value.filePage;
+    const cursors =
+      section === 'schedules' ? this.scheduleCursors : this.fileCursors;
+    const after = cursors[(page?.number ?? 1) - 1];
+    return {
+      limit: this.pageSize + 1,
+      ...(after === undefined ? {} : { after }),
+    };
   }
   async preview(
     text: string,
@@ -222,8 +461,13 @@ export class ScheduleClient {
         );
         if (!shown || identity !== JSON.stringify(shown))
           throw new Error('Choose a displayed schedule file before editing.');
-        const files = (await this.checked(request('schedule.files', {})))
-          .payload as ScheduleFile[];
+        const payload = this.pagePayload('files');
+        const answer = await this.checked(request('schedule.files', payload));
+        const files = this.pageRows(
+          answer.payload as ScheduleFile[],
+          (row) => row.internalName,
+          payload.after,
+        );
         guard();
         const fresh = files.find(
           (file) => file.internalName === shown.internalName,
@@ -278,15 +522,22 @@ export class ScheduleClient {
     )
       throw new Error('Choose a displayed schedule or trigger.');
     await this.mutate(async (guard) => {
+      const payload = this.pagePayload('schedules');
       const answer = await this.checked(
         kind === 'schedule'
-          ? request('schedule.list', {})
+          ? request('schedule.list', payload)
           : request('trigger.list', {}),
       );
       guard();
-      const current = (
-        answer.payload as (ScheduleRecord | TriggerRecord)[]
-      ).find((row) => row.name === name);
+      const rows =
+        kind === 'schedule'
+          ? this.pageRows(
+              answer.payload as ScheduleRecord[],
+              (row) => row.name,
+              payload.after,
+            )
+          : (answer.payload as TriggerRecord[]);
+      const current = rows.find((row) => row.name === name);
       if (!current || scheduleIdentity(current) !== identity)
         throw new Error(
           'This item changed elsewhere. Refresh before making a decision.',
@@ -327,7 +578,10 @@ export class ScheduleClient {
   private async mutate(work: (guard: () => void) => Promise<string>) {
     if (this.busy)
       throw new Error('Another scheduled-work change is being sent.');
+    // Mutations perform their own authoritative preflight/identity checks. An
+    // unrelated inspection panel does not hold the entire control surface busy.
     const epoch = this.epoch,
+      identity = this.identity(),
       value = this.value;
     this.busy = true;
     value.busy = true;
@@ -335,7 +589,7 @@ export class ScheduleClient {
     delete value.notice;
     this.emit();
     const guard = () => {
-      if (epoch !== this.epoch)
+      if (epoch !== this.epoch || identity !== this.identity())
         throw new Error('The connection changed. Refresh before retrying.');
       this.live();
     };
@@ -346,11 +600,11 @@ export class ScheduleClient {
       value.notice = notice;
       await this.refresh();
     } catch (error) {
-      if (epoch === this.epoch)
+      if (epoch === this.epoch && identity === this.identity())
         value.error = `${problem(error)} The request will not be replayed. Refresh to inspect what was saved.`;
       throw error;
     } finally {
-      if (epoch === this.epoch) {
+      if (epoch === this.epoch && identity === this.identity()) {
         this.busy = false;
         value.busy = false;
         this.emit();

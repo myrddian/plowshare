@@ -46,14 +46,44 @@ public final class AgentClient {
   }
 
   public ServerClient.StartedJob run(Run request) throws IOException {
-    return connection.exchange(
-        "agent.run", Objects.requireNonNull(request), ServerClient.StartedJob.class);
+    return AsyncSupport.await(connection.defaultOptions(), options -> runAsync(request, options));
   }
 
   public ServerClient.JobStatus status(String job) throws IOException {
+    return AsyncSupport.await(connection.defaultOptions(), options -> statusAsync(job, options));
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<ServerClient.StartedJob> runAsync(
+      Run request, RequestOptions options) {
+
+    return AsyncSupport.map(
+        connection.exchangeAsync(
+            "agent.run", Objects.requireNonNull(request), ServerClient.StartedJob.class, options),
+        asyncResult -> {
+          return asyncResult;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<ServerClient.StartedJob> runAsync(Run request) {
+    return runAsync(request, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<ServerClient.JobStatus> statusAsync(
+      String job, RequestOptions options) {
+
     var request = new Job(job);
-    var result = connection.exchange("job.status", request, ServerClient.JobStatus.class);
-    if (!request.job().equals(result.id())) throw new IOException("Foreign job status");
-    return result;
+    return AsyncSupport.map(
+        connection.exchangeAsync("job.status", request, ServerClient.JobStatus.class, options),
+        asyncResult -> {
+          var result = asyncResult;
+          if (!request.job().equals(result.id())) throw new IOException("Foreign job status");
+          return result;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<ServerClient.JobStatus> statusAsync(String job) {
+    return statusAsync(job, null);
   }
 }

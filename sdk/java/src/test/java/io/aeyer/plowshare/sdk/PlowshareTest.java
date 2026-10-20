@@ -90,7 +90,13 @@ class PlowshareTest {
                   }));
       try (var client =
           Plowshare.connect(
-              server.url("/").toString(), "fixture-token", Duration.ofSeconds(3), null)) {
+              server.url("/").toString(),
+              "fixture-token",
+              "packet-corruption",
+              Duration.ofSeconds(3),
+              null,
+              Plowshare.TransportMode.SEGMENTED,
+              Plowshare.DispatchMode.ORDERED)) {
         var failure =
             assertThrows(
                 Plowshare.TransportException.class, () -> client.request("project.list", Map.of()));
@@ -343,7 +349,11 @@ class PlowshareTest {
                     }
                   }));
       try (var sdk =
-          new WsServerClient(server.url("/").toString(), null, Plowshare.TransportMode.LEGACY)) {
+          new WsServerClient(
+              server.url("/").toString(),
+              null,
+              Plowshare.TransportMode.LEGACY,
+              Plowshare.DispatchMode.ORDERED)) {
         assertEquals(0, server.getRequestCount());
         var conversation = sdk.openConversation("selected", null);
         assertNull(conversation.maxModelCalls());

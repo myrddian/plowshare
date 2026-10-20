@@ -180,15 +180,34 @@ public final class FrameRouter {
   }
 
   public Outcome route(Envelope request, Asking asking) {
+    try {
+      return routeAsync(request, asking, false).toCompletableFuture().join();
+    } catch (java.util.concurrent.CompletionException failure) {
+      if (failure.getCause() instanceof Error fatal) throw fatal;
+      throw failure;
+    }
+  }
+
+  /**
+   * Complete routing, including disclosure and failure mapping, before handing a reply to output.
+   */
+  public java.util.concurrent.CompletionStage<Outcome> routeAsync(Envelope request, Asking asking) {
+    return routeAsync(request, asking, true);
+  }
+
+  private java.util.concurrent.CompletionStage<Outcome> routeAsync(
+      Envelope request, Asking asking, boolean disclosureFence) {
     FrameHandler handler = handlers.get(request.type());
     if (handler == null) {
-      return Outcome.failed(
-          Code.NOT_FOUND, "no handler is registered for type \"" + request.type() + "\"");
+      return java.util.concurrent.CompletableFuture.completedFuture(
+          Outcome.failed(
+              Code.NOT_FOUND, "no handler is registered for type \"" + request.type() + "\""));
     }
     try {
       if (request.actingFor() != null) {
         if (acting == null) throw new CallerFault("Acting request admission is unavailable");
-        return acting.route(request.type(), request.payload(), request.actingFor(), asking);
+        return java.util.concurrent.CompletableFuture.completedFuture(
+            acting.route(request.type(), request.payload(), request.actingFor(), asking));
       }
       if (authorization != null
           && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
@@ -198,14 +217,7 @@ public final class FrameRouter {
             io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
                 request.type(), request.payload()),
             asking.handle());
-      if (accounts != null
-          && ((request.type().startsWith("admin.") && !request.type().equals("admin.status"))
-              || (request.type().startsWith("project.")
-                  && !request.type().equals("project.list")
-                  && !request.type().equals("project.attach")
-                  && !request.type().equals("project.access")
-                  && !request.type().startsWith("project.member."))
-              || request.type().equals("provider.deregister")))
+      if (accounts != null && serverAdministration(request.type()))
         accounts.requireServerAdmin(asking.handle());
       // A worker facade validates its binding and every nested project/topic before broker use.
       // Running the ordinary Personal fence would require giving that worker the owner's
@@ -224,24 +236,115 @@ public final class FrameRouter {
         if (personalAccess != null)
           personalAccess.check(scope, asking.handle(), asking.sessionId());
       }
-      Outcome answer = handler.handle(request.payload(), asking);
-      return authorization == null
-          ? answer
-          : new ProjectListingFilter(authorization)
-              .filter(
-                  request.type(),
-                  answer,
-                  asking.handle(),
-                  request.payload().get("project") instanceof String selected ? selected : null);
+      var completion =
+          disclosureFence
+              ? handler.handleAsync(request.payload(), asking)
+              : java.util.concurrent.CompletableFuture.completedFuture(
+                  handler.handle(request.payload(), asking));
+      return java.util.Objects.requireNonNull(completion)
+          .thenApply(
+              answer -> {
+                asking.queryValidity().run();
+                java.util.Objects.requireNonNull(answer, "Handler returned no outcome");
+                // A genuinely asynchronous handler may finish after a membership change. This is a
+                // disclosure freshness check, not another admission or a cached permission grant.
+                if (disclosureFence
+                    && authorization != null
+                    && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
+                        .contains(request.type()))
+                  authorization.require(
+                      request.type(),
+                      io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                          request.type(), request.payload()),
+                      asking.handle());
+                return authorization == null
+                    ? answer
+                    : new ProjectListingFilter(authorization)
+                        .filter(
+                            request.type(),
+                            answer,
+                            asking.handle(),
+                            request.payload().get("project") instanceof String selected
+                                ? selected
+                                : null);
+              })
+          .handle(
+              (answer, failure) -> {
+                if (failure == null) return answer;
+                Throwable cause = failure;
+                while (cause instanceof java.util.concurrent.CompletionException
+                    && cause.getCause() != null) cause = cause.getCause();
+                if (cause instanceof Error fatal) throw fatal;
+                Fault fault = Faults.of(cause);
+                return Outcome.failed(fault.code(), fault.detail());
+              });
     } catch (RuntimeException thrown) {
       Fault fault = Faults.of(thrown);
-      return Outcome.failed(fault.code(), fault.detail());
+      return java.util.concurrent.CompletableFuture.completedFuture(
+          Outcome.failed(fault.code(), fault.detail()));
     }
   }
 
   /** Release temporary subject contexts on physical connection teardown. */
   public void disconnected(String connection) {
     if (acting != null) acting.disconnected(connection);
+  }
+
+  /**
+   * Queued-output authority check, not handler replay. If the retained listing would now be
+   * filtered differently, close its generation instead of emitting already-encoded protected data.
+   */
+  public void requireDisclosure(String frame, Asking asking, Outcome answer) {
+    asking.queryValidity().run();
+    if (answer.payload() == null) return;
+    try {
+      Envelope request = JSON.readValue(frame, Envelope.class);
+      if (request.actingFor() != null) {
+        if (acting == null) throw new CallerFault("Acting authority unavailable");
+        acting.requireDisclosure(request, asking, answer);
+        return;
+      }
+      if (accounts != null && serverAdministration(request.type()))
+        accounts.requireServerAdmin(asking.handle());
+      if (authorization != null
+          && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
+              .contains(request.type()))
+        authorization.require(
+            request.type(),
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                request.type(), request.payload()),
+            asking.handle());
+      if (personalAccess != null
+          && !io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(
+              request.type())
+          && !ProcFrames.OPERATIONS.contains(request.type()))
+        personalAccess.check(
+            io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload()),
+            asking.handle(),
+            asking.sessionId());
+      if (authorization != null) {
+        Outcome filtered =
+            new ProjectListingFilter(authorization)
+                .filter(
+                    request.type(),
+                    answer,
+                    asking.handle(),
+                    request.payload().get("project") instanceof String selected ? selected : null);
+        if (!answer.equals(filtered)) throw new CallerFault("Reply authority changed while queued");
+      }
+    } catch (IOException invalid) {
+      throw new CallerFault("Invalid reply authority context", invalid);
+    }
+  }
+
+  private static boolean serverAdministration(String type) {
+    return type.startsWith("admin.") && !type.equals("admin.status")
+        || type.startsWith("project.")
+            && !type.equals("project.list")
+            && !type.equals("project.attach")
+            && !type.equals("project.access")
+            && !type.startsWith("project.member.")
+        || type.equals("provider.deregister");
   }
 
   /**
@@ -259,6 +362,20 @@ public final class FrameRouter {
    *     Asking)} would answer for the parsed envelope
    */
   public Outcome route(String rawFrame, Asking asking) {
+    try {
+      return routeAsync(rawFrame, asking, false).toCompletableFuture().join();
+    } catch (java.util.concurrent.CompletionException failure) {
+      if (failure.getCause() instanceof Error fatal) throw fatal;
+      throw failure;
+    }
+  }
+
+  public java.util.concurrent.CompletionStage<Outcome> routeAsync(String rawFrame, Asking asking) {
+    return routeAsync(rawFrame, asking, true);
+  }
+
+  private java.util.concurrent.CompletionStage<Outcome> routeAsync(
+      String rawFrame, Asking asking, boolean disclosureFence) {
     Envelope request;
     try {
       var body = JSON.readTree(rawFrame);
@@ -272,19 +389,20 @@ public final class FrameRouter {
       }
       request = JSON.treeToValue(body, Envelope.class);
     } catch (IOException notAFrame) {
-      return refuse(notAFrame);
+      return java.util.concurrent.CompletableFuture.completedFuture(refuse(notAFrame));
     } catch (RuntimeException invalidSelection) {
       var fault = Faults.of(invalidSelection);
-      return Outcome.failed(fault.code(), fault.detail());
+      return java.util.concurrent.CompletableFuture.completedFuture(
+          Outcome.failed(fault.code(), fault.detail()));
     }
     if (request == null) {
       // Measured the same way FileChannelHandler measured it for its own
       // reply type on Jackson 2.17: readValue("null", Envelope.class)
       // returns a Java null with no exception thrown at all. The catch
       // above cannot see this; this is the second half of the guard.
-      return refuse(null);
+      return java.util.concurrent.CompletableFuture.completedFuture(refuse(null));
     }
-    return route(request, asking);
+    return routeAsync(request, asking, disclosureFence);
   }
 
   /**
