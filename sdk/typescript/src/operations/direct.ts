@@ -1,4 +1,5 @@
 import { hostedReplyMatches } from './hosted-tool-scopes.ts';
+import type { RequestOptions } from '../binding/acting.ts';
 import { providerReplyMatches } from './provider-credentials.ts';
 import { decodeReply } from './schema.ts';
 import { problem } from './payload-validation.ts';
@@ -267,7 +268,11 @@ export const WAIT_OPERATIONS: readonly Operation[] = [
 ];
 
 export interface Transport {
-  ask(type: string, payload: unknown): Promise<Outcome>;
+  ask(
+    type: string,
+    payload: unknown,
+    options?: RequestOptions,
+  ): Promise<Outcome>;
 }
 export type Result = {
   readonly kind:
@@ -288,6 +293,7 @@ export type Result = {
 export async function dispatch(
   transport: Transport,
   asked: Request,
+  options?: RequestOptions,
 ): Promise<Result> {
   // Direct callers may construct a request without the command parser. Enforce destination
   // selection here too, before delegating lifetime and I/O to their transport.
@@ -300,7 +306,12 @@ export async function dispatch(
   ].includes(asked.type)
     ? decodeRequest(asked.type, asked.payload)
     : asked;
-  return resultOf(checked, await transport.ask(checked.type, checked.payload));
+  return resultOf(
+    checked,
+    await (options === undefined
+      ? transport.ask(checked.type, checked.payload)
+      : transport.ask(checked.type, checked.payload, options)),
+  );
 }
 
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */

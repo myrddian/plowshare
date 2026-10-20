@@ -76,6 +76,7 @@ async function fixture(
     claims: URL[] = [],
     fileSockets: WebSocket[] = [];
   let refresh = 'initial-refresh-secret',
+    access = 'initial-access-secret',
     generation = 0;
   const server = createServer(
     httpHandler(async (req, res) => {
@@ -89,9 +90,10 @@ async function fixture(
           password: secrets[0],
         });
         assert.equal(req.headers['x-plowshare-token-delivery'], 'body');
+        access = 'initial-access-secret';
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
           JSON.stringify({
-            access: 'initial-access-secret',
+            access,
             refresh: flagged ? null : refresh,
             mustChangePassword: flagged,
           }),
@@ -99,19 +101,17 @@ async function fixture(
       } else if (req.url === '/v1/auth/refresh') {
         assert.equal(req.headers.cookie, 'ps_refresh=' + refresh);
         refresh = `refresh-secret-${++generation}`;
+        access = `access-secret-${generation}`;
         res
           .writeHead(204, {
             'Set-Cookie': [
-              `ps_access=access-secret-${generation}; Path=/`,
+              `ps_access=${access}; Path=/`,
               `ps_refresh=${refresh}; Path=/`,
             ],
           })
           .end();
       } else if (req.url === '/v1/auth/ticket') {
-        assert.equal(
-          req.headers.authorization,
-          `Bearer access-secret-${generation}`,
-        );
+        assert.equal(req.headers.authorization, `Bearer ${access}`);
         res
           .writeHead(200, { 'Content-Type': 'application/json' })
           .end(JSON.stringify({ ticket: 'ticket-secret' }));
@@ -148,6 +148,25 @@ async function fixture(
       const bytes = event.data;
       const frame = JSON.parse(bytes) as Frame;
       assert.equal(frame.protocol_version, 'plowshare-v1');
+      if (frame.type === 'transport.dispatch') {
+        assert.deepEqual(frame.payload, { mode: 'concurrent-v1' });
+        messages.send(
+          JSON.stringify({
+            id: frame.id,
+            type: frame.type,
+            protocol_version: frame.protocol_version,
+            payload: {
+              code: 'OK',
+              payload: {
+                mode: 'concurrent-v1',
+                maxPending: 64,
+                maxIdBytes: 128,
+              },
+            },
+          }),
+        );
+        return;
+      }
       frames.push(frame);
       const outcome = script(frame);
       if (outcome === 'drop') {
@@ -316,6 +335,7 @@ await test(
         noSecrets(JSON.stringify(result) + peer.stderr());
       }
       assert.equal(fake.frames.length, cases.length + damaged.length);
+      assert.deepEqual(fake.paths, ['/v1/auth/login', '/v1/auth/ticket']);
       assert.ok(
         fake.paths.every((path) =>
           ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(
@@ -828,13 +848,32 @@ await test(
         fake.base,
         JSON.stringify({
           jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/call',
-          params: { name: 'memory_digest', arguments: {} },
-        }) + '\n',
+          id: 'init',
+          method: 'initialize',
+          params: {},
+        }) +
+          '\n' +
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }) +
+          '\n' +
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'memory_digest', arguments: {} },
+          }) +
+          '\n',
       ).done;
-      assert.equal(timed.code, 5);
-      assert.equal(field(json(timed.stdout), ['result', 'isError']), true);
+      assert.equal(timed.code, 0);
+      const timedReply = timed.stdout
+        .trim()
+        .split('\n')
+        .map((line) => record(json(line)))
+        .find((reply) => reply['id'] === 1);
+      assert.ok(timedReply);
+      assert.equal(field(timedReply, ['error', 'code']), -32800);
       assert.match(timed.stdout, /completion is unknown/);
       assert.deepEqual(
         fake.frames.map((frame) => frame.type),

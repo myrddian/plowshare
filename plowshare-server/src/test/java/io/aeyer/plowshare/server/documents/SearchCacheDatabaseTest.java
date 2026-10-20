@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.access.ScopedPermissions;
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.cache.*;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationContext;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +46,102 @@ class SearchCacheDatabaseTest {
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     Flyway.configure().dataSource(source).load().migrate();
+  }
+
+  @Test
+  void discoverySelectionPreservesPagingTotalsAndLivePolicyAndAccountWithdrawal() {
+    try (var fixture = new Fixture()) {
+      var reader = fixture.reader;
+      assertEquals(1, reader.count(null));
+      assertEquals(fixture.revision, reader.page(null, 1, 0).getFirst().document().id());
+      assertTrue(reader.page(null, 1, 1).isEmpty());
+      assertEquals(1, reader.count(fixture.revision.toString()));
+      assertEquals(0, reader.count("not in source or title"));
+
+      fixture.jdbc.update(
+          "UPDATE information_resource_policies SET version=version+1,audience='QUARANTINED',reason='AUDIENCE',actor=(SELECT id FROM authority_accounts WHERE legacy_handle=?) WHERE resource_id=?",
+          fixture.account,
+          fixture.resource);
+      assertEquals(0, reader.count(null));
+      assertTrue(reader.page(null, 1, 0).isEmpty());
+      assertEquals(0, reader.coverage().searchable());
+
+      fixture.jdbc.update(
+          "UPDATE information_resource_policies SET version=version+1,audience='HOME',reason='AUDIENCE',actor=(SELECT id FROM authority_accounts WHERE legacy_handle=?) WHERE resource_id=?",
+          fixture.account,
+          fixture.resource);
+      assertEquals(1, reader.count(null));
+      fixture.jdbc.update("UPDATE admins SET enabled=false WHERE handle=?", fixture.account);
+      assertEquals(0, reader.count(null));
+      assertTrue(reader.page(null, 1, 0).isEmpty());
+    }
+  }
+
+  @Test
+  void retrievalExistenceUsesTheCapturedSpaceAndCurrentSourceBeforeSkippingInference() {
+    try (var fixture = new Fixture()) {
+      assertTrue(fixture.reader.hasRetrievable(null));
+      assertTrue(fixture.reader.hasRetrievable(fixture.revision));
+      assertFalse(fixture.reader.hasRetrievable(UUID.randomUUID()));
+      var spaces = new JdbcEmbeddingSpaceRepository(fixture.jdbc);
+      var space =
+          spaces.register(
+              new EmbeddingSpace.Definition(
+                  "fixture-prose",
+                  "revision",
+                  2,
+                  "",
+                  "",
+                  "mean",
+                  EmbeddingSpace.Normalization.NONE,
+                  "none"));
+      var profile =
+          new EmbeddingProfile(
+              EmbeddingSlot.PROSE,
+              space,
+              new EmbeddingSearchPolicy(
+                  EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE),
+              1);
+      fixture.reader.useDualEmbeddings(mock(DualEmbeddings.class));
+      var reader = fixture.reader.profiled(profile);
+      // The legacy vector exists, but it is not a vector in the captured serving space.
+      assertFalse(reader.hasRetrievable(null));
+      fixture.jdbc.update(
+          "UPDATE chunks SET prose_embedding='[1,0]'::vector,prose_space_id=?,prose_source_revision=embedding_source_revision WHERE paragraph_id IN(SELECT id FROM paragraphs WHERE document_id=?)",
+          space.id(),
+          fixture.revision);
+      assertTrue(reader.hasRetrievable(null));
+      assertTrue(reader.hasRetrievable(fixture.revision));
+      var other =
+          spaces.register(
+              new EmbeddingSpace.Definition(
+                  "other-model",
+                  "revision",
+                  2,
+                  "",
+                  "",
+                  "mean",
+                  EmbeddingSpace.Normalization.NONE,
+                  "none"));
+      fixture.jdbc.update(
+          "UPDATE chunks SET prose_space_id=? WHERE paragraph_id IN(SELECT id FROM paragraphs WHERE document_id=?)",
+          other.id(),
+          fixture.revision);
+      assertFalse(reader.hasRetrievable(null));
+      fixture.jdbc.update(
+          "UPDATE chunks SET text=text || ' changed' WHERE paragraph_id IN(SELECT id FROM paragraphs WHERE document_id=?)",
+          fixture.revision);
+      assertFalse(reader.hasRetrievable(null));
+      fixture.jdbc.update(
+          "UPDATE chunks SET prose_embedding='[1,0]'::vector,prose_space_id=?,prose_source_revision=embedding_source_revision WHERE paragraph_id IN(SELECT id FROM paragraphs WHERE document_id=?)",
+          space.id(),
+          fixture.revision);
+      assertTrue(reader.hasRetrievable(null));
+      fixture.jdbc.update(
+          "UPDATE information_revisions SET availability='withdrawn' WHERE id=?", fixture.revision);
+      assertFalse(reader.hasRetrievable(null));
+      assertFalse(reader.hasRetrievable(fixture.revision));
+    }
   }
 
   @Test
@@ -140,15 +237,15 @@ class SearchCacheDatabaseTest {
     final UnitOfWork work =
         new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
     final UUID revision = UUID.randomUUID();
+    final UUID resource = UUID.randomUUID();
+    final String account = "search-reader-" + UUID.randomUUID();
     final ProjectionCaches caches;
     final DocumentStore reader;
     final float[] vector = new float[768];
 
     Fixture() {
-      String account = "search-reader-" + UUID.randomUUID();
       String name = revision + ".txt";
       jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'fixture')", account);
-      UUID resource = UUID.randomUUID();
       jdbc.update(
           "INSERT INTO information_resources(id,namespace,source_name,owner_handle,kind) VALUES(?,?,?,?,'source')",
           resource,

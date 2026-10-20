@@ -17,6 +17,11 @@ public final class AuthClient {
 
   public static String login(String origin, String handle, String password, Duration timeout)
       throws IOException {
+    return Plowshare.await(loginAsync(origin, handle, password, timeout));
+  }
+
+  public static java.util.concurrent.CompletionStage<String> loginAsync(
+      String origin, String handle, String password, Duration timeout) throws IOException {
     HttpUrl base = HttpUrl.parse(origin);
     if (base == null
         || !base.username().isEmpty()
@@ -46,22 +51,30 @@ public final class AuthClient {
                       json.writeValueAsBytes(Map.of("handle", handle, "password", password)),
                       MediaType.get("application/json")))
               .build();
-      try (var response = http.newCall(request).execute()) {
-        if (response.code() != 200 || response.body() == null)
-          throw new IOException(
-              "Plowshare account login was refused (HTTP " + response.code() + ")");
-        byte[] bytes = response.body().byteStream().readNBytes(16385);
-        if (bytes.length > 16384)
-          throw new IOException("Plowshare login response exceeded its supported size");
-        var body = SdkJson.decode(json, json.readTree(bytes), LoginReply.class);
-        if (body.mustChangePassword())
-          throw new IOException(
-              "Complete the account's first password change before starting an adapter");
-        return body.access();
-      }
-    } finally {
+      return HttpAsync.call(
+              http.newCall(request),
+              response -> {
+                if (response.code() != 200 || response.body() == null)
+                  throw new IOException(
+                      "Plowshare account login was refused (HTTP " + response.code() + ")");
+                byte[] bytes = response.body().byteStream().readNBytes(16385);
+                if (bytes.length > 16384)
+                  throw new IOException("Plowshare login response exceeded its supported size");
+                var body = SdkJson.decode(json, json.readTree(bytes), LoginReply.class);
+                if (body.mustChangePassword())
+                  throw new IOException(
+                      "Complete the account's first password change before starting an adapter");
+                return body.access();
+              })
+          .whenComplete(
+              (value, failure) -> {
+                http.dispatcher().executorService().shutdown();
+                http.connectionPool().evictAll();
+              });
+    } catch (IOException | RuntimeException failure) {
       http.dispatcher().executorService().shutdown();
       http.connectionPool().evictAll();
+      throw failure;
     }
   }
 }

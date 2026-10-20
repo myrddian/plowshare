@@ -538,6 +538,15 @@ result('proc.tools',{snapshotAt:procPage.snapshotAt,selection:procSelection,tool
 result('proc.calls',{snapshotAt:procPage.snapshotAt,selection:procSelection,calls:[],cursor:null,coverage:[]},true);
 result('proc.queues',{snapshotAt:procPage.snapshotAt,selection:procSelection,queues:[],summaries:[],pools:[],cursor:null,coverage:[]},true);
 
+// Schedule inspection uses exclusive stable names, independently of numeric event cursors.
+for (const operation of ['schedule.list', 'schedule.files']) {
+  for (const value of [{}, {limit:1}, {after:'scheduled-1-daily',limit:100},
+    {project:'fixture',after:'nightly',limit:51}]) input(operation,value,true);
+  for (const value of [{after:null}, {after:1}, {after:''}, {after:' daily'},
+    {after:'bad\u0085cursor'}, {after:'x'.repeat(513)}, {limit:0}, {limit:101},
+    {limit:1.5}, {limit:'50'}, {offset:50}]) input(operation,value,false);
+}
+
 for (const test of cases) {
   let accepted = true;
   try {

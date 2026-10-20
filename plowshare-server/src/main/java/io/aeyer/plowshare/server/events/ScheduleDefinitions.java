@@ -19,6 +19,12 @@ public interface ScheduleDefinitions {
 
   List<ScheduledWork.File> list(String account);
 
+  /** Bounded internal-name page after selecting sources under live owner/project read authority. */
+  List<ScheduledWork.File> page(String account, String project, SchedulePage page);
+
+  /** Current ordinary-project VIEWER admission; does not grant control or transfer registration. */
+  void requireRead(String account, String project);
+
   /** Read project schedule projections under current VIEWER authority, regardless of deployer. */
   default List<ScheduledWork.File> list(String account, String project) {
     throw new io.aeyer.plowshare.server.faults.CallerFault(

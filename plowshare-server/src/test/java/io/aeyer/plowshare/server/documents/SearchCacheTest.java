@@ -282,6 +282,8 @@ class SearchCacheTest {
               invocation -> {
                 String sql = invocation.getArgument(0);
                 rankSql.add(sql);
+                assertTrue(sql.contains("knowledge_readable_selection"));
+                assertFalse(sql.contains("information_readable("));
                 Object[] arguments = (Object[]) invocation.getRawArguments()[2];
                 vectors.add(arguments[sql.startsWith("WITH cache_bounds") ? 1 : 0].toString());
                 RowMapper<DocumentStore.Hit> mapper = invocation.getArgument(1);

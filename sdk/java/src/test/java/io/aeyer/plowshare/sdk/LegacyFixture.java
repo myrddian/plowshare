@@ -20,6 +20,12 @@ final class LegacyFixture {
       String origin, String bearer, String session, Duration timeout, Consumer<ServerPush> push)
       throws IOException {
     return Plowshare.connect(
-        origin, bearer, session, timeout, push, Plowshare.TransportMode.LEGACY);
+        origin,
+        bearer,
+        session,
+        timeout,
+        push,
+        Plowshare.TransportMode.LEGACY,
+        Plowshare.DispatchMode.ORDERED);
   }
 }

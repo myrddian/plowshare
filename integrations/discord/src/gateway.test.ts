@@ -45,7 +45,7 @@ class Wire implements Socket {
 }
 await test('service identity is read from authenticated public SDK status, not a configured label', async () => {
   const wire = new Wire();
-  const client = new Plowshare({ socket: wire });
+  const client = new Plowshare({ socket: wire, dispatchMode: 'ordered' });
   const gateway = new SdkGateway(client);
   try {
     const service = gateway.identity();
@@ -60,7 +60,7 @@ await test('service identity is read from authenticated public SDK status, not a
 });
 await test('incoming receipt and catalog refusal pass through public SDK validation', async () => {
   const wire = new Wire();
-  const client = new Plowshare({ socket: wire });
+  const client = new Plowshare({ socket: wire, dispatchMode: 'ordered' });
   const gateway = new SdkGateway(client);
   try {
     const route = configuration().routes[0];
@@ -94,7 +94,7 @@ await test('incoming receipt and catalog refusal pass through public SDK validat
 
 await test('Relay receipts must belong to the requested subscription and batch', async () => {
   const wire = new Wire();
-  const client = new Plowshare({ socket: wire });
+  const client = new Plowshare({ socket: wire, dispatchMode: 'ordered' });
   const gateway = new SdkGateway(client);
   const request = {
     project: 'research',

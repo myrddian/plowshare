@@ -8,18 +8,25 @@ import {
 } from 'plowshare-client-ts/binding/auth';
 import { dispatch, request } from 'plowshare-client-ts/operations/direct';
 import type { Request } from 'plowshare-client-ts/operations/direct';
-import { respond } from './protocol.js';
+import { mcpRequests } from './requests.js';
+import type { McpRequests } from './requests.js';
 import type { Backend } from './adapter.js';
 
 const control = new AbortController();
 const stop = (): void => {
   control.abort();
   process.stdin.destroy();
+  requests?.close().catch(() => {
+    process.stderr.write('MCP shutdown failed; pending work may be unknown\n');
+    process.exitCode = 5;
+  });
+  session?.close();
 };
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
 let session: Awaited<ReturnType<typeof authenticateConfigured>> | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
+let requests: McpRequests | undefined;
 let exit = 0;
 const diagnostic = (text: string): void => {
   process.stderr.write(text + '\n');
@@ -94,12 +101,16 @@ try {
   }
   const active = session;
   const backend: Backend = {
-    invoke: async (type, payload) => {
+    invoke: async (type, payload, options) => {
       let result: Awaited<ReturnType<typeof dispatch>>;
       // invoke's generic signature holds the type/payload relation; TS
       // loses that relation when distributing the public request union.
       try {
-        result = await dispatch(active, request(type, payload) as Request);
+        result = await dispatch(
+          active,
+          request(type, payload) as Request,
+          options,
+        );
       } catch {
         throw new Error(
           'the WS connection was lost or unreadable; completion is unknown; no mutation was replayed or cancelled; restart the MCP client',
@@ -123,8 +134,38 @@ try {
     root: (project, path) => active.root(project, path),
     runSession: () => active.runSession(),
   };
-  // Process stdio requests sequentially while the WS channels remain live. The event and file channels
-  // remain live while a tool waits. A per-request deadline detaches; never replay.
+  requests = mcpRequests({
+    timeoutMs: timeout,
+    backend: (signal, submitted) => ({
+      invoke: (type, payload) => {
+        signal.throwIfAborted();
+        submitted();
+        return backend.invoke(type, payload, { signal, timeoutMs: timeout });
+      },
+      root: (project, path) => {
+        signal.throwIfAborted();
+        submitted();
+        return backend.root(project, path);
+      },
+      runSession: () => {
+        signal.throwIfAborted();
+        return backend.runSession();
+      },
+    }),
+    write: (record) =>
+      new Promise<void>((resolve, reject) => {
+        process.stdout.write(record, (failure) =>
+          failure ? reject(failure) : resolve(),
+        );
+      }),
+    fatal: (failure) => {
+      diagnostic(failure.message);
+      process.stdout.destroy();
+      stop();
+    },
+  });
+  // stdin continues admitting independent calls while earlier tasks wait. Each
+  // task owns its deadline; only process failure/signals close the shared session.
   let buffered = '';
   process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) {
@@ -140,37 +181,13 @@ try {
     ) {
       const input = buffered.slice(0, end);
       buffered = buffered.slice(end + 1);
-      timer = setTimeout(stop, timeout);
-      let response;
-      try {
-        response = await respond(input, backend);
-      } finally {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-      if (response !== undefined)
-        await new Promise<void>((resolve, reject) =>
-          process.stdout.write(JSON.stringify(response) + '\n', (failure) =>
-            failure ? reject(failure) : resolve(),
-          ),
-        );
+      requests.submit(input);
       if (control.signal.aborted) break;
     }
-    if (control.signal.aborted) {
-      exit = 5;
-      break;
-    }
+    if (control.signal.aborted) break;
   }
-  if (!control.signal.aborted && buffered.trim()) {
-    timer = setTimeout(stop, timeout);
-    const response = await respond(buffered, backend);
-    if (response !== undefined)
-      await new Promise<void>((resolve, reject) =>
-        process.stdout.write(JSON.stringify(response) + '\n', (failure) =>
-          failure ? reject(failure) : resolve(),
-        ),
-      );
-  }
+  if (!control.signal.aborted && buffered.trim()) requests.submit(buffered);
+  if (!control.signal.aborted) await requests.drain();
   if (control.signal.aborted) exit = 5;
 } catch (failure) {
   if (!control.signal.aborted)
@@ -178,6 +195,7 @@ try {
   exit = session === undefined ? 2 : 5;
 } finally {
   if (timer !== undefined) clearTimeout(timer);
+  await requests?.close();
   session?.close();
   process.removeListener('SIGINT', stop);
   process.removeListener('SIGTERM', stop);

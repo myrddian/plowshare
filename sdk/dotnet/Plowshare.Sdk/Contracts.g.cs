@@ -6987,6 +6987,8 @@ public sealed record ScheduleDefinePayloadDto {
 
 /// <summary>Fields of the ScheduleFilesPayloadDto protocol contract.</summary>
 public sealed record ScheduleFilesPayloadDto {
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
  [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
 }
 
@@ -6997,6 +6999,8 @@ public sealed record ScheduleForgetPayloadDto {
 
 /// <summary>Fields of the ScheduleListPayloadDto protocol contract.</summary>
 public sealed record ScheduleListPayloadDto {
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
  [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
 }
 
@@ -9538,6 +9542,8 @@ public static partial class Operations { public static Task<Reply<ScheduleRecord
 
 /// <summary>Fields of the ScheduleFilesRequest protocol contract.</summary>
 public sealed record ScheduleFilesRequest {
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
  [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
 }
 public static partial class Operations { public static Task<Reply<IReadOnlyList<ScheduleFileDto>>> ScheduleFilesAsync(this Client client,ScheduleFilesRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ScheduleFilesRequest,IReadOnlyList<ScheduleFileDto>>("schedule.files",request,cancellationToken,options); }
@@ -9550,6 +9556,8 @@ public static partial class Operations { public static Task<Reply<Unit>> Schedul
 
 /// <summary>Fields of the ScheduleListRequest protocol contract.</summary>
 public sealed record ScheduleListRequest {
+ [JsonPropertyName("after")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> After { get; init; }
+ [JsonPropertyName("limit")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> Limit { get; init; }
  [JsonPropertyName("project")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Project { get; init; }
 }
 public static partial class Operations { public static Task<Reply<IReadOnlyList<ScheduleRecordDto>>> ScheduleListAsync(this Client client,ScheduleListRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ScheduleListRequest,IReadOnlyList<ScheduleRecordDto>>("schedule.list",request,cancellationToken,options); }

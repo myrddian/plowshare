@@ -44,10 +44,17 @@ against Java and an independent MCP SDK client.
 
 `--url ORIGIN` overrides the server origin. `--timeout-ms N` or
 `PLOWSHARE_TIMEOUT_MS` sets the bootstrap/per-message deadline (default 120000).
-A deadline or signal closes the channels and exits 5; it does not cancel a
-server job. Startup errors exit 2 and normal EOF exits 0. Tool errors use MCP
+Each admitted call has its own deadline. Expiry or MCP cancellation detaches that
+call; completion after submission remains unknown and no mutation is replayed.
+Other calls keep running. A process signal closes the channels and exits 5; it
+does not cancel a server job. Startup errors exit 2 and normal EOF exits 0. Tool errors use MCP
 content with `isError=true`, leaving the daemon available for subsequent calls
-unless interrupted. JSON-RPC protocol errors use error envelopes.
+unless interrupted. JSON-RPC protocol errors use error envelopes. The bridge admits
+up to 16 calls and 16 MiB of retained input, with at most 8 MiB per response;
+complete stdout records are serialized with backpressure. Overload is refused
+before submission. Duplicate active request IDs terminate the stream rather than
+producing ambiguous replies. Clients must use fresh IDs and complete initialization
+before tool calls. Root changes and session-dependent runs retain receive order.
 
 ## Scope, jobs and local presence
 

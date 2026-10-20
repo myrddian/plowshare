@@ -159,6 +159,43 @@ class ScheduleProjectionCacheTest {
   }
 
   @Test
+  void filePagesReuseBoundedDtosButSeparateAccountScopeCursorAndLimit() {
+    var selected = new ScheduleDefinitionStore.FileSelection("owner", "project", List.of(source));
+    var page = new SchedulePage(null, 2);
+    var first = store.filesPage(selected, page);
+    assertSame(first, store.filesPage(selected, page));
+    assertEquals(1, statements.size());
+    String sql = statements.getFirst();
+    assertTrue(sql.contains("AND p.name=?"));
+    assertTrue(sql.contains("ORDER BY f.internal_name LIMIT ?"));
+    assertTrue(sql.indexOf("jsonb_to_recordset") < sql.indexOf("LIMIT ?"));
+    assertTrue(sql.contains("admitted.account=s.account AND admitted.source=s.source"));
+    assertTrue(sql.contains("admitted.\"projectId\" IS NOT DISTINCT FROM s.project_id"));
+    assertTrue(sql.contains("admitted.project IS NOT DISTINCT FROM p.name"));
+    assertFalse(sql.contains("ORDER BY f.name"));
+    store.filesPage(selected, new SchedulePage("scheduled-1-before", 2));
+    store.filesPage(selected, new SchedulePage(null, 1));
+    store.filesPage(
+        new ScheduleDefinitionStore.FileSelection("viewer", "project", List.of(source)), page);
+    store.filesPage(
+        new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source)), page);
+    assertEquals(5, filesCache.bounded);
+    assertEquals(5, statements.size());
+  }
+
+  @Test
+  void oversizedPageBypassesBeforeDefinitionHydrationAndFallbackRemainsPaged() {
+    grow = true;
+    bytes = 1_000_000;
+    var selected = new ScheduleDefinitionStore.FileSelection("owner", null, List.of(source));
+    assertEquals(1, store.filesPage(selected, new SchedulePage(null, 1)).size());
+    assertEquals(1, filesCache.bounded);
+    assertEquals(1, filesCache.ordinary);
+    assertEquals(2, statements.size());
+    assertTrue(statements.getLast().contains("ORDER BY f.internal_name LIMIT ?"));
+  }
+
+  @Test
   void missingOrForeignSourceCannotExposeAnOldCachedProjection() {
     store.snapshot(source, "daily");
     store.files(source);

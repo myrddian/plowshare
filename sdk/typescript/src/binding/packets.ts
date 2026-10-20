@@ -1,4 +1,4 @@
-import type { Arrival, Socket } from './connection.ts';
+import type { Arrival, Socket, RequestSend } from './connection.ts';
 import { utf8Length } from './files.ts';
 
 export const PACKET_PROTOCOL = 'plowshare-segments-v1';
@@ -50,6 +50,11 @@ interface Assembly {
 }
 interface Outgoing {
   readonly bytes: Uint8Array;
+  readonly submitted: () => void;
+  readonly resolved: () => void;
+  readonly failed: (cause: Error) => void;
+  cancelled: boolean;
+  started: boolean;
 }
 interface AwaitingCredit {
   readonly id: string;
@@ -177,7 +182,10 @@ export function packetSocket(options: PacketOptions): Socket {
     incoming.clear();
     release(completed.size * 256);
     completed.clear();
-    for (const item of outgoing.splice(0)) release(item.bytes.length);
+    for (const item of outgoing.splice(0)) {
+      release(item.bytes.length);
+      item.failed(new Error('packet connection closed before submission'));
+    }
     for (const listener of closes) listener(event);
   }
   function fail(): void {
@@ -195,8 +203,10 @@ export function packetSocket(options: PacketOptions): Socket {
         const item = outgoing.shift();
         if (item === undefined) break;
         try {
+          if (item.cancelled) continue;
           const id = identity(codec.identity());
           const hash = await codec.hash(item.bytes);
+          if (item.cancelled) continue;
           const count = Math.ceil(item.bytes.length / CHUNK);
           const started = Date.now();
           for (let number = 1; number <= count; number++) {
@@ -221,6 +231,10 @@ export function packetSocket(options: PacketOptions): Socket {
                 },
               };
               try {
+                if (!item.started) {
+                  item.started = true;
+                  item.submitted();
+                }
                 write({
                   kind: 'transport.segment',
                   version: 1,
@@ -243,8 +257,14 @@ export function packetSocket(options: PacketOptions): Socket {
             });
             waiting = undefined;
           }
+        } catch (cause) {
+          item.failed(
+            cause instanceof Error ? cause : new Error('packet write failed'),
+          );
+          throw cause;
         } finally {
           release(item.bytes.length);
+          item.resolved();
         }
       }
     } finally {
@@ -361,16 +381,56 @@ export function packetSocket(options: PacketOptions): Socket {
     reader = reader.then(() => receive(event.data)).catch(fail);
   });
   socket.addEventListener('close', stop);
+  function submit(frame: string, submitted: () => void): RequestSend {
+    if (!open || frame.length === 0 || frame.length > MESSAGE_BYTES)
+      throw new Error('encoded message exceeds transport allowance');
+    if (outgoing.length >= 64)
+      throw new Error('packet writer queue capacity exceeded');
+    const bytes = codec.encode(frame);
+    // Injected codecs may synchronously close/reenter the transport while encoding.
+    // Never publish a buffer after stop() has already reclaimed the writer queue.
+    if (!open || outgoing.length >= 64 || bytes.length > MESSAGE_BYTES)
+      throw new Error(
+        'encoded message exceeds transport allowance or writer is closed',
+      );
+    reserve(bytes.length);
+    let resolved: () => void = () => {};
+    let failed: (cause: Error) => void = () => {};
+    const settled = new Promise<void>((resolve, reject) => {
+      resolved = resolve;
+      failed = reject;
+    });
+    const item: Outgoing = {
+      bytes,
+      submitted,
+      resolved,
+      failed,
+      cancelled: false,
+      started: false,
+    };
+    outgoing.push(item);
+    void drain().catch(fail);
+    return {
+      settled,
+      cancel(): boolean {
+        if (item.started) return false;
+        item.cancelled = true;
+        const index = outgoing.indexOf(item);
+        if (index >= 0) {
+          outgoing.splice(index, 1);
+          release(item.bytes.length);
+          item.resolved();
+        }
+        // A current hash retains its own memory until the drain observes cancellation.
+        return true;
+      },
+    };
+  }
   return {
+    submit,
     send(frame): void {
-      if (!open || frame.length === 0 || frame.length > MESSAGE_BYTES)
-        throw new Error('encoded message exceeds transport allowance');
-      const bytes = codec.encode(frame);
-      if (bytes.length > MESSAGE_BYTES)
-        throw new Error('encoded message exceeds transport allowance');
-      reserve(bytes.length);
-      outgoing.push({ bytes });
-      void drain().catch(fail);
+      const item = submit(frame, () => {});
+      item.settled.catch(fail);
     },
     close(): void {
       stop(undefined);

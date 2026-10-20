@@ -209,7 +209,13 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     const socket = fixtureSocket(physical);
     assert.equal(new URL(req.url, 'http://fixture').pathname, '/v1/events');
     socket.on('message', async bytes => {
-      const frame = JSON.parse(bytes); frames.push(frame); assert.equal(frame.protocol_version, 'plowshare-v1');
+      const frame = JSON.parse(bytes); assert.equal(frame.protocol_version, 'plowshare-v1');
+      if (frame.type === 'transport.dispatch') {
+        assert.deepEqual(frame.payload,{mode:'concurrent-v1'});
+        socket.send(JSON.stringify({...frame,payload:{code:'OK',payload:{mode:'concurrent-v1',maxPending:64,maxIdBytes:128}}}));
+        return;
+      }
+      frames.push(frame);
       assert.match(frame.type, /^information\./);
       const operation = frame.type.slice('information.'.length);
       const payload = await server.call(operation, frame.payload, frame.payload.scope.kind);
@@ -227,7 +233,7 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     const failed = await execute(args, env); assert.equal(failed.code, 1); assert.equal(server.rows.size, 1);
     const denied = await execute(args, env); assert.equal(denied.code, 1); assert.match(denied.stderr, /uncertain delivery/);
     const done = await execute([...args, '--resume'], env);
-    assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 37 chapters/);
+    assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 37 generally available chapters/);
     assert.equal(server.rows.size, 37);
     assert.ok([...server.rows.values()].every(row => row.shared && row.tags.includes('plowshare-manual') && row.tags.includes(`manual-chapter-${row.name.split('/ ')[1].slice(0, -3)}`)));
     assert.ok(frames.some(frame => frame.type === 'information.read' && frame.payload.scope.kind === 'global_read'));
@@ -269,10 +275,55 @@ test('Global installation waits for budgeted preparation and preserves destinati
     return result;
   } };
   const journal = newJournal('http://server.invalid', 'admin', destination);
-  const opts = {journal,destination,persist:async () => {}};
-  await publishManual(plan('Global manual'), client, opts);
+  // A genuine Global-root admission starts with GLOBAL_READ audience; an account-scoped read
+  // alone must never substitute for the intended Help reader's verification.
+  const globalClient = { call: async (operation, payload) => {
+    const result = await client.call(operation, payload);
+    if (operation === 'upload') server.rows.get(result.revision).shared = true;
+    return result;
+  } };
+  const opts = {journal,destination,sharedClient:server.sharedClient,persist:async () => {}};
+  await publishManual(plan('Global manual'), globalClient, opts);
   const effects = server.calls.filter(row => row.operation === 'upload' || row.operation === 'tags').length;
-  await publishManual(plan('Global manual'), client, opts);
+  await publishManual(plan('Global manual'), globalClient, opts);
   assert.equal(server.calls.filter(row => row.operation === 'upload' || row.operation === 'tags').length,effects);
   assert.equal(journal.destination,destination);
+});
+
+
+test('Global custody cannot report Help success or exclude an old chapter without global_read proof', async () => {
+  const destination = '00000000-0000-0000-0000-000000000004';
+  const server = catalogue();
+  const journal = newJournal('https://server.invalid', 'admin', destination);
+  const client = { call: async (operation, payload) => {
+    const result = await server.call(operation, payload);
+    if (operation === 'status') result.steps = ['extract','derive','embed','summarise','summary_embed'].map(stage => ({stage,state:'ready',generation:1,attempt:1}));
+    return result;
+  } };
+  const old = await server.call('upload', { name: 'Plowshare manual / intro.md', text: '# Old public chapter' });
+  server.rows.get(old.revision).shared = true;
+  journal.chapters.intro = { revision: old.revision, hash: digest('# Old public chapter') };
+  const opts = { journal, destination, sharedClient: server.sharedClient, persist: async () => {} };
+  await assert.rejects(publishManual(plan('# Global chapter'), client, opts), /unavailable in Shared/);
+  assert.equal(server.calls.some(row => row.operation === 'share'), false);
+  assert.equal(journal.chapters.intro.revision, old.revision);
+  assert.equal(server.rows.get(old.revision).excluded, false);
+  assert.equal(server.calls.some(row => row.operation === 'exclude'), false);
+  const revision = [...server.rows.keys()].find(id => id !== old.revision);
+  server.rows.get(revision).shared = true;
+  const progress = [];
+  await publishManual(plan('# Global chapter'), client, { ...opts, progress: row => progress.push(row) });
+  assert.equal(server.rows.size, 2);
+  assert.equal(server.rows.get(old.revision).excluded, true);
+  assert.equal(progress[0].shared, true);
+  assert.ok(server.calls.some(row => row.operation === 'read' && row.scope === 'global_read'));
+});
+
+test('Global publication requires its intended reader before any upload', async () => {
+  const server = catalogue();
+  const destination = '00000000-0000-0000-0000-000000000004';
+  await assert.rejects(publishManual(plan('# Global chapter'), server.client, {
+    journal: newJournal('https://server.invalid', 'admin', destination), destination, persist: async () => {},
+  }), /global_read reader/);
+  assert.equal(server.calls.length, 0);
 });

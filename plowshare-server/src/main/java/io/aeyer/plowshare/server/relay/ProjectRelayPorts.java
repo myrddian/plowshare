@@ -166,7 +166,14 @@ public final class ProjectRelayPorts implements RelayPorts {
   @Override
   public RelayPort.Batch consume(
       String account, RelayPort.Consume request, RelayReadBudget budget) {
+    return observe(account, request, budget, () -> {});
+  }
+
+  @Override
+  public RelayPort.Batch observe(
+      String account, RelayPort.Consume request, RelayReadBudget budget, Runnable validity) {
     java.util.Objects.requireNonNull(budget);
+    java.util.Objects.requireNonNull(validity).run();
     long deadline =
         System.nanoTime()
             + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(
@@ -184,7 +191,9 @@ public final class ProjectRelayPorts implements RelayPorts {
     try (var waiting = signals.listen(new Relay.SubscriptionKey(selected, "port.wait"))) {
       var topic = selected;
       while (true) {
+        validity.run();
         var batch = repository.consume(topic, account, request, budget);
+        validity.run();
         long remaining = deadline - System.nanoTime();
         if (batch.status() != RelayPort.Status.EMPTY || remaining <= 0) return batch;
         try {
@@ -192,7 +201,7 @@ public final class ProjectRelayPorts implements RelayPorts {
           // authorizes delivery; every subsequent read repeats current port/membership checks.
           long interval =
               Math.min(
-                  java.time.Duration.ofSeconds(5).toNanos(),
+                  java.time.Duration.ofSeconds(1).toNanos(),
                   signals.reconciliationWait(java.time.Duration.ofMillis(100)).toNanos());
           waiting.await(java.time.Duration.ofNanos(Math.min(remaining, interval)));
           topic =

@@ -31,6 +31,6 @@ try {
   await postingPage.locator('#board-post-close').click();const expandedY=(await main.locator('#inbox-open').boundingBox()).y;await main.locator('#projects-toggle').click();
   await expect(main.locator('#sidebar-projects')).toBeHidden();const inboxY=(await main.locator('#inbox-open').boundingBox()).y,heading=await main.locator('#projects-toggle').boundingBox();assert.ok(inboxY<expandedY-80,'Account navigation moves up with the collapsed project list.');assert.ok(inboxY-heading.y-heading.height<85,'Navigation sits directly beneath Projects.');
   await main.reload();await expect(main.locator('#sidebar')).toHaveClass(/projects-collapsed/);await expect(main.locator('#sidebar-projects')).toBeHidden();assert.equal((await main.locator('#inbox-open').boundingBox()).y,inboxY);await main.screenshot({path:'build/smoke/projects-collapsed.png'});
-  assert.deepEqual([...new Set(fixture.httpPaths)].sort(),['/v1/auth/login','/v1/auth/refresh','/v1/auth/ticket']);assert.deepEqual(errors,[]);
+  assert.deepEqual([...new Set(fixture.httpPaths)].filter(path => path !== '/v1/auth/refresh').sort(),['/v1/auth/login','/v1/auth/ticket']);assert.deepEqual(errors,[]);
   console.log('PASS: Reports only, sources under Documents, main-row refresh, Board project/topic post, no automatic mutation, retained draft/request after reload and guarded roles.');
 } finally {await app?.close();await fixture.close();await rm(profile,{recursive:true,force:true});}

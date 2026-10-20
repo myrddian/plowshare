@@ -277,7 +277,7 @@ describe('Relay tool façade', () => {
       },
     };
     const wire = new Wire(request),
-      client = new Plowshare({ socket: wire });
+      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     let calls = 0;
     const tools = [
       {
@@ -307,7 +307,7 @@ describe('Relay tool façade', () => {
     const reconnect = new Wire(request);
     reconnect.published = wire.published;
     const recovered = await ToolProvider.create(
-      new Plowshare({ socket: reconnect }),
+      new Plowshare({ dispatchMode: 'ordered', socket: reconnect }),
       route,
       tools,
       journal,
@@ -389,7 +389,7 @@ describe('Relay tool façade', () => {
     ];
     wire.loseReply = true;
     const provider = await ToolProvider.create(
-      new Plowshare({ socket: wire }),
+      new Plowshare({ dispatchMode: 'ordered', socket: wire }),
       binding,
       tools,
       journal,
@@ -399,7 +399,7 @@ describe('Relay tool façade', () => {
     expect(journal.rows.get(wire.id)?.phase).toBe('publishing');
     wire.loseReply = false;
     const restarted = await ToolProvider.create(
-      new Plowshare({ socket: wire }),
+      new Plowshare({ dispatchMode: 'ordered', socket: wire }),
       binding,
       tools,
       journal,
@@ -423,7 +423,7 @@ describe('Relay tool façade', () => {
       occurredAt: null,
     });
     const provider = await ToolProvider.create(
-      new Plowshare({ socket: wire }),
+      new Plowshare({ dispatchMode: 'ordered', socket: wire }),
       binding,
       [
         {
@@ -456,7 +456,7 @@ describe('live tool catalogue', () => {
       })),
     };
     const wire = new Wire();
-    const client = new Plowshare({ socket: wire });
+    const client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     let calls = 0;
     const provider = await ToolProvider.create(
       client,
@@ -531,7 +531,7 @@ it.each(['canonical', 'legacy', 'legacy-interrupted'])(
         result: null,
         occurredAt: null,
       });
-    const client = new Plowshare({ socket: wire });
+    const client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
     const provider = await ToolProvider.create(
       client,
       binding,

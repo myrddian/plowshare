@@ -63,7 +63,8 @@ class ProviderConnectionClientTest {
               "fixture-session",
               Duration.ofSeconds(5),
               ignored -> {},
-              Plowshare.TransportMode.LEGACY)) {
+              Plowshare.TransportMode.LEGACY,
+              Plowshare.DispatchMode.ORDERED)) {
         var provider =
             assertThrows(
                 IOException.class, () -> new ProviderConnectionClient(client).list("fixture"));
@@ -142,7 +143,8 @@ class ProviderConnectionClientTest {
               "fixture-session",
               Duration.ofSeconds(5),
               ignored -> {},
-              Plowshare.TransportMode.LEGACY)) {
+              Plowshare.TransportMode.LEGACY,
+              Plowshare.DispatchMode.ORDERED)) {
         assertThrows(
             IOException.class,
             () ->

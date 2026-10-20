@@ -160,6 +160,15 @@ class InformationReadAuthorityDatabaseTest {
   }
 
   private void parity(InformationContext context) {
+    var discovery = InformationSql.discovery(context, "r");
+    assertEquals(
+        legacy(context, false, null, null, null),
+        Set.copyOf(
+            jdbc.queryForList(
+                "SELECT r.id FROM information_revisions r WHERE " + discovery.sql(),
+                UUID.class,
+                discovery.arguments().toArray())),
+        "Document discovery relation for " + context);
     assertEquals(
         legacy(context, false, null, null, null),
         selected(context, false, null, null, null),

@@ -62,6 +62,7 @@ export interface ClientOptions {
   readonly session?: string;
   readonly timeoutMs?: number;
   readonly transport?: 'segmented' | 'legacy';
+  readonly dispatchMode?: 'concurrent-v1' | 'ordered';
   readonly onPushFault?: (fault: ConnectionFault) => void;
   readonly onPush?: (push: ServerPush) => void;
 }
@@ -124,9 +125,10 @@ export async function connectPlowshare(
   });
   // Keep late transport errors from becoming unhandled EventEmitter exceptions; close strands asks.
   socket.on('error', () => {});
-  return new Plowshare({
+  const client = new Plowshare({
     socket: segmented ? nodePacketSocket(socket) : legacySocket(socket),
     session,
+    dispatchMode: options.dispatchMode ?? 'concurrent-v1',
     deadline: {
       milliseconds: timeout,
       schedule: (expired, milliseconds) => {
@@ -139,6 +141,8 @@ export async function connectPlowshare(
       : { onPushFault: options.onPushFault }),
     ...(options.onPush === undefined ? {} : { onPush: options.onPush }),
   });
+  await client.ready();
+  return client;
 }
 
 export {

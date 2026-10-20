@@ -122,7 +122,10 @@ export async function publishManual(plan, client, {
   sleep = ms => delay(ms, undefined, { signal }), progress = () => {},
 }) {
   validateJournal(journal, journal.server, journal.account, destination);
-  if (share && !sharedClient) throw new Error('Shared publication needs a shared-scope reader for verification.');
+  const generallyAvailable = share || destination === GLOBAL_ACCOUNT;
+  if (generallyAvailable && !sharedClient) {
+    throw new Error('Global/shared publication needs a global_read reader for verification.');
+  }
   // A pending share can only be recovered with explicit sharing still selected.
   // Otherwise this run could report success while leaving that effect unresolved.
   const steps = ['upload', 'chapter-tags', 'exclude', ...(share ? ['share'] : [])];
@@ -186,8 +189,12 @@ export async function publishManual(plan, client, {
     if (!object(window) || window.revision !== revision || typeof window.text !== 'string' || !window.text) throw new Error(`Chapter ${chapter.id} has no readable text.`);
     if (share) {
       await mutate(`${key}:share`, 'share', { revision }, changed);
+    }
+    // Custody alone is not publication evidence. Global installs must exercise the same
+    // GLOBAL_READ selection used by Help, even when no explicit --share mutation is needed.
+    if (generallyAvailable) {
       const shared = await sharedClient.call('read', { revision, offset: 0, limit: 1 });
-      if (!object(shared) || shared.revision !== revision || typeof shared.text !== 'string' || !shared.text) throw new Error(`Chapter ${chapter.id} could not be verified in Shared.`);
+      if (!object(shared) || shared.revision !== revision || typeof shared.text !== 'string' || !shared.text) throw new Error(`Chapter ${chapter.id} could not be verified in global_read.`);
     }
     // Preserve old evidence but remove the old imported version from normal discovery
     // only after the replacement can be read in its intended audience.
@@ -196,7 +203,7 @@ export async function publishManual(plan, client, {
     }
     journal.chapters[chapter.id] = { hash: chapter.hash, revision };
     await persist(journal);
-    progress({ id: chapter.id, title: chapter.title, revision, shared: share });
+    progress({ id: chapter.id, title: chapter.title, revision, shared: generallyAvailable });
   }
   return plan.chapters.map(chapter => ({ id: chapter.id, ...journal.chapters[chapter.id] }));
 }
@@ -206,7 +213,7 @@ Usage: node scripts/install-manual.mjs [--dry-run] [--url ORIGIN] [--share] [--g
        [--state /absolute/private/journal.json] [--readiness-ms N] [--timeout-ms N]
 
 --dry-run       validate and list chapters offline, without authentication or writes
---global        explicitly install into the Global account (human scoped ADMIN required)
+--global        install into Global and verify global_read access (human scoped ADMIN required)
 --share         explicitly publish chapters to authenticated server accounts
 --resume        resend an uncertain idempotent request with its saved UUID
 --state         private receipt journal outside the checkout (default: config/manual/)
@@ -315,7 +322,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       share: opts.share, resume: opts.resume, readinessMs: opts.readinessMs, signal: abort.signal,
       progress: row => process.stdout.write(`${row.id}\t${row.revision}\t${row.shared ? 'shared' : 'readable (sharing not requested)'}\n`),
     });
-    process.stdout.write(`Installed ${plan.chapters.length} chapters. Open Help to read the shared manual, or find installed chapters in Library.\n`);
+    process.stdout.write(opts.global || opts.share
+      ? `Installed ${plan.chapters.length} generally available chapters. Open Help to read the manual.\n`
+      : `Installed ${plan.chapters.length} Personal chapters. Find them in Library document sources; Help requires a Global/shared installation.\n`);
   } finally {
     session?.close();
     if (lock) await rm(lock, { recursive: true, force: true });

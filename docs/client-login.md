@@ -48,7 +48,9 @@ offline. Help, version and offline validation need no configured server.
 Desktop sign-in remembers reconnect intent per connection. Restart reconnects the
 selected account with its saved session. **Disconnect** or **Use demo** disables
 startup reconnect for that connection while retaining its session. Leave the
-password blank to reconnect; an expired or interrupted session requires login.
+password blank to reconnect; an expired refresh token or uncertain interrupted
+renewal requires login. An expired access token renews automatically after the
+server explicitly refuses it.
 The desktop clears password fields immediately and keeps tokens out of renderer
 state. CLI/TUI selection changes apply to the next invocation; end the current TUI
 before switching. Named user connections cannot be combined with service tokens.
@@ -131,12 +133,23 @@ Recovery and synchronization share a lock outside the Personal directory. After
 replacement, an older sync runtime refuses further work until file access is
 reconnected, so it cannot carry cached Git state into the new store.
 
-Every refresh holds a cross-process lock, reloads the latest tokens, and writes
+Event and file connections request a WS ticket with the access token already in
+memory. Only an explicit ticket 401 permits one refresh and a new ticket; a live
+access token, unavailable server, restricted session or malformed ticket reply
+never triggers rotation. No extra session-status probe is needed.
+
+Every refresh holds a cross-process lock and reloads the latest tokens. If another
+client already replaced the rejected access token, reconnect reuses that newer
+pair without another rotation. Explicit renewal still rotates. A rotation writes
 the new pair atomically before requesting a WS ticket. A failed ticket or socket
 upgrade therefore leaves a usable saved pair. A pending marker is written before
 refresh: if its outcome is uncertain, the next client requires a fresh login
-rather than spending a potentially retired refresh token again. No application
-operation is replayed during authentication or reconnect.
+rather than spending a potentially retired refresh token again. The owning native
+HTTP transport can prove a DNS or refused-connection failure happened before
+submission and retain the original pair for retry. Resets, timeouts, aborts,
+redirect failures and lost or malformed responses cannot clear that marker.
+Custom transports cannot establish non-submission by attaching an errno to an
+exception. No application operation is replayed during authentication or reconnect.
 
 The lock waits at most ten seconds. A process killed while holding it may leave
 an account's `.json.lock` directory. Stop clients using that account before removing

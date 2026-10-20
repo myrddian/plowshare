@@ -25,6 +25,9 @@ public final class InformationLifecycle implements AutoCloseable {
   private final Processor processor;
   private final Gates gates;
   private ScheduledExecutorService worker;
+  private boolean closed;
+  private final java.util.concurrent.CompletableFuture<Void> stopped =
+      new java.util.concurrent.CompletableFuture<>();
 
   @FunctionalInterface
   public interface Processor {
@@ -86,7 +89,7 @@ public final class InformationLifecycle implements AutoCloseable {
   }
 
   public synchronized void start() {
-    if (worker != null) return;
+    if (closed || worker != null) return;
     worker =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("information-lifecycle").factory());
@@ -278,8 +281,25 @@ public final class InformationLifecycle implements AutoCloseable {
   }
 
   @Override
-  public synchronized void close() {
-    if (worker != null) worker.shutdownNow();
+  public void close() {
+    ScheduledExecutorService stopping;
+    synchronized (this) {
+      if (closed) return;
+      closed = true;
+      stopping = worker;
+    }
+    try {
+      io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "information-lifecycle");
+      stopped.complete(null);
+    } catch (RuntimeException | Error failure) {
+      stopped.completeExceptionally(failure);
+      throw failure;
+    }
+  }
+
+  /** Acknowledges the owning close, including when another caller already started the drain. */
+  java.util.concurrent.CompletionStage<Void> shutdownCompletion() {
+    return stopped.minimalCompletionStage();
   }
 
   static final class StaleLease extends RuntimeException {}

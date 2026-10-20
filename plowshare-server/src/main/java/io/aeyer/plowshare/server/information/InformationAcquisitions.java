@@ -37,6 +37,9 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
   private final Hooks configured;
   private final Harness harness;
   private ScheduledExecutorService worker;
+  private boolean closed;
+  private final java.util.concurrent.CompletableFuture<Void> stopped =
+      new java.util.concurrent.CompletableFuture<>();
 
   public InformationAcquisitions(
       AcquisitionRepository repository,
@@ -162,7 +165,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
   }
 
   public synchronized void start() {
-    if (worker != null) return;
+    if (closed || worker != null) return;
     worker =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("information-acquisition").factory());
@@ -366,7 +369,24 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
   }
 
   @Override
-  public synchronized void close() {
-    if (worker != null) worker.shutdownNow();
+  public void close() {
+    ScheduledExecutorService stopping;
+    synchronized (this) {
+      if (closed) return;
+      closed = true;
+      stopping = worker;
+    }
+    try {
+      io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "information-acquisitions");
+      stopped.complete(null);
+    } catch (RuntimeException | Error failure) {
+      stopped.completeExceptionally(failure);
+      throw failure;
+    }
+  }
+
+  /** Acknowledges the owning close, including when another caller already started the drain. */
+  java.util.concurrent.CompletionStage<Void> shutdownCompletion() {
+    return stopped.minimalCompletionStage();
   }
 }

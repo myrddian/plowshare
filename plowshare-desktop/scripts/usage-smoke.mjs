@@ -91,6 +91,6 @@ try {
   await expect(usage.locator('[data-usage-status]')).toContainText('Live usage snapshot');
   await main.locator('#conversations [data-conversation="fixture-first"]').click();await main.locator('#usage-open').click();await expect(main.locator('#title-caption')).toHaveText('Usage');assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
   await assert.rejects(usage.evaluate(()=>window.plowshare.request({action:'run',conversation:'fixture-first',agent:'fixture-bot',text:'forbidden'})),/Usage can only read/);
-  assert.deepEqual([...new Set(fixture.httpPaths)].sort(),['/v1/auth/login','/v1/auth/refresh','/v1/auth/ticket']);assert.deepEqual(errors,[]);
+  assert.deepEqual([...new Set(fixture.httpPaths)].filter(path => path !== '/v1/auth/refresh').sort(),['/v1/auth/login','/v1/auth/ticket']);assert.deepEqual(errors,[]);
   console.log('PASS: repeated live Usage updates keep chat hidden and unchanged project navigation and agent controls mounted. Tabbed Usage with local provider/model and custom cost comparisons, live comparison updates, readable coverage, and narrow layout. Full-size Usage from Connection and sidebar, initial and replacement snapshots, visible capture-disabled/errors, retained data and reconnect. Context preserves constructed text/tool schemas, excludes draft, counts only explicitly, and retains failed snapshots. All operational traffic uses WS.');
 } finally {await app?.close();await fixture.close();await rm(profile,{recursive:true,force:true});}

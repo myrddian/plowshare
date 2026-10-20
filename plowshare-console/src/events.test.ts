@@ -1,6 +1,7 @@
 import { parseObject } from './json.test-support.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eventUrl, openEventStream, type StreamStatus } from './events';
+import type { RequestSend } from '../../sdk/typescript/src/binding/connection.ts';
 
 /**
  * A socket that records what was done to it and fires nothing on its own.
@@ -20,6 +21,7 @@ class FakeSocket {
   closed = false;
   /** Every frame this socket was asked to send, in order. */
   sent: string[] = [];
+  submit?: (frame: string, submitted: () => void) => RequestSend;
 
   constructor(readonly url: string) {
     FakeSocket.opened.push(this);
@@ -70,6 +72,93 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
+it('negotiates concurrent dispatch before publishing readiness or allowing application requests', async () => {
+  const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+  latest().open();
+  expect(stream.status().state).toBe('connecting');
+  await expect(stream.ask('project.list', {})).rejects.toThrow(/not sent/);
+  const sent = parseObject(latest().sent[0]!);
+  expect(sent['type']).toBe('transport.dispatch');
+  latest().deliver(
+    JSON.stringify({
+      id: sent['id'],
+      type: sent['type'],
+      protocol_version: 'plowshare-v1',
+      payload: {
+        code: 'OK',
+        payload: { mode: 'concurrent-v1', maxPending: 64, maxIdBytes: 128 },
+      },
+    }),
+  );
+  await Promise.resolve();
+  expect(stream.status().state).toBe('open');
+  stream.close();
+});
+
+it('refused negotiation closes without an ordered fallback or application send', async () => {
+  const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+  latest().open();
+  const sent = parseObject(latest().sent[0]!);
+  latest().deliver(
+    JSON.stringify({
+      id: sent['id'],
+      type: sent['type'],
+      protocol_version: 'plowshare-v1',
+      payload: { code: 'BAD_REQUEST', said: 'Unsupported mode' },
+    }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(stream.status().state).toBe('closed');
+  expect(latest().sent).toHaveLength(1);
+  expect(latest().closed).toBe(true);
+  stream.close();
+});
+
+it('bounds pending calls until timed-out queued physical transfers release their bytes', async () => {
+  const stream = openEventStream({
+    dispatchMode: 'ordered',
+    session: 's',
+    onEvent: vi.fn(),
+    open,
+    askTimeoutMs: 10,
+  });
+  latest().open();
+  const releases: (() => void)[] = [];
+  const cancelled = vi.fn(() => true);
+  latest().submit = () => ({
+    cancel: cancelled,
+    settled: new Promise<void>((resolve) => {
+      releases.push(resolve);
+    }),
+  });
+  const calls = Array.from({ length: 64 }, () =>
+    stream.ask('project.list', {}).catch((error: unknown) => error),
+  );
+  await expect(stream.ask('project.list', {})).rejects.toThrow(
+    /capacity exceeded/,
+  );
+  vi.advanceTimersByTime(10);
+  const outcomes = await Promise.all(calls);
+  expect(
+    outcomes.every(
+      (value) =>
+        value instanceof Error && /nothing was submitted/.test(value.message),
+    ),
+  ).toBe(true);
+  expect(cancelled).toHaveBeenCalledTimes(64);
+  await expect(stream.ask('project.list', {})).rejects.toThrow(
+    /capacity exceeded/,
+  );
+  for (const release of releases) release();
+  await Promise.resolve();
+  delete latest().submit;
+  const next = stream.ask('project.list', {}).catch((error: unknown) => error);
+  expect(latest().sent).toHaveLength(1);
+  stream.close();
+  await next;
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -100,7 +189,12 @@ describe('openEventStream', () => {
     // nothing else. This is the constraint the whole cookie design exists
     // for, and this assertion is what stops someone "fixing" the auth here
     // by inventing a header this call has nowhere to put.
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
 
     expect(open).toHaveBeenCalledTimes(1);
     expect(open.mock.calls[0]).toHaveLength(1);
@@ -116,6 +210,7 @@ describe('openEventStream', () => {
     const onEvent = vi.fn<(event: unknown) => void>();
     const onMalformed = vi.fn();
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent,
       onMalformed,
@@ -143,6 +238,7 @@ describe('openEventStream', () => {
     // difference between a stream that is down and a system that looks idle.
     const seen: StreamStatus[] = [];
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent: vi.fn(),
       open,
@@ -165,6 +261,7 @@ describe('openEventStream', () => {
 
   it('doubles the delay to a ceiling and stays there', () => {
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent: vi.fn(),
       open,
@@ -187,6 +284,7 @@ describe('openEventStream', () => {
     // Treating both as failures would halve the backoff and double the
     // traffic against a server that is already refusing.
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent: vi.fn(),
       open,
@@ -204,6 +302,7 @@ describe('openEventStream', () => {
 
   it('resets the backoff once a connection succeeds', () => {
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent: vi.fn(),
       open,
@@ -229,7 +328,12 @@ describe('openEventStream', () => {
   it('stays closed when it is closed, and schedules nothing more', () => {
     // The close this call causes must not come back through the failure
     // path and reconnect a stream somebody deliberately stopped.
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
     latest().open();
     const socket = latest();
 
@@ -244,6 +348,7 @@ describe('openEventStream', () => {
 
   it('does not reconnect after a close that races a pending retry', () => {
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent: vi.fn(),
       open,
@@ -262,7 +367,12 @@ describe('openEventStream', () => {
 
 describe('ask', () => {
   it('sends an envelope and resolves with the reply that carries its id', async () => {
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
     latest().open();
 
     const asked = stream.ask('inbox.list', { unread: true });
@@ -292,6 +402,7 @@ describe('ask', () => {
   it('hands a frame with no protocol_version to onEvent, not to a waiting ask', async () => {
     const events: unknown[] = [];
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent: (e) => events.push(e),
       open,
@@ -310,7 +421,12 @@ describe('ask', () => {
   });
 
   it('refuses to ask on a socket that is not open', async () => {
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
 
     await expect(stream.ask('inbox.list')).rejects.toThrow(/not open/);
 
@@ -318,7 +434,12 @@ describe('ask', () => {
   });
 
   it('rejects what is still waiting when the stream closes', async () => {
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
     latest().open();
 
     const asked = stream.ask('inbox.list');
@@ -333,7 +454,12 @@ describe('ask', () => {
     // not a push, so it is neither delivered to `onEvent` nor allowed to
     // resolve a wait it was never the answer to.
     const onEvent = vi.fn<(event: unknown) => void>();
-    const stream = openEventStream({ session: 's', onEvent, open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent,
+      open,
+    });
     latest().open();
 
     const asked = stream.ask('inbox.list');
@@ -368,7 +494,12 @@ describe('ask', () => {
   });
 
   it('rejects a correlated malformed outcome instead of stranding its request', async () => {
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
     latest().open();
     const asked = stream.ask('inbox.list', {});
     const sent = parseObject(latest().sent[0] as string);
@@ -387,6 +518,7 @@ describe('ask', () => {
   it('gives up on a reply that never comes, and ignores it if it arrives late', async () => {
     const onEvent = vi.fn<(event: unknown) => void>();
     const stream = openEventStream({
+      dispatchMode: 'ordered',
       session: 's',
       onEvent,
       open,
@@ -415,7 +547,12 @@ describe('ask', () => {
   });
 
   it('rejects an ask whose frame the socket would not send', async () => {
-    const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
+    const stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+    });
     latest().open();
     latest().send = (): void => {
       throw new Error('the socket is closing');
@@ -430,7 +567,12 @@ describe('ask', () => {
 
 it('forwards uncorrelated accounting envelopes while retaining request correlation', async () => {
   const onEvent = vi.fn<(event: unknown) => void>(),
-    stream = openEventStream({ session: 's', onEvent, open });
+    stream = openEventStream({
+      dispatchMode: 'ordered',
+      session: 's',
+      onEvent,
+      open,
+    });
   latest().open();
   const promise = stream.ask('usage.models', {}),
     request = parseObject(latest().sent.at(-1)!);
@@ -453,6 +595,36 @@ it('forwards uncorrelated accounting envelopes while retaining request correlati
   expect(await promise).toMatchObject({
     code: 'OK',
     payload: { value: 'snapshot' },
+  });
+  stream.close();
+});
+
+it('ignores late open and push callbacks from a replaced physical connection', async () => {
+  const received = vi.fn();
+  const stream = openEventStream({
+    session: 's',
+    onEvent: received,
+    open,
+    dispatchMode: 'ordered',
+    baseDelayMs: 10,
+  });
+  const previous = latest();
+  previous.open();
+  previous.drop();
+  await vi.advanceTimersByTimeAsync(10);
+  const current = latest();
+  expect(current).not.toBe(previous);
+  previous.open();
+  previous.deliver(JSON.stringify({ kind: 'inbox.changed', unread: 99 }));
+  expect(stream.status().state).toBe('reconnecting');
+  expect(received).not.toHaveBeenCalled();
+  expect(current.sent).toEqual([]);
+  current.open();
+  current.deliver(JSON.stringify({ kind: 'inbox.changed', unread: 1 }));
+  expect(stream.status().state).toBe('open');
+  expect(received).toHaveBeenCalledExactlyOnceWith({
+    kind: 'inbox.changed',
+    unread: 1,
   });
   stream.close();
 });

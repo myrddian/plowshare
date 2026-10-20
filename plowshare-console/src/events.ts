@@ -3,7 +3,10 @@ import {
   PACKET_PROTOCOL,
 } from '../../sdk/typescript/src/binding/packets.ts';
 import { sha256 } from '../../sdk/typescript/src/binding/sha256.ts';
-import type { Socket } from '../../sdk/typescript/src/binding/connection.ts';
+import type {
+  Socket,
+  RequestSend,
+} from '../../sdk/typescript/src/binding/connection.ts';
 import { errorMessage } from '../../sdk/typescript/src/binding/values.ts';
 import { isObject } from '../../sdk/typescript/src/binding/values.ts';
 import { outcomeIn } from '../../sdk/typescript/src/binding/envelope.ts';
@@ -90,10 +93,14 @@ export interface EventStreamOptions {
    * A reply the server wrote and the socket lost, or one a handler never
    * returned, would otherwise leave a button disabled until the tab closed.
    * Giving up rejects the ask and forgets its id, so a reply arriving after
-   * that is ignored as one nothing is waiting on. The server keeps no record
-   * of the id either way: a timed-out frame may still have been acted on.
+   * that is ignored as one nothing is waiting on. Server execution can outlive
+   * this caller's timeout, so its outcome may still be unknown.
    */
   readonly askTimeoutMs?: number;
+  /** Explicit compatibility selection; never downgrade after refused negotiation. */
+  readonly dispatchMode?: 'concurrent-v1' | 'ordered';
+  /** Encoded retained requests, including those waiting for packet credits. */
+  readonly maxPendingBytes?: number;
 }
 
 /** How long an ask waits, when nothing says otherwise. */
@@ -159,19 +166,35 @@ export function openEventStream(options: EventStreamOptions): EventStream {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   let issued = 0;
+  const maxPending = 64;
+  const maxPendingBytes = options.maxPendingBytes ?? 64 * 1024 * 1024;
+  if (
+    !Number.isSafeInteger(maxPendingBytes) ||
+    maxPendingBytes < 1 ||
+    maxPendingBytes > 640 * 1024 * 1024 ||
+    !Number.isSafeInteger(askTimeoutMs) ||
+    askTimeoutMs < 1 ||
+    askTimeoutMs > 2147483647
+  )
+    throw new Error('Invalid event request limits');
+  let retainedBytes = 0;
+  let reservedCount = 0;
   const waiting = new Map<
     string,
     {
       type: string;
+      retire: () => void;
       answered: (o: FrameOutcome) => void;
       failed: (e: Error) => void;
     }
   >();
   const failWaiting = (why: string): void => {
-    for (const each of waiting.values()) {
+    const held = [...waiting.values()];
+    waiting.clear();
+    for (const each of held) {
+      each.retire();
       each.failed(new Error(why));
     }
-    waiting.clear();
   };
 
   const status = (): StreamStatus => ({ state, attempt, retryInMs });
@@ -218,20 +241,22 @@ export function openEventStream(options: EventStreamOptions): EventStream {
     timer = null;
     let settled = false;
     const failed = (): void => {
-      if (settled || stopped) {
+      if (settled || stopped || socket !== physical) {
         return;
       }
       settled = true;
       messages?.close();
       messages = null;
       socket = null;
+      state = 'reconnecting';
       failWaiting('the socket closed before it answered');
       scheduleRetry();
     };
 
-    socket = openSocket(url);
+    const physical = openSocket(url);
+    socket = physical;
     socket.onopen = (): void => {
-      if (socket === null) return;
+      if (settled || stopped || socket !== physical) return;
       if (socket.protocol === PACKET_PROTOCOL) {
         messages = packetSocket({
           socket,
@@ -276,11 +301,44 @@ export function openEventStream(options: EventStreamOptions): EventStream {
       }
       attempt = 0;
       retryInMs = null;
-      state = 'open';
-      announce();
+      if (options.dispatchMode === 'ordered') {
+        state = 'open';
+        announce();
+      } else {
+        // Do not publish readiness or send application operations before the private
+        // exchange succeeds. Refusal closes this attempt; there is no ordered fallback.
+        void ask('transport.dispatch', { mode: 'concurrent-v1' }, true)
+          .then((outcome) => {
+            if (settled || stopped) return;
+            const payload = outcome.payload;
+            if (
+              outcome.code !== 'OK' ||
+              !isObject(payload) ||
+              payload['mode'] !== 'concurrent-v1' ||
+              payload['maxPending'] !== 64 ||
+              payload['maxIdBytes'] !== 128
+            )
+              throw new Error('Concurrent dispatch was not negotiated');
+            state = 'open';
+            announce();
+          })
+          .catch(() => {
+            if (settled || stopped) return;
+            // Negotiation is a compatibility failure, not an application retry.
+            stopped = true;
+            state = 'closed';
+            messages?.close();
+            socket?.close();
+            failWaiting(
+              'Concurrent dispatch was not negotiated; nothing was submitted',
+            );
+            announce();
+          });
+      }
     };
     const received = (data: unknown): void => {
-      if (typeof data !== 'string') return;
+      if (settled || stopped || socket !== physical || typeof data !== 'string')
+        return;
       const frame = data;
       let decoded: unknown;
       try {
@@ -302,6 +360,7 @@ export function openEventStream(options: EventStreamOptions): EventStream {
         const pending = waiting.get(id);
         if (pending) {
           waiting.delete(id);
+          pending.retire();
           try {
             const outcome = outcomeIn(decoded['payload']);
             if (
@@ -357,61 +416,144 @@ export function openEventStream(options: EventStreamOptions): EventStream {
       failWaiting('this stream was closed');
       announce();
     },
-    ask(type: string, payload?: unknown): Promise<FrameOutcome> {
-      if (socket === null || state !== 'open') {
-        return Promise.reject(
-          new Error(`the event socket is not open; "${type}" was not sent`),
-        );
-      }
-      issued += 1;
-      const id = `console-${issued}`;
-      const live = messages ?? socket;
-      return new Promise<FrameOutcome>((answered, failed) => {
-        const deadline = setTimeout(() => {
-          if (waiting.delete(id)) {
-            failed(
-              new Error(
-                `"${type}" was not answered within ${askTimeoutMs}ms; it may` +
-                  ' still have been acted on',
-              ),
-            );
-          }
-        }, askTimeoutMs);
-        waiting.set(id, {
-          type,
-          answered: (outcome) => {
-            clearTimeout(deadline);
-            answered(outcome);
-          },
-          failed: (problem) => {
-            clearTimeout(deadline);
-            failed(problem);
-          },
-        });
-        try {
-          const frame = JSON.stringify({
-            id,
-            type,
-            protocol_version: PROTOCOL_VERSION,
-            payload: payload ?? {},
-          });
-          if (
-            live === socket &&
-            new TextEncoder().encode(frame).length > 1024 * 1024
-          )
-            throw new Error('encoded request exceeds legacy allowance');
-          live.send(frame);
-        } catch (trouble) {
-          // Nothing left the tab, so nothing will answer this id.
-          waiting.delete(id);
-          clearTimeout(deadline);
+    ask,
+  };
+
+  function ask(
+    type: string,
+    payload?: unknown,
+    negotiating = false,
+  ): Promise<FrameOutcome> {
+    if (!negotiating && type === 'transport.dispatch')
+      return Promise.reject(
+        new Error('Dispatch selection belongs to connection opening'),
+      );
+    if (socket === null || (state !== 'open' && !negotiating)) {
+      return Promise.reject(
+        new Error(`the event socket is not open; "${type}" was not sent`),
+      );
+    }
+    if (reservedCount >= maxPending)
+      return Promise.reject(
+        new Error('Event request capacity exceeded; nothing was submitted'),
+      );
+    issued += 1;
+    const id = `console-${issued}`;
+    let frame: string;
+    reservedCount++;
+    try {
+      frame = JSON.stringify({
+        id,
+        type,
+        protocol_version: PROTOCOL_VERSION,
+        payload: payload ?? {},
+      });
+    } catch (failure) {
+      reservedCount--;
+      return Promise.reject(
+        failure instanceof Error ? failure : new Error('Invalid request'),
+      );
+    }
+    const bytes = new TextEncoder().encode(frame).length;
+    if (bytes > maxPendingBytes - retainedBytes) {
+      reservedCount--;
+      return Promise.reject(
+        new Error(
+          'Event request byte capacity exceeded; nothing was submitted',
+        ),
+      );
+    }
+    const live = messages ?? socket;
+    return new Promise<FrameOutcome>((answered, failed) => {
+      let terminal = false,
+        physical = false,
+        released = false,
+        submitted = false;
+      let transfer: RequestSend | undefined;
+      const release = () => {
+        if (!released && terminal && physical) {
+          released = true;
+          retainedBytes -= bytes;
+          reservedCount--;
+        }
+      };
+      const retire = () => {
+        terminal = true;
+        transfer?.cancel();
+        release();
+      };
+      const deadline = setTimeout(() => {
+        if (waiting.delete(id)) {
+          retire();
           failed(
-            trouble instanceof Error
-              ? trouble
-              : new Error(errorMessage(trouble)),
+            new Error(
+              submitted
+                ? `"${type}" was not answered within ${askTimeoutMs}ms; it may still have been acted on`
+                : `"${type}" expired before submission; nothing was submitted`,
+            ),
           );
         }
+      }, askTimeoutMs);
+      retainedBytes += bytes;
+      waiting.set(id, {
+        type,
+        retire,
+        answered: (outcome) => {
+          clearTimeout(deadline);
+          answered(outcome);
+        },
+        failed: (problem) => {
+          clearTimeout(deadline);
+          failed(problem);
+        },
       });
-    },
-  };
+      try {
+        if (
+          live === socket &&
+          new TextEncoder().encode(frame).length > 1024 * 1024
+        )
+          throw new Error('encoded request exceeds legacy allowance');
+        const channel: Socket = live;
+        if (channel.submit) {
+          transfer = channel.submit(frame, () => {
+            submitted = true;
+          });
+          if (terminal) transfer.cancel();
+          void transfer.settled.then(
+            () => {
+              physical = true;
+              release();
+            },
+            () => {
+              physical = true;
+              if (waiting.delete(id)) {
+                retire();
+                clearTimeout(deadline);
+                failed(
+                  new Error(
+                    submitted
+                      ? 'Request transfer failed; completion is unknown'
+                      : 'Request transfer failed before submission',
+                  ),
+                );
+              }
+              release();
+            },
+          );
+        } else {
+          submitted = true;
+          channel.send(frame);
+          physical = true;
+          release();
+        }
+      } catch (trouble) {
+        physical = true;
+        if (waiting.delete(id)) retire();
+        clearTimeout(deadline);
+        failed(
+          trouble instanceof Error ? trouble : new Error(errorMessage(trouble)),
+        );
+      }
+    });
+  }
 }

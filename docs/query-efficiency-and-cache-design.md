@@ -21,6 +21,15 @@ owner-specific removal of confirmed query waste. Its ledgers distinguish changed
 paths from necessary fresh reads and remaining work. Other owner plans described
 here require separate implementation and verification.
 
+The [deployment follow-ups](query-efficiency-deployment-followups.md) address
+legacy discovery permission costs, unnecessary empty-search inference, reconnect
+credentials, worker shutdown and verified Manual publication.
+
+The [asynchronous request dispatch plan](async-request-dispatch-plan.md) extends
+bounded read concurrency into actor-owned request coordination, explicit resource
+ordering, typed SDK completions and independent client rendering. It preserves
+the cache, PostgreSQL authority and durable recovery boundaries described here.
+
 The [JDBC owner inventory and individual plans](query-efficiency-plans/README.md)
 apply this strategy to the latest reviewed source baseline. The
 [cross-repository delivery plan](query-efficiency-plans/delivery.md) connects SQL,

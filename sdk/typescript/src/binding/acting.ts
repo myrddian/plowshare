@@ -4,6 +4,20 @@ export interface ActingSelection {
 }
 export interface RequestOptions {
   readonly actingFor?: ActingSelection;
+  /** Local wait cancellation; never serialized and never cancels remote work. */
+  readonly signal?: RequestSignal;
+  /** Invocation-through-reply allowance; overrides the connection default locally. */
+  readonly timeoutMs?: number;
+}
+/** Structural AbortSignal subset keeps the neutral SDK independent of DOM/Node types. */
+export interface RequestSignal {
+  readonly aborted: boolean;
+  addEventListener(
+    type: 'abort',
+    listener: () => void,
+    options?: { once?: boolean },
+  ): void;
+  removeEventListener(type: 'abort', listener: () => void): void;
 }
 export function actingOptions(options?: RequestOptions): RequestOptions {
   if (options === undefined) return {};
@@ -11,10 +25,35 @@ export function actingOptions(options?: RequestOptions): RequestOptions {
     typeof options !== 'object' ||
     options === null ||
     Array.isArray(options) ||
-    Object.keys(options).some((key) => key !== 'actingFor')
+    Object.keys(options).some(
+      (key) => !['actingFor', 'signal', 'timeoutMs'].includes(key),
+    )
   )
     throw new Error('Invalid request options');
-  if (!('actingFor' in options)) return {};
+  if (
+    'timeoutMs' in options &&
+    (typeof options.timeoutMs !== 'number' ||
+      !Number.isFinite(options.timeoutMs) ||
+      options.timeoutMs <= 0 ||
+      options.timeoutMs > 2147483647)
+  )
+    throw new Error('Choose a positive bounded request timeout');
+  if (
+    'signal' in options &&
+    (typeof options.signal !== 'object' ||
+      options.signal === null ||
+      typeof options.signal.aborted !== 'boolean' ||
+      typeof options.signal.addEventListener !== 'function' ||
+      typeof options.signal.removeEventListener !== 'function')
+  )
+    throw new Error('Choose a request cancellation signal');
+  const local = {
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: options.timeoutMs }),
+  };
+  if (!('actingFor' in options)) return local;
   const selection = options.actingFor;
   if (
     typeof selection !== 'object' ||
@@ -24,5 +63,5 @@ export function actingOptions(options?: RequestOptions): RequestOptions {
     !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(selection.context)
   )
     throw new Error('Choose a canonical acting context UUID');
-  return { actingFor: { context: selection.context } };
+  return { ...local, actingFor: { context: selection.context } };
 }

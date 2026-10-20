@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from plowshare import Client, Reply
+from plowshare import Client, Refusal, Reply
 from plowshare.contracts import (
     AgentListRequest,
     AgentViewDto,
@@ -88,6 +88,92 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         command = self.client.request.call_args.args[0]
         self.assertIsInstance(command, ScheduleFilesRequest)
         self.assertEqual(command.project, self.config.project)
+
+    async def test_schedule_target_after_first_hundred_files_and_runtime_rows(
+        self,
+    ) -> None:
+        target = ScheduleFileDto(
+            project=self.config.project,
+            source="server",
+            name="network_scan",
+            internal_name=self.config.schedule,
+            status="active",
+            error=None,
+            definition=None,
+            path="schedules/network_scan.json",
+        )
+        first = tuple(
+            replace(target, name=f"unrelated-{i}", internal_name=f"file-{i:03}")
+            for i in range(100)
+        )
+        runtime = ScheduleRecordDto(
+            name=self.config.schedule,
+            cron="0 */15 * * * *",
+            zone="UTC",
+            paused=True,
+            next_fire_at="2026-01-01T00:00:00Z",
+            defined_by="@service/fixture",
+            emits="scan",
+        )
+        runtime_first = tuple(
+            replace(runtime, name=f"runtime-{i:03}") for i in range(100)
+        )
+        self.client.request.side_effect = [
+            Reply("OK", None, first),
+            Reply("OK", None, (target,)),
+            Reply("OK", None, runtime_first),
+            Reply("OK", None, (runtime,)),
+        ]
+        result = await self.port.schedule()
+        assert result is not None
+        self.assertEqual(result.name, self.config.schedule)
+        commands = [call.args[0] for call in self.client.request.call_args_list]
+        self.assertEqual(len(commands), 4)
+        self.assertTrue(
+            all(
+                isinstance(command, (ScheduleFilesRequest, ScheduleListRequest))
+                for command in commands
+            )
+        )
+        self.assertTrue(
+            all(
+                command.project == self.config.project and command.limit == 100
+                for command in commands
+            )
+        )
+        self.assertEqual(commands[1].after, first[-1].internal_name)
+        self.assertEqual(commands[3].after, runtime_first[-1].name)
+
+    async def test_schedule_page_revocation_fails_without_retry_or_partial_view(
+        self,
+    ) -> None:
+        target = ScheduleFileDto(
+            project=self.config.project,
+            source="server",
+            name="network_scan",
+            internal_name=self.config.schedule,
+            status="active",
+            error=None,
+            definition=None,
+            path="schedules/network_scan.json",
+        )
+        first = tuple(
+            replace(target, name=f"unrelated-{i}", internal_name=f"file-{i:03}")
+            for i in range(100)
+        )
+        self.client.request.side_effect = [
+            Reply("OK", None, first),
+            Reply("FORBIDDEN", "revoked", ()),
+        ]
+        with self.assertRaises(Refusal):
+            await self.port.schedule()
+        self.assertEqual(self.client.request.await_count, 2)
+        self.assertTrue(
+            all(
+                isinstance(call.args[0], ScheduleFilesRequest)
+                for call in self.client.request.call_args_list
+            )
+        )
 
     async def test_agent_visibility_uses_projected_registry_not_declared_grants(
         self,
@@ -255,6 +341,8 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         command = self.client.request.call_args.args[0]
         self.assertIsInstance(command, ScheduleListRequest)
         self.assertEqual(command.project, self.config.project)
-        self.client.request.side_effect = [Reply("OK", None, (file, file))]
+        self.client.request.side_effect = [
+            Reply("OK", None, (file, replace(file, internal_name="different-source")))
+        ]
         with self.assertRaisesRegex(ValueError, "Ambiguous"):
             await self.port.schedule()

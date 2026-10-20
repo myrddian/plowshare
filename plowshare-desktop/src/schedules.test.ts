@@ -92,6 +92,56 @@ function fixture() {
     },
   };
 }
+await test('available collections publish while files are held and retain state on isolated refusal', async () => {
+  const f = fixture();
+  let finish!: (answer: Outcome) => void;
+  const held = new Promise<Outcome>((resolve) => {
+    finish = resolve;
+  });
+  f.reply((ask) =>
+    ask.type === 'schedule.files'
+      ? held
+      : {
+          code: 'OK',
+          payload:
+            ask.type === 'schedule.list'
+              ? [schedule]
+              : ask.type === 'trigger.list'
+                ? [trigger]
+                : [],
+        },
+  );
+  const refresh = f.client.refresh();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(f.state.activity.schedules?.schedules[0]?.name, schedule.name);
+  assert.equal(f.state.activity.schedules?.triggers[0]?.name, trigger.name);
+  assert.equal(f.state.activity.schedules?.schedulePage?.loading, false);
+  assert.equal(f.state.activity.schedules?.filePage?.loading, true);
+  finish({ code: 'BAD_REQUEST', said: 'File source unavailable' });
+  await refresh;
+  assert.match(
+    f.state.activity.schedules?.panels?.files?.error ?? '',
+    /File source unavailable/,
+  );
+  assert.equal(f.state.activity.schedules?.schedules[0]?.name, schedule.name);
+  assert.equal(f.state.activity.schedules?.loading, false);
+});
+
+await test('reset fences held panel success and failure without clearing replacement state', async () => {
+  const f = fixture();
+  let finish!: (answer: Outcome) => void;
+  const held = new Promise<Outcome>((resolve) => {
+    finish = resolve;
+  });
+  f.reply(() => held);
+  const refresh = f.client.refresh();
+  f.client.reset();
+  finish({ code: 'BAD_REQUEST', said: 'Obsolete source error' });
+  await refresh;
+  assert.equal(f.state.activity.schedules?.panels, undefined);
+  assert.equal(f.state.activity.schedules?.error, undefined);
+  assert.equal(f.state.activity.schedules?.loading, false);
+});
 await test('preview is read-only and save creates one monitored definition file', async () => {
   const f = fixture();
   await f.client.preview('Read the news every morning', proposal.zone);
@@ -224,7 +274,7 @@ await test('edited skill, routing and workspace source are saved as reviewed', a
     overwrite: false,
   });
 });
-await test('malformed account lists retain the complete previous schedule/trigger/firing snapshot', async () => {
+await test('malformed account collection retains its snapshot while valid collections update', async () => {
   const f = fixture();
   f.reply((ask) => ({
     code: 'OK',
@@ -242,9 +292,9 @@ await test('malformed account lists retain the complete previous schedule/trigge
     payload: ask.type === 'trigger.list' ? [{ name: 'broken' }] : [],
   }));
   await f.client.refresh();
-  assert.deepEqual(value.schedules, [schedule]);
+  assert.deepEqual(value.schedules, []);
   assert.deepEqual(value.triggers, [trigger]);
-  assert.match(value.error!, /incomplete|Unreadable/);
+  assert.match(value.panels?.triggers?.error ?? '', /incomplete|Unreadable/);
 });
 await test('pause/remove/fire reread the displayed identity and never start an agent turn', async () => {
   const f = fixture();
@@ -387,4 +437,242 @@ await test('Application schedule controls use one runtime operation without chan
     ),
     false,
   );
+});
+
+const scheduleRows = Array.from({ length: 125 }, (_, index) => ({
+  ...schedule,
+  name: `schedule-${String(index).padStart(3, '0')}`,
+}));
+const fileRows = Array.from({ length: 108 }, (_, index) => ({
+  ...file,
+  internalName: `internal-${String(index).padStart(3, '0')}`,
+}));
+function cursor(payload: unknown): string | undefined {
+  if (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'after' in payload &&
+    typeof payload.after === 'string'
+  )
+    return payload.after;
+  return undefined;
+}
+function listing(ask: { type: string; payload: unknown }): Outcome {
+  const after = cursor(ask.payload);
+  const rows =
+    ask.type === 'schedule.list'
+      ? scheduleRows
+      : ask.type === 'schedule.files'
+        ? fileRows
+        : [];
+  const start =
+    after === undefined
+      ? 0
+      : rows.findIndex(
+          (row) =>
+            ('internalName' in row ? row.internalName : row.name) === after,
+        ) + 1;
+  return { code: 'OK', payload: rows.slice(start, start + 51) };
+}
+await test('schedule and file pages independently use 50 visible rows and the last visible unique key', async () => {
+  const f = fixture();
+  f.reply(listing);
+  await f.client.refresh();
+  const value = f.state.activity.schedules!;
+  assert.equal(value.schedules.length, 50);
+  assert.equal(value.files?.length, 50);
+  assert.deepEqual(value.schedulePage, {
+    number: 1,
+    more: true,
+    loading: false,
+  });
+  assert.deepEqual(value.filePage, { number: 1, more: true, loading: false });
+  const start = f.calls.length;
+  await f.client.page('schedules', 'next');
+  assert.deepEqual(f.calls.slice(start), [
+    { type: 'schedule.list', payload: { limit: 51, after: 'schedule-049' } },
+  ]);
+  assert.equal(value.schedules[0]?.name, 'schedule-050');
+  assert.equal(value.files?.[0]?.internalName, 'internal-000');
+  await f.client.page('files', 'next');
+  assert.deepEqual(f.calls.at(-1), {
+    type: 'schedule.files',
+    payload: { limit: 51, after: 'internal-049' },
+  });
+  assert.equal(value.files?.[0]?.internalName, 'internal-050');
+  await f.client.page('schedules', 'next');
+  assert.equal(value.schedules.length, 25);
+  assert.equal(value.schedulePage?.more, false);
+  await f.client.page('schedules', 'previous');
+  assert.equal(value.schedules[0]?.name, 'schedule-050');
+  await f.client.page('schedules', 'first');
+  assert.equal(value.schedules[0]?.name, 'schedule-000');
+  assert.equal(value.files?.[0]?.internalName, 'internal-050');
+});
+await test('page refusal preserves current rows and cursor so retry cannot skip unseen data', async () => {
+  const f = fixture();
+  f.reply(listing);
+  await f.client.refresh();
+  const value = f.state.activity.schedules!,
+    shown = value.schedules;
+  f.reply(() => ({
+    code: 'BAD_REQUEST',
+    said: 'Current account access refused',
+  }));
+  await f.client.page('schedules', 'next');
+  assert.equal(value.schedules, shown);
+  assert.equal(value.schedulePage?.number, 1);
+  assert.match(value.schedulePage?.error ?? '', /account access refused/);
+  f.reply(listing);
+  await f.client.page('schedules', 'next');
+  assert.equal(value.schedules[0]?.name, 'schedule-050');
+  assert.equal(cursor(f.calls.at(-1)?.payload), 'schedule-049');
+});
+await test('refresh and account reset fence delayed page replies without replacing new rows', async () => {
+  const f = fixture();
+  f.reply(listing);
+  await f.client.refresh();
+  let release: ((outcome: Outcome) => void) | undefined;
+  f.reply((ask) =>
+    cursor(ask.payload) === undefined
+      ? listing(ask)
+      : new Promise((resolve) => {
+          release = resolve;
+        }),
+  );
+  const pending = f.client.page('schedules', 'next');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  f.reply((ask) => ({
+    code: 'OK',
+    payload:
+      ask.type === 'schedule.list'
+        ? [{ ...schedule, name: 'new-current' }]
+        : [],
+  }));
+  await f.client.refresh();
+  if (!release) throw new Error('Expected pending page');
+  release({ code: 'OK', payload: scheduleRows.slice(50, 101) });
+  await pending;
+  assert.equal(f.state.activity.schedules?.schedules[0]?.name, 'new-current');
+  assert.equal(f.state.activity.schedules?.schedulePage?.number, 1);
+  f.reply(listing);
+  await f.client.refresh();
+  f.reply(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const replaced = f.client.page('files', 'next');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  f.client.reset();
+  f.state.handle = 'another-account';
+  release({ code: 'OK', payload: fileRows.slice(50, 101) });
+  await replaced;
+  assert.equal(f.state.activity.schedules?.filePage?.number, 1);
+});
+await test('visible second-page mutation rechecks only its bounded page before submission', async () => {
+  const f = fixture();
+  f.reply((ask) =>
+    ask.type === 'schedule.pause'
+      ? { code: 'NO_CONTENT', payload: null }
+      : listing(ask),
+  );
+  await f.client.refresh();
+  await f.client.page('schedules', 'next');
+  const shown = f.state.activity.schedules!.schedules[0]!;
+  const start = f.calls.length;
+  await f.client.change('schedule', shown.name, scheduleIdentity(shown), true);
+  assert.deepEqual(f.calls[start], {
+    type: 'schedule.list',
+    payload: { limit: 51, after: 'schedule-049' },
+  });
+  assert.equal(f.calls[start + 1]?.type, 'schedule.pause');
+  assert.equal(
+    f.calls.filter((row) => row.type === 'schedule.pause').length,
+    1,
+  );
+});
+await test('displaced second-page selection fails closed without a mutation', async () => {
+  const f = fixture();
+  f.reply(listing);
+  await f.client.refresh();
+  await f.client.page('schedules', 'next');
+  const shown = f.state.activity.schedules!.schedules[0]!;
+  f.reply(() => ({ code: 'OK', payload: [] }));
+  await assert.rejects(
+    f.client.change('schedule', shown.name, scheduleIdentity(shown), true),
+    /changed elsewhere/,
+  );
+  assert.equal(
+    f.calls.some((row) => row.type === 'schedule.pause'),
+    false,
+  );
+});
+
+for (const section of ['schedules', 'files'] as const) {
+  const key = section === 'schedules' ? 'name' : 'internalName';
+  const type = section === 'schedules' ? 'schedule.list' : 'schedule.files';
+  const example = section === 'schedules' ? scheduleRows[50]! : fileRows[50]!;
+  const after = section === 'schedules' ? 'schedule-049' : 'internal-049';
+  for (const [label, rows] of [
+    [
+      'oversized',
+      Array.from({ length: 52 }, (_, index) => ({
+        ...example,
+        [key]: `oversized-${index}`,
+      })),
+    ],
+    ['duplicate', [example, example]],
+    ['inclusive cursor', [{ ...example, [key]: after }]],
+    ['blank key', [{ ...example, [key]: '   ' }]],
+    ['long key', [{ ...example, [key]: 'x'.repeat(513) }]],
+  ] as const) {
+    await test(`${section} rejects ${label} pages without losing rows or advancing the cursor`, async () => {
+      const f = fixture();
+      f.reply(listing);
+      await f.client.refresh();
+      const value = f.state.activity.schedules!;
+      const shown = section === 'schedules' ? value.schedules : value.files;
+      f.reply((ask) =>
+        ask.type === type ? { code: 'OK', payload: rows } : listing(ask),
+      );
+      await f.client.page(section, 'next');
+      assert.equal(
+        section === 'schedules' ? value.schedules : value.files,
+        shown,
+      );
+      const page =
+        section === 'schedules' ? value.schedulePage : value.filePage;
+      assert.equal(page?.number, 1);
+      assert.equal(page?.more, true);
+      assert.match(page?.error ?? '', /page|incomplete|Unreadable/);
+      f.reply(listing);
+      await f.client.page(section, 'next');
+      assert.equal(cursor(f.calls.at(-1)?.payload), after);
+      assert.equal(
+        (section === 'schedules' ? value.schedulePage : value.filePage)?.number,
+        2,
+      );
+    });
+  }
+}
+await test('invalid file refresh retains that collection while valid schedules reset to page one', async () => {
+  const f = fixture();
+  f.reply(listing);
+  await f.client.refresh();
+  await f.client.page('schedules', 'next');
+  const value = f.state.activity.schedules!,
+    shownSchedules = value.schedules,
+    shownFiles = value.files;
+  f.reply((ask) =>
+    ask.type === 'schedule.files'
+      ? { code: 'OK', payload: [file, file] }
+      : listing(ask),
+  );
+  await f.client.refresh();
+  assert.notEqual(value.schedules, shownSchedules);
+  assert.equal(value.files, shownFiles);
+  assert.equal(value.schedulePage?.number, 1);
+  assert.match(value.filePage?.error ?? '', /page|incomplete|Unreadable/);
 });

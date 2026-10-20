@@ -1,3 +1,4 @@
+import { schedulePages, SCHEDULE_PAGE_LIMIT } from '../logic/schedule-pages.ts';
 import { mcpControls } from './mcp-controls.ts';
 import {
   NativeHostCommands,
@@ -47,6 +48,7 @@ import { InformationClient } from '../logic/information.ts';
 import { preparePersonalStore } from 'plowshare-client-node/personal';
 import {
   Credentials,
+  authenticationFetch,
   credentialDirectory,
 } from 'plowshare-client-node/credentials';
 import { inspectBoard } from './board.ts';
@@ -132,7 +134,6 @@ import {
   listeningTo,
   listingAgents,
   listingProjects,
-  listingSchedules,
   listingTriggers,
   loadOf,
   loggedFrom,
@@ -454,9 +455,9 @@ import type { Exploring, Reads } from './exploring.ts';
  * <li><b>Every frame is `logic/session.ts`'s.</b> This file never writes a
  *     dotted type or a payload key; it hands `ask.type` and `ask.payload` to
  *     the connection, which is the whole of the dependency inversion.
- * <li><b>The refresh-before-ticket ordering is `auth.ts`'s.</b> The spec calls
- *     it the single thing a TUI author gets wrong; {@link openSocket} owns it
- *     so that nothing here has an opportunity to.
+ * <li><b>Authentication belongs to `auth.ts`.</b> {@link openSocket} owns
+ *     ticket acquisition and renews only after an explicit access refusal,
+ *     preserving unknown-delivery fences across reconnect attempts.
  * </ul>
  *
  * <h2>A turn is a value, and the only mutable thing is which value is current</h2>
@@ -1311,8 +1312,8 @@ export async function converse(talking: Talking): Promise<void> {
     },
     session.tokens,
   );
-  // THE PAIR ROTATES ON EVERY OPEN. The one sign-in returned is retired now,
-  // and the file channel refreshes again each time a project is rooted.
+  // Keep the current pair returned by bootstrap, including any rotation after
+  // an explicit access refusal. Live access is reused on reconnect and rooting.
   let wire = openedSocket.connection;
   const connection = {
     async ask<K extends Operation>(
@@ -1373,6 +1374,8 @@ export async function converse(talking: Talking): Promise<void> {
   };
   /** The rooted project's union lifecycle, when one is rooted. Spec 2026-09-14 §4. */
   let sync: Syncer | undefined;
+  /** A detached union still owns its queued filesystem work until its bounded leave settles. */
+  let syncLeaving: Promise<void> | undefined;
   /** `⚠ 2 sync conflicts` for the status line, or nothing. */
   let syncNotice: string | undefined;
   const rooting = rooter({
@@ -3968,16 +3971,69 @@ export async function converse(talking: Talking): Promise<void> {
     return undefined;
   };
 
-  /** Both listings, or nothing after saying why one of them was refused. */
-  const scheduled = async (): Promise<
-    { schedules: Schedule[]; triggers: Trigger[] } | undefined
-  > => {
-    const listed = await settled(listingSchedules());
-    const schedules = schedulesOf(listed);
-    if (schedules === undefined) {
-      show('trouble', refusal(listed));
+  // Listing and legacy trigger routing require complete authorized results. Only these
+  // read-only traversals cross pages; target lookups stop as soon as the named DTO is found.
+  const readSchedules = async (
+    name?: string,
+  ): Promise<Schedule[] | undefined> => {
+    const rows: Schedule[] = [];
+    try {
+      for await (const page of schedulePages(
+        async (after) => {
+          const reply = await settled({
+            type: 'schedule.list',
+            payload: {
+              limit: SCHEDULE_PAGE_LIMIT,
+              ...(after === undefined ? {} : { after }),
+            },
+          });
+          const page = schedulesOf(reply);
+          if (page === undefined) throw new Error(refusal(reply));
+          return page;
+        },
+        (row) => row.name,
+      )) {
+        rows.push(...page);
+        if (name !== undefined && page.some((row) => row.name === name)) break;
+      }
+      return rows;
+    } catch (error) {
+      show('trouble', errorMessage(error));
       return undefined;
     }
+  };
+  const managedSchedule = async (
+    name: string,
+  ): Promise<boolean | undefined> => {
+    try {
+      for await (const page of schedulePages(
+        async (after) => {
+          const reply = await settled({
+            type: 'schedule.files',
+            payload: {
+              limit: SCHEDULE_PAGE_LIMIT,
+              ...(after === undefined ? {} : { after }),
+            },
+          });
+          if (reply.code !== OK) throw new Error(refusal(reply));
+          return decodeReply('schedule.files', reply.payload);
+        },
+        (row) => row.internalName,
+      )) {
+        if (page.some((file) => file.internalName === name)) return true;
+      }
+      return false;
+    } catch (error) {
+      show('trouble', errorMessage(error));
+      return undefined;
+    }
+  };
+  /** Both listings, or nothing after saying why one of them was refused. */
+  const scheduled = async (
+    name?: string,
+  ): Promise<{ schedules: Schedule[]; triggers: Trigger[] } | undefined> => {
+    const schedules = await readSchedules(name);
+    if (schedules === undefined) return undefined;
     const heard = await settled(listingTriggers());
     const triggers = triggersOf(heard);
     if (triggers === undefined) {
@@ -4001,19 +4057,13 @@ export async function converse(talking: Talking): Promise<void> {
     verb: 'pause' | 'resume' | 'forget',
     name: string,
   ): Promise<void> => {
-    const both = await scheduled();
+    const both = await scheduled(name);
     if (both === undefined) {
       return;
     }
     const found = both.schedules.find((each) => each.name === name);
-    const fileReply = await settled({ type: 'schedule.files', payload: {} });
-    if (fileReply.code !== OK) {
-      show('trouble', refusal(fileReply));
-      return;
-    }
-    const managed = decodeReply('schedule.files', fileReply.payload).some(
-      (file) => file.internalName === name,
-    );
+    const managed = await managedSchedule(name);
+    if (managed === undefined) return;
     const listening =
       managed || found === undefined ? [] : listeningTo(found, both.triggers);
     const asks: Ask[] =
@@ -4048,12 +4098,8 @@ export async function converse(talking: Talking): Promise<void> {
 
   /** `/fire <name>`: the named schedule's event, emitted now. */
   const fire = async (name: string): Promise<void> => {
-    const listed = await settled(listingSchedules());
-    const schedules = schedulesOf(listed);
-    if (schedules === undefined) {
-      show('trouble', refusal(listed));
-      return;
-    }
+    const schedules = await readSchedules(name);
+    if (schedules === undefined) return;
     const found = schedules.find((each) => each.name === name);
     if (found === undefined) {
       show('client', describeNoSchedule(name));
@@ -4467,24 +4513,33 @@ export async function converse(talking: Talking): Promise<void> {
    * <p><b>Bounded, because a quit must not hang on a hub.</b> `leave` waits
    * behind whatever the syncer is doing — a whole reconcile — and then
    * pushes; git's own timeout is minutes. After {@link LEAVE_PATIENCE_MS}
-   * this returns and the leave carries on unwatched. The syncer is detached
-   * synchronously, before any wait, so a late leave cannot put it back.
+   * this returns and the physical leave may continue. The bounded wait remains owned
+   * after detaching, so root-loss cleanup, undo and shutdown all join the same leave.
+   * Detaching synchronously also prevents a late leave from putting the syncer back.
    */
   const unsyncing = async (): Promise<void> => {
     const leaving = sync;
     sync = undefined;
     syncNotice = undefined;
     stand();
-    if (leaving === undefined) {
-      return;
-    }
+    if (leaving === undefined) return syncLeaving;
     let patience: ReturnType<typeof setTimeout> | undefined;
     const waited = new Promise<void>((done) => {
       patience = setTimeout(done, LEAVE_PATIENCE_MS);
       patience.unref?.();
     });
-    await Promise.race([leaving.leave(), waited]);
-    clearTimeout(patience);
+    const previous = syncLeaving;
+    const closing = Promise.all([
+      previous,
+      Promise.race([leaving.leave(), waited]),
+    ])
+      .then(() => undefined)
+      .finally(() => {
+        clearTimeout(patience);
+        if (syncLeaving === closing) syncLeaving = undefined;
+      });
+    syncLeaving = closing;
+    await closing;
   };
   /** `/sync …`: only a project rooted on this machine has a syncer to ask. */
   const syncRun = async (action: SyncAction): Promise<void> => {
@@ -6154,12 +6209,26 @@ export async function run(args: readonly string[] = []): Promise<void> {
       // binding takes it, and builds none of its own.
       door: {
         base,
-        fetch,
+        dispatchMode: 'concurrent-v1',
+        deadline: {
+          milliseconds: 30_000,
+          schedule: (expired, milliseconds) => {
+            const timer = setTimeout(expired, milliseconds);
+            return () => clearTimeout(timer);
+          },
+        },
+        fetch: authenticationFetch,
         open: openingSocket,
         session: randomUUID(),
         ...(credentials === undefined
           ? {}
-          : { renew: () => credentials.renew({ base, fetch }) }),
+          : {
+              renew: (rejectedAccess?: string) =>
+                credentials.renew(
+                  { base, fetch: authenticationFetch },
+                  rejectedAccess,
+                ),
+            }),
       },
       ...(credentials === undefined ? {} : { credentials }),
       handle: credentials

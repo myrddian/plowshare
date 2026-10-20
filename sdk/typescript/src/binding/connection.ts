@@ -1,4 +1,5 @@
-import type { RequestOptions } from './acting.ts';
+import { actingOptions, type RequestOptions } from './acting.ts';
+import { utf8Length } from './files.ts';
 import { CURRENT_VERSION, asking, isAnswer, outcomeIn } from './envelope.ts';
 import type { Outcome } from './envelope.ts';
 
@@ -73,6 +74,8 @@ export interface Arrival {
 export interface Socket {
   /** One frame, as text. This client sends no binary. */
   send(frame: string): void;
+  /** Optional queued writer. Settlement retains byte ownership even after caller detachment. */
+  submit?(frame: string, submitted: () => void): RequestSend;
 
   /** Hangs up. Called by {@link Connection.close}. */
   close(): void;
@@ -80,11 +83,19 @@ export interface Socket {
   addEventListener(type: 'message', listener: (event: Arrival) => void): void;
   addEventListener(type: 'close', listener: (event: unknown) => void): void;
 }
+export interface RequestSend {
+  /** True only when cancellation proves that no packet write can occur. */
+  cancel(): boolean;
+  readonly settled: Promise<void>;
+}
 
 /** What {@link connect} needs, and what it will accept on top of that. */
 export interface ConnectOptions {
   /** The socket, already open. See {@link Socket}. */
   readonly socket: Socket;
+  /** Low-level injected transports default to ordered; public SDK opening selects concurrent-v1. */
+  readonly dispatchMode?: 'concurrent-v1' | 'ordered';
+  readonly maxPendingBytes?: number;
   /** Platform-supplied deadline; cancellation removes the pending request, never replays it. */
   readonly deadline?: {
     readonly milliseconds: number;
@@ -174,6 +185,12 @@ interface Waiting {
   readonly answered: (reply: Reply) => void;
   readonly failed: (trouble: Error) => void;
   cancelDeadline?: () => void;
+  cancelAbort?: () => void;
+  cancelSend?: () => boolean;
+  submitted: boolean;
+  terminal: boolean;
+  transferDone: boolean;
+  readonly release: () => void;
 }
 
 /** Complete envelope and checked outcome, including opaque future fields in raw. */
@@ -182,6 +199,10 @@ export interface Reply {
   readonly raw: Readonly<Record<string, unknown>>;
 }
 export interface Connected extends Connection {
+  /** Acknowledged dispatch negotiation, with no application request replay or fallback. */
+  ready(): Promise<void>;
+  /** Close and observe release of every transport-owned request/physical buffer. */
+  closeAsync(): Promise<void>;
   request(
     type: string,
     payload?: unknown,
@@ -215,207 +236,376 @@ export class ConnectionFault extends Error {
  * <h2>Correlation is by `id`, and the id means nothing to anybody else</h2>
  *
  * <p>Spec §3.1: `id` is client-generated and correlates a response to its
- * request. The server keeps no record of it — `EventChannelHandler` says so in
- * as many words — so it need only be unique among the frames <i>this
- * connection</i> has outstanding, which a counter gives without reaching for a
+ * request. IDs remain unique for the entire physical connection generation,
+ * which a counter gives without reaching for a
  * `crypto` this project has no types for and no need of. Nothing reads it but
  * the map below.
  */
 export function connect(options: ConnectOptions): Connected {
+  const deadline = options.deadline;
+  const capacity = options.maxPendingBytes ?? 640 * 1024 * 1024;
   if (
-    options.deadline !== undefined &&
-    (!Number.isFinite(options.deadline.milliseconds) ||
-      options.deadline.milliseconds <= 0)
+    deadline !== undefined &&
+    (!Number.isFinite(deadline.milliseconds) || deadline.milliseconds <= 0)
   )
     throw new Error('a positive request deadline is required');
+  if (!Number.isSafeInteger(capacity) || capacity < 1)
+    throw new Error('a positive pending byte limit is required');
+  if (
+    options.dispatchMode !== undefined &&
+    !['concurrent-v1', 'ordered'].includes(options.dispatchMode)
+  )
+    throw new Error('choose an explicit dispatch mode');
+  const concurrent = options.dispatchMode === 'concurrent-v1';
+  if (concurrent && deadline === undefined)
+    throw new Error('concurrent dispatch requires a deadline scheduler');
   const socket = options.socket;
-  const onPush = options.onPush;
-  const onClose = options.onClose;
   const waiting = new Map<string, Waiting>();
-  let issued = 0;
-  let open = true;
-
-  socket.addEventListener('message', (event) => {
-    arrived(event.data);
+  let issued = 0,
+    admitted = 0,
+    held = 0,
+    maximum = 64,
+    dispatched = 0;
+  let open = true,
+    callerClosed = false;
+  let opening: Promise<void> | undefined;
+  let stranding = false;
+  let drained!: () => void;
+  const drain = new Promise<void>((resolve) => {
+    drained = resolve;
   });
+  const checkDrained = (): void => {
+    if (!open && !stranding && admitted === 0) drained();
+  };
 
-  // The server closes a connection it cannot queue an answer for, rather than
-  // dropping the answer, and its reasoning names this listener's job: a
-  // dropped response is "an id that is never resolved and a caller that never
-  // fails", where a close "fails every outstanding id at once". This is the
-  // client half of that. Without it the caller waits forever, which is the
-  // exact outcome the server chose to close in order to avoid.
-  socket.addEventListener('close', () => {
-    strand('the socket closed before this frame was answered');
-    // After the strand and never before it: see `ConnectOptions.onClose`.
-    // Every ask is rejected and the connection is shut by the time a
-    // listener runs, so nothing it does here can start a new wait on a
-    // socket that is gone.
-    onClose?.();
-  });
-
-  /** One frame off the wire: an answer to correlate, or a push to hand on. */
-  function arrived(data: unknown): void {
-    if (typeof data !== 'string') {
-      // Binary. This client sends none and the server sends none; a frame
-      // that is neither an answer nor a push correlates with nothing, so
-      // there is nothing it could fail and nothing to hand a listener.
-      return;
+  function releaseIfSettled(asker: Waiting): void {
+    if (asker.terminal && asker.transferDone) asker.release();
+  }
+  function terminate(id: string, asker: Waiting): boolean {
+    if (asker.terminal) return false;
+    asker.terminal = true;
+    if (waiting.get(id) === asker) waiting.delete(id);
+    asker.cancelDeadline?.();
+    asker.cancelAbort?.();
+    releaseIfSettled(asker);
+    return true;
+  }
+  function fail(id: string, asker: Waiting, trouble: Error): void {
+    if (terminate(id, asker)) asker.failed(trouble);
+  }
+  function strand(why: string): void {
+    open = false;
+    stranding = true;
+    for (const [id, asker] of [...waiting]) {
+      asker.cancelSend?.();
+      fail(
+        id,
+        asker,
+        new ConnectionFault(
+          asker.submitted ? 'RESPONSE_LOST' : 'NOT_SUBMITTED',
+          why,
+        ),
+      );
     }
+    stranding = false;
+    checkDrained();
+  }
+  socket.addEventListener('close', () => {
+    const wasOpen = open;
+    strand('the socket closed before this frame was answered');
+    if (wasOpen && !callerClosed) options.onClose?.();
+  });
+  socket.addEventListener('message', (event) => {
+    if (typeof event.data !== 'string') return;
     let frame: unknown;
     try {
-      frame = JSON.parse(data);
+      frame = JSON.parse(event.data);
     } catch {
-      // Unreadable text carries no id either. Dropping it is the only
-      // honest move — failing some ask that happens to be outstanding
-      // would blame a question this frame was never an answer to.
       return;
     }
-    // Accounting subscriptions use envelopes with a null correlation id.
-    // They are notifications, never replies to an outstanding question.
-    if (isAnswer(frame) && frame['id'] === null) {
-      if (
-        frame['protocol_version'] === CURRENT_VERSION &&
-        typeof frame['type'] === 'string'
-      ) {
+    if (!isAnswer(frame) || frame['id'] === null) {
+      if (!isAnswer(frame) || frame['protocol_version'] === CURRENT_VERSION) {
         try {
-          onPush?.(frame);
+          options.onPush?.(frame);
         } catch {
-          /* Consumer failures cannot strand requests. */
+          /* Notification consumers cannot strand exchanges. */
         }
       }
       return;
     }
-    if (!isAnswer(frame)) {
-      try {
-        onPush?.(frame);
-      } catch {
-        /* Consumer failures cannot strand requests. */
-      }
-      return;
-    }
-    if (frame['id'] === null && frame['protocol_version'] === CURRENT_VERSION) {
-      try {
-        onPush?.(frame);
-      } catch {
-        /* Isolate consumers. */
-      }
-      return;
-    }
-    answer(frame);
-  }
-
-  /** An enveloped frame: check the handshake, find the asker, hand it over. */
-  function answer(frame: Record<string, unknown>): void {
     const id = frame['id'];
-    const asker = typeof id === 'string' ? waiting.get(id) : undefined;
-    if (asker === undefined) {
-      // An answer to a frame this connection is no longer waiting on —
-      // one already failed by a close, or an id it never issued. There is
-      // nobody to tell.
-      return;
-    }
-    waiting.delete(id as string);
-    asker.cancelDeadline?.();
-    const version = frame['protocol_version'];
-    if (version !== CURRENT_VERSION || frame['type'] !== asker.type) {
-      // §3.2: the envelope is a handshake, so this is refused rather than
-      // read as data. Per frame, and not by tearing the connection down,
-      // because that is how the server refuses in the other direction —
-      // binding throws out of `Envelope`'s constructor for that one frame.
-      asker.failed(
-        new ConnectionFault(
-          'INVALID_ENVELOPE',
-          `this build speaks protocol_version "${CURRENT_VERSION}"; a frame naming` +
-            ` "${String(version)}" is proposing a different handshake and is refused`,
-        ),
-      );
-      return;
-    }
+    if (typeof id !== 'string') return;
+    const asker = waiting.get(id);
+    if (asker === undefined) return;
     try {
-      asker.answered({ outcome: outcomeIn(frame['payload']), raw: frame });
-    } catch (trouble) {
-      asker.failed(
+      if (
+        frame['protocol_version'] !== CURRENT_VERSION ||
+        frame['type'] !== asker.type
+      )
+        throw new Error(
+          `response type or protocol version does not match ${CURRENT_VERSION}: received ${String(frame['protocol_version'])}`,
+        );
+      const reply = { outcome: outcomeIn(frame['payload']), raw: frame };
+      if (terminate(id, asker)) asker.answered(reply);
+    } catch (cause) {
+      fail(
+        id,
+        asker,
         new ConnectionFault(
           'INVALID_ENVELOPE',
-          trouble instanceof Error
-            ? trouble.message
-            : 'response envelope is unreadable',
+          cause instanceof Error
+            ? cause.message
+            : 'unreadable response envelope; outcome is unknown',
+          { cause },
         ),
       );
     }
-  }
+  });
 
-  /** Fails everything outstanding, once, with the same reason. */
-  function strand(why: string): void {
-    open = false;
-    const stranded = [...waiting.values()];
-    waiting.clear();
-    for (const asker of stranded) {
-      asker.cancelDeadline?.();
-      asker.failed(new ConnectionFault('RESPONSE_LOST', why));
-    }
-  }
-
-  function request(
+  /** Admission includes queued writers and negotiated opening waiters, not just sent IDs. */
+  function exchange(
     type: string,
-    payload?: unknown,
-    requestOptions?: RequestOptions,
+    payload: unknown,
+    input: RequestOptions | undefined,
+    control: boolean,
   ): Promise<Reply> {
-    if (!open) {
-      return Promise.reject(
-        new ConnectionFault(
+    let requestOptions: RequestOptions,
+      frame: string,
+      id: string,
+      bytes: number;
+    let reserved = false;
+    try {
+      requestOptions = actingOptions(input);
+      if (!control && type === 'transport.dispatch')
+        throw new ConnectionFault(
           'NOT_SUBMITTED',
-          `this connection is closed; "${type}" was not sent`,
-        ),
+          'dispatch selection is owned by connection opening',
+        );
+      if (!open)
+        throw new ConnectionFault('NOT_SUBMITTED', 'this connection is closed');
+      if (requestOptions.signal?.aborted || admitted >= maximum)
+        throw new ConnectionFault(
+          'NOT_SUBMITTED',
+          'request cancelled or capacity exhausted before submission',
+        );
+      if (requestOptions.timeoutMs !== undefined && deadline === undefined)
+        throw new Error('request timeouts require a deadline scheduler');
+      if (!Number.isSafeInteger(issued + 1))
+        throw new Error('request identity space exhausted');
+      id = String(++issued);
+      // Reserve before encoding: caller DTO hooks can synchronously reenter this transport.
+      admitted++;
+      reserved = true;
+      frame = JSON.stringify(asking(id, type, payload, requestOptions));
+      bytes = utf8Length(frame);
+      if (bytes > capacity - held)
+        throw new ConnectionFault(
+          'NOT_SUBMITTED',
+          'pending request byte capacity exceeded before submission',
+        );
+    } catch (cause) {
+      if (reserved) admitted--;
+      return Promise.reject(
+        cause instanceof Error
+          ? cause
+          : new Error('Invalid request before submission', { cause }),
       );
     }
-    if (waiting.size >= 64)
-      return Promise.reject(
-        new ConnectionFault(
-          'NOT_SUBMITTED',
-          'too many outstanding requests; frame was not submitted',
-        ),
-      );
-    issued += 1;
-    const id = String(issued);
+    held += bytes;
     return new Promise<Reply>((answered, failed) => {
-      const asker: Waiting = { type, answered, failed };
+      let released = false,
+        launched = false;
+      const asker: Waiting = {
+        type,
+        answered,
+        failed,
+        submitted: false,
+        terminal: false,
+        transferDone: true,
+        release: () => {
+          if (released) return;
+          released = true;
+          admitted--;
+          if (launched) dispatched--;
+          held -= bytes;
+          checkDrained();
+        },
+      };
       waiting.set(id, asker);
-      try {
-        socket.send(JSON.stringify(asking(id, type, payload, requestOptions)));
-      } catch (trouble) {
-        // Nothing left the process, so nothing will answer this id.
-        waiting.delete(id);
-        failed(
+      const detached = (why: string): void => {
+        asker.cancelSend?.();
+        fail(
+          id,
+          asker,
           new ConnectionFault(
-            'NOT_SUBMITTED',
-            'socket refused the frame before submission',
-            { cause: trouble },
+            asker.submitted ? 'RESPONSE_LOST' : 'NOT_SUBMITTED',
+            why,
           ),
         );
-        return;
+      };
+      if (deadline !== undefined) {
+        const milliseconds = requestOptions.timeoutMs ?? deadline.milliseconds;
+        asker.cancelDeadline = deadline.schedule(
+          () =>
+            detached(
+              'request deadline expired; submitted work is not replayed',
+            ),
+          milliseconds,
+        );
       }
-      if (options.deadline !== undefined && waiting.has(id))
-        asker.cancelDeadline = options.deadline.schedule(() => {
-          if (waiting.delete(id))
-            failed(
-              new ConnectionFault(
-                'RESPONSE_LOST',
-                'response deadline expired; outcome is unknown; request was not replayed',
-              ),
+      if (requestOptions.signal !== undefined) {
+        const signal = requestOptions.signal;
+        const aborted = (): void =>
+          detached('request cancelled; submitted work is not replayed');
+        signal.addEventListener('abort', aborted, { once: true });
+        asker.cancelAbort = () => signal.removeEventListener('abort', aborted);
+        if (signal.aborted) aborted();
+      }
+      const launch = (): void => {
+        if (asker.terminal) return;
+        if (!open) {
+          detached('connection closed before submission');
+          return;
+        }
+        if (dispatched >= maximum) {
+          detached('negotiated request capacity exhausted before submission');
+          return;
+        }
+        dispatched++;
+        launched = true;
+        try {
+          if (socket.submit !== undefined) {
+            asker.transferDone = false;
+            const sent = socket.submit(frame, () => {
+              asker.submitted = true;
+            });
+            asker.cancelSend = () => sent.cancel();
+            // An injected encoder may synchronously cancel while submit constructs its handle.
+            if (asker.terminal) sent.cancel();
+            sent.settled.then(
+              () => {
+                asker.transferDone = true;
+                releaseIfSettled(asker);
+              },
+              (cause: unknown) => {
+                asker.transferDone = true;
+                fail(
+                  id,
+                  asker,
+                  new ConnectionFault(
+                    asker.submitted ? 'RESPONSE_LOST' : 'NOT_SUBMITTED',
+                    'request writer failed; no request was replayed',
+                    { cause },
+                  ),
+                );
+                releaseIfSettled(asker);
+              },
             );
-        }, options.deadline.milliseconds);
+          } else {
+            // A raw socket's synchronous send either refuses locally or accepts the frame.
+            asker.submitted = true;
+            socket.send(frame);
+          }
+        } catch (cause) {
+          asker.transferDone = true;
+          fail(
+            id,
+            asker,
+            new ConnectionFault(
+              'NOT_SUBMITTED',
+              'socket refused the frame before submission',
+              { cause },
+            ),
+          );
+          releaseIfSettled(asker);
+        }
+      };
+      if (control || !concurrent) launch();
+      else
+        ready().then(launch, (cause: unknown) =>
+          fail(
+            id,
+            asker,
+            new ConnectionFault(
+              'NOT_SUBMITTED',
+              'dispatch negotiation failed before application submission',
+              { cause },
+            ),
+          ),
+        );
     });
   }
+  function ready(): Promise<void> {
+    if (!concurrent) return Promise.resolve();
+    if (opening) return opening;
+    let accepted!: () => void;
+    let rejected!: (cause: unknown) => void;
+    // Publish ownership before invoking an injected socket: it may synchronously
+    // deliver a push whose consumer asks for this same opening again.
+    opening = new Promise<void>((resolve, reject) => {
+      accepted = resolve;
+      rejected = reject;
+    });
+    void exchange(
+      'transport.dispatch',
+      { mode: 'concurrent-v1' },
+      undefined,
+      true,
+    )
+      .then((reply) => {
+        const body = reply.outcome.payload;
+        if (
+          reply.outcome.code !== 'OK' ||
+          typeof body !== 'object' ||
+          body === null ||
+          !('mode' in body) ||
+          body.mode !== 'concurrent-v1' ||
+          !('maxPending' in body) ||
+          typeof body.maxPending !== 'number' ||
+          !Number.isSafeInteger(body.maxPending) ||
+          body.maxPending < 1 ||
+          body.maxPending > 64 ||
+          !('maxIdBytes' in body) ||
+          body.maxIdBytes !== 128
+        )
+          throw new ConnectionFault(
+            'NOT_SUBMITTED',
+            'server did not acknowledge concurrent dispatch; select ordered mode explicitly for an older server',
+          );
+        maximum = body.maxPending;
+        accepted();
+      })
+      .catch((cause: unknown) => {
+        strand(
+          'dispatch negotiation failed; no application request was replayed',
+        );
+        socket.close();
+        rejected(
+          new ConnectionFault(
+            'NOT_SUBMITTED',
+            'dispatch negotiation failed before application submission',
+            { cause },
+          ),
+        );
+      });
+    return opening;
+  }
+  const close = (): void => {
+    if (callerClosed) return;
+    callerClosed = true;
+    strand('this connection was closed before its requests were answered');
+    socket.close();
+  };
   return {
-    request,
-    ask: async (type, payload, options) =>
-      (await request(type, payload, options)).outcome,
-
-    close(): void {
-      strand('this connection was closed before this frame was answered');
-      socket.close();
+    ready,
+    closeAsync: () => {
+      close();
+      return drain;
     },
+    request: (type, payload, requestOptions) =>
+      exchange(type, payload, requestOptions, false),
+    ask: async (type, payload, requestOptions) =>
+      (await exchange(type, payload, requestOptions, false)).outcome,
+    close,
   };
 }

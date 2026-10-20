@@ -16,7 +16,8 @@ import org.springframework.web.socket.WebSocketSession;
 /** All writes share the same lock; byte credits can pass a blocked logical-message sender. */
 final class PacketEventTransport implements EventTransport, PacketWire {
   private final WebSocketSession socket;
-  private final Object writeLock = new Object();
+  private final java.util.concurrent.locks.ReentrantLock writeLock =
+      new java.util.concurrent.locks.ReentrantLock();
   private final ObjectMapper json;
   private final SegmentedMessages packets;
 
@@ -73,8 +74,11 @@ final class PacketEventTransport implements EventTransport, PacketWire {
   }
 
   private void write(Object packet) throws IOException {
-    synchronized (writeLock) {
+    writeLock.lock();
+    try {
       socket.sendMessage(new TextMessage(json.writeValueAsString(packet)));
+    } finally {
+      writeLock.unlock();
     }
   }
 

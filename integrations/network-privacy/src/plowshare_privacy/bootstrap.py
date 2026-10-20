@@ -33,7 +33,6 @@ from plowshare.contracts import (
     ApplicationSourceFileDto,
     FilestoreListRequest,
     FileStoreReferenceDto,
-    ScheduleFilesRequest,
 )
 from plowshare.tools import ToolAttention
 
@@ -43,6 +42,7 @@ from .dashboard import reopen
 from .discovery import DiscoveryPlan, discover
 from .journal import FileReceipts
 from .monitor import replace_private
+from .schedule_pages import schedule_files
 from .setup import (
     Setup,
     SetupClient,
@@ -505,12 +505,9 @@ async def inspect(setup: Setup, client: SetupClient) -> None:
 async def resolve_schedule(setup: Setup, client: SetupClient) -> bool:
     """Resolve one active source schedule using read-only server requests."""
     config = Configuration.read(setup.collector)
-    schedules = (
-        await client.request(ScheduleFilesRequest(project=config.project))
-    ).require_payload()
     matches = [
         s
-        for s in schedules
+        async for s in schedule_files(client, config.project)
         if s.project == config.project
         and s.source == "server"
         and s.name == "network_scan"

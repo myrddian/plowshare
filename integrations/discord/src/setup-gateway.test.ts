@@ -102,7 +102,7 @@ await test('setup uses only existing public WS contracts and keeps Discord-only 
   const config = setupConfiguration();
   const server = new SetupServer(config);
   const wire = new SetupWire(server);
-  const client = new Plowshare({ socket: wire });
+  const client = new Plowshare({ socket: wire, dispatchMode: 'ordered' });
   const repository = new MemorySetup();
   try {
     const engine = new DiscordSetup(
@@ -137,7 +137,7 @@ await test('an existing public SDK refusal cannot cause setup to resend an uncer
   const config = setupConfiguration();
   const server = new SetupServer(config);
   const wire = new SetupWire(server);
-  const client = new Plowshare({ socket: wire });
+  const client = new Plowshare({ socket: wire, dispatchMode: 'ordered' });
   const repository = new MemorySetup();
   server.failDeploy = true;
   try {

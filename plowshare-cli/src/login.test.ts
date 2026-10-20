@@ -135,7 +135,13 @@ async function fixture(flagged = false) {
           id: field(frame, ['id']),
           type: field(frame, ['type']),
           protocol_version: field(frame, ['protocol_version']),
-          payload: { code: 'OK', payload: replies[text(frame, ['type'])] },
+          payload: {
+            code: 'OK',
+            payload:
+              text(frame, ['type']) === 'transport.dispatch'
+                ? { mode: 'concurrent-v1', maxPending: 64, maxIdBytes: 128 }
+                : replies[text(frame, ['type'])],
+          },
         }),
       );
     });
@@ -196,7 +202,7 @@ function child(
 }
 
 await test(
-  'one prompted login serves concurrent CLI processes, saves rotated tokens and logout removes them',
+  'one prompted login serves concurrent CLI processes without rotating live access and logout removes it',
   { timeout: 15000 },
   async () => {
     const fake = await fixture(),
@@ -226,7 +232,7 @@ await test(
         assert.equal(field(json(result.out), ['status']), 'completed');
         assert.ok(!result.out.includes('refresh-'));
       }
-      assert.deepEqual(fake.counts(), { logins: 1, refreshes: 2 });
+      assert.deepEqual(fake.counts(), { logins: 1, refreshes: 0 });
       const privateDirectory = join(
           connectionDirectory(fake.base, 'operator', directory),
           'credentials',
@@ -240,7 +246,7 @@ await test(
       );
       const saved = await readFile(join(privateDirectory, files[0]!), 'utf8');
       assert.ok(!saved.includes('never-save-password'));
-      assert.equal(field(json(saved), ['tokens', 'refresh']), 'refresh-2');
+      assert.equal(field(json(saved), ['tokens', 'refresh']), 'refresh-0');
       const signedOut = await child(['--url', fake.base, 'logout'], directory);
       assert.equal(signedOut.code, 0, signedOut.err);
       assert.deepEqual(await readdir(privateDirectory), []);
@@ -258,7 +264,7 @@ await test(
 );
 
 await test(
-  'failed ticket keeps the rotated pair and a later client never repeats login',
+  'unavailable ticket keeps the unrotated pair and a later client never repeats login',
   { timeout: 15000 },
   async () => {
     const fake = await fixture(),
@@ -271,13 +277,13 @@ await test(
         (await child(['--url', fake.base, 'memory', 'index'], directory)).code,
         5,
       );
-      assert.equal((await store.session()).tokens.refresh, 'refresh-1');
+      assert.equal((await store.session()).tokens.refresh, 'refresh-0');
       fake.fail(false);
       assert.equal(
         (await child(['--url', fake.base, 'memory', 'index'], directory)).code,
         0,
       );
-      assert.deepEqual(fake.counts(), { logins: 1, refreshes: 2 });
+      assert.deepEqual(fake.counts(), { logins: 1, refreshes: 0 });
       await assert.rejects(
         new Credentials(
           'http://localhost:1',

@@ -64,11 +64,37 @@ async def main() -> None:
     async with await Client.connect(
         origin, "sdk-fixture-token", session="typed-python/multiplex"
     ) as client:
-        one, two = await asyncio.gather(
-            client.request(ProjectListRequest()), client.request(ProjectListRequest())
-        )
-        assert one.require_payload()[0].name == "first"
-        assert two.require_payload()[0].name == "second"
+        first = asyncio.create_task(client.request(ProjectListRequest()))
+        assert getattr(await client.next_push(), "kind", None) == "inbox.changed"
+        second = await client.request(ProjectListRequest())
+        assert second.require_payload()[0].name == "second"
+        assert not first.done(), "B must complete while A remains held"
+        third = await client.request(ProjectListRequest())
+        assert third.require_payload()[0].name == "third"
+        assert (await first).require_payload()[0].name == "first"
+    async with await Client.connect(
+        origin, "sdk-fixture-token", session="typed-python/capacity", timeout=5
+    ) as capacity:
+        calls = [
+            asyncio.create_task(capacity.request(ProjectListRequest()))
+            for _ in range(64)
+        ]
+        for count in range(1, 65):
+            hint = await capacity.next_push()
+            assert getattr(hint, "unread", None) == count
+        try:
+            await capacity.request(ProjectListRequest())
+            raise AssertionError("65th request was submitted")
+        except TransportError as error:
+            assert error.delivery == "NOT_SUBMITTED"
+        await asyncio.gather(capacity.close(), capacity.close())
+        assert (capacity._admitted, capacity._held) == (0, 0)
+        for call in calls:
+            try:
+                await call
+                raise AssertionError("Closed pending request succeeded")
+            except TransportError as error:
+                assert error.delivery == "UNKNOWN"
     tests = [(test["name"], test.get("delivery")) for test in fixture["cases"]]
     tests += [
         ("malformed-nested", "INVALID_RESPONSE"),

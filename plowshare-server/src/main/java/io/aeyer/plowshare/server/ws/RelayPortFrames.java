@@ -45,7 +45,25 @@ public final class RelayPortFrames implements FrameArea {
         FrameTypes.RELAY_PUBLISH,
         this::publish,
         FrameTypes.RELAY_CONSUME,
-        this::consume,
+        new FrameHandler() {
+          @Override
+          public Outcome handle(Map<String, Object> payload, Asking asking) {
+            return consume(payload, asking);
+          }
+
+          @Override
+          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
+              Map<String, Object> payload, Asking asking) {
+            var request = decode(payload, RelayPort.Consume.class);
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                Outcome.ok(
+                    ports.observe(
+                        asking.requireHandle(FrameTypes.RELAY_CONSUME),
+                        request,
+                        asking.relayBudget(),
+                        asking.queryValidity())));
+          }
+        },
         FrameTypes.RELAY_ACK,
         this::ack);
   }

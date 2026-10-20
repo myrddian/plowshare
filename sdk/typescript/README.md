@@ -53,8 +53,9 @@ import { JobLifecycle } from 'plowshare-client-ts/jobs'
 
 Sockets and HTTP authentication are supplied through structural interfaces.
 The package has no platform globals, credential persistence, automatic
-reconnection, HTTP operation fallback, or mutation replay. Authentication's
-existing refresh-before-ticket behavior is preserved.
+reconnection, HTTP operation fallback, or mutation replay. Authentication requests
+a ticket with the current access token and renews once only after an explicit
+HTTP 401. Transport failures never trigger refresh replay.
 
 Every operation with a supported server WebSocket contract must use it.
 HTTP authentication/bootstrap, multipart uploads and Node Git object transfers

@@ -34,7 +34,7 @@ try {
     for (const type of ['conversation.open', 'agent.run', 'job.status', 'conversation.trajectory', 'memory.index', 'memory.read', 'orchestration.definitions'])
         assert.ok(fixture.frames.some(row => row.type === type), `${type} never reached WS`);
     assert.equal(fixture.frames.filter(row => row.type === 'agent.run').length, 1, 'mutation replay');
-    assert.deepEqual([...new Set(fixture.httpPaths)].sort(), ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket']);
+    assert.deepEqual([...new Set(fixture.httpPaths)].filter(path => path !== '/v1/auth/refresh').sort(), ['/v1/auth/login', '/v1/auth/ticket']);
     console.log(JSON.stringify({ frontend: 'native-desktop', status: 'passed', httpPaths: [...new Set(fixture.httpPaths)].sort(), wsFrames: [...new Set(fixture.frames.map(row => row.type))].sort(), agentSubmissions: 1 }));
 }
 finally {

@@ -128,6 +128,39 @@ Disconnect discards unstarted operations without interrupting or replaying an
 operation that has already started. Legacy JSON routing stays inline. Packet
 credits and physical response serialization retain their existing contracts.
 
+## Explicit concurrent dispatch extension
+
+An updated SDK selects `transport.dispatch` with payload
+`{"mode":"concurrent-v1"}` as its first logical envelope, after authenticated
+upgrade. An `OK` outcome carries
+`{"mode":"concurrent-v1","maxPending":64,"maxIdBytes":128}`. The control is private
+to transport opening, available on both encodings, and absent from the domain
+operation catalog. It may be selected only once, before application work.
+Unsupported negotiation never silently falls back; callers may explicitly open a
+new ordered connection. The previous scheduling policy above remains for
+connections that make no selection.
+
+Selected connections use a process-owned bounded coordinator. Short state turns
+reserve operation/resource capacity; blocking work and callbacks run outside the
+state lock. Audited reads overlap, resource effects serialize by their owning
+identity, and observers have separate capacity so an unblocking mutation can run.
+Unaudited operations remain connection barriers. PostgreSQL retains cross-process
+persistence and transaction authority. Queued authority and reply disclosure are
+checked independently of correlation and cache reuse.
+
+A selected connection admits 64 pending SDK calls plus one bounded physical
+reply handoff. IDs (each at most 128 UTF-8 bytes) and byte ownership stay pinned
+until execution and reply handoff settle. The one extra handoff slot allows a
+client that has decoded a reply to refill its 64-call window before the writer
+receives its final packet credit; it does not permit a second physical writer. IDs cannot contain surrounding
+whitespace or controls. Duplicate active IDs and admission overflow close the
+connection rather than risk settling another request with the duplicate's refusal.
+Request bodies reserve retained UTF-16 bytes; queued replies reserve encoded bytes
+against connection and process budgets. Physical response writes remain serialized,
+and packet credits continue while request handlers wait. See the
+[implementation record](../async-request-dispatch-validation.md) for verification
+and remaining deployment acceptance.
+
 ## Bounds and ownership
 
 | Bound | Version-one value |

@@ -109,4 +109,23 @@ public final class ActingRequests {
   public void disconnected(String connection) {
     contexts.disconnected(connection);
   }
+
+  /** Output freshness only: never calls a work-start/cancel handler or rereads turn content. */
+  public void requireDisclosure(
+      io.aeyer.plowshare.protocol.frames.Envelope request, Asking asking, Outcome answer) {
+    var connection = ActingFrames.connection(asking);
+    var authority = contexts.resolve(connection, request.actingFor().context());
+    if (FrameTypes.CONVERSATION_TURNS.equals(request.type()))
+      history.requireReadable(authority, ActingFrames.text(request.payload(), "conversation"));
+    else if (FrameTypes.JOB_STATUS.equals(request.type())
+        || FrameTypes.JOB_CANCEL.equals(request.type()))
+      work.requireJob(
+          authority,
+          ActingFrames.text(request.payload(), "job"),
+          io.aeyer.plowshare.server.acting.ActingPermission.READ);
+    else if (answer.payload()
+        instanceof io.aeyer.plowshare.server.acting.ActingWork.Receipt receipt)
+      work.requireReceipt(authority, receipt);
+    contexts.resolve(connection, request.actingFor().context());
+  }
 }

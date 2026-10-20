@@ -43,11 +43,22 @@ server.on('upgrade', (request, socket, head) => {
                 }
             })
             const ws = fixtureSocket(physical)
-            let first, second
+            let first, second, selected = false, applicationStarted = false
             ws.on('message', wire => {
                 try {
                     const sent = JSON.parse(wire.toString())
                     assert.equal(sent.protocol_version, fixture.protocolVersion)
+                    if (sent.type === 'transport.dispatch') {
+                        assert.equal(selected, false, 'dispatch selected twice')
+                        assert.equal(applicationStarted, false, 'dispatch selected after application request')
+                        assert.deepEqual(sent.payload, {mode:'concurrent-v1'})
+                        assert.equal(Object.hasOwn(sent, 'actingFor'), false)
+                        selected = true
+                        ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,
+                            payload:{code:'OK',payload:{mode:'concurrent-v1',maxPending:64,maxIdBytes:128}}}))
+                        return
+                    }
+                    applicationStarted = true
                     if (session.startsWith('packet-large-')) {
                         assert.equal(physical.protocol, 'plowshare-segments-v1')
                         assert.ok(['relay.publish','relay.consume'].includes(sent.type))
@@ -95,11 +106,21 @@ server.on('upgrade', (request, socket, head) => {
                         const project = name => ({name,workspace:'fixture',machine:null,members:[],lent:[],exclusions:[],future:{discard:true}})
                         const answer = body => ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:body,futureEnvelope:true}))
                         if(name==='multiplex') {
-                            if(!first){first=sent;return}
-                            answer({code:'OK',payload:[project('second')]})
+                            if (!first) {
+                                first = sent
+                                ws.send(JSON.stringify({kind:'inbox.changed',unread:1}))
+                                return
+                            }
+                            if (!second) {
+                                second = sent
+                                answer({code:'OK',payload:[project('second')]})
+                                return
+                            }
+                            answer({code:'OK',payload:[project('third')]})
                             ws.send(JSON.stringify({id:first.id,type:first.type,protocol_version:fixture.protocolVersion,payload:{code:'OK',payload:[project('first')]}}))
                             return
                         }
+                        if(name==='capacity'){ws.send(JSON.stringify({kind:'inbox.changed',unread:counts.get(key)}));return}
                         if(name==='bad-packet'){physical.send('{"kind":"transport.credit","version":"1","transferId":"11111111-1111-1111-1111-111111111111","segmentNumber":1}');return}
                         if(name==='cancel'){ws.send(JSON.stringify({kind:'inbox.changed',unread:1}));return}
                         if(name==='invalid-input')throw new Error('invalid DTO reached the transport')
@@ -176,6 +197,8 @@ try {
             child.on('error', reject)
             child.on('exit', code => { clearTimeout(deadline); code === 0 ? resolve() : reject(new Error(language + ' conformance failed: ' + code)) })
         })
+        assert.equal(counts.get('typed-'+language+'/capacity/capacity'),64,language+' capacity admission failed')
+        assert.equal(counts.get('typed-'+language+'/multiplex/multiplex'),3,language+' did not complete held-request proof')
         assert.equal(counts.get('packet-large-'+language+'/relay.publish'),1,'large publication repeated')
         assert.equal(counts.get('packet-large-'+language+'/relay.consume'),1,'large consume repeated')
         assert.ok(packetCounts.get('packet-large-'+language)>480,'large message was not segmented')

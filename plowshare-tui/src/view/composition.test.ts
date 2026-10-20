@@ -2770,11 +2770,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     expect(fake.heard.frames.map((frame) => frame.type)).not.toContain(
       'conversation.open',
     );
-    expect(fake.heard.paths).toEqual([
-      '/v1/auth/login',
-      '/v1/auth/refresh',
-      '/v1/auth/ticket',
-    ]);
+    expect(fake.heard.paths).toEqual(['/v1/auth/login', '/v1/auth/ticket']);
     const output = prompt.said.join('\n');
     expect(output).toContain('memory.navigate: incomplete');
     expect(output).toContain('memory.digest: accepted; /job status job_digest');
@@ -2938,20 +2934,11 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     await converse(talkingTo(fake, prompt));
     const scrollback = prompt.said.join('\n');
 
-    // The three HTTP calls, in the order openSocket owns.
-    expect(fake.heard.paths).toEqual([
-      '/v1/auth/login',
-      '/v1/auth/refresh',
-      '/v1/auth/ticket',
-    ]);
-    // REFRESH BEFORE TICKET, read off the wire rather than off a spy: the
-    // ticket presented `access-2`, which only the refresh's Set-Cookie
-    // could have produced. `access-1` here would be the bug the spec says
-    // a TUI author gets wrong, and it would loop against a real server.
-    expect(fake.heard.bearing.get('/v1/auth/ticket')).toBe('Bearer access-2');
-    expect(fake.heard.cookied.get('/v1/auth/refresh')).toBe(
-      'ps_refresh=refresh-1',
-    );
+    // A live access token opens directly; rotation adds uncertainty and work
+    // without changing the authenticated session's authority.
+    expect(fake.heard.paths).toEqual(['/v1/auth/login', '/v1/auth/ticket']);
+    expect(fake.heard.bearing.get('/v1/auth/ticket')).toBe('Bearer access-1');
+    expect(fake.heard.cookied.has('/v1/auth/refresh')).toBe(false);
     expect(fake.heard.tickets).toEqual(['tkt-1']);
 
     // The frames, in the order a turn is made of — the quiet inbox count
@@ -3444,11 +3431,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
       fake.heard.frames.filter((frame) => frame.type === 'job.status').length,
     ).toBeGreaterThanOrEqual(1);
     expect(prompt.said.join('\n')).not.toContain('foreign-');
-    expect(fake.heard.paths).toEqual([
-      '/v1/auth/login',
-      '/v1/auth/refresh',
-      '/v1/auth/ticket',
-    ]);
+    expect(fake.heard.paths).toEqual(['/v1/auth/login', '/v1/auth/ticket']);
   });
 
   it("keeps another run off this run's scrollback, handle or no handle", async () => {
@@ -5218,6 +5201,12 @@ describe('where a person is, and how they move', () => {
         .filter((frame) => frame.type === 'agent.list')
         .map((frame) => frame.payload),
     ).toEqual([{ project: 'ledger' }, {}]);
+    // Root-loss cleanup detached the syncer before undo/shutdown reached it.
+    // The conversation still joins that leave: no local lock writer may outlive
+    // it and recreate .plowshare while the fixture removes its checkout.
+    await expect(
+      readFile(join(top, '.plowshare', 'sync.lock'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('puts back the files a person had when a new root cannot even be opened', async () => {
@@ -5243,7 +5232,7 @@ describe('where a person is, and how they move', () => {
       'the server would not let this client root annex',
     );
     expect(surface.said.join('\n')).not.toContain('now in annex');
-    // The pair that rotated on the failed open is the one the restore presents.
+    // Failed upgrade and restoration never replay a spent refresh token.
     expect(fake.heard.refused).toEqual([]);
     // And the sentence about it carries no credential and no query.
     expect(surface.said.join('\n')).not.toContain('ticket=');
@@ -5710,43 +5699,51 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
       expect(prompt.said).toContain('resumed daily');
     });
 
-    it('controls an Application schedule through its registered definition', async () => {
+    it('controls an Application schedule whose registered definition is after the first page', async () => {
       const fake = await withAPair();
-      fake.script('schedule.files', {
-        code: 'OK',
-        payload: [
-          {
-            name: 'network_scan',
-            project: 'privacy',
-            source: 'server',
-            path: 'schedules/network_scan.json',
-            internalName: 'daily',
-            definition: {
-              version: 1,
-              cron: '0 9 * * *',
-              zone: 'UTC',
-              paused: false,
-              action: {
-                kind: 'agent',
-                agent: 'interlocutor',
-                name: null,
-                input: 'say hello',
-                mode: null,
-              },
-              target: {
-                kind: 'mailbox',
-                project: null,
-                conversation: null,
-                to: null,
-                route: null,
-              },
-              limits: { maxModelCalls: null, maxTurns: null, queueCap: 1 },
-            },
-            status: 'active',
-            error: null,
+      const file = {
+        name: 'network_scan',
+        project: 'privacy',
+        source: 'server',
+        path: 'schedules/network_scan.json',
+        internalName: 'daily',
+        definition: {
+          version: 1,
+          cron: '0 9 * * *',
+          zone: 'UTC',
+          paused: false,
+          action: {
+            kind: 'agent',
+            agent: 'interlocutor',
+            name: null,
+            input: 'say hello',
+            mode: null,
           },
-        ],
-      });
+          target: {
+            kind: 'mailbox',
+            project: null,
+            conversation: null,
+            to: null,
+            route: null,
+          },
+          limits: { maxModelCalls: null, maxTurns: null, queueCap: 1 },
+        },
+        status: 'active',
+        error: null,
+      };
+      fake.script('schedule.files', (payload) => ({
+        code: 'OK',
+        payload: !(
+          typeof payload === 'object' &&
+          payload !== null &&
+          'after' in payload
+        )
+          ? Array.from({ length: 100 }, (_, index) => ({
+              ...file,
+              internalName: `aaa-${String(index).padStart(3, '0')}`,
+            }))
+          : [file],
+      }));
       const prompt = scripted([
         '/schedule pause daily',
         '/schedule resume daily',
@@ -5761,6 +5758,16 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
           type: 'schedule.pause',
           payload: { schedule: 'daily', paused: false },
         },
+      ]);
+      expect(
+        fake.heard.frames
+          .filter((frame) => frame.type === 'schedule.files')
+          .map((frame) => frame.payload),
+      ).toEqual([
+        { limit: 100 },
+        { limit: 100, after: 'aaa-099' },
+        { limit: 100 },
+        { limit: 100, after: 'aaa-099' },
       ]);
       expect(prompt.said).toContain('paused daily');
       expect(prompt.said).toContain('resumed daily');

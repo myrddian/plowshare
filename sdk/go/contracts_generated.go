@@ -9995,7 +9995,9 @@ type ScheduleDefinePayloadDto struct {
 
 // ScheduleFilesPayloadDto is the explicit ScheduleFilesPayloadDto protocol shape.
 type ScheduleFilesPayloadDto struct {
-	Project *string `json:"project,omitempty"`
+	After   *string  `json:"after,omitempty"`
+	Limit   *float64 `json:"limit,omitempty"`
+	Project *string  `json:"project,omitempty"`
 }
 
 // ScheduleForgetPayloadDto is the explicit ScheduleForgetPayloadDto protocol shape.
@@ -10005,7 +10007,9 @@ type ScheduleForgetPayloadDto struct {
 
 // ScheduleListPayloadDto is the explicit ScheduleListPayloadDto protocol shape.
 type ScheduleListPayloadDto struct {
-	Project *string `json:"project,omitempty"`
+	After   *string  `json:"after,omitempty"`
+	Limit   *float64 `json:"limit,omitempty"`
+	Project *string  `json:"project,omitempty"`
 }
 
 // SchedulePausePayloadDto is the explicit SchedulePausePayloadDto protocol shape.
@@ -13660,7 +13664,9 @@ func (c *Client) ScheduleDefine(ctx context.Context, request ScheduleDefineReque
 
 // ScheduleFilesRequest is the explicit ScheduleFilesRequest protocol shape.
 type ScheduleFilesRequest struct {
-	Project *string `json:"project,omitempty"`
+	After   *string  `json:"after,omitempty"`
+	Limit   *float64 `json:"limit,omitempty"`
+	Project *string  `json:"project,omitempty"`
 }
 
 // ScheduleFiles validates before submission and returns the paired result DTO.
@@ -13680,7 +13686,9 @@ func (c *Client) ScheduleForget(ctx context.Context, request ScheduleForgetReque
 
 // ScheduleListRequest is the explicit ScheduleListRequest protocol shape.
 type ScheduleListRequest struct {
-	Project *string `json:"project,omitempty"`
+	After   *string  `json:"after,omitempty"`
+	Limit   *float64 `json:"limit,omitempty"`
+	Project *string  `json:"project,omitempty"`
 }
 
 // ScheduleList validates before submission and returns the paired result DTO.

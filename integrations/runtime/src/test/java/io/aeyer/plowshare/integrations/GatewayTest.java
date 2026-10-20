@@ -65,7 +65,8 @@ class GatewayTest {
                   "legacy-gateway-fixture",
                   Duration.ofSeconds(3),
                   null,
-                  Plowshare.TransportMode.LEGACY))) {
+                  Plowshare.TransportMode.LEGACY,
+                  Plowshare.DispatchMode.ORDERED))) {
         gateway.advertise("home", List.of("ha-house"));
         assertTrue(gateway.receipt(UUID.randomUUID()).isEmpty());
         assertEquals(

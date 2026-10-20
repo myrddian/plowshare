@@ -75,7 +75,15 @@ type outcome struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+type DispatchMode string
+
+const (
+	ConcurrentDispatch DispatchMode = "concurrent-v1"
+	OrderedDispatch    DispatchMode = "ordered"
+)
+
 type Options struct {
+	DispatchMode    DispatchMode
 	LegacyTransport bool
 	Session         string
 	Timeout         time.Duration
@@ -87,19 +95,104 @@ type response struct {
 type pending struct {
 	operation string
 	answer    chan response
+	submitted atomic.Bool
 }
+
+// admission covers conversion, writer wait and response retention until one caller settles.
+type admission struct {
+	owner      *Client
+	bytes      int
+	deadline   time.Time
+	converting bool
+	released   atomic.Bool
+}
+
+func (c *Client) admit() (*admission, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.admitted >= c.maximum {
+		return nil, &TransportError{Delivery: NotSubmitted, Cause: packetCapacity}
+	}
+	if c.admitted == 0 {
+		c.idle = make(chan struct{})
+	}
+	c.admitted++
+	return &admission{owner: c, deadline: time.Now().Add(c.timeout)}, nil
+}
+
+// convert serializes transient codec copies before their exact wire size is known.
+// It is released after encoding/byte charge, never while waiting for a reply.
+func (a *admission) convert(ctx context.Context) error {
+	deadline, cancel := context.WithDeadline(ctx, a.deadline)
+	defer cancel()
+	select {
+	case a.owner.converter <- struct{}{}:
+		a.converting = true
+	case <-deadline.Done():
+		return &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
+	case <-a.owner.done:
+		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed before conversion")}
+	}
+	if deadline.Err() != nil {
+		return &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
+	}
+	a.owner.mu.Lock()
+	closed := a.owner.closed
+	a.owner.mu.Unlock()
+	if closed {
+		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed before conversion")}
+	}
+	return nil
+}
+func (a *admission) releaseConversion() {
+	if a.converting {
+		a.converting = false
+		<-a.owner.converter
+	}
+}
+func (a *admission) charge(size int) error {
+	a.owner.mu.Lock()
+	defer a.owner.mu.Unlock()
+	if a.owner.closed || size > 640*1024*1024-a.owner.held {
+		return &TransportError{Delivery: NotSubmitted, Cause: packetCapacity}
+	}
+	a.bytes = size
+	a.owner.held += size
+	return nil
+}
+func (a *admission) release() {
+	if a.released.Swap(true) {
+		return
+	}
+	a.releaseConversion()
+	a.owner.mu.Lock()
+	a.owner.admitted--
+	a.owner.held -= a.bytes
+	if a.owner.admitted == 0 {
+		close(a.owner.idle)
+	}
+	a.owner.mu.Unlock()
+}
+
 type Client struct {
 	Session   string
 	socket    *websocket.Conn
 	packets   *packets
 	timeout   time.Duration
 	mu        sync.Mutex
-	pending   map[string]pending
+	pending   map[string]*pending
+	converter chan struct{}
+	admitted  int
+	maximum   int
+	held      int
 	closed    bool
 	pushes    chan ServerPush
 	dropped   atomic.Uint64
 	cancel    context.CancelFunc
 	done      chan struct{}
+	// idle belongs to one nonempty admission generation. Close fences admission
+	// before observing it, so no later generation can escape the shared drain.
+	idle      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -112,6 +205,9 @@ func identity() string {
 }
 
 func Connect(ctx context.Context, origin, token string, options Options) (*Client, error) {
+	if options.DispatchMode != "" && options.DispatchMode != ConcurrentDispatch && options.DispatchMode != OrderedDispatch {
+		return nil, errors.New("choose a dispatch mode")
+	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("an HTTP(S) origin without credentials, path, query or fragment is required")
@@ -152,19 +248,48 @@ func Connect(ctx context.Context, origin, token string, options Options) (*Clien
 	}
 	socket.SetReadLimit(1048576)
 	lifetime, cancel := context.WithCancel(context.Background())
-	c := &Client{Session: options.Session, socket: socket, timeout: options.Timeout, pending: map[string]pending{}, pushes: make(chan ServerPush, 256), cancel: cancel, done: make(chan struct{})}
+	c := &Client{Session: options.Session, socket: socket, timeout: options.Timeout, pending: map[string]*pending{}, converter: make(chan struct{}, 1), maximum: 64, pushes: make(chan ServerPush, 256), cancel: cancel, done: make(chan struct{})}
 	if !options.LegacyTransport {
 		c.packets = newPackets(socket)
 	}
 	go c.read(lifetime)
+	if options.DispatchMode != OrderedDispatch {
+		reply, err := c.request(opening, "transport.dispatch", []byte(`{"mode":"concurrent-v1"}`))
+		var selected struct {
+			Mode       string `json:"mode"`
+			MaxPending int    `json:"maxPending"`
+			MaxIDBytes int    `json:"maxIdBytes"`
+		}
+		if err == nil && (reply.Code != "OK" || json.Unmarshal(reply.Payload, &selected) != nil || selected.Mode != "concurrent-v1" || selected.MaxPending < 1 || selected.MaxPending > 64 || selected.MaxIDBytes != 128) {
+			err = &TransportError{Delivery: NotSubmitted, Cause: errors.New("server did not acknowledge concurrent dispatch; select ordered explicitly")}
+		}
+		if err != nil {
+			_ = c.Close()
+			return nil, &TransportError{Delivery: NotSubmitted, Cause: err}
+		}
+		c.mu.Lock()
+		c.maximum = selected.MaxPending
+		c.mu.Unlock()
+	}
 	return c, nil
 }
 
 // request owns correlation and the raw envelope; generated methods own DTO conversion.
 func (c *Client) request(ctx context.Context, operation string, body []byte) (outcome, error) {
+	reservation, err := c.admit()
+	if err != nil {
+		return outcome{}, err
+	}
+	defer reservation.release()
+	if err = reservation.convert(ctx); err != nil {
+		return outcome{}, err
+	}
+	return c.requestReserved(ctx, operation, body, reservation)
+}
+func (c *Client) requestReserved(ctx context.Context, operation string, body []byte, reservation *admission) (outcome, error) {
 	id := identity()
 	envelope := map[string]any{"id": id, "type": operation, "protocol_version": ProtocolVersion, "payload": json.RawMessage(body)}
-	if selection, ok := ctx.Value(actingContextKey{}).(string); ok {
+	if selection, ok := ctx.Value(actingContextKey{}).(string); ok && operation != "transport.dispatch" {
 		envelope["actingFor"] = map[string]string{"context": selection}
 	}
 	wire, err := json.Marshal(envelope)
@@ -174,11 +299,15 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 	if len(wire) > 1048576 && c.packets == nil || len(wire) > packetMessage {
 		return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: packetCapacity}
 	}
-	deadline, cancel := context.WithTimeout(ctx, c.timeout)
+	if err = reservation.charge(len(wire)); err != nil {
+		return outcome{}, err
+	}
+	reservation.releaseConversion()
+	deadline, cancel := context.WithDeadline(ctx, reservation.deadline)
 	defer cancel()
-	waiting := pending{operation: operation, answer: make(chan response, 1)}
+	waiting := &pending{operation: operation, answer: make(chan response, 1)}
 	c.mu.Lock()
-	if c.closed || len(c.pending) >= 64 || deadline.Err() != nil {
+	if c.closed || deadline.Err() != nil {
 		c.mu.Unlock()
 		return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
 	}
@@ -186,12 +315,16 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, id); c.mu.Unlock() }()
 	if c.packets != nil {
-		err = c.packets.send(deadline, wire)
+		err = c.packets.send(deadline, wire, func() { waiting.submitted.Store(true) })
 	} else {
+		if deadline.Err() != nil {
+			return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
+		}
+		waiting.submitted.Store(true)
 		err = c.socket.Write(deadline, websocket.MessageText, wire)
 	}
 	if err != nil {
-		if errors.Is(err, packetCapacity) {
+		if !waiting.submitted.Load() || errors.Is(err, packetCapacity) {
 			return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: err}
 		}
 		return outcome{}, &TransportError{Delivery: Unknown, Cause: err}
@@ -209,17 +342,26 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 
 func (c *Client) read(ctx context.Context) {
 	defer func() {
+		c.cancel()
 		if c.packets != nil {
 			c.packets.close()
-			_ = c.socket.CloseNow()
 		}
+		_ = c.socket.CloseNow()
 		c.mu.Lock()
 		c.closed = true
+		stranded := make([]*pending, 0, len(c.pending))
 		for _, waiting := range c.pending {
-			waiting.answer <- response{err: &TransportError{Delivery: Unknown}}
+			stranded = append(stranded, waiting)
 		}
 		clear(c.pending)
 		c.mu.Unlock()
+		for _, waiting := range stranded {
+			state := NotSubmitted
+			if waiting.submitted.Load() {
+				state = Unknown
+			}
+			waiting.answer <- response{err: &TransportError{Delivery: state}}
+		}
 		close(c.pushes)
 		close(c.done)
 	}()
@@ -282,9 +424,27 @@ func (c *Client) read(ctx context.Context) {
 
 func (c *Client) Pushes() <-chan ServerPush { return c.pushes }
 func (c *Client) DroppedPushes() uint64     { return c.dropped.Load() }
+
+// Close stops admission, settles outstanding requests and waits for all admitted
+// conversion/writer and byte ownership to drain. Concurrent closes observe the
+// same shutdown; callers need not collect their results for it to finish.
 func (c *Client) Close() error {
-	c.closeOnce.Do(func() { c.cancel(); _ = c.socket.CloseNow() })
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
+		c.mu.Unlock()
+		c.cancel()
+		_ = c.socket.CloseNow()
+	})
 	<-c.done
+	// Reader completion only settles replies. Converters and physical writers
+	// still own their admissions until their defers release all transport bytes.
+	c.mu.Lock()
+	idle := c.idle
+	c.mu.Unlock()
+	if idle != nil {
+		<-idle
+	}
 	return nil
 }
 

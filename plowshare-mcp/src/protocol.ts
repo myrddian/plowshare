@@ -98,3 +98,74 @@ export async function respond(
       return error(id, -32601, 'unknown method: ' + message['method']);
   }
 }
+
+/** Validated scheduling metadata stays separate from transport payloads. */
+export type PreparedCall =
+  | { readonly kind: 'silent' }
+  | { readonly kind: 'initialized' }
+  | { readonly kind: 'cancel'; readonly id: string | number }
+  | { readonly kind: 'reply'; readonly response: Response }
+  | {
+      readonly kind: 'request';
+      readonly id: string | number;
+      readonly method: string;
+      readonly presence: boolean;
+      readonly execute: (backend: Backend) => Promise<Response | undefined>;
+    };
+
+/** Decode scheduling metadata at the same boundary that owns JSON-RPC framing. */
+export function prepare(input: string): PreparedCall {
+  if (!input.trim()) return { kind: 'silent' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    return { kind: 'reply', response: error(null, -32700, 'invalid JSON') };
+  }
+  let message: Record<string, unknown>;
+  try {
+    message = record(parsed);
+  } catch {
+    return { kind: 'reply', response: error(null, -32600, 'invalid request') };
+  }
+  const id = message['id'],
+    method = message['method'];
+  if (message['jsonrpc'] !== '2.0' || typeof method !== 'string')
+    return { kind: 'reply', response: error(null, -32600, 'invalid request') };
+  if (id === undefined || id === null) {
+    if (method === 'notifications/initialized') return { kind: 'initialized' };
+    if (method === 'notifications/cancelled') {
+      const params = message['params'];
+      if (
+        typeof params === 'object' &&
+        params !== null &&
+        'requestId' in params &&
+        (typeof params.requestId === 'string' ||
+          (typeof params.requestId === 'number' &&
+            Number.isFinite(params.requestId)))
+      )
+        return { kind: 'cancel', id: params.requestId };
+    }
+    return { kind: 'silent' };
+  }
+  if (
+    (typeof id !== 'string' && typeof id !== 'number') ||
+    (typeof id === 'number' && !Number.isFinite(id)) ||
+    (typeof id === 'string' && (Buffer.byteLength(id) > 128 || !id.trim()))
+  )
+    return { kind: 'reply', response: error(null, -32600, 'invalid request') };
+  const params = message['params'];
+  const name =
+    typeof params === 'object' && params !== null && 'name' in params
+      ? params.name
+      : undefined;
+  return {
+    kind: 'request',
+    id,
+    method,
+    presence:
+      method === 'tools/call' &&
+      (name === 'client_root_project_here' || name === 'agent_run'),
+    execute: (backend) => respond(input, backend),
+  };
+}

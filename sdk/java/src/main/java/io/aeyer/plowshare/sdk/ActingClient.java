@@ -15,34 +15,34 @@ public final class ActingClient {
   }
 
   public ActingContext.Opened open(ActingContext.Open request) throws IOException {
-    Objects.requireNonNull(request);
-    return connection.request(
-        "acting.context.open",
-        Map.of(
-            "application",
-            request.application(),
-            "grant",
-            request.grant(),
-            "proof",
-            Map.of("kind", request.proof().kind(), "credential", request.proof().credential())),
-        ActingContext.Opened.class);
+    return AsyncSupport.await(connection.defaultOptions(), options -> openAsync(request, options));
   }
 
   public void close(ActingContext.Selection selection) throws IOException {
-    connection
-        .request("acting.context.close", Map.of("context", selection.context().toString()))
-        .requirePayload();
+    AsyncSupport.await(connection.defaultOptions(), options -> closeAsync(selection, options));
+  }
+
+  public java.util.concurrent.CompletionStage<Void> closeAsync(ActingContext.Selection selection) {
+    return closeAsync(selection, null);
+  }
+
+  public java.util.concurrent.CompletionStage<Void> closeAsync(
+      ActingContext.Selection selection, RequestOptions options) {
+    Objects.requireNonNull(selection);
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "acting.context.close", Map.of("context", selection.context().toString()), options),
+        reply -> {
+          reply.requirePayload();
+          return null;
+        });
   }
 
   /** Reads only; the selection never changes the identity of another concurrent call. */
   public List<HistoryTurn> turns(ActingContext.Selection selection, String conversation)
       throws IOException {
-    Objects.requireNonNull(selection);
-    conversation = ContractChecks.narrative(conversation, "conversation", 1024, true);
-    var reply =
-        connection.requestActing(
-            "conversation.turns", Map.of("conversation", conversation), selection);
-    return List.of(SdkJson.decode(SdkJson.mapper(), reply.requirePayload(), HistoryTurn[].class));
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> turnsAsync(selection, conversation, options));
   }
 
   /** Submit once. A lost response is recovered through receipt(), never by mutation replay. */
@@ -53,33 +53,15 @@ public final class ActingClient {
       String task,
       String conversation)
       throws IOException {
-    Objects.requireNonNull(selection);
-    Objects.requireNonNull(requestId);
-    agent = ContractChecks.narrative(agent, "agent", 64, true);
-    task = ContractChecks.narrative(task, "task", 65536, true);
-    if (!agent.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
-        || task.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 65536
-        || conversation != null
-            && (conversation.length() > 128 || !conversation.matches("cnv_[A-Za-z0-9]+")))
-      throw new IllegalArgumentException("Invalid acting turn request");
-    Map<String, Object> payload = new java.util.LinkedHashMap<>();
-    payload.put("requestId", requestId.toString());
-    payload.put("agent", agent);
-    payload.put("task", task);
-    if (conversation != null) payload.put("conversation", conversation);
-    return decodeReceipt(
-        connection.requestActing("acting.turn.start", payload, selection).requirePayload());
+    return AsyncSupport.await(
+        connection.defaultOptions(),
+        options -> startAsync(selection, requestId, agent, task, conversation, options));
   }
 
   public TurnReceipt receipt(ActingContext.Selection selection, java.util.UUID requestId)
       throws IOException {
-    Objects.requireNonNull(selection);
-    Objects.requireNonNull(requestId);
-    return decodeReceipt(
-        connection
-            .requestActing(
-                "acting.turn.receipt", Map.of("requestId", requestId.toString()), selection)
-            .requirePayload());
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> receiptAsync(selection, requestId, options));
   }
 
   private static TurnReceipt decodeReceipt(com.fasterxml.jackson.databind.JsonNode payload)
@@ -112,5 +94,111 @@ public final class ActingClient {
       answer = ContractChecks.narrative(answer, "answer", 1048576, false);
       ending = ContractChecks.narrative(ending, "ending", 64, true);
     }
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<ActingContext.Opened> openAsync(
+      ActingContext.Open request, RequestOptions options) {
+
+    Objects.requireNonNull(request);
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "acting.context.open",
+            Map.of(
+                "application",
+                request.application(),
+                "grant",
+                request.grant(),
+                "proof",
+                Map.of("kind", request.proof().kind(), "credential", request.proof().credential())),
+            ActingContext.Opened.class,
+            options),
+        asyncResult -> {
+          return asyncResult;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<ActingContext.Opened> openAsync(
+      ActingContext.Open request) {
+    return openAsync(request, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<List<HistoryTurn>> turnsAsync(
+      ActingContext.Selection selection, String conversation, RequestOptions options) {
+
+    Objects.requireNonNull(selection);
+    conversation = ContractChecks.narrative(conversation, "conversation", 1024, true);
+    return AsyncSupport.map(
+        connection.requestActingAsync(
+            "conversation.turns", Map.of("conversation", conversation), selection, options),
+        asyncResult -> {
+          var reply = asyncResult;
+          return List.of(
+              SdkJson.decode(SdkJson.mapper(), reply.requirePayload(), HistoryTurn[].class));
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<List<HistoryTurn>> turnsAsync(
+      ActingContext.Selection selection, String conversation) {
+    return turnsAsync(selection, conversation, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<TurnReceipt> startAsync(
+      ActingContext.Selection selection,
+      java.util.UUID requestId,
+      String agent,
+      String task,
+      String conversation,
+      RequestOptions options) {
+
+    Objects.requireNonNull(selection);
+    Objects.requireNonNull(requestId);
+    agent = ContractChecks.narrative(agent, "agent", 64, true);
+    task = ContractChecks.narrative(task, "task", 65536, true);
+    if (!agent.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+        || task.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 65536
+        || conversation != null
+            && (conversation.length() > 128 || !conversation.matches("cnv_[A-Za-z0-9]+")))
+      throw new IllegalArgumentException("Invalid acting turn request");
+    Map<String, Object> payload = new java.util.LinkedHashMap<>();
+    payload.put("requestId", requestId.toString());
+    payload.put("agent", agent);
+    payload.put("task", task);
+    if (conversation != null) payload.put("conversation", conversation);
+    return AsyncSupport.map(
+        connection.requestActingAsync("acting.turn.start", payload, selection, options),
+        asyncResult -> {
+          return decodeReceipt(asyncResult.requirePayload());
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<TurnReceipt> startAsync(
+      ActingContext.Selection selection,
+      java.util.UUID requestId,
+      String agent,
+      String task,
+      String conversation) {
+    return startAsync(selection, requestId, agent, task, conversation, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<TurnReceipt> receiptAsync(
+      ActingContext.Selection selection, java.util.UUID requestId, RequestOptions options) {
+
+    Objects.requireNonNull(selection);
+    Objects.requireNonNull(requestId);
+    return AsyncSupport.map(
+        connection.requestActingAsync(
+            "acting.turn.receipt", Map.of("requestId", requestId.toString()), selection, options),
+        asyncResult -> {
+          return decodeReceipt(asyncResult.requirePayload());
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<TurnReceipt> receiptAsync(
+      ActingContext.Selection selection, java.util.UUID requestId) {
+    return receiptAsync(selection, requestId, null);
   }
 }

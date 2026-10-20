@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from enum import Enum
 from types import TracebackType
-from typing import Generic, TypeVar, cast
+from typing import Generic, Literal, TypeVar, cast
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -48,7 +48,9 @@ class TransportError(Exception):
 
 
 class CancelledRequest(asyncio.CancelledError):
-    delivery = Delivery.UNKNOWN
+    def __init__(self, message: str, delivery: Delivery = Delivery.UNKNOWN):
+        super().__init__(message)
+        self.delivery = delivery
 
 
 class Refusal(Exception):
@@ -83,18 +85,51 @@ class _Outcome:
     payload: object
 
 
+@dataclass
+class _Pending:
+    operation: str
+    answer: asyncio.Future[_Outcome]
+    submitted: bool = False
+
+
+@dataclass(frozen=True)
+class _Dispatch:
+    maximum: int
+
+    @staticmethod
+    def read(value: object) -> _Dispatch:
+        row = _object(value)
+        maximum = row.get("maxPending")
+        if (
+            row.get("mode") != "concurrent-v1"
+            or type(maximum) is not int
+            or not 1 <= maximum <= 64
+            or type(row.get("maxIdBytes")) is not int
+            or row.get("maxIdBytes") != 128
+        ):
+            raise ValueError("Invalid dispatch acknowledgement")
+        return _Dispatch(maximum)
+
+
 class Client:
     def __init__(self, socket: ClientConnection, session: str, timeout: float):
         self.session = session
         self.timeout = timeout
         self._socket = socket
         self._closed = False
-        self._pending: dict[str, tuple[str, asyncio.Future[_Outcome]]] = {}
+        self._pending: dict[str, _Pending] = {}
+        self._admitted = 0
+        self._held = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._maximum = 64
+        self._max_pending_bytes = 640 * 1024 * 1024
         self._send_lock = asyncio.Lock()
         self._pushes: asyncio.Queue[contracts.ServerPush] = asyncio.Queue(256)
         self.dropped_pushes = 0
         self._reader_closed = asyncio.Event()
         self._abort_task: asyncio.Task[None] | None = None
+        self._close_task: asyncio.Task[None] | None = None
         self._packets = (
             Packets(self._abort_packets)
             if socket.subprotocol == PACKET_PROTOCOL
@@ -111,9 +146,18 @@ class Client:
         session: str | None = None,
         timeout: float = 30,
         legacy_transport: bool = False,
+        dispatch_mode: Literal["concurrent-v1", "ordered"] = "concurrent-v1",
+        max_pending_bytes: int = 640 * 1024 * 1024,
     ) -> Client:
         import math
 
+        opening_end = asyncio.get_running_loop().time() + timeout
+        if (
+            dispatch_mode not in {"concurrent-v1", "ordered"}
+            or type(max_pending_bytes) is not int
+            or max_pending_bytes < 1
+        ):
+            raise ValueError("Choose a dispatch mode and positive pending byte bound")
         url = urlsplit(origin)
         if (
             url.scheme not in {"http", "https"}
@@ -167,104 +211,166 @@ class Client:
                 Delivery.NOT_SUBMITTED,
                 "server does not support segmented transport; explicitly select legacy mode",
             )
-        return cls(socket, session, timeout)
+        client = cls(socket, session, timeout)
+        client._max_pending_bytes = max_pending_bytes
+        if dispatch_mode == "concurrent-v1":
+            try:
+                reply = await client._exchange(
+                    "transport.dispatch",
+                    {"mode": "concurrent-v1"},
+                    timeout=opening_end - asyncio.get_running_loop().time(),
+                )
+                if reply.code != "OK" or not isinstance(reply.payload, _Dispatch):
+                    raise TransportError(
+                        Delivery.NOT_SUBMITTED,
+                        "Server refused concurrent dispatch; select ordered mode explicitly",
+                    )
+                client._maximum = reply.payload.maximum
+            except asyncio.CancelledError:
+                await client.close()
+                raise CancelledRequest(
+                    "Connection opening cancelled before application submission",
+                    Delivery.NOT_SUBMITTED,
+                ) from None
+            except Exception:
+                await client.close()
+                raise TransportError(
+                    Delivery.NOT_SUBMITTED,
+                    "Concurrent dispatch negotiation failed; no application request was submitted; select ordered mode explicitly",
+                ) from None
+        return client
 
     async def request(
         self,
         request: contracts.Request[T],
         *,
         acting_for: ActingSelection | None = None,
+        timeout: float | None = None,
     ) -> Reply[T]:
-        """Validate before submission. Cancellation after a write never replays the request."""
+        """Return this request's typed reply; cancellation never replays remote work."""
         if acting_for is not None and not isinstance(acting_for, ActingSelection):
             raise ValueError("Invalid acting selection")
         operation, payload = encode_request(request)
-        identity = str(uuid4())
-        wire = json.dumps(
-            {
-                "id": identity,
-                "type": operation,
-                "protocol_version": PROTOCOL_VERSION,
-                "payload": payload,
-                **(
-                    {"actingFor": {"context": acting_for.context}}
-                    if acting_for is not None
-                    else {}
-                ),
-            },
-            allow_nan=False,
+        outcome = await self._exchange(
+            operation, payload, acting_for=acting_for, timeout=timeout
         )
+        if outcome.code in {
+            "OK",
+            "CREATED",
+            "ACCEPTED",
+            "NO_CONTENT",
+        } and not deployment_matches(operation, payload, outcome.payload):
+            raise TransportError(
+                Delivery.INVALID_RESPONSE,
+                "Foreign Application deployment receipt; outcome is unknown",
+            )
+        return Reply(outcome.code, outcome.said, cast(T, outcome.payload))
+
+    async def _exchange(
+        self,
+        operation: str,
+        payload: object,
+        *,
+        acting_for: ActingSelection | None = None,
+        timeout: float | None = None,
+    ) -> _Outcome:
+        import math
+
+        allowance = self.timeout if timeout is None else timeout
+        if not math.isfinite(allowance) or allowance <= 0:
+            raise ValueError("Choose a positive finite request timeout")
+        end = asyncio.get_running_loop().time() + allowance
+        # Event-loop-confined admission is atomic before the first await, including writer waiters.
+        if self._closed or self._admitted >= self._maximum:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"
+            )
+        self._admitted += 1
+        self._idle.clear()
+        identity = str(uuid4())
+        future: asyncio.Future[_Outcome] = asyncio.get_running_loop().create_future()
+        waiting = _Pending(operation, future)
+        size = 0
+        packet_reserved = False
         try:
+            wire = json.dumps(
+                {
+                    "id": identity,
+                    "type": operation,
+                    "protocol_version": PROTOCOL_VERSION,
+                    "payload": payload,
+                    **(
+                        {"actingFor": {"context": acting_for.context}}
+                        if acting_for
+                        else {}
+                    ),
+                },
+                allow_nan=False,
+            )
             encoded = (
                 self._packets.prepare(wire)
                 if self._packets is not None
                 else wire.encode("utf-8")
             )
-        except ValueError:
-            raise TransportError(
-                Delivery.NOT_SUBMITTED, "encoded request exceeds transport allowance"
-            ) from None
-        if self._packets is None and len(encoded) > 1048576:
-            raise TransportError(
-                Delivery.NOT_SUBMITTED, "encoded request exceeds legacy allowance"
-            )
-        if self._packets is not None:
-            try:
-                self._packets.reserve_outgoing(len(encoded))
-            except ValueError:
+            if (
+                self._packets is None
+                and len(encoded) > 1048576
+                or len(encoded) > self._max_pending_bytes - self._held
+            ):
                 raise TransportError(
-                    Delivery.NOT_SUBMITTED, "packet capacity exceeded before submission"
-                ) from None
-        future: asyncio.Future[_Outcome] = asyncio.get_running_loop().create_future()
-        submitted = False
-        try:
-            async with asyncio.timeout(self.timeout):
+                    Delivery.NOT_SUBMITTED,
+                    "Encoded request exceeds pending byte capacity",
+                )
+            if self._packets is not None:
+                self._packets.reserve_outgoing(len(encoded))
+                packet_reserved = True
+            size = len(encoded)
+            self._held += size
+            self._pending[identity] = waiting
+            async with asyncio.timeout_at(end):
                 async with self._send_lock:
-                    if self._closed or len(self._pending) >= 64:
+                    if self._closed:
                         raise TransportError(
                             Delivery.NOT_SUBMITTED,
-                            "connection closed or request capacity exceeded; request was not submitted",
+                            "Connection closed before writer admission",
                         )
-                    self._pending[identity] = (operation, future)
-                    submitted = True
+
+                    def submitted() -> None:
+                        waiting.submitted = True
+
                     if self._packets is not None:
-                        await self._packets.send(encoded, self._write_packet)
+                        await self._packets.send(encoded, self._write_packet, submitted)
                     else:
+                        waiting.submitted = True
                         await self._socket.send(wire)
-                outcome = await asyncio.shield(future)
-                # The reader validates structure; the submitting caller checks receipt ownership.
-                if outcome.code in {
-                    "OK",
-                    "CREATED",
-                    "ACCEPTED",
-                    "NO_CONTENT",
-                } and not deployment_matches(operation, payload, outcome.payload):
-                    raise TransportError(
-                        Delivery.INVALID_RESPONSE,
-                        "Foreign Application deployment receipt; outcome is unknown",
-                    )
-                return Reply(outcome.code, outcome.said, cast(T, outcome.payload))
+                return await asyncio.shield(future)
         except TransportError:
             raise
         except asyncio.CancelledError:
-            if submitted:
+            if waiting.submitted:
                 raise CancelledRequest(
-                    "request cancelled after submission; outcome is unknown; request was not replayed"
+                    "Request cancelled after submission; outcome is unknown; no replay"
                 ) from None
-            raise
+            raise CancelledRequest(
+                "Request cancelled before submission", Delivery.NOT_SUBMITTED
+            ) from None
         except Exception:
             raise TransportError(
-                Delivery.UNKNOWN if submitted else Delivery.NOT_SUBMITTED,
-                "request did not obtain a readable reply; request was not replayed",
+                Delivery.UNKNOWN if waiting.submitted else Delivery.NOT_SUBMITTED,
+                "Request did not obtain a readable reply; no request was replayed",
             ) from None
         finally:
             self._pending.pop(identity, None)
-            if self._packets is not None:
-                self._packets.release_outgoing(len(encoded))
+            self._admitted -= 1
+            self._held -= size
+            if packet_reserved and self._packets is not None:
+                self._packets.release_outgoing(size)
             if not future.done():
                 future.cancel()
             elif not future.cancelled():
-                future.exception()  # Retrieve a late failure when send/timeout won the race.
+                future.exception()
+            if self._admitted == 0:
+                self._idle.set()
 
     async def _write_packet(self, packet: str) -> None:
         await self._socket.send(packet)
@@ -309,7 +415,8 @@ class Client:
                 identity = frame.get("id")
                 if not isinstance(identity, str) or identity not in self._pending:
                     continue
-                operation, answer = self._pending.pop(identity)
+                waiting = self._pending.pop(identity)
+                operation, answer = waiting.operation, waiting.answer
                 outcome = frame.get("payload")
                 valid = (
                     frame.get("protocol_version") == PROTOCOL_VERSION
@@ -336,7 +443,11 @@ class Client:
                         code = cast(str, row["code"])
                         said = cast(str | None, row.get("said"))
                         payload = (
-                            decode_reply(operation, row.get("payload"))
+                            (
+                                _Dispatch.read(row.get("payload"))
+                                if operation == "transport.dispatch"
+                                else decode_reply(operation, row.get("payload"))
+                            )
                             if code in {"OK", "CREATED", "ACCEPTED", "NO_CONTENT"}
                             else None
                         )
@@ -356,11 +467,14 @@ class Client:
                 self._packets.close()
                 self._abort_packets()
             self._reader_closed.set()
-            for _, answer in self._pending.values():
+            for waiting in self._pending.values():
+                answer = waiting.answer
                 if not answer.done():
                     answer.set_exception(
                         TransportError(
-                            Delivery.UNKNOWN,
+                            Delivery.UNKNOWN
+                            if waiting.submitted
+                            else Delivery.NOT_SUBMITTED,
                             "socket closed before reply; request was not replayed",
                         )
                     )
@@ -389,11 +503,21 @@ class Client:
             await asyncio.gather(hint, stopped, return_exceptions=True)
 
     async def close(self) -> None:
-        self._closed = True
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._finish_close())
+        # A caller detaching from close cannot cancel the connection's shared drain.
+        await asyncio.shield(self._close_task)
+
+    async def _finish_close(self) -> None:
         await self._socket.close()
         await self._reader
         if self._abort_task is not None:
             await self._abort_task
+        # Reader completion fans out failures; each exchange still owns its encoded
+        # bytes and writer admission until its own finally block has run. This shared
+        # task is separate from the reader, so close never asks the reader to join itself.
+        await self._idle.wait()
 
     async def __aenter__(self) -> Client:
         return self

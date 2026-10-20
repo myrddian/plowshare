@@ -166,6 +166,37 @@ class BoundActingContextsTest {
   }
 
   @Test
+  void proof_io_does_not_hold_the_registry_and_disconnect_prevents_late_open() throws Exception {
+    var entered = new CompletableFuture<Void>();
+    var release = new CompletableFuture<Void>();
+    when(repository.proof(Tokens.hash(secret)))
+        .thenAnswer(
+            ignored -> {
+              entered.complete(null);
+              release.get(5, TimeUnit.SECONDS);
+              return Optional.of(token);
+            });
+    var result = new CompletableFuture<ActingContext.Opened>();
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try {
+                result.complete(contexts.open(connection, request()));
+              } catch (RuntimeException failure) {
+                result.completeExceptionally(failure);
+              }
+            });
+    entered.get(5, TimeUnit.SECONDS);
+    try {
+      contexts.disconnected(connection.id());
+    } finally {
+      release.complete(null);
+    }
+    var failure = assertThrows(ExecutionException.class, () -> result.get(5, TimeUnit.SECONDS));
+    assertInstanceOf(io.aeyer.plowshare.server.faults.CallerFault.class, failure.getCause());
+  }
+
+  @Test
   void proof_exchange_and_personal_read_keep_actor_and_subject_separate() {
     var opened = contexts.open(connection, request());
     assertEquals(now.plusSeconds(300), opened.expiresAt());

@@ -10,6 +10,7 @@ import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
@@ -90,34 +91,13 @@ public class FileChannelConfig implements WebSocketConfigurer {
   private final ProjectMembers members;
 
   /**
-   * Every bean in the context that must forget a session when this configuration's handler closes
-   * one — {@code DefinitionResolver} among them.
-   *
-   * <p>A constructor parameter for the same reason {@link #sessions} and {@link #roots} are: {@link
-   * #fileChannelHandler} is called a second time, through the CGLIB proxy, by {@link
-   * #registerWebSocketHandlers}, so anything the bean method needs has to be reachable from both
-   * call sites without being resolved twice.
-   *
-   * <p>An {@link ObjectProvider} of the listener type itself — <b>not of a {@link List} of it</b>,
-   * which is not the type-mismatch it looks like: Spring's collection auto-wiring (all beans of one
-   * type gathered into a {@code List<T>}) is a property of injecting {@code List<T>} directly, and
-   * an {@code ObjectProvider<List<T>>} asks it for a single bean whose type literally is {@code
-   * List<SessionCloseListener>} — a bean nothing here ever declares. {@link
-   * ObjectProvider#orderedStream()} is where the "every bean of this type" behaviour actually lives
-   * on this type, and {@link #fileChannelHandler} calls it to build the list this field's name
-   * promises.
-   *
-   * <p>An {@code ObjectProvider} at all, and not {@code List<SessionCloseListener>} injected
-   * plainly, because at least one such listener — {@code DefinitionResolver} — is itself built from
-   * the {@link SessionChannel} this configuration's own handler bean <em>is</em>. A plain {@code
-   * List} Spring must fully resolve before this configuration object could even be constructed
-   * would need that listener already built, which needs this configuration's handler bean already
-   * built — a cycle in the object graph and not merely in the package diagram. {@link
-   * FileChannelHandler}'s own {@code closeListeners} field javadoc carries the rest of this
-   * argument. The stream above is not walked until {@link #fileChannelHandler}'s own adapting
-   * {@code Supplier} runs, which is not until a socket actually closes.
+   * Deferred only until singleton construction completes: DefinitionResolver depends on this
+   * configuration's SessionChannel, so resolving its listener in the constructor would be circular.
+   * Socket-close callbacks use the immutable snapshot and never query a closing bean factory.
    */
   private final ObjectProvider<SessionCloseListener> closeListeners;
+
+  private volatile List<SessionCloseListener> initializedCloseListeners = List.of();
 
   public FileChannelConfig(
       SessionRegistry sessions,
@@ -144,9 +124,9 @@ public class FileChannelConfig implements WebSocketConfigurer {
    * test that drives the production wiring could not reach the thing the production wiring built.
    *
    * <p>Built with {@link #closeListeners} as well, adapted from an {@link ObjectProvider} of one
-   * listener to the {@code Supplier<List<...>>} the fuller constructor takes — {@link
-   * ObjectProvider#orderedStream()} is what actually gathers every bean of the type, and {@link
-   * #closeListeners}'s own javadoc says why the field is not simply a {@link List} already.
+   * listener to the {@code Supplier<List<...>>} the fuller constructor takes. The supplier reads
+   * the snapshot populated by {@link #fileChannelCloseListenerBinding()}, after all singleton
+   * listeners exist, and never resolves beans from a socket callback.
    */
   @Bean
   public FileChannelHandler fileChannelHandler() {
@@ -156,7 +136,17 @@ public class FileChannelConfig implements WebSocketConfigurer {
         roots,
         members,
         FileChannelHandler.DEADLINE,
-        () -> closeListeners.orderedStream().toList());
+        () -> initializedCloseListeners);
+  }
+
+  /**
+   * Resolve the cycle after construction, while the context is open. WebSocket shutdown may run
+   * after ContextClosedEvent; retaining already-built listeners avoids creating their dependencies
+   * (including configuration properties) from a closed context during channel cleanup.
+   */
+  @Bean
+  public SmartInitializingSingleton fileChannelCloseListenerBinding() {
+    return () -> initializedCloseListeners = List.copyOf(closeListeners.orderedStream().toList());
   }
 
   /**

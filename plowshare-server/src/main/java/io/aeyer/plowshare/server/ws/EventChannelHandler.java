@@ -8,6 +8,7 @@ import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.protocol.transport.ConcurrentDispatch;
 import io.aeyer.plowshare.server.agents.JobEvents;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.events.AccountPushes;
@@ -173,7 +174,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
         io.aeyer.plowshare.server.information.InformationInvalidations,
         SpeakerHandles,
         SessionPushes,
-        org.springframework.web.socket.SubProtocolCapable {
+        org.springframework.web.socket.SubProtocolCapable,
+        org.springframework.context.SmartLifecycle {
 
   private static final Logger log = LoggerFactory.getLogger(EventChannelHandler.class);
 
@@ -286,12 +288,109 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private EventReadCapacity readCapacity = new EventReadCapacity(2, 8);
   private boolean readDispatchStarted;
+  private ConcurrentRequests concurrentRequests;
+  private int requestPerConnection = 2;
+  private int requestGlobal = 8;
+  private java.time.Duration requestDrain = java.time.Duration.ofSeconds(10);
+  private volatile boolean lifecycleRunning;
+  private volatile boolean accepting = true;
+  private final AtomicBoolean drainRecorded = new AtomicBoolean();
+  private final DispatchTelemetry telemetry = new DispatchTelemetry();
+  private volatile DispatchTelemetry.Snapshot lastMetrics;
+
+  /** Aggregate measurements have fixed fields and never include operation/resource identifiers. */
+  @org.springframework.scheduling.annotation.Scheduled(
+      fixedDelayString = "${plowshare.transport.request-metrics-interval:PT30S}")
+  public void reportDispatchMetrics() {
+    var snapshot = telemetry.snapshot();
+    if (snapshot.admitted() == 0 && snapshot.encoding().count() == 0) return;
+    if (!snapshot.equals(lastMetrics)) {
+      lastMetrics = snapshot;
+      log.info("Event request dispatch measurements {}", snapshot);
+    }
+  }
+
+  DispatchTelemetry.Snapshot dispatchMeasurements() {
+    return telemetry.snapshot();
+  }
+
+  @Override
+  public void start() {
+    lifecycleRunning = true;
+  }
+
+  @Override
+  public boolean isRunning() {
+    return lifecycleRunning;
+  }
+
+  @Override
+  public int getPhase() {
+    return Integer.MAX_VALUE;
+  }
+
+  @Override
+  public void stop() {
+    drainRequests();
+    lifecycleRunning = false;
+  }
 
   /** Configure one shared server read bound before attaching segmented sockets. */
   synchronized void useReadConcurrency(int perConnection, int global) {
     if (readDispatchStarted)
       throw new IllegalStateException("Event read concurrency cannot change after dispatch starts");
     readCapacity = new EventReadCapacity(perConnection, global);
+    requestPerConnection = perConnection;
+    requestGlobal = global;
+  }
+
+  private synchronized ConcurrentRequests concurrentRequests() {
+    if (!accepting) throw new IllegalStateException("Request dispatch is stopping");
+    readDispatchStarted = true;
+    if (concurrentRequests == null)
+      concurrentRequests =
+          new ConcurrentRequests(packetBudget, requestPerConnection, requestGlobal, telemetry);
+    return concurrentRequests;
+  }
+
+  synchronized void useRequestDrain(java.time.Duration drain) {
+    if (readDispatchStarted) throw new IllegalStateException("Request dispatch already started");
+    if (drain == null
+        || drain.isNegative()
+        || drain.isZero()
+        || drain.compareTo(java.time.Duration.ofMinutes(5)) > 0)
+      throw new IllegalArgumentException("Request drain must be positive and at most five minutes");
+    requestDrain = drain;
+  }
+
+  @jakarta.annotation.PreDestroy
+  public void drainRequests() {
+    ConcurrentRequests requests;
+    synchronized (this) {
+      accepting = false;
+      requests = concurrentRequests;
+    }
+    if (requests == null) return;
+    boolean record = drainRecorded.compareAndSet(false, true);
+    long started = System.nanoTime();
+    requests.stopAdmission();
+    try {
+      requests
+          .drained()
+          .toCompletableFuture()
+          .get(requestDrain.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (InterruptedException stopped) {
+      Thread.currentThread().interrupt();
+    } catch (java.util.concurrent.ExecutionException
+        | java.util.concurrent.TimeoutException unfinished) {
+      log.warn("Request dispatcher did not finish its shutdown drain");
+    } finally {
+      requests.close();
+      if (record) {
+        telemetry.drain.record(System.nanoTime() - started);
+        reportDispatchMetrics();
+      }
+    }
   }
 
   private synchronized EventReadCapacity readCapacity() {
@@ -474,7 +573,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
     // publish need not defend itself: a job that finds this socket in the
     // role finds a socket that already has somewhere to put an event, so
     // there is no window in which a listener is attached and unreachable.
-    Delivery delivery = new Delivery(socket, id, json, packetBudget);
+    Delivery delivery = new Delivery(socket, id, json, packetBudget, telemetry);
     if (delivery.transport instanceof PacketEventTransport) {
       delivery.requests =
           new EventRequests(
@@ -545,9 +644,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * <p>Segmented operations use a bounded connection-owned dispatcher with audited independent
    * reads. The container's reader must remain free to receive packet credits while an operation
    * waits on persistence; otherwise an unrelated push times out and closes a healthy connection.
-   * Legacy JSON keeps its existing inline routing. Neither routing path writes the answer inline:
-   * {@link Delivery#answer} queues. Queued operations recheck socket authority before execution,
-   * and closing discards queued work without replaying or cancelling an operation already started.
+   * Legacy JSON keeps inline routing unless concurrent dispatch is explicitly selected. Neither
+   * routing path writes the answer inline: {@link Delivery#answer} queues. Queued operations
+   * recheck socket authority before execution, and closing discards queued work without replaying
+   * or cancelling an operation already started.
    *
    * <p><b>The correlation read is separate from the routing read, and is allowed to fail.</b>
    * {@link FrameRouter#route(String, Asking)} is the one place that decides what a malformed frame
@@ -587,6 +687,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
       }
       return;
     }
+    if (!accepting) {
+      delivery.disconnect("server stopping");
+      return;
+    }
+    if (concurrentFrame(socket, delivery, frame)) return;
     if (delivery.requests == null) {
       routeFrame(socket, delivery, frame);
     } else {
@@ -596,6 +701,141 @@ public final class EventChannelHandler extends TextWebSocketHandler
         delivery.requests.close();
         delivery.disconnect("request admission");
       }
+    }
+  }
+
+  /**
+   * Private transport control is admitted before domain routing and never grants domain authority.
+   */
+  private boolean concurrentFrame(WebSocketSession socket, Delivery delivery, String frame) {
+    com.fasterxml.jackson.databind.JsonNode body;
+    try {
+      body = json.readTree(frame);
+    } catch (IOException | RuntimeException malformed) {
+      if (delivery.concurrent == null) {
+        // Unselected peers retain the original correlated refusal for malformed JSON. Dispatch
+        // negotiation must not silently turn an old-mode bad request into a connection close.
+        delivery.domainSeen = true;
+        return false;
+      }
+      delivery.stop();
+      delivery.disconnect("invalid request admission");
+      return true;
+    }
+    try {
+      boolean selection =
+          body != null && ConcurrentDispatch.TYPE.equals(body.path("type").asText());
+      if (!selection && delivery.concurrent == null) {
+        delivery.domainSeen = true;
+        return false;
+      }
+      if (body == null || !body.path("id").isTextual())
+        throw new IllegalArgumentException("Invalid request ID");
+      String id = body.get("id").textValue();
+      ConcurrentDispatch.requireId(id);
+      Envelope request;
+      try {
+        request = json.treeToValue(body, Envelope.class);
+      } catch (IOException | RuntimeException malformedPayload) {
+        if (selection)
+          throw new IllegalArgumentException("Invalid dispatch selection", malformedPayload);
+        // Valid correlation plus malformed operation input belongs to the router's correlated
+        // refusal path. It must not disconnect other independent requests.
+        request =
+            new Envelope(id, body.path("type").asText("refused"), Envelope.CURRENT_VERSION, null);
+      }
+      if (selection) {
+        synchronized (delivery) {
+          if (delivery.domainSeen
+              || delivery.concurrent != null
+              || body.has("actingFor")
+              || request.payload() == null
+              || !request.payload().keySet().equals(Set.of("mode"))
+              || !ConcurrentDispatch.MODE.equals(request.payload().get("mode")))
+            throw new IllegalArgumentException("Dispatch selection must precede domain requests");
+          new ConcurrentDispatch.Selection((String) request.payload().get("mode"));
+          delivery.concurrent =
+              concurrentRequests()
+                  .connect(
+                      socket.getId(),
+                      (value, delivered) -> routeConcurrent(socket, delivery, value, delivered),
+                      () -> delivery.disconnect("request execution"));
+          delivery.validity =
+              () -> {
+                if (!delivery.running
+                    || !socket.isOpen()
+                    || socketAuthorization != null && !socketAuthorization.current(socket))
+                  throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+              };
+        }
+      } else {
+        delivery.domainSeen = true;
+      }
+      delivery.concurrent.offer(frame, request, (String) socket.getAttributes().get(HANDLE));
+      return true;
+    } catch (RuntimeException invalid) {
+      delivery.stop();
+      delivery.disconnect("invalid request admission");
+      return true;
+    }
+  }
+
+  private java.util.concurrent.CompletionStage<Void> routeConcurrent(
+      WebSocketSession socket,
+      Delivery delivery,
+      String frame,
+      ConcurrentRequests.Delivery delivered) {
+    if (!socket.isOpen()
+        || !delivery.running
+        || socketAuthorization != null && !socketAuthorization.current(socket)) {
+      delivered.run();
+      return java.util.concurrent.CompletableFuture.completedFuture(null);
+    }
+    try {
+      var correlation = correlationOf(frame);
+      String id = text(correlation.get("id"));
+      String type = Optional.ofNullable(text(correlation.get("type"))).orElse(FrameTypes.REFUSED);
+      var asking =
+          new Asking(
+              named(socket),
+              (String) socket.getAttributes().get(HANDLE),
+              socket.getId(),
+              delivery.transport instanceof PacketEventTransport
+                  ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
+                  : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
+              () -> {
+                if (!socket.isOpen()
+                    || !delivery.running
+                    || socketAuthorization != null && !socketAuthorization.current(socket))
+                  throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+              });
+      var answer =
+          ConcurrentDispatch.TYPE.equals(type)
+              ? java.util.concurrent.CompletableFuture.completedFuture(
+                  Outcome.ok(new ConcurrentDispatch.Selected()))
+              : router().routeAsync(frame, asking);
+      return answer.thenAccept(
+          outcome -> {
+            if (!delivery.running || !socket.isOpen()) {
+              delivered.run();
+              return;
+            }
+            delivery.answer(
+                id,
+                type,
+                outcome,
+                delivered,
+                ConcurrentDispatch.TYPE.equals(type)
+                    ? delivery.validity
+                    : () -> router().requireDisclosure(frame, asking, outcome),
+                delivered::started,
+                () -> delivered.executionFinished().toCompletableFuture().join());
+            if (usageSubscriptions != null
+                && outcome.payload() instanceof io.aeyer.plowshare.protocol.Usage.Initial initial)
+              usageSubscriptions.ready(socket.getId(), initial.subscription());
+          });
+    } catch (RuntimeException invalid) {
+      return java.util.concurrent.CompletableFuture.failedFuture(invalid);
     }
   }
 
@@ -936,9 +1176,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * One frame waiting for this connection's drain thread.
    *
    * <p><b>The queue holds this rather than a {@link JobEvent} because it now carries two kinds of
-   * frame</b>, and rather than a serialised string because serialising is the drain thread's job —
-   * a publisher that built the JSON would be doing work on a job's own virtual thread that this
-   * class has spent its whole design moving off it.
+   * frame</b>. Droppable pushes are serialized by the writer. Terminal replies are encoded and
+   * byte-reserved before queueing, so arbitrary result sizes cannot bypass output admission.
    */
   private sealed interface Pending permits Push, Pushed, Reply, Streamed {}
 
@@ -961,9 +1200,19 @@ public final class EventChannelHandler extends TextWebSocketHandler
    *     question it asked. {@code null} when the frame carried none — see {@link #correlationOf}
    * @param type the request's own {@code type}, or {@link FrameTypes#REFUSED} when the frame
    *     carried none this server could read
-   * @param outcome what {@link FrameRouter} answered
+   * @param frame the once-encoded, byte-reserved terminal response
    */
-  private record Reply(String id, String type, Outcome outcome) implements Pending {}
+  private record Reply(
+      String id,
+      String type,
+      String frame,
+      Runnable delivered,
+      Runnable release,
+      Runnable disclosure,
+      Runnable started,
+      Runnable settled,
+      long queuedAt)
+      implements Pending {}
 
   /**
    * A piece of what a model is producing. Goes out bare and drops freely.
@@ -990,6 +1239,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
     private final String session;
     private final ObjectMapper json;
     private final EventTransport transport;
+    private final DispatchTelemetry telemetry;
+    private final io.aeyer.plowshare.protocol.transport.PacketBudget budget;
+    private final java.util.concurrent.atomic.AtomicLong replyBytes =
+        new java.util.concurrent.atomic.AtomicLong();
     private final BlockingQueue<Pending> pending = new ArrayBlockingQueue<>(PENDING);
 
     /**
@@ -1046,6 +1299,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
     private final AtomicBoolean overrun = new AtomicBoolean();
     private volatile Thread drain;
     private EventRequests requests;
+    private volatile ConcurrentRequests.Connection concurrent;
+    private volatile boolean domainSeen;
+    private volatile Runnable validity = () -> {};
     private volatile boolean running = true;
     private Runnable whenStopped = () -> {};
     private final Map<String, Object> snapshots = new LinkedHashMap<>();
@@ -1073,10 +1329,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
         WebSocketSession socket,
         String session,
         ObjectMapper json,
-        io.aeyer.plowshare.protocol.transport.PacketBudget budget) {
+        io.aeyer.plowshare.protocol.transport.PacketBudget budget,
+        DispatchTelemetry telemetry) {
       this.socket = socket;
       this.session = session;
       this.json = json;
+      this.telemetry = telemetry;
+      this.budget = budget;
       if (io.aeyer.plowshare.protocol.transport.SegmentedMessages.SUBPROTOCOL.equals(
           socket.getAcceptedProtocol())) {
         socket.setTextMessageSizeLimit(
@@ -1119,6 +1378,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
     void stop() {
       running = false;
       if (requests != null) requests.close();
+      if (concurrent != null) concurrent.close();
+      Pending queued;
+      while ((queued = pending.poll()) != null)
+        if (queued instanceof Reply reply) reply.release().run();
       transport.close();
       whenStopped.run();
       informationHints.clear();
@@ -1184,10 +1447,72 @@ public final class EventChannelHandler extends TextWebSocketHandler
      * will ever resolve.
      */
     void answer(String id, String type, Outcome outcome) {
-      if (pending.offer(new Reply(id, type, outcome))) {
+      answer(id, type, outcome, () -> {});
+    }
+
+    void answer(String id, String type, Outcome outcome, Runnable delivered) {
+      answer(id, type, outcome, delivered, validity);
+    }
+
+    void answer(String id, String type, Outcome outcome, Runnable delivered, Runnable disclosure) {
+      answer(id, type, outcome, delivered, disclosure, () -> {}, () -> {});
+    }
+
+    void answer(
+        String id,
+        String type,
+        Outcome outcome,
+        Runnable delivered,
+        Runnable disclosure,
+        Runnable started,
+        Runnable settled) {
+      if (!running) {
+        delivered.run();
+        return;
+      }
+      long encodeStarted = System.nanoTime();
+      String frame = answered(id, type, outcome);
+      telemetry.encoding.record(System.nanoTime() - encodeStarted);
+      if (frame == null) {
+        disconnect(id);
+        return;
+      }
+      // Charge both encoded characters and the retained typed projection used by its disclosure
+      // fence; references are dropped together on successful handoff or connection teardown.
+      long bytes = 4L * frame.length();
+      long maximum = 4L * io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES;
+      long held = replyBytes.addAndGet(bytes);
+      if (held > maximum) {
+        replyBytes.addAndGet(-bytes);
+        disconnect(id);
+        return;
+      }
+      try {
+        budget.acquire(bytes);
+      } catch (IllegalArgumentException capacity) {
+        replyBytes.addAndGet(-bytes);
+        disconnect(id);
+        return;
+      }
+      var released = new AtomicBoolean();
+      telemetry.replyBytes.add(bytes);
+      Runnable release =
+          () -> {
+            if (released.compareAndSet(false, true)) {
+              replyBytes.addAndGet(-bytes);
+              telemetry.replyBytes.add(-bytes);
+              budget.release(bytes);
+            }
+          };
+      var reply =
+          new Reply(
+              id, type, frame, delivered, release, disclosure, started, settled, System.nanoTime());
+      if (pending.offer(reply)) {
+        if (!running && pending.remove(reply)) release.run();
         waiting.release();
         return;
       }
+      release.run();
       disconnect(id);
     }
 
@@ -1274,7 +1599,25 @@ public final class EventChannelHandler extends TextWebSocketHandler
           continue;
         }
         try {
-          transport.send(frame);
+          if (!running || !socket.isOpen()) return;
+          if (next instanceof Reply reply) reply.disclosure().run();
+          if (next instanceof Reply reply) reply.started().run();
+          long writeStarted = System.nanoTime();
+          if (next instanceof Reply reply)
+            telemetry.replyQueue.record(writeStarted - reply.queuedAt());
+          try {
+            transport.send(frame);
+          } finally {
+            telemetry.write.record(System.nanoTime() - writeStarted);
+          }
+          if (next instanceof Reply reply) {
+            // A peer can refill its 64-call window before send() returns. Keep the single
+            // handoff slot and all body/ID reservations until the handler's queueing stage has
+            // also settled, then release bytes before the dispatch drain can complete.
+            reply.settled().run();
+            reply.release().run();
+            reply.delivered().run();
+          }
         } catch (IOException | RuntimeException unusable) {
           // The two shapes FileChannelHandler measured for a socket
           // that cannot be written to: an IOException is the write
@@ -1295,6 +1638,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
             log.debug("Failed event socket could not close");
           }
           return;
+        } finally {
+          if (next instanceof Reply reply) reply.release().run();
         }
       }
     }
@@ -1308,7 +1653,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
         case Push push -> pushed(push.event());
         case Pushed account -> bare(account.body());
         case Streamed streamed -> streamed(streamed.delta());
-        case Reply reply -> answered(reply);
+        case Reply reply -> reply.frame();
       };
     }
 
@@ -1384,22 +1729,22 @@ public final class EventChannelHandler extends TextWebSocketHandler
      * forever for a reason that is entirely this server's. The replacement carries no payload, so
      * the only thing that could have failed is gone from it.
      */
-    private String answered(Reply reply) {
+    private String answered(String id, String type, Outcome outcome) {
       try {
-        return json.writeValueAsString(envelope(reply.id(), reply.type(), reply.outcome()));
+        return json.writeValueAsString(envelope(id, type, outcome));
       } catch (JsonProcessingException | IllegalArgumentException notSerialisable) {
         log.warn(
             "The answer to frame '{}' on session '{}' could not be written down"
                 + " ({}); its caller is told so rather than left waiting.",
-            reply.id(),
+            id,
             session,
             notSerialisable.getClass().getSimpleName());
       }
       try {
         return json.writeValueAsString(
             envelope(
-                reply.id(),
-                reply.type(),
+                id,
+                type,
                 Outcome.failed(
                     Code.INTERNAL_ERROR,
                     "this server produced an answer it could not write down")));

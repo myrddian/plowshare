@@ -49,7 +49,8 @@ public final class ScheduleFileFrames implements FrameArea {
 
   private Outcome files(Map<String, Object> payload, Asking asking) {
     String project = ScheduleListHandler.project(payload);
+    SchedulePage page = ScheduleListHandler.page(payload);
     String account = asking.requireHandle(FrameTypes.SCHEDULE_FILES);
-    return Outcome.ok(project == null ? service().list(account) : service().list(account, project));
+    return Outcome.ok(service().page(account, project, page));
   }
 }

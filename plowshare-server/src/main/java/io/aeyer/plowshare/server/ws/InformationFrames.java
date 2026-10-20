@@ -375,7 +375,8 @@ public final class InformationFrames implements FrameArea {
                   context,
                   io.aeyer.plowshare.server.information.InformationReadinessDecoder.sources(
                       payload.get("sources")),
-                  number(payload, "waitMs", 30000));
+                  number(payload, "waitMs", 30000),
+                  asking.queryValidity());
       case "read" ->
           result =
               catalogue.window(

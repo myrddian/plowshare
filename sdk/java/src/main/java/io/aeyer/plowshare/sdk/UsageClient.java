@@ -39,49 +39,28 @@ public final class UsageClient {
   }
 
   public Usage.Report report(ReportType type, Usage.Filter filter) throws IOException {
-    Objects.requireNonNull(type, "type");
-    var report = connection.request(type.operation, fields(filter), Usage.Report.class);
-    selected(type.operation, filter, report.filters());
-    return report;
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> reportAsync(type, filter, options));
   }
 
   public Usage.Audit calls(Usage.Filter filter) throws IOException {
-    var audit = connection.request("usage.calls", fields(filter), Usage.Audit.class);
-    selected("usage.calls", filter, audit.filters());
-    return audit;
+    return AsyncSupport.await(connection.defaultOptions(), options -> callsAsync(filter, options));
   }
 
   public Usage.AttemptPage attempts(Usage.Filter filter, UUID call, String cursor)
       throws IOException {
-    Objects.requireNonNull(call, "call");
-    var fields = fields(filter);
-    fields.put("call", call.toString());
-    fields.put(
-        "attempt_cursor",
-        cursor == null ? null : ContractChecks.identity(cursor, "attempt cursor"));
-    var page = connection.request("usage.calls", fields, Usage.AttemptPage.class);
-    selected("usage.calls", filter, page.filters());
-    if (!call.toString().equals(page.call())) throw new IOException("foreign usage call receipt");
-    return page;
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> attemptsAsync(filter, call, cursor, options));
   }
 
   public Usage.Initial subscribe(ReportType type, Usage.Filter filter) throws IOException {
-    Objects.requireNonNull(type, "type");
-    Objects.requireNonNull(filter, "filter");
-    if (filter.cursor() != null)
-      throw new IllegalArgumentException("usage subscriptions cannot have a page cursor");
-    var fields = fields(filter);
-    fields.put("report_type", type.operation);
-    var initial = connection.request("usage.subscribe", fields, Usage.Initial.class);
-    selected(type.operation, filter, initial.filters());
-    return initial;
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> subscribeAsync(type, filter, options));
   }
 
   public void unsubscribe(UUID subscription) throws IOException {
-    Objects.requireNonNull(subscription, "subscription");
-    var reply =
-        connection.request("usage.unsubscribe", Map.of("subscription", subscription.toString()));
-    if (!reply.successful()) throw new IOException("usage unsubscribe refused: " + reply.code());
+    AsyncSupport.await(
+        connection.defaultOptions(), options -> unsubscribeAsync(subscription, options));
   }
 
   private static LinkedHashMap<String, Object> fields(Usage.Filter filter) {
@@ -114,5 +93,112 @@ public final class UsageClient {
   private static <T> void same(T requested, T actual, String field) throws IOException {
     if (requested != null && !requested.equals(actual))
       throw new IOException("foreign usage report selection: " + field);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Usage.Report> reportAsync(
+      ReportType type, Usage.Filter filter, RequestOptions options) {
+
+    Objects.requireNonNull(type, "type");
+    return AsyncSupport.map(
+        connection.requestAsync(type.operation, fields(filter), Usage.Report.class, options),
+        asyncResult -> {
+          var report = asyncResult;
+          selected(type.operation, filter, report.filters());
+          return report;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Usage.Report> reportAsync(
+      ReportType type, Usage.Filter filter) {
+    return reportAsync(type, filter, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Usage.Audit> callsAsync(
+      Usage.Filter filter, RequestOptions options) {
+
+    return AsyncSupport.map(
+        connection.requestAsync("usage.calls", fields(filter), Usage.Audit.class, options),
+        asyncResult -> {
+          var audit = asyncResult;
+          selected("usage.calls", filter, audit.filters());
+          return audit;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Usage.Audit> callsAsync(Usage.Filter filter) {
+    return callsAsync(filter, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Usage.AttemptPage> attemptsAsync(
+      Usage.Filter filter, UUID call, String cursor, RequestOptions options) {
+
+    Objects.requireNonNull(call, "call");
+    var fields = fields(filter);
+    fields.put("call", call.toString());
+    fields.put(
+        "attempt_cursor",
+        cursor == null ? null : ContractChecks.identity(cursor, "attempt cursor"));
+    return AsyncSupport.map(
+        connection.requestAsync("usage.calls", fields, Usage.AttemptPage.class, options),
+        asyncResult -> {
+          var page = asyncResult;
+          selected("usage.calls", filter, page.filters());
+          if (!call.toString().equals(page.call()))
+            throw new IOException("foreign usage call receipt");
+          return page;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Usage.AttemptPage> attemptsAsync(
+      Usage.Filter filter, UUID call, String cursor) {
+    return attemptsAsync(filter, call, cursor, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Usage.Initial> subscribeAsync(
+      ReportType type, Usage.Filter filter, RequestOptions options) {
+
+    Objects.requireNonNull(type, "type");
+    Objects.requireNonNull(filter, "filter");
+    if (filter.cursor() != null)
+      throw new IllegalArgumentException("usage subscriptions cannot have a page cursor");
+    var fields = fields(filter);
+    fields.put("report_type", type.operation);
+    return AsyncSupport.map(
+        connection.requestAsync("usage.subscribe", fields, Usage.Initial.class, options),
+        asyncResult -> {
+          var initial = asyncResult;
+          selected(type.operation, filter, initial.filters());
+          return initial;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Usage.Initial> subscribeAsync(
+      ReportType type, Usage.Filter filter) {
+    return subscribeAsync(type, filter, null);
+  }
+
+  /** Asynchronous typed counterpart; cancellation never cancels remote work. */
+  public java.util.concurrent.CompletionStage<Void> unsubscribeAsync(
+      UUID subscription, RequestOptions options) {
+
+    Objects.requireNonNull(subscription, "subscription");
+    return AsyncSupport.map(
+        connection.requestAsync(
+            "usage.unsubscribe", Map.of("subscription", subscription.toString()), options),
+        asyncResult -> {
+          var reply = asyncResult;
+          if (!reply.successful())
+            throw new IOException("usage unsubscribe refused: " + reply.code());
+
+          return null;
+        });
+  }
+
+  public java.util.concurrent.CompletionStage<Void> unsubscribeAsync(UUID subscription) {
+    return unsubscribeAsync(subscription, null);
   }
 }

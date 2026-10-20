@@ -148,6 +148,23 @@ function definitionForm(
     <p>Server definitions use schedules/. A rooted workspace uses .plowshare/schedules/. Project managers can edit the folder; the registered owner supplies execution authority.</p>
     <p>Named routes supply their project and recipient. Skills keep their declared context mode, or require an explicit mode when none is declared.</p></section>`;
 }
+/** Independent collection controls; page failures retain the displayed authorized rows. */
+export function schedulePagingControls(
+  state: DesktopState,
+  section: 'schedules' | 'files',
+) {
+  const value = state.activity.schedules;
+  const page = section === 'schedules' ? value?.schedulePage : value?.filePage;
+  const unavailable = !state.connected || value?.busy || page?.loading;
+  const label = section === 'schedules' ? 'Schedules' : 'Schedule files';
+  const button = (
+    direction: 'previous' | 'next' | 'first',
+    text: string,
+    disabled: boolean,
+  ) =>
+    `<button type="button" data-schedule-page="${direction}" data-schedule-section="${section}" ${disabled ? 'disabled' : ''} aria-label="${text} ${label.toLowerCase()}">${text}</button>`;
+  return `<nav aria-label="${label} pages" class="run-actions">${button('previous', 'Previous', Boolean(unavailable || !page || page.number <= 1))}<span role="status">${label} page ${page?.number ?? 1}${page?.loading ? ' · Loading…' : ''}</span>${button('next', 'More', Boolean(unavailable || !page?.more))}${button('first', 'First page', Boolean(unavailable || !page || page.number <= 1))}</nav>${page?.error ? `<p role="alert" class="error-banner">${esc(page.error)} The displayed page is retained.</p>` : ''}`;
+}
 export function scheduledPanel(state: DesktopState, selected: string) {
   const nextAccount = JSON.stringify([state.base, state.handle]);
   if (account !== nextAccount) {
@@ -244,7 +261,7 @@ export function scheduledPanel(state: DesktopState, selected: string) {
         ) +
         `<section class="schedule-proposal"><h3>Review proposal</h3>${prose(proposal.when)}<p>Agent ${esc(proposal.agent)} · ${esc(proposal.project ?? proposal.conversation ?? 'Global → Mailbox')}</p>${prose(proposal.task)}<dl><dt>Cron</dt><dd>${esc(proposal.cron)}</dd><dt>Time zone</dt><dd>${esc(proposal.zone)}</dd><dt>Schedule</dt><dd>${esc(proposal.names.schedule)}</dd><dt>Trigger</dt><dd>${esc(proposal.names.trigger)}</dd><dt>Event</dt><dd>${esc(proposal.names.event)}</dd></dl><h4>Server-computed next fire times</h4><ul>${proposal.nextFires.map((time) => `<li>${esc(time)}</li>`).join('')}</ul><p>Saving writes the schedule JSON. The server reconciles its schedule and trigger together and monitors later edits.</p><button id="schedule-save" ${disabled}>Save schedule file</button></section>`;
   }
-  html += `<details><summary>Monitored folders and file status</summary><label>Project<select id="schedule-sync-project"><option value="">Global</option>${state.projects.map((row) => `<option value="${esc(row.name)}">${esc(row.name)}</option>`).join('')}</select></label><label>Definitions folder<select id="schedule-sync-source"><option value="server">Server definitions</option><option value="workspace">Rooted workspace</option></select></label><button id="schedule-sync" ${disabled}>Register and sync folder</button><p>Register a folder once to monitor JSON files you create yourself. Workspace folders require the owner's connected file provider.</p>${(value?.files ?? []).map((file) => `<article><strong>${esc(file.name)}</strong><p>${esc(file.project ?? 'Global')} · ${esc(file.source)} · ${esc(file.path)} · ${esc(file.status)}</p>${file.error ? `<p>${esc(file.error)}</p>` : ''}</article>`).join('') || '<p>No schedule files registered.</p>'}</details>`;
+  html += `<details data-persist="schedule-files"><summary>Monitored folders and file status</summary><label>Project<select id="schedule-sync-project"><option value="">Global</option>${state.projects.map((row) => `<option value="${esc(row.name)}">${esc(row.name)}</option>`).join('')}</select></label><label>Definitions folder<select id="schedule-sync-source"><option value="server">Server definitions</option><option value="workspace">Rooted workspace</option></select></label><button id="schedule-sync" ${disabled}>Register and sync folder</button><p>Register a folder once to monitor JSON files you create yourself. Workspace folders require the owner's connected file provider.</p>${(value?.files ?? []).map((file) => `<article><strong>${esc(file.name)}</strong><p>${esc(file.project ?? 'Global')} · ${esc(file.source)} · ${esc(file.path)} · ${esc(file.status)}</p>${file.error ? `<p>${esc(file.error)}</p>` : ''}</article>`).join('') || '<p>No schedule files registered on this page.</p>'}${schedulePagingControls(state, 'files')}</details>`;
   return html;
 }
 export function scheduledAction(
@@ -252,6 +269,19 @@ export function scheduledAction(
   selected: string,
   target: HTMLElement,
 ): Request | undefined {
+  const paging = target.closest<HTMLElement>('[data-schedule-page]');
+  if (paging) {
+    const section = paging.dataset.scheduleSection,
+      direction = paging.dataset.schedulePage;
+    if (
+      (section === 'schedules' || section === 'files') &&
+      (direction === 'next' ||
+        direction === 'previous' ||
+        direction === 'first')
+    )
+      return { action: 'schedule-refresh', section, direction };
+    return;
+  }
   if (target.closest('#schedule-sync')) {
     const container = target.closest('#activity-detail');
     const project = container?.querySelector<HTMLSelectElement>(

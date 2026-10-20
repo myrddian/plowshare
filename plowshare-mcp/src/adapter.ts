@@ -1,3 +1,4 @@
+import type { RequestOptions } from 'plowshare-client-ts/binding/acting';
 import { decodeRequest } from 'plowshare-client-ts/operations/schema';
 import type { Replies } from 'plowshare-client-ts/operations/replies';
 import { isList } from 'plowshare-client-ts/binding/values';
@@ -32,6 +33,7 @@ export interface Backend {
   invoke<T extends Operation>(
     type: T,
     payload: Payloads[T],
+    options?: RequestOptions,
   ): Promise<Replies[T]>;
   runSession(): string | null;
   root(

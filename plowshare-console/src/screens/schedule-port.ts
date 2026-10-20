@@ -6,8 +6,8 @@ import { decodeReply } from '../../../sdk/typescript/src/operations/schema.ts';
 
 /** Account-owned runtime controls; never write a release or start an agent. */
 export interface ScheduleControls {
-  list(): Promise<readonly ScheduleRecord[]>;
-  files(): Promise<readonly ScheduleFile[]>;
+  list(after?: string): Promise<readonly ScheduleRecord[]>;
+  files(after?: string): Promise<readonly ScheduleFile[]>;
   pause(schedule: string, paused: boolean): Promise<void>;
 }
 
@@ -17,22 +17,36 @@ export class ScheduleControlRefused extends Error {}
 export class SdkScheduleControls implements ScheduleControls {
   constructor(private readonly transport: OperationTransport) {}
 
-  async list(): Promise<readonly ScheduleRecord[]> {
-    const reply = await this.transport.ask('schedule.list', {});
+  async list(after?: string): Promise<readonly ScheduleRecord[]> {
+    const reply = await this.transport.ask('schedule.list', {
+      limit: 51,
+      ...(after === undefined ? {} : { after }),
+    });
     if (!succeeded(reply.code))
       throw new ScheduleControlRefused(
         reply.said ?? 'Schedule listing refused.',
       );
-    return decodeReply('schedule.list', reply.payload);
+    return schedulePage(
+      decodeReply('schedule.list', reply.payload),
+      (row) => row.name,
+      after,
+    );
   }
 
-  async files(): Promise<readonly ScheduleFile[]> {
-    const reply = await this.transport.ask('schedule.files', {});
+  async files(after?: string): Promise<readonly ScheduleFile[]> {
+    const reply = await this.transport.ask('schedule.files', {
+      limit: 51,
+      ...(after === undefined ? {} : { after }),
+    });
     if (!succeeded(reply.code))
       throw new ScheduleControlRefused(
         reply.said ?? 'Schedule source listing refused.',
       );
-    return decodeReply('schedule.files', reply.payload);
+    return schedulePage(
+      decodeReply('schedule.files', reply.payload),
+      (row) => row.internalName,
+      after,
+    );
   }
 
   async pause(schedule: string, paused: boolean): Promise<void> {
@@ -45,4 +59,24 @@ export class SdkScheduleControls implements ScheduleControls {
         reply.said ?? 'Schedule control refused.',
       );
   }
+}
+
+/** Ordering belongs to the database collation; validate bounded, unique cursor identities only. */
+function schedulePage<T>(
+  rows: readonly T[],
+  key: (row: T) => string,
+  after?: string,
+): readonly T[] {
+  if (rows.length > 51)
+    throw new Error('The server returned an oversized schedule page.');
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const name = key(row);
+    if (!name.trim() || name.length > 512 || name === after || seen.has(name))
+      throw new Error(
+        'The server returned an invalid or repeated schedule page key.',
+      );
+    seen.add(name);
+  }
+  return rows;
 }

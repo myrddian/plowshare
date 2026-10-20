@@ -20,16 +20,8 @@ import type { Answer, Door, Sent, Tokens } from './auth.ts';
 import type { Arrival, Socket } from './connection.ts';
 import { CURRENT_VERSION } from './envelope.ts';
 
-/**
- * The door, driven against a fake `fetch` — the same bargain `connection.test.ts`
- * makes with the socket, for the same reason.
- *
- * <b>What is asserted here is mostly order and shape rather than outcome.</b> A
- * test that only checks `openSocket` returns a connection passes for a client
- * that tickets first and refreshes when that fails, which is the loop this task
- * exists to prevent. So {@link calls} records every request in order and the
- * assertions read that record.
- */
+/** Authentication boundaries use scripted HTTP outcomes; request traces verify that
+ * transport failures never trigger a rotating refresh or application replay. */
 
 /** One request the code under test made, flattened for assertion. */
 interface Call {
@@ -365,7 +357,7 @@ describe('a ticket is minted against a live access token', () => {
   });
 });
 
-describe('openSocket refreshes before it tickets, and that is the whole point', () => {
+describe('openSocket renews only after an explicit access refusal', () => {
   function ready(): ReturnType<typeof doorway> {
     return doorway({
       '/v1/auth/refresh': {
@@ -373,8 +365,8 @@ describe('openSocket refreshes before it tickets, and that is the whole point', 
         cookies: issued('access-2', 'refresh-2'),
       },
       '/v1/auth/ticket': [
+        { status: 401 },
         { status: 200, body: { ticket: 't-1' } },
-        { status: 200, body: { ticket: 't-2' } },
       ],
     });
   }
@@ -394,15 +386,12 @@ describe('openSocket refreshes before it tickets, and that is the whole point', 
     expect(kept).toEqual([{ access: 'access-2', refresh: 'refresh-2' }]);
   });
 
-  it('asks the two endpoints in that order, not the other one', async () => {
+  it('tries the current access once and renews only its explicit refusal', async () => {
     const { door, calls } = ready();
     const { open } = openings();
     await openSocket({ ...door, open, session: LISTENING_AS }, PAIR);
-    // The order, not the outcome. A client that tickets first and refreshes
-    // when that fails also ends up with a socket, and loops on the day the
-    // access token is stale — which is every reconnect after an idle
-    // period, and the one thing this function exists to own.
     expect(calls.map((call) => call.path)).toEqual([
+      '/v1/auth/ticket',
       '/v1/auth/refresh',
       '/v1/auth/ticket',
     ]);
@@ -412,7 +401,7 @@ describe('openSocket refreshes before it tickets, and that is the whole point', 
     const { door, calls } = ready();
     const { open } = openings();
     await openSocket({ ...door, open, session: LISTENING_AS }, PAIR);
-    expect(calls[1]?.headers['Authorization']).toBe('Bearer access-2');
+    expect(calls[2]?.headers['Authorization']).toBe('Bearer access-2');
   });
 
   it('opens the events socket with the ticket it just minted', async () => {
@@ -468,6 +457,116 @@ describe('openSocket refreshes before it tickets, and that is the whole point', 
     );
   });
 
+  it('reuses live access on repeated event and file opens without renewal', async () => {
+    const { door, calls } = doorway({
+      '/v1/auth/ticket': { status: 200, body: { ticket: 'live' } },
+    });
+    const { open } = openings();
+    let renewals = 0;
+    const socketDoor = {
+      ...door,
+      open,
+      session: LISTENING_AS,
+      renew: (): Promise<Tokens> => {
+        renewals++;
+        return Promise.resolve(PAIR);
+      },
+    };
+    expect((await openSocket(socketDoor, PAIR)).tokens).toEqual(PAIR);
+    expect((await openSocket(socketDoor, PAIR)).tokens).toEqual(PAIR);
+    expect(
+      (
+        await openFiles(socketDoor, PAIR, {
+          project: 'p',
+          machine: 'fixture',
+          root: '/fixture',
+        })
+      ).tokens,
+    ).toEqual(PAIR);
+    expect(renewals).toBe(0);
+    expect(calls.map((call) => call.path)).toEqual(
+      Array(3).fill('/v1/auth/ticket'),
+    );
+  });
+
+  it.each([403, 500, 503])(
+    'does not rotate after ticket status %s',
+    async (status) => {
+      const { door, calls } = doorway({ '/v1/auth/ticket': { status } });
+      const { open, urls } = openings();
+      let renewals = 0;
+      await expect(
+        openSocket(
+          {
+            ...door,
+            open,
+            session: LISTENING_AS,
+            renew: (): Promise<Tokens> => {
+              renewals++;
+              return Promise.resolve(PAIR);
+            },
+          },
+          PAIR,
+        ),
+      ).rejects.toThrow();
+      expect(renewals).toBe(0);
+      expect(calls.map((call) => call.path)).toEqual(['/v1/auth/ticket']);
+      expect(urls).toEqual([]);
+    },
+  );
+
+  it('does not rotate or open after network loss or an unreadable ticket reply', async () => {
+    for (const fetch of [
+      (): Promise<Answer> => Promise.reject(new Error('server unavailable')),
+      (): Promise<Answer> =>
+        Promise.resolve(answering({ status: 200, body: {} })),
+    ]) {
+      const { open, urls } = openings();
+      let renewals = 0;
+      await expect(
+        openSocket(
+          {
+            base: BASE,
+            fetch,
+            open,
+            session: LISTENING_AS,
+            renew: (): Promise<Tokens> => {
+              renewals++;
+              return Promise.resolve(PAIR);
+            },
+          },
+          PAIR,
+        ),
+      ).rejects.toThrow();
+      expect(renewals).toBe(0);
+      expect(urls).toEqual([]);
+    }
+  });
+
+  it('a second 401 ends bootstrap without a second refresh or opening a socket', async () => {
+    const { door, calls } = doorway({
+      '/v1/auth/ticket': { status: 401 },
+      '/v1/auth/refresh': {
+        status: 204,
+        cookies: issued('access-2', 'refresh-2'),
+      },
+    });
+    const { open, urls } = openings();
+    const kept: Tokens[] = [];
+    await expect(
+      openSocket({ ...door, open, session: LISTENING_AS }, PAIR, (tokens) =>
+        kept.push(tokens),
+      ),
+    ).rejects.toThrow('401');
+    expect(calls.map((call) => call.path)).toEqual([
+      '/v1/auth/ticket',
+      '/v1/auth/refresh',
+      '/v1/auth/ticket',
+    ]);
+    expect(kept).toEqual([{ access: 'access-2', refresh: 'refresh-2' }]);
+    expect(urls).toEqual([]);
+  });
+
   it('hands back the rotated pair, so a reconnect does not present a spent one', async () => {
     const { door, calls } = doorway({
       '/v1/auth/refresh': [
@@ -475,7 +574,9 @@ describe('openSocket refreshes before it tickets, and that is the whole point', 
         { status: 204, cookies: issued('access-3', 'refresh-3') },
       ],
       '/v1/auth/ticket': [
+        { status: 401 },
         { status: 200, body: { ticket: 't-1' } },
+        { status: 401 },
         { status: 200, body: { ticket: 't-2' } },
       ],
     });
@@ -492,7 +593,7 @@ describe('openSocket refreshes before it tickets, and that is the whole point', 
     // The second refresh presents what the first one rotated to. Holding
     // the original would present a retired token, which this server's
     // reuse detection reads as theft and answers by killing the chain.
-    expect(calls[2]?.headers['Cookie']).toBe('ps_refresh=refresh-2');
+    expect(calls[4]?.headers['Cookie']).toBe('ps_refresh=refresh-2');
     expect(second.tokens).toEqual({ access: 'access-3', refresh: 'refresh-3' });
     // And a ticket is single-use, so the second connection gets its own.
     expect(urls).toEqual([
@@ -544,11 +645,14 @@ describe('openFiles is openSocket for the other socket, with a claim on it', () 
         status: 204,
         cookies: issued('access-2', 'refresh-2'),
       },
-      '/v1/auth/ticket': { status: 200, body: { ticket: 't-1' } },
+      '/v1/auth/ticket': [
+        { status: 401 },
+        { status: 200, body: { ticket: 't-1' } },
+      ],
     });
   }
 
-  it('refreshes, tickets, and opens /v1/files with every part of the claim escaped', async () => {
+  it('renews an expired access token and opens /v1/files with every part of the claim escaped', async () => {
     const { door, calls } = ready();
     const { open, urls } = openings();
     const opened = await openFiles(
@@ -558,6 +662,7 @@ describe('openFiles is openSocket for the other socket, with a claim on it', () 
     );
 
     expect(calls.map((call) => call.path)).toEqual([
+      '/v1/auth/ticket',
       '/v1/auth/refresh',
       '/v1/auth/ticket',
     ]);

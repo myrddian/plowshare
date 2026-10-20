@@ -12495,5 +12495,247 @@
       "coverage": []
     },
     "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "limit": 1
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": "scheduled-1-daily",
+      "limit": 100
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "project": "fixture",
+      "after": "nightly",
+      "limit": 51
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": " daily"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": "badcursor"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "limit": "50"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "offset": 50
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "limit": 1
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": "scheduled-1-daily",
+      "limit": 100
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "project": "fixture",
+      "after": "nightly",
+      "limit": 51
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": " daily"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": "badcursor"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "limit": "50"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "offset": 50
+    },
+    "valid": false
   }
 ]

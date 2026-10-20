@@ -106,6 +106,89 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
     return jdbc.query(SOURCE_QUERY + " ORDER BY s.id", JdbcScheduleDefinitionStore::source);
   }
 
+  public List<Source> sourcesForInspection(String account, String project) {
+    if (account == null || account.isBlank() || account.length() > 256)
+      throw new IllegalArgumentException("Authenticated schedule account required");
+    return List.copyOf(
+        jdbc.query(
+            SOURCE_QUERY
+                + (project == null ? " WHERE s.account=?" : " WHERE p.name=?")
+                + " ORDER BY s.id",
+            JdbcScheduleDefinitionStore::source,
+            project == null ? account : project));
+  }
+
+  public List<ScheduledWork.File> filesPage(FileSelection selection, SchedulePage page) {
+    java.util.Objects.requireNonNull(selection);
+    java.util.Objects.requireNonNull(page);
+    if (selection.sources().isEmpty()) return List.of();
+    long available = filesCache.maxWeight() - 4096L - 4L * InformationJson.json(selection).length();
+    long maximum = available <= 0 ? 0 : available / 64;
+    return filesCache.read(
+        new SnapshotCache.Key(
+            "files-page",
+            ProjectionCache.fingerprint(
+                InformationJson.json(selection), InformationJson.json(page))),
+        maximum > 0,
+        () -> selectedFilesPage(selection, page, maximum),
+        () -> selectedFilesPage(selection, page, null),
+        JdbcScheduleDefinitionStore::filesWeight);
+  }
+
+  /**
+   * Authority/source predicates and the unique cursor precede LIMIT. The cache's bounded loader
+   * measures only this page, and an oversized page reaches no JSON/definition mapper before pure
+   * fallback. Source identities remain lightweight; reconciliation still uses complete files().
+   */
+  private List<ScheduledWork.File> selectedFilesPage(
+      FileSelection selection, SchedulePage page, Long maximum) {
+    var args = new java.util.ArrayList<Object>();
+    // Retain the full admitted address, not just an ID that could move to another project before
+    // the cache captures its version. One bound typed relation also avoids the parameter ceiling
+    // for accounts with many folders. JSON is encoded only at this persistence boundary.
+    args.add(InformationJson.json(selection.sources()));
+    args.add(selection.project() == null ? selection.account() : selection.project());
+    if (page.after() != null) args.add(page.after());
+    args.add(page.limit());
+    String selected =
+        "SELECT "
+            + SOURCE_COLUMNS
+            + ",f.name,f.internal_name,f.definition,f.paused_override,f.status,f.error"
+            + (maximum == null ? "" : "," + FILE_BYTES + " AS file_bytes")
+            + SOURCE_FROM
+            + " JOIN schedule_files f ON f.source_id=s.id"
+            + " WHERE EXISTS(SELECT 1 FROM jsonb_to_recordset(?::jsonb)"
+            + " admitted(id bigint,account text,\"projectId\" bigint,project text,source text)"
+            + " WHERE admitted.id=s.id AND admitted.account=s.account AND admitted.source=s.source"
+            + " AND admitted.\"projectId\" IS NOT DISTINCT FROM s.project_id"
+            + " AND admitted.project IS NOT DISTINCT FROM p.name)"
+            + (selection.project() == null ? " AND s.account=?" : " AND p.name=?")
+            + (page.after() == null ? "" : " AND f.internal_name>?")
+            + " ORDER BY f.internal_name LIMIT ?";
+    if (maximum == null)
+      return List.copyOf(
+          jdbc.query(
+              selected,
+              (row, index) -> snapshot(source(row, index), row).effective(),
+              args.toArray()));
+    args.add(maximum);
+    return jdbc
+        .query(
+            "WITH retained AS MATERIALIZED ("
+                + selected
+                + "), bounds AS (SELECT COALESCE(sum(file_bytes),0) AS projection_bytes,count(*) AS total_files FROM retained)"
+                + " SELECT bounds.projection_bytes,bounds.total_files,retained.* FROM bounds LEFT JOIN retained ON bounds.projection_bytes<=? ORDER BY retained.internal_name",
+            (row, index) -> {
+              if (row.getLong("projection_bytes") > maximum) throw new ProjectionCache.Bypass();
+              if (row.getLong("total_files") == 0) return Optional.<ScheduledWork.File>empty();
+              return Optional.of(snapshot(source(row, index), row).effective());
+            },
+            args.toArray())
+        .stream()
+        .flatMap(Optional::stream)
+        .toList();
+  }
+
   public List<ScheduledWork.File> files(Source source) {
     if (!filesCache.enabled()) return directFiles(source);
     var currentSource = readSource(source);

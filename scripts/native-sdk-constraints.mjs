@@ -159,7 +159,8 @@ export function constrain(graph) {
           'start',
           'end',
           'waitMs',
-        ].includes(k)
+        ].includes(k) &&
+        !(k === 'after' && (op === 'schedule.list' || op === 'schedule.files'))
       )
         add(
           v,
@@ -219,8 +220,11 @@ export function constrain(graph) {
       field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
       field(s, 'expiresInDays', integer(1,365));
     }
-    if (op === 'schedule.list' || op === 'schedule.files')
+    if (op === 'schedule.list' || op === 'schedule.files') {
       field(s, 'project', {maxLength:256,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$',disallowPrefixes:['personal:','Personal:','client:']});
+      field(s, 'after', {minLength:1,maxLength:512,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$'});
+      field(s, 'limit', integer(1,100));
+    }
     if (op === 'application.deploy') {
       rules(s, present('destination.path'));
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});

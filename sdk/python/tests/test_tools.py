@@ -236,6 +236,7 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                         "fixture-token",
                         timeout=1,
                         legacy_transport=True,
+                        dispatch_mode="ordered",
                     ) as client:
                         provider = ToolProvider(
                             client,
@@ -274,6 +275,7 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                             "fixture-token",
                             timeout=1,
                             legacy_transport=True,
+                            dispatch_mode="ordered",
                         ) as client:
                             provider = ToolProvider(
                                 client,
@@ -329,6 +331,7 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                         "fixture-token",
                         timeout=1,
                         legacy_transport=True,
+                        dispatch_mode="ordered",
                     ) as client:
                         provider = ToolProvider(
                             client,
@@ -406,6 +409,7 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                         "fixture-token",
                         timeout=1,
                         legacy_transport=True,
+                        dispatch_mode="ordered",
                     ) as client:
                         if variant == "legacy-interrupted":
                             journal.save(
@@ -490,6 +494,7 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                             "fixture-token",
                             timeout=1,
                             legacy_transport=True,
+                            dispatch_mode="ordered",
                         ) as client:
                             provider = ToolProvider(
                                 client,

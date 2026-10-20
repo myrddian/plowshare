@@ -1796,13 +1796,21 @@ class GlobalPreparationPersistenceTest {
   @Test
   void withdrawalDuringProviderExecutionStopsTargetDisclosureAndKeepsItsClaim() {
     var revision = upload(UUID.randomUUID());
-    afterEmbedding =
-        () ->
-            call(
-                "operator",
-                "withdraw",
-                Map.of("revision", revision.toString(), "requestId", UUID.randomUUID().toString()));
-    try (var dispatcher = dispatcher()) {
+    try (var dispatcher = dispatcher();
+        var lifecycle = lifecycle(dispatcher, false)) {
+      // Upload retains text before deriving searchable passages. Exercise actual preparation so
+      // the bounded existence gate admits a real query; otherwise skipping inference is correct.
+      for (int attempt = 0; attempt < 8 && !ready(revision); attempt++)
+        assertTrue(lifecycle.drainOne(revision));
+      assertTrue(ready(revision));
+      embedded.set(0);
+      afterEmbedding =
+          () ->
+              call(
+                  "operator",
+                  "withdraw",
+                  Map.of(
+                      "revision", revision.toString(), "requestId", UUID.randomUUID().toString()));
       var reader =
           queryReader(dispatcher, false)
               .scoped(access, access.resolve("reader", InformationContext.Selection.globalRead()))

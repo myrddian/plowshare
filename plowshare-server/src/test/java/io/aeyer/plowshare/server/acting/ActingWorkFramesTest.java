@@ -66,6 +66,32 @@ class ActingWorkFramesTest {
   }
 
   @Test
+  void queued_receipt_disclosure_uses_owning_work_authority_without_history_or_work_replay() {
+    var receipt =
+        new ActingWork.Receipt(
+            UUID.randomUUID(), "cnv_ABC123", "chat", ActingWork.State.STARTED, "job_ABC123");
+    var envelope =
+        new io.aeyer.plowshare.protocol.frames.Envelope(
+            "id",
+            FrameTypes.ACTING_TURN_RECEIPT,
+            io.aeyer.plowshare.protocol.frames.Envelope.CURRENT_VERSION,
+            Map.of("requestId", receipt.requestId().toString()),
+            selection);
+    requests.requireDisclosure(
+        envelope, asking, io.aeyer.plowshare.protocol.frames.Outcome.ok(receipt));
+    verify(work).requireReceipt(authority, receipt);
+    verifyNoInteractions(history, jobs);
+    verify(work, never()).receipt(any(), any());
+    verify(work, never()).start(any(), any());
+    doThrow(new CallerFault("Revoked")).when(work).requireReceipt(authority, receipt);
+    assertThrows(
+        CallerFault.class,
+        () ->
+            requests.requireDisclosure(
+                envelope, asking, io.aeyer.plowshare.protocol.frames.Outcome.ok(receipt)));
+  }
+
+  @Test
   void receipt_recovery_only_reads_and_retains_the_selected_authority() {
     UUID request = UUID.randomUUID();
     var receipt =

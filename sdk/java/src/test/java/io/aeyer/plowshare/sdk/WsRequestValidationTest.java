@@ -46,7 +46,11 @@ class WsRequestValidationTest {
   void malformed_requests_never_open_a_socket_or_upload() throws Exception {
     try (var server = new MockWebServer();
         var client =
-            new WsServerClient(server.url("/").toString(), null, Plowshare.TransportMode.LEGACY)) {
+            new WsServerClient(
+                server.url("/").toString(),
+                null,
+                Plowshare.TransportMode.LEGACY,
+                Plowshare.DispatchMode.ORDERED)) {
       var invalid =
           List.<org.junit.jupiter.api.function.Executable>of(
               () -> client.recall(" ", "question", 1),

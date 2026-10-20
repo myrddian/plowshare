@@ -17,6 +17,14 @@ public interface ScheduleStore {
 
   List<ScheduleRecord> list();
 
+  /**
+   * User-facing name-keyset page. A null project selects the account's own schedules; a supplied
+   * project selects its enrolled file schedules irrespective of registrar. The caller must enforce
+   * current project VIEWER authority before and after this read. Full runtime scans use {@link
+   * #list}.
+   */
+  List<ScheduleRecord> page(String account, String project, SchedulePage page);
+
   Optional<ScheduleRecord> find(String name);
 
   void pause(String name, boolean paused, String handle);

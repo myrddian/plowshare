@@ -2,6 +2,7 @@ import { mark, markedName, discover, resolveMarked } from './marker.js';
 import { projectLabel } from 'plowshare-client-ts/operations/project-label';
 import {
   Credentials,
+  authenticationFetch,
   credentialDirectory,
   savedOrLogin,
 } from './credentials.ts';
@@ -28,6 +29,7 @@ import { rooter } from './rooter.ts';
 import { noticingWrites } from './sync/syncer.ts';
 
 export interface SessionOptions {
+  readonly dispatchMode?: 'concurrent-v1' | 'ordered';
   readonly credentials?: Credentials;
   readonly onPush?: (push: unknown) => void;
   readonly onClose?: () => void;
@@ -114,9 +116,17 @@ export async function authenticate(
     presenceLost = false;
   const door = {
     base,
+    dispatchMode: options.dispatchMode ?? 'concurrent-v1',
+    deadline: {
+      milliseconds: 30_000,
+      schedule: (expired: () => void, milliseconds: number) => {
+        const timer = setTimeout(expired, milliseconds);
+        return () => clearTimeout(timer);
+      },
+    },
     session: randomUUID(),
-    fetch: (url: string, sent: Parameters<typeof fetch>[1]) =>
-      fetch(url, { ...sent, signal, redirect: 'error' }),
+    fetch: (url: string, sent: Parameters<typeof authenticationFetch>[1]) =>
+      authenticationFetch(url, sent, signal),
     open: (url: string) => socketAt(url, signal),
     ...(options.onPush === undefined ? {} : { onPush: options.onPush }),
     onClose: () => {
@@ -127,7 +137,11 @@ export async function authenticate(
   const store = options.credentials;
   const authDoor = {
     ...door,
-    ...(store === undefined ? {} : { renew: () => store.renew(door) }),
+    ...(store === undefined
+      ? {}
+      : {
+          renew: (rejectedAccess?: string) => store.renew(door, rejectedAccess),
+        }),
   };
   const signed =
     store === undefined
@@ -296,6 +310,14 @@ export async function authenticateService(
     {
       base,
       session,
+      dispatchMode: options.dispatchMode ?? 'concurrent-v1',
+      deadline: {
+        milliseconds: 30_000,
+        schedule: (expired, milliseconds) => {
+          const timer = setTimeout(expired, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
       fetch: (url, sent) => fetch(url, { ...sent, signal, redirect: 'error' }),
       open: (url) => socketAt(url, signal),
       ...(options.onPush === undefined ? {} : { onPush: options.onPush }),

@@ -5772,6 +5772,8 @@ class ScheduleDefinePayloadDto:
 @dataclass(frozen=True, kw_only=True)
 class ScheduleFilesPayloadDto:
     """Validated fields of the ScheduleFilesPayloadDto protocol contract."""
+    after: str | Unset = UNSET
+    limit: float | Unset = UNSET
     project: str | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -5782,6 +5784,8 @@ class ScheduleForgetPayloadDto:
 @dataclass(frozen=True, kw_only=True)
 class ScheduleListPayloadDto:
     """Validated fields of the ScheduleListPayloadDto protocol contract."""
+    after: str | Unset = UNSET
+    limit: float | Unset = UNSET
     project: str | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -8269,6 +8273,8 @@ class ScheduleDefineRequest(Request[ScheduleRecordDto]):
 @dataclass(frozen=True, kw_only=True)
 class ScheduleFilesRequest(Request[tuple[ScheduleFileDto, ...]]):
     """Validated fields of the ScheduleFilesRequest protocol contract."""
+    after: str | Unset = UNSET
+    limit: float | Unset = UNSET
     project: str | Unset = UNSET
     operation: ClassVar[str] = "schedule.files"
 
@@ -8281,6 +8287,8 @@ class ScheduleForgetRequest(Request[None]):
 @dataclass(frozen=True, kw_only=True)
 class ScheduleListRequest(Request[tuple[ScheduleRecordDto, ...]]):
     """Validated fields of the ScheduleListRequest protocol contract."""
+    after: str | Unset = UNSET
+    limit: float | Unset = UNSET
     project: str | Unset = UNSET
     operation: ClassVar[str] = "schedule.list"
 
@@ -10366,9 +10374,9 @@ _FIELDS = {
     RelayTopicsResultDto: {"scope": "scope", "topics": "topics"},
     RelayTopicsResultDtoScopeDto: {"project": "project", "system": "system"},
     ScheduleDefinePayloadDto: {"cron": "cron", "emits": "emits", "schedule": "schedule", "zone": "zone"},
-    ScheduleFilesPayloadDto: {"project": "project"},
+    ScheduleFilesPayloadDto: {"after": "after", "limit": "limit", "project": "project"},
     ScheduleForgetPayloadDto: {"schedule": "schedule"},
-    ScheduleListPayloadDto: {"project": "project"},
+    ScheduleListPayloadDto: {"after": "after", "limit": "limit", "project": "project"},
     SchedulePausePayloadDto: {"paused": "paused", "schedule": "schedule"},
     ScheduleReadPayloadDto: {"conversation": "conversation", "project": "project", "text": "text", "zone": "zone"},
     ScheduleSavePayloadDto: {"definition": "definition", "name": "name", "overwrite": "overwrite", "project": "project", "source": "source"},
@@ -10656,9 +10664,9 @@ _FIELDS = {
     RelayTopicsRequest: {},
     RetentionSweepRequest: {},
     ScheduleDefineRequest: {"cron": "cron", "emits": "emits", "schedule": "schedule", "zone": "zone"},
-    ScheduleFilesRequest: {"project": "project"},
+    ScheduleFilesRequest: {"after": "after", "limit": "limit", "project": "project"},
     ScheduleForgetRequest: {"schedule": "schedule"},
-    ScheduleListRequest: {"project": "project"},
+    ScheduleListRequest: {"after": "after", "limit": "limit", "project": "project"},
     SchedulePauseRequest: {"paused": "paused", "schedule": "schedule"},
     ScheduleReadRequest: {"conversation": "conversation", "project": "project", "text": "text", "zone": "zone"},
     ScheduleSaveRequest: {"definition": "definition", "name": "name", "overwrite": "overwrite", "project": "project", "source": "source"},

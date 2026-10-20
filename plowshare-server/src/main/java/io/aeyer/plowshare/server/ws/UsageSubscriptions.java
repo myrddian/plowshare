@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import org.springframework.stereotype.Component;
 
@@ -21,7 +22,10 @@ public class UsageSubscriptions {
   public static final String CLOSED = "usage.closed";
 
   private record Connection(
-      String account, BiConsumer<String, Envelope> sink, Map<String, Subscription> active) {}
+      String account,
+      BiConsumer<String, Envelope> sink,
+      Map<String, Subscription> active,
+      ReentrantLock emitting) {}
 
   private static final class Subscription {
     final String id;
@@ -38,7 +42,7 @@ public class UsageSubscriptions {
   }
 
   private final UsageReports queries;
-  private final Map<String, Connection> connections = new HashMap<>();
+  private final ConcurrentMap<String, Connection> connections = new ConcurrentHashMap<>();
   private ScheduledExecutorService timer;
 
   public UsageSubscriptions(UsageReports queries) {
@@ -54,7 +58,8 @@ public class UsageSubscriptions {
   }
 
   public synchronized void connect(String id, String account, BiConsumer<String, Envelope> sink) {
-    connections.put(id, new Connection(account, sink, new LinkedHashMap<>()));
+    connections.put(
+        id, new Connection(account, sink, new ConcurrentHashMap<>(), new ReentrantLock()));
   }
 
   public synchronized void disconnect(String id) {
@@ -74,23 +79,49 @@ public class UsageSubscriptions {
     return c;
   }
 
-  public synchronized Usage.Initial subscribe(Asking asking, Usage.Resolved query) {
+  public Usage.Initial subscribe(Asking asking, Usage.Resolved query) {
     if (!UsageQueryService.REPORTS.contains(query.type()) || query.filter().cursor() != null)
       throw new CallerFault("usage.subscribe takes an aggregate report without a cursor");
-    Connection c = connection(asking);
-    if (c.active.size() >= 8)
-      throw new CallerFault("a socket can hold at most eight usage subscriptions");
-    var report = queries.report(c.account, query);
     String id = UUID.randomUUID().toString();
-    c.active.put(id, new Subscription(id, query, signature(report)));
-    return new Usage.Initial(id, 0, query, report);
+    var reserved = new Subscription(id, query, null);
+    Connection c;
+    synchronized (this) {
+      c = connection(asking);
+      if (c.active.size() >= 8)
+        throw new CallerFault("a socket can hold at most eight usage subscriptions");
+      c.active.put(id, reserved);
+    }
+    try {
+      // Report IO is outside the service-wide monitor. The pending reservation counts toward
+      // capacity and cannot become ready if disconnect/unsubscribe wins while this query runs.
+      var report = queries.report(c.account, query);
+      synchronized (this) {
+        if (connections.get(asking.connectionId()) != c || c.active.get(id) != reserved)
+          throw new CallerFault("usage subscription connection ended");
+        reserved.signature = signature(report);
+      }
+      return new Usage.Initial(id, 0, query, report);
+    } catch (RuntimeException | Error failure) {
+      c.active.remove(id, reserved);
+      throw failure;
+    }
   }
 
-  public synchronized void unsubscribe(Asking asking, String id) {
-    Connection c = connection(asking);
-    // An absent ID is idempotent. No lookup in another connection is performed.
-    c.active.remove(id);
-    c.sink.accept(id, null);
+  public void unsubscribe(Asking asking, String id) {
+    Connection c;
+    synchronized (this) {
+      c = connection(asking);
+      // An absent ID is idempotent. No lookup in another connection is performed.
+      c.active.remove(id);
+    }
+    // Serialize the queue-only sink with publish so its tombstone cannot be overtaken by a
+    // stale in-flight report. No report IO or external callback runs under the registry monitor.
+    c.emitting.lock();
+    try {
+      c.sink.accept(id, null);
+    } finally {
+      c.emitting.unlock();
+    }
   }
 
   public void publish() {
@@ -110,30 +141,42 @@ public class UsageSubscriptions {
         try {
           var report = queries.report(entry.getValue().account, sub.query);
           Signature signature = signature(report);
-          synchronized (this) {
-            Connection current = connections.get(entry.getKey());
-            if (current != entry.getValue() || current.active.get(sub.id) != sub) continue;
-            if (signature.equals(sub.signature)) continue;
-            sub.signature = signature;
-            current.sink.accept(
-                sub.id,
-                new Envelope(
-                    null,
-                    UPDATED,
-                    Envelope.CURRENT_VERSION,
-                    pushPayload(new Usage.Updated(sub.id, ++sub.revision, report))));
+          entry.getValue().emitting.lock();
+          try {
+            Envelope update;
+            synchronized (this) {
+              Connection current = connections.get(entry.getKey());
+              if (current != entry.getValue() || current.active.get(sub.id) != sub) continue;
+              if (signature.equals(sub.signature)) continue;
+              sub.signature = signature;
+              update =
+                  new Envelope(
+                      null,
+                      UPDATED,
+                      Envelope.CURRENT_VERSION,
+                      pushPayload(new Usage.Updated(sub.id, ++sub.revision, report)));
+            }
+            entry.getValue().sink.accept(sub.id, update);
+          } finally {
+            entry.getValue().emitting.unlock();
           }
         } catch (CallerFault revoked) {
-          synchronized (this) {
-            Connection current = connections.get(entry.getKey());
-            if (current != entry.getValue() || current.active.remove(sub.id) != sub) continue;
-            current.sink.accept(
-                sub.id,
-                new Envelope(
-                    null,
-                    CLOSED,
-                    Envelope.CURRENT_VERSION,
-                    pushPayload(new Usage.Closed(sub.id, "BAD_REQUEST"))));
+          entry.getValue().emitting.lock();
+          try {
+            Envelope closed;
+            synchronized (this) {
+              Connection current = connections.get(entry.getKey());
+              if (current != entry.getValue() || current.active.remove(sub.id) != sub) continue;
+              closed =
+                  new Envelope(
+                      null,
+                      CLOSED,
+                      Envelope.CURRENT_VERSION,
+                      pushPayload(new Usage.Closed(sub.id, "BAD_REQUEST")));
+            }
+            entry.getValue().sink.accept(sub.id, closed);
+          } finally {
+            entry.getValue().emitting.unlock();
           }
         } catch (RuntimeException unavailable) {
           // A transient query outage preserves the subscription and retries next tick. No error

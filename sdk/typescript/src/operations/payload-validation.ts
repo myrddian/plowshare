@@ -892,8 +892,8 @@ export const SHAPES: Record<
   ],
   'schedule.save': [['name', 'source', 'definition', 'overwrite'], ['project']],
   'schedule.sync': [['source'], ['project']],
-  'schedule.files': [[], ['project']],
-  'schedule.list': [[], ['project']],
+  'schedule.files': [[], ['project', 'after', 'limit']],
+  'schedule.list': [[], ['project', 'after', 'limit']],
   'schedule.define': [['schedule', 'cron', 'emits'], ['zone']],
   'schedule.read': [['text'], ['zone', 'project', 'conversation']],
   'schedule.pause': [['schedule'], ['paused']],
@@ -1249,14 +1249,41 @@ export function commandProblem(
     (type === 'schedule.files' || type === 'schedule.list') &&
     'project' in body &&
     (typeof body['project'] !== 'string' ||
+      !body['project'].length ||
       body['project'].length > 256 ||
       body['project'] !== body['project'].trim() ||
+      body['project'].startsWith('personal:') ||
+      body['project'].startsWith('Personal:') ||
+      body['project'].startsWith('client:') ||
       Array.from(body['project']).some((character) => {
         const point = character.codePointAt(0)!;
         return point <= 31 || (point >= 127 && point <= 159);
       }))
   )
     return 'Choose a bounded ordinary project name';
+  if (type === 'schedule.files' || type === 'schedule.list') {
+    const after = body['after'];
+    if (
+      'after' in body &&
+      (typeof after !== 'string' ||
+        !after.length ||
+        after.length > 512 ||
+        after !== after.trim() ||
+        Array.from(after).some((character) => {
+          const point = character.codePointAt(0)!;
+          return point <= 31 || (point >= 127 && point <= 159);
+        }))
+    )
+      return 'after must be an exact nonblank schedule cursor of at most 512 characters';
+    if (
+      'limit' in body &&
+      (typeof body['limit'] !== 'number' ||
+        !Number.isInteger(body['limit']) ||
+        body['limit'] < 1 ||
+        body['limit'] > 100)
+    )
+      return 'Schedule page limit must be an integer between 1 and 100';
+  }
   if (type === 'admin.pricing.set') return pricingProblem(body);
   if (type === 'schedule.save' || type === 'schedule.sync')
     return schedulePayloadProblem(type, body);
@@ -1330,7 +1357,13 @@ export function commandProblem(
         return `${key} must be an array of nonblank strings`;
     } else if (BOOLEAN_FIELDS.includes(key)) {
       if (typeof value !== 'boolean') return `${key} must be boolean`;
-    } else if (NUMBER_FIELDS.includes(key)) {
+    } else if (
+      NUMBER_FIELDS.includes(key) &&
+      !(
+        key === 'after' &&
+        (type === 'schedule.files' || type === 'schedule.list')
+      )
+    ) {
       const minimum =
         ['offset', 'after'].includes(key) ||
         (type === 'admin.audit' && key === 'before')

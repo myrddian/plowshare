@@ -6,10 +6,10 @@ import io.aeyer.plowshare.server.auth.Tokens;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * In-memory contexts end with the socket or after five minutes, never later than proof expiry. Only
@@ -20,7 +20,8 @@ public final class BoundActingContexts implements ActingContexts {
   private record Entry(
       Connection connection, RequestAuthority.Delegated authority, Instant expiresAt) {}
 
-  private final Map<UUID, Entry> contexts = new HashMap<>();
+  private final ConcurrentMap<UUID, Entry> contexts = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Connection> opening = new ConcurrentHashMap<>();
   private final ActingRepository repository;
   private final ActingAuthorization authorization;
   private final Clock clock;
@@ -33,11 +34,24 @@ public final class BoundActingContexts implements ActingContexts {
   }
 
   @Override
-  public synchronized ActingContext.Opened open(Connection connection, ActingContext.Open request) {
+  public ActingContext.Opened open(Connection connection, ActingContext.Open request) {
     Objects.requireNonNull(connection);
     Objects.requireNonNull(request);
+    UUID reservation = UUID.randomUUID();
     try {
-      return admit(connection, request);
+      synchronized (this) {
+        contexts.values().removeIf(entry -> !entry.expiresAt().isAfter(clock.instant()));
+        long local =
+            contexts.values().stream()
+                    .filter(entry -> entry.connection().id().equals(connection.id()))
+                    .count()
+                + opening.values().stream()
+                    .filter(value -> value.id().equals(connection.id()))
+                    .count();
+        if (contexts.size() + opening.size() >= 8192 || local >= 64) throw refused();
+        opening.put(reservation, connection);
+      }
+      return admit(connection, request, reservation);
     } catch (CallerFault refused) {
       repository.contextAudit(
           new ActingRepository.ContextAudit(
@@ -48,22 +62,21 @@ public final class BoundActingContexts implements ActingContexts {
               java.util.Optional.empty(),
               java.util.Optional.empty()));
       throw refused;
+    } finally {
+      opening.remove(reservation, connection);
     }
   }
 
-  private ActingContext.Opened admit(Connection connection, ActingContext.Open request) {
-    contexts.values().removeIf(entry -> !entry.expiresAt().isAfter(clock.instant()));
-    if (!repository.enabled()
-        || contexts.size() >= 8192
-        || contexts.values().stream()
-                .filter(entry -> entry.connection().id().equals(connection.id()))
-                .count()
-            >= 64) throw refused();
+  private ActingContext.Opened admit(
+      Connection connection, ActingContext.Open request, UUID reservation) {
+    if (!repository.enabled()) throw refused();
     var token =
         repository
             .proof(Tokens.hash(request.proof().credential()))
             .orElseThrow(BoundActingContexts::refused);
-    if (!token.actor().equals(connection.actor())
+    if (token.revoked()
+        || !token.expiresAt().isAfter(clock.instant())
+        || !token.actor().equals(connection.actor())
         || !token.application().equals(request.application())
         || !token.grant().equals(request.grant())) throw refused();
     var grant =
@@ -95,6 +108,17 @@ public final class BoundActingContexts implements ActingContexts {
     Instant expiresAt = clock.instant().plusSeconds(300);
     if (token.expiresAt().isBefore(expiresAt)) expiresAt = token.expiresAt();
     UUID id = UUID.randomUUID();
+    // The proof/grant may have changed during authorization IO. Refuse rather than retarget the
+    // retained subject/scope. This freshness read is not a reusable permission cache.
+    if (!repository.enabled()
+        || !repository
+            .proof(Tokens.hash(request.proof().credential()))
+            .filter(token::equals)
+            .isPresent()
+        || !repository
+            .grant(request.application(), request.grant())
+            .filter(grant::equals)
+            .isPresent()) throw refused();
     repository.contextAudit(
         new ActingRepository.ContextAudit(
             connection.actor(),
@@ -103,12 +127,16 @@ public final class BoundActingContexts implements ActingContexts {
             ActingRepository.ContextAction.OPEN,
             java.util.Optional.of(id),
             java.util.Optional.of(token.subject())));
-    contexts.put(id, new Entry(connection, admitted, expiresAt));
+    synchronized (this) {
+      if (opening.get(reservation) != connection || !expiresAt.isAfter(clock.instant()))
+        throw refused();
+      contexts.put(id, new Entry(connection, admitted, expiresAt));
+    }
     return new ActingContext.Opened(id, token.subject(), expiresAt);
   }
 
   @Override
-  public synchronized RequestAuthority.Delegated resolve(Connection connection, UUID context) {
+  public RequestAuthority.Delegated resolve(Connection connection, UUID context) {
     var entry = contexts.get(Objects.requireNonNull(context));
     if (entry == null
         || !entry.connection().equals(connection)
@@ -118,9 +146,10 @@ public final class BoundActingContexts implements ActingContexts {
   }
 
   @Override
-  public synchronized void close(Connection connection, UUID context) {
+  public void close(Connection connection, UUID context) {
     var entry = contexts.get(Objects.requireNonNull(context));
     if (entry == null || !entry.connection().equals(connection)) throw refused();
+    if (!contexts.remove(context, entry)) throw refused();
     var delegation = entry.authority().delegation();
     repository.contextAudit(
         new ActingRepository.ContextAudit(
@@ -130,12 +159,12 @@ public final class BoundActingContexts implements ActingContexts {
             ActingRepository.ContextAction.CLOSE,
             java.util.Optional.of(context),
             java.util.Optional.of(entry.authority().subject())));
-    contexts.remove(context);
   }
 
   @Override
   public synchronized void disconnected(String connection) {
     contexts.values().removeIf(entry -> entry.connection().id().equals(connection));
+    opening.values().removeIf(entry -> entry.id().equals(connection));
   }
 
   private static RequestAuthority.Delegated authority(

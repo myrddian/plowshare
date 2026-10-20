@@ -209,7 +209,8 @@ export default {
                   "legacy-ha-fixture",
                   Duration.ofSeconds(3),
                   null,
-                  Plowshare.TransportMode.LEGACY);
+                  Plowshare.TransportMode.LEGACY,
+                  Plowshare.DispatchMode.ORDERED);
           var runtime =
               new IntegrationRuntime(
                   config,

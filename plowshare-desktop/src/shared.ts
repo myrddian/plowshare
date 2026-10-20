@@ -324,6 +324,27 @@ export interface AccountActivity {
     { rows: readonly RecordView[]; loading?: boolean; error?: string }
   >;
   schedules?: {
+    panels?: Partial<
+      Record<
+        'schedules' | 'files' | 'triggers' | 'firings',
+        {
+          loading: boolean;
+          error?: string;
+        }
+      >
+    >;
+    schedulePage?: {
+      number: number;
+      more: boolean;
+      loading?: boolean;
+      error?: string;
+    };
+    filePage?: {
+      number: number;
+      more: boolean;
+      loading?: boolean;
+      error?: string;
+    };
     files?: readonly ScheduleFile[];
     sourceProject?: string;
     schedules: readonly ScheduleRecord[];
@@ -633,7 +654,11 @@ export type Request =
   | { action: 'inbox-read'; id: string }
   | { action: 'inbox-more' }
   | { action: 'run-detail'; id: string }
-  | { action: 'schedule-refresh' }
+  | {
+      action: 'schedule-refresh';
+      section?: 'schedules' | 'files';
+      direction?: 'next' | 'previous' | 'first';
+    }
   | {
       action: 'schedule-preview';
       text: string;

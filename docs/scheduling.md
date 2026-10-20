@@ -68,6 +68,48 @@ Files cannot traverse folders or follow symbolic links. Model file tools do not 
 access to the hidden schedule folder. The dedicated schedule file purpose serves
 only these JSON files.
 
+## Inspection pages
+
+`schedule.list` and `schedule.files` return bounded arrays. Both accept optional
+`after` and `limit`: omitting `limit` returns at most 50 rows; explicit limits must
+be integers from 1 through 100. An omitted `after` starts at the beginning. A cursor
+is exact, nonblank text of at most 512 characters, without surrounding whitespace
+or control characters. Do not trim it or construct it from a display label.
+
+`schedule.list` orders by schedule `name`; use the last retained row's `name` as
+the exclusive next-page `after`. `schedule.files` instead orders by its unique
+`internalName`, including refused source files; use that field for its cursor.
+Keep the project selection fixed while paging. An empty or short page ends the
+current traversal. Because replies remain arrays, a full page alone does not prove
+that another row exists.
+
+Interactive clients show 50 rows and request one additional row as lookahead
+(`limit:51`) to decide whether to enable Next. Next uses the last displayed row's
+key, so the lookahead row is the next page's first candidate. Previous/Refresh
+reissue bounded reads rather than retaining an unbounded collection.
+
+Every page rechecks current account, service-token and project authority. These
+are current keyset reads, with no immutable snapshot spanning requests: removals
+and changed permissions affect later pages, and insertions ordered before the
+cursor require Refresh to see. The server's internal source reconciliation,
+boot recovery and due-work selection remain complete and unpaginated; a bounded
+inspection page never defines which schedules may run.
+
+File pages bound definition hydration and cache admission. Unscoped inspection
+still admits lightweight owned-source metadata; stored membership is batched,
+while deployed Application manifests and grant lineage remain live per-project
+checks. Paging does not replace these authority fences or make their total cost
+independent of project count. Migration V180 adds owner/name, source-owner/id and
+source/internal-name indexes for the new selection and cursor predicates.
+
+Java offers `ScheduleClient.listPage(project, after, limit)` and
+`filesPage(project, after, limit)`; null `after` starts a traversal and null `limit`
+uses 50. Existing `list(project)` and `files(project)` deliberately traverse pages
+of 100 and retain at most 10,000 typed rows. They throw on a repeated key, refusal,
+malformed page or exceeded bound, and never return a misleading partial list.
+Prefer page reads for interactive displays and larger collections. All of these
+are read-only; paging never resumes a schedule or replays a control mutation.
+
 ## Actions and destinations
 
 The version 1 format has timing, an action, a target and optional limits:

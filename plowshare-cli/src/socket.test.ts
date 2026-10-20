@@ -73,6 +73,7 @@ async function fixture(
     frames: Frame[] = [],
     sessions: string[] = [];
   let seen: ((frame: Frame) => void) | undefined;
+  let access = 'fixture-access-secret';
   const server = createServer(
     httpHandler(async (req, res) => {
       paths.push(req.url ?? '');
@@ -89,15 +90,17 @@ async function fixture(
           res.writeHead(401).end();
           return;
         }
+        access = 'fixture-access-secret';
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
           JSON.stringify({
-            access: 'fixture-access-secret',
+            access,
             refresh: flagged ? null : 'fixture-refresh-secret',
             mustChangePassword: flagged,
           }),
         );
       } else if (req.url === '/v1/auth/refresh') {
         assert.equal(req.headers.cookie, 'ps_refresh=fixture-refresh-secret');
+        access = 'renewed-access-secret';
         res
           .writeHead(204, {
             'Set-Cookie': [
@@ -109,7 +112,7 @@ async function fixture(
       } else if (req.url === '/v1/auth/ticket') {
         assert.equal(
           req.headers.authorization,
-          'Bearer ' + (machineCredential ?? 'renewed-access-secret'),
+          'Bearer ' + (machineCredential ?? access),
         );
         if (machineCredential === 'pss_revoked-test') {
           res.writeHead(401).end();
@@ -139,6 +142,25 @@ async function fixture(
       const bytes = event.data;
       const frame = JSON.parse(bytes) as Frame;
       assert.equal(frame.protocol_version, 'plowshare-v1');
+      if (frame.type === 'transport.dispatch') {
+        assert.deepEqual(frame.payload, { mode: 'concurrent-v1' });
+        messages.send(
+          JSON.stringify({
+            id: frame.id,
+            type: frame.type,
+            protocol_version: frame.protocol_version,
+            payload: {
+              code: 'OK',
+              payload: {
+                mode: 'concurrent-v1',
+                maxPending: 64,
+                maxIdBytes: 128,
+              },
+            },
+          }),
+        );
+        return;
+      }
       frames.push(frame);
       seen?.(frame);
       const outcome = script(frame);
@@ -306,6 +328,12 @@ await test(
         fake.frames.map((frame) => frame.type),
         ['agent.run', 'agent.run', 'job.status'],
       );
+      assert.deepEqual(fake.paths, [
+        '/v1/auth/login',
+        '/v1/auth/ticket',
+        '/v1/auth/login',
+        '/v1/auth/ticket',
+      ]);
       noSecrets(first.stdout + second.stdout);
     } finally {
       await fake.close();
