@@ -543,6 +543,7 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 "OK",
                 None,
                 InformationDocumentsListResultDto(
+                    projection="metadata-v1",
                     documents=tuple(entry(i) for i in range(100)),
                     limit=100.0,
                     offset=0.0,
@@ -552,7 +553,10 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 "OK",
                 None,
                 InformationDocumentsListResultDto(
-                    documents=(entry(101),), limit=1.0, offset=100.0
+                    projection="metadata-v1",
+                    documents=(entry(101),),
+                    limit=1.0,
+                    offset=100.0,
                 ),
             ),
         ]
@@ -571,7 +575,10 @@ class SdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
             "OK",
             None,
             InformationDocumentsListResultDto(
-                documents=(entry(), entry()), limit=100.0, offset=0.0
+                projection="metadata-v1",
+                documents=(entry(), entry()),
+                limit=100.0,
+                offset=0.0,
             ),
         )
         with self.assertRaises(ValueError):

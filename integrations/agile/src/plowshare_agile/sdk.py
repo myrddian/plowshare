@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-from collections import OrderedDict
 from dataclasses import dataclass, replace
 from typing import Mapping, Protocol, TypeVar
 
@@ -17,6 +15,7 @@ from plowshare.contracts import (
     InformationAcquirePayloadDtoTypingVariant2Dto,
     InformationContentBindingDto,
     InformationContentGetRequest,
+    InformationContentMetadataDto,
     InformationContentReviseRequest,
     InformationDocumentsGetRequest,
     InformationDocumentsListRequest,
@@ -90,25 +89,11 @@ def metadata(fields: TicketFields | EpicFields) -> Mapping[str, SchemaObjectEntr
 
 
 class SdkBoardPort:
-    # Only small, validated field DTOs are retained, never bodies, schemas, tags
-    # or permission decisions. These limits also bound historical revisions.
-    FIELD_ENTRIES = 120
-    FIELD_BYTES = 1024 * 1024
-    FIELD_LOADS = 128
-
     def __init__(self, client: SdkConnection, config: Configuration):
         self.client, self.config = client, config
         self.scope = SelectionDtoScopeVariant3Dto(
             kind="project", project=config.project, include_global=False
         )
-        self._fields: OrderedDict[
-            tuple[str, str, str], tuple[TicketFields | EpicFields, int]
-        ] = OrderedDict()
-        self._field_bytes = 0
-        self._field_keys: dict[tuple[str, str], tuple[str, str, str]] = {}
-        self._field_loads: dict[
-            tuple[str, str, str], asyncio.Task[TicketFields | EpicFields]
-        ] = {}
 
     async def check(self, *, writing: bool = False) -> None:
         capabilities = (
@@ -150,88 +135,50 @@ class SdkBoardPort:
             binding, InformationContentBindingDto
         ):
             raise ValueError("Document does not have the configured Application type")
-        fields = self._decode_fields(kind, binding)
-        key = (kind, entry.resource, entry.revision)
-        # Conservative accounting includes key/DTO/container overhead and up to
-        # four-byte Python string storage; schema definitions are not retained.
-        weight = 4096 + 4 * sum(
-            len(value.encode("utf-8"))
-            for value in (*key, *metadata(fields).values())
-            if isinstance(value, str)
-        )
-        # Retain at most one revision per resource. Otherwise one edit on a
-        # full board displaces an unchanged row and the next sequential scan
-        # can churn the whole LRU. The secondary index keeps removal O(1).
-        resource_key = (kind, entry.resource)
-        previous_key = self._field_keys.pop(resource_key, None)
-        if previous_key is not None:
-            self._field_bytes -= self._fields.pop(previous_key)[1]
-        if weight <= self.FIELD_BYTES:
-            self._fields[key] = (fields, weight)
-            self._field_keys[resource_key] = key
-            self._field_bytes += weight
-            while (
-                len(self._fields) > self.FIELD_ENTRIES
-                or self._field_bytes > self.FIELD_BYTES
-            ):
-                removed_key, (_, removed) = self._fields.popitem(last=False)
-                self._field_keys.pop(removed_key[:2])
-                self._field_bytes -= removed
-        return fields
+        return self._decode_fields(kind, binding)
 
     def _decode_fields(
         self, kind: str, binding: InformationContentBindingDto
     ) -> TicketFields | EpicFields:
-        if (
-            binding.contract.type_ != self.config.type_id(kind)
-            or binding.contract.slug != "agile-" + kind
-        ):
+        return self._decode_metadata(
+            kind, binding.contract.type_, binding.contract.slug, binding.metadata
+        )
+
+    def _decode_metadata(
+        self,
+        kind: str,
+        type_id: str,
+        slug: str,
+        values: Mapping[str, SchemaObjectEntry],
+    ) -> TicketFields | EpicFields:
+        if type_id != self.config.type_id(kind) or slug != "agile-" + kind:
             raise ValueError("Document does not have the configured Application type")
         return (
-            TicketFields.decode(binding.metadata)
+            TicketFields.decode(values)
             if kind == "ticket"
-            else EpicFields.decode(binding.metadata)
+            else EpicFields.decode(values)
         )
 
-    async def _listed_fields(
-        self, kind: str, entry: CurrentDocumentDto
-    ) -> TicketFields | EpicFields:
-        # Reuse requires a NEW authorized documents.list page filtered by this
-        # content type. That operation also excludes redacted bindings. A cached
-        # revision is never an access lease, nor a substitute for get's live
-        # binding read. The cache belongs to this connection/configuration only;
-        # reconnect constructs another port. Tags/owner always come from the page.
-        key = (kind, entry.resource, entry.revision)
-        cached = self._fields.get(key)
-        if cached is not None:
-            self._fields.move_to_end(key)
-            return cached[0]
-        load = self._field_loads.get(key)
-        if load is None:
-            if len(self._field_loads) >= self.FIELD_LOADS:
-                raise ValueError("Too many metadata reads; retry the read later")
-            load = asyncio.create_task(self._read_fields(kind, entry))
-            self._field_loads[key] = load
-
-            def finished(task: asyncio.Task[TicketFields | EpicFields]) -> None:
-                self._field_loads.pop(key, None)
-                # Observe failed loads even if all HTTP waiters disconnected.
-                # Active waiters still receive the original exception.
-                if not task.cancelled():
-                    task.exception()
-
-            load.add_done_callback(finished)
-        return await asyncio.shield(load)
-
-    async def _document(
-        self, kind: str, entry: CurrentDocumentDto, *, listed: bool = False
-    ) -> Document:
+    def _projected_document(self, kind: str, entry: CurrentDocumentDto) -> Document:
         self._entry(entry)
-        fields = (
-            await self._listed_fields(kind, entry)
-            if listed
-            else await self._read_fields(kind, entry)
+        binding = entry.content_metadata
+        if not isinstance(binding, InformationContentMetadataDto):
+            raise ValueError(
+                "The server omitted the requested typed metadata projection"
+            )
+        return Document(
+            entry.resource,
+            entry.revision,
+            entry.owner,
+            entry.tags,
+            self._decode_metadata(
+                kind, binding.type_.type_, binding.type_.slug, binding.metadata
+            ),
         )
+
+    async def _document(self, kind: str, entry: CurrentDocumentDto) -> Document:
+        self._entry(entry)
+        fields = await self._read_fields(kind, entry)
         return Document(
             identity(entry.resource),
             identity(entry.revision),
@@ -259,9 +206,14 @@ class SdkBoardPort:
                         ),
                         limit=limit,
                         offset=len(entries),
+                        projection="metadata-v1",
                     )
                 )
             ).require_payload()
+            if page.projection != "metadata-v1":
+                raise ValueError(
+                    "The server does not support the requested metadata projection"
+                )
             if (
                 page.offset != len(entries)
                 or page.limit != limit
@@ -283,9 +235,7 @@ class SdkBoardPort:
 
     async def list(self, kind: str, tags: tuple[str, ...]) -> tuple[Document, ...]:
         entries = await self._entries(kind, tags)
-        return tuple(
-            [await self._document(kind, entry, listed=True) for entry in entries]
-        )
+        return tuple(self._projected_document(kind, entry) for entry in entries)
 
     async def validate_epics(self, resources: tuple[str, ...]) -> None:
         """Validate one selected set without per-epic current-head requests."""
@@ -298,7 +248,7 @@ class SdkBoardPort:
         if any(resource not in entries for resource in requested):
             raise ValueError("An epic is unavailable")
         for resource in requested:
-            await self._document("epic", entries[resource], listed=True)
+            self._projected_document("epic", entries[resource])
 
     async def _select(
         self, resource: str, revision: str | None = None

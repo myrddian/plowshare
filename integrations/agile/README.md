@@ -164,9 +164,11 @@ and the same private journal. This adds no core HTTP endpoint or ticket database
 Opening details reuses the visible board metadata. **Reload** and original
 Markdown reads fetch current authorized documents. A confirmed save refreshes
 only its document; **Refresh** and explicit receipt recovery reload the board.
-Unchanged board refreshes reuse bounded revision fields only after fresh native
-type-filtered discovery. See the [query-efficiency review](query-efficiency.md)
-for request budgets, authorization fences and the remaining cold-load SDK gap.
+Board discovery requests the public `metadata-v1` document projection and reads
+fields directly from each authorized page, with no per-item hydration or field
+cache. Install the matching SDK and a server supporting that projection before
+using this version; unsupported or damaged responses fail explicitly. See the
+[query-efficiency review](query-efficiency.md) for request budgets and boundaries.
 
 ## Recovery and private state
 

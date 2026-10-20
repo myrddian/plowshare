@@ -2,139 +2,105 @@
 
 Reviewed against public main `2cf4db4c2d72e9f99e43e343a38ff603278e8329`
 and the repository's [query rules](../../docs/coding-standards.md#query-efficiency-and-reuse).
-All changes belong to this external Application. No core runtime, database,
-operation contract or SDK implementation changes are required by these fixes.
+All application changes stay in this directory. The generic platform capability
+is a separate change described by [ADR 0033](../../docs/decisions/0033-paged-document-metadata-projection.md).
+
+## Public SDK projection
+
+Excalibur requests `projection:"metadata-v1"` and `view:"content-types-v1"` on
+`information.documents.list`, with its configured project, `includeGlobal:false`,
+content-type UUID and optional AND tags. Each page contains current resource and
+revision identities, owner, tags and compact `contentMetadata`. The application
+checks the page's projection marker, scope, identities, pagination, type UUID,
+slug and complete ticket/epic field contract before returning documents.
+Extraction title never substitutes for the schema's title.
+
+Discovery no longer calls `information.content.get` for every entry. It retains
+no application field cache or shared fill tasks: every refresh receives current
+fields and authority from the public projection. Old servers or damaged replies
+fail explicitly; there is no implicit per-item hydration or HTTP fallback.
+The matching SDK and a server implementing metadata-v1 must be installed before
+running this version of Excalibur.
+
+The platform page joins only authorized selected heads to non-redacted bindings.
+It transfers no bodies or schema definitions. Its 100-row and 512-KiB aggregate
+metadata limits are generic; Excalibur separately enforces its own smaller
+100-ticket/20-epic board and metadata contracts. A full 100-ticket selection
+still probes one extra page to detect overflow; epics request up to 21 entries
+and refuse overflow. Duplicate resources and invalid page boundaries also fail.
 
 ## Request shapes and waste removed
 
-`information.documents.list` performs bounded current-head discovery in the
-configured project with `includeGlobal:false`, content-type UUID and optional
-AND tags. It returns resource, revision, owner, tags and extraction title. It
-does **not** return typed metadata. Excalibur must obtain fields from
-`information.content.get(revision)` on the first encounter with a revision.
-Extraction title is not a substitute for the schema's title.
-
-| Interaction | Before | After |
+| Interaction | Before | Current behavior |
 | --- | --- | --- |
+| Board discovery | P list pages + N full content bindings | P projected pages; no per-item reads |
 | Open details from the board | head + binding reads | reuse visible metadata; zero SDK calls |
-| Explicit detail Reload | head + binding | unchanged: fresh head + binding |
+| Explicit detail Reload | head + binding | fresh head + binding |
 | Read original Markdown for editing | head + binding + readable export | head + readable export, including its typed sidecar binding |
 | Replace topic tags | ticket head/binding fetched twice | one fresh ticket snapshot, preserving epic tags |
-| Validate K selected epics | K head reads + K bindings | one bounded epic discovery; hydrate only missing selected revision fields |
+| Validate K selected epics | K heads + K bindings | one complete projected epic page |
 | Replace epic membership | ticket fetched twice after epic checks | one fresh ticket snapshot after epic validation |
-| Confirmed create/edit/status/tag/epic save | reload every board field | fetch only the saved document; patch validated visible snapshot |
-| CLI list/show | two unused capability probes before the actual reads | actual authorized read operations only |
-| Write readiness, health, watchdog, explicit check | typed capabilities plus unused navigation capabilities | one typed-capability read |
-| Concurrent identical browser GETs | independent requests | share pending request; discard completed response entry |
+| Confirmed create/edit/status/tag/epic save | reload the whole board | read only the saved document; patch validated visible snapshot |
+| CLI list/show | unused capabilities before actual reads | actual authorized reads only |
+| Write readiness, health, watchdog, explicit check | typed and unused navigation capabilities | one typed-capability read |
+| Concurrent identical browser GETs | independent requests | share the pending request; discard completed entry |
 
-The exact-full 100-ticket selection still probes a second page with limit 1 to
-detect overflow. Epics use a limit of 21 to enforce the 20-epic board bound.
-Membership validation uses that same complete bounded epic selection; it fails
-explicitly if the selection exceeds capacity or a requested epic is absent.
+One metadata save followed by a current document refresh takes **6 SDK calls**,
+independent of board size: typed-write readiness, head, binding, revision
+mutation, current head, current binding. Previously it took 67 on a
+50-ticket/10-epic board or 128 on a 100-ticket/20-epic board. Independent health
+probes are excluded. Receipts contain identities rather than actual fields/tags,
+so the post-write read is deliberate current-state evidence. A later external
+edit may already be visible; submitted intent or a historical recovery receipt
+cannot replace that read.
 
-One metadata save followed by a current document refresh now takes **6 SDK
-calls**, independent of board size: typed-write readiness, head, binding,
-revision mutation, current head, current binding. Previously it took 67 calls
-on a 50-ticket/10-epic board and 128 on a 100-ticket/20-epic board, including
-the unconditional collection refresh. Independent health probes are excluded.
-The mutation receipt carries identities, not committed fields/tags, so the
-narrow post-write read is required. It can observe a later external edit;
-submitted intent or a historical recovery receipt cannot replace that evidence.
+## Browser consistency and lifecycle
 
-## Immutable field reuse and authorization
-
-The per-`SdkBoardPort` store retains only frozen `TicketFields`/`EpicFields` DTOs.
-Its implicit namespace is the SDK connection identity and immutable origin,
-project and schema configuration; the explicit key is `(kind, resource, revision)`.
-It retains no bodies, type definitions, tags, owners, session state or access
-decisions. Tags and owner always come from the new discovery page.
-
-A hit is usable **only after a fresh successful `documents.list`** with the
-configured content-type filter and project fence. The current server's
-`InformationSelectionSql`/`JdbcInformationNavigationRepository` enforce current
-readability; `InformationFacetSql`'s content-type predicate excludes redacted
-bindings. `JdbcInformationContentRepository` owns immutable revision bindings.
-Both guarantees are required: if the public contract changes, reuse must be
-reassessed. Cached resources absent from the fresh selection are never served.
-Foreign scope, duplicate resources and invalid page boundaries fail before
-hydration. Generic `documents.get` does not establish the non-redacted typed
-filter, so direct get **always** fetches its current binding, including on a
-cache hit. Original Markdown is independently authorized and hash/identity/type
-validated from the public readable projection.
-
-Admission is limited to **120 entries and 1 MiB of accounted weight**, with at
-most one retained revision per resource. Each entry is charged 4096 bytes
-plus four times the UTF-8 lengths of key and field strings. This conservative
-DTO budget is not an RSS measurement. Oversized entries are returned to the
-authorized caller but not retained. OrderedDict lookup, recency changes and
-individual eviction are expected O(1); removing K entries costs O(K).
-New revisions miss; unchanged revisions need no TTL because fields are immutable.
-Revocation/redaction is guarded by fresh filtered discovery, never by TTL.
-Admitting another revision evicts the previous one for that resource through an
-O(1) secondary index. This avoids a single edit churning an entire full board's
-LRU on its next sequential refresh. Other resources age out under both limits.
-No invalidation notification is needed.
-
-At most **128 distinct listed-field fills** may be pending. Concurrent callers
-share only the same revision's field fill, while each still obtains its own
-authorized discovery pages. A cancelled waiter cannot cancel another's fill.
-Failed loads leave no reusable result and do not retry themselves. A new SDK
-connection constructs a new port and empty store; process restart also clears it.
-The CLI starts a new connection per invocation, so its lists remain cold.
-The cache is an optimization of this typed SDK boundary, not a source of truth.
-
-The browser shares at most **16 pending GETs**, with no completed-response cache.
+The browser shares at most 16 pending GETs and keeps no completed-response cache.
 Confirmed writes abort pending board and same-resource reads before the narrow
-replacement read. Selection identity/generation checks reject superseded results,
-including closing and reopening the same resource. Sign-in/sign-out invalidate
-pending reads and clear the visible workspace. Aborts never apply to mutations.
-Board metadata already visible can populate a detail form; every write, body
-read and explicit Reload still uses current server authorization. Dirty forms
-retain their displayed revision and must resolve conflicts explicitly.
+replacement read. Selection identities and generations reject superseded
+responses, including closing and reopening the same resource. Sign-in/sign-out
+invalidate pending reads and clear visible workspace state. Aborts never apply
+to mutations. Initial board loading must finish before a new save can begin.
+
+Board metadata already visible can populate a detail form. Writes, original body
+reads and explicit Reload still use current server authorization. Dirty forms
+retain their displayed revision and must resolve conflicts explicitly. The
+native tag control still lacks an atomic expected-head CAS, so the existing
+single-maintainer limitation remains.
+
+Explicit Refresh and receipt recovery fetch current collection state. The
+30-second watchdog and health requests deliberately recheck upstream readiness;
+there is no public durable capability-change subscription to replace them.
+The watchdog alone owns serve's startup probe. Unknown mutation outcomes remain
+in the private journal for explicit recovery; no write is auto-replayed.
 
 ## Verification and measurement limits
 
-`tests/test_queries.py` asserts SDK request sequences, exact-revision reuse,
-fresh tags/owners, refusal/scope fences, selected-epic batching, cold/warm bounds,
-LRU/byte admission, connection separation and concurrent-fill cancellation.
+`tests/test_queries.py` asserts cold/repeated request budgets, fresh fields,
+projection/type/scope fences, single-read tag actions and batched epic validation.
 `tests/test_socket.py` measures generated public SDK traffic against a disposable
-ordered WebSocket fixture. Response bytes below count UTF-8 JSON envelopes;
-they exclude WebSocket/TCP framing, compression, dispatch negotiation and bodies.
-Each pass reads the stated number of current-document rows; warm passes read
-zero metadata bindings. Cold passes read one binding per row. Fixture schemas
-are deliberately small and do not represent production schema sizes.
+ordered WebSocket fixture. Tests using ordered dispatch are fixture-specific;
+runtime connection negotiation remains the SDK default.
 
-| Tickets + epics | Cold calls | Unchanged calls | Cold response bytes | Unchanged response bytes | Discovery rows each pass |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 50 + 10 | 62 | 2 | 69,049 | 18,679 | 60 |
-| 100 + 20 | 123 | 3 | 137,900 | 37,160 | 120 |
+| Tickets + epics | Previous unprojected calls | Projected calls, cold or repeated | Projected UTF-8 response bytes | Rows each pass |
+| --- | ---: | ---: | ---: | ---: |
+| 50 + 10 | 62 | 2 | 45,703 | 60 |
+| 100 + 20 | 123 | 3 | 91,181 | 120 |
 
-These are transport request/row/byte budgets, **not PostgreSQL query counts or
-latency measurements**. No database tests or `EXPLAIN` were required: no query
-implementation changed. Queue, database execution, network latency and rendering
-timings have not been measured. The request-count tests are the current cache
-observability mechanism; no protected content or per-document cache keys are
-logged by production code.
+Bytes include JSON response envelopes and compact type identities; they exclude
+socket framing, compression, negotiation and bodies. Fixtures are synthetic.
+Each refresh transfers typed fields again rather than retaining a field cache;
+this costs more bytes than a header-only warm-cache refresh, but removes cache
+storage and consistency complexity. Full schema definitions are not repeated.
+These counts establish SDK request/row/byte budgets, not production database or
+network latency. Queue, rendering and production database timings are unmeasured.
 
-The disposable browser fixture verified one initial board GET, zero GETs when
-opening a listed ticket, and one targeted GET after each metadata, topic and
-epic-membership save. Node tests cover pending-read coalescing, rejection,
-bounded admission, cancellation/session invalidation and safe snapshot replacement.
-Explicit Refresh/recovery still fetch current collection state. The 30-second
-watchdog and health requests deliberately recheck upstream readiness; Excalibur
-has no public durable capability-change subscription to replace them. The
-watchdog alone owns the serve command's startup probe. Fixtures predating SDK
-commit `e91181ef` now explicitly choose ordered dispatch; runtime connection
-negotiation remains the SDK default.
-
-## Remaining public SDK gap
-
-Cold board discovery still has **P + N SDK reads**: P discovery pages and N
-typed-binding projections. Current public operations offer no batch projection
-of authorized typed fields for selected current documents. Neither revision
-history listing nor extraction text supplies those fields. Exporting all source
-documents would transfer unnecessary bodies and schemas. A future general public
-projection could return the exact resource/revision, typed fields and current
-authority/redaction result in bounded pages. That is a separate platform design
-decision. Excalibur does not add a private endpoint, import server internals or
-query database tables to hide the gap.
+The separate platform tests verify one repository statement for 50 typed
+instances with real PostgreSQL ordering/mapping, scope/dependency restrictions,
+redaction, exact heads and oversized-page refusal, including a read-only EXPLAIN.
+The app gate uses no database. Node tests cover GET coalescing, failure,
+admission/cancellation/session bounds and validated snapshot replacement. The
+local browser fixture verified zero detail-opening reads and one targeted GET
+after each metadata, topic and epic-membership save. Deployment acceptance
+against an updated server remains separate from these source/fixture checks.
