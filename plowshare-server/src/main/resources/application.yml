@@ -46,6 +46,14 @@ management:
 # single-pool shape below can be replaced by a complete external pool list.
 # LlmProperties rejects unknown keys and LlmConfig validates the fleet at boot.
 plowshare:
+  transport:
+    # Native WebSocket Ping/Pong on idle event and file channels. This does not
+    # renew authentication, run an operation or extend a pending request deadline.
+    keepalive:
+      enabled: ${PLOWSHARE_WS_KEEPALIVE_ENABLED:true}
+      interval: ${PLOWSHARE_WS_KEEPALIVE_INTERVAL:PT30S}
+      pong-timeout: ${PLOWSHARE_WS_KEEPALIVE_PONG_TIMEOUT:PT30S}
+      check-interval: ${PLOWSHARE_WS_KEEPALIVE_CHECK_INTERVAL:PT5S}
   information:
     # Startup-only, server-wide operator controls; both default on. Account/project
     # roles, service-token ceilings, document access and reference policies still apply.

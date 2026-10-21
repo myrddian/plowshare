@@ -41,9 +41,8 @@ import org.slf4j.LoggerFactory;
  *       2026-09-30-local-hooks-are-served decision 11);
  *   <li><b>the displaced one is handed back to the caller that displaced it.</b> There the returned
  *       socket has its outstanding file requests failed at once and is then <em>closed</em> — left
- *       open, a Tomcat session survives until its peer goes, which that class's javadoc
- *       <em>states</em> can be minutes on a half-open connection waiting out a TCP keepalive, so a
- *       client in a reconnect loop would accumulate them. Here {@link #attach} returns it and
+ *       open, a displaced but responsive peer can continue answering transport keepalive probes, so
+ *       a client in a reconnect loop would accumulate them. Here {@link #attach} returns it and
  *       stops. <b>This class holds no socket and closes nothing</b>, for the reason {@link Session}
  *       gives: it must not know what a role attached. The ritual stays with the handler that owns
  *       the connection, which is where the one copy of it already is;

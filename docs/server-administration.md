@@ -6,6 +6,38 @@ controls server management; granting that role does not automatically grant acce
 to another account's Personal space. Server administrators have Manager access to
 ordinary server projects; private client projects keep their client ownership boundary.
 
+## WebSocket connection keepalive
+
+The server sends a native WebSocket Ping after an event or file channel has been
+idle for 30 seconds. The peer must echo its eight-byte payload in a Pong within
+30 seconds. Checks run every five seconds, so detection can lag a deadline by
+one check interval. Active traffic postpones an idle probe; once sent, only the
+matching Pong satisfies it. A missed deadline closes that transport with the
+reason `WebSocket heartbeat pong deadline expired`. Each channel is checked
+independently, including idle file channels.
+
+These are WebSocket control frames, outside JSON operations and segmented
+messages. They require no agent, database query, application `PING` command or
+new SDK operation. They preserve the existing authentication, request timeouts,
+file-operation deadlines and disconnect/recovery rules; they never replay work
+or renew a login. A Pong establishes transport responsiveness, not completion of
+an application request.
+
+Startup settings live under `plowshare.transport.keepalive`:
+
+| Setting | Environment variable | Default |
+| --- | --- | --- |
+| `enabled` | `PLOWSHARE_WS_KEEPALIVE_ENABLED` | `true` |
+| `interval` | `PLOWSHARE_WS_KEEPALIVE_INTERVAL` | `PT30S` |
+| `pong-timeout` | `PLOWSHARE_WS_KEEPALIVE_PONG_TIMEOUT` | `PT30S` |
+| `check-interval` | `PLOWSHARE_WS_KEEPALIVE_CHECK_INTERVAL` | `PT5S` |
+
+Durations must be between one second and one hour. The check interval must not
+exceed either the idle interval or the Pong timeout. Missing/wrong Pongs, failed
+writes and shutdown close or detach through the channel's ordinary lifecycle.
+Control-frame writes share serialization with application writes; probes never
+queue behind a busy writer or block the shared scheduler.
+
 ## Information feature switches
 
 Authored content and document-navigation writes are **enabled by default**.

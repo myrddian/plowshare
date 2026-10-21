@@ -116,6 +116,14 @@ export function installInformation(
   const addDialog =
     dialog.querySelector<HTMLDialogElement>('[data-add-dialog]')!;
   const error = dialog.querySelector<HTMLElement>('[data-error]')!;
+  // Protected snapshots can be hidden while their authority is rechecked. Keep
+  // non-sensitive progress outside those surfaces so slow reads never look blank.
+  const readStatus = document.createElement('p');
+  readStatus.dataset.readStatus = '';
+  readStatus.setAttribute('role', 'status');
+  readStatus.textContent = 'Refreshing this collection…';
+  readStatus.hidden = true;
+  error.after(readStatus);
   let offset = 0,
     selected = '',
     acquisition = false,
@@ -784,7 +792,14 @@ export function installInformation(
       answerJob?.detail,
       sourceOffset,
     ]);
-    if (detailSignature === nextSignature) {
+    // A previous inspection may have rendered its header then lost its text read
+    // to an invalidation or a newer inspection. Only a completed text window can
+    // satisfy an unchanged signature; a loading placeholder is never a snapshot.
+    const textReady =
+      value.availability !== 'active' ||
+      !extracted ||
+      cachedText?.key === textKey;
+    if (detailSignature === nextSignature && textReady) {
       renderAnswer();
       return;
     }
@@ -1029,7 +1044,10 @@ export function installInformation(
           ).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
           if (source) {
             source.innerHTML = `<h3>Source text is unavailable</h3><p>${message === 'this revision has not been extracted' ? 'The server has no saved extraction for this version. Open Processing details to check its extraction status.' : escape(message)}</p><p>Use Refresh sources to try reading again.</p>`;
-            cachedText = { key: textKey, html: source.innerHTML };
+            // A failed text read is visible recovery state, not a reusable text
+            // snapshot. Refresh must retry even if its metadata is unchanged.
+            cachedText = undefined;
+            detailSignature = '';
           }
         }
       }
@@ -1805,6 +1823,7 @@ export function installInformation(
     for (const surface of facetSurfaces()) surface.style.visibility = '';
   }
   function revealReadSurfaces() {
+    readStatus.hidden = true;
     for (const surface of [list, detail, question, authoredControls])
       surface.style.visibility = '';
   }
@@ -1869,6 +1888,7 @@ export function installInformation(
         ...facetSurfaces(),
       ])
         surface.style.visibility = 'hidden';
+      readStatus.hidden = !active || !state().connected;
     },
     () => background(reload()),
   );
@@ -1886,6 +1906,7 @@ export function installInformation(
   });
   const close = () => {
     active = false;
+    readStatus.hidden = true;
     refreshes.stop();
     collectionReads.invalidate();
     facetStatus.hidden = true;

@@ -33,6 +33,10 @@ uses `plowshare.relay.max-text-bytes` (5 MiB by default). See [Relay configurati
 The encoded inner message is bounded at 320 MiB; domain limits still
 apply. Unsupported negotiation fails before an application request is submitted.
 
+The server also uses native WebSocket Ping/Pong on idle event and file channels;
+these control frames are handled by the WebSocket implementation outside JSON
+messages. See [keepalive configuration](server-administration.md#websocket-connection-keepalive).
+
 Explicit legacy compatibility is available through these connection options:
 
 | SDK | Legacy option |
@@ -92,6 +96,14 @@ uses contexts. Admission includes calls waiting for the writer and retained
 physical transfers, with count and byte limits. Cancellation before a possible
 write is `NOT_SUBMITTED`; after a possible write the outcome remains `UNKNOWN`.
 Late replies cannot settle a later request, and cancellation never triggers replay.
+
+TypeScript packet transport failures preserve a fixed, content-free reason in
+pending `ConnectionFault` errors and their `PacketTransportFault` cause. This
+distinguishes invalid packets, write failures, credit/receive/transfer deadlines
+and capacity exhaustion. An ordinary request deadline detaches that request;
+a packet transport failure closes the connection. A physical WebSocket close
+code of 1000 alone does not establish that the transport was healthy or identify
+which peer initiated closure.
 
 See the [dispatch implementation and validation record](async-request-dispatch-validation.md)
 for scope, checks and rollout status.

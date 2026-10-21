@@ -41,6 +41,7 @@
     "test:document-navigation": "node scripts/build.mjs && node --experimental-strip-types scripts/document-navigation-smoke.mjs",
     "test:authored-information": "node scripts/build.mjs && node --experimental-strip-types scripts/authored-information-smoke.mjs",
     "test:information-collection": "node scripts/information-collection-smoke.mjs",
+    "test:information-reader": "node scripts/information-reader-smoke.mjs",
     "test:information": "node scripts/build.mjs && node --experimental-strip-types scripts/information-smoke.mjs",
     "test:sync": "node scripts/build.mjs && node scripts/sync-smoke.mjs",
     "test:builder": "node scripts/build.mjs && node --experimental-strip-types scripts/builder-smoke.mjs",

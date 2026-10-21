@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { Arrival, Socket } from './connection.ts';
+import { connect } from './connection.ts';
 import {
   packetSocket,
   legacySocket,
   type PacketCodec,
   PACKET_BYTES,
+  PacketTransportFault,
 } from './packets.ts';
 import { sha256 } from './sha256.ts';
 
@@ -70,6 +72,70 @@ const flush = async (): Promise<void> => {
 };
 
 describe('bounded packet transport', () => {
+  it('preserves the credit timeout in pending request failures without replay', async () => {
+    vi.useFakeTimers();
+    try {
+      const wire = new Wire();
+      const socket = connected(wire);
+      const connection = connect({ socket });
+      const failed = connection
+        .ask('project.list', {})
+        .catch((cause: unknown) => cause);
+      await flush();
+      expect(wire.sent).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await failed).toMatchObject({
+        code: 'RESPONSE_LOST',
+        delivery: 'UNKNOWN',
+        message:
+          'request writer failed: packet credit deadline expired; no request was replayed',
+        cause: new PacketTransportFault('packet credit deadline expired'),
+      });
+      expect(wire.closed).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(wire.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports malformed packets without exposing JSON or codec error contents', async () => {
+    const wire = new Wire();
+    const socket = connected(wire);
+    const connection = connect({ socket });
+    const failed = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({
+      code: 'RESPONSE_LOST',
+      message: 'the packet transport closed: invalid packet',
+      cause: new PacketTransportFault('invalid packet'),
+    });
+    await flush();
+    wire.deliver('{"private":"must never appear in a diagnostic"');
+    await failed;
+    expect(wire.closed).toBe(true);
+    expect(wire.sent).toHaveLength(1);
+  });
+
+  it('identifies receive idle timeout separately from a credit timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const wire = new Wire();
+      const socket = connected(wire);
+      const closed = vi.fn();
+      socket.addEventListener('close', closed);
+      wire.deliver(parts(new Uint8Array(70000))[0]!);
+      await flush();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(closed).toHaveBeenCalledExactlyOnceWith(
+        new PacketTransportFault('packet receive idle deadline expired'),
+      );
+      expect(wire.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects an oversized explicit legacy send before touching the physical socket', () => {
     const wire = new Wire();
     const socket = legacySocket(wire);

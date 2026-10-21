@@ -9,6 +9,22 @@ const CONNECTION_BYTES = 640 * 1024 * 1024;
 const PROCESS_BYTES = 2 * 1024 * 1024 * 1024;
 let processHeld = 0;
 
+/** Safe transport diagnostics contain no packet content, identities or codec error text. */
+export class PacketTransportFault extends Error {
+  readonly reason:
+    | 'invalid packet'
+    | 'packet write failed'
+    | 'packet credit deadline expired'
+    | 'packet receive idle deadline expired'
+    | 'packet transfer deadline expired'
+    | 'packet capacity exceeded';
+
+  constructor(reason: PacketTransportFault['reason']) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
 /** Platform codecs are injected so the common packet owner has no Node or DOM dependency. */
 export interface PacketCodec {
   encode(text: string): Uint8Array;
@@ -161,7 +177,7 @@ export function packetSocket(options: PacketOptions): Socket {
       bytes > CONNECTION_BYTES - held ||
       bytes * 3 > PROCESS_BYTES - processHeld
     )
-      throw new Error('packet memory capacity exceeded');
+      throw new PacketTransportFault('packet capacity exceeded');
     held += bytes;
     processHeld += bytes * 3;
   }
@@ -188,8 +204,9 @@ export function packetSocket(options: PacketOptions): Socket {
     }
     for (const listener of closes) listener(event);
   }
-  function fail(): void {
-    stop(undefined);
+  function fail(reason: PacketTransportFault): void {
+    if (!open) return;
+    stop(reason);
     socket.close();
   }
   function write(value: Segment | Credit): void {
@@ -211,11 +228,16 @@ export function packetSocket(options: PacketOptions): Socket {
           const started = Date.now();
           for (let number = 1; number <= count; number++) {
             if (!open || Date.now() - started >= 60_000)
-              throw new Error('packet transfer deadline expired');
+              throw new PacketTransportFault(
+                'packet transfer deadline expired',
+              );
             const offset = (number - 1) * CHUNK;
             await new Promise<void>((resolve, reject) => {
               const cancel = schedule(
-                () => reject(new Error('packet credit deadline expired')),
+                () =>
+                  reject(
+                    new PacketTransportFault('packet credit deadline expired'),
+                  ),
                 15_000,
               );
               waiting = {
@@ -252,7 +274,7 @@ export function packetSocket(options: PacketOptions): Socket {
                   ),
                 });
               } catch {
-                waiting.reject(new Error('packet write failed'));
+                waiting.reject(new PacketTransportFault('packet write failed'));
               }
             });
             waiting = undefined;
@@ -327,7 +349,7 @@ export function packetSocket(options: PacketOptions): Socket {
     let assembly = incoming.get(part.transferId);
     if (assembly === undefined) {
       if (incoming.size >= 4 || incoming.size + completed.size >= 4096)
-        throw new Error('transfer capacity exceeded');
+        throw new PacketTransportFault('packet capacity exceeded');
       reserve(part.totalBytes);
       assembly = {
         first: part,
@@ -335,7 +357,11 @@ export function packetSocket(options: PacketOptions): Socket {
         ranges: new Set(),
         started: Date.now(),
         cancelIdle: () => {},
-        cancelTotal: schedule(fail, 60_000),
+        cancelTotal: schedule(
+          () =>
+            fail(new PacketTransportFault('packet transfer deadline expired')),
+          60_000,
+        ),
       };
       incoming.set(part.transferId, assembly);
     }
@@ -354,7 +380,11 @@ export function packetSocket(options: PacketOptions): Socket {
       assembly.ranges.add(part.segmentNumber);
     }
     assembly.cancelIdle();
-    assembly.cancelIdle = schedule(fail, 15_000);
+    assembly.cancelIdle = schedule(
+      () =>
+        fail(new PacketTransportFault('packet receive idle deadline expired')),
+      15_000,
+    );
     let complete: string | undefined;
     if (assembly.ranges.size === part.segmentCount) {
       if ((await codec.hash(assembly.bytes)) !== part.sha256)
@@ -378,7 +408,15 @@ export function packetSocket(options: PacketOptions): Socket {
       for (const listener of messages) listener({ data: complete });
   }
   socket.addEventListener('message', (event) => {
-    reader = reader.then(() => receive(event.data)).catch(fail);
+    reader = reader
+      .then(() => receive(event.data))
+      .catch((cause: unknown) => {
+        fail(
+          cause instanceof PacketTransportFault
+            ? cause
+            : new PacketTransportFault('invalid packet'),
+        );
+      });
   });
   socket.addEventListener('close', stop);
   function submit(frame: string, submitted: () => void): RequestSend {
@@ -409,7 +447,13 @@ export function packetSocket(options: PacketOptions): Socket {
       started: false,
     };
     outgoing.push(item);
-    void drain().catch(fail);
+    void drain().catch((cause: unknown) => {
+      fail(
+        cause instanceof PacketTransportFault
+          ? cause
+          : new PacketTransportFault('packet write failed'),
+      );
+    });
     return {
       settled,
       cancel(): boolean {
@@ -430,7 +474,13 @@ export function packetSocket(options: PacketOptions): Socket {
     submit,
     send(frame): void {
       const item = submit(frame, () => {});
-      item.settled.catch(fail);
+      item.settled.catch((cause: unknown) => {
+        fail(
+          cause instanceof PacketTransportFault
+            ? cause
+            : new PacketTransportFault('packet write failed'),
+        );
+      });
     },
     close(): void {
       stop(undefined);

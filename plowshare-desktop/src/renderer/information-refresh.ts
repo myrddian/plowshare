@@ -13,6 +13,7 @@ export class InformationRefresh {
   private requestGeneration = 0;
   private pending: (() => void) | undefined;
   private reconciliation: (() => void) | undefined;
+  private invalidated = false;
 
   private readonly clock: InformationRefreshClock;
   private readonly invalidate: (contextChanged: boolean) => void;
@@ -35,16 +36,24 @@ export class InformationRefresh {
       this.identity = identity;
       this.revision = revision;
       if (previous !== undefined || identity !== undefined)
-        this.invalidate(true);
+        this.invalidateOnce(true);
       if (identity !== undefined) {
         this.request(0);
         this.reconcile();
       }
     } else if (identity !== undefined && revision !== this.revision) {
       this.revision = revision;
-      this.invalidate(false);
+      this.invalidateOnce(false);
       this.request(250);
     }
+  }
+
+  private invalidateOnce(contextChanged: boolean): void {
+    // Hints in one pending debounce batch need only fence and hide once. A new
+    // hint after readStarted still invalidates that read, including permission
+    // revocation while a response is in flight. Identity changes always fence it.
+    if (!this.invalidated || contextChanged) this.invalidate(contextChanged);
+    this.invalidated = true;
   }
 
   private request(delay: number): void {
@@ -68,7 +77,8 @@ export class InformationRefresh {
     const generation = this.generation;
     this.reconciliation = this.clock.schedule(60_000, () => {
       if (generation !== this.generation || this.identity === undefined) return;
-      this.invalidate(false);
+      // No new invalidation was received. Reconcile through authorized reads
+      // without blanking an otherwise unchanged reader every minute.
       this.request(0);
       this.reconcile();
     });
@@ -76,6 +86,7 @@ export class InformationRefresh {
 
   /** Any actual read also satisfies a hint queued during the preceding read. */
   readStarted(): void {
+    this.invalidated = false;
     this.requestGeneration++;
     this.pending?.();
     this.pending = undefined;
@@ -94,5 +105,6 @@ export class InformationRefresh {
     this.reconciliation?.();
     this.pending = this.reconciliation = undefined;
     this.identity = undefined;
+    this.invalidated = false;
   }
 }
