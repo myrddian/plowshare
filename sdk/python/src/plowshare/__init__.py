@@ -1,6 +1,24 @@
 from ._protocol import OPERATIONS, PROTOCOL_VERSION
 from .acting import ActingSelection
+from .auth import (
+    Authentication,
+    AuthenticationError,
+    AuthenticationUnavailable,
+    HttpAuthentication,
+    SignIn,
+    Standing,
+    Tokens,
+)
 from .client import CancelledRequest, Client, Delivery, Refusal, Reply, TransportError
+from .credentials import (
+    CredentialError,
+    Credentials,
+    LoginRequired,
+    NamedConnection,
+    UserSession,
+    configuration_directory,
+    connection_key,
+)
 from .tool_journal import SqliteToolJournal
 from .tools import (
     Parameter,
@@ -18,6 +36,20 @@ from .tools import (
 
 __all__ = [
     "ActingSelection",
+    "Authentication",
+    "AuthenticationError",
+    "AuthenticationUnavailable",
+    "HttpAuthentication",
+    "SignIn",
+    "Standing",
+    "Tokens",
+    "CredentialError",
+    "Credentials",
+    "LoginRequired",
+    "NamedConnection",
+    "UserSession",
+    "configuration_directory",
+    "connection_key",
     "SchemaDefinition",
     "ToolValue",
     "decode_tool_schema",

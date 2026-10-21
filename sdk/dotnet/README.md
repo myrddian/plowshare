@@ -20,8 +20,8 @@ A default `Optional<T>` field is omitted; a selected `Unit` variant represents
 explicit JSON null. Unknown output fields are omitted. Malformed inputs fail
 before submission. `ACCEPTED` is not completion.
 
-Bearer credentials use upgrade headers; redirects, credential persistence, refresh,
-HTTP application fallback and implicit reconnect are absent. Requests are bounded
+Bearer credentials use upgrade headers; redirects, HTTP application fallback
+and implicit reconnect are absent from the WS client. Requests are bounded
 to 64 outstanding and a 30-second default deadline. Transport failures expose
 `Delivery`. Caller cancellation raises `RequestCancelledException`, retaining both
 the cancellation token and delivery uncertainty. No mutation is automatically replayed.
@@ -37,3 +37,26 @@ Follow [the native SDK standard](../../docs/native-sdk-standards.md), including 
 Named external tools use the same declaration, handler, durable journal and
 read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
 for configuration, grants, examples and recovery semantics.
+
+## Optional saved user login
+
+```csharp
+var store = Credentials.Resolve(origin: origin, account: account);
+var session = await store.AuthenticatedAsync(cancellationToken: cancellationToken);
+await using var client = await Client.ConnectAsync(session.Origin, session.Tokens.Access);
+```
+
+`Credentials` also accepts an explicit account/directory. `LoginAsync`,
+`SessionAsync`, `RenewAsync`, `AuthenticatedAsync` and `LogoutAsync` expose typed
+results and optional `IAuthentication`. Native `HttpAuthentication` accepts timeout
+and cookie names. A rejected access token
+passed to `RenewAsync` reuses a newer saved pair; omitting it explicitly rotates.
+`SessionAsync` reads local state only. `AuthenticatedAsync` renews only after
+explicit authentication rejection and never reconnects application sockets.
+
+The shared native registry, version-1 files, locks and migration/logout markers
+interoperate with Node, Python, Go and Java. Every failed refresh conservatively
+requires fresh login. Cancellation and failed persistence never authorize replay;
+an unproven final write retains its lock. Never steal stale locks. Service
+credentials remain explicit and never fall back to a human login. Application
+recovery keeps original UUIDs and payloads. See [the native auth contract](../../docs/decisions/0036-native-sdk-shared-login.md).

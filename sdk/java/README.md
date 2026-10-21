@@ -66,3 +66,30 @@ the [receiving manual](../../docs/a2a-receiving.md) for client identities and sc
 Named external tools use the same declaration, handler, durable journal and
 read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
 for configuration, grants, examples and recovery semantics.
+
+## Optional saved user login
+
+```java
+var store = Credentials.resolve(origin, account, connectionName, null);
+var session = store.authenticated(null); // null selects native HTTP auth
+try (var client = new WsServerClient(session.origin(), session.tokens().access())) {
+    var projects = client.projects();
+}
+```
+
+`Credentials` also accepts an explicit account/directory. `UserAuthentication`
+is the typed login, status, refresh and logout capability, with native
+`HttpAuthentication`. Existing `AuthClient.login` remains access-only and compatible.
+`session()` reads local state; `authenticated(null)` checks server status and renews
+only after explicit rejection. `renew(auth, rejectedAccess)` reloads under the
+shared lock and reuses a pair already replaced by another client; null rejected
+access explicitly rotates. Passwords are never saved and token diagnostics redact
+secrets.
+
+The native registry, private version-1 files, locks and migration/logout markers
+interoperate with Node, Python, Go and .NET. Every failed refresh conservatively
+requires fresh login. Interruption and failed persistence never replay refresh; an
+unproven final write retains its lock. Never steal stale locks. Renewal does not
+reconnect or replay application operations. Service credentials stay explicit,
+and application recovery preserves original UUIDs and payloads. See
+[the native auth contract](../../docs/decisions/0036-native-sdk-shared-login.md).

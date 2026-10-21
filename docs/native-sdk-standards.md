@@ -41,7 +41,11 @@ cron interpretation and durable state transitions remain server responsibilities
 
 ## Transport ownership
 
-Require an explicit HTTP(S) origin and caller-managed bearer. Reject authenticated
+Require an explicit HTTP(S) origin and caller-managed bearer. Optional native
+user-auth capabilities may manage the shared login store separately, under
+[the shared renewal contract](decisions/0036-native-sdk-shared-login.md); they must
+never fall back from a service credential to saved human login or replay an
+application operation. Reject authenticated
 upgrade redirects. Bound pending requests, frames, notification queues and waiting
 time. Validate notification variants and count queue overflow; malformed hints
 must never reach application consumers. Closure must wake notification readers.
