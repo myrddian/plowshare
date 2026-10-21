@@ -1,6 +1,6 @@
 # Mutation integrity and file-channel recovery
 
-Status: Track A accepted; Track B proposed, with no protocol implementation.
+Status: Track A accepted; Track B aspirational, with no approved implementation or delivery schedule.
 
 ## Context and scope
 
@@ -53,56 +53,69 @@ deltas; deriving a replacement delta from stale state is not conflict detection.
 The existing tags hook stages remain unchanged. Post-control refusal can occur
 after an applied checkpoint; it is not universal rollback.
 
-## Track B proposal: durable file-channel evidence
+## Aspirational Track B: durable file-channel evidence
+
+Track B describes a possible future direction for reducing manual reconciliation
+after client disconnects or provider restarts. Track A remains independently useful.
+Pursuing Track B would require evidence that interrupted operations and recovery
+costs justify the additional protocol, storage and lifecycle complexity, followed
+by a separately scoped design and implementation approval. The approach below
+records candidate mechanisms and safety constraints for that future discussion.
 
 Relay tools already have server-owned intent, provider execution journals,
 fingerprint conflicts and read-only invocation reconciliation. Prefer that public
 capability for work already modeled as an authorized external tool. It does not
 currently provide receipts for ordinary session-bound FileProvider mutations.
-Silently redirecting filesystem operations through tools would change authority
-and workspace binding and is not part of Track A.
+Redirecting filesystem operations through tools would change authority and workspace
+binding and would require a separate design decision.
 
-If separately approved, retain transport correlation and add a durable operation
-UUID before dispatch. Bind it to authenticated actor, project/home, stable
-provider identity and workspace generation, independent of socket/session IDs.
-Fingerprint operation, original path selectors, workspace, purpose, create-only
-flag, exact bytes and any preconditions. Conflicting reuse refuses before effects.
+An eventual design could retain transport correlation and add a durable operation
+UUID before dispatch. Its identity would need to bind the authenticated actor,
+project/home, stable provider identity and workspace generation independently of
+socket/session IDs. A request fingerprint would cover operation, original path
+selectors, workspace, purpose, create-only flag, exact bytes and any preconditions.
+Conflicting identity reuse would have to refuse before effects.
 
-The filesystem provider owns an exclusive durable effect journal in explicitly
-configured private storage outside model-writable roots. The server's existing
-execution owner retains dispatch intent, binding and acknowledged evidence through
-a specialist repository. This is evidence storage, not another scheduler. Reuse
-ToolJournal durability and exclusivity contracts where compatible; do not pretend
-its existing tool schema already represents filesystem operations.
+One candidate approach would give the filesystem provider an exclusive durable
+effect journal in explicitly configured private storage outside model-writable
+roots. The server's existing execution owner would retain dispatch intent, binding
+and acknowledged evidence through a specialist repository. Existing execution
+owners would continue to own scheduling. ToolJournal durability and exclusivity
+contracts could be reused where compatible; its existing tool schema does not
+already represent filesystem operations.
 
-Persist execution intent before effects. Duplicate execution requests return
-retained state and never run again. A durable provider ownership fence prevents
-concurrent processes sharing the journal. Lease expiry alone cannot fence a
-filesystem syscall or authorize another execution. Reconnect can inspect only
-the original provider/workspace binding; restart during execution becomes UNKNOWN.
-A different root, replacement provider or missing journal supplies no success or
+Such a journal would need to persist execution intent before effects. Duplicate
+execution requests would return retained state without running again. Durable
+provider ownership would need to prevent concurrent processes sharing the journal.
+Lease expiry alone cannot fence a filesystem syscall or authorize another
+execution. Reconciliation would be limited to the original provider/workspace
+binding; restart during execution would leave the outcome UNKNOWN. A different
+root, replacement provider or missing journal would supply no success or
 non-execution evidence.
 
 Filesystem effects and receipt persistence are separate commits. A crash after
-replacement but before the journal commit remains UNKNOWN. Staging markers and
-hash observations may aid investigation; matching bytes do not prove causation.
-Do not promise exactly-once effects, automatic rollback or automatic replay.
+replacement but before the journal commit would remain UNKNOWN. Staging markers
+and hash observations might aid investigation; matching bytes do not prove
+causation. Track B would offer retained evidence and duplicate suppression, with
+no guarantee of exactly-once effects, automatic rollback or automatic replay.
 
-A proposed read-only status operation reports retained state/result evidence or
-explicit absence of evidence. It never executes work. Missing/expired receipts
-do not mean not executed. Cancellation before execution may establish rejection;
-after execution starts it is best effort and may leave effects. Reconciliation
-uses authoritative reads and operator review without changing historical unknown
-outcomes into invented receipts.
+A future read-only status operation could report retained state/result evidence
+or explicit absence of evidence without executing work. Missing/expired receipts
+would not mean not executed. Cancellation before execution might establish
+rejection; after execution starts it would be best effort and could leave effects.
+Reconciliation would need authoritative reads and operator review without changing
+historical unknown outcomes into invented receipts.
 
-Bound admission and retention. Preserve unresolved operations and deduplication
-evidence for accepted identity lifetimes; reject retired identity epochs rather
-than making old identities executable after cleanup. Status and dispatch recheck
-current authority. A fingerprint grants no access. Negotiate protocol support
-explicitly; older providers retain their current uncertain-outcome behavior.
+Any eventual design would need bounded admission and retention. It would need to
+preserve unresolved operations and deduplication evidence for accepted identity
+lifetimes, and reject retired identity epochs so cleanup could not make old
+identities executable again. Status and dispatch would recheck current authority;
+a fingerprint grants no access. Protocol support would need explicit negotiation,
+with older providers retaining their current uncertain-outcome behavior.
 
-Acceptance would require failure injection before intent, after intent, after
-filesystem effects, after receipt commit and before response; conflicting and
-concurrent duplicate identities; reconnect and provider restart; journal loss,
-workspace rebinding, cancellation, retention and cross-account refusal. No file
-channel frames, receipts or automatic recovery are added by this decision.
+Before implementation could be accepted, validation would need failure injection
+before intent, after intent, after filesystem effects, after receipt commit and
+before response; conflicting and concurrent duplicate identities; reconnect and
+provider restart; journal loss, workspace rebinding, cancellation, retention and
+cross-account refusal. No file-channel frames, receipts or automatic recovery are
+added by this aspirational direction.
