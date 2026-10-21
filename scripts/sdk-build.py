@@ -38,6 +38,8 @@ def main():
     run(python, '-m', 'ruff', 'format', '--check', '.', cwd=ROOT / 'sdk/python')
     run(python, '-m', 'mypy', 'src', 'tests', cwd=ROOT / 'sdk/python')
     run(python, '-m', 'unittest', 'discover', '-s', 'sdk/python/tests', '-p', 'test_*.py')
+    ENV['PLOWSHARE_SDK_PYTHON'] = python
+    run('node', '--test', 'sdk/node/test/python-auth.test.mjs')
     run(dotnet, 'build', 'sdk/dotnet/Conformance', '--configuration', 'Debug', '--nologo')
     run(dotnet, 'run', '--project', 'sdk/dotnet/ContractTests')
     run(go, 'vet', './...', cwd=ROOT / 'sdk/go')

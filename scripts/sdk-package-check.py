@@ -55,9 +55,11 @@ if(packed.documents[0].descriptor.contentHash!==hash)throw new Error('Installed 
     run(python, '-m', 'venv', str(base / 'python'))
     python = str(base / 'python/bin/python')
     run(python, '-m', 'pip', 'install', str(OUT / 'plowshare_sdk-0.1.0-py3-none-any.whl'))
-    run(python, '-I', '-c', 'import plowshare; from plowshare import ToolProvider, ToolDeclaration, SqliteToolJournal; from pathlib import Path; import sys; assert Path(plowshare.__file__).is_relative_to(Path(sys.prefix))')
+    run(python, '-I', '-c', 'import plowshare; from plowshare import ToolProvider, ToolDeclaration, SqliteToolJournal, Credentials, HttpAuthentication, Tokens; from pathlib import Path; import sys; assert Path(plowshare.__file__).is_relative_to(Path(sys.prefix))')
     env['PLOWSHARE_SDK_PYTHON'] = python
     env['PLOWSHARE_SDK_PYTHONPATH'] = ''
+    # Exercise native auth from the installed wheel as well as checkout sources.
+    run('node', '--test', 'sdk/node/test/python-auth.test.mjs')
 
     dotnet = base / 'dotnet'
     dotnet.mkdir()

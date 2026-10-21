@@ -325,6 +325,22 @@ and saved selection while refusing identity conflicts. `Credentials` accepts an
 explicit account as its fourth constructor argument and keeps refresh locking and
 uncertain-renewal fencing within that scope. See [client login](client-login.md).
 
+### Python shared user login
+
+Python exports `Authentication`, `HttpAuthentication`, immutable auth/session DTOs
+and `Credentials`. `Credentials.resolve(origin, account=..., connection=...)`
+selects the native registry without copying credential handling into consumers.
+`authenticated()` checks saved-session standing and renews only after explicit
+401; `session()` is a local read, not proof of current authority. Login, refresh,
+status and logout use existing public HTTP auth boundaries. Application operations
+still use `Client.connect(origin, bearer)` over WebSocket with no implicit retry.
+
+The version-1 files, account keys, locks and migration/logout fences are shared
+with Node. Renewal persists before access reaches a consumer; ambiguous delivery,
+cancellation and interrupted persistence require explicit login. See the
+[Python SDK guide](../sdk/python/README.md#shared-user-login) and
+[ADR 0035](decisions/0035-python-sdk-shared-login.md) for selection and recovery.
+
 ## Relay topic ports
 
 All SDKs expose typed `relay.publish`, `relay.consume` and `relay.ack` operations.
