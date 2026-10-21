@@ -24,7 +24,7 @@ fields are omitted. Malformed inputs fail before submission. `ACCEPTED` indicate
 pending work and is never converted to completed work.
 
 Tokens are caller-managed and sent in upgrade headers. Redirects, HTTP application
-fallback, credential persistence, implicit reconnect and mutation replay are absent.
+fallback, implicit reconnect and mutation replay are absent from the WS client.
 Requests use caller contexts plus a 30-second default deadline, with at most 64
 outstanding. `TransportError.Delivery` distinguishes not submitted, unknown and
 invalid responses. `errors.Is` retains the underlying context cancellation/deadline.
@@ -39,3 +39,28 @@ Follow [the native SDK standard](../../docs/native-sdk-standards.md), including 
 Named external tools use the same declaration, handler, durable journal and
 read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
 for configuration, grants, examples and recovery semantics.
+
+## Optional saved user login
+
+```go
+store, err := plowshare.ResolveCredentials(origin, account, connection, plowshare.CredentialOptions{})
+if err != nil { return err }
+session, err := store.Authenticated(ctx, nil) // nil selects native HTTP auth
+if err != nil { return err }
+client, err := plowshare.Connect(ctx, session.Origin, session.Tokens.Access, plowshare.Options{})
+```
+
+`NewCredentials` also accepts an explicit account/directory. `Login`, `Session`,
+`Renew`, `Authenticated` and `Logout` use typed results and the optional
+`Authentication` interface. `NewHttpAuthentication` permits explicit timeout and
+cookie names. `Renew(ctx, auth, rejectedAccess)` reuses a newer pair if another
+client already replaced that rejected token; an empty rejected access means
+explicit rotation. `Session` reads local state only. `Authenticated` renews only
+after an explicit session rejection, without reconnecting application sockets.
+
+State, registry selection, migration and logout fences are shared with Node,
+Python, .NET and Java. Cancellation, failed refresh or persistence never blindly
+replay refresh. All failed refreshes conservatively require fresh login; a failed
+final write retains its lock. Never steal stale locks. Service credentials stay
+caller-managed and cannot fall back to this store. Retain original mutation UUIDs
+and payloads for explicit application recovery. See [the native auth contract](../../docs/decisions/0036-native-sdk-shared-login.md).

@@ -56,10 +56,19 @@ def canonical_origin(value: str) -> str:
             or parsed.query
             or parsed.fragment
             or "\\" in value
+            or "?" in value
+            or "#" in value
         ):
             raise ValueError
         if ":" in host:
-            host = "[" + ipaddress.IPv6Address(host).compressed + "]"
+            address = ipaddress.IPv6Address(host)
+            # Python versions differ in mapped-IPv6 display (dotted vs hex).
+            # WHATWG/Node always hashes the compressed hexadecimal spelling.
+            if address.ipv4_mapped is not None:
+                mapped = int(address.ipv4_mapped)
+                host = f"[::ffff:{mapped >> 16:x}:{mapped & 0xFFFF:x}]"
+            else:
+                host = "[" + address.compressed + "]"
         elif not re.fullmatch(r"[A-Za-z0-9._-]+", host):
             raise ValueError
         elif re.fullmatch(

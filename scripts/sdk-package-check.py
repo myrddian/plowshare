@@ -85,6 +85,30 @@ if(packed.documents[0].descriptor.contentHash!==hash)throw new Error('Installed 
     run(go_tool, 'mod', 'tidy', cwd=consumer)
     env['PLOWSHARE_SDK_GO_ROOT'] = str(consumer)
     env['PLOWSHARE_SDK_GO'] = go_tool
+    # Repeat authentication against fresh installed artifacts in all languages.
+    env['PLOWSHARE_SDK_NODE_CREDENTIALS'] = (node / 'node_modules/plowshare-client-node/build/credentials.js').as_uri()
+    env['PLOWSHARE_SDK_NODE_CONNECTIONS'] = (node / 'node_modules/plowshare-client-node/build/connections.js').as_uri()
+    auth_dotnet = base / 'auth-dotnet'
+    auth_dotnet.mkdir()
+    shutil.copy(ROOT / 'sdk/dotnet/AuthConformance/Program.cs', auth_dotnet / 'Program.cs')
+    (auth_dotnet / 'Consumer.csproj').write_text((dotnet / 'Consumer.csproj').read_text())
+    run(dotnet_tool, 'build', str(auth_dotnet), '--source', str(OUT), '--source', 'https://api.nuget.org/v3/index.json', '--nologo')
+    env['PLOWSHARE_SDK_AUTH_DOTNET'] = str(auth_dotnet / 'bin/Debug/net8.0/Consumer.dll')
+    (consumer / 'cmd/auth-conformance').mkdir()
+    shutil.copy(ROOT / 'sdk/go/cmd/auth-conformance/main.go', consumer / 'cmd/auth-conformance/main.go')
+    env['PLOWSHARE_SDK_AUTH_GO'] = str(base / 'auth-go')
+    run(go_tool, 'build', '-o', env['PLOWSHARE_SDK_AUTH_GO'], './cmd/auth-conformance', cwd=consumer)
+    auth_java = base / 'auth-java'
+    auth_java.mkdir()
+    def binary_jar(folder):
+        candidates = [path for path in folder.glob('*.jar') if not path.name.endswith(('-sources.jar', '-javadoc.jar'))]
+        if len(candidates) != 1:
+            raise SystemExit(f'Expected exactly one current binary jar in {folder}; clean stale distribution artifacts')
+        return candidates[0]
+    classpath = os.pathsep.join([str(binary_jar(ROOT / 'sdk/java/build/libs')), str(binary_jar(ROOT / 'plowshare-protocol/build/libs')), (ROOT / 'sdk/java/build/auth-dependencies-classpath.txt').read_text()])
+    run('javac', '-cp', classpath, '-d', str(auth_java), str(ROOT / 'sdk/java/src/test/java/io/aeyer/plowshare/sdk/AuthConformance.java'))
+    env['PLOWSHARE_SDK_AUTH_JAVA_CP'] = os.pathsep.join([str(auth_java), classpath])
+    run('node', 'scripts/sdk-auth-conformance.mjs')
     run('node', 'scripts/sdk-conformance.mjs')
     print('Fresh distribution consumers passed: ' + str(base))
 

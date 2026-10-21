@@ -384,6 +384,14 @@ class ValueTests(unittest.TestCase):
             canonical_origin("HTTPS://EXAMPLE.COM:443/"), "https://example.com"
         )
         self.assertEqual(canonical_origin("http://[::1]:80"), "http://[::1]")
+        self.assertEqual(
+            canonical_origin("http://[::ffff:192.0.2.1]:8080"),
+            "http://[::ffff:c000:201]:8080",
+        )
+        self.assertEqual(
+            connection_key("http://[::ffff:192.0.2.1]:8080", "alice"),
+            "328ce9e955f2752432338d5f852d9eea221cfdf5e47ebd9520f95d5d1501b42b",
+        )
         for value in (
             "https://u:p@example.com",
             "https://example.com/path",
@@ -391,6 +399,8 @@ class ValueTests(unittest.TestCase):
             "file:///tmp",
             "https://example.com\n",
             "https://example.com?x=y",
+            "https://example.com?",
+            "https://example.com#",
             "http://127.1",
             "http://0x7f000001",
         ):

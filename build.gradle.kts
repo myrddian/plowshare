@@ -347,7 +347,7 @@ val sdkContractCheck by tasks.registering(Exec::class) {
 val sdkBuild by tasks.registering(Exec::class) {
     group = "build"
     description = "Builds native Python/.NET/Go SDKs; requires their documented toolchains."
-    dependsOn(sdkContractCheck, nativeSdkPolicyCheck, ":plowshare-client-node:nodeBuild")
+    dependsOn(sdkContractCheck, nativeSdkPolicyCheck, ":plowshare-client-node:nodeBuild", ":plowshare-sdk:authFixtureClasspath")
     workingDir = rootDir
     commandLine("python3", "scripts/sdk-build.py", "build")
 }

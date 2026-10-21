@@ -32,18 +32,22 @@ def main():
         python = str(ROOT / 'build/sdk-python-env/bin/python')
     dotnet = tool('PLOWSHARE_SDK_DOTNET', 'dotnet', ROOT / 'build/dotnet/dotnet')
     go = tool('PLOWSHARE_SDK_GO', 'go')
+    ENV['PLOWSHARE_SDK_DOTNET'] = dotnet
+    ENV['PLOWSHARE_SDK_PYTHON'] = python
     run('node', '--test', 'sdk/node/test/tools.test.mjs')
     run(python, '-c', 'import websockets; import build; import setuptools; import mypy; import ruff')
     run(python, '-m', 'ruff', 'check', '.', cwd=ROOT / 'sdk/python')
     run(python, '-m', 'ruff', 'format', '--check', '.', cwd=ROOT / 'sdk/python')
     run(python, '-m', 'mypy', 'src', 'tests', cwd=ROOT / 'sdk/python')
     run(python, '-m', 'unittest', 'discover', '-s', 'sdk/python/tests', '-p', 'test_*.py')
-    ENV['PLOWSHARE_SDK_PYTHON'] = python
     run('node', '--test', 'sdk/node/test/python-auth.test.mjs')
+    run(dotnet, 'build', 'sdk/dotnet/AuthConformance', '--configuration', 'Debug', '--nologo')
     run(dotnet, 'build', 'sdk/dotnet/Conformance', '--configuration', 'Debug', '--nologo')
     run(dotnet, 'run', '--project', 'sdk/dotnet/ContractTests')
     run(go, 'vet', './...', cwd=ROOT / 'sdk/go')
     run(go, 'test', '-race', './...', cwd=ROOT / 'sdk/go')
+    run(go, 'build', '-o', str(ROOT / 'build/sdk-auth-go'), './cmd/auth-conformance', cwd=ROOT / 'sdk/go')
+    run('node', 'scripts/sdk-auth-conformance.mjs')
     if action == 'distributions':
         OUT.mkdir(parents=True, exist_ok=True)
         pnpm = tool('PLOWSHARE_SDK_PNPM', 'pnpm')
@@ -54,7 +58,7 @@ def main():
         run(python, '-m', 'build', 'sdk/python', '--no-isolation', '--outdir', str(OUT))
         run(dotnet, 'pack', 'sdk/dotnet/Plowshare.Sdk', '--configuration', 'Release', '--output', str(OUT), '--nologo')
         with tarfile.open(OUT / 'plowshare-sdk-go-0.1.0.tar.gz', 'w:gz') as archive:
-            for name in ['README.md', 'go.mod', 'go.sum', 'client.go', 'packets.go', 'tools.go', 'tool_schemas.go', 'schema_definition_generated.go', 'protocol_generated.go', 'contracts_generated.go', 'codec.go', 'validation.go', 'interchange_validation.go', 'schemas.json']:
+            for name in ['README.md', 'go.mod', 'go.sum', 'client.go', 'auth.go', 'auth_json.go', 'auth_connections.go', 'credentials.go', 'auth_owner_unix.go', 'auth_owner_windows.go', 'packets.go', 'tools.go', 'tool_schemas.go', 'schema_definition_generated.go', 'protocol_generated.go', 'contracts_generated.go', 'codec.go', 'validation.go', 'interchange_validation.go', 'schemas.json']:
                 path = ROOT / 'sdk/go' / name
                 info = archive.gettarinfo(str(path), 'plowshare-sdk-go/' + name)
                 info.uid = info.gid = info.mtime = 0

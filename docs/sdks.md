@@ -104,8 +104,9 @@ requests while retaining the scalar provider facade.
 
 - Credentials travel in the WebSocket upgrade's bearer header; authenticated
   redirects are refused. Application operations use `/v1/events`, never an HTTP fallback.
-- Tokens are supplied by callers. The new core SDK entry points don't persist or
-  refresh them. Existing Node platform credential/file adapters are separate exports.
+- WebSocket clients receive caller-managed bearers. Optional native `Credentials`
+  and HTTP authentication capabilities manage shared user sessions separately;
+  they never reconnect or replay application operations.
 - Each request has an ID, type and protocol version. Replies are correlated by ID
   and checked for matching type/version and a known outcome code.
 - Native Python/C#/Go replies contain a known code, optional text and a validated
@@ -247,7 +248,8 @@ and caller cancellation/close after submission. The fixture counts wire requests
 to reject replay. Go conformance runs with the race detector. Java's separate SDK
 checks also run. `sdkPackageCheck` installs the npm, Python, NuGet and Go
 distributions into fresh consumers, checks TypeScript declarations and repeats the WebSocket fixture using
-the installed artifacts. This task may download runtime/build dependencies.
+the installed artifacts. The authentication fixture also exercises installed Java jars
+and all five native stores against one shared credential directory. This task may download runtime/build dependencies.
 These checks prove client transport behavior against the controlled fixture; it does not claim deployment or model-provider validation.
 
 Native toolchains are required by these explicit SDK tasks. Ordinary `check`
@@ -452,3 +454,28 @@ remain closed until their consumers retain authority. See the
 [supported execution capabilities](account-delegation-implementation-map.md#fifth-slice-standard-tool-checks-and-child-agents).
 Human-facing token management and external identity linking remain later work; see
 [ADR 0026](decisions/0026-service-execution-on-behalf-of-an-account.md).
+
+## Optional native user authentication
+
+Node, Python, Go, .NET and Java can explicitly reuse the same native user login.
+Use the SDK's `Credentials` resolver to select a named connection or explicit
+origin/account. Configuration precedence, version-1 files, mkdir locks, canonical
+keys and migration/logout markers follow [shared local login](client-login.md).
+Go exposes `Authentication`, .NET `IAuthentication`, and Java `UserAuthentication`;
+each has a native `HttpAuthentication` and typed sign-in, token and status results.
+The existing Java access-only `AuthClient` remains compatible.
+
+`session` loads local state without proving server authority. `authenticated`
+checks the public session endpoint and renews only after explicit rejection.
+`renew` is an explicit rotation; supply the rejected access token to reuse a newer
+pair saved by another client. Every rotation reloads under the shared lock and
+persists renewal intent before HTTP, then the returned pair before exposing access.
+These new stores conservatively fence every failed refresh, including connection
+failures. Cancellation and failed persistence require explicit recovery; an
+unproven final write retains the lock. Never automatically delete stale locks.
+
+Application reconnect and mutation recovery remain explicit. Retain original UUIDs
+and payloads, reconcile durable receipts, and make a deliberate recovery decision.
+Service credentials remain an explicit alternative and never fall back to a saved
+human login. See [ADR 0036](decisions/0036-native-sdk-shared-login.md) and the SDK
+README examples. No new server authentication system is introduced.

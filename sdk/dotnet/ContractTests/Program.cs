@@ -72,3 +72,4 @@ using(var hosted=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirect
   }
  }
 }
+await AuthChecks.RunAsync();
