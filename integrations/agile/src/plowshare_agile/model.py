@@ -29,6 +29,13 @@ def text(value: object, field: str, maximum: int) -> str:
     return value
 
 
+def account_handle(value: object) -> str:
+    """Validate the SDK-selected ordinary account at the journal boundary."""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value):
+        raise ValueError("Choose a valid Plowshare account handle")
+    return value
+
+
 def identity(value: object) -> str:
     if not isinstance(value, str) or str(UUID(value)) != value:
         raise ValueError("Expected a canonical lowercase UUID")

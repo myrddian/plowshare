@@ -281,7 +281,7 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
                 patch(
                     "plowshare_agile.cli.Configuration.read", return_value=self.config
                 ),
-                patch.dict("os.environ", {"AGILE_TEST_BEARER": "fixture-bearer"}),
+                patch.dict("os.environ", {"AGILE_TEST_BEARER": "pss_fixture-bearer"}),
                 patch("plowshare_agile.cli.Client.connect", new_callable=AsyncMock),
                 patch("plowshare_agile.cli.SdkBoardPort", return_value=self.port),
                 redirect_stdout(io.StringIO()),
