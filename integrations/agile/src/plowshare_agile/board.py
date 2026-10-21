@@ -24,6 +24,8 @@ DEFINITIVE_REFUSALS = frozenset(
         "BAD_REQUEST",
         "NOT_FOUND",
         "CONFLICT",
+        # A concurrent writer can advance tags after the displayed-version check.
+        "INFORMATION_TAGS_CONFLICT",
         "UNSUPPORTED_DOCUMENT",
         "VALIDATION_FAILED",
     }
