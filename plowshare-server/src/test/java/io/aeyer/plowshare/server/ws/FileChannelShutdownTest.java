@@ -26,7 +26,8 @@ class FileChannelShutdownTest {
             new SessionRegistry(),
             mock(ProjectRoots.class),
             context.getDefaultListableBeanFactory().getBeanProvider(SessionCloseListener.class),
-            TestProjectMembers.allowed());
+            TestProjectMembers.allowed(),
+            mock(WebSocketKeepAlive.class));
     context.registerBean("fileChannel", FileChannelHandler.class, config::fileChannelHandler);
     // This listener depends on the handler, as DefinitionResolver does in production. Snapshot
     // resolution must happen after that construction cycle is complete, before context shutdown.

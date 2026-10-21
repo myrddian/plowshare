@@ -48,6 +48,14 @@ typed registry options. Editing drafts survive a successful refresh within the
 same identity. Lists render independently while facets load or fail. Lost hints
 recover through reconnect and bounded periodic reconciliation.
 
+Hints in the same pending debounce batch invalidate once; a hint received after
+the recovery read starts still fences that read. The periodic reconciliation
+does not hide an unchanged snapshot merely because its timer fired. While a
+hint requires protected surfaces to be hidden, a separate progress message stays
+visible. Reader signatures are reusable only when the selected text window has
+finished loading: an interrupted read's loading placeholder cannot satisfy a
+later refresh with identical metadata.
+
 ## Additional tracked DTOs
 
 | Projection | Durable dependencies | Admission and consistency |

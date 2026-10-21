@@ -58,6 +58,7 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
  */
 @Configuration
 @EnableWebSocket
+@org.springframework.context.annotation.Import(WebSocketKeepAliveConfig.class)
 public class FileChannelConfig implements WebSocketConfigurer {
 
   /**
@@ -89,6 +90,7 @@ public class FileChannelConfig implements WebSocketConfigurer {
   private final ProjectRoots roots;
 
   private final ProjectMembers members;
+  private final WebSocketKeepAlive keepAlive;
 
   /**
    * Deferred only until singleton construction completes: DefinitionResolver depends on this
@@ -103,10 +105,12 @@ public class FileChannelConfig implements WebSocketConfigurer {
       SessionRegistry sessions,
       ProjectRoots roots,
       ObjectProvider<SessionCloseListener> closeListeners,
-      ProjectMembers members) {
+      ProjectMembers members,
+      WebSocketKeepAlive keepAlive) {
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.roots = Objects.requireNonNull(roots, "roots");
     this.members = members;
+    this.keepAlive = Objects.requireNonNull(keepAlive, "keepAlive");
     this.closeListeners = Objects.requireNonNull(closeListeners, "closeListeners");
   }
 
@@ -347,7 +351,7 @@ public class FileChannelConfig implements WebSocketConfigurer {
     // /v1/events, so a session id is held to one account (Enzo's decision
     // of 2026-09-30, spec 2026-09-30-local-hooks-are-served).
     registry
-        .addHandler(fileChannelHandler(), FileChannelHandler.PATH)
+        .addHandler(keepAlive.decorate(fileChannelHandler()), FileChannelHandler.PATH)
         .addInterceptors(new HandleInterceptor());
   }
 }
