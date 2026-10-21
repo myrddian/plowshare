@@ -3151,3 +3151,37 @@ await test('chat preflight cannot overwrite a newer snapshot after another clien
     false,
   );
 });
+
+await test('Mailbox opening and refresh do not wait for unrelated approval scopes', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  const releases: ((value: Outcome) => void)[] = [];
+  f.rawApprovals(() => new Promise((resolve) => releases.push(resolve)));
+  let opened = false;
+  const opening = f.client
+    .dispatch({ action: 'activity-view', view: 'inbox' })
+    .then(() => {
+      opened = true;
+    });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      opened,
+      true,
+      'Mailbox must load while approval reads remain pending',
+    );
+    assert.equal(f.client.state.activity.inbox.loaded, true);
+    assert.ok(
+      releases.length > 0,
+      'Approval discovery still runs independently',
+    );
+    await f.client.dispatch({ action: 'activity-refresh' });
+  } finally {
+    // A refresh coalesced while opening may request one follow-up approval pass.
+    f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+    for (const resolve of releases)
+      resolve({ code: 'OK', payload: { approvals: [] } });
+    await opening;
+  }
+});

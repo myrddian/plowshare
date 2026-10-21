@@ -174,7 +174,7 @@ and remaining deployment acceptance.
 | Active incoming transfers | 4 per connection |
 | Per-connection byte reservations | 640 MiB shared by incoming/outgoing logical buffers and tombstones |
 | Process reservation budget | 2 GiB; each logical byte reserves three bytes for buffer/conversion copies |
-| Completed transfer IDs | 4096 per connection, charged 256 logical bytes each |
+| Recent completed transfer IDs | Last 4096 per connection, charged 256 logical bytes each; no lifetime message cap |
 | Incomplete-transfer idle / total deadline | 15 seconds / 60 seconds |
 | Sender credit / total deadline | 15 seconds / 60 seconds |
 
@@ -205,8 +205,22 @@ typed validation, project membership, grants, approvals and owning repository
 checks. The transport does not add authority or create a second durable runtime.
 
 Incomplete assemblies expire and release capacity on disconnect, invalid input
-or deadline. Completed IDs remain until disconnect; they are never evicted to
-allow reuse. Exhausting byte, transfer or tombstone capacity fails the connection.
+or deadline. Completed IDs form a FIFO window of the last 4096 completions. A recent ID cannot
+be reused. On completion at the window bound, the oldest ID and its byte
+reservation are removed before adding the new one. Active transfers retain their
+separate four-transfer and byte limits. Exhausting active-transfer or byte
+capacity fails the connection.
+
+The previous lifetime tombstone cap disconnected healthy clients on their 4097th
+received reply or push, including ordinary streamed updates. The bounded recent
+window fixes that availability defect without changing packet encoding or adding
+reconnect/replay. Detection of a reused transfer ID is limited to this window;
+an older ID is treated as new transport input. Transfer IDs are bookkeeping,
+not authorization or durable deduplication credentials: an authenticated sender
+could already choose another UUID. Inner requests still undergo normal current
+authorization, response correlation and operation-owned idempotency. All server
+and SDK receivers use the same window; older peers remain wire-compatible but
+retain their own lifetime cap until upgraded.
 There is no durable packet spool, cross-connection resume or automatic mutation
 replay. Failure once sending starts retains uncertain-delivery semantics;
 local size/capacity rejection before a send remains `NOT_SUBMITTED`.

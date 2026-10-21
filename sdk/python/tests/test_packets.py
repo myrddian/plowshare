@@ -6,6 +6,7 @@ import json
 import unittest
 from uuid import uuid4
 
+import plowshare._packets as packet_module
 from plowshare._packets import CHUNK, MAX_MESSAGE, Packets
 
 
@@ -32,6 +33,24 @@ def parts(data: bytes) -> list[str]:
 
 
 class PacketTests(unittest.IsolatedAsyncioTestCase):
+    async def test_long_session_keeps_bounded_recent_ids_and_releases_budget(
+        self,
+    ) -> None:
+        before = packet_module._process_held
+        transport = Packets(lambda: None)
+        latest = ""
+        try:
+            for _ in range(4200):
+                latest = parts(b"small reply")[0]
+                self.assertEqual("small reply", transport.accept(latest)[0])
+            self.assertEqual(4096, len(transport._completed))
+            self.assertEqual(before + 4096 * 256 * 3, packet_module._process_held)
+            with self.assertRaises(ValueError):
+                transport.accept(latest)
+        finally:
+            transport.close()
+        self.assertEqual(before, packet_module._process_held)
+
     async def test_reordered_split_unicode_dispatches_once(self) -> None:
         transport = Packets(lambda: None)
         text = "x" * (CHUNK - 1) + "😀" + "y"

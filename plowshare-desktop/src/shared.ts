@@ -649,11 +649,11 @@ export type Request =
     }
   | { action: 'activity'; view: ActivityView }
   | { action: 'activity-view'; view: ActivityView }
-  | { action: 'activity-refresh' }
+  | { action: 'activity-refresh'; view?: ActivityView }
   | { action: 'question-refresh' }
   | { action: 'inbox-read'; id: string }
   | { action: 'inbox-more' }
-  | { action: 'run-detail'; id: string }
+  | { action: 'run-detail'; id: string; view?: 'runs' | 'builder' }
   | {
       action: 'schedule-refresh';
       section?: 'schedules' | 'files';

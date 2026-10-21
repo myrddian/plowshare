@@ -171,6 +171,16 @@ class ConcurrentEventChannelTest {
           }
         };
     var authority = mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);
+    var revoked = new AtomicBoolean();
+    // Configure the mock before concurrent calls; changing stubs during delivery races Mockito.
+    doAnswer(
+            ignored -> {
+              if (revoked.get())
+                throw new io.aeyer.plowshare.server.faults.CallerFault("Membership revoked");
+              return null;
+            })
+        .when(authority)
+        .require(anyString(), any(), anyString());
     var router = new FrameRouter(Map.of("relay.topics", read));
     router.useAuthorization(authority);
     var writing = new CompletableFuture<Void>();
@@ -189,9 +199,7 @@ class ConcurrentEventChannelTest {
       fixture.send("protected", "relay.topics", Map.of("project", "research"));
       entered.get(5, TimeUnit.SECONDS);
       result.complete(Outcome.ok(Map.of("secret", "protected content")));
-      doThrow(new io.aeyer.plowshare.server.faults.CallerFault("Membership revoked"))
-          .when(authority)
-          .require(anyString(), any(), anyString());
+      revoked.set(true);
       release.complete(null);
       verify(fixture.socket, timeout(5000)).close(any(CloseStatus.class));
       assertTrue(fixture.received.stream().noneMatch(frame -> frame.contains("protected content")));

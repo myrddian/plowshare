@@ -48,6 +48,14 @@ func main() {
 		check(err == nil, "connect failed")
 		return client
 	}
+	longSession := open("long-session")
+	for n := 0; n < 4200; n++ {
+		reply, err := longSession.ProjectList(ctx, plowshare.ProjectListRequest{})
+		check(err == nil, "long packet session failed")
+		rows, err := reply.RequirePayload()
+		check(err == nil && len(rows) == 1 && rows[0].Name == "long-session", "long packet response lost")
+	}
+	longSession.Close()
 	selected := open("acting-selection")
 	for _, id := range []string{"00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"} {
 		actingCtx, err := plowshare.WithActingContext(ctx, id)

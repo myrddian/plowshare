@@ -78,6 +78,18 @@ export function installDocumentNavigation(
     if (!value) throw new Error('Navigation control unavailable');
     return value;
   };
+  function showError(error: unknown): void {
+    element('[data-nav-error]').hidden = false;
+    element('[data-nav-error]').textContent =
+      error instanceof Error ? error.message : 'Document navigation failed';
+  }
+  // Supplementary reads own their failures and keep the same selection fence,
+  // while the main read releases the interaction lock as soon as text is ready.
+  function auxiliary(work: Promise<void>, token: number): void {
+    work.catch((reason: unknown) => {
+      if (token === sequence) showError(reason);
+    });
+  }
   const run = (action: () => Promise<void>) => {
     if (busy) return;
     busy = true;
@@ -287,19 +299,59 @@ export function installDocumentNavigation(
       traversed = undefined;
     }
     const related = traversal();
-    const [found, facets, views] = await Promise.all([
-      call(activeScope, 'documents.list', {
+    selected = candidate;
+    const collection = call(activeScope, 'documents.list', {
+      filter: criteria(),
+      limit: 20,
+      offset: page * 20,
+      ...related,
+    }).then((found) => found.documents);
+    // The path has authorized this current document. Text does not depend on
+    // collection facets, saved views, relationships or policy-editor controls.
+    const opening =
+      candidate && !related && steps.at(-1)?.kind === 'document'
+        ? showDocument(candidate, token, collection)
+        : undefined;
+    const opened = opening?.catch((reason: unknown) => {
+      if (token === sequence) showError(reason);
+    });
+    auxiliary(
+      call(activeScope, 'documents.facets', {
         filter: criteria(),
-        limit: 20,
-        offset: page * 20,
         ...related,
+      }).then((facets) => {
+        if (token !== sequence) return;
+        element('[data-nav-notice]').textContent =
+          `${facets.total} current documents`;
+        element<HTMLSelectElement>('[name="tag"]').innerHTML =
+          '<option value="">All tags</option>' +
+          facets.facets.tags
+            .map(
+              (t) =>
+                `<option value="${escape(t.value)}">${escape(t.value)} (${t.count})</option>`,
+            )
+            .join('');
       }),
-      call(activeScope, 'documents.facets', { filter: criteria(), ...related }),
-      call(scope(), 'views.list', {}),
-    ]);
+      token,
+    );
+    auxiliary(
+      call(scope(), 'views.list', {}).then((views) => {
+        if (token !== sequence) return;
+        saved = views.views;
+        element<HTMLSelectElement>('[data-nav-views]').innerHTML =
+          '<option value="">Choose a saved view</option>' +
+          saved
+            .map(
+              (v, index) =>
+                `<option value="${index}" ${savedView?.id === v.id ? 'selected' : ''}>${escape(v.label)}</option>`,
+            )
+            .join('');
+      }),
+      token,
+    );
+    const found = await collection;
     if (token !== sequence) return;
-    docs = found.documents;
-    saved = views.views;
+    docs = found;
     selected = candidate;
     element('[data-nav-crumbs]').innerHTML = steps
       .map(
@@ -316,17 +368,6 @@ export function installDocumentNavigation(
         .join('') || '<p>No matching current documents.</p>';
     element<HTMLButtonElement>('[data-nav-prev]').disabled = page === 0;
     element<HTMLButtonElement>('[data-nav-next]').disabled = docs.length < 20;
-    element('[data-nav-notice]').textContent = facets
-      ? `${facets.total} current documents`
-      : 'Related current documents';
-    element<HTMLSelectElement>('[name="tag"]').innerHTML =
-      '<option value="">All tags</option>' +
-      (facets?.facets.tags ?? [])
-        .map(
-          (t) =>
-            `<option value="${escape(t.value)}">${escape(t.value)} (${t.count})</option>`,
-        )
-        .join('');
     element<HTMLSelectElement>('[name="type"]').innerHTML =
       '<option value="">All types</option>' +
       types()
@@ -334,29 +375,23 @@ export function installDocumentNavigation(
           (t) => `<option value="${escape(t.id)}">${escape(t.label)}</option>`,
         )
         .join('');
-    element<HTMLSelectElement>('[data-nav-views]').innerHTML =
-      '<option value="">Choose a saved view</option>' +
-      saved
-        .map(
-          (v, index) =>
-            `<option value="${index}" ${savedView?.id === v.id ? 'selected' : ''}>${escape(v.label)}</option>`,
-        )
-        .join('');
     element('[data-nav-delete]').hidden =
       !savedView || !capabilities.writesEnabled;
     element<HTMLButtonElement>('[data-nav-save]').disabled =
       !capabilities.writesEnabled;
-    if (selected && !related && steps.at(-1)?.kind === 'document')
-      await showDocument(selected, token);
+    if (opened) await opened;
     else {
       element('[data-nav-document]').textContent = '';
-      await showPolicy(
-        scope().kind === 'project'
-          ? {
-              kind: 'project',
-              project: scope().kind === 'project' ? scopeProject() : '',
-            }
-          : { kind: 'platform' },
+      auxiliary(
+        showPolicy(
+          scope().kind === 'project'
+            ? {
+                kind: 'project',
+                project: scope().kind === 'project' ? scopeProject() : '',
+              }
+            : { kind: 'platform' },
+          token,
+        ),
         token,
       );
     }
@@ -365,44 +400,58 @@ export function installDocumentNavigation(
     const current = scope();
     return current.kind === 'project' ? current.project : '';
   }
-  async function showDocument(doc: CurrentDocument, token: number) {
+  async function showDocument(
+    doc: CurrentDocument,
+    token: number,
+    collection: Promise<readonly CurrentDocument[]> = Promise.resolve(docs),
+  ) {
     element('[data-nav-document]').textContent = 'Opening document…';
     element('[data-nav-policy]').textContent = '';
     const last = steps.at(-1);
     const pinned =
       last?.kind === 'document' && last.target.revision !== undefined;
-    const [outgoing, incoming, text] = await Promise.all([
-      pinned
-        ? Promise.resolve({ connections: [], limit: 100, offset: 0 })
-        : call(doc.scope, 'relationships.list', {
-            resource: doc.resource,
-            direction: 'outgoing',
-            limit: 100,
-          }),
-      pinned
-        ? Promise.resolve({ connections: [], limit: 100, offset: 0 })
-        : call(doc.scope, 'relationships.list', {
-            resource: doc.resource,
-            direction: 'backlinks',
-            limit: 100,
-          }),
-      call(doc.scope, 'read', {
-        revision: doc.revision,
-        offset: openOffset,
-        limit: 8192,
-      }),
-    ]);
+    const text = await call(doc.scope, 'read', {
+      revision: doc.revision,
+      offset: openOffset,
+      limit: 8192,
+    });
     if (token !== sequence) return;
-    connections = [...outgoing.connections, ...incoming.connections];
-    const sections = [
-      ['Relationships', outgoing.connections, 0],
-      ['Backlinks', incoming.connections, outgoing.connections.length],
-    ] as const;
     element('[data-nav-document]').innerHTML =
-      `<h3>${escape(doc.title)}</h3><p>Current selection: ${escape(doc.sourceName)}</p><pre data-nav-text>${escape(text.text)}</pre><button data-nav-text-prev ${openOffset === 0 ? 'disabled' : ''}>Previous text</button><button data-nav-text-next ${text.text.length < 8192 ? 'disabled' : ''}>More text</button><button data-nav-pin>Pin this version in the path</button>${sections.map(([label, rows, start]) => `<h4>${label}</h4>${rows.map((row, index) => `<div>${row.selection.kind === 'locked' ? `<span>${escape(row.selection.label)} · content locked</span>` : row.selection.kind === 'readable' ? `<button data-nav-follow="${start + index}">${escape(row.relationship.relation)} → ${escape(row.selection.document.title)}</button>` : ''}${label === 'Relationships' && capabilities?.writesEnabled && doc.owner === actor() ? `<button data-nav-remove="${start + index}">Remove relationship</button>` : ''}</div>`).join('') || '<p>None visible.</p>'}`).join('')}
+      `<div><h3>${escape(doc.title)}</h3><p>Current selection: ${escape(doc.sourceName)}</p><pre data-nav-text>${escape(text.text)}</pre><button data-nav-text-prev ${openOffset === 0 ? 'disabled' : ''}>Previous text</button><button data-nav-text-next ${text.text.length < 8192 ? 'disabled' : ''}>More text</button><button data-nav-pin>Pin this version in the path</button></div><div data-nav-connections role="status">Loading relationships…</div>`;
+    auxiliary(
+      (async () => {
+        const [outgoing, incoming, collectionDocs] = await Promise.all([
+          pinned
+            ? Promise.resolve({ connections: [], limit: 100, offset: 0 })
+            : call(doc.scope, 'relationships.list', {
+                resource: doc.resource,
+                direction: 'outgoing',
+                limit: 100,
+              }),
+          pinned
+            ? Promise.resolve({ connections: [], limit: 100, offset: 0 })
+            : call(doc.scope, 'relationships.list', {
+                resource: doc.resource,
+                direction: 'backlinks',
+                limit: 100,
+              }),
+          collection,
+        ]);
+        if (token !== sequence) return;
+        connections = [...outgoing.connections, ...incoming.connections];
+        const sections = [
+          ['Relationships', outgoing.connections, 0],
+          ['Backlinks', incoming.connections, outgoing.connections.length],
+        ] as const;
+        element('[data-nav-connections]').removeAttribute('role');
+        element('[data-nav-connections]').innerHTML =
+          `${sections.map(([label, rows, start]) => `<h4>${label}</h4>${rows.map((row, index) => `<div>${row.selection.kind === 'locked' ? `<span>${escape(row.selection.label)} · content locked</span>` : row.selection.kind === 'readable' ? `<button data-nav-follow="${start + index}">${escape(row.relationship.relation)} → ${escape(row.selection.document.title)}</button>` : ''}${label === 'Relationships' && capabilities?.writesEnabled && doc.owner === actor() ? `<button data-nav-remove="${start + index}">Remove relationship</button>` : ''}</div>`).join('') || '<p>None visible.</p>'}`).join('')}
       <form data-nav-traverse><label>Relationship name<input name="relation" required pattern="[a-z][a-z0-9_-]{0,63}" maxlength="64"></label><label>Direction<select name="direction"><option value="outgoing">Outgoing</option><option value="backlinks">Backlinks</option></select></label><button>Browse related documents</button></form>
-      ${capabilities?.writesEnabled && doc.owner === actor() ? `<details><summary>Add an explicit relationship</summary><form data-nav-link><label>Target document<select name="target" required><option value="">Choose from the current collection</option>${docs.map((d, index) => `<option value="${index}">${escape(d.title)}</option>`).join('')}</select></label><label>Relationship name<input name="relation" required pattern="[a-z][a-z0-9_-]{0,63}" maxlength="64"></label><label><input type="checkbox" name="pin">Pin the target’s displayed revision</label><button>Add relationship</button></form></details>` : ''}`;
-    await showPolicy({ kind: 'document', resource: doc.resource }, token);
+      ${capabilities?.writesEnabled && doc.owner === actor() ? `<details><summary>Add an explicit relationship</summary><form data-nav-link><label>Target document<select name="target" required><option value="">Choose from the current collection</option>${collectionDocs.map((d, index) => `<option value="${index}">${escape(d.title)}</option>`).join('')}</select></label><label>Relationship name<input name="relation" required pattern="[a-z][a-z0-9_-]{0,63}" maxlength="64"></label><label><input type="checkbox" name="pin">Pin the target’s displayed revision</label><button>Add relationship</button></form></details>` : ''}`;
+        await showPolicy({ kind: 'document', resource: doc.resource }, token);
+      })(),
+      token,
+    );
   }
   async function showPolicy(target: ReferencePolicyTarget, token: number) {
     policy = undefined;

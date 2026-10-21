@@ -50,6 +50,12 @@ async def main() -> None:
     except TransportError as error:
         assert error.delivery == "NOT_SUBMITTED"
     async with await Client.connect(
+        origin, "sdk-fixture-token", session="typed-python/long-session"
+    ) as long_session:
+        for _ in range(4200):
+            reply = await long_session.request(ProjectListRequest())
+            assert reply.require_payload()[0].name == "long-session"
+    async with await Client.connect(
         origin, "sdk-fixture-token", session="typed-python/acting-selection"
     ) as selected:
         for context in [

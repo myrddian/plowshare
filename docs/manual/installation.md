@@ -78,6 +78,29 @@ installer verified actual readable text, including a shared-scope read when
 `--share` was selected. It does not claim that every model-derived summary or
 embedding completed.
 
+## Repair publication after an access-policy change
+
+A completed installer receipt records an earlier operation; it does not grant
+current access. The installer verifies both retained text and the exact chapter
+lookup used by Help through `global_read` before reporting success or excluding
+an older chapter. An unreadable or ambiguous chapter stops the run.
+
+After reviewing the intended audience and reference restrictions, explicitly
+republish an existing shared installation with its original private journal:
+
+```sh
+node scripts/install-manual.mjs --url https://plowshare.example --share --republish --state /absolute/private/manual-journal.json
+```
+
+`--republish` uses a new journaled sharing request for each reviewed chapter. It
+reuses the existing admission when the content has not changed. It never clears
+old receipts, adopts another account's journal, changes reference restrictions,
+or bypasses server authorization. If a sharing reply is lost, inspect the journal
+and resume with both `--republish --resume`; an ordinary rerun does not replay it.
+For a Global installation use `--global --republish` with its Global journal.
+Without `--republish`, a failed current publication check reports the recovery
+path and preserves the previous chapter.
+
 ## Global account installation
 
 A human with ADMIN WRITE on Global can explicitly install into the fixed Global

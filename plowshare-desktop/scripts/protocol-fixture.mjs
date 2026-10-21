@@ -276,7 +276,7 @@ export async function protocolFixture(options = {}) {
         return;
       }
       if (frame.type.startsWith('information.') && options.information) {
-        const overridden = options.information(frame.type, payload);
+        const overridden = await options.information(frame.type, payload);
         if (overridden) { connection.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: frame.protocol_version, payload: overridden })); return; }
       }
       switch (frame.type) {

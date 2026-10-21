@@ -100,6 +100,16 @@ try {
   const studio=opened.get('Orchestration builder');await main.locator('#studio-open').click();await expect(studio.locator('.activity-tabs button:visible')).toHaveCount(2);
   await studio.locator('#activity-definitions').click();await expect(studio.locator('#activity-title')).toHaveText('Definitions');
   await assert.rejects(opened.get('Mailbox').evaluate(()=>window.plowshare.request({action:'activity-view',view:'runs'})),/workspace sidebar/);
+  const runPage = opened.get('Runs');
+  const selected = await runPage.evaluate(() => window.plowshare.request({action:'run-detail',id:'fixture-old-root'}));
+  assert.equal(selected.state.activity.details['fixture-old-root'].value.run.id,'fixture-old-root');
+  await main.locator('#inbox-open').click();
+  await runPage.evaluate(() => window.plowshare.request({action:'run-detail',id:'fixture-old-root'}));
+  const mailboxRow = opened.get('Mailbox').locator('#activity-list [data-item]').first();
+  await expect(mailboxRow).toBeVisible();
+  await mailboxRow.evaluate(node => { node.dataset.renderProbe = 'retained'; });
+  await opened.get('Mailbox').evaluate(() => window.plowshare.request({action:'activity-refresh'}));
+  await expect(mailboxRow).toHaveAttribute('data-render-probe', 'retained');
   await assert.rejects(opened.get('Board').evaluate(()=>window.plowshare.request({action:'board-view',view:'swarm'})),/workspace sidebar/);
   await main.locator('#projects-toggle').click();await expect(main.locator('#sidebar-projects')).toBeHidden();await expect(main.locator('#projects-toggle')).toHaveAttribute('aria-expanded','false');
   await main.reload();await expect(main.locator('#sidebar-projects')).toBeHidden();await main.locator('#projects-toggle').click();await expect(main.locator('#sidebar-projects')).toBeVisible();

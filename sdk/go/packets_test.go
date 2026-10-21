@@ -2,7 +2,10 @@ package plowshare
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -118,5 +121,36 @@ func TestPacketFieldsRefuseDuplicatesAndTrailingMessages(t *testing.T) {
 		if _, err := packetFields([]byte(wire)); err == nil {
 			t.Fatal("invalid packet accepted", wire)
 		}
+	}
+}
+
+// Completion bookkeeping must not disconnect a healthy long-lived stream.
+func TestLongPacketSessionKeepsBoundedRecentCompletionIDs(t *testing.T) {
+	p := newPackets(nil)
+	defer p.close()
+	payload := []byte("small reply")
+	hash := sha256.Sum256(payload)
+	var part messageSegment
+	for n := 0; n < 4200; n++ {
+		part = messageSegment{TransferID: fmt.Sprintf("00000000-0000-0000-0000-%012x", n), Number: 1, Count: 1, Total: len(payload), Hash: hex.EncodeToString(hash[:])}
+		p.mu.Lock()
+		message, err := p.assemble(part, payload)
+		p.mu.Unlock()
+		if err != nil || string(message) != "small reply" {
+			t.Fatal("long session failed", n, err)
+		}
+	}
+	if len(p.completed) != 4096 || len(p.completionOrder) != 4096 || p.held != 4096*256 {
+		t.Fatal("unbounded completion state")
+	}
+	p.mu.Lock()
+	_, err := p.assemble(part, payload)
+	p.mu.Unlock()
+	if err == nil {
+		t.Fatal("recent duplicate accepted")
+	}
+	p.close()
+	if p.held != 0 {
+		t.Fatal("completion reservations leaked")
 	}
 }

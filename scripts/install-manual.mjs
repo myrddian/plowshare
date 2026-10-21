@@ -87,6 +87,9 @@ function validateJournal(journal, server, account, destination = 'personal') {
       || !object(journal.operations) || !object(journal.chapters)) {
     throw new Error('Manual journal is invalid or belongs to another server/account.');
   }
+  if (journal.review && (!object(journal.review) || !UUID.test(journal.review.id)
+      || !/^[a-f0-9]{64}$/.test(journal.review.fingerprint) || !['pending', 'done'].includes(journal.review.state)))
+    throw new Error('Manual journal contains an invalid publication review.');
   for (const row of Object.values(journal.operations)) {
     if (!object(row) || !UUID.test(row.requestId) || !['pending', 'done'].includes(row.state)
         || typeof row.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(row.fingerprint)) {
@@ -117,7 +120,7 @@ const excluded = value => {
  * persist must durably save the journal before returning. No mutation is retried
  * within this invocation, and a saved pending receipt needs explicit resume. */
 export async function publishManual(plan, client, {
-  journal, persist, sharedClient, share = false, resume = false, signal, destination = 'personal',
+  journal, persist, sharedClient, share = false, republish = false, resume = false, signal, destination = 'personal',
   readinessMs = 300_000, pollMs = 1000, now = Date.now,
   sleep = ms => delay(ms, undefined, { signal }), progress = () => {},
 }) {
@@ -128,13 +131,39 @@ export async function publishManual(plan, client, {
   }
   // A pending share can only be recovered with explicit sharing still selected.
   // Otherwise this run could report success while leaving that effect unresolved.
-  const steps = ['upload', 'chapter-tags', 'exclude', ...(share ? ['share'] : [])];
+  if (republish && !generallyAvailable) throw new Error('--republish requires --share or --global.');
+  const steps = ['upload', 'chapter-tags', 'exclude', ...(share && !republish ? ['share'] : [])];
+  // A review is one durable batch. Resume never allocates a new sharing request
+  // for a chapter already confirmed earlier in the interrupted batch.
+  const reviewedShares = new Map();
+  let newReview;
+  if (journal.review?.state === 'pending' && !republish)
+    throw new Error('A publication review is incomplete; inspect the journal and use --republish --resume.');
+  if (republish) {
+    const fingerprint = hash(JSON.stringify(plan.chapters.map(chapter => [chapter.id, chapter.hash])));
+    let review = journal.review;
+    if (review?.state === 'pending') {
+      if (!resume || review.fingerprint !== fingerprint)
+        throw new Error('A publication review has uncertain delivery; use --republish --resume with the same manual contents.');
+    } else {
+      review = { id: randomUUID(), fingerprint, state: 'pending' };
+      newReview = review;
+    }
+    for (const chapter of plan.chapters)
+      reviewedShares.set(chapter.id, `${chapter.id}:${chapter.hash}:reviewed-share:${review.id}`);
+  }
   const active = new Set(plan.chapters.flatMap(chapter =>
     steps.map(step => `${chapter.id}:${chapter.hash}:${step}`)));
+  for (const key of reviewedShares.values()) active.add(key);
   for (const [key, row] of Object.entries(journal.operations)) {
     if (row.state === 'pending' && (!resume || !active.has(key))) {
       throw new Error('A manual operation has uncertain delivery. Inspect the journal; use --resume with the same manual contents.');
     }
+  }
+
+  if (newReview) {
+    journal.review = newReview;
+    await persist(journal);
   }
 
   async function mutate(key, operation, payload, validate) {
@@ -187,34 +216,56 @@ export async function publishManual(plan, client, {
     // Check the real reader rather than treating an admission/processing receipt as text.
     const window = await client.call('read', { revision, offset: 0, limit: 1 });
     if (!object(window) || window.revision !== revision || typeof window.text !== 'string' || !window.text) throw new Error(`Chapter ${chapter.id} has no readable text.`);
-    if (share) {
+    if (republish) {
+      await mutate(reviewedShares.get(chapter.id), 'share', { revision }, changed);
+    } else if (share) {
       await mutate(`${key}:share`, 'share', { revision }, changed);
     }
-    // Custody alone is not publication evidence. Global installs must exercise the same
-    // GLOBAL_READ selection used by Help, even when no explicit --share mutation is needed.
-    if (generallyAvailable) {
-      const shared = await sharedClient.call('read', { revision, offset: 0, limit: 1 });
-      if (!object(shared) || shared.revision !== revision || typeof shared.text !== 'string' || !shared.text) throw new Error(`Chapter ${chapter.id} could not be verified in global_read.`);
+    async function verifyDiscovery(allowPrevious) {
+      const found = await sharedClient.call('list', {
+        kind: 'source', filter: { tags: ['plowshare-manual', `manual-chapter-${chapter.id}`] }, offset: 0, limit: 2,
+      });
+      const allowed = new Set([revision, ...(allowPrevious && previous ? [previous.revision] : [])]);
+      if (!Array.isArray(found) || found.length < 1 || !found.some(row => row.id === revision)
+          || found.some(row => !allowed.has(row.id) || row.source_name !== chapter.name)
+          || (!allowPrevious && found.length !== 1))
+        throw new Error('Help must resolve exactly one current chapter from its name and tags.');
     }
-    // Preserve old evidence but remove the old imported version from normal discovery
-    // only after the replacement can be read in its intended audience.
-    if (previous && previous.revision !== revision) {
-      await mutate(`${key}:exclude`, 'exclude', { revision: previous.revision }, excluded);
+    // Custody and old receipts are not publication evidence. Before replacing an
+    // edition, admit only its known predecessor as a temporary second lookup match.
+    try {
+      if (generallyAvailable) {
+        const shared = await sharedClient.call('read', { revision, offset: 0, limit: 1 });
+        if (!object(shared) || shared.revision !== revision || typeof shared.text !== 'string' || !shared.text)
+          throw new Error('Retained chapter text is unavailable.');
+        await verifyDiscovery(true);
+      }
+      // Preserve the old evidence; remove it from discovery only once the new
+      // revision is readable. Exclusion changes discovery, requiring a fresh lookup.
+      if (previous && previous.revision !== revision) {
+        await mutate(`${key}:exclude`, 'exclude', { revision: previous.revision }, excluded);
+        if (generallyAvailable) await verifyDiscovery(false);
+      }
+    } catch (cause) {
+      if (!generallyAvailable) throw cause;
+      throw new Error(`Chapter ${chapter.id} could not be verified in global_read. Historical sharing receipts do not prove current publication. Review its audience and reference policy; use --republish with --share or --global to explicitly publish this revision again.`, { cause });
     }
     journal.chapters[chapter.id] = { hash: chapter.hash, revision };
     await persist(journal);
     progress({ id: chapter.id, title: chapter.title, revision, shared: generallyAvailable });
   }
+  if (republish) { journal.review.state = 'done'; await persist(journal); }
   return plan.chapters.map(chapter => ({ id: chapter.id, ...journal.chapters[chapter.id] }));
 }
 
 const HELP = `Install the Markdown Plowshare manual into the existing information Library.
-Usage: node scripts/install-manual.mjs [--dry-run] [--url ORIGIN] [--share] [--global] [--resume]
+Usage: node scripts/install-manual.mjs [--dry-run] [--url ORIGIN] [--share] [--global] [--republish] [--resume]
        [--state /absolute/private/journal.json] [--readiness-ms N] [--timeout-ms N]
 
 --dry-run       validate and list chapters offline, without authentication or writes
 --global        install into Global and verify global_read access (human scoped ADMIN required)
 --share         explicitly publish chapters to authenticated server accounts
+--republish     explicitly reapply publication after ACL/audience review; requires --share or --global
 --resume        resend an uncertain idempotent request with its saved UUID
 --state         private receipt journal outside the checkout (default: config/manual/)
 --readiness-ms  per-chapter extraction/derivation deadline (default 300000)
@@ -226,13 +277,14 @@ use configured models and allowances. No SQL, new HTTP route or agent run is use
 
 export function options(args, env = process.env) {
   const opts = { url: env.PLOWSHARE_URL, share: false,
-    resume: false, dryRun: false, readinessMs: 300_000, timeoutMs: 30_000 };
+    resume: false, republish: false, dryRun: false, readinessMs: 300_000, timeoutMs: 30_000 };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--help' || flag === '-h') opts.help = true;
     else if (flag === '--share') opts.share = true;
     else if (flag === '--global') opts.global = true;
     else if (flag === '--resume') opts.resume = true;
+    else if (flag === '--republish') opts.republish = true;
     else if (flag === '--dry-run') opts.dryRun = true;
     else if (['--url', '--state', '--readiness-ms', '--timeout-ms'].includes(flag)) {
       const value = args[++i];
@@ -246,6 +298,7 @@ export function options(args, env = process.env) {
       }
     } else throw new Error(`Unknown option: ${flag}`);
   }
+  if (opts.republish && !opts.share && !opts.global) throw new Error('--republish requires --share or --global.');
   if (opts.state && !isAbsolute(opts.state)) throw new Error('--state must be an absolute private path.');
   // Offline preview does not need a server. Live work never guesses a local origin.
   if (!opts.url) {
@@ -319,7 +372,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     await publishManual(plan, new InformationClient(transport, scope), {
       journal, destination, persist: value => saveJournal(state, value),
       sharedClient: new InformationClient(transport, { kind: 'global_read' }),
-      share: opts.share, resume: opts.resume, readinessMs: opts.readinessMs, signal: abort.signal,
+      share: opts.share, republish: opts.republish, resume: opts.resume, readinessMs: opts.readinessMs, signal: abort.signal,
       progress: row => process.stdout.write(`${row.id}\t${row.revision}\t${row.shared ? 'shared' : 'readable (sharing not requested)'}\n`),
     });
     process.stdout.write(opts.global || opts.share

@@ -57,6 +57,7 @@ const groupOf = (tab: ActivityView) =>
 let inboxId = '',
   runId = '',
   requestedRun = '',
+  listStamp = '',
   detailStamp = '',
   localError = '';
 let launchConversation = '',
@@ -133,6 +134,12 @@ function update(next: DesktopState) {
     detailStamp = '';
   }
   render();
+}
+function listHtml(html: string): void {
+  // Compare the generated input: DOM serialization normalizes SVG markup.
+  if (listStamp === html) return;
+  listStamp = html;
+  $('#activity-list').innerHTML = html;
 }
 function render() {
   if (!state || !initialized) return;
@@ -284,12 +291,15 @@ function render() {
       inboxId = shownInbox[0]?.id ?? '';
       $('#activity-detail').scrollTop = 0;
     }
-    $('#activity-list').innerHTML = shownInbox
-      .map(
-        (item) =>
-          `<button class="activity-row" data-item="${esc(item.id)}" aria-current="${item.id === inboxId}">${icon(inbox.read.includes(item.id) ? 'check' : 'inbox')}<span><strong>${esc(kindLabel(item.kind))}${item.ending ? ` · ${esc(item.ending)}` : ''}</strong><small>${esc(preview(item.answer))}</small><time>${esc(date(item.arrivedAt))} · ${inbox.read.includes(item.id) ? 'Read' : 'Unread'}</time></span></button>`,
-      )
-      .join('');
+    if (shownInbox.length)
+      listHtml(
+        shownInbox
+          .map(
+            (item) =>
+              `<button class="activity-row" data-item="${esc(item.id)}" aria-current="${item.id === inboxId}">${icon(inbox.read.includes(item.id) ? 'check' : 'inbox')}<span><strong>${esc(kindLabel(item.kind))}${item.ending ? ` · ${esc(item.ending)}` : ''}</strong><small>${esc(preview(item.answer))}</small><time>${esc(date(item.arrivedAt))} · ${inbox.read.includes(item.id) ? 'Read' : 'Unread'}</time></span></button>`,
+          )
+          .join(''),
+      );
     $('#activity-list-note').textContent = inbox.loading
       ? 'Updating mailbox…'
       : `${shownInbox.length} shown · ${inbox.items.length} loaded. The counter shows unread only.${inbox.more ? ' Load older items for more history.' : ''}`;
@@ -316,12 +326,15 @@ function render() {
       requestedRun = '';
       pendingLaunch = false;
     }
-    $('#activity-list').innerHTML = shownRuns
-      .map(
-        (run) =>
-          `<button class="activity-row" data-item="${esc(run.id)}" aria-current="${run.id === runId}">${icon(run.parent ? 'layers' : 'route')}<span><strong>${esc(run.definition || run.id)}</strong><small>${esc(run.project || 'Global')} · ${esc(run.state)}${run.stalledSince ? ' · stalled' : ''}${run.parent ? ` · child, depth ${run.depth}` : ''}</small><time>${esc(date(run.createdAt))}</time></span></button>`,
-      )
-      .join('');
+    if (shownRuns.length)
+      listHtml(
+        shownRuns
+          .map(
+            (run) =>
+              `<button class="activity-row" data-item="${esc(run.id)}" aria-current="${run.id === runId}">${icon(run.parent ? 'layers' : 'route')}<span><strong>${esc(run.definition || run.id)}</strong><small>${esc(run.project || 'Global')} · ${esc(run.state)}${run.stalledSince ? ' · stalled' : ''}${run.parent ? ` · child, depth ${run.depth}` : ''}</small><time>${esc(date(run.createdAt))}</time></span></button>`,
+          )
+          .join(''),
+      );
     $('#activity-list-note').textContent = runs.loading
       ? 'Updating runs…'
       : runs.limited
@@ -338,13 +351,14 @@ function render() {
     );
     if (!rows.some((row) => row.name === definitionId))
       definitionId = rows[0]?.name ?? '';
-    $('#activity-list').innerHTML =
+    listHtml(
       rows
         .map(
           (row) =>
             `<button class="activity-row" data-item="${esc(row.name)}" aria-current="${row.name === definitionId}"><span><strong>${esc(row.name)}</strong><small>${row.served ? 'Available' : 'Withheld'} · ${esc(row.tier ?? '')}</small></span></button>`,
         )
-        .join('') || '<p class="activity-empty">No definitions to show.</p>';
+        .join('') || '<p class="activity-empty">No definitions to show.</p>',
+    );
     $('#activity-list-note').textContent = activity.definitions?.loading
       ? 'Updating definitions…'
       : `${rows.length} definitions`;
@@ -360,15 +374,16 @@ function render() {
         kind: 'trigger',
       })),
     ].filter(({ row }) => row.name.toLowerCase().includes(query));
-    $('#activity-list').innerHTML =
+    listHtml(
       `<button class="activity-row" data-item="" aria-current="${!scheduledId}">New scheduled work</button>` +
-      rows
-        .map(({ row, kind }) => {
-          const key = JSON.stringify([kind, row.name]);
-          return `<button class="activity-row" data-item="${esc(key)}" aria-current="${key === scheduledId}"><span><strong>${esc(row.name)}</strong><small>${kind} · ${row.paused ? 'Paused' : 'Active'}</small></span></button>`;
-        })
-        .join('') +
-      schedulePagingControls(state, 'schedules');
+        rows
+          .map(({ row, kind }) => {
+            const key = JSON.stringify([kind, row.name]);
+            return `<button class="activity-row" data-item="${esc(key)}" aria-current="${key === scheduledId}"><span><strong>${esc(row.name)}</strong><small>${kind} · ${row.paused ? 'Paused' : 'Active'}</small></span></button>`;
+          })
+          .join('') +
+        schedulePagingControls(state, 'schedules'),
+    );
     $('#activity-list-note').textContent = activity.schedules?.schedulePage
       ?.loading
       ? 'Updating schedules…'
@@ -380,11 +395,12 @@ function render() {
   if (
     view !== 'definitions' &&
     view !== 'schedules' &&
-    !$('#activity-list').children.length
+    (view === 'inbox' ? shownInbox.length === 0 : shownRuns.length === 0)
   ) {
     const source = view === 'inbox' ? inbox : runs;
-    $('#activity-list').innerHTML =
-      `<p class="activity-empty">${source.loading ? 'Loading…' : !source.loaded ? 'Activity unavailable. Try Refresh.' : query || (type && view === 'inbox') ? `No matching items.${view === 'inbox' && inbox.more ? ' Load older items to look further back.' : ''}` : view === 'inbox' ? (filter === 'all' ? 'No mailbox items yet.' : `No ${filter} items${inbox.more ? ' in the loaded history. Load older items to look further back' : ''}.`) : 'No runs yet.'}</p>`;
+    listHtml(
+      `<p class="activity-empty">${source.loading ? 'Loading…' : !source.loaded ? 'Activity unavailable. Try Refresh.' : query || (type && view === 'inbox') ? `No matching items.${view === 'inbox' && inbox.more ? ' Load older items to look further back.' : ''}` : view === 'inbox' ? (filter === 'all' ? 'No mailbox items yet.' : `No ${filter} items${inbox.more ? ' in the loaded history. Load older items to look further back' : ''}.`) : 'No runs yet.'}</p>`,
+    );
   }
   if (focusId)
     [...$('#activity-list').querySelectorAll<HTMLButtonElement>('[data-item]')]
@@ -429,13 +445,16 @@ function renderDetail() {
     job.status,
     job.ending,
   ]);
+  const updating =
+    $('#activity-detail').querySelector<HTMLElement>('[data-run-loading]');
+  if (updating) updating.hidden = !detail?.loading;
   const stamp = JSON.stringify([
     view,
     view === 'inbox'
       ? [item, activity.inbox.read.includes(inboxId), marking]
       : [
           runId,
-          detail,
+          [detail?.value, detail?.wire, detail?.error],
           activity.records?.[runId],
           activity.navigation?.[runId],
           activity.decisions?.[runId],
@@ -484,7 +503,7 @@ function renderDetail() {
       : '<p class="activity-empty">Choose a definition.</p>';
   } else if (detail?.value) {
     const { run, children } = detail.value;
-    content.innerHTML = `${view === 'builder' ? builderPanel(state, runId) : ''}<header class="run-detail-header"><div><div class="eyebrow">${esc(run.project || 'Global')} · ${esc(run.tier)} · ${esc(run.state)}${detail.loading ? ' · updating' : ''}</div><h2>${icon('route')}${esc(run.definition || run.id)}</h2><p class="activity-id">${esc(run.id)}</p></div>${cancelControl(state, runId)}</header>${questionControls(state, runId, { question: false })}${detail.error ? `<p class="error-banner">${esc(detail.error)}</p>` : ''}
+    content.innerHTML = `${view === 'builder' ? builderPanel(state, runId) : ''}<header class="run-detail-header"><div><div class="eyebrow">${esc(run.project || 'Global')} · ${esc(run.tier)} · ${esc(run.state)}<span data-run-loading ${detail.loading ? '' : 'hidden'}> · updating</span></div><h2>${icon('route')}${esc(run.definition || run.id)}</h2><p class="activity-id">${esc(run.id)}</p></div>${cancelControl(state, runId)}</header>${questionControls(state, runId, { question: false })}${detail.error ? `<p class="error-banner">${esc(detail.error)}</p>` : ''}
       ${run.parent ? `<p class="activity-relation">Child run · depth ${run.depth} · <button data-run="${esc(run.parent)}">${icon('layers')}Parent ${esc(run.parent)}</button></p>` : ''}
       ${run.stalledSince ? `<p class="activity-warning">${icon('alert')}Marked stalled ${esc(date(run.stalledSince))}</p>` : ''}
       ${run.pendingCap ? `<p class="activity-warning">${icon('alert')}Waiting on a ${esc(capLabel(run.pendingCap))}</p>` : ''}
@@ -505,11 +524,12 @@ function renderDetail() {
   content.scrollTop = scroll;
 }
 async function selectRun(id: string) {
-  await action({ action: 'run-detail', id });
+  if (view !== 'runs' && view !== 'builder') return;
+  await action({ action: 'run-detail', id, view });
   if (
     state.connected &&
     runId === id &&
-    (state.activity.view === 'runs' || state.activity.view === 'builder')
+    (view === 'runs' || view === 'builder')
   )
     await action({ action: 'run-record', id });
 }
@@ -548,7 +568,7 @@ $('#inbox-older').addEventListener('click', () =>
 );
 $('#activity-refresh').addEventListener('click', () => {
   outputsStamp = '';
-  background(action({ action: 'activity-refresh' }));
+  background(action({ action: 'activity-refresh', view }));
 });
 $('#activity-list').addEventListener('click', (event) => {
   const id = (event.target as HTMLElement).closest<HTMLElement>('[data-item]')
