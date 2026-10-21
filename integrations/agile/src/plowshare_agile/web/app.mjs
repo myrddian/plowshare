@@ -65,7 +65,8 @@ function report(error) {
 }
 class ApiError extends Error {
   constructor(status, value) {
-    const conflict = value?.code === 'CONFLICT';
+    const conflict =
+      value?.code === 'CONFLICT' || value?.code === 'INFORMATION_TAGS_CONFLICT';
     const message = conflict
       ? 'This document changed. Your edits are still here. Reload and review before saving again.'
       : value?.error === 'transport'

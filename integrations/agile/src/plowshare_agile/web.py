@@ -179,7 +179,7 @@ class WebUI:
                         503
                         if self._pending(request) or error.code == "INTERNAL_ERROR"
                         else 409
-                        if error.code == "CONFLICT"
+                        if error.code in {"CONFLICT", "INFORMATION_TAGS_CONFLICT"}
                         else 403
                     ),
                 )
