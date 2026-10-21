@@ -104,6 +104,7 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
  */
 @Configuration
 @EnableWebSocket
+@org.springframework.context.annotation.Import(WebSocketKeepAliveConfig.class)
 public class EventChannelConfig implements WebSocketConfigurer {
 
   /**
@@ -138,6 +139,8 @@ public class EventChannelConfig implements WebSocketConfigurer {
    * be the one {@code JobStreamHandler} holds.
    */
   private final Watchers watchers;
+
+  private final WebSocketKeepAlive keepAlive;
 
   @org.springframework.beans.factory.annotation.Value(
       "${plowshare.transport.packet-memory-bytes:2147483648}")
@@ -179,9 +182,11 @@ public class EventChannelConfig implements WebSocketConfigurer {
     usageSubscriptions = source;
   }
 
-  public EventChannelConfig(ObjectProvider<FrameRouter> routers, Watchers watchers) {
+  public EventChannelConfig(
+      ObjectProvider<FrameRouter> routers, Watchers watchers, WebSocketKeepAlive keepAlive) {
     this.routers = Objects.requireNonNull(routers, "routers");
     this.watchers = Objects.requireNonNull(watchers, "watchers");
+    this.keepAlive = Objects.requireNonNull(keepAlive, "keepAlive");
   }
 
   /**
@@ -261,7 +266,8 @@ public class EventChannelConfig implements WebSocketConfigurer {
     // return the same singleton — the same shape, for the same reason, as
     // FileChannelConfig's call to its own handler method.
     registry
-        .addHandler(eventChannelHandler(sessionRegistry()), EventChannelHandler.PATH)
+        .addHandler(
+            keepAlive.decorate(eventChannelHandler(sessionRegistry())), EventChannelHandler.PATH)
         .addInterceptors(new HandleInterceptor());
   }
 }

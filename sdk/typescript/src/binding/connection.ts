@@ -2,6 +2,7 @@ import { actingOptions, type RequestOptions } from './acting.ts';
 import { utf8Length } from './files.ts';
 import { CURRENT_VERSION, asking, isAnswer, outcomeIn } from './envelope.ts';
 import type { Outcome } from './envelope.ts';
+import { PacketTransportFault } from './packets.ts';
 
 /**
  * One socket, many questions, and the correlation that keeps their answers
@@ -293,7 +294,7 @@ export function connect(options: ConnectOptions): Connected {
   function fail(id: string, asker: Waiting, trouble: Error): void {
     if (terminate(id, asker)) asker.failed(trouble);
   }
-  function strand(why: string): void {
+  function strand(why: string, cause?: PacketTransportFault): void {
     open = false;
     stranding = true;
     for (const [id, asker] of [...waiting]) {
@@ -304,15 +305,24 @@ export function connect(options: ConnectOptions): Connected {
         new ConnectionFault(
           asker.submitted ? 'RESPONSE_LOST' : 'NOT_SUBMITTED',
           why,
+          cause ? { cause } : undefined,
         ),
       );
     }
     stranding = false;
     checkDrained();
   }
-  socket.addEventListener('close', () => {
+  socket.addEventListener('close', (event) => {
     const wasOpen = open;
-    strand('the socket closed before this frame was answered');
+    // Packet transport closes carry a fixed diagnostic, rather than an untrusted
+    // codec/JSON exception. Preserve it for pending calls without replaying work.
+    const failure = event instanceof PacketTransportFault ? event : undefined;
+    strand(
+      failure
+        ? `the packet transport closed: ${failure.reason}`
+        : 'the socket closed before this frame was answered',
+      failure,
+    );
     if (wasOpen && !callerClosed) options.onClose?.();
   });
   socket.addEventListener('message', (event) => {
@@ -494,7 +504,9 @@ export function connect(options: ConnectOptions): Connected {
                   asker,
                   new ConnectionFault(
                     asker.submitted ? 'RESPONSE_LOST' : 'NOT_SUBMITTED',
-                    'request writer failed; no request was replayed',
+                    cause instanceof PacketTransportFault
+                      ? `request writer failed: ${cause.reason}; no request was replayed`
+                      : 'request writer failed; no request was replayed',
                     { cause },
                   ),
                 );

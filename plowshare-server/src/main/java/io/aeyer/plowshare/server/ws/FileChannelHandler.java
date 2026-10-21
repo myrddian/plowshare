@@ -74,10 +74,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  * here</b> — it is one rule and it drifts the moment there are two copies of it. What cannot be
  * distinguished is a wedged client from a merely slow one, and no instrument for that can exist: a
  * WebSocket ping would prove the client's reader loop is alive, which is not the question — a
- * client wedged on one file read answers pings from another thread the whole time — and a half-open
- * connection whose far host lost power sends nothing at all until a TCP keepalive expires, which is
- * minutes. So the deadline's sentence says what is known, that no answer arrived in the time
- * allowed, and does not guess which it was.
+ * client wedged on one file read answers pings from another thread the whole time. The transport's
+ * independent Ping/Pong keepalive bounds silent connections, while a responsive transport can still
+ * have an unfinished file operation. So the deadline's sentence says what is known, that no answer
+ * arrived in the time allowed, and does not guess which it was.
  *
  * <h2>Sends are serialised, and it is a lock rather than {@code synchronized}</h2>
  *

@@ -245,23 +245,38 @@ await test('unchanged information does no four-second reads and reconciles at a 
   assert.equal(f.reads(), 1);
   f.clock.advance(4000);
   assert.equal(f.reads(), 2);
-  assert.deepEqual(f.invalidations, [true, false]);
+  assert.deepEqual(f.invalidations, [true]);
 });
 await test('hints hide immediately and bursts coalesce without postponing the first deadline', () => {
   const f = refreshFixture();
   f.owner.observe('selection', 0);
   f.clock.advance(0);
+  f.owner.readStarted();
   f.owner.observe('selection', 1);
   f.clock.advance(100);
   f.owner.observe('selection', 2);
   f.clock.advance(149);
   assert.equal(f.reads(), 1);
-  assert.deepEqual(f.invalidations, [true, false, false]);
+  assert.deepEqual(f.invalidations, [true, false]);
   f.clock.advance(1);
   assert.equal(f.reads(), 2);
   f.owner.observe('selection', 2);
   f.clock.advance(250);
   assert.equal(f.reads(), 2);
+});
+
+await test('a new hint during a read still invalidates its response and schedules recovery', () => {
+  const f = refreshFixture();
+  f.owner.observe('selection', 0);
+  f.clock.advance(0);
+  f.owner.readStarted();
+  f.owner.observe('selection', 1);
+  f.clock.advance(250);
+  f.owner.readStarted();
+  f.owner.observe('selection', 2);
+  assert.deepEqual(f.invalidations, [true, false, false]);
+  f.clock.advance(250);
+  assert.equal(f.reads(), 3);
 });
 await test('scope/account/server/socket switches fence already queued callbacks and recover immediately', () => {
   for (const identity of [

@@ -53,7 +53,9 @@ class PacketBudgetConfigurationTest {
   void default_budget_supports_the_portable_ceiling_and_explicit_undersizing_fails() {
     var config =
         new EventChannelConfig(
-            new DefaultListableBeanFactory().getBeanProvider(FrameRouter.class), new Watchers());
+            new DefaultListableBeanFactory().getBeanProvider(FrameRouter.class),
+            new Watchers(),
+            mock(WebSocketKeepAlive.class));
     assertEquals(2L * 1024 * 1024 * 1024, config.resolvedPacketMemoryBytes());
     ReflectionTestUtils.setField(config, "packetMemoryBytes", 256L * 1024 * 1024);
     assertThrows(IllegalArgumentException.class, config::resolvedPacketMemoryBytes);
