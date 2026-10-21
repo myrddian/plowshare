@@ -97,7 +97,7 @@ const activities = new Map<
 >();
 const activityGroup = (view: ActivityView) =>
   view === 'definitions' || view === 'builder' ? 'studio' : view;
-let activityRunRead = 0;
+const activityRunReads = new Map<string, number>();
 const libraries = new Map<'library' | 'memories', WorkspacePage>();
 const boards = new Map<BoardView, WorkspacePage>();
 let usagePage: WorkspacePage | undefined;
@@ -352,8 +352,11 @@ function openActivity(tab: ActivityView, project?: string) {
   page.on('closed', () => {
     if (activities.get(group)?.window !== page) return;
     activities.delete(group);
+    client.activity.close(activity.view);
+    if (!client.activity.isOpen('runs') && !client.activity.isOpen('builder'))
+      client.runs.pause();
     if (group === 'runs' || group === 'studio') {
-      activityRunRead++;
+      activityRunReads.set(group, (activityRunReads.get(group) ?? 0) + 1);
       if (!quitting) background(client.followView(`activity-run:${group}`));
     }
     if (!activities.size) {
@@ -1012,10 +1015,22 @@ background(
             return { state: client.state };
           });
         }
+        if (request.action === 'activity-refresh')
+          return client.dispatch({ ...request, view: account.view });
         if (request.action === 'run-detail') {
-          const read = ++activityRunRead;
-          return client.dispatch(request).then(async (reply) => {
-            if (account.window.isDestroyed() || read !== activityRunRead)
+          if (account.view !== 'runs' && account.view !== 'builder')
+            throw new Error(
+              'Choose a run in Runs or the orchestration builder.',
+            );
+          // The owning page supplies context; another open page cannot change it.
+          const scopedRequest = { ...request, view: account.view };
+          const read = (activityRunReads.get(account.group) ?? 0) + 1;
+          activityRunReads.set(account.group, read);
+          return client.dispatch(scopedRequest).then(async (reply) => {
+            if (
+              account.window.isDestroyed() ||
+              read !== activityRunReads.get(account.group)
+            )
               return { ...reply, state: client.state };
             const conversation =
               client.state.activity.details[request.id]?.wire?.orchestration
@@ -1037,7 +1052,10 @@ background(
           request.view !== 'runs' &&
           request.view !== 'builder'
         ) {
-          activityRunRead++;
+          activityRunReads.set(
+            account.group,
+            (activityRunReads.get(account.group) ?? 0) + 1,
+          );
           background(client.followView(`activity-run:${account.group}`));
         }
         if (request.action === 'builder-trajectory') {

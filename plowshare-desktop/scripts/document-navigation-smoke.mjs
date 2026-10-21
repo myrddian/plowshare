@@ -47,8 +47,12 @@ const policy = {
   allowOverrides: true,
   referenceLabel: 'Approved locked reference',
 };
+let holdAuxiliary = false;
+const pendingAuxiliary = [];
 const fixture = await protocolFixture({
-  information(operation, payload) {
+  information: function answerInformation(operation, payload) {
+    if (holdAuxiliary && ['information.documents.facets', 'information.views.list', 'information.relationships.list', 'information.policy.get'].includes(operation))
+      return new Promise(resolve => pendingAuxiliary.push(() => resolve(answerInformation(operation, payload))));
     calls.push({ operation, payload });
     const ok = (payload) => ({ code: 'OK', payload });
     if (operation === 'information.navigation.capabilities')
@@ -255,6 +259,15 @@ try {
   await expect(panel.locator('[data-nav-results]')).toContainText(
     'Billing service',
   );
+  holdAuxiliary = true;
+  await panel.locator('[data-nav-open="0"]').click();
+  await expect(panel.locator('[data-nav-text]')).toHaveText('Retained runbook text');
+  await expect.poll(() => pendingAuxiliary.length).toBeGreaterThan(0);
+  // Supplementary reads must not hold the navigation lock or hide readable text.
+  await panel.locator('[data-nav-root]').click();
+  await expect(panel.locator('[data-nav-document]')).toBeEmpty();
+  holdAuxiliary = false;
+  for (const release of pendingAuxiliary.splice(0)) release();
   await panel.locator('[data-nav-open="0"]').click();
   await expect(panel.locator('[data-nav-document]')).toContainText(
     'Approved locked reference',

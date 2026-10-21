@@ -529,3 +529,34 @@ await test('question read failures retain loaded questions and account switches 
   await refreshing;
   assert.deepEqual(f.state.activity.details, {});
 });
+
+await test('Mailbox and Runs keep independent open-page state and selected-run refreshes', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.reset());
+  f.respond((ask) =>
+    ask.type === 'orchestration.status'
+      ? { code: 'OK', payload: statusWire('root', 'running') }
+      : ask.type === 'orchestration.list'
+        ? { code: 'OK', payload: { orchestrations: [run('root')] } }
+        : { code: 'OK', payload: { items: [item('one')], unread: 1 } },
+  );
+  await f.client.open('runs');
+  await f.client.open('inbox');
+  await f.client.select('root', 'runs');
+  assert.equal(f.state.activity.details.root?.value?.run.id, 'root');
+  assert.equal(f.state.activity.view, 'inbox');
+  const before = f.calls.filter((ask) => ask.type === 'inbox.list').length;
+  f.client.push({ kind: 'inbox.changed', unread: 2 });
+  await tick();
+  assert.ok(f.calls.filter((ask) => ask.type === 'inbox.list').length > before);
+  await f.client.open('builder');
+  await f.client.select('root', 'builder');
+  f.client.close('builder');
+  assert.equal(f.client.isOpen('runs'), true);
+  await f.client.select('root', 'runs');
+  f.client.close('runs');
+  const count = f.calls.length;
+  await assert.rejects(f.client.select('root', 'runs'), /available/);
+  assert.equal(f.calls.length, count);
+  assert.equal(f.client.isOpen('inbox'), true);
+});

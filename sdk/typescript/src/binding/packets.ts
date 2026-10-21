@@ -348,7 +348,7 @@ export function packetSocket(options: PacketOptions): Socket {
       throw new Error('completed transfer identity reused');
     let assembly = incoming.get(part.transferId);
     if (assembly === undefined) {
-      if (incoming.size >= 4 || incoming.size + completed.size >= 4096)
+      if (incoming.size >= 4)
         throw new PacketTransportFault('packet capacity exceeded');
       reserve(part.totalBytes);
       assembly = {
@@ -395,6 +395,14 @@ export function packetSocket(options: PacketOptions): Socket {
       assembly.cancelTotal();
       incoming.delete(part.transferId);
       release(part.totalBytes);
+      // Retain only recent IDs. A lifetime tombstone cap disconnected healthy streams
+      // after 4096 replies/pushes; domain idempotency is owned by the inner operation.
+      if (completed.size === 4096) {
+        const oldest = completed.values().next().value;
+        if (oldest === undefined) throw new Error('missing completed transfer');
+        completed.delete(oldest);
+        release(256);
+      }
       reserve(256);
       completed.add(part.transferId);
     }

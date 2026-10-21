@@ -19,6 +19,7 @@ internal sealed class Packets : IDisposable
     private readonly Timer expiry;
     private readonly Dictionary<string, Assembly> incoming = [];
     private readonly HashSet<string> completed = [];
+    private readonly Queue<string> completionOrder = [];
     private long held;
     private bool closed;
     private string? sending;
@@ -142,7 +143,7 @@ internal sealed class Packets : IDisposable
             if (closed || completed.Contains(transfer)) throw new IOException("Completed transfer identity reused");
             if (!incoming.TryGetValue(transfer, out var assembly))
             {
-                if (incoming.Count >= 4 || incoming.Count + completed.Count >= 4096) throw new IOException("Transfer capacity exceeded");
+                if (incoming.Count >= 4) throw new IOException("Transfer capacity exceeded");
                 Reserve(total); assembly = new Assembly(part); incoming.Add(transfer, assembly);
             }
             if ((total, count, hash) != (assembly.First.Total, assembly.First.Count, assembly.First.Hash)) throw new IOException("Conflicting transfer metadata");
@@ -157,7 +158,10 @@ internal sealed class Packets : IDisposable
                 if (Convert.ToHexString(SHA256.HashData(assembly.Bytes)).ToLowerInvariant() != hash) throw new IOException("Transfer hash mismatch");
                 // Check UTF-8 before forwarding the original bytes to the ordinary response codec.
                 _ = new UTF8Encoding(false, true).GetCharCount(assembly.Bytes);
-                message = assembly.Bytes; incoming.Remove(transfer); Release(total); Reserve(256); completed.Add(transfer);
+                message = assembly.Bytes; incoming.Remove(transfer); Release(total);
+                // Keep a recent duplicate-detection window, not a lifetime message limit.
+                if (completionOrder.Count == 4096) { completed.Remove(completionOrder.Dequeue()); Release(256); }
+                Reserve(256); completed.Add(transfer); completionOrder.Enqueue(transfer);
             }
         }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -178,7 +182,7 @@ internal sealed class Packets : IDisposable
             if (closed) return;
             closed = true; expiry.Dispose();
             foreach (var assembly in incoming.Values) Release(assembly.First.Total);
-            incoming.Clear(); Release(completed.Count * 256); completed.Clear(); credit?.TrySetException(new IOException("Packet connection closed"));
+            incoming.Clear(); Release(completed.Count * 256); completed.Clear(); completionOrder.Clear(); credit?.TrySetException(new IOException("Packet connection closed"));
         }
     }
 }

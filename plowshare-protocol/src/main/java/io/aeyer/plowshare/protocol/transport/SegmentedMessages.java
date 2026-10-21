@@ -12,11 +12,10 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.BitSet;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -52,7 +51,7 @@ public final class SegmentedMessages implements AutoCloseable {
   private final Runnable expired;
   private final Object sender = new Object();
   private final Map<String, Assembly> receiving = new HashMap<>();
-  private final Set<String> completed = new HashSet<>();
+  private final LinkedHashSet<String> completed = new LinkedHashSet<>();
   private final ScheduledFuture<?> timer;
   private long held;
   private boolean closed;
@@ -194,8 +193,7 @@ public final class SegmentedMessages implements AutoCloseable {
         throw new IllegalArgumentException("completed transfer identity reused");
       Assembly assembly = receiving.get(packet.transferId());
       if (assembly == null) {
-        if (receiving.size() >= MAX_TRANSFERS
-            || completed.size() + receiving.size() >= MAX_TOMBSTONES)
+        if (receiving.size() >= MAX_TRANSFERS)
           throw new IllegalArgumentException("transfer capacity exceeded");
         reserve(packet.totalBytes());
         try {
@@ -237,6 +235,12 @@ public final class SegmentedMessages implements AutoCloseable {
         }
         receiving.remove(packet.transferId());
         release(packet.totalBytes());
+        // Completion history is a bounded recent window, never a connection lifetime limit.
+        // Domain replay/idempotency checks still belong to the assembled operation.
+        if (completed.size() == MAX_TOMBSTONES) {
+          completed.removeFirst();
+          release(TOMBSTONE_BYTES);
+        }
         reserve(TOMBSTONE_BYTES);
         completed.add(packet.transferId());
       }

@@ -72,6 +72,26 @@ const flush = async (): Promise<void> => {
 };
 
 describe('bounded packet transport', () => {
+  it('keeps long sessions open with a bounded recent-completion window', async () => {
+    const wire = new Wire();
+    const socket = connected(wire);
+    const messages = vi.fn();
+    socket.addEventListener('message', messages);
+    let latest = '';
+    for (let n = 0; n < 4200; n++) {
+      latest = parts(codec.encode('small reply'))[0]!;
+      wire.deliver(latest);
+      await flush();
+    }
+    expect(messages).toHaveBeenCalledTimes(4200);
+    expect(wire.closed).toBe(false);
+    // Recent duplicates are still invalid; old IDs are bookkeeping, not domain receipts.
+    wire.deliver(latest);
+    await flush();
+    expect(wire.closed).toBe(true);
+    expect(messages).toHaveBeenCalledTimes(4200);
+    socket.close();
+  });
   it('preserves the credit timeout in pending request failures without replay', async () => {
     vi.useFakeTimers();
     try {

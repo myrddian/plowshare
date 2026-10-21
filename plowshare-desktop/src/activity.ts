@@ -49,8 +49,22 @@ export class ActivityClient {
   private timer: ReturnType<typeof setInterval> | undefined;
   private flights = new Map<string, Promise<void>>();
   private dirty = new Set<string>();
-  private view: ActivityView | undefined;
-  private selected: string | undefined;
+  // Workspace pages coexist. Opening Mailbox must not invalidate an open Runs page.
+  private readonly views = new Map<string, ActivityView>();
+  private readonly selected = new Map<'runs' | 'builder', string>();
+  private group(view: ActivityView): string {
+    return view === 'definitions' || view === 'builder' ? 'studio' : view;
+  }
+  isOpen(view: ActivityView): boolean {
+    return this.views.get(this.group(view)) === view;
+  }
+  close(view: ActivityView): void {
+    this.views.delete(this.group(view));
+    if (view === 'runs' || view === 'builder') this.selected.delete(view);
+    if (this.state().activity.view === view)
+      this.state().activity.view = [...this.views.values()].at(-1);
+    this.emit();
+  }
   private marking = new Set<string>();
   private inboxShown = 20;
   private state: () => DesktopState;
@@ -80,8 +94,8 @@ export class ActivityClient {
     for (const detail of Object.values(activity.details))
       detail.loading = false;
     if (clearView) {
-      this.view = undefined;
-      this.selected = undefined;
+      this.views.clear();
+      this.selected.clear();
       activity.view = undefined;
       this.inboxShown = 20;
     }
@@ -109,22 +123,37 @@ export class ActivityClient {
       view !== 'builder'
     )
       throw new Error('Choose an Activity view.');
-    this.view = view;
+    if (view === undefined) {
+      this.views.clear();
+      this.selected.clear();
+    } else {
+      const previous = this.views.get(this.group(view));
+      if (previous === 'builder' && view !== previous)
+        this.selected.delete(previous);
+      this.views.set(this.group(view), view);
+    }
     this.state().activity.view = view;
     this.emit();
     if (view === 'inbox') await this.inbox();
     if (view === 'runs' || view === 'builder') {
       await this.runs();
-      if (this.selected) await this.detail(this.selected);
+      const selected = this.selected.get(view);
+      if (selected) await this.detail(selected);
     }
   }
-  async refresh() {
+  async refresh(view?: ActivityView) {
+    if (view === 'inbox') return this.inbox();
+    if (view === 'definitions' || view === 'schedules') return;
+    if (view === 'runs' || view === 'builder') {
+      await this.runs();
+      const selected = this.selected.get(view);
+      if (selected) await this.detail(selected);
+      return;
+    }
     await Promise.all([
-      this.view === 'inbox' ? this.inbox() : this.unread(),
+      this.isOpen('inbox') ? this.inbox() : this.unread(),
       this.runs(),
-      (this.view === 'runs' || this.view === 'builder') && this.selected
-        ? this.detail(this.selected)
-        : Promise.resolve(),
+      ...[...new Set(this.selected.values())].map((id) => this.detail(id)),
     ]);
   }
   private read(key: string, work: () => Promise<void>): Promise<void> {
@@ -247,7 +276,7 @@ export class ActivityClient {
   }
   async older() {
     const inbox = this.state().activity.inbox;
-    if (this.view !== 'inbox' || !inbox.loaded || !inbox.more)
+    if (!this.isOpen('inbox') || !inbox.loaded || !inbox.more)
       throw new Error('No older mailbox items are available.');
     if (!this.live())
       throw new Error('Reconnect before loading older mailbox items.');
@@ -256,7 +285,7 @@ export class ActivityClient {
   }
   async mark(id: string) {
     const inbox = this.state().activity.inbox;
-    if (this.view !== 'inbox' || !inbox.items.some((item) => item.id === id))
+    if (!this.isOpen('inbox') || !inbox.items.some((item) => item.id === id))
       throw new Error('Only a displayed inbox item can be marked read.');
     if (inbox.read.includes(id) || this.marking.has(id)) return;
     const epoch = this.epoch,
@@ -367,7 +396,7 @@ export class ActivityClient {
       }
     });
   }
-  async select(id: string) {
+  async select(id: string, view: 'runs' | 'builder' = 'runs') {
     const activity = this.state().activity;
     const known =
       activity.runs.items.some((run) => run.id === id) ||
@@ -377,9 +406,9 @@ export class ActivityClient {
           detail.value?.children.some((child) => child.id === id) ||
           detail.value?.run.parent === id,
       );
-    if ((this.view !== 'runs' && this.view !== 'builder') || !known)
+    if (!this.isOpen(view) || !known)
       throw new Error('Choose an available run.');
-    this.selected = id;
+    this.selected.set(view, id);
     await this.detail(id);
   }
   private detail(id: string) {
@@ -428,7 +457,7 @@ export class ActivityClient {
       this.revision++;
       this.state().activity.inbox.unread = unread;
       this.emit();
-      if (this.view === 'inbox' && this.marking.size === 0)
+      if (this.isOpen('inbox') && this.marking.size === 0)
         this.background(this.inbox());
     }
     const changed = changedOf(value),
@@ -441,18 +470,16 @@ export class ActivityClient {
       )
         this.background(this.detail(changed.id));
     }
-    if (
-      (this.view === 'runs' || this.view === 'builder') &&
-      this.selected &&
-      (changed || recorded)
-    ) {
-      const detail = this.state().activity.details[this.selected]?.value;
-      if (
-        recorded?.root === this.selected ||
-        changed?.id === this.selected ||
-        detail?.children.some((child) => child.id === changed?.id)
-      )
-        this.background(this.detail(this.selected));
+    if (changed || recorded) {
+      for (const selected of new Set(this.selected.values())) {
+        const detail = this.state().activity.details[selected]?.value;
+        if (
+          recorded?.root === selected ||
+          changed?.id === selected ||
+          detail?.children.some((child) => child.id === changed?.id)
+        )
+          this.background(this.detail(selected));
+      }
     }
   }
 }

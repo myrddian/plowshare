@@ -58,19 +58,21 @@ type packetAssembly struct {
 
 // A socket owns its assemblies. Credits bypass the logical writer; no mutation is ever retried.
 type packets struct {
-	socket    *websocket.Conn
-	mu        sync.Mutex
-	sender    chan struct{}
-	writer    chan struct{}
-	incoming  map[string]*packetAssembly
-	completed map[string]bool
-	held      int
-	closed    bool
-	sending   string
-	expected  int
-	credited  int
-	credit    chan struct{}
-	done      chan struct{}
+	socket           *websocket.Conn
+	mu               sync.Mutex
+	sender           chan struct{}
+	writer           chan struct{}
+	incoming         map[string]*packetAssembly
+	completed        map[string]bool
+	completionOrder  []string
+	completionCursor int
+	held             int
+	closed           bool
+	sending          string
+	expected         int
+	credited         int
+	credit           chan struct{}
+	done             chan struct{}
 }
 
 func newPackets(socket *websocket.Conn) *packets {
@@ -300,7 +302,7 @@ func (p *packets) assemble(part messageSegment, decoded []byte) ([]byte, error) 
 	}
 	assembly := p.incoming[part.TransferID]
 	if assembly == nil {
-		if len(p.incoming) >= 4 || len(p.completed)+len(p.incoming) >= 4096 {
+		if len(p.incoming) >= 4 {
 			return nil, contractError
 		}
 		if err := p.reserve(part.Total); err != nil {
@@ -330,10 +332,21 @@ func (p *packets) assemble(part messageSegment, decoded []byte) ([]byte, error) 
 	}
 	delete(p.incoming, part.TransferID)
 	p.release(part.Total)
+	// Recent completion IDs detect duplicates without imposing a session lifetime cap.
+	if len(p.completionOrder) == 4096 {
+		delete(p.completed, p.completionOrder[p.completionCursor])
+		p.release(256)
+	}
 	if err := p.reserve(256); err != nil {
 		return nil, err
 	}
 	p.completed[part.TransferID] = true
+	if len(p.completionOrder) == 4096 {
+		p.completionOrder[p.completionCursor] = part.TransferID
+		p.completionCursor = (p.completionCursor + 1) % 4096
+	} else {
+		p.completionOrder = append(p.completionOrder, part.TransferID)
+	}
 	return assembly.bytes, nil
 }
 func (p *packets) expire() {
@@ -374,5 +387,7 @@ func (p *packets) close() {
 	clear(p.incoming)
 	p.release(len(p.completed) * 256)
 	clear(p.completed)
+	p.completionOrder = nil
+	p.completionCursor = 0
 	close(p.done)
 }

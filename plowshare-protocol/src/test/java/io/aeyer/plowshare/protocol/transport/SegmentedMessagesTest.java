@@ -52,22 +52,25 @@ class SegmentedMessagesTest {
   }
 
   @Test
-  void completed_ids_are_connection_scoped_and_never_evicted_on_capacity_exhaustion()
-      throws Exception {
+  void long_sessions_retain_only_recent_completed_ids_and_release_their_budget() throws Exception {
     var budget = new PacketBudget(256L * 1024 * 1024);
     var first = parts(new byte[] {65}).getFirst();
     try (var left = new SegmentedMessages(new Wire(), budget, () -> {});
         var right = new SegmentedMessages(new Wire(), budget, () -> {})) {
       assertEquals("A", left.receive(first).orElseThrow());
-      assertEquals(
-          "A",
-          right.receive(first).orElseThrow(),
-          "another connection owns another assembly namespace");
-      for (int n = 1; n < SegmentedMessages.MAX_TOMBSTONES; n++)
-        left.receive(parts(new byte[] {65}).getFirst());
-      assertThrows(
-          IllegalArgumentException.class, () -> left.receive(parts(new byte[] {65}).getFirst()));
-      assertThrows(IllegalArgumentException.class, () -> left.receive(first));
+      assertEquals("A", right.receive(first).orElseThrow());
+      MessageSegment latest = first;
+      for (int n = 1; n < 4200; n++) {
+        latest = parts(new byte[] {65}).getFirst();
+        assertEquals("A", left.receive(latest).orElseThrow());
+      }
+      assertEquals((SegmentedMessages.MAX_TOMBSTONES + 1L) * 256 * 3, budget.heldBytes());
+      var recent = latest;
+      assertThrows(IllegalArgumentException.class, () -> left.receive(recent));
+      assertThrows(IllegalArgumentException.class, () -> right.receive(first));
+      // An ID outside the recent window is ordinary transport input again. The inner
+      // operation still owns authentication, request correlation and durable idempotency.
+      assertEquals("A", left.receive(first).orElseThrow());
     }
     assertEquals(0, budget.heldBytes());
   }

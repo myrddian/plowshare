@@ -109,4 +109,8 @@ try {
     const batch=requirePayload(await large.request('relay.consume',{project:'fixture',topic:'large.events',group:'fixture',consumerId:id,start:'OLDEST_RETAINED'}))
     assert.ok(batch.events[0].payload.text===largeText,'large typed reply lost bytes')
 } finally { large.close() }
+// More than 4096 small replies must not exhaust completed-transfer bookkeeping.
+const longSession = await connectPlowshare({origin,token:'sdk-fixture-token',session:'typed-node/long-session'});
+try {for(let i=0;i<4200;i++) assert.equal(requirePayload(await longSession.request('project.list',{}))[0].name,'long-session');}
+finally {longSession.close();}
 console.log('Node SDK conformance passed')

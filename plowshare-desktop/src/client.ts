@@ -1599,23 +1599,27 @@ export class DesktopClient {
         await this.loadScope(projectOf(request));
         break;
       case 'activity-view':
-        await this.refresh();
-        if (request.view !== 'runs' && request.view !== 'builder')
-          this.runs.pause();
+        // Approval discovery has its own state/error channel. It must not delay
+        // navigation or independent Mailbox/run reads behind slow approval scopes.
+        this.background(this.refresh().then(() => this.emit()));
         await this.activity.open(request.view);
+        if (!this.activity.isOpen('runs') && !this.activity.isOpen('builder'))
+          this.runs.pause();
         if (request.view === 'definitions' && this.state.connected)
           await this.runs.definitions(this.state.activity.definitions?.project);
         if (request.view === 'schedules' && this.state.connected)
           await this.schedules.refresh();
         break;
-      case 'activity-refresh':
-        await this.refresh();
-        await this.activity.refresh();
-        if (this.state.activity.view === 'definitions' && this.state.connected)
+      case 'activity-refresh': {
+        this.background(this.refresh().then(() => this.emit()));
+        const view = request.view ?? this.state.activity.view;
+        await this.activity.refresh(view);
+        if (view === 'definitions' && this.state.connected)
           await this.runs.definitions(this.state.activity.definitions?.project);
-        if (this.state.activity.view === 'schedules' && this.state.connected)
+        if (view === 'schedules' && this.state.connected)
           await this.schedules.refresh();
         break;
+      }
       case 'question-refresh':
         await this.activity.refresh();
         break;
@@ -1626,7 +1630,7 @@ export class DesktopClient {
         await this.activity.older();
         break;
       case 'run-detail':
-        await this.activity.select(text(request.id, 'run', 512));
+        await this.activity.select(text(request.id, 'run', 512), request.view);
         break;
       case 'library-view':
         await this.library.open(

@@ -105,6 +105,7 @@ server.on('upgrade', (request, socket, head) => {
                         counts.set(key, (counts.get(key) ?? 0) + 1)
                         const project = name => ({name,workspace:'fixture',machine:null,members:[],lent:[],exclusions:[],future:{discard:true}})
                         const answer = body => ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:body,futureEnvelope:true}))
+                        if(name==='long-session'){answer({code:'OK',payload:[project('long-session')]});return}
                         if(name==='multiplex') {
                             if (!first) {
                                 first = sent
@@ -198,6 +199,7 @@ try {
             child.on('exit', code => { clearTimeout(deadline); code === 0 ? resolve() : reject(new Error(language + ' conformance failed: ' + code)) })
         })
         assert.equal(counts.get('typed-'+language+'/capacity/capacity'),64,language+' capacity admission failed')
+        assert.equal(counts.get('typed-'+language+'/long-session/long-session'),4200,language+' did not survive the old completion cap')
         assert.equal(counts.get('typed-'+language+'/multiplex/multiplex'),3,language+' did not complete held-request proof')
         assert.equal(counts.get('packet-large-'+language+'/relay.publish'),1,'large publication repeated')
         assert.equal(counts.get('packet-large-'+language+'/relay.consume'),1,'large consume repeated')

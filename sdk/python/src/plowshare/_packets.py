@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 from uuid import UUID, uuid4
@@ -114,7 +115,7 @@ class Packets:
     def __init__(self, expired: Callable[[], None]):
         self._expired = expired
         self._incoming: dict[str, _Assembly] = {}
-        self._completed: set[str] = set()
+        self._completed: OrderedDict[str, None] = OrderedDict()
         self._held = 0
         self._closed = False
         self._waiting: tuple[str, int, asyncio.Future[None]] | None = None
@@ -245,10 +246,7 @@ class Packets:
         assembly = self._incoming.get(part.transfer)
         loop = asyncio.get_running_loop()
         if assembly is None:
-            if (
-                len(self._incoming) >= 4
-                or len(self._incoming) + len(self._completed) >= 4096
-            ):
+            if len(self._incoming) >= 4:
                 raise ValueError("transfer capacity exceeded")
             self._reserve(part.total)
             assembly = _Assembly(
@@ -282,8 +280,12 @@ class Packets:
             assembly.total_timer.cancel()
             del self._incoming[part.transfer]
             self._release(part.total)
+            # Recent completion IDs bound duplicate detection without limiting session lifetime.
+            if len(self._completed) == 4096:
+                self._completed.popitem(last=False)
+                self._release(256)
             self._reserve(256)
-            self._completed.add(part.transfer)
+            self._completed[part.transfer] = None
         credit = json.dumps(
             {
                 "kind": "transport.credit",

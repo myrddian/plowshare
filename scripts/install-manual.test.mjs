@@ -32,6 +32,11 @@ function catalogue() {
     calls.push({ operation, payload, scope });
     if (payload.requestId && receipts.has(payload.requestId)) return receipts.get(payload.requestId);
     let result;
+    if (operation === 'list') {
+      return [...rows.entries()].filter(([, row]) => !row.excluded && (scope !== 'global_read' || row.shared)
+        && payload.filter.tags.every(tag => row.tags.includes(tag))).slice(payload.offset, payload.offset + payload.limit)
+        .map(([id, row]) => ({ id, kind:'source', source_name:row.name, availability:'active', tags:row.tags }));
+    }
     if (operation === 'upload') {
       const revision = randomUUID();
       rows.set(revision, { name: payload.name, text: payload.text, tags: [], shared: false, excluded: false });
@@ -116,7 +121,7 @@ test('replacement becomes shared/readable before old discovery is excluded; old 
   assert.equal(server.calls[index - 1].scope, 'global_read');
   const count = server.calls.length;
   await publishManual(plan('# After\n'), server.client, opts);
-  assert.ok(server.calls.slice(count).every(row => ['status', 'read'].includes(row.operation)));
+  assert.ok(server.calls.slice(count).every(row => ['status', 'read', 'list'].includes(row.operation)));
 });
 
 test('failed derivation does not share a replacement or exclude the working old edition', async () => {
@@ -156,6 +161,8 @@ test('uncertain sharing cannot be skipped by resuming without the share flag', a
   const count = server.calls.length;
   await assert.rejects(publishManual(plan('# Hello\n'), server.client,
     { ...opts, share: false, resume: true }), /uncertain delivery/);
+  await assert.rejects(publishManual(plan('# Hello\n'), server.client,
+    { ...opts, republish: true, resume: true }), /uncertain delivery/);
   assert.equal(server.calls.length, count);
   await publishManual(plan('# Hello\n'), server.client, { ...opts, resume: true });
   assert.equal(server.rows.size, 1);
@@ -304,7 +311,7 @@ test('Global custody cannot report Help success or exclude an old chapter withou
   server.rows.get(old.revision).shared = true;
   journal.chapters.intro = { revision: old.revision, hash: digest('# Old public chapter') };
   const opts = { journal, destination, sharedClient: server.sharedClient, persist: async () => {} };
-  await assert.rejects(publishManual(plan('# Global chapter'), client, opts), /unavailable in Shared/);
+  await assert.rejects(publishManual(plan('# Global chapter'), client, opts), /could not be verified in global_read/);
   assert.equal(server.calls.some(row => row.operation === 'share'), false);
   assert.equal(journal.chapters.intro.revision, old.revision);
   assert.equal(server.rows.get(old.revision).excluded, false);
@@ -326,4 +333,82 @@ test('Global publication requires its intended reader before any upload', async 
     journal: newJournal('https://server.invalid', 'admin', destination), destination, persist: async () => {},
   }), /global_read reader/);
   assert.equal(server.calls.length, 0);
+});
+
+
+test('reviewed republication repairs a retired audience without replaying an old receipt or uploading again', async () => {
+  const server = catalogue(), opts = installation(server, { share: true });
+  const manual = plan('# Public manual');
+  await publishManual(manual, server.client, opts);
+  const revision = opts.journal.chapters.intro.revision;
+  const original = server.calls.find(row => row.operation === 'share').payload.requestId;
+  server.rows.get(revision).shared = false;
+  await assert.rejects(publishManual(manual, server.client, opts), /Historical sharing receipts/);
+  await publishManual(manual, server.client, { ...opts, republish: true });
+  assert.equal(server.rows.size, 1);
+  const shares = server.calls.filter(row => row.operation === 'share');
+  assert.equal(shares.length, 2);
+  assert.notEqual(shares[1].payload.requestId, original);
+  assert.equal(shares[1].payload.revision, revision);
+  assert.ok(server.calls.some(row => row.operation === 'list' && row.scope === 'global_read'));
+});
+
+test('uncertain reviewed publication requires both explicit republication and resume with the saved UUID', async () => {
+  const server = catalogue(), opts = installation(server, { share: true });
+  const manual = plan('# Public manual');
+  await publishManual(manual, server.client, opts);
+  let dropped = false;
+  const client = { call: async (operation, payload) => {
+    const result = await server.call(operation, payload);
+    if (operation === 'share' && !dropped) {
+      dropped = true;
+      throw new Error('review reply lost');
+    }
+    return result;
+  } };
+  await assert.rejects(publishManual(manual, client, { ...opts, republish: true }), /review reply lost/);
+  const request = server.calls.filter(row => row.operation === 'share').at(-1).payload.requestId;
+  const count = server.calls.length;
+  await assert.rejects(publishManual(manual, server.client, { ...opts, republish: true }), /uncertain delivery/);
+  await assert.rejects(publishManual(manual, server.client, { ...opts, resume: true }), /publication review is incomplete/);
+  assert.equal(server.calls.length, count);
+  await publishManual(manual, server.client, { ...opts, republish: true, resume: true });
+  assert.equal(server.calls.filter(row => row.operation === 'share').at(-1).payload.requestId, request);
+  assert.equal(server.rows.size, 1);
+});
+
+test('publication refuses ambiguous Help chapter discovery and preserves the prior edition', async () => {
+  const server = catalogue(), opts = installation(server, { share: true });
+  await publishManual(plan('# Old'), server.client, opts);
+  const previous = opts.journal.chapters.intro.revision;
+  const sharedClient = { call: async (operation, payload) => {
+    const result = await server.sharedClient.call(operation, payload);
+    // Another publisher's chapter shares the same Help lookup name and tags.
+    return operation === 'list' ? [result.at(-1), { ...result.at(-1), id: randomUUID() }] : result;
+  } };
+  await assert.rejects(publishManual(plan('# New'), server.client, { ...opts, sharedClient }), /could not be verified in global_read/);
+  assert.equal(opts.journal.chapters.intro.revision, previous);
+  assert.equal(server.rows.get(previous).excluded, false);
+  assert.throws(() => options(['--dry-run', '--republish'], {}), /requires --share or --global/);
+});
+
+test('review resume retains confirmed chapters from the same interrupted batch', async () => {
+  const server = catalogue(), opts = installation(server, { share: true });
+  const first = plan('# One').chapters[0];
+  const second = { ...first, id: 'two', name: 'Plowshare manual / two.md', text: '# Two', hash: digest('# Two') };
+  const manual = { edition: '1', chapters: [first, second] };
+  await publishManual(manual, server.client, opts);
+  let shares = 0;
+  const losing = { call: async (operation, payload) => {
+    const result = await server.call(operation, payload);
+    if (operation === 'share' && ++shares === 2) throw new Error('second review reply lost');
+    return result;
+  } };
+  await assert.rejects(publishManual(manual, losing, { ...opts, republish: true }), /reply lost/);
+  const firstRevision = opts.journal.chapters.intro.revision;
+  const firstShares = () => server.calls.filter(row => row.operation === 'share' && row.payload.revision === firstRevision).length;
+  const before = firstShares();
+  await publishManual(manual, server.client, { ...opts, republish: true, resume: true });
+  assert.equal(firstShares(), before);
+  assert.equal(opts.journal.review.state, 'done');
 });
