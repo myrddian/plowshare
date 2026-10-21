@@ -49,6 +49,8 @@ export interface CurrentDocument {
   readonly title: string;
   readonly sourceName: string;
   readonly owner: string;
+  /** Absent on older peers; guarded replacement must refuse without this snapshot version. */
+  readonly tagsVersion?: number;
   readonly tags: readonly string[];
   readonly scope: InformationScope;
   /** Only returned for an explicit metadata-v1 list projection; absent for untyped/redacted rows. */

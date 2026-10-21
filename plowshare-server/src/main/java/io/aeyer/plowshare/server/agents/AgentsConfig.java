@@ -902,10 +902,10 @@ public class AgentsConfig {
         new Messaging() {
           public SendMessageTool tool(RunExtras.Context context) {
             return new SendMessageTool(
-                (request, home) -> {
+                (request, home, owner) -> {
                   var available = messaging.getIfAvailable();
                   if (available == null) return "Messaging is unavailable on this server.";
-                  return available.send(context, request, home);
+                  return available.send(context, request, home, owner);
                 });
           }
 

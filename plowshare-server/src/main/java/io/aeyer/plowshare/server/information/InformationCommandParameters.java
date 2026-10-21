@@ -59,6 +59,15 @@ sealed interface InformationCommandParameters {
     }
   }
 
+  record TagsReplace(List<String> values, long expectedVersion)
+      implements InformationCommandParameters {
+    public TagsReplace {
+      values = InformationFacets.tags(values);
+      if (expectedVersion < 0 || expectedVersion > 9007199254740991L)
+        throw new CallerFault("invalid expected tag version");
+    }
+  }
+
   record Groups(Map<String, List<String>> values) implements InformationCommandParameters {
     public Groups {
       if (values != null) values = InformationTagGroups.from(values, null);

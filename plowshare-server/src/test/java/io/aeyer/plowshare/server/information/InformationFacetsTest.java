@@ -163,6 +163,116 @@ class InformationFacetsTest {
   }
 
   @Test
+  void guardedTagsRejectStaleSelectionsAndRecoverAppliedReceiptsAfterLaterWrites() {
+    UUID target = revision("reader", "[]", "[\"automatic\"]", "source");
+    UUID request = UUID.randomUUID();
+    assertEquals(0L, catalogue.status(own, target).tagsVersion());
+    catalogue.replaceTags(own, target, List.of("selected"), 0, request);
+    assertEquals(1L, catalogue.status(own, target).tagsVersion());
+    catalogue.replaceTags(own, target, List.of("selected"), 0, request);
+    assertEquals(1L, catalogue.status(own, target).tagsVersion());
+    catalogue.tags(own, target, List.of("legacy"), UUID.randomUUID());
+    assertEquals(2L, catalogue.status(own, target).tagsVersion());
+    catalogue.replaceTags(own, target, List.of("selected"), 0, request);
+    assertEquals(List.of("legacy"), catalogue.status(own, target).tags());
+    assertThrows(
+        CallerFault.class,
+        () -> catalogue.replaceTags(own, target, List.of("lost"), 1, UUID.randomUUID()));
+    assertThrows(
+        CallerFault.class,
+        () -> catalogue.replaceTags(own, target, List.of("selected"), 2, request));
+    assertEquals(List.of("legacy"), catalogue.status(own, target).tags());
+    catalogue.replaceTags(own, target, List.of("legacy"), 2, UUID.randomUUID());
+    assertEquals(
+        2L,
+        catalogue.status(own, target).tagsVersion(),
+        "A semantic no-op does not invalidate selections");
+    assertEquals(List.of("automatic"), catalogue.status(own, target).autoTag());
+    var other = new InformationContext("other", InformationContext.Selection.personal());
+    assertThrows(
+        NotFoundFault.class,
+        () -> catalogue.replaceTags(other, target, List.of("take over"), 2, UUID.randomUUID()));
+    assertEquals(2L, catalogue.status(own, target).tagsVersion());
+  }
+
+  @Test
+  void tagVersionIsCheckedAfterPreControlAndCannotOverwriteAnInterveningLegacyWrite() {
+    UUID target = revision("reader", "[]", "[]", "source");
+    catalogue.withGates(
+        new InformationLifecycle.Gates() {
+          public io.aeyer.plowshare.server.hooks.Gate before(InformationLifecycle.Lease lease) {
+            assertEquals("tags", lease.stage());
+            jdbc.update("UPDATE information_resources SET tags='[\"intervening\"]'::jsonb");
+            return io.aeyer.plowshare.server.hooks.Gate.NOTHING;
+          }
+        });
+    var failure =
+        assertThrows(
+            CallerFault.class,
+            () -> catalogue.replaceTags(own, target, List.of("lost"), 0, UUID.randomUUID()));
+    assertTrue(failure.getMessage().contains("INFORMATION_TAGS_CONFLICT"));
+    assertEquals(List.of("intervening"), catalogue.status(own, target).tags());
+    assertEquals(1L, catalogue.status(own, target).tagsVersion());
+  }
+
+  @Test
+  void appliedTagCheckpointRetainsPostControlRefusalWithoutApplyingAgain() {
+    UUID target = revision("reader", "[]", "[]", "source"), request = UUID.randomUUID();
+    catalogue.withGates(
+        new InformationLifecycle.Gates() {
+          public io.aeyer.plowshare.server.hooks.Gate after(InformationLifecycle.Lease lease) {
+            return new io.aeyer.plowshare.server.hooks.Gate(
+                "review required", List.of(), List.of());
+          }
+        });
+    assertThrows(
+        CallerFault.class,
+        () -> catalogue.replaceTags(own, target, List.of("selected"), 0, request));
+    assertEquals(List.of("selected"), catalogue.status(own, target).tags());
+    assertEquals(1L, catalogue.status(own, target).tagsVersion());
+    catalogue.withGates(new InformationLifecycle.Gates() {});
+    catalogue.tags(own, target, List.of("later"), UUID.randomUUID());
+    var retained =
+        assertThrows(
+            CallerFault.class,
+            () -> catalogue.replaceTags(own, target, List.of("selected"), 0, request));
+    assertTrue(retained.getMessage().contains("checkpoint retained; stage.post denied completion"));
+    assertEquals(List.of("later"), catalogue.status(own, target).tags());
+    assertEquals(2L, catalogue.status(own, target).tagsVersion());
+  }
+
+  @Test
+  void concurrentGuardedReplacementsHaveOneWinnerAndNoPartialTagSets() throws Exception {
+    UUID target = revision("reader", "[]", "[]", "source");
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var results = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+      for (String value : List.of("first", "second"))
+        results.add(
+            pool.submit(
+                () -> {
+                  start.await();
+                  try {
+                    catalogue.replaceTags(own, target, List.of(value), 0, UUID.randomUUID());
+                    return true;
+                  } catch (CallerFault conflict) {
+                    assertTrue(conflict.getMessage().contains("INFORMATION_TAGS_CONFLICT"));
+                    return false;
+                  }
+                }));
+      start.countDown();
+      int successes = 0;
+      for (var result : results)
+        if (result.get(10, java.util.concurrent.TimeUnit.SECONDS)) successes++;
+      assertEquals(1, successes);
+    }
+    assertEquals(1L, catalogue.status(own, target).tagsVersion());
+    assertTrue(
+        List.of(List.of("first"), List.of("second"))
+            .contains(catalogue.status(own, target).tags()));
+  }
+
+  @Test
   void user_tags_are_owner_managed_idempotent_and_independent_from_generated_tags() {
     UUID target = revision("reader", "[]", "[\"postgresql\"]", "source"),
         request = UUID.randomUUID();
@@ -362,6 +472,8 @@ class InformationFacetsTest {
     var summariser = mock(Summariser.class);
     when(summariser.forRevision(any(), any(), anyString(), nullable(String.class)))
         .thenReturn(summariser);
+    when(summariser.withSystemValidity(any())).thenReturn(summariser);
+    when(summariser.withSystemScope(any())).thenReturn(summariser);
     when(summariser.autoTag(anyString(), anyString(), any(), any()))
         .thenAnswer(
             call -> {
@@ -422,7 +534,9 @@ class InformationFacetsTest {
       assertEquals(
           1,
           jdbc.queryForObject(
-              "SELECT allowance_spent FROM information_revisions WHERE id=?", Integer.class, id));
+              "SELECT allowance_spent FROM information_revision_allowances WHERE id=?",
+              Integer.class,
+              id));
       catalogue.rebuild(own, id, "autoTag", UUID.randomUUID());
       assertEquals(
           "reader",
@@ -436,7 +550,9 @@ class InformationFacetsTest {
       assertEquals(
           2,
           jdbc.queryForObject(
-              "SELECT allowance_spent FROM information_revisions WHERE id=?", Integer.class, id));
+              "SELECT allowance_spent FROM information_revision_allowances WHERE id=?",
+              Integer.class,
+              id));
     }
     verify(summariser, times(2)).autoTag(anyString(), anyString(), any(), any());
   }

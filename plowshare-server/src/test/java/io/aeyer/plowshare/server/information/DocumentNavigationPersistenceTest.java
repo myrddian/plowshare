@@ -175,6 +175,7 @@ class DocumentNavigationPersistenceTest {
     for (int i = 0; i < 50; i++)
       content.attach(head(resource("alice", "operations", "incident-" + i)), binding);
     resource("alice", "operations", "untyped");
+    jdbc.update("UPDATE information_resources SET tags='[\"reviewed\"]'::jsonb");
     UUID redacted = resource("alice", "operations", "redacted");
     content.attach(head(redacted), binding);
     jdbc.update(
@@ -209,6 +210,7 @@ class DocumentNavigationPersistenceTest {
     assertTrue(explained.contains("Actual Rows"));
     assertEquals("metadata-v1", page.projection());
     assertEquals(51, page.documents().size());
+    assertTrue(page.documents().stream().allMatch(d -> Long.valueOf(1).equals(d.tagsVersion())));
     assertTrue(page.documents().stream().noneMatch(d -> d.resource().equals(redacted)));
     assertEquals(50, page.documents().stream().filter(d -> d.contentMetadata() != null).count());
     page.documents().stream()
@@ -223,6 +225,7 @@ class DocumentNavigationPersistenceTest {
         legacy.documents().stream().map(Document::resource).toList(),
         page.documents().stream().map(Document::resource).toList());
     assertTrue(legacy.documents().stream().allMatch(d -> d.contentMetadata() == null));
+    assertTrue(legacy.documents().stream().allMatch(d -> Long.valueOf(1).equals(d.tagsVersion())));
     var second = projection.documentsWithMetadata(viewer, null, null, null, 2, 2);
     assertEquals(page.documents().subList(2, 4), second.documents());
     assertEquals(2, statements.get());

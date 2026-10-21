@@ -373,18 +373,19 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             rs.getString("visibility").equals("shared") ? null : rs.getString("project_name"),
             rs.getString("visibility").equals("shared") ? null : includeGlobal),
         rs.getString("owner"),
-        metadata);
+        metadata,
+        rs.getObject("tags_version", Long.class));
   }
 
   private static final String DOCUMENT =
-      "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT CASE WHEN audience='GLOBAL_READ' THEN 'shared' ELSE 'home' END FROM information_resource_policies WHERE resource_id=q.id),'pending') AS visibility";
+      "SELECT q.id AS resource,r.id AS revision,r.title,q.source_name,q.owner_handle AS owner,q.tags::text,q.tags_version,(SELECT name FROM projects WHERE id=q.project_id) AS project_name,coalesce((SELECT CASE WHEN audience='GLOBAL_READ' THEN 'shared' ELSE 'home' END FROM information_resource_policies WHERE resource_id=q.id),'pending') AS visibility";
 
   /**
    * The original bounded page is materialized once; only accepted text crosses the JDBC boundary.
    */
   private static final String BOUNDED_DOCUMENTS =
       """
-      SELECT p.resource,p.revision,
+      SELECT p.resource,p.revision,p.tags_version,
         CASE WHEN length(p.title)<=cap.chars THEN p.title END AS title,
         CASE WHEN length(p.source_name)<=cap.chars THEN p.source_name END AS source_name,
         CASE WHEN length(p.owner)<=cap.chars THEN p.owner END AS owner,
@@ -498,7 +499,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             + " LEFT JOIN information_revision_content c ON c.revision_id=p.revision AND NOT c.redacted"
             + " LEFT JOIN information_content_type_versions v ON v.id=c.type_version"
             + " LEFT JOIN information_content_types t ON t.id=v.type_id)"
-            + " SELECT p.resource,p.revision,p.title,p.source_name,p.owner,p.tags,p.project_name,p.visibility,"
+            + " SELECT p.resource,p.revision,p.title,p.source_name,p.owner,p.tags,p.tags_version,p.project_name,p.visibility,"
             + "p.metadata_hash,p.type_version,p.type_id,p.ordinal,p.definition_hash,p.slug,p.label,p.metadata_bytes,"
             + "CASE WHEN p.metadata_bytes<=? THEN p.metadata::text END AS metadata_json"
             + " FROM metadata_page p ORDER BY p.sort_created_at DESC,p.resource";

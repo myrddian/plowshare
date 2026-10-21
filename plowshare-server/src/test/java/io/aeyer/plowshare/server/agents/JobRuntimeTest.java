@@ -392,6 +392,24 @@ class JobRuntimeTest {
    * the case a too-broad set produces, and it is asserted on rather than waved through.
    */
   @Test
+  void duplicateToolIdsInOneBatchRefuseBeforeAnyToolEffect() throws Exception {
+    Probe probe = Probe.returning("probe_read", "effect");
+    Scripted transport =
+        new Scripted()
+            .then(
+                () ->
+                    asking(
+                        "",
+                        call("reused", "probe_read", "{}"),
+                        call("reused", "probe_read", "{}")));
+    var runtime = runtimeOver(transport, probe);
+    var outcome = runtime.run(agent("reader"), "Read", Home.of("fixture"), generous(), null);
+    assertEquals(Ending.UNAVAILABLE, outcome.ending());
+    assertTrue(probe.seen().isEmpty());
+    assertEquals(1, transport.calls().size());
+  }
+
+  @Test
   void a_declared_builtin_uses_its_admitted_grant_without_external_policy_lookup()
       throws Exception {
     Probe probe = Probe.returning("probe_read", "internal result");

@@ -23,6 +23,7 @@ from plowshare.contracts import (
     InformationInterchangeReadableRequest,
     InformationReadRequest,
     InformationReviseRequest,
+    InformationTagsReplaceRequest,
     InformationTagsRequest,
     InformationTypesCapabilitiesRequest,
     InformationTypesGetRequest,
@@ -174,6 +175,9 @@ class SdkBoardPort:
             self._decode_metadata(
                 kind, binding.type_.type_, binding.type_.slug, binding.metadata
             ),
+            tags_version=entry.tags_version
+            if isinstance(entry.tags_version, int)
+            else None,
         )
 
     async def _document(self, kind: str, entry: CurrentDocumentDto) -> Document:
@@ -185,6 +189,9 @@ class SdkBoardPort:
             entry.owner,
             entry.tags,
             fields,
+            tags_version=entry.tags_version
+            if isinstance(entry.tags_version, int)
+            else None,
         )
 
     async def _entries(
@@ -361,6 +368,9 @@ class SdkBoardPort:
             entry.tags,
             self._decode_fields(kind, binding),
             body_text(source.markdown),
+            tags_version=entry.tags_version
+            if isinstance(entry.tags_version, int)
+            else None,
         )
 
     async def submit(self, intent: Intent) -> MutationResult:
@@ -457,7 +467,8 @@ class SdkBoardPort:
                 identity(admitted.revision),
                 "information.content.revise",
             )
-        changed = await self.client.request(
+        # Old journals deliberately recover with their old operation and exact inputs.
+        command = (
             InformationTagsRequest(
                 scope=self.scope,
                 view="content-types-v1",
@@ -465,12 +476,24 @@ class SdkBoardPort:
                 revision=intent.expected_revision,
                 tags=intent.tags,
             )
+            if intent.expected_tags_version is None
+            else InformationTagsReplaceRequest(
+                scope=self.scope,
+                view="content-types-v1",
+                request_id=intent.request_id,
+                revision=intent.expected_revision,
+                tags=intent.tags,
+                expected_tags_version=intent.expected_tags_version,
+            )
         )
+        changed = await self.client.request(command)
         changed.require_payload()
         return MutationResult(
             intent.request_id,
             changed.code,
             intent.resource,
             intent.expected_revision,
-            "information.tags",
+            "information.tags"
+            if intent.expected_tags_version is None
+            else "information.tags.replace",
         )

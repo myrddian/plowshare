@@ -52,7 +52,90 @@ public final class Information {
       Report report,
       List<UUID> citations,
       InformationContent.Identity contentType,
-      String processingPolicy) {
+      String processingPolicy,
+      Long tagsVersion) {
+    /** Source compatibility for revisions produced before resource tag versions. */
+    public Revision(
+        UUID id,
+        UUID resourceId,
+        int ordinal,
+        String title,
+        String mediaType,
+        @JsonProperty("document_type") String documentType,
+        @JsonProperty("document_subtype") String documentSubtype,
+        String sourceUri,
+        @JsonProperty("content_hash") String contentHash,
+        String textHash,
+        Long byteSize,
+        Instant createdAt,
+        String availability,
+        boolean excluded,
+        long generation,
+        String converter,
+        @JsonProperty("allowance_total") int allowanceTotal,
+        @JsonProperty("allowance_spent") int allowanceSpent,
+        @JsonProperty("source_name") String sourceName,
+        String kind,
+        String author,
+        List<String> tags,
+        List<String> autoTag,
+        @JsonProperty("auto_tag_generated") Boolean autoTagGenerated,
+        String documentAuthor,
+        String documentAuthorSource,
+        Map<String, List<String>> tagGroups,
+        String tagGroupsSource,
+        String reportStatus,
+        @JsonProperty("can_manage") Boolean canManage,
+        List<Step> steps,
+        Progress progress,
+        List<Event> events,
+        List<UUID> inputs,
+        Report report,
+        List<UUID> citations,
+        InformationContent.Identity contentType,
+        String processingPolicy) {
+      this(
+          id,
+          resourceId,
+          ordinal,
+          title,
+          mediaType,
+          documentType,
+          documentSubtype,
+          sourceUri,
+          contentHash,
+          textHash,
+          byteSize,
+          createdAt,
+          availability,
+          excluded,
+          generation,
+          converter,
+          allowanceTotal,
+          allowanceSpent,
+          sourceName,
+          kind,
+          author,
+          tags,
+          autoTag,
+          autoTagGenerated,
+          documentAuthor,
+          documentAuthorSource,
+          tagGroups,
+          tagGroupsSource,
+          reportStatus,
+          canManage,
+          steps,
+          progress,
+          events,
+          inputs,
+          report,
+          citations,
+          contentType,
+          processingPolicy,
+          null);
+    }
+
     /** Source-compatible constructor for the untyped revision view. */
     public Revision(
         UUID id,
@@ -133,6 +216,8 @@ public final class Information {
     }
 
     public Revision {
+      if (tagsVersion != null && (tagsVersion < 0 || tagsVersion > 9007199254740991L))
+        throw new IllegalArgumentException("invalid tag version");
       Objects.requireNonNull(id);
       Objects.requireNonNull(resourceId);
       Objects.requireNonNull(createdAt);
@@ -215,7 +300,8 @@ public final class Information {
           checkedReport,
           checkedCitations,
           readable ? contentType : null,
-          processingPolicy);
+          processingPolicy,
+          tagsVersion);
     }
   }
 

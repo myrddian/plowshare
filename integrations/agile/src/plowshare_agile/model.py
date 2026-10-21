@@ -70,6 +70,12 @@ def body_text(value: str) -> str:
     return value
 
 
+def tag_version(value: object) -> int:
+    if type(value) is not int or value < 0 or value > 9007199254740991:
+        raise ValueError("Expected a nonnegative safe tag version")
+    return value
+
+
 def tags(values: tuple[str, ...]) -> tuple[str, ...]:
     if len(values) > 32 or len(set(values)) != len(values):
         raise ValueError("Choose at most 32 distinct tags")
@@ -148,6 +154,7 @@ class Document:
     tags: tuple[str, ...]
     fields: TicketFields | EpicFields
     body: str | None = None
+    tags_version: int | None = None
 
 
 @dataclass(frozen=True)

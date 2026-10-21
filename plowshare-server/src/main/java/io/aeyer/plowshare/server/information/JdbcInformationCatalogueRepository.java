@@ -788,7 +788,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   private static final String SELECT =
       "SELECT r.id,r.resource_id,r.ordinal,r.title,r.media_type,r.document_type,r.document_subtype,r.source_uri,r.content_hash,r.text_hash,"
-          + "r.byte_size,r.created_at,r.availability,r.excluded,r.generation,r.converter,r.allowance_total,r.allowance_spent,q.source_name,q.kind,q.owner_handle AS author,q.tags,"
+          + "r.byte_size,r.created_at,r.availability,r.excluded,r.generation,r.converter,r.allowance_total,r.allowance_spent,q.source_name,q.kind,q.owner_handle AS author,q.tags,q.tags_version AS \"tagsVersion\","
           + io.aeyer.plowshare.server.information.InformationFacetSql.readyTags("r")
           + " AS \"autoTag\",r.auto_tag_generated,"
           + io.aeyer.plowshare.server.information.InformationFacetSql.documentAuthor("r", "q")
@@ -1358,6 +1358,23 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             "UPDATE information_resources SET tags=CAST(? AS jsonb) WHERE id=?",
             canonical(checked),
             resource));
+  }
+
+  public void replaceTags(Resource resource, List<String> tags, long expectedVersion) {
+    if (expectedVersion < 0 || expectedVersion > 9007199254740991L)
+      throw new IllegalArgumentException("invalid expected tag version");
+    Objects.requireNonNull(resource);
+    var checked = InformationFacets.tags(tags);
+    // The existing resource lock fences live authorization; the predicate also protects this
+    // repository invariant from stale callers. The trigger versions legacy/import writes too.
+    if (jdbc.update(
+            "UPDATE information_resources SET tags=CAST(? AS jsonb) WHERE id=? AND tags_version=?",
+            canonical(checked),
+            resource.id(),
+            expectedVersion)
+        != 1)
+      throw new CallerFault(
+          "INFORMATION_TAGS_CONFLICT: Tags changed; refresh and review before replacing");
   }
 
   public Command reserve(

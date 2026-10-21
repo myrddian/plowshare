@@ -29,6 +29,7 @@ from .model import (
     choice,
     identity,
     object_fields,
+    tag_version,
     text,
 )
 from .sdk import MutationResult
@@ -380,23 +381,39 @@ class WebUI:
         )
 
     async def epics(self, request: web.Request) -> web.Response:
-        row = await _payload(request, {"requestId", "expectedRevision", "epics"})
+        row = await _payload(
+            request, {"requestId", "expectedRevision", "expectedTagsVersion", "epics"}
+        )
         key = self._request_id(request, row)
         resource = identity(request.match_info["resource"])
         expected = identity(row["expectedRevision"])
         selected = tuple(identity(value) for value in _strings(row["epics"]))
         return await self._mutate(
-            lambda: self.board.set_epics(resource, expected, key, selected)
+            lambda: self.board.set_epics(
+                resource,
+                expected,
+                key,
+                selected,
+                tag_version(row["expectedTagsVersion"]),
+            )
         )
 
     async def topics(self, request: web.Request) -> web.Response:
-        row = await _payload(request, {"requestId", "expectedRevision", "tags"})
+        row = await _payload(
+            request, {"requestId", "expectedRevision", "expectedTagsVersion", "tags"}
+        )
         key = self._request_id(request, row)
         resource = identity(request.match_info["resource"])
         expected = identity(row["expectedRevision"])
         selected = _strings(row["tags"])
         return await self._mutate(
-            lambda: self.board.set_topics(resource, expected, key, selected)
+            lambda: self.board.set_topics(
+                resource,
+                expected,
+                key,
+                selected,
+                tag_version(row["expectedTagsVersion"]),
+            )
         )
 
     async def recover(self, request: web.Request) -> web.Response:

@@ -300,7 +300,12 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(
             "/api/tickets/" + uid(10) + "/epics",
             headers=self.headers(uid(70)),
-            json={"requestId": uid(70), "expectedRevision": uid(1010), "epics": []},
+            json={
+                "requestId": uid(70),
+                "expectedRevision": uid(1010),
+                "expectedTagsVersion": 0,
+                "epics": [],
+            },
         )
         self.assertEqual(response.status, 200)
         self.assertEqual(self.port.calls[-1].tags, ("sdk",))
@@ -311,6 +316,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                 "requestId": uid(71),
                 "expectedRevision": uid(1010),
                 "tags": ["websocket"],
+                "expectedTagsVersion": 0,
             },
         )
         self.assertEqual(response.status, 200)

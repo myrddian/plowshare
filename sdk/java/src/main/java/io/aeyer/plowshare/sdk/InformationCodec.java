@@ -139,6 +139,7 @@ public final class InformationCodec {
             yield InformationRequest.Link.class;
           }
           case "tags" -> InformationRequest.Tags.class;
+          case "tags.replace" -> InformationRequest.TagsReplace.class;
           case "tags.groups" -> {
             if (!body.has("groups"))
               throw new IOException("groups is required, including null for automatic grouping");
@@ -347,6 +348,8 @@ public final class InformationCodec {
               };
           case InformationRequest.Link ignored -> read(node, InformationResponse.Changed.class);
           case InformationRequest.Tags ignored -> read(node, InformationResponse.Changed.class);
+          case InformationRequest.TagsReplace ignored ->
+              read(node, InformationResponse.Changed.class);
           case InformationRequest.TagGroups ignored ->
               read(node, InformationResponse.Changed.class);
           case InformationRequest.Retry ignored -> read(node, InformationResponse.Queued.class);

@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import type * as FileSystem from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import {
   chmod,
+  link,
   lstat,
   mkdtemp,
   mkdir,
@@ -1900,4 +1902,98 @@ it('protects application authority even before the root manifest exists', async 
     (await asking('move', { from: 'plowshare.json', to: 'old.json' })).outcome,
   ).toBe('refused');
   expect(allows(root, join(root, 'plowshare.json'), 'definitions')).toBe(true);
+});
+
+describe('mutation publication and participating writers', () => {
+  it.skipIf(process.platform !== 'darwin')(
+    'retains ACLs and extended attributes during replacement',
+    async () => {
+      const target = join(root, 'metadata.txt');
+      await writeFile(target, 'original');
+      execFileSync('xattr', [
+        '-w',
+        'com.plowshare.fixture',
+        'metadata',
+        target,
+      ]);
+      execFileSync('chmod', ['+a', 'everyone deny execute', target]);
+      const result = await asking('write', {
+        path: 'metadata.txt',
+        content: 'changed',
+      });
+      expect(result.outcome).toBe('ok');
+      expect(
+        execFileSync('ls', ['-le', target], { encoding: 'utf8' }),
+      ).toContain('deny execute');
+      expect(
+        execFileSync('xattr', ['-p', 'com.plowshare.fixture', target], {
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe('metadata');
+      expect(await readFile(target, 'utf8')).toBe('changed');
+    },
+  );
+
+  it('preserves mode, refuses hard links, and removes unpublished staging files', async () => {
+    const target = join(root, 'atomic.txt');
+    await writeFile(target, 'original');
+    await chmod(target, 0o740);
+    expect(
+      (await asking('write', { path: 'atomic.txt', content: 'complete' }))
+        .outcome,
+    ).toBe('ok');
+    expect((await lstat(target)).mode & 0o777).toBe(0o740);
+    await link(target, join(root, 'alias.txt'));
+    expect(
+      (await asking('write', { path: 'atomic.txt', content: 'unsafe' }))
+        .outcome,
+    ).toBe('refused');
+    expect(await readFile(target, 'utf8')).toBe('complete');
+    expect(
+      (await (await import('node:fs/promises')).readdir(root)).filter((name) =>
+        name.startsWith('.plowshare-write-'),
+      ),
+    ).toEqual([]);
+  });
+
+  it.skipIf(permissive)(
+    'does not bypass read-only target permissions through rename',
+    async () => {
+      const target = join(root, 'readonly.txt');
+      await writeFile(target, 'original');
+      await chmod(target, 0o400);
+      locked.push(target);
+      expect(
+        (await asking('write', { path: 'readonly.txt', content: 'changed' }))
+          .outcome,
+      ).toBe('refused');
+      expect(await readFile(target, 'utf8')).toBe('original');
+    },
+  );
+
+  it('coordinates edits across separate enforcers without losing the other edit', async () => {
+    const first = enforcing(root);
+    const second = enforcing(root);
+    await writeFile(join(root, 'concurrent.txt'), '\ufeffone\r\ntwo');
+    const replies = await Promise.all([
+      first({
+        id: 'first',
+        op: 'edit',
+        path: 'concurrent.txt',
+        replacing: 'one',
+        content: 'ONE',
+      }),
+      second({
+        id: 'second',
+        op: 'edit',
+        path: 'concurrent.txt',
+        replacing: 'two',
+        content: 'TWO',
+      }),
+    ]);
+    expect(replies.map((reply) => reply.outcome)).toEqual(['ok', 'ok']);
+    expect(await readFile(join(root, 'concurrent.txt'), 'utf8')).toBe(
+      '\ufeffONE\r\nTWO',
+    );
+  });
 });

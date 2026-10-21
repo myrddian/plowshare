@@ -296,6 +296,12 @@ public interface InformationCatalogueRepository {
 
   void tags(InformationContext context, UUID revision, List<String> tags);
 
+  /**
+   * Conditional resource tag replacement. The resource must come from live write admission in the
+   * same transaction; reuse that locked snapshot rather than resolving authority a second time.
+   */
+  void replaceTags(Resource resource, List<String> tags, long expectedVersion);
+
   Command reserve(InformationContext context, UUID revision, UUID request, String fingerprint);
 
   void commandState(InformationContext context, Command command, CommandState state, String error);

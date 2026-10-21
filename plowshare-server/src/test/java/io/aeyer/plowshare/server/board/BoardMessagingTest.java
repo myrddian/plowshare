@@ -1162,6 +1162,96 @@ class BoardMessagingTest {
   }
 
   @Test
+  void attributedSendRetriesSurviveRestartAndDistinctStepsReuseProviderIds() throws Exception {
+    var lineage =
+        io.aeyer.plowshare.server.llm.accounting.UsageLineage.root(caller.conversationId());
+    var run = io.aeyer.plowshare.server.llm.accounting.UsageLineage.root("retained-run");
+    var base =
+        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.project(
+            "enzo",
+            "1",
+            io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Operation.AGENT_CHAT);
+    var firstOwner =
+        base.withExecution(
+            lineage,
+            run,
+            io.aeyer.plowshare.server.llm.accounting.UsageLineage.NONE,
+            "sender",
+            1L,
+            1L);
+    String input = "{\"to\":\"reviewer\",\"body\":\"Review\"}";
+    var tool = messages.tool(caller);
+    tool.calledAs("provider-id");
+    JsonNode first = JSON.readTree(tool.run(input, caller.home(), firstOwner));
+    var reconstructed = messages.tool(caller);
+    reconstructed.calledAs("provider-id");
+    assertEquals(first, JSON.readTree(reconstructed.run(input, caller.home(), firstOwner)));
+    reconstructed.calledAs("provider-id");
+    var secondOwner =
+        base.withExecution(
+            lineage,
+            run,
+            io.aeyer.plowshare.server.llm.accounting.UsageLineage.NONE,
+            "sender",
+            1L,
+            2L);
+    JsonNode second = JSON.readTree(reconstructed.run(input, caller.home(), secondOwner));
+    assertNotEquals(first.path("message"), second.path("message"));
+    assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+  }
+
+  @Test
+  void concurrentIdenticalSendsCommitOneMessageAndWake() throws Exception {
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var a =
+          pool.submit(
+              () -> {
+                start.await();
+                return request(true);
+              });
+      var b =
+          pool.submit(
+              () -> {
+                start.await();
+                return request(true);
+              });
+      start.countDown();
+      assertEquals(
+          a.get(10, java.util.concurrent.TimeUnit.SECONDS),
+          b.get(10, java.util.concurrent.TimeUnit.SECONDS));
+    }
+    assertEquals(
+        1, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+  }
+
+  @Test
+  void conflictingSendIdentityCannotChangeMessageWakeAllowanceOrDeadline() throws Exception {
+    JsonNode first = request(true);
+    String id = first.path("message").asText();
+    var before = fixture.jdbc.queryForList("SELECT message,deadline_at FROM board_message_routes");
+    String call =
+        fixture.jdbc.queryForObject(
+            "SELECT call_id FROM board_message_routes WHERE message=?", String.class, id);
+    var attempt =
+        new SendMessageTool.Request(
+            "reviewer",
+            "changed",
+            null,
+            true,
+            false,
+            "persistent",
+            call.substring(call.indexOf(':') + 1),
+            99L);
+    String result = messages.send(caller, attempt, Home.of("payments"));
+    assertTrue(result.contains("different message arguments"), result);
+    assertEquals(
+        before, fixture.jdbc.queryForList("SELECT message,deadline_at FROM board_message_routes"));
+    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+  }
+
+  @Test
   void retries_do_not_duplicate_messages_or_wakes_and_names_reuse_the_default() throws Exception {
     JsonNode first = request(true);
     JsonNode retry = request(true);

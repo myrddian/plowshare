@@ -665,10 +665,18 @@ public final class BoardMessaging
   }
 
   public SendMessageTool tool(RunExtras.Context context) {
-    return new SendMessageTool((request, home) -> send(context, request, home));
+    return new SendMessageTool((request, home, owner) -> send(context, request, home, owner));
   }
 
   public String send(RunExtras.Context context, SendMessageTool.Request request, Home home) {
+    return send(context, request, home, null);
+  }
+
+  public String send(
+      RunExtras.Context context,
+      SendMessageTool.Request request,
+      Home home,
+      io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
     if (context.home() != null && !home.equals(context.home()))
       return "The sending run owns its project.";
     RunExtras.Context scoped =
@@ -688,21 +696,40 @@ public final class BoardMessaging
                 Integer turn = context.transcript().continuingTurn();
                 if (request.callId() != null && turn == null)
                   turn = repository.lastTurn(context.conversationId());
+                Instance sender = source(scoped);
+                String call = request.callId();
+                if (call != null) {
+                  if (owner != null
+                      && owner.status()
+                          != io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Status
+                              .LEGACY_UNATTRIBUTED) {
+                    if (!java.util.Objects.equals(owner.accountHandle(), sender.account())
+                        || !java.util.Objects.equals(
+                            owner.conversations().id(), context.conversationId()))
+                      throw new Board.Refused(
+                          "Message invocation belongs to a different account or conversation");
+                    // A pre-upgrade turn may have sent under turn:call. Do not reinterpret that
+                    // execution under v2, even for a different model step. Its messages remain
+                    // readable.
+                    if (repository.legacySendTurn(sender.id(), turn))
+                      throw new Board.Refused(
+                          "Legacy handling turn has unverified send identities; inspect its messages and start a new turn");
+                    call = MessageSendIdentity.invocation(owner, call);
+                  } else call = turn + ":" + call;
+                }
                 SendMessageTool.Request identified =
-                    request.callId() == null
-                        ? request
-                        : new SendMessageTool.Request(
-                            request.to(),
-                            request.body(),
-                            request.replyTo(),
-                            request.replyExpected(),
-                            request.finalReply(),
-                            request.lifetime(),
-                            turn + ":" + request.callId(),
-                            request.timeoutSeconds(),
-                            request.toProject(),
-                            request.route());
-                return send(source(scoped), identified, false, null);
+                    new SendMessageTool.Request(
+                        request.to(),
+                        request.body(),
+                        request.replyTo(),
+                        request.replyExpected(),
+                        request.finalReply(),
+                        request.lifetime(),
+                        call,
+                        request.timeoutSeconds(),
+                        request.toProject(),
+                        request.route());
+                return send(sender, identified, false, null);
               });
       Route sent = route(id).orElseThrow();
       return json(
@@ -738,8 +765,10 @@ public final class BoardMessaging
     // Tool call IDs are durable idempotency keys; retries do not owe another wake.
     if (request.callId() != null) {
       lock("send:" + sender.id() + ":" + request.callId());
-      List<String> prior = repository.priorSend(sender.id(), request.callId());
-      if (!prior.isEmpty()) return prior.getFirst();
+      var prior = repository.priorSend(sender.id(), request.callId());
+      if (prior.isPresent())
+        return MessageSendIdentity.recover(
+            prior.get(), MessageSendIdentity.fingerprint(request, generated, ending));
     }
     Route original =
         request.replyTo() == null
@@ -809,7 +838,8 @@ public final class BoardMessaging
             generated,
             ending,
             false),
-        request.callId());
+        request.callId(),
+        MessageSendIdentity.fingerprint(request, generated, ending));
     if (request.timeoutSeconds() != null)
       repository.deadline(message.id(), clock.get().plusSeconds(request.timeoutSeconds()));
     if (recipient.active()) {

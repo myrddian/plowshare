@@ -337,10 +337,10 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(port, "get", side_effect=get),
             patch.object(port, "validate_epics", side_effect=validate),
         ):
-            await board.set_epics(uid(10), uid(1010), uid(40), (uid(20),))
+            await board.set_epics(uid(10), uid(1010), uid(40), (uid(20),), 0)
             self.assertEqual(order, ["epics", "ticket"])
             order.clear()
-            await board.set_topics(uid(10), uid(1010), uid(41), ("topic",))
+            await board.set_topics(uid(10), uid(1010), uid(41), ("topic",), 0)
             self.assertEqual(order, ["ticket"])
             with self.assertRaises(RevisionConflict):
                 await board.set_topics(uid(10), uid(999), uid(42), ())

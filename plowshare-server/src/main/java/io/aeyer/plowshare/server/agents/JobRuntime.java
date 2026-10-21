@@ -3323,6 +3323,16 @@ public final class JobRuntime {
                 ? new ToolCall(synthesisedId(++synthesised), wanted.name(), wanted.arguments())
                 : wanted);
       }
+      // Step ownership distinguishes later model calls, not two ambiguous declarations in one
+      // batch. Reject the entire malformed batch before any tool can acquire an effect identity.
+      if (asked.stream().map(ToolCall::id).distinct().count() != asked.size())
+        return stopped(
+            Ending.UNAVAILABLE,
+            "The model reused a tool-call ID within one batch; no tools in that batch ran.",
+            trail,
+            steps,
+            modelCalls,
+            "");
       pacing.asked(asked.size());
       // A real tool call restores the call-failure allowance (spec 2026-09-28 §4).
       if (!asked.isEmpty()) {

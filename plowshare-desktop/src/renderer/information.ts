@@ -86,6 +86,7 @@ export function installInformation(
     typeIdentity = '';
   let availableTypes: readonly InformationTypeVersion[] = [];
   let selectedContent: InformationContentView | undefined;
+  let selectedTagsVersion: number | undefined;
   let pendingMetadataEdit: InformationTyping | undefined;
   let pendingMetadataScope = '';
   const authoredControls = document.createElement('details');
@@ -674,6 +675,7 @@ export function installInformation(
     }
     const inspection = ++inspectRevision;
     selected = id;
+    selectedTagsVersion = undefined;
     acquisition = isAcquisition;
     sourceCanAsk = false;
     const value = await call(
@@ -702,6 +704,7 @@ export function installInformation(
     }
     if ('state' in value)
       throw new Error('Expected a retained revision status.');
+    selectedTagsVersion = value.tagsVersion;
     const steps = (value.steps ?? []).filter(
       (row) => row.generation === value.generation,
     );
@@ -890,7 +893,7 @@ export function installInformation(
       </details>
       <details class="information-processing"><summary>${options.kind === 'report' ? 'Processing' : 'Processing details'}</summary><p>These steps prepare the saved text for search and questions. “Ready” means that step has finished.</p><p>${escape(value.allowance_spent ?? 'Unknown')} / ${escape(value.allowance_total ?? 'unknown')} model calls used.</p><table><thead><tr><th>Step</th><th>Status</th><th>Attempts</th></tr></thead><tbody>${steps.map((row) => `<tr><td>${escape(({ extract: 'Extract text', derive: 'Organise passages', embed: 'Prepare passage search', summarise: 'Write summaries', summary_embed: 'Prepare summary search', autoTag: 'Generate tags and document author', tagGroups: 'Group related tags' } as Record<string, string>)[String(row.stage)] ?? row.stage)}</td><td>${escape(row.state === 'ready' && row.compatible === false ? `${row.state} · settings changed; rebuild needed` : row.state)}</td><td>${escape(row.attempt)}</td></tr>${row.error ? `<tr><td colspan="3" role="alert">${escape(row.error)}</td></tr>` : ''}`).join('')}</tbody></table><p class="information-id">Source version ID: ${escape(id)}</p><details><summary>Processing history</summary><pre>${escape(JSON.stringify(value.events ?? [], null, 2))}</pre></details>${report?.details ? `<details><summary>Report review data</summary><pre>${escape(JSON.stringify(report?.details, null, 2))}</pre></details>` : ''}</details></div>
       <details class="information-tag-metadata"><summary>Tags</summary>
-      <section class="information-tags"><h3>Tags</h3><p>Your tags: ${isList(value.tags) && value.tags.length ? value.tags.map(escape).join(', ') : 'None yet'}</p><p>Automatic tags: ${isList(value.autoTag) && value.autoTag.length ? value.autoTag.map(escape).join(', ') : value.auto_tag_generated && steps.some((row) => row.stage === 'autoTag' && row.state === 'ready') ? 'No topical tags found' : `Not ready${steps.find((row) => row.stage === 'autoTag') ? ` · ${escape(steps.find((row) => row.stage === 'autoTag')!.state)}` : ''}`}</p>${manage ? `<form data-tags><label>Your tags, separated by commas<input name="tags" value="${escape(isList(value.tags) ? value.tags.join(', ') : '')}" maxlength="2080"></label><button>Save tags</button></form>` : ''}</section>
+      <section class="information-tags"><h3>Tags</h3><p>Your tags: ${isList(value.tags) && value.tags.length ? value.tags.map(escape).join(', ') : 'None yet'}</p><p>Automatic tags: ${isList(value.autoTag) && value.autoTag.length ? value.autoTag.map(escape).join(', ') : value.auto_tag_generated && steps.some((row) => row.stage === 'autoTag' && row.state === 'ready') ? 'No topical tags found' : `Not ready${steps.find((row) => row.stage === 'autoTag') ? ` · ${escape(steps.find((row) => row.stage === 'autoTag')!.state)}` : ''}`}</p>${manage && value.tagsVersion !== undefined ? `<form data-tags><label>Your tags, separated by commas<input name="tags" value="${escape(isList(value.tags) ? value.tags.join(', ') : '')}" maxlength="2080"></label><button>Save tags</button></form>` : ''}</section>
       <details class="information-tag-groups"><summary>Tag groups · ${value.tagGroupsSource === 'manual' ? 'your override' : 'automatic'}</summary>${
         Object.entries(value.tagGroups ?? {})
           .map(
@@ -1495,9 +1498,16 @@ export function installInformation(
       else removeFilter('search');
       resetSelection();
     }
-    if (form.hasAttribute('data-tags'))
+    if (form.hasAttribute('data-tags')) {
+      if (selectedTagsVersion === undefined) {
+        showError(
+          'Refresh from a server supporting guarded tag editing before saving.',
+        );
+        return;
+      }
       background(
-        mutate('tags', {
+        mutate('tags.replace', {
+          expectedTagsVersion: selectedTagsVersion,
           revision: selected,
           tags: displayText(data.get('tags') ?? '')
             .split(',')
@@ -1505,6 +1515,7 @@ export function installInformation(
             .filter(Boolean),
         }),
       );
+    }
     if (form.hasAttribute('data-tag-groups')) {
       const groups: Record<string, string[]> = {};
       for (const line of displayText(data.get('groups') ?? '')

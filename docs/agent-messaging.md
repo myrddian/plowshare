@@ -14,6 +14,19 @@ free. Each direct message has a bounded handling run, so its terminal
 outcome is attributable to exactly one incoming message. Direct wakes are never
 coalesced like ordinary board notification wakes.
 
+Each retained send identity now includes a fingerprint of the validated request,
+including destination selectors, body, reply flags, lifetime and requested timeout.
+Identical retries recover the same message without another wake or deadline;
+changed arguments are refused. Authenticated invocations include execution turn
+and step ownership, so a provider call ID reused in another model step is distinct.
+The original invocation owner must be retained when recovering an existing call.
+
+Pre-upgrade sends lack complete request fingerprints. They remain readable through
+message inspection, but cannot be blindly recovered by resubmitting a send. A
+handling turn with those unverified records cannot switch to the new identity
+scheme; inspect its messages and start a new turn. No historical fingerprint is
+invented from a resolved destination. This does not replay interrupted handling.
+
 ## Addresses and lifetimes
 
 An `ins_...` address identifies a specific instance, bound to an account, project,

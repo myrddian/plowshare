@@ -117,12 +117,23 @@ permissions and cannot reveal excluded, withdrawn or unreadable information.
 The desktop source/report Library exposes these choices and removable selected
 filters. Search/rank retain their existing published-report retrieval policy.
 
-User `tags` belong to the resource and therefore survive new revisions. Only its
-owner can replace them through `information.tags`, supplying `revision`, a stable
-`requestId`, and a string array `tags` (an empty array clears them). This human
-control is unavailable to model tools. Lists/status return `tags` and `autoTag`
-as separate arrays. Tags are trimmed, lowercased, deduplicated and bounded to
-32 tags of 64 printable characters each.
+User `tags` belong to the resource and survive new revisions. Authorized human
+controls can replace them with `information.tags.replace`, supplying `revision`,
+a stable `requestId`, `tags`, and the `expectedTagsVersion` from the displayed
+snapshot. Lists/status and document navigation return `tagsVersion` beside their
+tag set. This version is independent of content heads and processing generation.
+The existing resource lock, command receipt and transaction own the conditional
+update. Stale replacements fail before changing tags; retrying an already applied
+command recovers its receipt even after later tag changes. Changed arguments or
+preconditions under the same request ID conflict. Hooks retain their existing
+checkpoint semantics: a post-control refusal need not undo an applied change.
+
+The legacy `information.tags` operation remains an unconditional replacement for
+older clients. Its actual tag changes and imported tags advance the same version,
+so guarded clients detect them. Semantic no-ops do not advance it. There is no
+silent downgrade from guarded replacement. Both controls remain unavailable to
+model tools, normalize/deduplicate user tags, and enforce 32 tags of 64 printable
+characters. Generated `autoTag` remains separate.
 
 The tool-free `information_tagger` model worker fills revision-specific `autoTag`
 from a bounded excerpt of the retained extraction. Generated tags are navigation

@@ -70,8 +70,8 @@ plowshare-agile --config "$AGILE_CONFIG" ticket show "$TICKET_ID"
 plowshare-agile --config "$AGILE_CONFIG" ticket show "$TICKET_ID" --body
 plowshare-agile --config "$AGILE_CONFIG" ticket move "$TICKET_ID" in-progress --expected-revision "$REVISION" --request-id "$REQUEST_ID"
 plowshare-agile --config "$AGILE_CONFIG" ticket update "$TICKET_ID" --fields-file fields.json --expected-revision "$REVISION" --request-id "$REQUEST_ID"
-plowshare-agile --config "$AGILE_CONFIG" ticket set-epics "$TICKET_ID" --epic "$EPIC_A" --epic "$EPIC_B" --expected-revision "$REVISION" --request-id "$REQUEST_ID"
-plowshare-agile --config "$AGILE_CONFIG" ticket set-tags "$TICKET_ID" --tag sdk --tag websocket --expected-revision "$REVISION" --request-id "$REQUEST_ID"
+plowshare-agile --config "$AGILE_CONFIG" ticket set-epics "$TICKET_ID" --expected-tags-version "$TAGS_VERSION" --epic "$EPIC_A" --epic "$EPIC_B" --expected-revision "$REVISION" --request-id "$REQUEST_ID"
+plowshare-agile --config "$AGILE_CONFIG" ticket set-tags "$TICKET_ID" --expected-tags-version "$TAGS_VERSION" --tag sdk --tag websocket --expected-revision "$REVISION" --request-id "$REQUEST_ID"
 plowshare-agile --config "$AGILE_CONFIG" tickets list --epic "$EPIC_A" --tag sdk --status ready --iteration Next
 ```
 
@@ -87,11 +87,15 @@ copy of extracted text from `show --body`.
 `set-epics` replaces the ticket's epic set and preserves its topic tags. Repeat
 `--epic` for intersections; omit it to clear membership. `set-tags` replaces
 topics while preserving epic tags; omit `--tag` to clear topics. Neither creates
-a document relationship. Both use the existing owner-only tag control and its
-32-tag limit. Tag writes lack metadata's expected-head compare-and-set, so this
-first version supports one maintainer and explicitly refreshes before replacement.
-There remains a possible race with another tag writer; no concurrency guarantee
-is inferred from the command's expected body revision.
+a document relationship. Both use the public guarded tag replacement control and
+its 32-tag limit. Supply `--expected-tags-version` from the displayed document's
+`tags_version`, separately from its expected body revision. The server checks
+this resource version transactionally; concurrent stale replacements refuse
+without discarding the other writer's tags. Refresh and review before a new
+request. The web forms retain the displayed version too. An older server without
+tag versions cannot accept a new guarded edit. Historical journal entries still
+recover through their original legacy operation; new intents retain the exact
+version and `information.tags.replace` identity.
 
 Lists count unique current documents, not historical revisions. A complete
 filtered selection is limited to 100 tickets or 20 epics; overflow and duplicate

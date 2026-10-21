@@ -1,3 +1,4 @@
+import { validateInformationTagVersions } from './information-validation.ts';
 import { interchangeProblem } from './interchange-validation.ts';
 import { validateNavigationMetadata } from './navigation-validation.ts';
 import { validateProcReply } from './proc.ts';
@@ -263,6 +264,7 @@ export function decodeReply<K extends keyof Replies>(
     throw new Error('Invalid FileStore catalogue');
   validateActingReply(type, decoded);
   validateNavigationMetadata(type, decoded);
+  validateInformationTagVersions(type, decoded);
   validateProviderCredentialReply(type, decoded);
   const portableFailure = interchangeProblem(type, decoded, true);
   if (portableFailure) throw new Error(portableFailure);

@@ -188,13 +188,26 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
         id);
   }
 
-  public List<String> priorSend(String sender, String call) {
+  public Optional<PriorSend> priorSend(String sender, String call) {
+    return jdbc
+        .query(
+            "SELECT message,send_fingerprint FROM board_message_routes WHERE sender=? AND call_id=?",
+            (row, ordinal) ->
+                new PriorSend(row.getString("message"), row.getString("send_fingerprint")),
+            sender,
+            call)
+        .stream()
+        .findFirst();
+  }
 
-    return jdbc.queryForList(
-        "SELECT message FROM board_message_routes WHERE sender = ? AND call_id = ?",
-        String.class,
-        sender,
-        call);
+  public boolean legacySendTurn(String sender, int turn) {
+    if (turn < 0) throw new IllegalArgumentException("invalid handling turn");
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM board_message_routes WHERE sender=? AND call_id LIKE ? AND send_fingerprint IS NULL)",
+            Boolean.class,
+            sender,
+            turn + ":%"));
   }
 
   public boolean terminated(String message) {
@@ -213,11 +226,11 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
         recipient);
   }
 
-  public void insertRoute(Route route, String call) {
+  public void insertRoute(Route route, String call, String fingerprint) {
 
     changed(
         jdbc.update(
-            "INSERT INTO board_message_routes (message, sender, recipient, reply_to, reply_expected, final, generated, ending, call_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO board_message_routes (message, sender, recipient, reply_to, reply_expected, final, generated, ending, call_id, send_fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             route.message(),
             route.sender(),
             route.recipient(),
@@ -226,7 +239,8 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
             route.finalReply(),
             route.generated(),
             route.ending(),
-            call));
+            call,
+            fingerprint));
   }
 
   public void deadline(String message, Instant deadline) {

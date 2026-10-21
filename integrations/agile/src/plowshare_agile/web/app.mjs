@@ -755,6 +755,7 @@ function renderMembership(container, doc) {
     );
     await mutate(`/api/tickets/${doc.resource}/epics`, {
       expectedRevision: state.selected.document.revision,
+      expectedTagsVersion: state.selected.document.tags_version,
       epics: selected,
     });
     state.dirty.delete('epics');
@@ -782,6 +783,7 @@ function renderMembership(container, doc) {
       .filter(Boolean);
     await mutate(`/api/tickets/${doc.resource}/tags`, {
       expectedRevision: state.selected.document.revision,
+      expectedTagsVersion: state.selected.document.tags_version,
       tags: selected,
     });
     state.dirty.delete('tags');

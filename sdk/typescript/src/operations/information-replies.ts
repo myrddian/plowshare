@@ -247,6 +247,7 @@ export interface InformationReplies
   'information.facets': InformationFacetCounts;
   'information.tags.groups': ChangedInformation;
   'information.tags': ChangedInformation;
+  'information.tags.replace': ChangedInformation;
   'information.list': readonly InformationRow[];
   'information.status': InformationRevision | InformationAcquisition;
   'information.read': InformationWindow;
@@ -318,6 +319,7 @@ export const INFORMATION_FRAMES = [
   'information.list',
   'information.facets',
   'information.tags',
+  'information.tags.replace',
   'information.tags.groups',
   'information.status',
   'information.await',
@@ -636,6 +638,7 @@ function legacyInformationReply(
       'unshare',
       'allowance',
       'tags',
+      'tags.replace',
       'tags.groups',
     ].includes(verb)
   )

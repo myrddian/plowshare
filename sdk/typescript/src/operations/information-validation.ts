@@ -29,6 +29,15 @@ export function informationPayloadProblem(
   }
   for (const key of required) if (!(key in body)) return `${type} needs ${key}`;
   for (const [key, value] of Object.entries(body)) {
+    if (key === 'expectedTagsVersion') {
+      if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+      )
+        return 'expectedTagsVersion must be a nonnegative safe integer';
+      continue;
+    }
     if (['typing', 'metadata', 'presentation', 'schema'].includes(key)) {
       try {
         if (key === 'schema') {
@@ -359,4 +368,31 @@ export function informationPayloadProblem(
   )
     return 'evidence end must follow start';
   return undefined;
+}
+
+/** Versions are checked before a displayed snapshot can become a mutation precondition. */
+export function validateInformationTagVersions(
+  type: string,
+  value: unknown,
+): void {
+  if (!type.startsWith('information.')) return;
+  const visit = (row: unknown, depth: number): void => {
+    if (depth > 6 || row === null || typeof row !== 'object') return;
+    if (isList(row)) {
+      for (const item of row) visit(item, depth + 1);
+      return;
+    }
+    const fields = row as Record<string, unknown>;
+    if (
+      'tagsVersion' in fields &&
+      (typeof fields['tagsVersion'] !== 'number' ||
+        !Number.isSafeInteger(fields['tagsVersion']) ||
+        fields['tagsVersion'] < 0)
+    )
+      throw new Error('Invalid resource tag version');
+    // Follow only public navigation containers, never arbitrary user metadata or source content.
+    for (const key of ['documents', 'connections', 'selection', 'document'])
+      if (key in fields) visit(fields[key], depth + 1);
+  };
+  visit(value, 0);
 }

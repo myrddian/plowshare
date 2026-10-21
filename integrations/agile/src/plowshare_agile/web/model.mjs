@@ -48,6 +48,11 @@ function choice(value, allowed) {
 function nullable(value, max) {
   return value === null ? null : string(value, max);
 }
+function tagVersion(value) {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error('Invalid tag version.');
+  return value;
+}
 export function decodeDocument(value, kind) {
   const row = record(value),
     meta = record(row.fields);
@@ -77,6 +82,11 @@ export function decodeDocument(value, kind) {
     resource: uuid(row.resource),
     revision: uuid(row.revision),
     owner: string(row.owner),
+    ...(row.tags_version === undefined || row.tags_version === null
+      ? {}
+      : {
+          tags_version: tagVersion(row.tags_version),
+        }),
     tags: row.tags.map((tag) => string(tag, 64)),
     fields,
     body: row.body,
@@ -127,6 +137,7 @@ export function decodeResult(value) {
       'information.content.revise',
       'information.revise',
       'information.tags',
+      'information.tags.replace',
     ]),
   };
 }

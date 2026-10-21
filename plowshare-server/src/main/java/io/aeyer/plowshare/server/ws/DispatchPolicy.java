@@ -58,6 +58,7 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
   private static final Set<String> REVISIONS =
       Set.of(
           "information.tags",
+          "information.tags.replace",
           "information.tags.groups",
           "information.allowance",
           "information.rebuild",

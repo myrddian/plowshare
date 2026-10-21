@@ -74,6 +74,7 @@ export function constrain(graph) {
       for (const variant of s.anyOf ?? [ref])
         field(resolve(graph, variant), 'topic', { ...portName, maxLength: 1024 });
     if (s.anyOf) continue;
+    if (op==='information.tags.replace') field(s,'expectedTagsVersion',integer(0,9007199254740991));
     if (op.startsWith('proc.')) {
       for (const key of ['project','conversation','root','causation','after'])
         field(s,key,{...identity,maxLength:256});
@@ -499,6 +500,7 @@ export function constrain(graph) {
   // Constraints owned by shared domain shapes apply to both requests and responses.
   for (const s of Object.values(graph.$defs)) {
     if (!s.properties) continue;
+    field(s,'tagsVersion',integer(0,9007199254740991));
     const p = s.properties,
       title = s.title ?? '';
     if(title.startsWith('HostedTool')) {

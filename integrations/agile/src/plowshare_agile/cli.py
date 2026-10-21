@@ -99,6 +99,10 @@ def parser() -> argparse.ArgumentParser:
                 change.add_argument("resource", type=identity)
                 change.add_argument("--expected-revision", required=True, type=identity)
                 change.add_argument("--request-id", required=True, type=identity)
+                if verb in ("set-epics", "set-tags"):
+                    change.add_argument(
+                        "--expected-tags-version", required=True, type=int
+                    )
                 if verb == "move":
                     change.add_argument("status", choices=STATUSES)
                 elif verb == "update":
@@ -290,6 +294,7 @@ async def execute(args: argparse.Namespace) -> None:
                     args.expected_revision,
                     args.request_id,
                     tuple(args.epic),
+                    args.expected_tags_version,
                 )
             )
         elif args.action == "set-tags":
@@ -299,6 +304,7 @@ async def execute(args: argparse.Namespace) -> None:
                     args.expected_revision,
                     args.request_id,
                     tuple(args.tag),
+                    args.expected_tags_version,
                 )
             )
         else:

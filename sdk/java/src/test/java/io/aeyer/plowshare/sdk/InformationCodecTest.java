@@ -31,6 +31,38 @@ class InformationCodecTest {
   }
 
   @Test
+  void guardedTagsRoundTripAndRejectMissingOrMalformedPreconditions() throws Exception {
+    var input =
+        new java.util.HashMap<String, Object>(
+            Map.of(
+                "revision",
+                ID,
+                "requestId",
+                OTHER,
+                "tags",
+                List.of("topic"),
+                "expectedTagsVersion",
+                0));
+    var command =
+        assertInstanceOf(
+            InformationRequest.TagsReplace.class,
+            InformationCodec.decode("tags.replace", JSON.writeValueAsString(input)));
+    assertEquals(0L, command.expectedTagsVersion());
+    assertEquals(
+        0L, JSON.readTree(InformationCodec.encode(command)).path("expectedTagsVersion").asLong());
+    for (Object invalid : List.of(-1L, 0.5, "0", 9007199254740992L)) {
+      input.put("expectedTagsVersion", invalid);
+      assertThrows(
+          IOException.class,
+          () -> InformationCodec.decode("tags.replace", JSON.writeValueAsString(input)));
+    }
+    input.remove("expectedTagsVersion");
+    assertThrows(
+        IOException.class,
+        () -> InformationCodec.decode("tags.replace", JSON.writeValueAsString(input)));
+  }
+
+  @Test
   void selectors_tags_and_automatic_grouping_have_explicit_contracts() throws Exception {
     var request =
         (InformationRequest.Tags)
