@@ -252,7 +252,10 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         await self.login()
-        self.port.error = Refusal("INFORMATION_TAGS_CONFLICT", "Private diagnostic")
+        self.port.error = Refusal(
+            "BAD_REQUEST",
+            "INFORMATION_TAGS_CONFLICT: Tags changed; refresh and review before replacing",
+        )
         response = await self.client.post(
             "/api/tickets/" + uid(10) + "/tags",
             headers=self.headers(uid(72)),
@@ -265,13 +268,32 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status, 409)
         row = await response.json()
-        self.assertEqual(row["code"], "INFORMATION_TAGS_CONFLICT")
+        self.assertEqual(row["code"], "CONFLICT")
         self.assertFalse(row["pending"])
-        self.assertNotIn("Private diagnostic", str(row))
+        self.assertNotIn("Tags changed", str(row))
         intent, state = self.journal.read(uid(72))
         self.assertEqual(state, "refused")
         self.assertEqual(intent.expected_tags_version, 0)
         self.assertEqual(len(self.port.calls), 1)
+
+    async def test_other_bad_requests_do_not_become_tag_conflicts(self) -> None:
+        await self.login()
+        self.port.error = Refusal(
+            "BAD_REQUEST", "Invalid value mentions INFORMATION_TAGS_CONFLICT: privately"
+        )
+        response = await self.client.post(
+            "/api/tickets/" + uid(10) + "/tags",
+            headers=self.headers(uid(73)),
+            json={
+                "requestId": uid(73),
+                "expectedRevision": uid(1010),
+                "expectedTagsVersion": 0,
+                "tags": ["reviewed"],
+            },
+        )
+        self.assertEqual(response.status, 403)
+        self.assertEqual((await response.json())["code"], "BAD_REQUEST")
+        self.assertEqual(self.journal.read(uid(73))[1], "refused")
 
     async def test_stale_display_is_refused_before_journaling_or_submitting(
         self,

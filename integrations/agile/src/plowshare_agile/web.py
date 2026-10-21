@@ -169,17 +169,23 @@ class WebUI:
                     status=409,
                 )
             except Refusal as error:
+                # Guarded tags use the public BAD_REQUEST envelope with a stable
+                # reason marker. Match only that marker, never arbitrary prose.
+                conflict = error.code == "CONFLICT" or (
+                    error.code == "BAD_REQUEST"
+                    and (error.said or "").startswith("INFORMATION_TAGS_CONFLICT:")
+                )
                 response = web.json_response(
                     {
                         "error": "server-refusal",
-                        "code": error.code,
+                        "code": "CONFLICT" if conflict else error.code,
                         "pending": self._pending(request),
                     },
                     status=(
                         503
                         if self._pending(request) or error.code == "INTERNAL_ERROR"
                         else 409
-                        if error.code in {"CONFLICT", "INFORMATION_TAGS_CONFLICT"}
+                        if conflict
                         else 403
                     ),
                 )
