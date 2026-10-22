@@ -766,13 +766,22 @@ export interface Reply {
   proc?: ProcReplies[keyof ProcReplies];
   information?: Replies[`information.${InformationOperation}`];
   /**
-   * Present only when the replicated state is itself the answer, or when a
-   * caller reads it synchronously with the reply. Replies that carry a domain
-   * payload omit it: the whole blob is orders of magnitude larger than the
-   * answer, and `subscribe()` already delivers every state change the handler
-   * made before it returned. Read it through `replyState` where a call site
-   * expects it, so a missing state fails loudly instead of rendering stale
-   * state.
+   * The replicated state, on the replies that carry it — which is most of
+   * them, including payload-bearing replies that change state.
+   *
+   * It is absent on exactly the replies whose answer is a domain payload and
+   * whose handler changes no replicated state: `relay-operate`, `relay-read`,
+   * `proc-read`, `usage-read`, and every `information` operation except `ask`.
+   * There the blob is orders of magnitude larger than the answer and every
+   * subscriber already holds an equal state, so sending it is pure waste.
+   *
+   * `DesktopWorkspace` replaces a present state with its composite one, which
+   * also covers project children, and leaves an absent one absent, so the
+   * omission survives to the renderer. A handler that changes state and wants
+   * its caller to see that change synchronously with the reply must include
+   * state; `information`/`ask` is the one payload handler that does.
+   *
+   * Read it through {@link replyState} wherever a call site expects it.
    */
   state?: DesktopState;
   conversation?: string;
@@ -792,11 +801,11 @@ export interface DesktopApi {
   ): () => void;
 }
 /**
- * The replicated state of a reply that carries one. Only handlers whose answer
- * is the state itself include it, so a call site that needs it must name an
- * action that returns it. An absent state is a wiring defect between the
- * handler and the call site, never a runtime condition, so it fails here
- * rather than rendering a stale or partial view.
+ * The replicated state of a reply that carries one. A call site that needs
+ * state synchronously with the reply must name an action that answers with
+ * it; {@link Reply.state} lists the replies that omit it. An absent state
+ * here is a mismatch between the handler and the call site, never a runtime
+ * condition, so it fails rather than rendering a stale or partial view.
  */
 export function replyState(reply: Reply): DesktopState {
   if (!reply.state)

@@ -7,6 +7,7 @@ import type { Arrival } from 'plowshare-client-ts/binding/connection';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
 import { replyState } from './shared.ts';
+import type { Request } from './shared.ts';
 import {
   mkdtemp,
   mkdir,
@@ -33,6 +34,8 @@ import type { JobStore, SavedJob } from './job-store.ts';
 import type { ProjectStore } from './project-config.ts';
 import type { ConnectionStore, SavedConnection } from './connection-config.ts';
 
+const relayRequestId = '00000000-0000-4000-8000-000000000011';
+const relayGeneration = '00000000-0000-4000-8000-000000000012';
 function fixture(
   connectionStore?: ConnectionStore,
   jobStore?: JobStore,
@@ -210,6 +213,68 @@ function fixture(
             return { code: 'OK', payload: { items: [], unread: 0 } };
           if (type === 'orchestration.list')
             return { code: 'OK', payload: { orchestrations: [] } };
+          // Payload-bearing reads used by the omitted-state test below. Each
+          // payload is the production decoder's minimal accepted shape.
+          if (type === 'information.list') return { code: 'OK', payload: [] };
+          if (type === 'proc.list')
+            return {
+              code: 'OK',
+              payload: {
+                snapshotAt: '2026-10-19T01:00:00Z',
+                selection: {
+                  visibility: 'mine',
+                  project: null,
+                  conversation: null,
+                  root: null,
+                  causation: null,
+                  active: null,
+                  after: null,
+                  limit: 50,
+                },
+                conversations: [],
+                total: 0,
+                cursor: null,
+                coverage: [],
+              },
+            };
+          if (type === 'usage.calls')
+            return {
+              code: 'OK',
+              payload: {
+                filters: { type: 'usage.calls', filter: {} },
+                calls: [],
+                cursor: null,
+                health: {
+                  watermark: '1',
+                  as_of: '2026-10-02T00:00:00Z',
+                  capture_enabled: true,
+                  historical_usage: 'not_imported',
+                },
+              },
+            };
+          if (type === 'relay.topics')
+            return {
+              code: 'OK',
+              payload: {
+                scope: { project: 'Research', system: false },
+                topics: [],
+              },
+            };
+          if (type === 'relay.operate')
+            return {
+              code: 'OK',
+              payload: {
+                requestId: relayRequestId,
+                project: 'Research',
+                topic: 'release.observed',
+                action: 'ACKNOWLEDGE_GAP',
+                subscriber: 'relay.notices.due',
+                deliveryId: null,
+                status: 'GAP_ACKNOWLEDGED',
+                seenThrough: '4',
+                completedAt: '2026-10-19T01:00:00Z',
+              },
+            };
           return { code: 'OK' };
         },
       },
@@ -935,6 +1000,66 @@ await test('a refused saved folder is not retried by navigation or run preparati
     await workspace.dispatch({ action: 'scope', project: 'Research' });
     assert.equal(fileClaims.length, 3);
     assert.equal(workspace.state.files.status, 'ready');
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('payload replies reach the renderer without the replicated state, and state-only replies still get the composite', async () => {
+  const { workspace } = fixture();
+  try {
+    await connect(workspace);
+    // Each of these answers with a domain payload and changes no replicated
+    // state. DesktopClient omits `state`; this asserts the workspace tail does
+    // not put it back, which is the only layer the renderer talks to.
+    const payloadRequests: Request[] = [
+      {
+        action: 'information',
+        operation: 'list',
+        scope: { kind: 'personal' },
+        payload: {},
+      },
+      { action: 'usage-read', type: 'usage.calls', payload: {} },
+      { action: 'proc-read', type: 'proc.list', payload: {} },
+      {
+        action: 'relay-read',
+        type: 'relay.topics',
+        payload: { project: 'Research' },
+      },
+      {
+        action: 'relay-operate',
+        payload: {
+          requestId: relayRequestId,
+          project: 'Research',
+          topic: 'release.observed',
+          topicGeneration: relayGeneration,
+          action: 'ACKNOWLEDGE_GAP',
+          reason: 'Fixture gap acknowledgement',
+          subscriber: 'relay.notices.due',
+          subscriptionGeneration: relayGeneration,
+          expiredThrough: '4',
+        },
+      },
+    ];
+    for (const request of payloadRequests) {
+      const reply = await workspace.dispatch(request);
+      assert.equal(
+        'state' in reply,
+        false,
+        `${request.action} must answer with its payload alone`,
+      );
+      assert.notEqual(
+        Object.keys(reply).length,
+        0,
+        `${request.action} must still answer with a payload`,
+      );
+    }
+    // The same tail is how every state-only handler receives the composite
+    // state, including the fields only the workspace owns.
+    const stateOnly = await workspace.dispatch({ action: 'question-refresh' });
+    const state = replyState(stateOnly);
+    assert.equal(state.connected, true);
+    assert.equal(state.localMachine, thisMachine(process.env, hostname()));
   } finally {
     await workspace.shutdown();
   }
