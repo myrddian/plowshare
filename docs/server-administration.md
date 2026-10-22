@@ -52,16 +52,29 @@ Startup settings live under `plowshare.transport`:
 
 | Property | Default | Effect |
 | --- | --- | --- |
-| `request-depth` | `64` | Per-connection in-flight window advertised to clients, between 1 and 64. |
-| `request-per-connection` | `2` | Requests of one connection executing at once. |
+| `request-depth` | `8` | Per-connection admission window (requests queued, including those executing) advertised to clients, between 1 and 64. |
+| `request-per-connection` | `2` | Requests of one connection executing at once. Inherited, not chosen; see below. |
 | `request-global` | `0` | Requests executing at once across all connections; `0` is unlimited. Admission stays bounded by the depth, the server-wide pending bound and the byte budgets, and the database pool bounds actual work. |
 | `request-observers` | `256` | Long parked waits (such as `information.await`) across all connections; must be at least `request-per-connection`. |
 
-`request-depth` is deliberately left at the protocol ceiling. The Java, Go,
-Python and .NET SDKs adopt the advertised depth and fail locally with
-`NOT_SUBMITTED` at that bound instead of waiting, so lowering it makes them reject
-sooner than they did before this setting existed. Lower it only when every client
-is a TypeScript SDK client; teaching the other SDKs to block is follow-up work.
+`request-depth` defaults to 8 for honest backpressure: a shallow queue refuses
+sooner and more visibly instead of letting 64 requests pile up behind two
+executing ones. It bounds queueing, not execution, so it does not affect the
+database pool; `request-per-connection` governs that. At the defaults, 8 are
+admitted, 2 execute and 6 wait. The Java, Go, Python and .NET SDKs adopt the
+advertised depth and fail locally with `NOT_SUBMITTED` at that bound instead of
+waiting, so their consumers are refused at the 9th concurrent request. Only the
+TypeScript SDK blocks, and every first-party client uses it. A deployment serving
+the other four SDKs may want a higher value. Teaching those SDKs to block is
+separate work.
+
+`request-per-connection` was not chosen for request dispatch. Request dispatch
+originally shared the event-read setting (`event-read-concurrency`, default 2),
+and 2 was kept when the properties were split, purely to preserve behaviour. It
+is now more load-bearing: with `request-global` at 0 it is the only transport
+execution bound. Raising it is what would pressure the connection pool, and that
+should wait until Hikari starvation is expressed as `CAPACITY_EXHAUSTED`
+capacity, which is not done yet.
 
 The main database pool is sized by environment variables:
 

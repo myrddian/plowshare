@@ -150,8 +150,8 @@ class ConcurrentEventChannelTest {
       fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
       var selection = FrameJson.answering().readTree(fixture.reply());
       assertEquals("select", selection.path("id").asText());
-      // The server's own default depth, which is the protocol ceiling (see EventChannelConfig).
-      assertEquals(64, selection.path("payload").path("payload").path("maxPending").asInt());
+      // The server's own default depth (see EventChannelConfig).
+      assertEquals(8, selection.path("payload").path("payload").path("maxPending").asInt());
       fixture.send("slow", "information.facets", Map.of("slow", true));
       entered.get(5, TimeUnit.SECONDS);
       fixture.send("fast", "information.facets", Map.of());

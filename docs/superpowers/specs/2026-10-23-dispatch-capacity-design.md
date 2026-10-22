@@ -482,14 +482,28 @@ blocking on them, and each is reversible.
   classified `FINITE`. Accepted consequence, stated rather than discovered later:
   `requestPerConnection` remains fiction for roughly 220 unclassified operations
   until slice 04's audit proceeds.
-- **The shipped `plowshare.transport.request-depth` is 64, not a lower number.** The
-  depth is deliberately left at the protocol ceiling because four of the six SDKs
-  (Java, Go, Python, .NET) hard-fail with `NOT_SUBMITTED` at the depth bound instead
-  of blocking, and all four adopt the advertised depth. A lower default would make
-  them reject their 9th concurrent request where they rejected the 65th. The server
-  still advertises rather than asserts the depth, enforces it, and answers instead of
-  disconnecting; the TypeScript client still blocks. Lowering the depth is safe only
-  for TypeScript clients. Teaching the other four SDKs to block is follow-up work.
+- **The shipped `plowshare.transport.request-depth` is 8.** Depth is the admission
+  window (`connection.depth`, checked in `ConcurrentRequests.Connection.offer`): how
+  many requests may be queued on a connection. Concurrency (`request-per-connection`,
+  checked as `connection.running < connectionLimit`) is how many execute. At the
+  defaults, 8 are admitted, 2 execute and 6 wait. A shallow queue refuses sooner and
+  more visibly instead of letting 64 requests pile up behind two executing ones. An
+  earlier version of this scope call implied that depth affects connection-pool
+  pressure; that is retracted. Pool pressure follows the executing count, so depth
+  has no database implication. The known consequence: four of the six SDKs (Java, Go,
+  Python, .NET) hard-fail with `NOT_SUBMITTED` at the depth bound instead of
+  blocking, and all four adopt the advertised depth, so their external consumers are
+  refused at the 9th concurrent request where they were previously refused at the
+  65th. Only the TypeScript SDK blocks, and every first-party client uses it, so none
+  is affected. Depth is configurable, so a deployment serving the other four SDKs can
+  raise it. Teaching them to block is separate work.
+- **`request-per-connection = 2` is inherited, not chosen.** At the base commit the
+  handler had `requestPerConnection = 2` fed from `event-read-concurrency:2`, the
+  event-read property request dispatch piggybacked on. The split kept 2 to preserve
+  behaviour. It is now more load-bearing: with `request-global` at 0 it is the only
+  transport execution bound. Raising it is what would pressure the pool, gated on
+  expressing Hikari starvation as `CAPACITY_EXHAUSTED` capacity, which this branch
+  does not do.
 - **`max_connections` must be confirmed on the deployment** before the pool is fixed
   at 20. If it cannot be read, 20 still fits a default of 100 with wide margin.
 2. **Scope of "each resource answers for itself"** — all fifteen bounded resources,
@@ -534,11 +548,12 @@ still connection-exclusive: `!connection.barrier` is the first eligibility term 
 every kind. One slow unclassified BARRIER operation therefore still blocks the
 newly `FINITE` `board.topics`, `swarm.status` and `admin.status` reads completely on
 that connection. Every admitted request beyond the two executing — up to the
-advertised depth, 64 by default — can therefore sit unanswered behind two slow
+advertised depth, 8 by default — can therefore sit unanswered behind two slow
 barriers until the client's deadline expires as `RESPONSE_LOST`, which is the
-originally reported symptom, still reachable. The deeper default makes this worse
-rather than better: a shallower depth would refuse sooner and more honestly, which
-is precisely the trade recorded in the scope call above. Each ingredient is an
+originally reported symptom, still reachable. The shallower default makes the residual
+window smaller, not larger: fewer requests can pile up behind a slow barrier, and
+the rest are refused sooner and more visibly, which is the trade recorded in the
+scope call above. Each ingredient is an
 accepted scope call; their composition is what needed stating.
 
 ## Unverified

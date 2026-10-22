@@ -296,11 +296,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
   /**
    * Per-connection call window advertised in the dispatch handshake. Clients adopt it as their own
    * limit, so it is a statement about how much work this server will queue for one connection, not
-   * a protocol constant. Defaults to the protocol ceiling because most SDKs fail rather than block
-   * at the bound; see the {@code plowshare.transport.request-depth} comment in {@code
-   * EventChannelConfig}.
+   * a protocol constant. It bounds queueing, not execution (see {@code requestPerConnection}).
+   * Defaults to 8 so a full queue refuses sooner and visibly; the cost is that the Java, Go, Python
+   * and .NET SDKs, which fail rather than block at the bound, refuse their 9th concurrent request.
+   * See the {@code plowshare.transport.request-depth} comment in {@code EventChannelConfig}.
    */
-  private int requestDepth = ConcurrentDispatch.MAX_PENDING;
+  private int requestDepth = 8;
 
   private java.time.Duration requestDrain = java.time.Duration.ofSeconds(10);
   private volatile boolean lifecycleRunning;
