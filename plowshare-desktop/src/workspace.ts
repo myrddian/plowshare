@@ -117,20 +117,38 @@ export class DesktopWorkspace {
   get board() {
     return this.control.board;
   }
+  /** Derived composite of the account session, its project children and the
+   * desktop-local values (FileStores, preferences, named connections, personal
+   * workspace, operator, authoring).
+   *
+   * Reading this property is cheap. The returned object is always freshly
+   * allocated, so a caller may assign to its own top-level fields without
+   * affecting the session, and so is every container this getter rebuilds for a
+   * live session (`projects`, `conversations`, `jobs`, `approvals`,
+   * `answeringApprovals`, `agents`, `history`, `contexts`, `contextSnapshots`,
+   * `projectFolders`, `projectPreparing`). Every nested value it does not
+   * rebuild — all of them outside a live session — is shared by reference with
+   * `this.control.state`, a child client's state, or a desktop-local field: the
+   * getter reads them and never mutates them.
+   *
+   * The sharing is safe for the two ways this value is consumed. Consumers that
+   * inspect fields read them before any `await`, and consumers that return the
+   * value over IPC hand it straight to Electron, which structured-clones
+   * `ipcMain.handle` replies and `webContents.send` arguments anyway. A caller
+   * that instead mutates a nested field, or that keeps the value across an
+   * `await`, must use {@link snapshot} so it owns an isolated copy. */
   get state(): DesktopState {
-    const state = structuredClone(this.control.state);
-    if (this.localFileStores)
-      state.localFileStores = structuredClone(this.localFileStores);
+    const state: DesktopState = { ...this.control.state };
+    if (this.localFileStores) state.localFileStores = this.localFileStores;
     if (this.localPreferences !== undefined)
-      state.localPreferences = structuredClone(this.localPreferences);
-    state.namedConnections = structuredClone(this.namedConnections);
+      state.localPreferences = this.localPreferences;
+    state.namedConnections = this.namedConnections;
     if (this.selectedConnection !== undefined)
       state.selectedConnection = this.selectedConnection;
-    state.personal = structuredClone(this.personal);
-    if (this.operatorOwner)
-      state.operator = structuredClone(this.operatorOwner.state.operator);
+    state.personal = this.personal;
+    if (this.operatorOwner) state.operator = this.operatorOwner.state.operator;
     if (this.authoringIdentity === `${state.base}|${state.handle}`)
-      state.authoring = structuredClone(this.authoring);
+      state.authoring = this.authoring;
     if (state.mode !== 'live') return state;
     if (this.transitioning) {
       state.connected = false;
@@ -181,9 +199,11 @@ export class DesktopWorkspace {
           ...(child.state.answeringApprovals ?? []),
         ]),
       ];
-      Object.assign(state.agents, child.state.agents);
-      Object.assign(state.history, child.state.history);
-      Object.assign(state.contexts, child.state.contexts);
+      // Rebuilt rather than assigned into: the inherited maps are the account
+      // session's own objects, which this getter must not modify.
+      state.agents = { ...state.agents, ...child.state.agents };
+      state.history = { ...state.history, ...child.state.history };
+      state.contexts = { ...state.contexts, ...child.state.contexts };
       state.contextSnapshots = {
         ...state.contextSnapshots,
         ...child.state.contextSnapshots,
@@ -215,8 +235,13 @@ export class DesktopWorkspace {
           ...(error === undefined ? {} : { error }),
         };
       });
+    // Replaced rather than mutated: `state.personal` is this workspace's own
+    // `personal` field, which the project error must not be written into.
     if (state.personal && this.errors.has(state.personal.project))
-      state.personal.error = this.errors.get(state.personal.project);
+      state.personal = {
+        ...state.personal,
+        error: this.errors.get(state.personal.project),
+      };
     state.projectConfigError = this.configError;
     state.localMachine = thisMachine(process.env, hostname());
     state.projectPreparing = [...this.attachments.keys()];
@@ -229,6 +254,12 @@ export class DesktopWorkspace {
     state.sync = visibleChild?.state.sync;
     state.liveHistory = visibleChild?.state.liveHistory ?? state.liveHistory;
     return state;
+  }
+  /** Isolated deep copy of {@link state}, for the callers that mutate the
+   * result or keep it across an `await`. Every other caller should read
+   * {@link state}, which shares nested values and costs no deep copy. */
+  snapshot(): DesktopState {
+    return structuredClone(this.state);
   }
   private emit() {
     this.changed(this.state);

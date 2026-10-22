@@ -388,7 +388,11 @@ async function openLibrary(
     (screen === 'memories') !==
       ['recall', 'navigate'].includes(search.value.kind)
   )
-    client.state.library!.search = {};
+    // This write has always landed on a throwaway deep copy of the state and so
+    // clears nothing in the live session. Kept on an explicit snapshot to
+    // preserve that behaviour exactly; whether it should clear the live search
+    // is a separate question from making state reads cheap.
+    client.snapshot().library!.search = {};
   const existing = libraries.get(screen);
   if (existing && !existing.isDestroyed()) {
     existing.show();
@@ -1165,7 +1169,9 @@ background(
           return { state: client.state };
         const folder = choice.filePaths[0];
         return {
-          state: client.state,
+          // Snapshotted because the package read below awaits after the state
+          // is captured, so the reply must not observe a later session change.
+          state: client.snapshot(),
           applicationPackage: { folder, files: await applicationFiles(folder) },
         };
       }
