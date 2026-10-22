@@ -127,7 +127,8 @@ export class DesktopWorkspace {
    * on it is safe. Nested values are shared by reference with
    * `this.control.state`, a child client's state, or a desktop-local field, and
    * writing into one corrupts the live session. A caller that must mutate the
-   * result, or hold a container across an `await`, uses {@link snapshot}.
+   * result uses {@link snapshot}, and so does a caller that holds any part of
+   * the result across an `await` — with the single exception argued below.
    *
    * What is rebuilt, precisely. Outside a live session nothing below the top
    * level is rebuilt. In a live session `projects`, `projectFolders` and
@@ -135,22 +136,30 @@ export class DesktopWorkspace {
    * `answeringApprovals`, `agents`, `history`, `contexts` and
    * `contextSnapshots` are rebuilt only while at least one available project
    * child exists, so with no project attached — the common case for a freshly
-   * connected account — they are the account session's own containers. Nothing
-   * else is ever rebuilt: `library`, `activity`, `board`, `usage`, `personal`
-   * (except when a project error is merged into it), `authoring`, `operator`,
-   * `localFileStores`, `localPreferences`, `namedConnections`, `files`, `sync`
-   * and `liveHistory` are shared, as is every row object inside the rebuilt
-   * arrays. This getter only reads the values it shares.
+   * connected account — they are the account session's own containers. Also in
+   * a live session, `files` is the visible project child's own object, or a
+   * fresh `{ status: 'off' }` when no child is visible. Nothing else is ever
+   * rebuilt: `library`, `activity`, `board`, `usage`, `personal` (except when a
+   * project error is merged into it), `authoring`, `operator`,
+   * `localFileStores`, `localPreferences`, `namedConnections`, `sync` and
+   * `liveHistory` are shared. So are the rows inside the rebuilt arrays, which
+   * are the account session's and the children's own row objects — except the
+   * `projectFolders` rows and the `{ name }` placeholders `projects` takes from
+   * the saved folder list, both of which are built here. This getter only reads
+   * what it shares.
    *
-   * Reading a shared value across an `await`. The two callers that do this hold
-   * one row out of `projects` or `conversations` ({@link recoverProject},
+   * Holding a shared value across an `await`. Exactly one kind of value may be
+   * held: a single row out of `projects` or `conversations`, which is what the
+   * two callers that do it hold ({@link recoverProject},
    * {@link conversationOwner}). That is sound because those rows are replaced,
-   * never written into: a project listing refresh, a recorded-folder change and
-   * a conversation listing or title change all build a new row, and
-   * `DesktopClient.retainConversation` deep-copies a row before storing it. The
-   * arrays themselves are mutated in place (a new conversation is pushed or
-   * unshifted onto `conversations`), as are `personal` and `authoring`, so
-   * those must not be held across an `await`.
+   * never written into — a project listing refresh, a recorded-folder change
+   * and a conversation listing or title change all build a new row, and
+   * `DesktopClient.retainConversation` deep-copies a row before storing it.
+   * Nothing else may be held. A `jobs` row is written onto in place throughout
+   * its lifecycle — its id, status, phase, streamed text and `events` are all
+   * assigned to the live row — as are `personal` and `authoring`; and the
+   * containers themselves are mutated rather than replaced, a new job or
+   * conversation being pushed or unshifted onto `jobs` and `conversations`.
    *
    * Returning the result over IPC needs no copy: Electron structured-clones
    * `ipcMain.handle` replies and `webContents.send` arguments anyway. An
