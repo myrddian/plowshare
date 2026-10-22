@@ -79,7 +79,8 @@ function fixture() {
       payload.question = ask.payload.question;
     return { code: 'OK', payload };
   };
-  const emits = { count: 0 };
+  // `watch` lets a test inspect the state each broadcast would carry.
+  const emits = { count: 0, watch: () => {} };
   const client = new LibraryClient(
     () => state,
     checkedSender(async (ask) => {
@@ -88,6 +89,7 @@ function fixture() {
     }),
     () => {
       emits.count++;
+      emits.watch();
     },
   );
   return {
@@ -676,8 +678,7 @@ await test('a refused document detail still surfaces its own error and leaves no
   await f.client.documents('');
   const id = present(f.replies['document.list'].documents[0]).documentId;
   pagedSavedText(f, id);
-  const refused = f.setReply;
-  refused((ask) =>
+  f.setReply((ask) =>
     ask.type === 'document.detail'
       ? { code: 'BAD_REQUEST', said: 'Detail unavailable.' }
       : {
@@ -707,4 +708,26 @@ await test('a disconnected library sends nothing when a document is opened', asy
   const sent = f.calls.length;
   await assert.rejects(f.client.document(id), /Connect before reading/);
   assert.equal(f.calls.length, sent);
+});
+await test('re-opening the displayed document keeps the reader pending broadcast', async () => {
+  const f = fixture();
+  await f.client.documents('');
+  const id = present(f.replies['document.list'].documents[0]).documentId;
+  pagedSavedText(f, id);
+  await f.client.document(id);
+  assert.equal(f.state.library!.reader!.value!.text.length, 8192);
+  // The displayed page survives a re-open, so the renderer shows that text
+  // rather than a pending state. The reader's own broadcast is therefore still
+  // required: it is what disables the paging controls while the refreshed page
+  // is in flight.
+  const pending: boolean[] = [];
+  f.emits.watch = () => {
+    pending.push(Boolean(f.state.library!.reader!.loading));
+  };
+  const reopening = f.emits.count;
+  await f.client.document(id);
+  f.emits.watch = () => {};
+  assert.ok(f.state.library!.reader!.value!.text.startsWith('A'));
+  assert.ok(pending.includes(true));
+  assert.equal(f.emits.count - reopening, 4);
 });

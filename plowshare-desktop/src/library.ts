@@ -311,7 +311,10 @@ export class LibraryClient {
     const generation = this.epoch;
     const v = this.value;
     v.selected = 'document';
-    if (v.document.id !== id) {
+    // A re-open of the already-selected document keeps the displayed text, so
+    // it still needs the reader's pending broadcast; see below.
+    const cleared = v.document.id !== id;
+    if (cleared) {
       v.document = { id };
       v.reader = { id };
       this.revisions.set('reader', (this.revisions.get('reader') ?? 0) + 1);
@@ -344,7 +347,7 @@ export class LibraryClient {
       v.document.id === id &&
       v.document.value?.documentId === id
     )
-      await this.applySourceText(id, 0, page, false);
+      await this.applySourceText(id, 0, page, !cleared);
     // A failed guard discards `page`. `started` has already absorbed its
     // outcome, so the unconsumed reply cannot surface as an unhandled
     // rejection, and nothing is applied to the reader slot.
@@ -366,12 +369,18 @@ export class LibraryClient {
   /**
    * Validates a saved-text request and applies the reply to the reader slot.
    *
-   * `page`, when given, is an `information.read` {@link document} already put
-   * on the wire. Every guard below still runs, in the same order, before that
-   * reply is read, and the reply's own validation still runs inside the read,
-   * so concurrency changes when the request leaves and nothing else. `announce`
-   * is false on that path: the document read's broadcasts already carry the
-   * cleared reader slot, which the renderer shows as pending text.
+   * `page`, when given, is an `information.read` that
+   * {@link LibraryClient.document} already put on the wire. Every guard below
+   * still runs, in the same order, before that reply is read, and the reply's
+   * own validation still runs inside the read, so concurrency changes when the
+   * request leaves and nothing else.
+   *
+   * `announce` is false only when the caller emptied the reader slot first: the
+   * document read's own broadcasts then carry a slot with no page, which the
+   * renderer already shows as pending text, making the reader's pending
+   * broadcast redundant. Re-opening the already-selected document keeps its
+   * displayed page, so that frame renders the text rather than a pending state
+   * and the broadcast is still needed to disable the paging controls.
    */
   private async applySourceText(
     id: string,
