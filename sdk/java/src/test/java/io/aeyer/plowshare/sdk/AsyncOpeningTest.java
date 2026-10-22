@@ -185,6 +185,94 @@ class AsyncOpeningTest {
     }
   }
 
+  @Test
+  void a_lower_advertised_depth_is_accepted_and_bounds_admission() throws Exception {
+    try (var server = acknowledging(4)) {
+      var client = connectConcurrent(server).toCompletableFuture().get(3, TimeUnit.SECONDS);
+      try {
+        // The server never answers, so every admitted request stays outstanding.
+        var outstanding = new ArrayList<CompletionStage<Plowshare.Reply>>();
+        for (int i = 0; i < 4; i++)
+          outstanding.add(client.requestAsync("admin.status", java.util.Map.of()));
+        for (var request : outstanding) assertFalse(request.toCompletableFuture().isDone());
+        // The negotiated depth, not the protocol ceiling of 64, is what bounds admission.
+        var fifth = client.requestAsync("admin.status", java.util.Map.of());
+        assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure(fifth).delivery());
+      } finally {
+        client.closeAsync();
+      }
+    }
+  }
+
+  @Test
+  void advertised_depth_boundaries_are_one_to_the_protocol_ceiling() throws Exception {
+    for (int accepted : new int[] {1, 64}) {
+      try (var server = acknowledging(accepted)) {
+        var client = connectConcurrent(server).toCompletableFuture().get(3, TimeUnit.SECONDS);
+        client.closeAsync();
+      }
+    }
+    for (int rejected : new int[] {0, 65}) {
+      try (var server = acknowledging(rejected)) {
+        assertEquals(
+            Plowshare.Delivery.NOT_SUBMITTED, failure(connectConcurrent(server)).delivery());
+      }
+    }
+  }
+
+  private static CompletionStage<Plowshare> connectConcurrent(MockWebServer server) {
+    return Plowshare.connectAsync(
+        server.url("/").toString(),
+        "fixture",
+        "depth",
+        Duration.ofSeconds(3),
+        null,
+        Plowshare.TransportMode.LEGACY,
+        Plowshare.DispatchMode.CONCURRENT);
+  }
+
+  /** Acknowledges the dispatch handshake with {@code maxPending} and ignores every later frame. */
+  private static MockWebServer acknowledging(int maxPending) throws IOException {
+    var server = new MockWebServer();
+    server.enqueue(
+        new MockResponse()
+            .withWebSocketUpgrade(
+                new WebSocketListener() {
+                  @Override
+                  public void onMessage(okhttp3.WebSocket socket, String text) {
+                    try {
+                      var frame = SdkJson.mapper().readTree(text);
+                      if (!"transport.dispatch".equals(frame.path("type").asText())) return;
+                      socket.send(
+                          SdkJson.mapper()
+                              .writeValueAsString(
+                                  java.util.Map.of(
+                                      "id",
+                                      frame.path("id").asText(),
+                                      "type",
+                                      "transport.dispatch",
+                                      "protocol_version",
+                                      "plowshare-v1",
+                                      "payload",
+                                      java.util.Map.of(
+                                          "code",
+                                          "OK",
+                                          "payload",
+                                          java.util.Map.of(
+                                              "mode",
+                                              "concurrent-v1",
+                                              "maxPending",
+                                              maxPending,
+                                              "maxIdBytes",
+                                              128)))));
+                    } catch (IOException invalid) {
+                      throw new AssertionError(invalid);
+                    }
+                  }
+                }));
+    return server;
+  }
+
   private static MockWebServer heldUpgrade(CountDownLatch received, CountDownLatch release) {
     var server = new MockWebServer();
     server.setDispatcher(
