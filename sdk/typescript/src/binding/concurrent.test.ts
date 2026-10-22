@@ -400,8 +400,9 @@ describe('concurrent dispatch lifecycle', () => {
     await expect(second).resolves.toEqual({ code: 'OK', payload: [] });
     connection.close();
   });
-  // Red before: pump() re-parked head-of-queue refused waiters forever.
-  it('resubmits two simultaneous refusals without spinning', async () => {
+  // Guards the new drain path (timers push straight to transmit). Deliberately
+  // NOT red-before: the old code also drained this scenario, only reordered.
+  it('resubmits both of two simultaneous refusals', async () => {
     vi.useFakeTimers();
     const wire = new Wire();
     const { connection, ready } = opening(wire, 3);

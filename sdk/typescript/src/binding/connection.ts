@@ -644,8 +644,9 @@ export function connect(options: ConnectOptions): Connected {
        * poll an overloaded server. When the timer fires the request joins the
        * back of `launchWaiters` with `proceed: transmit` and `pump()` drains it
        * once depth allows. Invariant: anything `pump()` drains goes straight to
-       * `transmit`, never back through `launch()`, whose queue-position check
-       * would re-park a waiter that is already at the head and spin `pump()`.
+       * `transmit`, never back through `launch()`: a drained entry is already at
+       * the head of the queue, so re-running the queue-position check would only
+       * reorder it needlessly.
        * The freed slot is announced with `pump()` so other parked work uses it.
        *
        * <p>Resubmission re-enters this same closure, so the deadline armed on
