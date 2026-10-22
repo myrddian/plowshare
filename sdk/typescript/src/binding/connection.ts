@@ -101,6 +101,11 @@ export interface ConnectOptions {
   /** Low-level injected transports default to ordered; public SDK opening selects concurrent-v1. */
   readonly dispatchMode?: 'concurrent-v1' | 'ordered';
   readonly maxPendingBytes?: number;
+  /**
+   * Source of uniform [0, 1) randomness for resubmission jitter; injectable so
+   * tests are deterministic.
+   */
+  readonly random?: () => number;
   /** Platform-supplied deadline; cancellation removes the pending request, never replays it. */
   readonly deadline?: {
     readonly milliseconds: number;
@@ -242,8 +247,9 @@ export class ConnectionFault extends Error {
   }
 }
 
-/** Pause before resubmitting a refused request when nothing else is in flight to wake it. */
-const RESUBMIT_BACKOFF_MS = 100;
+/** Backoff before resubmitting a refused request: base doubles per refusal up to the cap. */
+const RESUBMIT_BACKOFF_BASE_MS = 100;
+const RESUBMIT_BACKOFF_CAP_MS = 5000;
 
 /**
  * Speaks frames on an already-open socket.
@@ -258,6 +264,7 @@ const RESUBMIT_BACKOFF_MS = 100;
  */
 export function connect(options: ConnectOptions): Connected {
   const deadline = options.deadline;
+  const random = options.random ?? Math.random;
   const capacity = options.maxPendingBytes ?? 640 * 1024 * 1024;
   if (
     deadline !== undefined &&
@@ -626,31 +633,50 @@ export function connect(options: ConnectOptions): Connected {
        * <p>The request stays in `waiting` (so abort, deadline and `strand()`
        * still settle it) and keeps its `id`: the server refused before owning
        * anything, so sending it again is not a mutation replay. The launch
-       * bookkeeping is undone so that the normal `launch()` -> `transmit()` path
-       * can run again without double-counting `dispatched`; `submitted` is
-       * cleared because a close while waiting is honestly NOT_SUBMITTED.
+       * bookkeeping is undone so `transmit()` can run again without
+       * double-counting `dispatched`; `submitted` is cleared because a close
+       * while waiting is honestly NOT_SUBMITTED. A second refusal for the same
+       * id while already waiting is ignored (`launched` is false then), so a
+       * misbehaving server cannot underflow the counters.
        *
-       * <p>Resubmission is the same closure's `launch`, so the deadline armed on
+       * <p>Every refusal waits out a jittered exponential backoff on the
+       * injected scheduler, so refused clients neither retry in lockstep nor
+       * poll an overloaded server. When the timer fires the request joins the
+       * back of `launchWaiters` with `proceed: transmit` and `pump()` drains it
+       * once depth allows. Invariant: anything `pump()` drains goes straight to
+       * `transmit`, never back through `launch()`, whose queue-position check
+       * would re-park a waiter that is already at the head and spin `pump()`.
+       * The freed slot is announced with `pump()` so other parked work uses it.
+       *
+       * <p>Resubmission re-enters this same closure, so the deadline armed on
        * the first transmit is neither renewed nor extended and alone bounds the
-       * whole loop; there is deliberately no attempt counter. It waits for the
-       * next release of another in-flight request; when none is in flight no
-       * release can wake it, so it retries after a short backoff instead
-       * (immediately when no scheduler exists, which is the ordered case and
-       * costs one network round trip per attempt).
+       * loop. The backoff exponent below is a pacing input, not a bound.
+       *
+       * <p>Only installed with a scheduler: without one (ordered mode with no
+       * deadline) there is nothing to pace or bound retries, so the refusal is
+       * surfaced to the caller rather than resubmitted in a tight loop.
        */
-      asker.refused = (): void => {
-        dispatched--;
-        launched = false;
-        asker.submitted = false;
-        if (dispatched > 0) {
-          launchWaiters.push({ asker, proceed: launch });
-        } else if (deadline !== undefined) {
+      let refusals = 0;
+      if (deadline !== undefined)
+        asker.refused = (): void => {
+          if (!launched) return;
+          dispatched--;
+          launched = false;
+          asker.submitted = false;
+          const ceiling = Math.min(
+            RESUBMIT_BACKOFF_CAP_MS,
+            RESUBMIT_BACKOFF_BASE_MS * 2 ** Math.min(refusals++, 16),
+          );
+          // Half fixed, half random: always pauses, never lockstep.
+          const pause = Math.ceil(ceiling / 2 + (random() * ceiling) / 2);
           asker.cancelRetry = deadline.schedule(() => {
             delete asker.cancelRetry;
-            launch();
-          }, RESUBMIT_BACKOFF_MS);
-        } else launch();
-      };
+            if (asker.terminal) return;
+            launchWaiters.push({ asker, proceed: transmit });
+            pump();
+          }, pause);
+          pump();
+        };
       const launch = (): void => {
         if (asker.terminal) return;
         if (!open) {

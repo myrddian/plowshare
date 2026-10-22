@@ -33,6 +33,7 @@ function opening(wire: Wire, maximum = 64) {
   const connection = connect({
     socket: wire,
     dispatchMode: 'concurrent-v1',
+    random: () => 0,
     deadline: {
       milliseconds: 30000,
       schedule: (callback, milliseconds) => {
@@ -379,30 +380,129 @@ describe('concurrent dispatch lifecycle', () => {
     await expect(asked).resolves.toEqual({ code: 'OK', payload: [] });
     connection.close();
   });
-  it('resubmits when another request frees its slot, without a timer', async () => {
+  it('does not leak a dispatch slot across a resubmission', async () => {
     vi.useFakeTimers();
     const wire = new Wire();
-    const { connection, ready } = opening(wire);
+    const { connection, ready } = opening(wire, 1);
     await ready;
     const first = connection.ask('project.list', {});
+    await flush();
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await first;
+    // With depth 1 a leaked count would park this request forever.
     const second = connection.ask('project.list', {});
     await flush();
-    wire.answer(2, refusal);
-    await flush();
-    // Another request is still in flight, so the refused one waits for it.
-    expect(wire.sent).toHaveLength(3);
-    wire.answer(1);
-    await first;
-    await flush();
     expect(wire.sent).toHaveLength(4);
-    expect(idOf(wire, 3)).toBe(idOf(wire, 2));
     wire.answer(3);
     await expect(second).resolves.toEqual({ code: 'OK', payload: [] });
-    // Re-entry must not double-count the window: a full window still admits.
-    const again = connection.ask('project.list', {});
+    connection.close();
+  });
+  // Red before: pump() re-parked head-of-queue refused waiters forever.
+  it('resubmits two simultaneous refusals without spinning', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 3);
+    await ready;
+    const a = connection.ask('project.list', {});
+    const b = connection.ask('project.list', {});
+    const c = connection.ask('project.list', {});
     await flush();
+    wire.answer(1, refusal);
+    wire.answer(2, refusal);
+    wire.answer(3);
+    await c;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(6);
     wire.answer(4);
-    await expect(again).resolves.toEqual({ code: 'OK', payload: [] });
+    wire.answer(5);
+    await expect(a).resolves.toEqual({ code: 'OK', payload: [] });
+    await expect(b).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  // Red before: a refusal freed a slot without waking parked work, so the
+  // second refused request parked behind the first with nothing to wake it.
+  it('transmits both of two refused requests rather than stalling to the deadline', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 2);
+    await ready;
+    const a = connection.ask('project.list', {});
+    const b = connection.ask('project.list', {});
+    await flush();
+    wire.answer(1, refusal);
+    wire.answer(2, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(5);
+    wire.answer(3);
+    wire.answer(4);
+    await expect(a).resolves.toEqual({ code: 'OK', payload: [] });
+    await expect(b).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  // Red before: a second refusal decremented dispatched again and queued twice.
+  it('ignores a duplicate refusal for a request already waiting to resubmit', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 2);
+    await ready;
+    const a = connection.ask('project.list', {});
+    await flush();
+    wire.answer(1, refusal);
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await expect(a).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  it('paces resubmission with injected, capped, jittered exponential backoff', async () => {
+    vi.useFakeTimers();
+    const run = async (random: number): Promise<number[]> => {
+      const wire = new Wire();
+      const pauses: number[] = [];
+      const connection = connect({
+        socket: wire,
+        dispatchMode: 'concurrent-v1',
+        random: () => random,
+        deadline: {
+          milliseconds: 1000000,
+          schedule: (callback, milliseconds) => {
+            if (milliseconds !== 1000000) pauses.push(milliseconds);
+            const timer = setTimeout(callback, milliseconds);
+            return () => clearTimeout(timer);
+          },
+        },
+      });
+      const ready = connection.ready();
+      wire.answer(0, {
+        code: 'OK',
+        payload: { mode: 'concurrent-v1', maxPending: 4, maxIdBytes: 128 },
+      });
+      await ready;
+      void connection.ask('project.list', {}).catch(() => undefined);
+      await flush();
+      for (let n = 0; n < 8; n++) {
+        wire.answer(wire.sent.length - 1, refusal);
+        await vi.advanceTimersByTimeAsync(6000);
+      }
+      connection.close();
+      return pauses;
+    };
+    expect(await run(0)).toEqual([50, 100, 200, 400, 800, 1600, 2500, 2500]);
+    expect(await run(1)).toEqual([100, 200, 400, 800, 1600, 3200, 5000, 5000]);
+  });
+  // Red before: with no scheduler the refusal was resubmitted immediately and
+  // without bound.
+  it('surfaces a refusal when there is no scheduler to pace retries', async () => {
+    const wire = new Wire();
+    const connection = connect({ socket: wire });
+    const asked = connection.ask('project.list', {});
+    wire.answer(0, refusal);
+    await expect(asked).resolves.toEqual(refusal);
+    expect(wire.sent).toHaveLength(1);
     connection.close();
   });
   it('settles a request waiting to resubmit when the connection closes', async () => {
@@ -430,6 +530,7 @@ describe('concurrent dispatch lifecycle', () => {
     const connection = connect({
       socket: wire,
       dispatchMode: 'concurrent-v1',
+      random: () => 0,
       deadline: {
         milliseconds: 30000,
         schedule: (callback, milliseconds) => {
