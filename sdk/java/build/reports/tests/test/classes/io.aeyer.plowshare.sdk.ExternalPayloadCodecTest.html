@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - ExternalPayloadCodecTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>ExternalPayloadCodecTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/io.aeyer.plowshare.sdk.html">io.aeyer.plowshare.sdk</a> &gt; ExternalPayloadCodecTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">26</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.024s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Method name</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">a_remote_task_is_typed_and_preserves_its_observed_state()</td>
+<td class="success">a_remote_task_is_typed_and_preserves_its_observed_state()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">declared_integration_arguments_are_immutable_typed_values_and_keep_the_wire_shape()</td>
+<td class="success">declared_integration_arguments_are_immutable_typed_values_and_keep_the_wire_shape()</td>
+<td class="success">0.008s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[10] wire={&quot;task&quot;:{&quot;id&quot;:&quot;t&quot;,&quot;contextId&quot;:&quot;c&quot;,&quot;status&quot;:{&quot;state&quot;:&quot;TASK_STATE_COMPLETED&quot;,&quot;timestamp&quot;:1}}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[10]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[11] wire={&quot;task&quot;:{&quot;id&quot;:&quot;t&quot;,&quot;contextId&quot;:&quot;c&quot;,&quot;status&quot;:{&quot;state&quot;:&quot;TASK_STATE_COMPLETED&quot;,&quot;timestamp&quot;:1.5}}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[11]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[1] wire={&quot;task&quot;:{&quot;id&quot;:&quot;t&quot;,&quot;contextId&quot;:&quot;c&quot;,&quot;status&quot;:{&quot;state&quot;:&quot;unknown&quot;}}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[1]</td>
+<td class="success">0.006s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[2] wire={&quot;task&quot;:{&quot;id&quot;:&quot;t&quot;,&quot;status&quot;:{&quot;state&quot;:&quot;TASK_STATE_COMPLETED&quot;}}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[2]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[3] wire={&quot;task&quot;:{&quot;id&quot;:&quot;t&quot;,&quot;contextId&quot;:&quot;c&quot;,&quot;status&quot;:{&quot;state&quot;:&quot;TASK_STATE_COMPLETED&quot;},&quot;history&quot;:[{&quot;messageId&quot;:&quot;m&quot;,&quot;role&quot;:&quot;ROLE_USER&quot;,&quot;contextId&quot;:&quot;foreign&quot;,&quot;parts&quot;:[{&quot;text&quot;:&quot;x&quot;}]}]}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[3]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[4] wire={&quot;message&quot;:{&quot;messageId&quot;:&quot;m&quot;,&quot;role&quot;:&quot;ROLE_USER&quot;,&quot;parts&quot;:[{&quot;text&quot;:&quot;x&quot;}]}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[4]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[5] wire={&quot;acknowledged&quot;:&quot;true&quot;}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[5]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[6] wire={&quot;acknowledged&quot;:true,&quot;verification&quot;:&quot;proved&quot;}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[6]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[7] wire={&quot;acknowledged&quot;:true,&quot;response&quot;:{&quot;arbitrary&quot;:&quot;object&quot;}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[7]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[8] wire={&quot;states&quot;:{},&quot;acknowledged&quot;:true}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[8]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[9] wire={&quot;unregisteredResult&quot;:{}}</td>
+<td class="success">invalid_result_members_and_unregistered_results_are_refused(String)[9]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[10] wire={&quot;parts&quot;:[{&quot;data&quot;:[1,2,3]}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[10]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[11] wire={&quot;parts&quot;:[{&quot;text&quot;:&quot;ok&quot;,&quot;unknown&quot;:true}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[11]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[12] wire={&quot;parts&quot;:[{&quot;text&quot;:&quot;one&quot;,&quot;text&quot;:&quot;two&quot;}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[12]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[13] wire={&quot;parts&quot;:[{&quot;text&quot;:&quot;ok&quot;}]} {}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[13]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[1] wire={&quot;parts&quot;:[]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[1]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[2] wire={&quot;parts&quot;:[{&quot;text&quot;:12}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[2]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[3] wire={&quot;parts&quot;:[{&quot;text&quot;:&quot;one&quot;,&quot;url&quot;:&quot;https://example.test&quot;}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[3]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[4] wire={&quot;parts&quot;:[{&quot;text&quot;:null}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[4]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[5] wire={&quot;parts&quot;:[{&quot;raw&quot;:&quot;%%%&quot;}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[5]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[6] wire={&quot;parts&quot;:[{&quot;url&quot;:&quot;file:///private/data&quot;}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[6]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[7] wire={&quot;parts&quot;:[{&quot;url&quot;:&quot;https://user:secret@example.test&quot;}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[7]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[8] wire={&quot;parts&quot;:[{&quot;text&quot;:&quot;ok&quot;,&quot;filename&quot;:&quot;../secret&quot;}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[8]</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[9] wire={&quot;parts&quot;:[{&quot;data&quot;:{&quot;schema&quot;:&quot;unknown/1&quot;}}]}</td>
+<td class="success">malformed_or_unregistered_parts_are_refused_before_use(String)[9]</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.10</a> at 23 Oct 2026, 7:28:33 am</p>
+</div>
+</div>
+</body>
+</html>

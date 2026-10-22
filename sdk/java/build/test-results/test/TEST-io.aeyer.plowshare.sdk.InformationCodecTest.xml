@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.aeyer.plowshare.sdk.InformationCodecTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:30" hostname="MacBook-Pro.lan" time="0.068">
+  <properties/>
+  <testcase name="guardedTagsRoundTripAndRejectMissingOrMalformedPreconditions()" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.011"/>
+  <testcase name="report_metadata_is_validated_and_keeps_the_existing_flat_wire_shape()" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.007"/>
+  <testcase name="authored_commands_round_trip_closed_typing_and_exact_revision_identity()" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.024"/>
+  <testcase name="[1] input={&quot;revision&quot;:1}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.0"/>
+  <testcase name="[2] input={&quot;revision&quot;:&quot;wrong&quot;}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.001"/>
+  <testcase name="[3] input={&quot;revision&quot;:&quot;00000000-0000-0000-0000-000000000001&quot;,&quot;offset&quot;:1.5}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.001"/>
+  <testcase name="[4] input={&quot;revision&quot;:&quot;00000000-0000-0000-0000-000000000001&quot;,&quot;offset&quot;:&quot;0&quot;}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.001"/>
+  <testcase name="[5] input={&quot;revision&quot;:&quot;00000000-0000-0000-0000-000000000001&quot;,&quot;limit&quot;:32769}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.0"/>
+  <testcase name="[6] input={&quot;revision&quot;:&quot;00000000-0000-0000-0000-000000000001&quot;,&quot;offset&quot;:-1}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.0"/>
+  <testcase name="[7] input={&quot;revision&quot;:&quot;00000000-0000-0000-0000-000000000001&quot;,&quot;owner&quot;:&quot;someone&quot;}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.001"/>
+  <testcase name="[8] input={&quot;revision&quot;:&quot;00000000-0000-0000-0000-000000000001&quot;,&quot;scope&quot;:{&quot;kind&quot;:&quot;personal&quot;,&quot;includeGlobal&quot;:&quot;false&quot;}}" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.0"/>
+  <testcase name="response_primitives_and_identity_are_required_without_a_mutation_retry()" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.011"/>
+  <testcase name="scoped_search_decodes_ancestry_lists_and_rejects_legacy_or_partial_results()" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.006"/>
+  <testcase name="selectors_tags_and_automatic_grouping_have_explicit_contracts()" classname="io.aeyer.plowshare.sdk.InformationCodecTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

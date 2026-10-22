@@ -126,6 +126,14 @@ public final class Plowshare implements AutoCloseable {
   private final Thread writer;
   private long queuedBytes;
   private int reserved;
+
+  /**
+   * Call window the server advertised in the dispatch handshake, within {@code [1, MAX_PENDING]}.
+   * Written once before the connection is handed to callers; {@code MAX_PENDING} sizes the
+   * structures and is the ceiling, while this is the depth actually admitted.
+   */
+  private volatile int window = MAX_PENDING;
+
   private boolean writerStopped;
 
   private final BlockingQueue<ServerPush> pushes = new ArrayBlockingQueue<>(256);
@@ -392,7 +400,8 @@ public final class Plowshare implements AutoCloseable {
                         || !"concurrent-v1".equals(reply.payload().path("mode").asText())
                         || !reply.payload().path("maxPending").isIntegralNumber()
                         || !reply.payload().path("maxPending").canConvertToInt()
-                        || reply.payload().path("maxPending").asInt() != MAX_PENDING
+                        || reply.payload().path("maxPending").asInt() < 1
+                        || reply.payload().path("maxPending").asInt() > MAX_PENDING
                         || !reply.payload().path("maxIdBytes").isIntegralNumber()
                         || !reply.payload().path("maxIdBytes").canConvertToInt()
                         || reply.payload().path("maxIdBytes").asInt() != 128)) {
@@ -404,6 +413,8 @@ public final class Plowshare implements AutoCloseable {
                   client.close();
                   return;
                 }
+                if (dispatch == DispatchMode.CONCURRENT)
+                  client.window = reply.payload().path("maxPending").asInt();
                 Consumer<ServerPush> callback = onPush == null ? push -> {} : onPush;
                 client.callbacks.execute(
                     () -> {
@@ -526,7 +537,7 @@ public final class Plowshare implements AutoCloseable {
     if (type == null || !type.matches("[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+"))
       throw new IllegalArgumentException("a dotted frame type is required");
     synchronized (this) {
-      if (!connected() || reserved == MAX_PENDING || !completions.tryAcquire())
+      if (!connected() || reserved >= window || !completions.tryAcquire())
         return CompletableFuture.failedFuture(
             new TransportException(
                 Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"));

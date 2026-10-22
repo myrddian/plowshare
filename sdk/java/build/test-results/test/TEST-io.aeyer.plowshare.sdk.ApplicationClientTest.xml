@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.aeyer.plowshare.sdk.ApplicationClientTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:29" hostname="MacBook-Pro.lan" time="0.119">
+  <properties/>
+  <testcase name="first_install_sends_explicit_null_and_foreign_receipts_never_replay()" classname="io.aeyer.plowshare.sdk.ApplicationClientTest" time="0.101"/>
+  <testcase name="malformed_release_and_missing_status_fields_are_refused()" classname="io.aeyer.plowshare.sdk.ApplicationClientTest" time="0.002"/>
+  <testcase name="ownedIdentityChecksAuthorityShapeAndCredentialCoordinatesWithoutRepeatingIssue()" classname="io.aeyer.plowshare.sdk.ApplicationClientTest" time="0.012"/>
+  <testcase name="catalogue_decode_refuses_malformed_aliases_roles_and_missing_fields()" classname="io.aeyer.plowshare.sdk.ApplicationClientTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

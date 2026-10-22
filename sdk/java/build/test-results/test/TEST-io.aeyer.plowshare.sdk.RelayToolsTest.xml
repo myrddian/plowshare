@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.aeyer.plowshare.sdk.RelayToolsTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:31" hostname="MacBook-Pro.lan" time="0.063">
+  <properties/>
+  <testcase name="catalogue_publish_withdraw_and_lost_reply_do_not_run_or_replay_handlers()" classname="io.aeyer.plowshare.sdk.RelayToolsTest" time="0.009"/>
+  <testcase name="shared_boundaries_and_result_identity()" classname="io.aeyer.plowshare.sdk.RelayToolsTest" time="0.007"/>
+  <testcase name="interrupted_execution_intent_is_unknown_and_never_runs_again()" classname="io.aeyer.plowshare.sdk.RelayToolsTest" time="0.005"/>
+  <testcase name="nested_handler_receives_exact_values_and_changed_schema_never_executes()" classname="io.aeyer.plowshare.sdk.RelayToolsTest" time="0.038"/>
+  <testcase name="duplicate_delivery_and_lost_publication_never_repeat_handler_or_result()" classname="io.aeyer.plowshare.sdk.RelayToolsTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

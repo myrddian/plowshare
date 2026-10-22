@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.aeyer.plowshare.sdk.AsyncExchangeTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:29" hostname="MacBook-Pro.lan" time="0.17">
+  <properties/>
+  <testcase name="preCancelledCallWritesNothing()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.003"/>
+  <testcase name="blockedCallbacksUseReservedCapacityAndDoNotPreventTransportDrain()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.012"/>
+  <testcase name="negotiatesBeforeDomainWorkAndCompletesTypedCallsOutOfOrder()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.005"/>
+  <testcase name="cancellationAfterSubmissionIsUnknownAndLateReplyCannotCompleteANewCall()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.003"/>
+  <testcase name="publicContinuationCanWaitForAnotherRequestWithoutBlockingReader()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.005"/>
+  <testcase name="interruptedSynchronousFacadeDetachesItsExchangeAndLeavesFullCapacityReusable()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.008"/>
+  <testcase name="queuedCancellationAndDeadlineDoNotWaitForHeldSegmentCredits()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.115"/>
+  <testcase name="voidSuccessAndRefusalAreTerminalForMultipleObservers()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.006"/>
+  <testcase name="admissionBoundsEveryQueuedOrSentRequestAndCloseSettlesAll()" classname="io.aeyer.plowshare.sdk.AsyncExchangeTest" time="0.009"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

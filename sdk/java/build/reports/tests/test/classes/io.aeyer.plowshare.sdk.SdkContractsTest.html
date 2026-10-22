@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - SdkContractsTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>SdkContractsTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/io.aeyer.plowshare.sdk.html">io.aeyer.plowshare.sdk</a> &gt; SdkContractsTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">11</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.022s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Method name</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">dto_collections_are_immutable_and_counts_are_checked_for_direct_callers()</td>
+<td class="success">dto_collections_are_immutable_and_counts_are_checked_for_direct_callers()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">duplicate_fields_and_trailing_values_are_rejected()</td>
+<td class="success">duplicate_fields_and_trailing_values_are_rejected()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[1] payload={}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[1]</td>
+<td class="success">0.004s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[2] payload={&quot;id&quot;:&quot;job_1&quot;,&quot;agent&quot;:&quot;worker&quot;,&quot;state&quot;:&quot;INVALID_STATE&quot;,&quot;cancelRequested&quot;:false}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[2]</td>
+<td class="success">0.003s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[3] payload={&quot;id&quot;:&quot;job_1&quot;,&quot;agent&quot;:&quot;worker&quot;,&quot;state&quot;:&quot;RUNNING&quot;,&quot;cancelRequested&quot;:&quot;false&quot;}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[3]</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[4] payload={&quot;id&quot;:&quot;job_1&quot;,&quot;agent&quot;:&quot;worker&quot;,&quot;state&quot;:&quot;RUNNING&quot;}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[4]</td>
+<td class="success">0.003s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[5] payload={&quot;id&quot;:5,&quot;agent&quot;:&quot;worker&quot;,&quot;state&quot;:&quot;RUNNING&quot;,&quot;cancelRequested&quot;:false}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[5]</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[6] payload={&quot;id&quot;:&quot;job_1&quot;,&quot;agent&quot;:&quot;worker&quot;,&quot;state&quot;:&quot;RUNNING&quot;,&quot;cancelRequested&quot;:false,&quot;limits&quot;:{&quot;noTurnCap&quot;:false,&quot;noBudget&quot;:false,&quot;modelCallsSpent&quot;:-7}}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[6]</td>
+<td class="success">0.003s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">[7] payload={&quot;id&quot;:&quot;job_1&quot;,&quot;agent&quot;:&quot;worker&quot;,&quot;state&quot;:&quot;RUNNING&quot;,&quot;cancelRequested&quot;:false,&quot;limits&quot;:{&quot;noTurnCap&quot;:false,&quot;noBudget&quot;:false,&quot;modelCallsSpent&quot;:1.5}}</td>
+<td class="success">malformed_job_reply_is_invalid_without_replaying_the_request(String)[7]</td>
+<td class="success">0.003s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">optional_feature_flags_in_older_views_have_explicit_defaults()</td>
+<td class="success">optional_feature_flags_in_older_views_have_explicit_defaults()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">valid_nullable_limits_and_future_fields_are_preserved_by_contract()</td>
+<td class="success">valid_nullable_limits_and_future_fields_are_preserved_by_contract()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.10</a> at 23 Oct 2026, 7:28:33 am</p>
+</div>
+</div>
+</body>
+</html>
