@@ -109,18 +109,142 @@ describe('concurrent dispatch lifecycle', () => {
     expect(wire.sent).toHaveLength(3);
     connection.close();
   });
-  it('honors a smaller negotiated capacity', async () => {
+  it('holds a request past the window until a slot frees', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 2);
+    await ready;
+    const first = connection.ask('project.list', {});
+    const second = connection.ask('project.list', {});
+    const third = connection.ask('project.list', {});
+    let settled = false;
+    const observed = third.then(() => {
+      settled = true;
+    });
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    expect(settled).toBe(false);
+    wire.answer(1);
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(4);
+    wire.answer(3);
+    await observed;
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  it('settles a parked caller when the connection closes', async () => {
+    const wire = new Wire();
+    let close: (() => void) | undefined;
+    wire.addEventListener = (type, listener) => {
+      if (type === 'message') wire.listener = listener;
+      else if (type === 'close') close = () => listener({ data: '' });
+    };
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    close!();
+    await first;
+    // The parked caller is settled by the closure rather than left hanging.
+    await second;
+    expect(wire.sent).toHaveLength(2);
+  });
+  it('wakes a waiter when a deadline frees the slot', async () => {
+    vi.useFakeTimers();
     const wire = new Wire();
     const { connection, ready } = opening(wire, 1);
     await ready;
-    const first = connection.ask('project.list', {});
-    await expect(connection.ask('project.list', {})).rejects.toMatchObject({
-      code: 'NOT_SUBMITTED',
-    });
+    const first = expect(
+      connection.ask('project.list', {}, { timeoutMs: 1000 }),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = connection.ask('project.list', {}, { timeoutMs: 60000 });
     await flush();
     expect(wire.sent).toHaveLength(2);
-    wire.answer(1);
+    await vi.advanceTimersByTimeAsync(1000);
     await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  it('wakes a waiter when an in-flight request is aborted', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const controller = new AbortController();
+    const first = expect(
+      connection.ask('project.list', {}, { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    controller.abort();
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  it('fails a parked request fast when its signal aborts', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const holder = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const controller = new AbortController();
+    const parked = expect(
+      connection.ask('project.list', {}, { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    await flush();
+    controller.abort();
+    await parked;
+    expect(wire.sent).toHaveLength(2);
+    connection.close();
+    await holder;
+  });
+  it('stops admitting when a renegotiated depth is below what is in flight', async () => {
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: { milliseconds: 30000, schedule: () => () => undefined },
+    });
+    // Four requests are admitted under the pre-negotiation default window.
+    const early = [1, 2, 3, 4].map(() => connection.ask('project.list', {}));
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 2, maxIdBytes: 128 },
+    });
+    await flush();
+    // Only the advertised depth is dispatched; the rest wait.
+    expect(wire.sent).toHaveLength(3);
+    const late = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(1);
+    await early[0];
+    await flush();
+    // Three admitted, depth two: still no new admission or dispatch of `late`.
+    expect(wire.sent).toHaveLength(4);
+    wire.answer(2);
+    wire.answer(3);
+    await flush();
+    wire.answer(4);
+    await flush();
+    expect(wire.sent).toHaveLength(6);
+    wire.answer(5);
+    await Promise.all(early);
+    await late;
     connection.close();
   });
   it('retains slots after cancellation until physical writer ownership settles', async () => {
@@ -149,13 +273,13 @@ describe('concurrent dispatch lifecycle', () => {
     );
     controllers.forEach((control) => control.abort());
     await Promise.all(calls);
-    await expect(connection.ask('project.list', {})).rejects.toMatchObject({
-      code: 'NOT_SUBMITTED',
-    });
+    // Cancelled requests still hold their slots, so the next caller is held.
+    const last = connection.ask('project.list', {});
+    await flush();
     expect(wire.sent).toHaveLength(64);
     wire.transfers.forEach((transfer) => transfer.release());
     await flush();
-    const last = connection.ask('project.list', {});
+    expect(wire.sent).toHaveLength(65);
     wire.answer(64);
     wire.transfers[64]!.release();
     await last;
