@@ -13,6 +13,7 @@ import type {
   LogSearchResponse,
 } from 'plowshare-client-ts/operations/retrieval';
 import type { CheckedAnswer as Outcome } from 'plowshare-client-ts/operations/response';
+import type { InformationWindow } from 'plowshare-client-ts/operations/information-replies';
 import type { DesktopState } from './shared.ts';
 import {
   emptyLibrary,
@@ -31,6 +32,22 @@ function text(value: unknown, label: string, maximum = 16000): string {
   if (typeof value !== 'string' || !value.trim() || value.length > maximum)
     throw new Error(`Enter ${label}.`);
   return value.trim();
+}
+/**
+ * Starts `work` now and returns a thunk replaying its settled outcome, so a
+ * request can be put on the wire before the guards that decide whether to use
+ * its reply have run. Both outcomes are captured here: a caller that never
+ * invokes the thunk cannot leave an unhandled rejection behind, and one that
+ * does sees exactly the value or the error `work` produced.
+ */
+function started<T>(work: Promise<T>): () => Promise<T> {
+  const settled = work.then(
+    (value) => () => value,
+    (error: unknown) => () => {
+      throw error;
+    },
+  );
+  return async () => (await settled)();
 }
 /** Library reads and explicit maintenance, using one WS request per operation. */
 export class LibraryClient {
@@ -96,6 +113,17 @@ export class LibraryClient {
       );
     return decodeReply(ask.type, answer.payload);
   }
+  /**
+   * Runs one guarded read into `slot`, keyed by `key` for revision ordering.
+   *
+   * `announce` controls only the broadcast that accompanies `slot.loading =
+   * true`; the flag itself is always set, so the paging guards that consult it
+   * are unaffected. It defaults to true, so every existing caller keeps the
+   * pending frame it renders today. A caller passes false only when the
+   * pending state it would show is already on screen from an earlier
+   * broadcast, which costs a full-state emit per read. The completion
+   * broadcast in `finally` is unconditional.
+   */
   private async read<T>(
     key: string,
     slot: Reading<T>,
@@ -103,13 +131,14 @@ export class LibraryClient {
     apply: (value: T) => void = (value) => {
       slot.value = value;
     },
+    announce = true,
   ) {
     this.live();
     const epoch = this.epoch,
       revision = (this.revisions.get(key) ?? 0) + 1;
     this.revisions.set(key, revision);
     slot.loading = true;
-    this.emit();
+    if (announce) this.emit();
     const current = () =>
       epoch === this.epoch && revision === this.revisions.get(key);
     try {
@@ -296,6 +325,12 @@ export class LibraryClient {
       );
       this.revisions.set('stance', (this.revisions.get('stance') ?? 0) + 1);
     }
+    // The transport multiplexes requests, so the detail and the first saved
+    // text page travel together instead of in series. `live()` runs here, with
+    // the same state the read below would see, so nothing leaves while
+    // disconnected and the same error still surfaces from the same place.
+    this.live();
+    const page = started(this.savedText(id, 0));
     await this.read('document', v.document, async () => {
       const row = await this.checked(
         request('document.detail', { document: id }),
@@ -309,9 +344,41 @@ export class LibraryClient {
       v.document.id === id &&
       v.document.value?.documentId === id
     )
-      await this.sourceText(id);
+      await this.applySourceText(id, 0, page, false);
+    // A failed guard discards `page`. `started` has already absorbed its
+    // outcome, so the unconsumed reply cannot surface as an unhandled
+    // rejection, and nothing is applied to the reader slot.
   }
   async sourceText(id: string, offset = 0) {
+    await this.applySourceText(id, offset, null, true);
+  }
+  /** One `information.read` for a saved page; its reply is validated by the caller. */
+  private savedText(id: string, offset: number) {
+    return this.checked(
+      request('information.read', {
+        revision: id,
+        scope: { kind: 'personal', includeGlobal: true },
+        offset,
+        limit: 8192,
+      }),
+    );
+  }
+  /**
+   * Validates a saved-text request and applies the reply to the reader slot.
+   *
+   * `page`, when given, is an `information.read` {@link document} already put
+   * on the wire. Every guard below still runs, in the same order, before that
+   * reply is read, and the reply's own validation still runs inside the read,
+   * so concurrency changes when the request leaves and nothing else. `announce`
+   * is false on that path: the document read's broadcasts already carry the
+   * cleared reader slot, which the renderer shows as pending text.
+   */
+  private async applySourceText(
+    id: string,
+    offset: number,
+    page: (() => Promise<InformationWindow>) | null,
+    announce: boolean,
+  ) {
     const v = this.value;
     if (v.document.id !== id || v.document.value?.documentId !== id)
       throw new Error('Choose the displayed document before reading its text.');
@@ -325,29 +392,28 @@ export class LibraryClient {
     )
       throw new Error('Choose the next or previous text page.');
     const slot = (v.reader ??= { id });
-    await this.read('reader', slot, async () => {
-      const row = await this.checked(
-        request('information.read', {
-          revision: id,
-          scope: { kind: 'personal', includeGlobal: true },
-          offset,
-          limit: 8192,
-        }),
-      );
-      if (
-        row.revision !== id ||
-        row.start !== offset ||
-        row.end < row.start ||
-        row.end > row.total ||
-        row.end - row.start !== row.text.length ||
-        row.end - row.start > 8192 ||
-        (row.end === row.start && row.end < row.total)
-      )
-        throw new Error(
-          'The saved text page names a different source or invalid text range.',
-        );
-      return row;
-    });
+    await this.read(
+      'reader',
+      slot,
+      async () => {
+        const row = await (page ? page() : this.savedText(id, offset));
+        if (
+          row.revision !== id ||
+          row.start !== offset ||
+          row.end < row.start ||
+          row.end > row.total ||
+          row.end - row.start !== row.text.length ||
+          row.end - row.start > 8192 ||
+          (row.end === row.start && row.end < row.total)
+        )
+          throw new Error(
+            'The saved text page names a different source or invalid text range.',
+          );
+        return row;
+      },
+      undefined,
+      announce,
+    );
   }
   async chunk(id: string) {
     text(id, 'a passage', 512);
