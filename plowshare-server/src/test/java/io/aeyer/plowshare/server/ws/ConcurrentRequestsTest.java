@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.ws;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.protocol.frames.Envelope;
+import io.aeyer.plowshare.protocol.transport.ConcurrentDispatch;
 import io.aeyer.plowshare.protocol.transport.PacketBudget;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -35,7 +36,8 @@ class ConcurrentRequestsTest {
                 (id.equals("first") ? firstStarted : secondStarted).complete(null);
                 return completion;
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              2);
       connection.offer("first", request("first", "information.facets", Map.of()), "alice");
       firstStarted.get(5, TimeUnit.SECONDS);
       connection.offer("second", request("second", "relay.topics", Map.of()), "alice");
@@ -64,6 +66,47 @@ class ConcurrentRequestsTest {
   }
 
   @Test
+  void a_global_bound_of_zero_is_unlimited() throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    int connections = 6;
+    try (var dispatcher = new ConcurrentRequests(budget, 1, 0)) {
+      var held = new CompletableFuture<Void>();
+      var entered = new java.util.concurrent.CountDownLatch(connections);
+      for (int i = 0; i < connections; i++) {
+        var connection =
+            dispatcher.connect(
+                "socket-" + i,
+                (id, delivered) -> {
+                  entered.countDown();
+                  return held.thenRun(delivered);
+                },
+                () -> fail("Unexpected transport failure"),
+                1);
+        // Distinct resources, so only the global execution cap could serialise these.
+        connection.offer(
+            "r" + i,
+            request("r" + i, "conversation.resume", Map.of("conversation", "c" + i)),
+            "alice");
+      }
+      assertTrue(
+          entered.await(5, TimeUnit.SECONDS),
+          "every connection's request must execute concurrently when the global bound is 0");
+      held.complete(null);
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  @Test
+  void a_zero_global_bound_does_not_loosen_the_per_connection_bound_or_other_guards() {
+    var budget = new PacketBudget(1024 * 1024);
+    assertThrows(IllegalArgumentException.class, () -> new ConcurrentRequests(budget, 0, 0));
+    assertThrows(IllegalArgumentException.class, () -> new ConcurrentRequests(budget, 2, 1));
+    assertThrows(IllegalArgumentException.class, () -> new ConcurrentRequests(budget, 1, -1));
+  }
+
+  @Test
   void conflicts_span_connections_but_observers_do_not_hold_mutation_capacity() throws Exception {
     var budget = new PacketBudget(1024 * 1024);
     try (var dispatcher = new ConcurrentRequests(budget, 1, 1)) {
@@ -79,7 +122,8 @@ class ConcurrentRequestsTest {
                 entered.complete(null);
                 return held.thenRun(delivered);
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              1);
       var second =
           dispatcher.connect(
               "two",
@@ -88,7 +132,8 @@ class ConcurrentRequestsTest {
                 delivered.run();
                 return CompletableFuture.completedFuture(null);
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              1);
       var observer =
           dispatcher.connect(
               "observer",
@@ -96,7 +141,8 @@ class ConcurrentRequestsTest {
                 observerEntered.complete(null);
                 return observing.thenRun(delivered);
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              1);
       observer.offer("wait", request("wait", "information.await", Map.of()), "alice");
       observerEntered.get(5, TimeUnit.SECONDS);
       var payload = Map.<String, Object>of("conversation", "same");
@@ -144,7 +190,8 @@ class ConcurrentRequestsTest {
                       yield CompletableFuture.completedFuture(null);
                     }
                   },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              3);
       connection.offer(
           "observe",
           new Envelope(
@@ -187,7 +234,8 @@ class ConcurrentRequestsTest {
                 entered.complete(null);
                 return held;
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              2);
       connection.offer("first", request("first", "relay.log", Map.of()), "alice");
       entered.get(5, TimeUnit.SECONDS);
       connection.offer("second", request("second", "relay.log", Map.of()), "alice");
@@ -196,6 +244,46 @@ class ConcurrentRequestsTest {
       dispatcher.stopAdmission();
       assertFalse(dispatcher.drained().toCompletableFuture().isDone());
       held.complete(null);
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  @Test
+  void a_dispatch_selection_is_admitted_even_when_the_global_pending_cap_is_reached()
+      throws Exception {
+    var budget = new PacketBudget(64L * 1024 * 1024);
+    try (var dispatcher = new ConcurrentRequests(budget, 64, 0)) {
+      var held = new CompletableFuture<Void>();
+      // 16 connections x 64 held requests reaches the server-wide pending cap of 1024.
+      for (int c = 0; c < 16; c++) {
+        var busy =
+            dispatcher.connect(
+                "busy-" + c,
+                (frame, delivered) -> held.thenRun(delivered),
+                () -> fail("Unexpected transport failure"),
+                64);
+        for (int r = 0; r < 64; r++)
+          busy.offer("r" + r, request("r" + r, "relay.topics", Map.of()), "alice");
+      }
+      var fresh =
+          dispatcher.connect(
+              "fresh",
+              (frame, delivered) -> {
+                delivered.run();
+                return CompletableFuture.completedFuture(null);
+              },
+              () -> fail("Unexpected transport failure"),
+              64);
+      assertThrows(
+          ConcurrentRequests.CapacityExceededException.class,
+          () -> fresh.offer("x", request("x", "relay.topics", Map.of()), "alice"),
+          "ordinary work is refused at the cap");
+      var selection =
+          request("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
+      fresh.offer("select", selection, "alice");
+      held.complete(null);
+      dispatcher.stopAdmission();
       dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
       assertEquals(0, budget.heldBytes());
     }

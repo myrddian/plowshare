@@ -7,6 +7,32 @@ spring:
     username: ${PLOWSHARE_DB_USER}
     password: ${PLOWSHARE_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    # The main pool is sized and bounded here, not left to Hikari's defaults.
+    # Until now it inherited Hikari's default of 10, and the transport's
+    # request-global of 8 was an unwritten stand-in for "stay below the pool":
+    # the invariant was real and recorded nowhere. The transport no longer
+    # guesses (plowshare.transport.request-global defaults to 0, unlimited);
+    # the pool is the bound, because it is the scarce resource.
+    #
+    # 20 is twice the default it inherited. Added to the 4 connections of the
+    # separate `projection-versions` pool (ProjectionCacheConfiguration) it is
+    # 24 against PostgreSQL's default max_connections of 100, which leaves wide
+    # margin for other clients, migrations and the LISTEN session. Raise it
+    # only together with the server's max_connections.
+    #
+    # The acquire timeout is short on purpose, and is in MILLISECONDS: Hikari's
+    # connectionTimeout is a plain long, so a duration such as 5s fails to bind
+    # and the server does not start (Hikari's minimum is 250). Hikari's default connectionTimeout
+    # is 30s, which is also the client's request deadline: a request waiting on
+    # an exhausted pool then looks exactly like a lost response. At 5s,
+    # starvation is a fast, honest failure that names the pool. The sizing
+    # assumes connections are held briefly: no network or model call inside a
+    # transaction (docs/coding-standards.md, "Hold connections briefly").
+    # Pressure is observable as hikaricp.connections.pending / .active under
+    # /actuator/metrics.
+    hikari:
+      maximum-pool-size: ${PLOWSHARE_DB_POOL:20}
+      connection-timeout: ${PLOWSHARE_DB_CONNECTION_TIMEOUT:5000}
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -36,6 +62,10 @@ server:
   # Deployment bind address is required.
   address: ${PLOWSHARE_BIND}
 
+# These endpoints are UNAUTHENTICATED on the API port (no security starter is
+# present) and expose JVM, pool and request metrics; the health indicator also
+# borrows a database connection per probe. A deployment must restrict them
+# with management.server.port / management.server.address or a front proxy.
 management:
   endpoints:
     web:

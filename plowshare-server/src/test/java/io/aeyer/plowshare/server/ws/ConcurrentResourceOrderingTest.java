@@ -34,7 +34,8 @@ class ConcurrentResourceOrderingTest {
                 firstEntered.complete(null);
                 return release.thenRun(delivered);
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              1);
       var second =
           dispatcher.connect(
               "two",
@@ -43,7 +44,8 @@ class ConcurrentResourceOrderingTest {
                 delivered.run();
                 return CompletableFuture.completedFuture(null);
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              1);
       var unrelated =
           dispatcher.connect(
               "three",
@@ -52,7 +54,8 @@ class ConcurrentResourceOrderingTest {
                 delivered.run();
                 return CompletableFuture.completedFuture(null);
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              1);
       first.offer("first", request("first", "Aa"), "alice");
       firstEntered.get(5, TimeUnit.SECONDS);
       second.offer("second", request("second", "Aa"), "bob");
@@ -85,7 +88,8 @@ class ConcurrentResourceOrderingTest {
                 entered.complete(null);
                 return release;
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              64);
       connection.offer("x", request("first", "same"), "alice");
       entered.get(5, TimeUnit.SECONDS);
       for (int n = 1; n < 64; n++) connection.offer("x", request("id-" + n, "same"), "alice");
@@ -102,6 +106,87 @@ class ConcurrentResourceOrderingTest {
       assertEquals(0, telemetry.snapshot().queued());
       assertEquals(0, telemetry.snapshot().resourceKeys());
       assertEquals(1, telemetry.snapshot().rejected());
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  private Envelope typed(String id, String type) {
+    return new Envelope(id, type, Envelope.CURRENT_VERSION, Map.of());
+  }
+
+  @Test
+  void the_desktop_read_hot_path_is_finite() {
+    for (String type : new String[] {"board.topics", "swarm.status", "admin.status"}) {
+      var policy = DispatchPolicy.decode(typed("id", type), "alice", "connection");
+      assertEquals(DispatchPolicy.Kind.FINITE, policy.kind(), type);
+      assertTrue(policy.resources().isEmpty(), type);
+    }
+    // The conservative default is deliberately unchanged for unaudited operations.
+    assertEquals(
+        DispatchPolicy.Kind.BARRIER,
+        DispatchPolicy.decode(typed("id", "unaudited.operation"), "alice", "connection").kind());
+  }
+
+  @Test
+  void two_finite_reads_overlap_on_one_connection() throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 4, new DispatchTelemetry())) {
+      var entered = new AtomicInteger();
+      var bothEntered = new CompletableFuture<Void>();
+      var release = new CompletableFuture<Void>();
+      var connection =
+          dispatcher.connect(
+              "reads",
+              (frame, delivered) -> {
+                if (entered.incrementAndGet() == 2) bothEntered.complete(null);
+                return release.thenRun(delivered);
+              },
+              () -> fail("Unexpected failure"),
+              4);
+      connection.offer("a", typed("a", "board.topics"), "alice");
+      connection.offer("b", typed("b", "swarm.status"), "alice");
+      // Both are inside the handler at once; a barrier would have held the second back.
+      bothEntered.get(5, TimeUnit.SECONDS);
+      release.complete(null);
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  @Test
+  void a_finite_read_still_waits_behind_a_barrier_on_its_connection() throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 4, new DispatchTelemetry())) {
+      var barrierEntered = new CompletableFuture<Void>();
+      var readEntered = new CompletableFuture<Void>();
+      var releaseBarrier = new CompletableFuture<Void>();
+      var connection =
+          dispatcher.connect(
+              "mixed",
+              (frame, delivered) -> {
+                if (frame.equals("barrier")) {
+                  barrierEntered.complete(null);
+                  return releaseBarrier.thenRun(delivered);
+                }
+                readEntered.complete(null);
+                delivered.run();
+                return CompletableFuture.completedFuture(null);
+              },
+              () -> fail("Unexpected failure"),
+              4);
+      connection.offer("barrier", typed("barrier", "unaudited.operation"), "alice");
+      barrierEntered.get(5, TimeUnit.SECONDS);
+      connection.offer("read", typed("read", "admin.status"), "alice");
+      // Per-connection and global capacity are both free, so only the barrier can be holding the
+      // read back. A bounded wait is the only way to observe that something did not happen.
+      assertThrows(
+          java.util.concurrent.TimeoutException.class,
+          () -> readEntered.get(300, TimeUnit.MILLISECONDS));
+      releaseBarrier.complete(null);
+      readEntered.get(5, TimeUnit.SECONDS);
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
       assertEquals(0, budget.heldBytes());
     }
   }

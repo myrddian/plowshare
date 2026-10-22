@@ -1,4 +1,8 @@
-import { actingOptions, type RequestOptions } from './acting.ts';
+import {
+  actingOptions,
+  type RequestOptions,
+  type RequestSignal,
+} from './acting.ts';
 import { utf8Length } from './files.ts';
 import { CURRENT_VERSION, asking, isAnswer, outcomeIn } from './envelope.ts';
 import type { Outcome } from './envelope.ts';
@@ -97,6 +101,11 @@ export interface ConnectOptions {
   /** Low-level injected transports default to ordered; public SDK opening selects concurrent-v1. */
   readonly dispatchMode?: 'concurrent-v1' | 'ordered';
   readonly maxPendingBytes?: number;
+  /**
+   * Source of uniform [0, 1) randomness for resubmission jitter; injectable so
+   * tests are deterministic.
+   */
+  readonly random?: () => number;
   /** Platform-supplied deadline; cancellation removes the pending request, never replays it. */
   readonly deadline?: {
     readonly milliseconds: number;
@@ -188,6 +197,13 @@ interface Waiting {
   cancelDeadline?: () => void;
   cancelAbort?: () => void;
   cancelSend?: () => boolean;
+  /** Cancels a pending resubmission backoff timer; set only while one is armed. */
+  cancelRetry?: () => void;
+  /**
+   * Consumes a server capacity refusal: the request returns to waiting for a
+   * dispatch slot and is resubmitted. Set once the request is submittable.
+   */
+  refused?: () => void;
   submitted: boolean;
   terminal: boolean;
   transferDone: boolean;
@@ -231,6 +247,10 @@ export class ConnectionFault extends Error {
   }
 }
 
+/** Backoff before resubmitting a refused request: base doubles per refusal up to the cap. */
+const RESUBMIT_BACKOFF_BASE_MS = 100;
+const RESUBMIT_BACKOFF_CAP_MS = 5000;
+
 /**
  * Speaks frames on an already-open socket.
  *
@@ -244,6 +264,7 @@ export class ConnectionFault extends Error {
  */
 export function connect(options: ConnectOptions): Connected {
   const deadline = options.deadline;
+  const random = options.random ?? Math.random;
   const capacity = options.maxPendingBytes ?? 640 * 1024 * 1024;
   if (
     deadline !== undefined &&
@@ -267,6 +288,43 @@ export function connect(options: ConnectOptions): Connected {
     held = 0,
     maximum = 64,
     dispatched = 0;
+  /**
+   * Callers parked until a request slot frees (backpressure, not failure). FIFO.
+   * An entry is granted its slot (`admitted` already incremented) when resolved,
+   * so no later synchronous caller can steal it. Not yet in `waiting`, hence
+   * `strand()` must settle these itself.
+   */
+  const slotWaiters: {
+    granted: () => void;
+    refused: (cause: ConnectionFault) => void;
+    cancelAbort?: () => void;
+  }[] = [];
+  /**
+   * Admitted requests whose launch is parked behind the negotiated dispatch
+   * depth, FIFO. Terminal entries are skipped; they release through `waiting`.
+   */
+  const launchWaiters: { asker: Waiting; proceed: () => void }[] = [];
+  /**
+   * Grants freed capacity to parked work. Runs from every slot release and after
+   * negotiation changes `maximum`. Conditions are strict `<`, so a depth below
+   * what is already in flight admits nothing until in-flight work drains below it.
+   */
+  function pump(): void {
+    // Never launch once closed: strand() runs release() (hence pump) for each
+    // failed request while the socket is still open, and a frame sent then would
+    // reach the server after its caller was told it was not submitted.
+    while (open && launchWaiters.length > 0 && dispatched < maximum) {
+      const next = launchWaiters.shift();
+      if (next !== undefined && !next.asker.terminal) next.proceed();
+    }
+    while (slotWaiters.length > 0 && admitted < maximum) {
+      const next = slotWaiters.shift();
+      if (next === undefined) break;
+      next.cancelAbort?.();
+      admitted++;
+      next.granted();
+    }
+  }
   let open = true,
     callerClosed = false;
   let opening: Promise<void> | undefined;
@@ -288,6 +346,7 @@ export function connect(options: ConnectOptions): Connected {
     if (waiting.get(id) === asker) waiting.delete(id);
     asker.cancelDeadline?.();
     asker.cancelAbort?.();
+    asker.cancelRetry?.();
     releaseIfSettled(asker);
     return true;
   }
@@ -297,6 +356,20 @@ export function connect(options: ConnectOptions): Connected {
   function strand(why: string, cause?: PacketTransportFault): void {
     open = false;
     stranding = true;
+    // Launch-parked entries are also in `waiting` and fail below; drop them so
+    // nothing can transmit them.
+    launchWaiters.length = 0;
+    // Nothing from a parked caller was sent, so it is safely NOT_SUBMITTED.
+    for (const parked of slotWaiters.splice(0)) {
+      parked.cancelAbort?.();
+      parked.refused(
+        new ConnectionFault(
+          'NOT_SUBMITTED',
+          why,
+          cause ? { cause } : undefined,
+        ),
+      );
+    }
     for (const [id, asker] of [...waiting]) {
       asker.cancelSend?.();
       fail(
@@ -356,6 +429,13 @@ export function connect(options: ConnectOptions): Connected {
           `response type or protocol version does not match ${CURRENT_VERSION}: received ${String(frame['protocol_version'])}`,
         );
       const reply = { outcome: outcomeIn(frame['payload']), raw: frame };
+      // Flow control, not an answer: the server confirmed it never started this
+      // request (it owns no queue entry, packet budget or reply slot), so the
+      // caller is not told and the request waits to be submitted again.
+      if (reply.outcome.code === 'CAPACITY_EXHAUSTED' && asker.refused) {
+        asker.refused();
+        return;
+      }
       if (terminate(id, asker)) asker.answered(reply);
     } catch (cause) {
       fail(
@@ -372,6 +452,32 @@ export function connect(options: ConnectOptions): Connected {
     }
   });
 
+  /**
+   * Resolves once a request slot is reserved for the caller (the caller has
+   * already tried the synchronous path in `exchange`). Waiting is flow
+   * control: it ends by grant, or by abort/closure, never by a capacity error.
+   */
+  function reserveSlot(signal: RequestSignal | undefined): Promise<void> {
+    return new Promise<void>((granted, refused) => {
+      const parked: (typeof slotWaiters)[number] = { granted, refused };
+      if (signal !== undefined) {
+        const aborted = (): void => {
+          const at = slotWaiters.indexOf(parked);
+          if (at >= 0) slotWaiters.splice(at, 1);
+          refused(
+            new ConnectionFault(
+              'NOT_SUBMITTED',
+              'request cancelled before submission',
+            ),
+          );
+        };
+        signal.addEventListener('abort', aborted, { once: true });
+        parked.cancelAbort = () => signal.removeEventListener('abort', aborted);
+      }
+      slotWaiters.push(parked);
+    });
+  }
+
   /** Admission includes queued writers and negotiated opening waiters, not just sent IDs. */
   function exchange(
     type: string,
@@ -379,11 +485,7 @@ export function connect(options: ConnectOptions): Connected {
     input: RequestOptions | undefined,
     control: boolean,
   ): Promise<Reply> {
-    let requestOptions: RequestOptions,
-      frame: string,
-      id: string,
-      bytes: number;
-    let reserved = false;
+    let requestOptions: RequestOptions;
     try {
       requestOptions = actingOptions(input);
       if (!control && type === 'transport.dispatch')
@@ -393,19 +495,43 @@ export function connect(options: ConnectOptions): Connected {
         );
       if (!open)
         throw new ConnectionFault('NOT_SUBMITTED', 'this connection is closed');
-      if (requestOptions.signal?.aborted || admitted >= maximum)
+      if (requestOptions.signal?.aborted)
         throw new ConnectionFault(
           'NOT_SUBMITTED',
-          'request cancelled or capacity exhausted before submission',
+          'request cancelled before submission',
         );
       if (requestOptions.timeoutMs !== undefined && deadline === undefined)
         throw new Error('request timeouts require a deadline scheduler');
+    } catch (cause) {
+      return Promise.reject(
+        cause instanceof Error
+          ? cause
+          : new Error('Invalid request before submission', { cause }),
+      );
+    }
+    const options = requestOptions;
+    // Reserve before encoding: caller DTO hooks can synchronously reenter this transport.
+    if (admitted < maximum && slotWaiters.length === 0) {
+      admitted++;
+      return submit(type, payload, options, control);
+    }
+    return reserveSlot(options.signal).then(() =>
+      submit(type, payload, options, control),
+    );
+  }
+
+  /** Sends a request whose admission slot is already reserved; frees it on any pre-launch failure. */
+  function submit(
+    type: string,
+    payload: unknown,
+    requestOptions: RequestOptions,
+    control: boolean,
+  ): Promise<Reply> {
+    let frame: string, id: string, bytes: number;
+    try {
       if (!Number.isSafeInteger(issued + 1))
         throw new Error('request identity space exhausted');
       id = String(++issued);
-      // Reserve before encoding: caller DTO hooks can synchronously reenter this transport.
-      admitted++;
-      reserved = true;
       frame = JSON.stringify(asking(id, type, payload, requestOptions));
       bytes = utf8Length(frame);
       if (bytes > capacity - held)
@@ -414,7 +540,9 @@ export function connect(options: ConnectOptions): Connected {
           'pending request byte capacity exceeded before submission',
         );
     } catch (cause) {
-      if (reserved) admitted--;
+      admitted--;
+      pump();
+      checkDrained();
       return Promise.reject(
         cause instanceof Error
           ? cause
@@ -439,6 +567,8 @@ export function connect(options: ConnectOptions): Connected {
           if (launched) dispatched--;
           held -= bytes;
           checkDrained();
+          // Every ending funnels here, so a failure frees a slot like a reply.
+          pump();
         },
       };
       waiting.set(id, asker);
@@ -453,7 +583,33 @@ export function connect(options: ConnectOptions): Connected {
           ),
         );
       };
-      if (deadline !== undefined) {
+      /**
+       * Arms the request deadline, at most once per request.
+       *
+       * <p>Decision: the deadline does not cover waiting for a slot. It governs
+       * an in-flight request, the time the server has to answer. Waiting for
+       * admission, for dispatch negotiation, or behind the negotiated depth is
+       * flow control, not failure; charging it to the deadline would turn
+       * back-pressure into a timeout. It is therefore armed only when the frame
+       * is handed to the transport (`transmit`), never on `launch()`'s parking
+       * path. With `socket.submit` the frame may still sit in a writer queue.
+       *
+       * <p>Consequence: a request awaiting dispatch negotiation carries no
+       * per-request deadline. Its bound is the negotiation exchange's own
+       * deadline, so a caller's `timeoutMs` is not honoured until the request is
+       * transmitted.
+       *
+       * <p>Invariant: the deadline is armed once and never re-armed or extended,
+       * so the first transmission's deadline bounds the request's whole life even
+       * if `launch()` is entered again.
+       *
+       * <p>A never-launched request has no timer; its only exits are abort and
+       * connection close, and `strand()` settles both parked sets.
+       */
+      let deadlineArmed = false;
+      const armDeadline = (): void => {
+        if (deadline === undefined || deadlineArmed) return;
+        deadlineArmed = true;
         const milliseconds = requestOptions.timeoutMs ?? deadline.milliseconds;
         asker.cancelDeadline = deadline.schedule(
           () =>
@@ -462,7 +618,7 @@ export function connect(options: ConnectOptions): Connected {
             ),
           milliseconds,
         );
-      }
+      };
       if (requestOptions.signal !== undefined) {
         const signal = requestOptions.signal;
         const aborted = (): void =>
@@ -471,18 +627,85 @@ export function connect(options: ConnectOptions): Connected {
         asker.cancelAbort = () => signal.removeEventListener('abort', aborted);
         if (signal.aborted) aborted();
       }
+      /**
+       * Capacity refusal handling: back-pressure the caller never sees.
+       *
+       * <p>The request stays in `waiting` (so abort, deadline and `strand()`
+       * still settle it) and keeps its `id`: the server refused before owning
+       * anything, so sending it again is not a mutation replay. The launch
+       * bookkeeping is undone so `transmit()` can run again without
+       * double-counting `dispatched`; `submitted` is cleared because a close
+       * while waiting is honestly NOT_SUBMITTED. A second refusal for the same
+       * id while already waiting is ignored (`launched` is false then), so a
+       * misbehaving server cannot underflow the counters.
+       *
+       * <p>Every refusal waits out a jittered exponential backoff on the
+       * injected scheduler, so refused clients neither retry in lockstep nor
+       * poll an overloaded server. When the timer fires the request joins the
+       * back of `launchWaiters` with `proceed: transmit` and `pump()` drains it
+       * once depth allows. Invariant: anything `pump()` drains goes straight to
+       * `transmit`, never back through `launch()`: a drained entry is already at
+       * the head of the queue, so re-running the queue-position check would only
+       * reorder it needlessly.
+       * The freed slot is announced with `pump()` so other parked work uses it.
+       *
+       * <p>Resubmission re-enters this same closure, so the deadline armed on
+       * the first transmit is neither renewed nor extended and alone bounds the
+       * loop. The backoff exponent below is a pacing input, not a bound.
+       *
+       * <p>Only installed with a scheduler: without one (ordered mode with no
+       * deadline) there is nothing to pace or bound retries, so the refusal is
+       * surfaced to the caller rather than resubmitted in a tight loop.
+       *
+       * <p>Never installed for a `control` request (the dispatch negotiation).
+       * Resubmitting a handshake is not flow control: the server treats a second
+       * selection on a connection as a protocol violation, so a retry would turn
+       * a refusal into a teardown. A refused negotiation fails honestly instead.
+       */
+      let refusals = 0;
+      if (deadline !== undefined && !control)
+        asker.refused = (): void => {
+          if (!launched) return;
+          dispatched--;
+          launched = false;
+          asker.submitted = false;
+          const ceiling = Math.min(
+            RESUBMIT_BACKOFF_CAP_MS,
+            RESUBMIT_BACKOFF_BASE_MS * 2 ** Math.min(refusals++, 16),
+          );
+          // Half fixed, half random: always pauses, never lockstep.
+          const pause = Math.ceil(ceiling / 2 + (random() * ceiling) / 2);
+          asker.cancelRetry = deadline.schedule(() => {
+            delete asker.cancelRetry;
+            if (asker.terminal) return;
+            launchWaiters.push({ asker, proceed: transmit });
+            pump();
+          }, pause);
+          pump();
+        };
       const launch = (): void => {
         if (asker.terminal) return;
         if (!open) {
           detached('connection closed before submission');
           return;
         }
-        if (dispatched >= maximum) {
-          detached('negotiated request capacity exhausted before submission');
+        // Wait behind the negotiated depth rather than fail; pump() resumes FIFO.
+        if (dispatched >= maximum || launchWaiters.length > 0) {
+          launchWaiters.push({ asker, proceed: transmit });
           return;
         }
+        transmit();
+      };
+      // Not idempotent: it counts a dispatch and sets `launched` unconditionally,
+      // so a caller must never transmit the same request twice without first
+      // undoing that bookkeeping (see `asker.refused`). `sends` makes a stale
+      // writer completion from an earlier send unable to touch a later one.
+      let sends = 0;
+      const transmit = (): void => {
+        const send = ++sends;
         dispatched++;
         launched = true;
+        armDeadline();
         try {
           if (socket.submit !== undefined) {
             asker.transferDone = false;
@@ -494,10 +717,12 @@ export function connect(options: ConnectOptions): Connected {
             if (asker.terminal) sent.cancel();
             sent.settled.then(
               () => {
+                if (send !== sends) return;
                 asker.transferDone = true;
                 releaseIfSettled(asker);
               },
               (cause: unknown) => {
+                if (send !== sends) return;
                 asker.transferDone = true;
                 fail(
                   id,
@@ -586,6 +811,7 @@ export function connect(options: ConnectOptions): Connected {
           );
         maximum = body.maxPending;
         accepted();
+        pump();
       })
       .catch((cause: unknown) => {
         strand(

@@ -267,6 +267,22 @@ are invalidation hints; durable versions and recovery establish correctness.
 The [query efficiency and cache design](query-efficiency-and-cache-design.md)
 defines the proposed implementation and its acceptance criteria.
 
+### Hold connections briefly
+
+The main database pool (`spring.datasource.hikari` in `application.yml`) is the
+server's scarce resource and the only bound on database-backed request
+concurrency; the transport no longer caps it. Its size assumes short holds. Do not
+make a provider, model, embedding or other network call inside a database
+transaction or while otherwise holding a pooled connection: it holds the
+connection for a connect-plus-read timeout, and as many stalled calls as the pool
+has connections stop the server for everyone, reads included. Do the call first,
+then open the unit of work with the result. `Archive.embedding(...)` is the worked
+example: it embeds before any unit of work opens and its comment explains why.
+
+Nothing enforces this yet. Auditing the files that use `@Transactional` or
+`TransactionTemplate` (23 at the time of writing) is follow-up work, so the pool
+sizing currently rests on this convention rather than a check.
+
 ## Typed DTOs and secure conversion
 
 Raw JSON representations are confined to boundary parsing and serialization.

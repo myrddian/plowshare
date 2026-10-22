@@ -163,6 +163,18 @@ class EnvelopeTest {
     return rows;
   }
 
+  /**
+   * Failures the transport raises before any handler runs, so no row of {@code
+   * ApiExceptionHandler}'s table can ever produce them. Kept apart from {@link #tableRows()} so the
+   * table check below still fails on an unexplained constant, while a transport-origin one is named
+   * here on purpose. {@code CAPACITY_EXHAUSTED}: the connection's dispatch queue was full.
+   */
+  private static Set<Map.Entry<Integer, String>> transportRows() {
+    Set<Map.Entry<Integer, String>> rows = new HashSet<>();
+    rows.add(Map.entry(429, "capacity_exhausted")); // dispatch queue full, nothing started
+    return rows;
+  }
+
   @Test
   void code_covers_every_distinct_status_in_the_survey_table_plus_ok() {
     Set<Map.Entry<Integer, String>> covered = new HashSet<>();
@@ -172,18 +184,20 @@ class EnvelopeTest {
       }
       covered.add(Map.entry(code.httpStatus(), code.slug()));
     }
+    Set<Map.Entry<Integer, String>> expected = new HashSet<>(tableRows());
+    expected.addAll(transportRows());
 
     assertEquals(
-        tableRows(),
+        expected,
         covered,
-        "every distinct (status, slug) pair the table produces has exactly one"
-            + " Code constant, and no constant answers a pair the table never"
+        "every distinct (status, slug) pair the table produces, and every transport-origin"
+            + " pair, has exactly one Code constant, and no constant answers a pair neither"
             + " produced");
     assertEquals(
-        tableRows().size() + SUCCESSES.size(),
+        expected.size() + SUCCESSES.size(),
         Code.values().length,
-        "the table's distinct pairs, plus the successes it could never name,"
-            + " and nothing else");
+        "the table's distinct pairs, the transport's, plus the successes the table could never"
+            + " name, and nothing else");
   }
 
   @Test

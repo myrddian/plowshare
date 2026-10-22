@@ -543,8 +543,9 @@ public class Archive implements UsageAware, MemoryFiling {
     // Embedded before any unit of work opens, and the order is the point:
     // this is a call to a model that can take a connect-plus-read timeout
     // to answer, and inside a transaction it would hold a pooled database
-    // connection for all of it. Ten stalled recalls against Hikari's
-    // default pool of ten stop the server for everyone, reads included.
+    // connection for all of it. As many stalled recalls as the main pool
+    // has connections (spring.datasource.hikari) stop the server for everyone,
+    // reads included.
     // Nothing has been read from the database yet, so there is nothing for
     // this call to be consistent with.
     if (dualEmbeddings != null) {

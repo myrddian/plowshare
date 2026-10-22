@@ -46,6 +46,11 @@ dependencies {
     // statements over one table, and the vector column is a type JPA has no
     // mapping for anyway.
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    // application.yml exposes health, info and metrics; without this the
+    // configuration is dead and /actuator/health is a 404. It is also what
+    // publishes hikaricp.connections.pending/active, the database pool pressure
+    // that connection starvation is diagnosed from.
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
 
     implementation("org.flywaydb:flyway-core:$flywayVersion")
     // Flyway 10 moved Postgres support out of core; without this the migration

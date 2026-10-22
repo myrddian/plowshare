@@ -41,7 +41,8 @@ package io.aeyer.plowshare.protocol.frames;
  *
  * <p>Twelve from the table, plus {@link #OK}, is thirteen. {@link #MODEL_UNAVAILABLE} came later
  * and from outside the table: {@code schedule.read} waits on a model with a person waiting on it,
- * and has no HTTP twin for {@code ApiExceptionHandler} to hold a row for.
+ * and has no HTTP twin for {@code ApiExceptionHandler} to hold a row for. {@link
+ * #CAPACITY_EXHAUSTED} is the same kind of addition, raised by the transport rather than a handler.
  *
  * <h2>And three more the table could never have named</h2>
  *
@@ -188,6 +189,14 @@ public enum Code {
    * no HTTP twin. {@code Faults}: {@code events.ModelUnavailableException}.
    */
   MODEL_UNAVAILABLE(503, "model_unavailable"),
+
+  /**
+   * The connection's dispatch queue was full, so the frame was refused before anything started: no
+   * handler ran and nothing was written, and the request is safe to retry. Not a row of {@code
+   * ApiExceptionHandler}'s table and never will be: per-connection dispatch depth is a transport
+   * condition that no controller can raise, so it has no HTTP twin to hold a row for.
+   */
+  CAPACITY_EXHAUSTED(429, "capacity_exhausted"),
 
   /**
    * Nobody classified this failure. {@code ApiExceptionHandler} row 15, the {@code Throwable}

@@ -290,7 +290,19 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private boolean readDispatchStarted;
   private ConcurrentRequests concurrentRequests;
   private int requestPerConnection = 2;
-  private int requestGlobal = 8;
+  private int requestGlobal = 0;
+  private int requestObservers = ConcurrentRequests.DEFAULT_OBSERVERS;
+
+  /**
+   * Per-connection call window advertised in the dispatch handshake. Clients adopt it as their own
+   * limit, so it is a statement about how much work this server will queue for one connection, not
+   * a protocol constant. It bounds queueing, not execution (see {@code requestPerConnection}).
+   * Defaults to 8 so a full queue refuses sooner and visibly; the cost is that the Java, Go, Python
+   * and .NET SDKs, which fail rather than block at the bound, refuse their 9th concurrent request.
+   * See the {@code plowshare.transport.request-depth} comment in {@code EventChannelConfig}.
+   */
+  private int requestDepth = 8;
+
   private java.time.Duration requestDrain = java.time.Duration.ofSeconds(10);
   private volatile boolean lifecycleRunning;
   private volatile boolean accepting = true;
@@ -354,8 +366,34 @@ public final class EventChannelHandler extends TextWebSocketHandler
     if (readDispatchStarted)
       throw new IllegalStateException("Event read concurrency cannot change after dispatch starts");
     readCapacity = new EventReadCapacity(perConnection, global);
+  }
+
+  /** Request execution bounds as configured; {@code global == 0} means unlimited. */
+  record RequestBounds(int perConnection, int global, int observers) {}
+
+  synchronized RequestBounds requestBounds() {
+    return new RequestBounds(requestPerConnection, requestGlobal, requestObservers);
+  }
+
+  /**
+   * Configures how many domain requests may execute at once, per connection and across the server
+   * ({@code 0} = unlimited), independently of event-read concurrency. A global cap here used to be
+   * an unwritten stand-in for the database pool; that pool now bounds itself (see {@code
+   * spring.datasource.hikari} in {@code application.yml}), so the default is no transport cap. Must
+   * be called before dispatch starts.
+   */
+  synchronized void useRequestBounds(int perConnection, int global, int observers) {
+    if (readDispatchStarted) throw new IllegalStateException("Request dispatch already started");
+    if (perConnection < 1
+        || global < 0
+        || (global != 0 && global < perConnection)
+        || observers < perConnection)
+      throw new IllegalArgumentException(
+          "Request bounds need per-connection >= 1, global 0 (unlimited) or >= per-connection, "
+              + "and observers >= per-connection");
     requestPerConnection = perConnection;
     requestGlobal = global;
+    requestObservers = observers;
   }
 
   private synchronized ConcurrentRequests concurrentRequests() {
@@ -363,8 +401,26 @@ public final class EventChannelHandler extends TextWebSocketHandler
     readDispatchStarted = true;
     if (concurrentRequests == null)
       concurrentRequests =
-          new ConcurrentRequests(packetBudget, requestPerConnection, requestGlobal, telemetry);
+          new ConcurrentRequests(
+              packetBudget, requestPerConnection, requestGlobal, requestObservers, telemetry);
     return concurrentRequests;
+  }
+
+  /**
+   * Sets the depth advertised to clients in the dispatch handshake, within {@code [1,
+   * ConcurrentDispatch.MAX_PENDING]}. Must be called before dispatch starts, because connections
+   * already handshaken would otherwise hold a stale window.
+   */
+  synchronized void useRequestDepth(int depth) {
+    if (readDispatchStarted) throw new IllegalStateException("Request dispatch already started");
+    if (depth < 1 || depth > ConcurrentDispatch.MAX_PENDING)
+      throw new IllegalArgumentException(
+          "Request depth must be between 1 and " + ConcurrentDispatch.MAX_PENDING);
+    requestDepth = depth;
+  }
+
+  private synchronized int advertisedRequestDepth() {
+    return requestDepth;
   }
 
   synchronized void useRequestDrain(java.time.Duration drain) {
@@ -773,7 +829,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   .connect(
                       socket.getId(),
                       (value, delivered) -> routeConcurrent(socket, delivery, value, delivered),
-                      () -> delivery.disconnect("request execution"));
+                      () -> delivery.disconnect("request execution"),
+                      advertisedRequestDepth());
           delivery.validity =
               () -> {
                 if (!delivery.running
@@ -785,13 +842,47 @@ public final class EventChannelHandler extends TextWebSocketHandler
       } else {
         delivery.domainSeen = true;
       }
-      delivery.concurrent.offer(frame, request, (String) socket.getAttributes().get(HANDLE));
+      try {
+        delivery.concurrent.offer(frame, request, (String) socket.getAttributes().get(HANDLE));
+      } catch (ConcurrentRequests.CapacityExceededException congested) {
+        refuseCongested(delivery, request);
+      }
       return true;
     } catch (RuntimeException invalid) {
       delivery.stop();
       delivery.disconnect("invalid request admission");
       return true;
     }
+  }
+
+  /**
+   * Answers a request the dispatch queue had no room for, leaving the connection and every other
+   * in-flight request untouched.
+   *
+   * <p>Only {@link ConcurrentRequests.CapacityExceededException} reaches here. Malformed frames,
+   * duplicate ids and a closed dispatcher are protocol violations or shutdown and still tear the
+   * connection down in the caller.
+   *
+   * <p><b>This reply deliberately bypasses the dispatcher's reply handoff.</b> The refused request
+   * was never admitted: it has no {@code active} entry, no {@code PacketBudget} reservation for its
+   * body and no claim on {@code Connection.handingOff}. Routing the refusal through the dispatcher
+   * would take that single slot, and refusals are most frequent exactly when another reply is
+   * mid-handoff, so it would throw "A reply handoff is already settling". It is instead queued on
+   * the delivery's own output path with no dispatch callbacks, charged only against that path's
+   * ordinary reply bounds. Because it owns nothing, the client may resubmit the same id as soon as
+   * capacity frees; nothing here marks the id as used. Nothing was started, so a retry cannot
+   * replay work.
+   *
+   * <p>If the refusal itself cannot be queued or budgeted it is dropped and the connection is kept
+   * (see {@link Delivery#refuse}): the refused request goes unanswered and its client's deadline
+   * expires, instead of every in-flight request on the connection being torn down.
+   */
+  private void refuseCongested(Delivery delivery, Envelope request) {
+    delivery.refuse(
+        request.id(),
+        request.type(),
+        Outcome.failed(
+            Code.CAPACITY_EXHAUSTED, "Request queue is full; nothing was started, retry later"));
   }
 
   private java.util.concurrent.CompletionStage<Void> routeConcurrent(
@@ -826,7 +917,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
       var answer =
           ConcurrentDispatch.TYPE.equals(type)
               ? java.util.concurrent.CompletableFuture.completedFuture(
-                  Outcome.ok(new ConcurrentDispatch.Selected()))
+                  Outcome.ok(
+                      new ConcurrentDispatch.Selected(
+                          ConcurrentDispatch.MODE,
+                          advertisedRequestDepth(),
+                          ConcurrentDispatch.MAX_ID_BYTES)))
               : router().routeAsync(frame, asking);
       return answer.thenAccept(
           outcome -> {
@@ -1480,16 +1575,49 @@ public final class EventChannelHandler extends TextWebSocketHandler
         Runnable disclosure,
         Runnable started,
         Runnable settled) {
+      enqueue(id, type, outcome, delivered, disclosure, started, settled, true);
+    }
+
+    /**
+     * Queues a capacity refusal, and <b>never disconnects</b> when it cannot.
+     *
+     * <p>A refusal is emitted precisely when its connection is congested, so the three ways a reply
+     * can fail to queue (the shared {@code PacketBudget}, the per-connection reply byte bound,
+     * {@link #PENDING}) are most likely exactly when a refusal is needed. Tearing the connection
+     * down for them would strand every in-flight request to deliver a "retry later". An
+     * undeliverable refusal is instead dropped: that one request goes unanswered and its client's
+     * deadline expires, which is strictly better than losing every other request on the connection.
+     * There is deliberately no reserved budget for refusals; exhausting the whole budget is
+     * systemic, and shedding is the defensible response.
+     *
+     * @return whether the refusal was queued
+     */
+    boolean refuse(String id, String type, Outcome outcome) {
+      return enqueue(id, type, outcome, () -> {}, validity, () -> {}, () -> {}, false);
+    }
+
+    /**
+     * @param fatal whether failing to queue closes the connection (an answer is owed and a silent
+     *     drop would leave its caller waiting forever) or only drops this one reply
+     */
+    private boolean enqueue(
+        String id,
+        String type,
+        Outcome outcome,
+        Runnable delivered,
+        Runnable disclosure,
+        Runnable started,
+        Runnable settled,
+        boolean fatal) {
       if (!running) {
         delivered.run();
-        return;
+        return false;
       }
       long encodeStarted = System.nanoTime();
       String frame = answered(id, type, outcome);
       telemetry.encoding.record(System.nanoTime() - encodeStarted);
       if (frame == null) {
-        disconnect(id);
-        return;
+        return unqueued(id, fatal);
       }
       // Charge both encoded characters and the retained typed projection used by its disclosure
       // fence; references are dropped together on successful handoff or connection teardown.
@@ -1498,15 +1626,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
       long held = replyBytes.addAndGet(bytes);
       if (held > maximum) {
         replyBytes.addAndGet(-bytes);
-        disconnect(id);
-        return;
+        return unqueued(id, fatal);
       }
       try {
         budget.acquire(bytes);
       } catch (IllegalArgumentException capacity) {
         replyBytes.addAndGet(-bytes);
-        disconnect(id);
-        return;
+        return unqueued(id, fatal);
       }
       var released = new AtomicBoolean();
       telemetry.replyBytes.add(bytes);
@@ -1524,10 +1650,22 @@ public final class EventChannelHandler extends TextWebSocketHandler
       if (pending.offer(reply)) {
         if (!running && pending.remove(reply)) release.run();
         waiting.release();
-        return;
+        return true;
       }
       release.run();
-      disconnect(id);
+      return unqueued(id, fatal);
+    }
+
+    private boolean unqueued(String id, boolean fatal) {
+      if (fatal) {
+        disconnect(id);
+      } else {
+        log.debug(
+            "Session '{}' could not queue a refusal to '{}'; dropped, connection kept.",
+            session,
+            id);
+      }
+      return false;
     }
 
     /**

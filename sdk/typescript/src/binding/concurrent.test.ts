@@ -26,6 +26,16 @@ class Wire implements Socket {
     this.listener?.({ data: JSON.stringify({ ...frame, payload }) });
   }
 }
+const codeOf = (cause: unknown): unknown =>
+  typeof cause === 'object' && cause !== null && 'code' in cause
+    ? cause.code
+    : undefined;
+const payloadOf = (frame: string): unknown => {
+  const parsed: unknown = JSON.parse(frame);
+  return typeof parsed === 'object' && parsed !== null && 'payload' in parsed
+    ? parsed.payload
+    : undefined;
+};
 const flush = async (): Promise<void> => {
   for (let n = 0; n < 12; n++) await Promise.resolve();
 };
@@ -33,6 +43,7 @@ function opening(wire: Wire, maximum = 64) {
   const connection = connect({
     socket: wire,
     dispatchMode: 'concurrent-v1',
+    random: () => 0,
     deadline: {
       milliseconds: 30000,
       schedule: (callback, milliseconds) => {
@@ -109,18 +120,595 @@ describe('concurrent dispatch lifecycle', () => {
     expect(wire.sent).toHaveLength(3);
     connection.close();
   });
-  it('honors a smaller negotiated capacity', async () => {
+  it('holds a request past the window until a slot frees', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 2);
+    await ready;
+    const first = connection.ask('project.list', {});
+    const second = connection.ask('project.list', {});
+    const third = connection.ask('project.list', {});
+    let settled = false;
+    const observed = third.then(() => {
+      settled = true;
+    });
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    expect(settled).toBe(false);
+    wire.answer(1);
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(4);
+    wire.answer(3);
+    await observed;
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  // Guards strand() settling parked callers; not red-before (the old code rejected at once).
+  it('settles a parked caller when the connection closes', async () => {
+    const wire = new Wire();
+    let close: (() => void) | undefined;
+    wire.addEventListener = (type, listener) => {
+      if (type === 'message') wire.listener = listener;
+      else if (type === 'close') close = () => listener({ data: '' });
+    };
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    close!();
+    await first;
+    // The parked caller is settled by the closure rather than left hanging.
+    await second;
+    expect(wire.sent).toHaveLength(2);
+  });
+  it('wakes a waiter when a deadline frees the slot', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = expect(
+      connection.ask('project.list', {}, { timeoutMs: 1000 }),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = connection.ask('project.list', {}, { timeoutMs: 60000 });
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  it('wakes a waiter when an in-flight request is aborted', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const controller = new AbortController();
+    const first = expect(
+      connection.ask('project.list', {}, { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    controller.abort();
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  it('sends nothing and fails NOT_SUBMITTED when closed while launch-parked', async () => {
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: { milliseconds: 30000, schedule: () => () => undefined },
+    });
+    const calls = [1, 2, 3, 4].map(() =>
+      connection.ask('project.list', {}).then(
+        () => 'ok',
+        (cause: unknown) => codeOf(cause),
+      ),
+    );
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 2, maxIdBytes: 128 },
+    });
+    await flush();
+    // Two dispatched, two parked behind the depth.
+    expect(wire.sent).toHaveLength(3);
+    connection.close();
+    await flush();
+    // The frame count catches a launch pumped while strand() still sees an open socket.
+    expect(wire.sent).toHaveLength(3);
+    expect(await Promise.all(calls)).toEqual([
+      'RESPONSE_LOST',
+      'RESPONSE_LOST',
+      'NOT_SUBMITTED',
+      'NOT_SUBMITTED',
+    ]);
+  });
+  // Red before: the deadline was armed at submission, so a launch-parked request
+  // (admitted, waiting behind the negotiated depth) expired at 30s with no frame sent.
+  it('does not spend the deadline while launch-parked behind the depth', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    const outcomes: string[] = [];
+    const record = (name: string) => (settled: unknown) => {
+      outcomes.push(`${name}:${(settled as { code?: string })?.code ?? 'ok'}`);
+    };
+    const first = connection
+      .ask('project.list', {})
+      .then(record('first'), record('first'));
+    const second = connection
+      .ask('project.list', {})
+      .then(record('second'), record('second'));
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 1, maxIdBytes: 128 },
+    });
+    await flush();
+    // One in flight; the second is admitted but launch-parked.
+    expect(wire.sent).toHaveLength(2);
+    // The in-flight request expires; the parked one has not started its clock.
+    await vi.advanceTimersByTimeAsync(29000);
+    await vi.advanceTimersByTimeAsync(29000);
+    expect(outcomes).toEqual(['first:RESPONSE_LOST']);
+    await first;
+    await flush();
+    // The slot freed at 30s, so the parked request launched then and is timed
+    // from that moment: 58s elapsed is only 28s of its own budget.
+    expect(wire.sent).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(outcomes).toEqual(['first:RESPONSE_LOST']);
+    await vi.advanceTimersByTimeAsync(2000);
+    await second;
+    expect(outcomes).toEqual(['first:RESPONSE_LOST', 'second:RESPONSE_LOST']);
+    connection.close();
+  });
+  it('does not spend the deadline while parked for admission', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = connection.ask('project.list', {}, { timeoutMs: 600000 });
+    let settled = false;
+    const second = connection
+      .ask('project.list', {}, { timeoutMs: 1000 })
+      .then(() => {
+        settled = true;
+      });
+    await flush();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(settled).toBe(false);
+    expect(wire.sent).toHaveLength(2);
+    wire.answer(1);
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    expect(settled).toBe(true);
+    connection.close();
+  });
+  it('settles launch-parked and admission-parked requests on close, with no timer firing', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    let close: (() => void) | undefined;
+    wire.addEventListener = (type, listener) => {
+      if (type === 'message') wire.listener = listener;
+      else if (type === 'close') close = () => listener({ data: '' });
+    };
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    // Two before negotiation: at depth 1 the second is launch-parked. Two more
+    // after negotiation park for admission.
+    const calls = [1, 2].map(() =>
+      connection.ask('project.list', {}).then(
+        () => 'ok',
+        (cause: unknown) => codeOf(cause),
+      ),
+    );
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 1, maxIdBytes: 128 },
+    });
+    await flush();
+    const more = [3, 4].map(() =>
+      connection.ask('project.list', {}).then(
+        () => 'ok',
+        (cause: unknown) => codeOf(cause),
+      ),
+    );
+    await flush();
+    // Negotiation frame plus one transmitted request.
+    expect(wire.sent).toHaveLength(2);
+    close!();
+    await flush();
+    expect(await Promise.all([...calls, ...more])).toEqual([
+      'RESPONSE_LOST',
+      'NOT_SUBMITTED',
+      'NOT_SUBMITTED',
+      'NOT_SUBMITTED',
+    ]);
+    // Nothing may fire or transmit after the settle: no deadline is running.
+    // Asserted before advancing, since advancing would fire and drop a leak.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wire.sent).toHaveLength(2);
+  });
+  const refusal = { code: 'CAPACITY_EXHAUSTED', payload: [] };
+  const idOf = (wire: Wire, index: number): unknown =>
+    (JSON.parse(wire.sent[index]!) as { id: unknown }).id;
+  // Red before: a refusal resolved the caller with a non-OK Reply.
+  it('resubmits under the same id after a capacity refusal instead of surfacing it', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire);
+    await ready;
+    const asked = connection.ask('project.list', {});
+    let settled = false;
+    void asked.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await flush();
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(settled).toBe(false);
+    expect(wire.sent).toHaveLength(3);
+    expect(idOf(wire, 2)).toBe(idOf(wire, 1));
+    wire.answer(2);
+    await expect(asked).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  it('does not leak a dispatch slot across a resubmission', async () => {
+    vi.useFakeTimers();
     const wire = new Wire();
     const { connection, ready } = opening(wire, 1);
     await ready;
     const first = connection.ask('project.list', {});
-    await expect(connection.ask('project.list', {})).rejects.toMatchObject({
-      code: 'NOT_SUBMITTED',
+    await flush();
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await first;
+    // With depth 1 a leaked count would park this request forever.
+    const second = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(4);
+    wire.answer(3);
+    await expect(second).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  // Guards the new drain path (timers push straight to transmit). Deliberately
+  // NOT red-before: the old code also drained this scenario, only reordered.
+  it('resubmits both of two simultaneous refusals', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 3);
+    await ready;
+    const a = connection.ask('project.list', {});
+    const b = connection.ask('project.list', {});
+    const c = connection.ask('project.list', {});
+    await flush();
+    wire.answer(1, refusal);
+    wire.answer(2, refusal);
+    wire.answer(3);
+    await c;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(6);
+    wire.answer(4);
+    wire.answer(5);
+    await expect(a).resolves.toEqual({ code: 'OK', payload: [] });
+    await expect(b).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  // Red before: a refusal freed a slot without waking parked work, so the
+  // second refused request parked behind the first with nothing to wake it.
+  it('transmits both of two refused requests rather than stalling to the deadline', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 2);
+    await ready;
+    const a = connection.ask('project.list', {});
+    const b = connection.ask('project.list', {});
+    await flush();
+    wire.answer(1, refusal);
+    wire.answer(2, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(5);
+    wire.answer(3);
+    wire.answer(4);
+    await expect(a).resolves.toEqual({ code: 'OK', payload: [] });
+    await expect(b).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  // Red before: a second refusal decremented dispatched again and queued twice.
+  it('ignores a duplicate refusal for a request already waiting to resubmit', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 2);
+    await ready;
+    const a = connection.ask('project.list', {});
+    await flush();
+    wire.answer(1, refusal);
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await expect(a).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  it('paces resubmission with injected, capped, jittered exponential backoff', async () => {
+    vi.useFakeTimers();
+    const run = async (random: number): Promise<number[]> => {
+      const wire = new Wire();
+      const pauses: number[] = [];
+      const connection = connect({
+        socket: wire,
+        dispatchMode: 'concurrent-v1',
+        random: () => random,
+        deadline: {
+          milliseconds: 1000000,
+          schedule: (callback, milliseconds) => {
+            if (milliseconds !== 1000000) pauses.push(milliseconds);
+            const timer = setTimeout(callback, milliseconds);
+            return () => clearTimeout(timer);
+          },
+        },
+      });
+      const ready = connection.ready();
+      wire.answer(0, {
+        code: 'OK',
+        payload: { mode: 'concurrent-v1', maxPending: 4, maxIdBytes: 128 },
+      });
+      await ready;
+      void connection.ask('project.list', {}).catch(() => undefined);
+      await flush();
+      for (let n = 0; n < 8; n++) {
+        wire.answer(wire.sent.length - 1, refusal);
+        await vi.advanceTimersByTimeAsync(6000);
+      }
+      connection.close();
+      return pauses;
+    };
+    expect(await run(0)).toEqual([50, 100, 200, 400, 800, 1600, 2500, 2500]);
+    expect(await run(1)).toEqual([100, 200, 400, 800, 1600, 3200, 5000, 5000]);
+  });
+  // Red before: with no scheduler the refusal was resubmitted immediately and
+  // without bound.
+  it('surfaces a refusal when there is no scheduler to pace retries', async () => {
+    const wire = new Wire();
+    const connection = connect({ socket: wire });
+    const asked = connection.ask('project.list', {});
+    wire.answer(0, refusal);
+    await expect(asked).resolves.toEqual(refusal);
+    expect(wire.sent).toHaveLength(1);
+    connection.close();
+  });
+  it('settles a request waiting to resubmit when the connection closes', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire);
+    await ready;
+    const asked = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    await flush();
+    wire.answer(1, refusal);
+    connection.close();
+    await asked;
+    // Before advancing: advancing would fire and discard a leaked timer.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wire.sent).toHaveLength(2);
+  });
+  // Red before: a refused dispatch negotiation was consumed as backpressure and
+  // resubmitted, which the server answers by tearing the connection down.
+  it('surfaces a capacity refusal of the negotiation instead of resubmitting it', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    const asked = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    wire.answer(0, refusal);
+    await asked;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wire.sent).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  // Red before: nothing re-entered transmit, so the guard was untested. With the
+  // guard removed this fails on the second 30s schedule and the leaked timer.
+  it('does not renew the deadline when a refused request resubmits', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const requested: number[] = [];
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      random: () => 0,
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          requested.push(milliseconds);
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    const ready = connection.ready();
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 64, maxIdBytes: 128 },
+    });
+    await ready;
+    // The negotiation exchange armed its own deadline; count only the request's.
+    const negotiated = requested.length;
+    let failure: unknown;
+    const asked = connection.ask('project.list', {}).catch((e: unknown) => {
+      failure = e;
     });
     await flush();
+    await vi.advanceTimersByTimeAsync(20000);
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(3);
+    // 21s in: the original deadline has 9s left, not a renewed 30s.
+    await vi.advanceTimersByTimeAsync(8999);
+    expect(failure).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await asked;
+    expect(failure).toMatchObject({ code: 'RESPONSE_LOST' });
+    expect(
+      requested.slice(negotiated).filter((ms) => ms === 30000),
+    ).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    connection.close();
+  });
+  it('admits parked callers in arrival order', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const calls = [1, 2, 3, 4].map((n) =>
+      connection.ask('project.list', { n }),
+    );
+    await flush();
+    for (let n = 1; n <= 3; n++) {
+      wire.answer(n);
+      await flush();
+      expect(wire.sent).toHaveLength(n + 2);
+      expect(payloadOf(wire.sent[n + 1]!)).toEqual({ n: n + 1 });
+    }
+    wire.answer(4);
+    await Promise.all(calls);
+    connection.close();
+  });
+  it('wakes a waiter when the physical writer fails', async () => {
+    class FailingWire extends Wire {
+      fail: (cause: unknown) => void = () => undefined;
+      submit(frame: string, submitted: () => void): RequestSend {
+        this.sent.push(frame);
+        let first = this.sent.length === 2;
+        const settled = new Promise<void>((resolve, reject) => {
+          if (first) this.fail = reject;
+          else resolve();
+        });
+        first = false;
+        if (this.sent.length > 1) submitted();
+        return { cancel: () => true, settled };
+      }
+    }
+    const wire = new FailingWire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = connection.ask('project.list', {});
+    await flush();
     expect(wire.sent).toHaveLength(2);
-    wire.answer(1);
+    wire.fail(new Error('writer down'));
     await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  // Guards the new parked-abort listener; the old code also rejected, so this is not red-before.
+  it('fails a parked request fast when its signal aborts', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const holder = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const controller = new AbortController();
+    const parked = expect(
+      connection.ask('project.list', {}, { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    await flush();
+    controller.abort();
+    await parked;
+    expect(wire.sent).toHaveLength(2);
+    connection.close();
+    await holder;
+  });
+  it('stops admitting when a renegotiated depth is below what is in flight', async () => {
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: { milliseconds: 30000, schedule: () => () => undefined },
+    });
+    // Four requests are admitted under the pre-negotiation default window.
+    const early = [1, 2, 3, 4].map(() => connection.ask('project.list', {}));
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 2, maxIdBytes: 128 },
+    });
+    await flush();
+    // Only the advertised depth is dispatched; the rest wait.
+    expect(wire.sent).toHaveLength(3);
+    const late = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(1);
+    await early[0];
+    await flush();
+    // Three admitted, depth two: still no new admission or dispatch of `late`.
+    expect(wire.sent).toHaveLength(4);
+    wire.answer(2);
+    wire.answer(3);
+    await flush();
+    wire.answer(4);
+    await flush();
+    expect(wire.sent).toHaveLength(6);
+    wire.answer(5);
+    await Promise.all(early);
+    await late;
     connection.close();
   });
   it('retains slots after cancellation until physical writer ownership settles', async () => {
@@ -149,13 +737,13 @@ describe('concurrent dispatch lifecycle', () => {
     );
     controllers.forEach((control) => control.abort());
     await Promise.all(calls);
-    await expect(connection.ask('project.list', {})).rejects.toMatchObject({
-      code: 'NOT_SUBMITTED',
-    });
+    // Cancelled requests still hold their slots, so the next caller is held.
+    const last = connection.ask('project.list', {});
+    await flush();
     expect(wire.sent).toHaveLength(64);
     wire.transfers.forEach((transfer) => transfer.release());
     await flush();
-    const last = connection.ask('project.list', {});
+    expect(wire.sent).toHaveLength(65);
     wire.answer(64);
     wire.transfers[64]!.release();
     await last;

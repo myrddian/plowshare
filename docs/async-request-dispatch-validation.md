@@ -9,7 +9,7 @@ release acceptance. It is not a deployment receipt.
 
 | Slice | Implementation |
 | --- | --- |
-| 01 Contract | Private `ConcurrentDispatch` selection, explicit ordered compatibility, bounded ID validation and response ownership (64 SDK calls plus one physical reply handoff). No public operation-catalog addition. |
+| 01 Contract | Private `ConcurrentDispatch` selection, explicit ordered compatibility, bounded ID validation and response ownership (the server-advertised per-connection depth, 8 by default, plus one physical reply handoff). No public operation-catalog addition. |
 | 02 Coordination | Internal `ConcurrentRequests` process coordinator, bounded count/byte admission, resource keys, separate finite/observer capacity and drain. Concurrent collections own shared registries; short locked turns protect compound invariants. |
 | 03 Server | `FrameHandler.handleAsync`, asynchronous `FrameRouter` authorization/fault/disclosure pipeline, both event encodings and serialized bounded reply output. |
 | 04 Effects | `DispatchPolicy` explicitly classifies reads, accounted search, Relay waits/leases, schedule/conversation mutations, subscriptions and acting contexts. Unclassified operations preserve a connection barrier. |
@@ -35,8 +35,8 @@ The integrated `./gradlew format formatCheck check sdkCheck` gate passed on 2026
   coverage includes the corrected subscription disconnect race, observer coordination
   and queued-disclosure checks.
 - Full `sdkCheck` passed for Node, Python, .NET and Go, including B completing
-  while A remains held until an explicit third request, 64 active calls with
-  local refusal of the 65th, close uncertainty and large segmented publication/read.
+  while A remains held until an explicit third request, active calls up to the
+  advertised depth (8 by default) with local refusal of the next, close uncertainty and large segmented publication/read.
 
 - The embedded Tomcat/public Java SDK held-request test passed in both segmented
   and legacy encodings, with a typed schedule page and an intervening notification.

@@ -35,7 +35,17 @@ final class ConcurrentRequests implements AutoCloseable {
     CompletionStage<Void> run(String frame, Delivery delivered);
   }
 
+  /** Used by callers that do not configure observers; matches the server property default. */
+  static final int DEFAULT_OBSERVERS = 256;
+
   private static final int GLOBAL_PENDING = 1024;
+
+  /**
+   * A genuine dispatch-selection frame is a few dozen characters. A frame of that type larger than
+   * this is not a handshake and gets no admission exemption.
+   */
+  private static final int SELECTION_FRAME_CHARS = 1024;
+
   private static final int RESOURCE_KEYS = 2048;
   private static final long CONNECTION_BYTES = 2L * SegmentedMessages.MAX_MESSAGE_BYTES;
   private final ReentrantLock state = new ReentrantLock();
@@ -49,6 +59,7 @@ final class ConcurrentRequests implements AutoCloseable {
   private final PacketBudget budget;
   private final DispatchTelemetry telemetry;
   private final int finiteLimit;
+  private final boolean unlimited;
   private final int connectionLimit;
   private final int observerLimit;
   private final CompletableFuture<Void> drained = new CompletableFuture<>();
@@ -58,24 +69,59 @@ final class ConcurrentRequests implements AutoCloseable {
   private int finite;
   private int observers;
 
+  /** See {@link #ConcurrentRequests(PacketBudget, int, int, DispatchTelemetry)}. */
   ConcurrentRequests(PacketBudget budget, int perConnection, int global) {
     this(budget, perConnection, global, new DispatchTelemetry());
   }
 
+  /**
+   * {@code global} caps requests executing at once across all connections, and {@code 0} means no
+   * cap. The cap is deliberately not the throughput policy: it was a proxy for the database pool,
+   * which is the scarce resource and bounds itself (waiters fail fast at the pool's acquire
+   * timeout). Admission stays bounded either way by the per-connection depth, {@link
+   * #GLOBAL_PENDING} and the byte budgets, so lifting the execution cap cannot turn into unbounded
+   * memory.
+   */
   ConcurrentRequests(
       PacketBudget budget, int perConnection, int global, DispatchTelemetry telemetry) {
-    if (perConnection < 1 || global < perConnection)
+    this(budget, perConnection, global, DEFAULT_OBSERVERS, telemetry);
+  }
+
+  /**
+   * Observers (long-parked waits such as {@code information.await}) have their own bound, not an
+   * alias of {@code global}. A parked observer holds no pooled database connection: it snapshots
+   * (one connection per statement, returned) and then sleeps outside any transaction. They are also
+   * bounded by admission (per-connection depth, {@link #GLOBAL_PENDING}, byte budgets).
+   */
+  ConcurrentRequests(
+      PacketBudget budget,
+      int perConnection,
+      int global,
+      int observerBound,
+      DispatchTelemetry telemetry) {
+    if (perConnection < 1
+        || global < 0
+        || (global != 0 && global < perConnection)
+        || observerBound < perConnection)
       throw new IllegalArgumentException("Invalid request execution bounds");
     this.budget = budget;
     this.telemetry = telemetry;
     connectionLimit = perConnection;
+    unlimited = global == 0;
     finiteLimit = global;
-    observerLimit = global;
+    observerLimit = observerBound;
     coordinator = Thread.ofVirtual().name("request-coordination").start(this::coordinate);
   }
 
-  Connection connect(String id, Handler handler, Runnable failed) {
-    var connection = new Connection(id, handler, failed);
+  /**
+   * Registers a connection whose in-flight window is {@code depth}, the value the server advertised
+   * to that client. Admission past it is congestion, answered per request, rather than a protocol
+   * violation.
+   */
+  Connection connect(String id, Handler handler, Runnable failed, int depth) {
+    if (depth < 1 || depth > ConcurrentDispatch.MAX_PENDING)
+      throw new IllegalArgumentException("Invalid connection request depth");
+    var connection = new Connection(id, handler, failed, depth);
     state.lock();
     try {
       if (!open || connections.putIfAbsent(id, connection) != null)
@@ -86,8 +132,21 @@ final class ConcurrentRequests implements AutoCloseable {
     return connection;
   }
 
+  /**
+   * Admission was refused because the dispatch queue is full, not because the request is invalid.
+   * Nothing was registered, reserved or started, so the same request id may be offered again once
+   * capacity frees. Callers answer it per request; every other {@link IllegalArgumentException}
+   * from {@code offer} is a protocol violation.
+   */
+  static final class CapacityExceededException extends IllegalArgumentException {
+    CapacityExceededException() {
+      super("Request admission capacity exceeded");
+    }
+  }
+
   final class Connection {
     private final String id;
+    private final int depth;
     private final Handler handler;
     private final Runnable failed;
     private final ConcurrentMap<String, Request> active = new ConcurrentHashMap<>();
@@ -98,8 +157,9 @@ final class ConcurrentRequests implements AutoCloseable {
     private boolean barrier;
     private Request handingOff;
 
-    private Connection(String id, Handler handler, Runnable failed) {
+    private Connection(String id, Handler handler, Runnable failed, int depth) {
       this.id = id;
+      this.depth = depth;
       this.handler = handler;
       this.failed = failed;
     }
@@ -107,7 +167,16 @@ final class ConcurrentRequests implements AutoCloseable {
     void offer(String frame, Envelope envelope, String account) {
       ConcurrentDispatch.requireId(envelope.id());
       SegmentedMessages.utf8Length(frame);
-      long bytes = 2L * frame.length();
+      // The dispatch-selection frame is exempt from every congestion check below, and is charged
+      // no bytes. It is one tiny frame and the precondition for every other request on the
+      // connection, so refusing it is never useful: the client would only retry the handshake
+      // against the same congestion, and the server rejects a second selection as a protocol
+      // violation. Admitting it cannot grow memory without bound: it is size-limited here, it is
+      // released when its reply is delivered, and the duplicate-id check still applies.
+      boolean selection =
+          ConcurrentDispatch.TYPE.equals(envelope.type())
+              && frame.length() <= SELECTION_FRAME_CHARS;
+      long bytes = selection ? 0L : 2L * frame.length();
       var request =
           new Request(
               this, envelope.id(), frame, bytes, DispatchPolicy.decode(envelope, account, id));
@@ -123,14 +192,24 @@ final class ConcurrentRequests implements AutoCloseable {
         long newKeys =
             request.policy.resources().stream().filter(key -> !references.containsKey(key)).count();
         int transferring = handingOff == null ? 0 : 1;
-        if (active.size() - transferring >= ConcurrentDispatch.MAX_PENDING
-            || retained >= GLOBAL_PENDING
-            || bytes > CONNECTION_BYTES - this.bytes
-            || newKeys > RESOURCE_KEYS - references.size()) {
+        // Congestion is checked after every validity check above, and before any state is touched:
+        // a refusal leaves no active entry, byte reservation or resource reference behind.
+        if (!selection
+            && (active.size() - transferring >= depth
+                || retained >= GLOBAL_PENDING
+                || bytes > CONNECTION_BYTES - this.bytes
+                || newKeys > RESOURCE_KEYS - references.size())) {
           telemetry.rejected.increment();
-          throw new IllegalArgumentException("Request admission capacity exceeded");
+          throw new CapacityExceededException();
         }
-        budget.acquire(bytes);
+        try {
+          budget.acquire(bytes);
+        } catch (IllegalArgumentException exhausted) {
+          // Shared packet memory is full across all connections: congestion, and retryable. The
+          // acquire failed before any state below changed, so there is nothing to unwind.
+          telemetry.rejected.increment();
+          throw new CapacityExceededException();
+        }
         active.put(request.id, request);
         this.bytes += bytes;
         retained++;
@@ -230,7 +309,8 @@ final class ConcurrentRequests implements AutoCloseable {
                     && !conflict
                     && (observer
                         ? observers < observerLimit && connection.observing < connectionLimit
-                        : finite < finiteLimit && connection.running < connectionLimit)
+                        : (unlimited || finite < finiteLimit)
+                            && connection.running < connectionLimit)
                     && (!barrier
                         || connection.running + connection.observing == 0
                             && !earlierWork.contains(connection));
