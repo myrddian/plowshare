@@ -34,7 +34,8 @@ class ConcurrentResourceOrderingTest {
                 firstEntered.complete(null);
                 return release.thenRun(delivered);
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              1);
       var second =
           dispatcher.connect(
               "two",
@@ -43,7 +44,8 @@ class ConcurrentResourceOrderingTest {
                 delivered.run();
                 return CompletableFuture.completedFuture(null);
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              1);
       var unrelated =
           dispatcher.connect(
               "three",
@@ -52,7 +54,8 @@ class ConcurrentResourceOrderingTest {
                 delivered.run();
                 return CompletableFuture.completedFuture(null);
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              1);
       first.offer("first", request("first", "Aa"), "alice");
       firstEntered.get(5, TimeUnit.SECONDS);
       second.offer("second", request("second", "Aa"), "bob");
@@ -85,7 +88,8 @@ class ConcurrentResourceOrderingTest {
                 entered.complete(null);
                 return release;
               },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              64);
       connection.offer("x", request("first", "same"), "alice");
       entered.get(5, TimeUnit.SECONDS);
       for (int n = 1; n < 64; n++) connection.offer("x", request("id-" + n, "same"), "alice");

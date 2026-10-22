@@ -35,7 +35,8 @@ class ConcurrentRequestsTest {
                 (id.equals("first") ? firstStarted : secondStarted).complete(null);
                 return completion;
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              2);
       connection.offer("first", request("first", "information.facets", Map.of()), "alice");
       firstStarted.get(5, TimeUnit.SECONDS);
       connection.offer("second", request("second", "relay.topics", Map.of()), "alice");
@@ -79,7 +80,8 @@ class ConcurrentRequestsTest {
                 entered.complete(null);
                 return held.thenRun(delivered);
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              1);
       var second =
           dispatcher.connect(
               "two",
@@ -88,7 +90,8 @@ class ConcurrentRequestsTest {
                 delivered.run();
                 return CompletableFuture.completedFuture(null);
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              1);
       var observer =
           dispatcher.connect(
               "observer",
@@ -96,7 +99,8 @@ class ConcurrentRequestsTest {
                 observerEntered.complete(null);
                 return observing.thenRun(delivered);
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              1);
       observer.offer("wait", request("wait", "information.await", Map.of()), "alice");
       observerEntered.get(5, TimeUnit.SECONDS);
       var payload = Map.<String, Object>of("conversation", "same");
@@ -144,7 +148,8 @@ class ConcurrentRequestsTest {
                       yield CompletableFuture.completedFuture(null);
                     }
                   },
-              () -> fail("Unexpected failure"));
+              () -> fail("Unexpected failure"),
+              3);
       connection.offer(
           "observe",
           new Envelope(
@@ -187,7 +192,8 @@ class ConcurrentRequestsTest {
                 entered.complete(null);
                 return held;
               },
-              () -> fail("Unexpected transport failure"));
+              () -> fail("Unexpected transport failure"),
+              2);
       connection.offer("first", request("first", "relay.log", Map.of()), "alice");
       entered.get(5, TimeUnit.SECONDS);
       connection.offer("second", request("second", "relay.log", Map.of()), "alice");

@@ -10,6 +10,7 @@ import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.ConcurrentDispatch;
 import io.aeyer.plowshare.protocol.transport.PacketBudget;
+import io.aeyer.plowshare.protocol.transport.SegmentedMessages;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -38,7 +39,8 @@ class ConcurrentRequestFailureTest {
     var budget = new PacketBudget(1024 * 1024);
     try (var dispatcher = new ConcurrentRequests(budget, 1, 1)) {
       var connection =
-          dispatcher.connect("fatal", (frame, delivered) -> deferred, () -> failed.complete(null));
+          dispatcher.connect(
+              "fatal", (frame, delivered) -> deferred, () -> failed.complete(null), 1);
       connection.offer(
           "fatal",
           new Envelope("fatal", "relay.topics", Envelope.CURRENT_VERSION, Map.of()),
@@ -118,7 +120,14 @@ class ConcurrentRequestFailureTest {
   }
 
   @Test
-  void a_refusal_does_not_disturb_an_in_flight_reply_handoff() throws Exception {
+  void a_refusal_while_a_reply_is_being_written_is_answered_and_leaves_the_connection_open()
+      throws Exception {
+    // Scope: this proves a refusal arriving while the writer is blocked mid-send is still answered
+    // and never disconnects. It does NOT prove the handoff slot is untouched: with three requests
+    // active the depth of 2 would refuse regardless of the handoff exemption. That the refusal
+    // takes no slot holds because refuseCongested writes through Delivery.answer and never calls
+    // ConcurrentRequests.handoff(); a refused request has no Request object to hand off, so the
+    // buggy variant cannot be written against this API. Verified by inspection, not by this test.
     var release = new CompletableFuture<Void>();
     var writerHeld = new CompletableFuture<Void>();
     var writerGate = new CompletableFuture<Void>();
@@ -218,6 +227,58 @@ class ConcurrentRequestFailureTest {
         }
       }
       completions.computeIfAbsent("b", key -> new CompletableFuture<>()).complete(null);
+      connection.close();
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  @Test
+  void shared_packet_memory_exhaustion_is_answered_not_disconnected() throws Exception {
+    var release = new CompletableFuture<Void>();
+    var entered = new java.util.concurrent.atomic.AtomicInteger();
+    // Leave room for small replies but not for a request carrying a large body.
+    var shared = new PacketBudget(3L * SegmentedMessages.CHUNK_BYTES);
+    shared.acquire(3L * SegmentedMessages.CHUNK_BYTES - 3_000);
+    try (var fixture =
+        new ConcurrentEventChannelTest.Fixture(
+            false, blockingRouter(release, entered), handler -> handler.usePacketBudget(shared))) {
+      select(fixture);
+      fixture.send("big", "information.facets", Map.of("pad", "x".repeat(2_000)));
+      var refusal = FrameJson.answering().readTree(fixture.reply());
+      assertEquals("big", refusal.path("id").asText());
+      assertEquals("CAPACITY_EXHAUSTED", refusal.path("payload").path("code").asText());
+      assertTrue(fixture.open.get(), "Memory pressure is congestion and must not disconnect");
+      verify(fixture.socket, never()).close(any(CloseStatus.class));
+      assertEquals(0, entered.get());
+    } finally {
+      release.complete(null);
+    }
+  }
+
+  @Test
+  void a_budget_refusal_owns_nothing_and_its_id_can_be_offered_again() throws Exception {
+    long limit = 3L * SegmentedMessages.CHUNK_BYTES;
+    var budget = new PacketBudget(limit);
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 2)) {
+      var connection =
+          dispatcher.connect(
+              "memory",
+              (frame, delivered) -> {
+                delivered.run();
+                return CompletableFuture.completedFuture(null);
+              },
+              () -> fail("Unexpected execution failure"),
+              2);
+      budget.acquire(limit);
+      Envelope request = new Envelope("a", "relay.topics", Envelope.CURRENT_VERSION, Map.of());
+      assertThrows(
+          ConcurrentRequests.CapacityExceededException.class,
+          () -> connection.offer("a", request, "alice"));
+      assertEquals(limit, budget.heldBytes());
+      budget.release(limit);
+      connection.offer("a", request, "alice");
       connection.close();
       dispatcher.stopAdmission();
       dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);

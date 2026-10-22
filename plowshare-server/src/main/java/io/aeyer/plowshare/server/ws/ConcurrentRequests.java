@@ -74,10 +74,6 @@ final class ConcurrentRequests implements AutoCloseable {
     coordinator = Thread.ofVirtual().name("request-coordination").start(this::coordinate);
   }
 
-  Connection connect(String id, Handler handler, Runnable failed) {
-    return connect(id, handler, failed, ConcurrentDispatch.MAX_PENDING);
-  }
-
   /**
    * Registers a connection whose in-flight window is {@code depth}, the value the server advertised
    * to that client. Admission past it is congestion, answered per request, rather than a protocol
@@ -150,11 +146,6 @@ final class ConcurrentRequests implements AutoCloseable {
         int transferring = handingOff == null ? 0 : 1;
         // Congestion is checked after every validity check above, and before any state is touched:
         // a refusal leaves no active entry, byte reservation or resource reference behind.
-        if (bytes > CONNECTION_BYTES) {
-          // A single frame that can never fit is not congestion; retrying cannot help.
-          telemetry.rejected.increment();
-          throw new IllegalArgumentException("Request exceeds connection byte capacity");
-        }
         if (active.size() - transferring >= depth
             || retained >= GLOBAL_PENDING
             || bytes > CONNECTION_BYTES - this.bytes
@@ -162,7 +153,14 @@ final class ConcurrentRequests implements AutoCloseable {
           telemetry.rejected.increment();
           throw new CapacityExceededException();
         }
-        budget.acquire(bytes);
+        try {
+          budget.acquire(bytes);
+        } catch (IllegalArgumentException exhausted) {
+          // Shared packet memory is full across all connections: congestion, and retryable. The
+          // acquire failed before any state below changed, so there is nothing to unwind.
+          telemetry.rejected.increment();
+          throw new CapacityExceededException();
+        }
         active.put(request.id, request);
         this.bytes += bytes;
         retained++;

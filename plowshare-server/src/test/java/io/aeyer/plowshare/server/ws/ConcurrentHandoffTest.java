@@ -34,7 +34,8 @@ class ConcurrentHandoffTest {
                 if (id.equals("id-1")) second.complete(delivery);
                 return completions.get(id);
               },
-              () -> fail("Unexpected execution failure"));
+              () -> fail("Unexpected execution failure"),
+              64);
       for (int n = 0; n < 64; n++) connection.offer("id-" + n, request("id-" + n), "alice");
       var handoff = first.get(5, TimeUnit.SECONDS);
       var other = second.get(5, TimeUnit.SECONDS);
