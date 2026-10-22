@@ -116,13 +116,14 @@ export class LibraryClient {
   /**
    * Runs one guarded read into `slot`, keyed by `key` for revision ordering.
    *
-   * `announce` controls only the broadcast that accompanies `slot.loading =
-   * true`; the flag itself is always set, so the paging guards that consult it
-   * are unaffected. It defaults to true, so every existing caller keeps the
+   * `announce` gates only the `emit()` that accompanies `slot.loading = true`,
+   * never the assignment itself: the flag is set on every path, so no reader of
+   * `loading` — the paging guards included — can observe a difference between
+   * the two values. It changes how many full-state broadcasts a read costs and
+   * nothing else. It defaults to true, so every existing caller keeps the
    * pending frame it renders today. A caller passes false only when the
    * pending state it would show is already on screen from an earlier
-   * broadcast, which costs a full-state emit per read. The completion
-   * broadcast in `finally` is unconditional.
+   * broadcast. The completion broadcast in `finally` is unconditional.
    */
   private async read<T>(
     key: string,

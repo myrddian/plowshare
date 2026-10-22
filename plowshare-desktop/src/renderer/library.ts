@@ -94,8 +94,14 @@ async function action(request: Request) {
   try {
     const reply = await window.plowshare.request(request);
     localError = '';
-    // A document operation answers with its payload and leaves state to
-    // subscribe(); every other action here answers with state.
+    // Every request routed through this funnel answers with state today: the
+    // only `information` operation reaching it is `ask`, which keeps its state
+    // deliberately, and the operations that omit state are issued elsewhere.
+    // The `else` arm is therefore defence for `Reply.state` being optional in
+    // the type, not a live path. Note that this site does not go through
+    // `replyState()`, so it will not fail loudly: if a later change strips
+    // `ask`'s state, this renders the previous snapshot silently instead of
+    // throwing.
     if (reply.state) update(reply.state);
     else render();
   } catch (error) {

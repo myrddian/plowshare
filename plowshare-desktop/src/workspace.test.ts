@@ -216,6 +216,15 @@ function fixture(
           // Payload-bearing reads used by the omitted-state test below. Each
           // payload is the production decoder's minimal accepted shape.
           if (type === 'information.list') return { code: 'OK', payload: [] };
+          // `information.ask` is the one payload-bearing information operation
+          // that must still answer with state; the job handle is what the
+          // production handler requires before it tracks the question. An
+          // accepted question is queued work, so the code is `ACCEPTED`.
+          if (type === 'information.ask')
+            return {
+              code: 'ACCEPTED',
+              payload: { job: 'ask-job', revision: 'document-1' },
+            };
           if (type === 'proc.list')
             return {
               code: 'OK',
@@ -1071,12 +1080,93 @@ await test('payload replies reach the renderer without the replicated state, and
         `${request.action} must still answer with its ${answer} payload`,
       );
     }
+    // `information`/`ask` is the deliberate exception to the rule above. It
+    // pushes a tracked job onto the state and Library renders the asking
+    // document from this reply, while `emit()` arrives on a separate IPC
+    // interface whose ordering against the reply is not guaranteed. So this
+    // one payload reply must still carry state. Stripping it would leave
+    // Library's asking-document indicator rendering the previous snapshot,
+    // silently, because the renderer's library funnel does not use
+    // `replyState()`.
+    const asked = await workspace.dispatch({
+      action: 'information',
+      operation: 'ask',
+      scope: { kind: 'personal', includeGlobal: true },
+      payload: { revision: 'document-1', question: 'What does this say?' },
+    });
+    assert.notEqual(
+      asked.information,
+      undefined,
+      'information/ask must answer with its question payload',
+    );
+    const askedState = replyState(asked);
+    assert.ok(
+      askedState.jobs.some(
+        (job) => job.source === 'information' && job.revision === 'document-1',
+      ),
+      'information/ask must answer with the state that carries its tracked job',
+    );
     // The same tail is how every state-only handler receives the composite
     // state, including the fields only the workspace owns.
     const stateOnly = await workspace.dispatch({ action: 'question-refresh' });
     const state = replyState(stateOnly);
     assert.equal(state.connected, true);
     assert.equal(state.localMachine, thisMachine(process.env, hostname()));
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('reading state shares its nested values and snapshot() isolates them', async () => {
+  const { workspace } = fixture();
+  try {
+    await connect(workspace);
+    // `state` promises a freshly allocated top level and nested values shared
+    // by reference, so that reading it costs no deep copy. Identity is the
+    // only thing that distinguishes it from a copying getter: a
+    // `structuredClone` reintroduced here would keep every other assertion in
+    // this suite green while undoing the whole point of the property.
+    const first = workspace.state,
+      second = workspace.state;
+    assert.notEqual(
+      first,
+      second,
+      'each read of state must own its top-level object',
+    );
+    assert.equal(
+      first.activity,
+      second.activity,
+      'state must share `activity` by reference rather than copy it',
+    );
+    assert.equal(
+      first.jobs,
+      second.jobs,
+      'state must share `jobs` by reference rather than copy it',
+    );
+    assert.equal(
+      first.board,
+      second.board,
+      'state must share `board` by reference rather than copy it',
+    );
+    // `snapshot()` is the opposite contract: the callers that mutate the
+    // result or hold it across an `await` need an isolated deep copy.
+    const copy = workspace.snapshot();
+    assert.notEqual(
+      copy.activity,
+      first.activity,
+      'snapshot() must deep-copy `activity`',
+    );
+    assert.notEqual(copy.jobs, first.jobs, 'snapshot() must deep-copy `jobs`');
+    assert.notEqual(
+      copy.board,
+      first.board,
+      'snapshot() must deep-copy `board`',
+    );
+    assert.deepEqual(
+      copy.activity,
+      first.activity,
+      'snapshot() must copy `activity` faithfully, not replace it',
+    );
   } finally {
     await workspace.shutdown();
   }
