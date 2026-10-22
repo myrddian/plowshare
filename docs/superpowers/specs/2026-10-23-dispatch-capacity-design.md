@@ -533,10 +533,13 @@ time-to-reply budget (descoped above), `requestPerConnection` is still 2, and th
 still connection-exclusive: `!connection.barrier` is the first eligibility term for
 every kind. One slow unclassified BARRIER operation therefore still blocks the
 newly `FINITE` `board.topics`, `swarm.status` and `admin.status` reads completely on
-that connection. Up to six of eight admitted requests can sit unanswered behind two
-slow barriers until the client's deadline expires as `RESPONSE_LOST`, which is the
-originally reported symptom, still reachable. Each ingredient is an accepted scope
-call; their composition is what needed stating.
+that connection. Every admitted request beyond the two executing — up to the
+advertised depth, 64 by default — can therefore sit unanswered behind two slow
+barriers until the client's deadline expires as `RESPONSE_LOST`, which is the
+originally reported symptom, still reachable. The deeper default makes this worse
+rather than better: a shallower depth would refuse sooner and more honestly, which
+is precisely the trade recorded in the scope call above. Each ingredient is an
+accepted scope call; their composition is what needed stating.
 
 ## Unverified
 
