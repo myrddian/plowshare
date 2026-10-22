@@ -4,16 +4,16 @@ import { CODES, isCode, succeeded } from './codes.ts';
 /**
  * The vocabulary, asserted as a set rather than one constant at a time.
  *
- * The cross-language half of this — that these seventeen are the seventeen
+ * The cross-language half of this — that these eighteen are the eighteen
  * `Code.java` declares, spelled the same way — is `src/mirrors-the-server.test.ts`,
  * which reads the Java. It cannot live here: this directory's tsconfig project
  * has `types: []`, so a `node:fs` import in a file under it does not compile.
  * Same reason `neutrality.test.ts` sits where it sits.
  */
 describe('the status vocabulary', () => {
-  it('has seventeen constants and no duplicates', () => {
-    expect(CODES).toHaveLength(17);
-    expect(new Set(CODES).size).toBe(17);
+  it('has eighteen constants and no duplicates', () => {
+    expect(CODES).toHaveLength(18);
+    expect(new Set(CODES).size).toBe(18);
   });
 
   it('carries four successes, kept apart from one another', () => {
@@ -34,8 +34,8 @@ describe('the status vocabulary', () => {
     expect(CODES.indexOf('ACCEPTED')).not.toBe(CODES.indexOf('OK'));
   });
 
-  it('counts thirteen failures: the table ApiExceptionHandler holds, and the model being away', () => {
-    expect(CODES.filter((code) => !succeeded(code))).toHaveLength(13);
+  it('counts fourteen failures: the table ApiExceptionHandler holds, the model being away, and the dispatch queue being full', () => {
+    expect(CODES.filter((code) => !succeeded(code))).toHaveLength(14);
   });
 
   it('recognises a code off the wire, and refuses anything else', () => {

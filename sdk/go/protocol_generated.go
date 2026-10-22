@@ -307,5 +307,6 @@ var knownCodes = map[string]bool{
 	"EMBEDDING_UNAVAILABLE":         true,
 	"CONFIG_UNAVAILABLE":            true,
 	"MODEL_UNAVAILABLE":             true,
+	"CAPACITY_EXHAUSTED":            true,
 	"INTERNAL_ERROR":                true,
 }
