@@ -770,16 +770,20 @@ export interface Reply {
    * them, including payload-bearing replies that change state.
    *
    * It is absent on exactly the replies whose answer is a domain payload and
-   * whose handler changes no replicated state: `relay-operate`, `relay-read`,
-   * `proc-read`, `usage-read`, and every `information` operation except `ask`.
-   * There the blob is orders of magnitude larger than the answer and every
-   * subscriber already holds an equal state, so sending it is pure waste.
+   * whose callers need no state synchronously with that answer:
+   * `relay-operate`, `relay-read`, `proc-read`, `usage-read`, and every
+   * `information` operation except `ask`. Two of those do change state —
+   * `relay-read` and `proc-read` append to `conversations` through
+   * `retainConversation` — and they deliver the change through
+   * `emit()`/`subscribe()`, which reaches every subscriber regardless. Putting
+   * the blob in the reply as well only adds bytes orders of magnitude larger
+   * than the answer.
    *
    * `DesktopWorkspace` replaces a present state with its composite one, which
    * also covers project children, and leaves an absent one absent, so the
-   * omission survives to the renderer. A handler that changes state and wants
-   * its caller to see that change synchronously with the reply must include
-   * state; `information`/`ask` is the one payload handler that does.
+   * omission survives to the renderer. A handler whose caller must see a state
+   * change synchronously with the reply has to include state; among the
+   * payload handlers only `information`/`ask` does.
    *
    * Read it through {@link replyState} wherever a call site expects it.
    */

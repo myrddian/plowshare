@@ -1374,12 +1374,16 @@ export class DesktopWorkspace {
       );
     this.emit();
     // An omitted `state` is the inner handler's decision: it answered with a
-    // domain payload and changed no replicated state, so the renderer keeps
-    // what `subscribe()` already gave it. Every other `DesktopClient` reply
-    // carries that one client's state, which this workspace replaces with the
-    // composite covering project children. See {@link Reply.state}; the
-    // distinction is pinned by the payload-reply test in workspace.test.ts.
-    if (reply.state === undefined) return reply;
+    // domain payload and left any state change to the `emit()` above, which
+    // publishes the composite to every subscriber. Such a handler may well
+    // have changed state — `relay-read` and `proc-read` append to
+    // `conversations` — so this guard has to stay after that `emit()`, never
+    // before it. Every other `DesktopClient` reply carries that one client's
+    // state, which this workspace replaces with the composite covering project
+    // children. Keyed on the key's presence rather than an undefined value, so
+    // that it reads the same as {@link Reply.state} and as the payload-reply
+    // test in workspace.test.ts.
+    if (!('state' in reply)) return reply;
     return { ...reply, state: this.state };
   }
   private async rememberConnection(reconnect: boolean, name?: string) {

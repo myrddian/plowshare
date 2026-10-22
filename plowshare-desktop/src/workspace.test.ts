@@ -7,7 +7,7 @@ import type { Arrival } from 'plowshare-client-ts/binding/connection';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
 import { replyState } from './shared.ts';
-import type { Request } from './shared.ts';
+import type { Reply, Request } from './shared.ts';
 import {
   mkdtemp,
   mkdir,
@@ -1009,39 +1009,56 @@ await test('payload replies reach the renderer without the replicated state, and
   const { workspace } = fixture();
   try {
     await connect(workspace);
-    // Each of these answers with a domain payload and changes no replicated
-    // state. DesktopClient omits `state`; this asserts the workspace tail does
-    // not put it back, which is the only layer the renderer talks to.
-    const payloadRequests: Request[] = [
+    // Each of these answers with a domain payload instead of state.
+    // DesktopClient omits `state`; this asserts the workspace tail does not
+    // put it back, which is the only layer the renderer talks to. `answer`
+    // names the payload field each one must still deliver, so losing the
+    // payload cannot pass for omitting the state.
+    const payloadRequests: { request: Request; answer: keyof Reply }[] = [
       {
-        action: 'information',
-        operation: 'list',
-        scope: { kind: 'personal' },
-        payload: {},
-      },
-      { action: 'usage-read', type: 'usage.calls', payload: {} },
-      { action: 'proc-read', type: 'proc.list', payload: {} },
-      {
-        action: 'relay-read',
-        type: 'relay.topics',
-        payload: { project: 'Research' },
-      },
-      {
-        action: 'relay-operate',
-        payload: {
-          requestId: relayRequestId,
-          project: 'Research',
-          topic: 'release.observed',
-          topicGeneration: relayGeneration,
-          action: 'ACKNOWLEDGE_GAP',
-          reason: 'Fixture gap acknowledgement',
-          subscriber: 'relay.notices.due',
-          subscriptionGeneration: relayGeneration,
-          expiredThrough: '4',
+        request: {
+          action: 'information',
+          operation: 'list',
+          scope: { kind: 'personal' },
+          payload: {},
         },
+        answer: 'information',
+      },
+      {
+        request: { action: 'usage-read', type: 'usage.calls', payload: {} },
+        answer: 'usage',
+      },
+      {
+        request: { action: 'proc-read', type: 'proc.list', payload: {} },
+        answer: 'proc',
+      },
+      {
+        request: {
+          action: 'relay-read',
+          type: 'relay.topics',
+          payload: { project: 'Research' },
+        },
+        answer: 'relay',
+      },
+      {
+        request: {
+          action: 'relay-operate',
+          payload: {
+            requestId: relayRequestId,
+            project: 'Research',
+            topic: 'release.observed',
+            topicGeneration: relayGeneration,
+            action: 'ACKNOWLEDGE_GAP',
+            reason: 'Fixture gap acknowledgement',
+            subscriber: 'relay.notices.due',
+            subscriptionGeneration: relayGeneration,
+            expiredThrough: '4',
+          },
+        },
+        answer: 'relayControl',
       },
     ];
-    for (const request of payloadRequests) {
+    for (const { request, answer } of payloadRequests) {
       const reply = await workspace.dispatch(request);
       assert.equal(
         'state' in reply,
@@ -1049,9 +1066,9 @@ await test('payload replies reach the renderer without the replicated state, and
         `${request.action} must answer with its payload alone`,
       );
       assert.notEqual(
-        Object.keys(reply).length,
-        0,
-        `${request.action} must still answer with a payload`,
+        reply[answer],
+        undefined,
+        `${request.action} must still answer with its ${answer} payload`,
       );
     }
     // The same tail is how every state-only handler receives the composite
