@@ -50,7 +50,10 @@ public final class OperationExecution {
     if (retained.isEmpty()) {
       if (origin == Origin.ORCHESTRATION || origin == Origin.DELEGATION)
         throw new CallerFault("This continuation has no retained authority lineage");
-      return operations.admit(executor, home, actions(definition));
+      // The execution home a run was started in, resolved to the scope admission decides on. A run
+      // in the caller's own personal space keeps resolving to that Personal scope, as it does
+      // today: this is the same resolution, moved out of admission's parameter list.
+      return operations.admit(executor, operations.scope(home), actions(definition));
     }
     var bound = retained.get();
     requireBinding(bound, executor, home, definition, budget);

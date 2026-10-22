@@ -72,7 +72,7 @@ class OperationRecordsPersistenceTest {
   OperationAuthority.Admission admit() {
     return policy.admit(
         "alice",
-        Home.of("one"),
+        policy.scope(Home.of("one")),
         Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL));
   }
 
@@ -184,7 +184,7 @@ class OperationRecordsPersistenceTest {
     var parent =
         policy.admit(
             "alice",
-            Home.of("one"),
+            policy.scope(Home.of("one")),
             Set.of(
                 AuthorityAction.READ,
                 AuthorityAction.WRITE,
@@ -413,7 +413,7 @@ class OperationRecordsPersistenceTest {
     OperationAuthority.Admission caller =
         policy.admit(
             "alice",
-            Home.of("one"),
+            policy.scope(Home.of("one")),
             Set.of(
                 AuthorityAction.READ,
                 AuthorityAction.WRITE,
@@ -591,7 +591,7 @@ class OperationRecordsPersistenceTest {
     OperationAuthority.Admission parent =
         policy.admit(
             "alice",
-            Home.of("one"),
+            policy.scope(Home.of("one")),
             Set.of(
                 AuthorityAction.READ,
                 AuthorityAction.WRITE,

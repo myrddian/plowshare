@@ -56,17 +56,31 @@ public final class PinnedOperationAuthority implements OperationAuthority {
   }
 
   @Override
-  public Admission admit(String executor, Home home, Set<AuthorityAction> actions) {
+  public AuthorityScope scope(Home home) {
     Objects.requireNonNull(home);
+    // The global memory tier is no execution scope, and it is refused here rather than resolved so
+    // that a caller still holding a legacy home gets the admission refusal it gets today. An
+    // account's own space is reached by resolving that scope, never by omitting a project.
+    if (home.isGlobal()) throw denied();
+    return identities.project(home.project());
+  }
+
+  @Override
+  public Admission admit(String executor, AuthorityScope target, Set<AuthorityAction> actions) {
+    Objects.requireNonNull(target);
     actions = Set.copyOf(actions);
-    if (home.isGlobal() || actions.isEmpty()) throw denied();
+    // The admissible kinds are checked before any identity is resolved, where the global-home
+    // refusal used to sit: Global knowledge and administration are separate authorities with their
+    // own gates, and an unresolvable executor must not change which refusal a caller sees.
+    if (actions.isEmpty()
+        || !(target instanceof AuthorityScope.Project || target instanceof AuthorityScope.Personal))
+      throw denied();
     var account = identities.account(executor);
     if (account.kind() == IdentityRepository.AccountKind.BUILTIN) throw denied();
-    var target = identities.project(home.project());
-    if (!(target instanceof AuthorityScope.Project || target instanceof AuthorityScope.Personal))
-      throw denied();
     if (target instanceof AuthorityScope.Personal personal
         && !personal.account().equals(account.id())) throw denied();
+    // The retained home belongs to the scope by construction rather than by the caller's say-so.
+    var home = identities.home(target);
     String source =
         members.authorityAccount(executor).orElseThrow(PinnedOperationAuthority::denied);
     var recipient = GrantRecipient.account(identities.account(source).id());
@@ -186,6 +200,12 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     var executor = identities.account(admission.executor());
     if (executor.kind() == IdentityRepository.AccountKind.BUILTIN
         || !executor.id().equals(admission.account())) throw denied();
+    // One read resolves the scope AND proves the two retained columns still agree: the admission's
+    // project name must still map to the admission's scope id. Resolving by scope id instead would
+    // be a read of the same size that cannot see a disagreement -- and the role ceiling below is
+    // keyed by project name either way, so a project that was renamed, or dropped and recreated
+    // under the same name, would have its new members' roles checked against the old scope's
+    // retained grants. A stale admission must die here instead.
     var scope = identities.project(admission.home().project());
     if (!scope.id().equals(admission.scope())) throw denied();
     var source =

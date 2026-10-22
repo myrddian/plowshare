@@ -868,7 +868,7 @@ class GlobalPreparationPersistenceTest {
             new JdbcOperationRecords(jdbc),
             new JdbcResourceScopeRepository(jdbc));
     var home = Home.of("memory-project");
-    var parent = operations.admit("reader", home, Set.of(AuthorityAction.READ));
+    var parent = operations.admit("reader", operations.scope(home), Set.of(AuthorityAction.READ));
     var log =
         new ConversationStore(jdbc)
             .log(
@@ -1595,7 +1595,7 @@ class GlobalPreparationPersistenceTest {
               new JdbcResourceScopeRepository(jdbc),
               new LiveAccountKnowledgePermissions(identities, grants, authority));
       var home = Home.of("reader-project");
-      var parent = operations.admit("reader", home, Set.of(AuthorityAction.READ));
+      var parent = operations.admit("reader", operations.scope(home), Set.of(AuthorityAction.READ));
       assertTrue(parent.globalRead());
       var log =
           new ConversationStore(jdbc)
