@@ -566,12 +566,17 @@ export function connect(options: ConnectOptions): Connected {
        * admission, for dispatch negotiation, or behind the negotiated depth is
        * flow control, not failure; charging it to the deadline would turn
        * back-pressure into a timeout. It is therefore armed only when the frame
-       * is actually handed to the socket (`transmit`), never in `launch()`'s
-       * parking path.
+       * is handed to the transport (`transmit`), never on `launch()`'s parking
+       * path. With `socket.submit` the frame may still sit in a writer queue.
        *
-       * <p>The once-only guard is load-bearing: a request that is resubmitted
-       * after a refusal must stay bounded by its first deadline. Re-arming per
-       * attempt would let a resubmitting request wait forever.
+       * <p>Consequence: a request awaiting dispatch negotiation carries no
+       * per-request deadline. Its bound is the negotiation exchange's own
+       * deadline, so a caller's `timeoutMs` is not honoured until the request is
+       * transmitted.
+       *
+       * <p>Invariant: the deadline is armed once and never re-armed or extended,
+       * so the first transmission's deadline bounds the request's whole life even
+       * if `launch()` is entered again.
        *
        * <p>A never-launched request has no timer; its only exits are abort and
        * connection close, and `strand()` settles both parked sets.
@@ -610,6 +615,8 @@ export function connect(options: ConnectOptions): Connected {
         }
         transmit();
       };
+      // Not idempotent: counts a dispatch and arms the deadline unconditionally
+      // (and arms the deadline once); a caller must never transmit the same request twice.
       const transmit = (): void => {
         dispatched++;
         launched = true;

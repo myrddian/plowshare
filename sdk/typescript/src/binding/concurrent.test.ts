@@ -300,7 +300,7 @@ describe('concurrent dispatch lifecycle', () => {
     expect(settled).toBe(true);
     connection.close();
   });
-  it('settles never-launched requests on close with no deadline running', async () => {
+  it('settles launch-parked and admission-parked requests on close, with no timer firing', async () => {
     vi.useFakeTimers();
     const wire = new Wire();
     let close: (() => void) | undefined;
@@ -319,8 +319,8 @@ describe('concurrent dispatch lifecycle', () => {
         },
       },
     });
-    // Two before negotiation (one will be launch-parked at depth 1), then one
-    // more after negotiation that parks for admission.
+    // Two before negotiation: at depth 1 the second is launch-parked. Two more
+    // after negotiation park for admission.
     const calls = [1, 2].map(() =>
       connection.ask('project.list', {}).then(
         () => 'ok',
@@ -329,7 +329,7 @@ describe('concurrent dispatch lifecycle', () => {
     );
     wire.answer(0, {
       code: 'OK',
-      payload: { mode: 'concurrent-v1', maxPending: 2, maxIdBytes: 128 },
+      payload: { mode: 'concurrent-v1', maxPending: 1, maxIdBytes: 128 },
     });
     await flush();
     const more = [3, 4].map(() =>
@@ -339,16 +339,20 @@ describe('concurrent dispatch lifecycle', () => {
       ),
     );
     await flush();
-    expect(wire.sent).toHaveLength(3);
+    // Negotiation frame plus one transmitted request.
+    expect(wire.sent).toHaveLength(2);
     close!();
     await flush();
     expect(await Promise.all([...calls, ...more])).toEqual([
       'RESPONSE_LOST',
-      'RESPONSE_LOST',
+      'NOT_SUBMITTED',
       'NOT_SUBMITTED',
       'NOT_SUBMITTED',
     ]);
-    expect(wire.sent).toHaveLength(3);
+    // Nothing may fire or transmit after the settle: no deadline is running.
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(wire.sent).toHaveLength(2);
   });
   it('admits parked callers in arrival order', async () => {
     const wire = new Wire();
