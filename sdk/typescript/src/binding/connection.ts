@@ -615,8 +615,8 @@ export function connect(options: ConnectOptions): Connected {
         }
         transmit();
       };
-      // Not idempotent: counts a dispatch and arms the deadline unconditionally
-      // (and arms the deadline once); a caller must never transmit the same request twice.
+      // Not idempotent: it counts a dispatch and sets `launched` unconditionally,
+      // so a caller must never transmit the same request twice.
       const transmit = (): void => {
         dispatched++;
         launched = true;
