@@ -382,17 +382,12 @@ async function openLibrary(
   )
     throw new Error('Choose an available project.');
   const screen = tab === 'memories' ? 'memories' : 'library';
-  const search = client.state.library?.search;
-  if (
-    search?.value?.kind &&
-    (screen === 'memories') !==
-      ['recall', 'navigate'].includes(search.value.kind)
-  )
-    // This write has always landed on a throwaway deep copy of the state and so
-    // clears nothing in the live session. Kept on an explicit snapshot to
-    // preserve that behaviour exactly; whether it should clear the live search
-    // is a separate question from making state reads cheap.
-    client.snapshot().library!.search = {};
+  // A reset of a search whose kind does not match the screen being opened used
+  // to stand here. It wrote into a deep copy of the state that was discarded on
+  // the next statement, so it cleared nothing and its guard only read fields;
+  // removed rather than kept, because preserving it meant deep-copying the
+  // whole state to accomplish nothing. Whether opening Library or Memories
+  // should clear a mismatched live search is a separate decision.
   const existing = libraries.get(screen);
   if (existing && !existing.isDestroyed()) {
     existing.show();

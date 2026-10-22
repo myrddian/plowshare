@@ -121,22 +121,41 @@ export class DesktopWorkspace {
    * desktop-local values (FileStores, preferences, named connections, personal
    * workspace, operator, authoring).
    *
-   * Reading this property is cheap. The returned object is always freshly
-   * allocated, so a caller may assign to its own top-level fields without
-   * affecting the session, and so is every container this getter rebuilds for a
-   * live session (`projects`, `conversations`, `jobs`, `approvals`,
-   * `answeringApprovals`, `agents`, `history`, `contexts`, `contextSnapshots`,
-   * `projectFolders`, `projectPreparing`). Every nested value it does not
-   * rebuild — all of them outside a live session — is shared by reference with
-   * `this.control.state`, a child client's state, or a desktop-local field: the
-   * getter reads them and never mutates them.
+   * Reading this property is cheap because it deep-copies nothing. **Treat the
+   * result as read-only.** Only the returned object itself is guaranteed to be
+   * freshly allocated and owned by the caller, so only a top-level assignment
+   * on it is safe. Nested values are shared by reference with
+   * `this.control.state`, a child client's state, or a desktop-local field, and
+   * writing into one corrupts the live session. A caller that must mutate the
+   * result, or hold a container across an `await`, uses {@link snapshot}.
    *
-   * The sharing is safe for the two ways this value is consumed. Consumers that
-   * inspect fields read them before any `await`, and consumers that return the
-   * value over IPC hand it straight to Electron, which structured-clones
-   * `ipcMain.handle` replies and `webContents.send` arguments anyway. A caller
-   * that instead mutates a nested field, or that keeps the value across an
-   * `await`, must use {@link snapshot} so it owns an isolated copy. */
+   * What is rebuilt, precisely. Outside a live session nothing below the top
+   * level is rebuilt. In a live session `projects`, `projectFolders` and
+   * `projectPreparing` always are; `conversations`, `jobs`, `approvals`,
+   * `answeringApprovals`, `agents`, `history`, `contexts` and
+   * `contextSnapshots` are rebuilt only while at least one available project
+   * child exists, so with no project attached — the common case for a freshly
+   * connected account — they are the account session's own containers. Nothing
+   * else is ever rebuilt: `library`, `activity`, `board`, `usage`, `personal`
+   * (except when a project error is merged into it), `authoring`, `operator`,
+   * `localFileStores`, `localPreferences`, `namedConnections`, `files`, `sync`
+   * and `liveHistory` are shared, as is every row object inside the rebuilt
+   * arrays. This getter only reads the values it shares.
+   *
+   * Reading a shared value across an `await`. The two callers that do this hold
+   * one row out of `projects` or `conversations` ({@link recoverProject},
+   * {@link conversationOwner}). That is sound because those rows are replaced,
+   * never written into: a project listing refresh, a recorded-folder change and
+   * a conversation listing or title change all build a new row, and
+   * `DesktopClient.retainConversation` deep-copies a row before storing it. The
+   * arrays themselves are mutated in place (a new conversation is pushed or
+   * unshifted onto `conversations`), as are `personal` and `authoring`, so
+   * those must not be held across an `await`.
+   *
+   * Returning the result over IPC needs no copy: Electron structured-clones
+   * `ipcMain.handle` replies and `webContents.send` arguments anyway. An
+   * `async` handler that captures the state and only then `await`s must still
+   * use {@link snapshot}, so its reply cannot observe a later change. */
   get state(): DesktopState {
     const state: DesktopState = { ...this.control.state };
     if (this.localFileStores) state.localFileStores = this.localFileStores;
@@ -369,6 +388,10 @@ export class DesktopWorkspace {
       if (owner) return owner;
     }
     if (!row) throw new Error('Choose an available conversation.');
+    // `row` is shared with the owning session, and is read and handed on after
+    // the await. Sound because conversation rows are replaced rather than
+    // written into, and `retainConversation` deep-copies before storing. See
+    // the contract on `state`.
     const owner = await this.clientFor(row.project);
     owner.retainConversation(row);
     return owner;
@@ -643,6 +666,9 @@ export class DesktopWorkspace {
       throw new Error(
         'The recorded folder belongs to another machine or the server. Choose its location on this computer.',
       );
+    // `recorded` is shared with the owning session and is compared again after
+    // the await. Sound because project rows are replaced rather than written
+    // into; see the contract on `state`.
     const root = await realpath(recorded.workspace);
     this.same(token);
     if (root !== recorded.workspace)
