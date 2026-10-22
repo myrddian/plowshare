@@ -49,6 +49,7 @@ final class ConcurrentRequests implements AutoCloseable {
   private final PacketBudget budget;
   private final DispatchTelemetry telemetry;
   private final int finiteLimit;
+  private final boolean unlimited;
   private final int connectionLimit;
   private final int observerLimit;
   private final CompletableFuture<Void> drained = new CompletableFuture<>();
@@ -58,17 +59,27 @@ final class ConcurrentRequests implements AutoCloseable {
   private int finite;
   private int observers;
 
+  /** See {@link #ConcurrentRequests(PacketBudget, int, int, DispatchTelemetry)}. */
   ConcurrentRequests(PacketBudget budget, int perConnection, int global) {
     this(budget, perConnection, global, new DispatchTelemetry());
   }
 
+  /**
+   * {@code global} caps requests executing at once across all connections, and {@code 0} means no
+   * cap. The cap is deliberately not the throughput policy: it was a proxy for the database pool,
+   * which is the scarce resource and bounds itself (waiters fail fast at the pool's acquire
+   * timeout). Admission stays bounded either way by the per-connection depth, {@link
+   * #GLOBAL_PENDING} and the byte budgets, so lifting the execution cap cannot turn into unbounded
+   * memory.
+   */
   ConcurrentRequests(
       PacketBudget budget, int perConnection, int global, DispatchTelemetry telemetry) {
-    if (perConnection < 1 || global < perConnection)
+    if (perConnection < 1 || global < 0 || (global != 0 && global < perConnection))
       throw new IllegalArgumentException("Invalid request execution bounds");
     this.budget = budget;
     this.telemetry = telemetry;
     connectionLimit = perConnection;
+    unlimited = global == 0;
     finiteLimit = global;
     observerLimit = global;
     coordinator = Thread.ofVirtual().name("request-coordination").start(this::coordinate);
@@ -259,8 +270,10 @@ final class ConcurrentRequests implements AutoCloseable {
                     && !earlierBarriers.contains(connection)
                     && !conflict
                     && (observer
-                        ? observers < observerLimit && connection.observing < connectionLimit
-                        : finite < finiteLimit && connection.running < connectionLimit)
+                        ? (unlimited || observers < observerLimit)
+                            && connection.observing < connectionLimit
+                        : (unlimited || finite < finiteLimit)
+                            && connection.running < connectionLimit)
                     && (!barrier
                         || connection.running + connection.observing == 0
                             && !earlierWork.contains(connection));

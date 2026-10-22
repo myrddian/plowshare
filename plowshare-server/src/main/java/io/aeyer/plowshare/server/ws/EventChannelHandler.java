@@ -290,7 +290,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private boolean readDispatchStarted;
   private ConcurrentRequests concurrentRequests;
   private int requestPerConnection = 2;
-  private int requestGlobal = 8;
+  private int requestGlobal = 0;
 
   /**
    * Per-connection call window advertised in the dispatch handshake. Clients adopt it as their own
@@ -362,6 +362,27 @@ public final class EventChannelHandler extends TextWebSocketHandler
     if (readDispatchStarted)
       throw new IllegalStateException("Event read concurrency cannot change after dispatch starts");
     readCapacity = new EventReadCapacity(perConnection, global);
+  }
+
+  /** Request execution bounds as configured; {@code global == 0} means unlimited. */
+  record RequestBounds(int perConnection, int global) {}
+
+  synchronized RequestBounds requestBounds() {
+    return new RequestBounds(requestPerConnection, requestGlobal);
+  }
+
+  /**
+   * Configures how many domain requests may execute at once, per connection and across the server
+   * ({@code 0} = unlimited), independently of event-read concurrency. A global cap here used to be
+   * an unwritten stand-in for the database pool; that pool now bounds itself (see {@code
+   * spring.datasource.hikari} in {@code application.yml}), so the default is no transport cap. Must
+   * be called before dispatch starts.
+   */
+  synchronized void useRequestBounds(int perConnection, int global) {
+    if (readDispatchStarted) throw new IllegalStateException("Request dispatch already started");
+    if (perConnection < 1 || global < 0 || (global != 0 && global < perConnection))
+      throw new IllegalArgumentException(
+          "Request bounds need per-connection >= 1 and global 0 (unlimited) or >= per-connection");
     requestPerConnection = perConnection;
     requestGlobal = global;
   }

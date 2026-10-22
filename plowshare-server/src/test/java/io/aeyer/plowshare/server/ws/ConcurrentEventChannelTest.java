@@ -175,6 +175,24 @@ class ConcurrentEventChannelTest {
   }
 
   @Test
+  void request_bounds_are_independent_of_event_read_concurrency() throws Exception {
+    var handler =
+        new EventChannelHandler(new SessionRegistry(), new FrameRouter(Map.of()), new Watchers());
+    var defaults = handler.requestBounds();
+    handler.useReadConcurrency(5, 9);
+    assertEquals(defaults, handler.requestBounds());
+    handler.useRequestBounds(3, 0);
+    handler.useReadConcurrency(1, 1);
+    assertEquals(new EventChannelHandler.RequestBounds(3, 0), handler.requestBounds());
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(0, 0));
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(2, 1));
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(1, -1));
+    try (var fixture = new Fixture(true, new FrameRouter(Map.of()))) {
+      assertThrows(IllegalStateException.class, () -> fixture.handler.useRequestBounds(2, 0));
+    }
+  }
+
+  @Test
   void request_depth_is_validated_and_fixed_once_dispatch_starts() throws Exception {
     var handler =
         new EventChannelHandler(new SessionRegistry(), new FrameRouter(Map.of()), new Watchers());

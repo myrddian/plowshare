@@ -65,6 +65,47 @@ class ConcurrentRequestsTest {
   }
 
   @Test
+  void a_global_bound_of_zero_is_unlimited() throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    int connections = 6;
+    try (var dispatcher = new ConcurrentRequests(budget, 1, 0)) {
+      var held = new CompletableFuture<Void>();
+      var entered = new java.util.concurrent.CountDownLatch(connections);
+      for (int i = 0; i < connections; i++) {
+        var connection =
+            dispatcher.connect(
+                "socket-" + i,
+                (id, delivered) -> {
+                  entered.countDown();
+                  return held.thenRun(delivered);
+                },
+                () -> fail("Unexpected transport failure"),
+                1);
+        // Distinct resources, so only the global execution cap could serialise these.
+        connection.offer(
+            "r" + i,
+            request("r" + i, "conversation.resume", Map.of("conversation", "c" + i)),
+            "alice");
+      }
+      assertTrue(
+          entered.await(5, TimeUnit.SECONDS),
+          "every connection's request must execute concurrently when the global bound is 0");
+      held.complete(null);
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  @Test
+  void a_zero_global_bound_does_not_loosen_the_per_connection_bound_or_other_guards() {
+    var budget = new PacketBudget(1024 * 1024);
+    assertThrows(IllegalArgumentException.class, () -> new ConcurrentRequests(budget, 0, 0));
+    assertThrows(IllegalArgumentException.class, () -> new ConcurrentRequests(budget, 2, 1));
+    assertThrows(IllegalArgumentException.class, () -> new ConcurrentRequests(budget, 1, -1));
+  }
+
+  @Test
   void conflicts_span_connections_but_observers_do_not_hold_mutation_capacity() throws Exception {
     var budget = new PacketBudget(1024 * 1024);
     try (var dispatcher = new ConcurrentRequests(budget, 1, 1)) {
