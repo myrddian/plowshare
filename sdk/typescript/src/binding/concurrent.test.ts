@@ -26,6 +26,16 @@ class Wire implements Socket {
     this.listener?.({ data: JSON.stringify({ ...frame, payload }) });
   }
 }
+const codeOf = (cause: unknown): unknown =>
+  typeof cause === 'object' && cause !== null && 'code' in cause
+    ? cause.code
+    : undefined;
+const payloadOf = (frame: string): unknown => {
+  const parsed: unknown = JSON.parse(frame);
+  return typeof parsed === 'object' && parsed !== null && 'payload' in parsed
+    ? parsed.payload
+    : undefined;
+};
 const flush = async (): Promise<void> => {
   for (let n = 0; n < 12; n++) await Promise.resolve();
 };
@@ -206,7 +216,7 @@ describe('concurrent dispatch lifecycle', () => {
     const calls = [1, 2, 3, 4].map(() =>
       connection.ask('project.list', {}).then(
         () => 'ok',
-        (cause: { code: string }) => cause.code,
+        (cause: unknown) => codeOf(cause),
       ),
     );
     wire.answer(0, {
@@ -325,7 +335,7 @@ describe('concurrent dispatch lifecycle', () => {
     const calls = [1, 2].map(() =>
       connection.ask('project.list', {}).then(
         () => 'ok',
-        (cause: { code: string }) => cause.code,
+        (cause: unknown) => codeOf(cause),
       ),
     );
     wire.answer(0, {
@@ -336,7 +346,7 @@ describe('concurrent dispatch lifecycle', () => {
     const more = [3, 4].map(() =>
       connection.ask('project.list', {}).then(
         () => 'ok',
-        (cause: { code: string }) => cause.code,
+        (cause: unknown) => codeOf(cause),
       ),
     );
     await flush();
@@ -582,7 +592,7 @@ describe('concurrent dispatch lifecycle', () => {
       wire.answer(n);
       await flush();
       expect(wire.sent).toHaveLength(n + 2);
-      expect(JSON.parse(wire.sent[n + 1]!).payload).toEqual({ n: n + 1 });
+      expect(payloadOf(wire.sent[n + 1]!)).toEqual({ n: n + 1 });
     }
     wire.answer(4);
     await Promise.all(calls);
