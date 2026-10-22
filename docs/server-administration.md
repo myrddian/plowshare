@@ -38,6 +38,51 @@ writes and shutdown close or detach through the channel's ordinary lifecycle.
 Control-frame writes share serialization with application writes; probes never
 queue behind a busy writer or block the shared scheduler.
 
+## Request dispatch and capacity
+
+Each event connection that selects concurrent dispatch is given a per-connection
+request depth in the handshake, and the server enforces it. A request beyond that
+depth, or beyond a server-wide pending or byte bound, is answered with
+`CAPACITY_EXHAUSTED` rather than closing the connection; nothing was started, so
+the client may send it again under the same id. The TypeScript SDK treats that
+answer as backpressure and waits; the other SDKs fail the call with
+`NOT_SUBMITTED`.
+
+Startup settings live under `plowshare.transport`:
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `request-depth` | `64` | Per-connection in-flight window advertised to clients, between 1 and 64. |
+| `request-per-connection` | `2` | Requests of one connection executing at once. |
+| `request-global` | `0` | Requests executing at once across all connections; `0` is unlimited. Admission stays bounded by the depth, the server-wide pending bound and the byte budgets, and the database pool bounds actual work. |
+| `request-observers` | `256` | Long parked waits (such as `information.await`) across all connections; must be at least `request-per-connection`. |
+
+`request-depth` is deliberately left at the protocol ceiling. The Java, Go,
+Python and .NET SDKs adopt the advertised depth and fail locally with
+`NOT_SUBMITTED` at that bound instead of waiting, so lowering it makes them reject
+sooner than they did before this setting existed. Lower it only when every client
+is a TypeScript SDK client; teaching the other SDKs to block is follow-up work.
+
+The main database pool is sized by environment variables:
+
+| Environment variable | Default | Effect |
+| --- | --- | --- |
+| `PLOWSHARE_DB_POOL` | `20` | Maximum size of the main connection pool. Raise it only together with PostgreSQL `max_connections`. |
+| `PLOWSHARE_DB_CONNECTION_TIMEOUT` | `5000` | How long a request waits for a pooled connection, in **milliseconds**. |
+
+`PLOWSHARE_DB_CONNECTION_TIMEOUT` is a plain millisecond count, not a duration. A
+duration string such as `5s` fails to bind and the server will not start. The
+timeout is short on purpose: starvation then fails fast and names the pool instead
+of looking like a lost response at the client's request deadline.
+
+### Actuator endpoints
+
+The `health`, `info` and `metrics` actuator endpoints are exposed on the main API
+port **without authentication**; no security starter is present. They reveal JVM,
+connection-pool and request metrics, and the health probe borrows a database
+connection. A deployment must restrict them with `management.server.port` and
+`management.server.address`, or by a front proxy that blocks `/actuator`.
+
 ## Information feature switches
 
 Authored content and document-navigation writes are **enabled by default**.
