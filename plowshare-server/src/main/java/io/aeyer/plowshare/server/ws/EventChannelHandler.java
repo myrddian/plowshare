@@ -291,6 +291,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private ConcurrentRequests concurrentRequests;
   private int requestPerConnection = 2;
   private int requestGlobal = 0;
+  private int requestObservers = ConcurrentRequests.DEFAULT_OBSERVERS;
 
   /**
    * Per-connection call window advertised in the dispatch handshake. Clients adopt it as their own
@@ -365,10 +366,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
   }
 
   /** Request execution bounds as configured; {@code global == 0} means unlimited. */
-  record RequestBounds(int perConnection, int global) {}
+  record RequestBounds(int perConnection, int global, int observers) {}
 
   synchronized RequestBounds requestBounds() {
-    return new RequestBounds(requestPerConnection, requestGlobal);
+    return new RequestBounds(requestPerConnection, requestGlobal, requestObservers);
   }
 
   /**
@@ -378,13 +379,18 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * spring.datasource.hikari} in {@code application.yml}), so the default is no transport cap. Must
    * be called before dispatch starts.
    */
-  synchronized void useRequestBounds(int perConnection, int global) {
+  synchronized void useRequestBounds(int perConnection, int global, int observers) {
     if (readDispatchStarted) throw new IllegalStateException("Request dispatch already started");
-    if (perConnection < 1 || global < 0 || (global != 0 && global < perConnection))
+    if (perConnection < 1
+        || global < 0
+        || (global != 0 && global < perConnection)
+        || observers < perConnection)
       throw new IllegalArgumentException(
-          "Request bounds need per-connection >= 1 and global 0 (unlimited) or >= per-connection");
+          "Request bounds need per-connection >= 1, global 0 (unlimited) or >= per-connection, "
+              + "and observers >= per-connection");
     requestPerConnection = perConnection;
     requestGlobal = global;
+    requestObservers = observers;
   }
 
   private synchronized ConcurrentRequests concurrentRequests() {
@@ -392,7 +398,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
     readDispatchStarted = true;
     if (concurrentRequests == null)
       concurrentRequests =
-          new ConcurrentRequests(packetBudget, requestPerConnection, requestGlobal, telemetry);
+          new ConcurrentRequests(
+              packetBudget, requestPerConnection, requestGlobal, requestObservers, telemetry);
     return concurrentRequests;
   }
 

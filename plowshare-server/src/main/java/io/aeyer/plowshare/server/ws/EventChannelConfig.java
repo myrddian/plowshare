@@ -163,6 +163,13 @@ public class EventChannelConfig implements WebSocketConfigurer {
   @org.springframework.beans.factory.annotation.Value("${plowshare.transport.request-global:0}")
   private int requestGlobal = 0;
 
+  // Parked observer waits (information.await and the like). They hold no pooled database
+  // connection while parked, so this is not a database bound; admission (depth, pending count,
+  // byte budgets) bounds them as well. Must be >= request-per-connection.
+  @org.springframework.beans.factory.annotation.Value(
+      "${plowshare.transport.request-observers:256}")
+  private int requestObservers = 256;
+
   // Advertised to clients in the dispatch handshake; must be within 1..64 (the protocol ceiling).
   @org.springframework.beans.factory.annotation.Value("${plowshare.transport.request-depth:8}")
   private int requestDepth = 8;
@@ -253,7 +260,7 @@ public class EventChannelConfig implements WebSocketConfigurer {
           new io.aeyer.plowshare.protocol.transport.PacketBudget(resolvedPacketMemoryBytes());
     channel.usePacketBudget(packetBudget);
     channel.useReadConcurrency(eventReadConcurrency, eventReadGlobalConcurrency);
-    channel.useRequestBounds(requestPerConnection, requestGlobal);
+    channel.useRequestBounds(requestPerConnection, requestGlobal, requestObservers);
     channel.useRequestDepth(requestDepth);
     channel.useRequestDrain(
         org.springframework.boot.convert.DurationStyle.detectAndParse(requestShutdownDrain));

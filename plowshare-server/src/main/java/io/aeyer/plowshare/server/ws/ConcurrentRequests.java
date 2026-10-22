@@ -35,6 +35,9 @@ final class ConcurrentRequests implements AutoCloseable {
     CompletionStage<Void> run(String frame, Delivery delivered);
   }
 
+  /** Used by callers that do not configure observers; matches the server property default. */
+  static final int DEFAULT_OBSERVERS = 256;
+
   private static final int GLOBAL_PENDING = 1024;
   private static final int RESOURCE_KEYS = 2048;
   private static final long CONNECTION_BYTES = 2L * SegmentedMessages.MAX_MESSAGE_BYTES;
@@ -74,14 +77,32 @@ final class ConcurrentRequests implements AutoCloseable {
    */
   ConcurrentRequests(
       PacketBudget budget, int perConnection, int global, DispatchTelemetry telemetry) {
-    if (perConnection < 1 || global < 0 || (global != 0 && global < perConnection))
+    this(budget, perConnection, global, DEFAULT_OBSERVERS, telemetry);
+  }
+
+  /**
+   * Observers (long-parked waits such as {@code information.await}) have their own bound, not an
+   * alias of {@code global}. A parked observer holds no pooled database connection: it snapshots
+   * (one connection per statement, returned) and then sleeps outside any transaction. They are also
+   * bounded by admission (per-connection depth, {@link #GLOBAL_PENDING}, byte budgets).
+   */
+  ConcurrentRequests(
+      PacketBudget budget,
+      int perConnection,
+      int global,
+      int observerBound,
+      DispatchTelemetry telemetry) {
+    if (perConnection < 1
+        || global < 0
+        || (global != 0 && global < perConnection)
+        || observerBound < perConnection)
       throw new IllegalArgumentException("Invalid request execution bounds");
     this.budget = budget;
     this.telemetry = telemetry;
     connectionLimit = perConnection;
     unlimited = global == 0;
     finiteLimit = global;
-    observerLimit = global;
+    observerLimit = observerBound;
     coordinator = Thread.ofVirtual().name("request-coordination").start(this::coordinate);
   }
 
@@ -270,8 +291,7 @@ final class ConcurrentRequests implements AutoCloseable {
                     && !earlierBarriers.contains(connection)
                     && !conflict
                     && (observer
-                        ? (unlimited || observers < observerLimit)
-                            && connection.observing < connectionLimit
+                        ? observers < observerLimit && connection.observing < connectionLimit
                         : (unlimited || finite < finiteLimit)
                             && connection.running < connectionLimit)
                     && (!barrier

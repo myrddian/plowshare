@@ -181,14 +181,15 @@ class ConcurrentEventChannelTest {
     var defaults = handler.requestBounds();
     handler.useReadConcurrency(5, 9);
     assertEquals(defaults, handler.requestBounds());
-    handler.useRequestBounds(3, 0);
+    handler.useRequestBounds(3, 0, 40);
     handler.useReadConcurrency(1, 1);
-    assertEquals(new EventChannelHandler.RequestBounds(3, 0), handler.requestBounds());
-    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(0, 0));
-    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(2, 1));
-    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(1, -1));
+    assertEquals(new EventChannelHandler.RequestBounds(3, 0, 40), handler.requestBounds());
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(0, 0, 8));
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(2, 1, 8));
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(1, -1, 8));
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestBounds(3, 0, 2));
     try (var fixture = new Fixture(true, new FrameRouter(Map.of()))) {
-      assertThrows(IllegalStateException.class, () -> fixture.handler.useRequestBounds(2, 0));
+      assertThrows(IllegalStateException.class, () -> fixture.handler.useRequestBounds(2, 0, 8));
     }
   }
 
