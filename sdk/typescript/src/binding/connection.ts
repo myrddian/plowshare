@@ -656,9 +656,14 @@ export function connect(options: ConnectOptions): Connected {
        * <p>Only installed with a scheduler: without one (ordered mode with no
        * deadline) there is nothing to pace or bound retries, so the refusal is
        * surfaced to the caller rather than resubmitted in a tight loop.
+       *
+       * <p>Never installed for a `control` request (the dispatch negotiation).
+       * Resubmitting a handshake is not flow control: the server treats a second
+       * selection on a connection as a protocol violation, so a retry would turn
+       * a refusal into a teardown. A refused negotiation fails honestly instead.
        */
       let refusals = 0;
-      if (deadline !== undefined)
+      if (deadline !== undefined && !control)
         asker.refused = (): void => {
           if (!launched) return;
           dispatched--;

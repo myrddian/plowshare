@@ -171,8 +171,14 @@ public class EventChannelConfig implements WebSocketConfigurer {
   private int requestObservers = 256;
 
   // Advertised to clients in the dispatch handshake; must be within 1..64 (the protocol ceiling).
-  @org.springframework.beans.factory.annotation.Value("${plowshare.transport.request-depth:8}")
-  private int requestDepth = 8;
+  //
+  // The default is deliberately the ceiling. The Java, Go, Python and .NET SDKs hard-fail with
+  // NOT_SUBMITTED at the depth bound instead of waiting, and all adopt the advertised depth, so a
+  // lower default would make them reject their 9th concurrent request where they rejected the 65th.
+  // Only the TypeScript SDK blocks. Lower this only when every client is TypeScript; teaching the
+  // other four SDKs to block is follow-up work.
+  @org.springframework.beans.factory.annotation.Value("${plowshare.transport.request-depth:64}")
+  private int requestDepth = io.aeyer.plowshare.protocol.transport.ConcurrentDispatch.MAX_PENDING;
 
   @org.springframework.beans.factory.annotation.Value(
       "${plowshare.transport.request-shutdown-drain:10s}")

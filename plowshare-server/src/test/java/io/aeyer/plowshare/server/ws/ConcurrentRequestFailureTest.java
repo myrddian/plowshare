@@ -285,4 +285,72 @@ class ConcurrentRequestFailureTest {
       assertEquals(0, budget.heldBytes());
     }
   }
+
+  /** Waits until the reply path holds nothing, so a test can then exhaust the shared budget. */
+  private static void awaitIdle(PacketBudget shared) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (shared.heldBytes() != 0 && System.nanoTime() < deadline) Thread.sleep(5);
+    assertEquals(0, shared.heldBytes());
+  }
+
+  @Test
+  void a_refusal_that_cannot_be_budgeted_is_dropped_and_the_connection_is_kept() throws Exception {
+    var release = new CompletableFuture<Void>();
+    var entered = new java.util.concurrent.atomic.AtomicInteger();
+    long limit = 3L * SegmentedMessages.CHUNK_BYTES;
+    var shared = new PacketBudget(limit);
+    try (var fixture =
+        new ConcurrentEventChannelTest.Fixture(
+            false, blockingRouter(release, entered), handler -> handler.usePacketBudget(shared))) {
+      select(fixture);
+      awaitIdle(shared);
+      shared.acquire(limit);
+      // Neither the request nor the refusal answering it can be budgeted.
+      fixture.send("lost", "information.facets", Map.of());
+      verify(fixture.socket, org.mockito.Mockito.after(300).never()).close(any(CloseStatus.class));
+      assertTrue(fixture.open.get(), "An unsendable refusal must not tear the connection down");
+      shared.release(limit);
+      fixture.send("again", "information.facets", Map.of());
+      var answered = FrameJson.answering().readTree(fixture.reply());
+      assertEquals("again", answered.path("id").asText());
+      assertNotEquals("CAPACITY_EXHAUSTED", answered.path("payload").path("code").asText());
+    } finally {
+      release.complete(null);
+    }
+  }
+
+  @Test
+  void a_refusal_that_overflows_the_reply_queue_is_dropped_and_the_connection_is_kept()
+      throws Exception {
+    var release = new CompletableFuture<Void>();
+    var writerHeld = new CompletableFuture<Void>();
+    var writerGate = new CompletableFuture<Void>();
+    var entered = new java.util.concurrent.atomic.AtomicInteger();
+    try (var fixture =
+        new ConcurrentEventChannelTest.Fixture(
+            false, blockingRouter(release, entered), handler -> handler.useRequestDepth(1))) {
+      select(fixture);
+      fixture.send("one", "information.facets", Map.of("slow", true));
+      awaitEntered(entered, 1);
+      // Stall the writer so refusals pile up behind the first one in the bounded reply queue.
+      fixture.beforeWrite =
+          () -> {
+            writerHeld.complete(null);
+            writerGate.join();
+          };
+      for (int n = 0; n < EventChannelHandler.PENDING + 64; n++)
+        fixture.send("refused-" + n, "information.facets", Map.of());
+      verify(fixture.socket, org.mockito.Mockito.after(300).never()).close(any(CloseStatus.class));
+      assertTrue(fixture.open.get(), "A refusal the queue cannot take must not disconnect");
+      writerGate.complete(null);
+      release.complete(null);
+      var ids = new java.util.HashSet<String>();
+      for (int n = 0; n < 3; n++)
+        ids.add(FrameJson.answering().readTree(fixture.reply()).path("id").asText());
+      assertTrue(fixture.open.get());
+    } finally {
+      writerGate.complete(null);
+      release.complete(null);
+    }
+  }
 }

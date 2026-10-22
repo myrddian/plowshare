@@ -296,9 +296,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
   /**
    * Per-connection call window advertised in the dispatch handshake. Clients adopt it as their own
    * limit, so it is a statement about how much work this server will queue for one connection, not
-   * a protocol constant.
+   * a protocol constant. Defaults to the protocol ceiling because most SDKs fail rather than block
+   * at the bound; see the {@code plowshare.transport.request-depth} comment in {@code
+   * EventChannelConfig}.
    */
-  private int requestDepth = 8;
+  private int requestDepth = ConcurrentDispatch.MAX_PENDING;
 
   private java.time.Duration requestDrain = java.time.Duration.ofSeconds(10);
   private volatile boolean lifecycleRunning;
@@ -869,9 +871,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * ordinary reply bounds. Because it owns nothing, the client may resubmit the same id as soon as
    * capacity frees; nothing here marks the id as used. Nothing was started, so a retry cannot
    * replay work.
+   *
+   * <p>If the refusal itself cannot be queued or budgeted it is dropped and the connection is kept
+   * (see {@link Delivery#refuse}): the refused request goes unanswered and its client's deadline
+   * expires, instead of every in-flight request on the connection being torn down.
    */
   private void refuseCongested(Delivery delivery, Envelope request) {
-    delivery.answer(
+    delivery.refuse(
         request.id(),
         request.type(),
         Outcome.failed(
@@ -1568,16 +1574,49 @@ public final class EventChannelHandler extends TextWebSocketHandler
         Runnable disclosure,
         Runnable started,
         Runnable settled) {
+      enqueue(id, type, outcome, delivered, disclosure, started, settled, true);
+    }
+
+    /**
+     * Queues a capacity refusal, and <b>never disconnects</b> when it cannot.
+     *
+     * <p>A refusal is emitted precisely when its connection is congested, so the three ways a reply
+     * can fail to queue (the shared {@code PacketBudget}, the per-connection reply byte bound,
+     * {@link #PENDING}) are most likely exactly when a refusal is needed. Tearing the connection
+     * down for them would strand every in-flight request to deliver a "retry later". An
+     * undeliverable refusal is instead dropped: that one request goes unanswered and its client's
+     * deadline expires, which is strictly better than losing every other request on the connection.
+     * There is deliberately no reserved budget for refusals; exhausting the whole budget is
+     * systemic, and shedding is the defensible response.
+     *
+     * @return whether the refusal was queued
+     */
+    boolean refuse(String id, String type, Outcome outcome) {
+      return enqueue(id, type, outcome, () -> {}, validity, () -> {}, () -> {}, false);
+    }
+
+    /**
+     * @param fatal whether failing to queue closes the connection (an answer is owed and a silent
+     *     drop would leave its caller waiting forever) or only drops this one reply
+     */
+    private boolean enqueue(
+        String id,
+        String type,
+        Outcome outcome,
+        Runnable delivered,
+        Runnable disclosure,
+        Runnable started,
+        Runnable settled,
+        boolean fatal) {
       if (!running) {
         delivered.run();
-        return;
+        return false;
       }
       long encodeStarted = System.nanoTime();
       String frame = answered(id, type, outcome);
       telemetry.encoding.record(System.nanoTime() - encodeStarted);
       if (frame == null) {
-        disconnect(id);
-        return;
+        return unqueued(id, fatal);
       }
       // Charge both encoded characters and the retained typed projection used by its disclosure
       // fence; references are dropped together on successful handoff or connection teardown.
@@ -1586,15 +1625,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
       long held = replyBytes.addAndGet(bytes);
       if (held > maximum) {
         replyBytes.addAndGet(-bytes);
-        disconnect(id);
-        return;
+        return unqueued(id, fatal);
       }
       try {
         budget.acquire(bytes);
       } catch (IllegalArgumentException capacity) {
         replyBytes.addAndGet(-bytes);
-        disconnect(id);
-        return;
+        return unqueued(id, fatal);
       }
       var released = new AtomicBoolean();
       telemetry.replyBytes.add(bytes);
@@ -1612,10 +1649,22 @@ public final class EventChannelHandler extends TextWebSocketHandler
       if (pending.offer(reply)) {
         if (!running && pending.remove(reply)) release.run();
         waiting.release();
-        return;
+        return true;
       }
       release.run();
-      disconnect(id);
+      return unqueued(id, fatal);
+    }
+
+    private boolean unqueued(String id, boolean fatal) {
+      if (fatal) {
+        disconnect(id);
+      } else {
+        log.debug(
+            "Session '{}' could not queue a refusal to '{}'; dropped, connection kept.",
+            session,
+            id);
+      }
+      return false;
     }
 
     /**

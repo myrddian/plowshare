@@ -361,8 +361,9 @@ describe('concurrent dispatch lifecycle', () => {
       'NOT_SUBMITTED',
     ]);
     // Nothing may fire or transmit after the settle: no deadline is running.
-    await vi.advanceTimersByTimeAsync(60000);
+    // Asserted before advancing, since advancing would fire and drop a leak.
     expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
     expect(wire.sent).toHaveLength(2);
   });
   const refusal = { code: 'CAPACITY_EXHAUSTED', payload: [] };
@@ -528,8 +529,34 @@ describe('concurrent dispatch lifecycle', () => {
     wire.answer(1, refusal);
     connection.close();
     await asked;
+    // Before advancing: advancing would fire and discard a leaked timer.
+    expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60000);
     expect(wire.sent).toHaveLength(2);
+  });
+  // Red before: a refused dispatch negotiation was consumed as backpressure and
+  // resubmitted, which the server answers by tearing the connection down.
+  it('surfaces a capacity refusal of the negotiation instead of resubmitting it', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    const asked = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    wire.answer(0, refusal);
+    await asked;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wire.sent).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });
   // Red before: nothing re-entered transmit, so the guard was untested. With the

@@ -39,6 +39,13 @@ final class ConcurrentRequests implements AutoCloseable {
   static final int DEFAULT_OBSERVERS = 256;
 
   private static final int GLOBAL_PENDING = 1024;
+
+  /**
+   * A genuine dispatch-selection frame is a few dozen characters. A frame of that type larger than
+   * this is not a handshake and gets no admission exemption.
+   */
+  private static final int SELECTION_FRAME_CHARS = 1024;
+
   private static final int RESOURCE_KEYS = 2048;
   private static final long CONNECTION_BYTES = 2L * SegmentedMessages.MAX_MESSAGE_BYTES;
   private final ReentrantLock state = new ReentrantLock();
@@ -160,7 +167,16 @@ final class ConcurrentRequests implements AutoCloseable {
     void offer(String frame, Envelope envelope, String account) {
       ConcurrentDispatch.requireId(envelope.id());
       SegmentedMessages.utf8Length(frame);
-      long bytes = 2L * frame.length();
+      // The dispatch-selection frame is exempt from every congestion check below, and is charged
+      // no bytes. It is one tiny frame and the precondition for every other request on the
+      // connection, so refusing it is never useful: the client would only retry the handshake
+      // against the same congestion, and the server rejects a second selection as a protocol
+      // violation. Admitting it cannot grow memory without bound: it is size-limited here, it is
+      // released when its reply is delivered, and the duplicate-id check still applies.
+      boolean selection =
+          ConcurrentDispatch.TYPE.equals(envelope.type())
+              && frame.length() <= SELECTION_FRAME_CHARS;
+      long bytes = selection ? 0L : 2L * frame.length();
       var request =
           new Request(
               this, envelope.id(), frame, bytes, DispatchPolicy.decode(envelope, account, id));
@@ -178,10 +194,11 @@ final class ConcurrentRequests implements AutoCloseable {
         int transferring = handingOff == null ? 0 : 1;
         // Congestion is checked after every validity check above, and before any state is touched:
         // a refusal leaves no active entry, byte reservation or resource reference behind.
-        if (active.size() - transferring >= depth
-            || retained >= GLOBAL_PENDING
-            || bytes > CONNECTION_BYTES - this.bytes
-            || newKeys > RESOURCE_KEYS - references.size()) {
+        if (!selection
+            && (active.size() - transferring >= depth
+                || retained >= GLOBAL_PENDING
+                || bytes > CONNECTION_BYTES - this.bytes
+                || newKeys > RESOURCE_KEYS - references.size())) {
           telemetry.rejected.increment();
           throw new CapacityExceededException();
         }
