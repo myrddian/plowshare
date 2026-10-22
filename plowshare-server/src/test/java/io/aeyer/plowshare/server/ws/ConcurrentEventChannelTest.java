@@ -25,7 +25,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 class ConcurrentEventChannelTest {
-  private static final class Fixture implements AutoCloseable {
+  static final class Fixture implements AutoCloseable {
     final WebSocketSession socket = mock(WebSocketSession.class);
     final EventChannelHandler handler;
     final SegmentedMessages client;

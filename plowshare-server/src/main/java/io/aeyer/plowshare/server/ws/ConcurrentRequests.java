@@ -75,7 +75,18 @@ final class ConcurrentRequests implements AutoCloseable {
   }
 
   Connection connect(String id, Handler handler, Runnable failed) {
-    var connection = new Connection(id, handler, failed);
+    return connect(id, handler, failed, ConcurrentDispatch.MAX_PENDING);
+  }
+
+  /**
+   * Registers a connection whose in-flight window is {@code depth}, the value the server advertised
+   * to that client. Admission past it is congestion, answered per request, rather than a protocol
+   * violation.
+   */
+  Connection connect(String id, Handler handler, Runnable failed, int depth) {
+    if (depth < 1 || depth > ConcurrentDispatch.MAX_PENDING)
+      throw new IllegalArgumentException("Invalid connection request depth");
+    var connection = new Connection(id, handler, failed, depth);
     state.lock();
     try {
       if (!open || connections.putIfAbsent(id, connection) != null)
@@ -86,8 +97,21 @@ final class ConcurrentRequests implements AutoCloseable {
     return connection;
   }
 
+  /**
+   * Admission was refused because the dispatch queue is full, not because the request is invalid.
+   * Nothing was registered, reserved or started, so the same request id may be offered again once
+   * capacity frees. Callers answer it per request; every other {@link IllegalArgumentException}
+   * from {@code offer} is a protocol violation.
+   */
+  static final class CapacityExceededException extends IllegalArgumentException {
+    CapacityExceededException() {
+      super("Request admission capacity exceeded");
+    }
+  }
+
   final class Connection {
     private final String id;
+    private final int depth;
     private final Handler handler;
     private final Runnable failed;
     private final ConcurrentMap<String, Request> active = new ConcurrentHashMap<>();
@@ -98,8 +122,9 @@ final class ConcurrentRequests implements AutoCloseable {
     private boolean barrier;
     private Request handingOff;
 
-    private Connection(String id, Handler handler, Runnable failed) {
+    private Connection(String id, Handler handler, Runnable failed, int depth) {
       this.id = id;
+      this.depth = depth;
       this.handler = handler;
       this.failed = failed;
     }
@@ -123,12 +148,19 @@ final class ConcurrentRequests implements AutoCloseable {
         long newKeys =
             request.policy.resources().stream().filter(key -> !references.containsKey(key)).count();
         int transferring = handingOff == null ? 0 : 1;
-        if (active.size() - transferring >= ConcurrentDispatch.MAX_PENDING
+        // Congestion is checked after every validity check above, and before any state is touched:
+        // a refusal leaves no active entry, byte reservation or resource reference behind.
+        if (bytes > CONNECTION_BYTES) {
+          // A single frame that can never fit is not congestion; retrying cannot help.
+          telemetry.rejected.increment();
+          throw new IllegalArgumentException("Request exceeds connection byte capacity");
+        }
+        if (active.size() - transferring >= depth
             || retained >= GLOBAL_PENDING
             || bytes > CONNECTION_BYTES - this.bytes
             || newKeys > RESOURCE_KEYS - references.size()) {
           telemetry.rejected.increment();
-          throw new IllegalArgumentException("Request admission capacity exceeded");
+          throw new CapacityExceededException();
         }
         budget.acquire(bytes);
         active.put(request.id, request);

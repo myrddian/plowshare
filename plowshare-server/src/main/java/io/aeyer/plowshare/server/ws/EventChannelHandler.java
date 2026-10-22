@@ -798,7 +798,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   .connect(
                       socket.getId(),
                       (value, delivered) -> routeConcurrent(socket, delivery, value, delivered),
-                      () -> delivery.disconnect("request execution"));
+                      () -> delivery.disconnect("request execution"),
+                      advertisedRequestDepth());
           delivery.validity =
               () -> {
                 if (!delivery.running
@@ -810,13 +811,43 @@ public final class EventChannelHandler extends TextWebSocketHandler
       } else {
         delivery.domainSeen = true;
       }
-      delivery.concurrent.offer(frame, request, (String) socket.getAttributes().get(HANDLE));
+      try {
+        delivery.concurrent.offer(frame, request, (String) socket.getAttributes().get(HANDLE));
+      } catch (ConcurrentRequests.CapacityExceededException congested) {
+        refuseCongested(delivery, request);
+      }
       return true;
     } catch (RuntimeException invalid) {
       delivery.stop();
       delivery.disconnect("invalid request admission");
       return true;
     }
+  }
+
+  /**
+   * Answers a request the dispatch queue had no room for, leaving the connection and every other
+   * in-flight request untouched.
+   *
+   * <p>Only {@link ConcurrentRequests.CapacityExceededException} reaches here. Malformed frames,
+   * duplicate ids and a closed dispatcher are protocol violations or shutdown and still tear the
+   * connection down in the caller.
+   *
+   * <p><b>This reply deliberately bypasses the dispatcher's reply handoff.</b> The refused request
+   * was never admitted: it has no {@code active} entry, no {@code PacketBudget} reservation for its
+   * body and no claim on {@code Connection.handingOff}. Routing the refusal through the dispatcher
+   * would take that single slot, and refusals are most frequent exactly when another reply is
+   * mid-handoff, so it would throw "A reply handoff is already settling". It is instead queued on
+   * the delivery's own output path with no dispatch callbacks, charged only against that path's
+   * ordinary reply bounds. Because it owns nothing, the client may resubmit the same id as soon as
+   * capacity frees; nothing here marks the id as used. Nothing was started, so a retry cannot
+   * replay work.
+   */
+  private void refuseCongested(Delivery delivery, Envelope request) {
+    delivery.answer(
+        request.id(),
+        request.type(),
+        Outcome.failed(
+            Code.CAPACITY_EXHAUSTED, "Request queue is full; nothing was started, retry later"));
   }
 
   private java.util.concurrent.CompletionStage<Void> routeConcurrent(
