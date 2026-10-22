@@ -154,6 +154,10 @@ public class EventChannelConfig implements WebSocketConfigurer {
       "${plowshare.transport.event-read-global-concurrency:8}")
   private int eventReadGlobalConcurrency = 8;
 
+  // Advertised to clients in the dispatch handshake; must be within 1..64 (the protocol ceiling).
+  @org.springframework.beans.factory.annotation.Value("${plowshare.transport.request-depth:8}")
+  private int requestDepth = 8;
+
   @org.springframework.beans.factory.annotation.Value(
       "${plowshare.transport.request-shutdown-drain:10s}")
   private String requestShutdownDrain = "10s";
@@ -240,6 +244,7 @@ public class EventChannelConfig implements WebSocketConfigurer {
           new io.aeyer.plowshare.protocol.transport.PacketBudget(resolvedPacketMemoryBytes());
     channel.usePacketBudget(packetBudget);
     channel.useReadConcurrency(eventReadConcurrency, eventReadGlobalConcurrency);
+    channel.useRequestDepth(requestDepth);
     channel.useRequestDrain(
         org.springframework.boot.convert.DurationStyle.detectAndParse(requestShutdownDrain));
     if (usageSubscriptions != null) usageSubscriptions.ifAvailable(channel::useUsageSubscriptions);

@@ -291,6 +291,14 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private ConcurrentRequests concurrentRequests;
   private int requestPerConnection = 2;
   private int requestGlobal = 8;
+
+  /**
+   * Per-connection call window advertised in the dispatch handshake. Clients adopt it as their own
+   * limit, so it is a statement about how much work this server will queue for one connection, not
+   * a protocol constant.
+   */
+  private int requestDepth = 8;
+
   private java.time.Duration requestDrain = java.time.Duration.ofSeconds(10);
   private volatile boolean lifecycleRunning;
   private volatile boolean accepting = true;
@@ -365,6 +373,23 @@ public final class EventChannelHandler extends TextWebSocketHandler
       concurrentRequests =
           new ConcurrentRequests(packetBudget, requestPerConnection, requestGlobal, telemetry);
     return concurrentRequests;
+  }
+
+  /**
+   * Sets the depth advertised to clients in the dispatch handshake, within {@code [1,
+   * ConcurrentDispatch.MAX_PENDING]}. Must be called before dispatch starts, because connections
+   * already handshaken would otherwise hold a stale window.
+   */
+  synchronized void useRequestDepth(int depth) {
+    if (readDispatchStarted) throw new IllegalStateException("Request dispatch already started");
+    if (depth < 1 || depth > ConcurrentDispatch.MAX_PENDING)
+      throw new IllegalArgumentException(
+          "Request depth must be between 1 and " + ConcurrentDispatch.MAX_PENDING);
+    requestDepth = depth;
+  }
+
+  private synchronized int advertisedRequestDepth() {
+    return requestDepth;
   }
 
   synchronized void useRequestDrain(java.time.Duration drain) {
@@ -826,7 +851,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
       var answer =
           ConcurrentDispatch.TYPE.equals(type)
               ? java.util.concurrent.CompletableFuture.completedFuture(
-                  Outcome.ok(new ConcurrentDispatch.Selected()))
+                  Outcome.ok(
+                      new ConcurrentDispatch.Selected(
+                          ConcurrentDispatch.MODE,
+                          advertisedRequestDepth(),
+                          ConcurrentDispatch.MAX_ID_BYTES)))
               : router().routeAsync(frame, asking);
       return answer.thenAccept(
           outcome -> {

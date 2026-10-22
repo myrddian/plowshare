@@ -35,8 +35,18 @@ class ConcurrentEventChannelTest {
     volatile java.util.function.Consumer<String> onReply = ignored -> {};
 
     Fixture(boolean segmented, FrameRouter router) throws Exception {
+      this(segmented, router, ignored -> {});
+    }
+
+    /** {@code configure} runs before the connection is established, as startup wiring would. */
+    Fixture(
+        boolean segmented,
+        FrameRouter router,
+        java.util.function.Consumer<EventChannelHandler> configure)
+        throws Exception {
       var json = FrameJson.answering();
       handler = new EventChannelHandler(new SessionRegistry(), router, new Watchers());
+      configure.accept(handler);
       var attributes = new ConcurrentHashMap<String, Object>();
       attributes.put(EventChannelHandler.HANDLE, "alice");
       when(socket.getAttributes()).thenReturn(attributes);
@@ -140,7 +150,8 @@ class ConcurrentEventChannelTest {
       fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
       var selection = FrameJson.answering().readTree(fixture.reply());
       assertEquals("select", selection.path("id").asText());
-      assertEquals(64, selection.path("payload").path("payload").path("maxPending").asInt());
+      // The server's own default depth, not the protocol ceiling of 64.
+      assertEquals(8, selection.path("payload").path("payload").path("maxPending").asInt());
       fixture.send("slow", "information.facets", Map.of("slow", true));
       entered.get(5, TimeUnit.SECONDS);
       fixture.send("fast", "information.facets", Map.of());
@@ -150,6 +161,30 @@ class ConcurrentEventChannelTest {
       assertEquals("slow", FrameJson.answering().readTree(fixture.reply()).path("id").asText());
     } finally {
       release.complete(null);
+    }
+  }
+
+  @Test
+  void the_handshake_reply_carries_the_configured_depth() throws Exception {
+    try (var fixture =
+        new Fixture(true, new FrameRouter(Map.of()), handler -> handler.useRequestDepth(5))) {
+      fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
+      var selection = FrameJson.answering().readTree(fixture.reply());
+      assertEquals(5, selection.path("payload").path("payload").path("maxPending").asInt());
+    }
+  }
+
+  @Test
+  void request_depth_is_validated_and_fixed_once_dispatch_starts() throws Exception {
+    var handler =
+        new EventChannelHandler(new SessionRegistry(), new FrameRouter(Map.of()), new Watchers());
+    assertThrows(IllegalArgumentException.class, () -> handler.useRequestDepth(0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> handler.useRequestDepth(ConcurrentDispatch.MAX_PENDING + 1));
+    handler.useRequestDepth(ConcurrentDispatch.MAX_PENDING);
+    try (var fixture = new Fixture(true, new FrameRouter(Map.of()))) {
+      assertThrows(IllegalStateException.class, () -> fixture.handler.useRequestDepth(4));
     }
   }
 

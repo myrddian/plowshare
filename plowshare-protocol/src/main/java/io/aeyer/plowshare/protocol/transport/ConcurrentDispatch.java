@@ -21,13 +21,25 @@ public final class ConcurrentDispatch {
     }
   }
 
-  /** Effective per-connection bounds confirmed before any domain request is submitted. */
+  /**
+   * Effective per-connection bounds confirmed before any domain request is submitted.
+   *
+   * <p>{@code maxPending} is the depth the server advertises and the client then adopts as its call
+   * window. It may be any value in {@code [1, MAX_PENDING]}: {@link #MAX_PENDING} is the protocol
+   * ceiling, not a required value, so a server may advertise a shallower queue than clients could
+   * tolerate. Clients already accept that whole range. The mode and ID bound stay exact because
+   * they are part of the wire identity of this protocol version.
+   */
   public record Selected(String mode, int maxPending, int maxIdBytes) {
     public Selected {
-      if (!MODE.equals(mode) || maxPending != MAX_PENDING || maxIdBytes != MAX_ID_BYTES)
+      if (!MODE.equals(mode)
+          || maxPending < 1
+          || maxPending > MAX_PENDING
+          || maxIdBytes != MAX_ID_BYTES)
         throw new IllegalArgumentException("Invalid dispatch selection");
     }
 
+    /** Selection at the protocol ceiling. */
     public Selected() {
       this(MODE, MAX_PENDING, MAX_ID_BYTES);
     }
