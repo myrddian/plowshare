@@ -36,6 +36,7 @@ class PinnedOperationAuthorityTest {
     when(identities.project("one")).thenReturn(target);
     when(members.authorityAccount("alice")).thenReturn(Optional.of("alice"));
     when(members.role("one", "alice")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+    when(identities.home(target)).thenReturn(Home.of("one"));
     var binding = mock(ScopedGrantRepository.Binding.class);
     when(binding.id()).thenReturn(grant);
     when(grants.live(recipient)).thenReturn(List.of(binding));
@@ -45,22 +46,90 @@ class PinnedOperationAuthorityTest {
 
   @Test
   void empty_creation_never_implies_model_admission() {
-    var admitted =
-        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
     assertEquals(Set.of(AuthorityAction.CONVERSATION_CREATE), admitted.actions());
     verify(records).retain(admitted);
     assertThrows(
-        CallerFault.class,
-        () -> policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.RUN_MODEL)));
-    assertThrows(
-        CallerFault.class,
-        () -> policy.admit("alice", Home.global(), Set.of(AuthorityAction.CONVERSATION_CREATE)));
+        CallerFault.class, () -> policy.admit("alice", target, Set.of(AuthorityAction.RUN_MODEL)));
+    // The global tier is refused where a legacy home is resolved, with admission's own refusal.
+    assertEquals(
+        "Operation is outside its retained scoped authority",
+        assertThrows(CallerFault.class, () -> policy.scope(Home.global())).getMessage());
+  }
+
+  /**
+   * Admission is for a project or an account's own space. Global knowledge and administration are
+   * separate authorities with their own gates, and naming one explicitly must not open admission to
+   * it — the closure the two-tier home used to provide by accident.
+   */
+  @Test
+  void global_knowledge_and_administration_scopes_are_never_admitted() {
+    for (var scope :
+        List.<AuthorityScope>of(
+            new AuthorityScope.AccountKnowledge(new ScopeId(UUID.randomUUID()), account),
+            new AuthorityScope.Administration(new ScopeId(UUID.randomUUID()), account)))
+      assertEquals(
+          "Operation is outside its retained scoped authority",
+          assertThrows(
+                  CallerFault.class,
+                  () -> policy.admit("alice", scope, Set.of(AuthorityAction.CONVERSATION_CREATE)))
+              .getMessage());
+    verify(records, never()).retain(any());
+    verifyNoInteractions(grants);
+  }
+
+  /** A project home resolves to its scope, and the admission retains that scope's own home. */
+  @Test
+  void a_legacy_project_home_resolves_to_its_scope_and_the_scope_supplies_the_retained_home() {
+    assertEquals(target, policy.scope(Home.of("one")));
+    var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
+    assertEquals(target.id(), admitted.scope());
+    assertEquals(Home.of("one"), admitted.home());
+    assertDoesNotThrow(() -> policy.require(admitted));
+  }
+
+  /**
+   * An account's own space is admissible when it is named as the scope it is. Unchanged policy —
+   * {@code admit} has always accepted a Personal scope — but unreachable while the only way in was
+   * a project home, which an account's own space does not have.
+   */
+  @Test
+  void an_account_s_own_personal_scope_is_admitted_and_is_not_the_global_tier() {
+    var own = new AuthorityScope.Personal(new ScopeId(UUID.randomUUID()), account, 7);
+    var home = Home.of("personal:alice");
+    when(identities.home(own)).thenReturn(home);
+    when(identities.project("personal:alice")).thenReturn(own);
+    when(members.role("personal:alice", "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(authority.allowsUsing(recipient, own, AuthorityAction.WRITE, grant)).thenReturn(true);
+    var admitted = policy.admit("alice", own, Set.of(AuthorityAction.WRITE));
+    assertEquals(own.id(), admitted.scope());
+    assertEquals(home, admitted.home());
+    assertFalse(admitted.home().isGlobal());
+    assertDoesNotThrow(() -> policy.require(admitted));
+  }
+
+  /** A reserved built-in identity is refused before any grant is read, scope notwithstanding. */
+  @Test
+  void builtin_identities_are_never_admitted_for_a_project_scope() {
+    when(identities.account("robot"))
+        .thenReturn(
+            new IdentityRepository.Account(
+                new AccountId(UUID.randomUUID()),
+                "robot",
+                IdentityRepository.AccountKind.BUILTIN,
+                true));
+    assertEquals(
+        "Operation is outside its retained scoped authority",
+        assertThrows(
+                CallerFault.class,
+                () -> policy.admit("robot", target, Set.of(AuthorityAction.CONVERSATION_CREATE)))
+            .getMessage());
+    verify(records, never()).retain(any());
   }
 
   @Test
   void replacement_grant_cannot_repair_revocation_and_current_role_can_only_narrow() {
-    var admitted =
-        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
     when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
         .thenReturn(false);
     var replacement = mock(ScopedGrantRepository.Binding.class);
@@ -75,8 +144,7 @@ class PinnedOperationAuthorityTest {
 
   @Test
   void resource_relocation_and_other_personal_scopes_refuse() {
-    var admitted =
-        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
     var resource = new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "cnv");
     when(resources.projects(resource)).thenReturn(List.of("two"));
     assertThrows(
@@ -84,15 +152,12 @@ class PinnedOperationAuthorityTest {
         () -> policy.requireTargets(admitted, Home.of("one"), List.of(resource)));
     assertThrows(
         CallerFault.class, () -> policy.requireTargets(admitted, Home.of("two"), List.of()));
-    when(identities.project("personal:bob"))
-        .thenReturn(
-            new AuthorityScope.Personal(
-                new ScopeId(UUID.randomUUID()), new AccountId(UUID.randomUUID()), 2));
+    var other =
+        new AuthorityScope.Personal(
+            new ScopeId(UUID.randomUUID()), new AccountId(UUID.randomUUID()), 2);
     assertThrows(
         CallerFault.class,
-        () ->
-            policy.admit(
-                "alice", Home.of("personal:bob"), Set.of(AuthorityAction.CONVERSATION_CREATE)));
+        () -> policy.admit("alice", other, Set.of(AuthorityAction.CONVERSATION_CREATE)));
   }
 
   @Test
@@ -103,7 +168,7 @@ class PinnedOperationAuthorityTest {
     var parent =
         policy.admit(
             "alice",
-            Home.of("one"),
+            target,
             Set.of(
                 AuthorityAction.READ,
                 AuthorityAction.WRITE,
@@ -143,8 +208,7 @@ class PinnedOperationAuthorityTest {
 
   @Test
   void missing_and_cyclic_parent_evidence_never_falls_back_to_ambient_authority() {
-    var admitted =
-        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
     UUID unknown = UUID.randomUUID();
     when(records.parent(admitted.id())).thenReturn(Optional.of(unknown));
     assertThrows(CallerFault.class, () -> policy.require(admitted));
@@ -155,7 +219,7 @@ class PinnedOperationAuthorityTest {
 
   @Test
   void builtin_system_identity_cannot_be_minted_as_an_ordinary_child() {
-    var parent = policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var parent = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
     when(identities.account("alice"))
         .thenReturn(
             new IdentityRepository.Account(
@@ -166,8 +230,7 @@ class PinnedOperationAuthorityTest {
 
   @Test
   void missing_or_relocated_retained_input_refuses_even_when_grants_remain_live() {
-    var admitted =
-        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
     var target =
         new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "retained-input");
     when(records.targets(admitted.id())).thenReturn(List.of(target));
@@ -189,8 +252,7 @@ class PinnedOperationAuthorityTest {
             identities, grants, authority, members, records, resources, knowledge);
     when(authority.allowsUsing(recipient, target, AuthorityAction.READ, grant)).thenReturn(true);
     when(authority.allowsUsing(recipient, target, AuthorityAction.WRITE, grant)).thenReturn(true);
-    var root =
-        live.admit("alice", Home.of("one"), Set.of(AuthorityAction.READ, AuthorityAction.WRITE));
+    var root = live.admit("alice", target, Set.of(AuthorityAction.READ, AuthorityAction.WRITE));
     assertTrue(root.globalRead());
     var memory = new AccessRequest.Resource(ResourceScopeRepository.Kind.MEMORY, "global-memory");
     when(resources.projects(memory)).thenReturn(java.util.Collections.singletonList(null));

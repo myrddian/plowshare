@@ -196,4 +196,65 @@ class InformationAccessTest {
         () -> InformationSql.boundary(access.resolve("alice", null), "r.id) OR true --"));
     assertThrows(UnsupportedOperationException.class, () -> filter.arguments().add("bob"));
   }
+
+  /**
+   * Personal is the account's own knowledge home. Java admits the selection and the SQL destination
+   * function owns the live write policy, so no account-home ADMIN authority is consulted here. The
+   * DENY account permissions mirror a deployment that issues no account-knowledge grant at all.
+   */
+  @Test
+  void personal_write_needs_no_account_home_authority() {
+    ProjectMembers members = mock(ProjectMembers.class);
+    var access = new InformationAccess(new EffectiveProjectPermissions(members));
+    var personal = access.resolve("alice", InformationContext.Selection.personal());
+    assertEquals(InformationContext.Scope.PERSONAL, personal.selection().scope());
+    assertDoesNotThrow(() -> access.requireWork(personal));
+    assertDoesNotThrow(() -> access.requireSelection(personal));
+    verifyNoInteractions(members);
+  }
+
+  /**
+   * Account scope addresses the Global knowledge home only, never the caller's own account. Content
+   * WRITE and SET_AUDIENCE are separate actions over that home: holding one must not confer the
+   * other.
+   */
+  @Test
+  void account_scope_is_the_global_home_with_separate_write_and_audience_authority() {
+    ProjectMembers members = mock(ProjectMembers.class);
+    var selection =
+        InformationContext.Selection.account(
+            io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value());
+    var denied = new InformationAccess(new EffectiveProjectPermissions(members));
+    var unauthorized = denied.resolve("alice", selection);
+    assertEquals(InformationContext.Scope.ACCOUNT, unauthorized.selection().scope());
+    assertEquals(
+        io.aeyer.plowshare.server.access.BuiltInIdentities.GLOBAL.value(),
+        unauthorized.selection().account());
+    assertDoesNotThrow(() -> denied.requireSelection(unauthorized));
+    assertEquals(
+        "This account needs scoped human ADMIN authority for this account home",
+        assertThrows(CallerFault.class, () -> denied.requireWork(unauthorized)).getMessage());
+    assertEquals(
+        "This account needs scoped human ADMIN authority for this account home",
+        assertThrows(CallerFault.class, () -> denied.requireAudience(unauthorized)).getMessage());
+    var writeOnly =
+        new InformationAccess(
+            new EffectiveProjectPermissions(members),
+            io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY,
+            (actor, account, action) ->
+                action == io.aeyer.plowshare.server.access.AuthorityAction.WRITE);
+    var writable = writeOnly.resolve("alice", selection);
+    assertDoesNotThrow(() -> writeOnly.requireWork(writable));
+    assertThrows(CallerFault.class, () -> writeOnly.requireAudience(writable));
+    var audienceOnly =
+        new InformationAccess(
+            new EffectiveProjectPermissions(members),
+            io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY,
+            (actor, account, action) ->
+                action == io.aeyer.plowshare.server.access.AuthorityAction.SET_AUDIENCE);
+    var audience = audienceOnly.resolve("alice", selection);
+    assertDoesNotThrow(() -> audienceOnly.requireAudience(audience));
+    assertThrows(CallerFault.class, () -> audienceOnly.requireWork(audience));
+    verifyNoInteractions(members);
+  }
 }

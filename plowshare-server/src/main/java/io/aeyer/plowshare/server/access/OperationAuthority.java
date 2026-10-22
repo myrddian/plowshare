@@ -92,8 +92,33 @@ public interface OperationAuthority {
   /** Narrows a retained parent, preserving exact supporting grants and immutable ancestry. */
   Admission derive(Admission parent, Set<AuthorityAction> actions);
 
-  /** Resolves and retains exact supporting grants; never changes account or home on refusal. */
-  Admission admit(String executor, Home home, Set<AuthorityAction> actions);
+  /**
+   * The explicit authority scope a legacy project home names.
+   *
+   * <p>A {@link Home} is the two-tier <em>memory retrieval</em> partition: a named project, or
+   * {@code null} for the global tier. Admission asks a four-way question instead — a project, an
+   * account's own space, Global knowledge, or administration — and the home cannot spell the
+   * difference between the last three, because all of them are "no project". So the global tier is
+   * refused here with the same refusal {@link #admit} gives it: it is a memory tier, not an
+   * execution scope. A caller that means an account's own space resolves that scope explicitly
+   * instead of presenting a home with no project.
+   *
+   * <p>This exists for the callers that still carry a request's project name. It is not a
+   * permission check: resolving a scope grants nothing.
+   */
+  AuthorityScope scope(Home home);
+
+  /**
+   * Resolves and retains exact supporting grants for an explicit scope; never changes account or
+   * home on refusal.
+   *
+   * <p>Takes the resolved {@link AuthorityScope} rather than a {@link Home} so that each caller
+   * states which of the four authority concerns it means and a new concern cannot be absorbed into
+   * an existing one. The admission still retains the legacy project home its resource fences
+   * compare against; that home is resolved from the scope rather than from caller-supplied text, so
+   * no admission can be recorded under a home its scope does not own.
+   */
+  Admission admit(String executor, AuthorityScope scope, Set<AuthorityAction> actions);
 
   /** Rechecks only the captured grants and current token/Application ceilings. */
   void require(Admission admission);

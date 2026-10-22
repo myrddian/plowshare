@@ -72,6 +72,26 @@ public class JdbcIdentityRepository implements IdentityRepository {
             name));
   }
 
+  /**
+   * One read of the project row the scope already points at. The name is not derived from the
+   * scope's kind or owner — a personal space's name is an ordinary {@code projects.name} — so a
+   * renamed project answers its current name and nothing reconstructs a stale one.
+   */
+  @Override
+  public Home home(AuthorityScope scope) {
+    Objects.requireNonNull(scope);
+    long project =
+        switch (scope) {
+          case AuthorityScope.Project value -> value.projectId();
+          case AuthorityScope.Personal value -> value.projectId();
+          case AuthorityScope.AccountKnowledge ignored -> 0L;
+          case AuthorityScope.Administration ignored -> 0L;
+        };
+    if (project == 0L) throw absent();
+    return Home.of(
+        one(jdbc.queryForList("SELECT name FROM projects WHERE id=?", String.class, project)));
+  }
+
   @Override
   public AuthorityScope.Personal personal(AccountId account) {
     Objects.requireNonNull(account);

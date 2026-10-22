@@ -46,6 +46,18 @@ public interface IdentityRepository {
   /** Resolves the exact legacy name, never interprets its text as a scope/account UUID. */
   AuthorityScope project(String legacyName);
 
+  /**
+   * The legacy project home a project-bearing scope is recorded under: the exact inverse of {@link
+   * #project(String)}.
+   *
+   * <p>Knowledge and administration scopes have no project and are refused rather than answered
+   * with {@link Home#global()}. A null project is the global <em>memory</em> tier, so handing it
+   * back for an account's own knowledge scope would be the same conflation {@link
+   * #legacyHome(Home)} refuses in the other direction — and a retained home of "no project" is
+   * exactly what closed personal admission in the first place.
+   */
+  Home home(AuthorityScope scope);
+
   AuthorityScope.Personal personal(AccountId account);
 
   AuthorityScope.AccountKnowledge knowledge(AccountId account);

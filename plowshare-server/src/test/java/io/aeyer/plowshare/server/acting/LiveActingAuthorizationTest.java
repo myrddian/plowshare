@@ -508,7 +508,8 @@ class LiveActingAuthorizationTest {
             OperationExecution.actions(definition).stream()
                 .map(action -> new OperationAuthority.Support(action, UUID.randomUUID()))
                 .toList());
-    when(operations.admit(SUBJECT, home, OperationExecution.actions(definition)))
+    when(operations.scope(home)).thenReturn(personalScope);
+    when(operations.admit(SUBJECT, personalScope, OperationExecution.actions(definition)))
         .thenReturn(operation);
     var dispatcher = mock(LlmDispatcher.class);
     var transcript = mock(Transcript.class, CALLS_REAL_METHODS);

@@ -213,7 +213,10 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
       }
       String log = row.log();
       if (log == null) {
-        Home home = project == null ? Home.global() : Home.of(project);
+        // The same door, and the same selection, as the write gate: this row's null project is a
+        // PERSONAL selection twenty lines above, not the global tier, so the home comes from the
+        // resolved context rather than from the column. See InformationAccess.executionHome.
+        Home home = InformationAccess.executionHome(context);
         log =
             conversations
                 .log(
