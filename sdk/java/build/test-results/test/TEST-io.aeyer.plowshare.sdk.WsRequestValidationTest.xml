@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.aeyer.plowshare.sdk.WsRequestValidationTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:33" hostname="MacBook-Pro.lan" time="0.009">
-  <properties/>
-  <testcase name="malformed_requests_never_open_a_socket_or_upload()" classname="io.aeyer.plowshare.sdk.WsRequestValidationTest" time="0.003"/>
-  <testcase name="an_existing_conversation_is_an_explicit_scope()" classname="io.aeyer.plowshare.sdk.WsRequestValidationTest" time="0.0"/>
-  <testcase name="image_receipts_must_match_the_explicit_project_without_replay()" classname="io.aeyer.plowshare.sdk.WsRequestValidationTest" time="0.006"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

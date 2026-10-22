@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.aeyer.plowshare.sdk.ProviderConnectionClientTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:30" hostname="MacBook-Pro.lan" time="0.02">
-  <properties/>
-  <testcase name="a_foreign_receipt_is_refused_after_one_send_and_nullable_ownership_is_explicit()" classname="io.aeyer.plowshare.sdk.ProviderConnectionClientTest" time="0.011"/>
-  <testcase name="older_server_refusals_remain_explicit_for_owner_management_without_secret_payloads()" classname="io.aeyer.plowshare.sdk.ProviderConnectionClientTest" time="0.006"/>
-  <testcase name="nullable_metadata_fields_are_required_and_uuid_text_cannot_be_coerced()" classname="io.aeyer.plowshare.sdk.ProviderConnectionClientTest" time="0.003"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

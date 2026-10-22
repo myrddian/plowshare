@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.aeyer.plowshare.sdk.RelayClientTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:28:30" hostname="MacBook-Pro.lan" time="0.021">
-  <properties/>
-  <testcase name="strict_reply_decoding_preserves_positions_and_refuses_corrupted_semantics()" classname="io.aeyer.plowshare.sdk.RelayClientTest" time="0.007"/>
-  <testcase name="foreign_processing_reply_is_refused_after_exactly_one_submission()" classname="io.aeyer.plowshare.sdk.RelayClientTest" time="0.008"/>
-  <testcase name="foreign_control_outcome_is_refused_without_replaying_the_mutation()" classname="io.aeyer.plowshare.sdk.RelayClientTest" time="0.006"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>
