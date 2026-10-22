@@ -99,6 +99,38 @@ public final class InformationAccess {
     return InformationContext.Selection.project(project);
   }
 
+  /**
+   * The execution home a selection's own pipeline work is admitted against.
+   *
+   * <p>This is the exact inverse of {@link #forRun}, which reads a PERSONAL selection back out of a
+   * home by comparing its project against {@code PersonalSpaces.name(account)}. A {@link
+   * InformationContext.Selection} cannot carry the answer by itself: its constructor forbids every
+   * non-PROJECT scope from naming a project, so {@code selection.project()} is null for a PERSONAL
+   * selection and reading it alone cannot tell "this account's own space" apart from "no project at
+   * all". Resolving the personal space's own project name here is what keeps a personal write
+   * inside an execution scope that {@code OperationAuthority.scope(Home)} can resolve and {@code
+   * admit} can own-check; mapping it to {@code Home.global()} instead is what refused every
+   * personal document upload with "Operation is outside its retained scoped authority".
+   *
+   * <p>This resolves a destination; it grants nothing. The caller's own authority over that home is
+   * still established by admission — {@code admit} refuses a {@code Personal} scope whose account
+   * is not the executor's, and still requires a live supporting grant.
+   *
+   * <p>ACCOUNT and GLOBAL_READ selections keep answering {@link
+   * io.aeyer.plowshare.protocol.Home#global()}: the Global knowledge tier genuinely has no project,
+   * it is not an execution scope, and admission for it stays closed exactly as it is today. Those
+   * two scopes have their own gates ({@link AccountKnowledgePermissions}, and {@link
+   * #requireWork}'s refusal of a Global READ destination) and are not widened here.
+   */
+  public static io.aeyer.plowshare.protocol.Home executionHome(InformationContext context) {
+    Objects.requireNonNull(context, "context");
+    return switch (context.selection().scope()) {
+      case PROJECT -> io.aeyer.plowshare.protocol.Home.of(context.selection().project());
+      case PERSONAL -> io.aeyer.plowshare.protocol.Home.of(PersonalSpaces.name(context.account()));
+      case ACCOUNT, GLOBAL_READ -> io.aeyer.plowshare.protocol.Home.global();
+    };
+  }
+
   /** Check every operation again; an earlier context is not a membership lease. */
   public void requireSelection(InformationContext context) {
     Objects.requireNonNull(context, "context");

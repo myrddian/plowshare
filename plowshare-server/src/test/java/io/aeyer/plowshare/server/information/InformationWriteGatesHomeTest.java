@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.Hooks;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -23,11 +24,19 @@ import org.mockito.ArgumentCaptor;
  * Which {@link Home} a gated information transition opens its {@code document_pipeline} log
  * against.
  *
- * <p>{@code InformationWriteGates.executePrepared} derives that home from {@link
- * InformationContext.Selection#project()} alone. A PROJECT selection names a project, so it gets
- * {@code Home.of(project)}; every other scope is forbidden to name one by the {@code Selection}
- * constructor, so a PERSONAL selection reaches the same expression with {@code project == null} and
- * falls to {@code Home.global()}. These tests execute that branch rather than read it.
+ * <p>{@code InformationWriteGates.executePrepared} resolves that home through {@link
+ * InformationAccess#executionHome}, which answers the selection's own execution scope rather than
+ * reading {@link InformationContext.Selection#project()}. A PROJECT selection names a project, so
+ * it gets {@code Home.of(project)}; a PERSONAL selection is forbidden to name one by the {@code
+ * Selection} constructor, so its home is its account's own personal space. These tests execute that
+ * resolution rather than read it.
+ *
+ * <p>Both tests were pinned at {@code 4ea69c14} against the defect: the personal case then asserted
+ * {@code Home.global()}, because the gate read the project column alone and a null column fell to
+ * the global tier — which {@code OperationAuthority.scope(Home)} refuses outright, and which is why
+ * a personal document upload returned "Operation is outside its retained scoped authority". The
+ * personal assertion below is the inversion of that pin. The PROJECT control is unchanged, which is
+ * what shows the resolution still reads the selection and not a stub.
  */
 class InformationWriteGatesHomeTest {
 
@@ -97,26 +106,26 @@ class InformationWriteGatesHomeTest {
   }
 
   /**
-   * CONFIRMED DEFECT, pinned as it stands. A PERSONAL upload opens its {@code document_pipeline}
-   * log against the GLOBAL home, because {@code Selection} forbids a non-PROJECT scope from naming
-   * a project and the gate reads nothing else. Downstream admission therefore sees a Global write
-   * from an account that has no Global write authority.
+   * FIXED, and this is the inverted pin. A PERSONAL upload opens its {@code document_pipeline} log
+   * against the uploading account's own personal space — the project {@code PersonalSpaces.name}
+   * already names at every other site that addresses one — and never against the global tier, which
+   * is a memory tier rather than an execution scope and is refused at admission.
    *
-   * <p><b>When this is fixed, invert the assertion</b> — a PERSONAL selection must open its log
-   * against that account's own personal home, not {@code Home.global()}.
+   * <p>The home is asserted by its exact project name rather than only by {@code !isGlobal()},
+   * because "some project" would also be satisfied by a wrong one: an implicit project, or another
+   * account's personal space, would both be a different defect.
    */
   @Test
-  void personal_selection_currently_opens_its_pipeline_log_against_the_global_home() {
+  void personal_selection_opens_its_pipeline_log_against_that_accounts_own_personal_home() {
     reachTheLogOpening("cnv_personal");
 
     assertNotNull(upload(InformationContext.Selection.personal()));
 
     Home home = capturedHome();
-    assertTrue(
-        home.isGlobal(),
-        "a personal selection reached the gate's project==null branch and fell to global");
-    assertEquals(Home.global(), home);
-    assertNull(home.project());
+    assertFalse(home.isGlobal(), "a personal selection must not fall to the global memory tier");
+    assertEquals(Home.of(PersonalSpaces.name(ACCOUNT)), home);
+    assertEquals(PersonalSpaces.name(ACCOUNT), home.project());
+    assertNotEquals(Home.global(), home);
   }
 
   /**

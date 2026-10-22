@@ -19,6 +19,7 @@ import io.aeyer.plowshare.server.access.ScopedGrantRepository;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -36,9 +37,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * is refused there, and {@code admit} separately refuses any scope that is not {@code Project} or
  * {@code Personal}. Those two refusals are pinned directly in {@code PinnedOperationAuthorityTest};
  * what was never executed is that <em>this store's log path</em> reaches one of them when the home
- * it is handed is global — the link between {@code InformationWriteGates} opening a personal
- * upload's pipeline log against {@code Home.global()} (see {@code InformationWriteGatesHomeTest})
- * and the live "Operation is outside its retained scoped authority" refusal.
+ * it is handed is global — which was the link between {@code InformationWriteGates} opening a
+ * personal upload's pipeline log against {@code Home.global()} and the live "Operation is outside
+ * its retained scoped authority" refusal.
+ *
+ * <p>That gate now resolves a PERSONAL selection to its own account's personal home instead (see
+ * {@code InformationWriteGatesHomeTest}), so the live refusal is gone. The global refusal pinned
+ * here is unchanged and still correct: a global home remains a memory tier rather than an execution
+ * scope. {@link #a_personal_home_is_admitted_at_the_same_link_that_refuses_the_global_one} closes
+ * the chain from the other end, at this same door.
  *
  * <p>The authority here is the real {@link PinnedOperationAuthority} over mocked repositories — the
  * same fixture {@code PinnedOperationAuthorityTest} uses — so the refusal under test is production
@@ -61,6 +68,15 @@ class ConversationStoreAdmissionHomeTest {
   private final AccountId account = new AccountId(UUID.randomUUID());
   private final AuthorityScope project =
       new AuthorityScope.Project(new ScopeId(UUID.randomUUID()), 1);
+
+  /**
+   * Alice's own personal space: the scope the information path now resolves a PERSONAL write to.
+   */
+  private static final String PERSONAL = PersonalSpaces.name("alice");
+
+  private final AuthorityScope.Personal personal =
+      new AuthorityScope.Personal(new ScopeId(UUID.randomUUID()), account, 2);
+
   private final GrantRecipient recipient = GrantRecipient.account(account);
   private final UUID grant = UUID.randomUUID();
 
@@ -99,6 +115,14 @@ class ConversationStoreAdmissionHomeTest {
         .thenReturn(true);
     when(allowances.attach(any(Budget.class)))
         .thenAnswer(invocation -> invocation.getArgument(0, Budget.class));
+    // Alice's own personal space, as the live repositories answer for it: an ordinary project row
+    // whose scope is PERSONAL and owned by her account, and on which JdbcProjectMembers.role
+    // answers MANAGER for its owner. Nothing here is Global authority either.
+    when(identities.project(PERSONAL)).thenReturn(personal);
+    when(identities.home(personal)).thenReturn(Home.of(PERSONAL));
+    when(members.role(PERSONAL, "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(authority.allowsUsing(recipient, personal, AuthorityAction.CONVERSATION_CREATE, grant))
+        .thenReturn(true);
   }
 
   /** The call the write gate makes for a document upload, with only the home varying. */
@@ -114,11 +138,12 @@ class ConversationStoreAdmissionHomeTest {
    * refusal, raised where a legacy home is resolved — so it happens before any identity, grant or
    * record is read, and before the INSERT.
    *
-   * <p>This is the defect's last link, not a rule being blessed: a person uploading a document with
-   * {@code scope:{kind:"personal"}} is refused here because the gate handed this door {@code
-   * Home.global()} for a write that is not a Global write. <b>When the gate is fixed to open a
-   * personal selection's log against that account's own personal home, this test keeps standing — a
-   * genuinely global home is still not an execution scope — but the live refusal disappears.</b>
+   * <p>This was the defect's last link, not a rule being blessed: a person uploading a document
+   * with {@code scope:{kind:"personal"}} was refused here because the gate handed this door {@code
+   * Home.global()} for a write that is not a Global write. <b>The gate has since been fixed to open
+   * a personal selection's log against that account's own personal home, and this test stands
+   * unchanged — a genuinely global home is still not an execution scope. Global admission stays
+   * closed; do not relax this.</b>
    */
   @Test
   void a_global_home_is_refused_at_the_admission_link_of_the_log_path() {
@@ -150,5 +175,60 @@ class ConversationStoreAdmissionHomeTest {
     assertEquals(Home.of("one"), admitted.getValue().home());
     assertEquals(project.id(), admitted.getValue().scope());
     assertEquals(Set.of(AuthorityAction.CONVERSATION_CREATE), admitted.getValue().actions());
+  }
+
+  /**
+   * The fix, executed at the link that refused it. The information write gate now opens a PERSONAL
+   * selection's {@code document_pipeline} log against {@code PersonalSpaces.name(account)} instead
+   * of {@code Home.global()}, and that is the home handed to this door. It is admitted: the home
+   * resolves to a {@code Personal} scope, {@code admit} own-checks that scope against the executor,
+   * a live grant supports {@code CONVERSATION_CREATE}, {@code requireOwn} re-resolves the scope
+   * from the retained project name and holds it to the owner's MANAGER ceiling, and the admission
+   * is retained under that personal home.
+   *
+   * <p>This is the assertion the acceptance criterion asks for: not that the home changed, but that
+   * the changed home passes the admission that the global home fails. Taken with {@link
+   * #a_global_home_is_refused_at_the_admission_link_of_the_log_path}, which is unchanged, it also
+   * shows the fix did not widen admission — the global tier is still refused.
+   */
+  @Test
+  void a_personal_home_is_admitted_at_the_same_link_that_refuses_the_global_one() {
+    ConversationRecord logged =
+        assertDoesNotThrow(() -> logPipeline(Home.of(PersonalSpaces.name("alice"))));
+    assertEquals(Home.of(PERSONAL), logged.home());
+
+    var admitted = org.mockito.ArgumentCaptor.forClass(OperationAuthority.Admission.class);
+    verify(records).retain(admitted.capture());
+    assertEquals(Home.of(PERSONAL), admitted.getValue().home());
+    assertFalse(admitted.getValue().home().isGlobal());
+    assertEquals(personal.id(), admitted.getValue().scope());
+    assertEquals(account, admitted.getValue().account());
+    assertEquals(Set.of(AuthorityAction.CONVERSATION_CREATE), admitted.getValue().actions());
+  }
+
+  /**
+   * The ownership fence this resolution depends on, executed rather than read. The identical call
+   * for a home that names <em>another</em> account's personal space is refused: {@code admit}
+   * compares the {@code Personal} scope's account against the executor's before any grant is
+   * consulted. Resolving a personal home is therefore a destination, not an authority — which is
+   * what makes it safe for the write gate to resolve one from the caller's own selection.
+   */
+  @Test
+  void another_accounts_personal_home_is_refused_even_with_a_live_grant() {
+    String other = PersonalSpaces.name("bob");
+    var bobs =
+        new AuthorityScope.Personal(
+            new ScopeId(UUID.randomUUID()), new AccountId(UUID.randomUUID()), 3);
+    when(identities.project(other)).thenReturn(bobs);
+    when(identities.home(bobs)).thenReturn(Home.of(other));
+    when(members.role(other, "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(authority.allowsUsing(recipient, bobs, AuthorityAction.CONVERSATION_CREATE, grant))
+        .thenReturn(true);
+
+    CallerFault refused = assertThrows(CallerFault.class, () -> logPipeline(Home.of(other)));
+
+    assertEquals(REFUSAL, refused.getMessage());
+    verify(records, never()).retain(any());
+    verifyNoInteractions(jdbc);
   }
 }

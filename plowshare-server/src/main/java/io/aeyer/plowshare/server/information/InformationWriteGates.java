@@ -105,8 +105,11 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
       if (receipt.state() != InformationGateRepository.State.APPROVED) {
         String log = receipt.log();
         if (log == null) {
-          String project = context.selection().project();
-          Home home = project == null ? Home.global() : Home.of(project);
+          // The selection's own execution home, not its project column: a PERSONAL selection is
+          // forbidden to name a project, so reading the column alone sent every personal upload's
+          // pipeline log to the global tier, which is no execution scope and is refused at
+          // admission. See InformationAccess.executionHome.
+          Home home = InformationAccess.executionHome(context);
           log =
               conversations
                   .log(
