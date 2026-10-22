@@ -354,6 +354,120 @@ describe('concurrent dispatch lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(wire.sent).toHaveLength(2);
   });
+  const refusal = { code: 'CAPACITY_EXHAUSTED', payload: [] };
+  const idOf = (wire: Wire, index: number): unknown =>
+    (JSON.parse(wire.sent[index]!) as { id: unknown }).id;
+  // Red before: a refusal resolved the caller with a non-OK Reply.
+  it('resubmits under the same id after a capacity refusal instead of surfacing it', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire);
+    await ready;
+    const asked = connection.ask('project.list', {});
+    let settled = false;
+    void asked.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await flush();
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(settled).toBe(false);
+    expect(wire.sent).toHaveLength(3);
+    expect(idOf(wire, 2)).toBe(idOf(wire, 1));
+    wire.answer(2);
+    await expect(asked).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  it('resubmits when another request frees its slot, without a timer', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire);
+    await ready;
+    const first = connection.ask('project.list', {});
+    const second = connection.ask('project.list', {});
+    await flush();
+    wire.answer(2, refusal);
+    await flush();
+    // Another request is still in flight, so the refused one waits for it.
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(1);
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(4);
+    expect(idOf(wire, 3)).toBe(idOf(wire, 2));
+    wire.answer(3);
+    await expect(second).resolves.toEqual({ code: 'OK', payload: [] });
+    // Re-entry must not double-count the window: a full window still admits.
+    const again = connection.ask('project.list', {});
+    await flush();
+    wire.answer(4);
+    await expect(again).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
+  it('settles a request waiting to resubmit when the connection closes', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire);
+    await ready;
+    const asked = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    await flush();
+    wire.answer(1, refusal);
+    connection.close();
+    await asked;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wire.sent).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  // Red before: nothing re-entered transmit, so the guard was untested. With the
+  // guard removed this fails on the second 30s schedule and the leaked timer.
+  it('does not renew the deadline when a refused request resubmits', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const requested: number[] = [];
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          requested.push(milliseconds);
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    const ready = connection.ready();
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 64, maxIdBytes: 128 },
+    });
+    await ready;
+    // The negotiation exchange armed its own deadline; count only the request's.
+    const negotiated = requested.length;
+    let failure: unknown;
+    const asked = connection.ask('project.list', {}).catch((e: unknown) => {
+      failure = e;
+    });
+    await flush();
+    await vi.advanceTimersByTimeAsync(20000);
+    wire.answer(1, refusal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wire.sent).toHaveLength(3);
+    // 21s in: the original deadline has 9s left, not a renewed 30s.
+    await vi.advanceTimersByTimeAsync(8999);
+    expect(failure).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await asked;
+    expect(failure).toMatchObject({ code: 'RESPONSE_LOST' });
+    expect(
+      requested.slice(negotiated).filter((ms) => ms === 30000),
+    ).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    connection.close();
+  });
   it('admits parked callers in arrival order', async () => {
     const wire = new Wire();
     const { connection, ready } = opening(wire, 1);

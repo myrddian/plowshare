@@ -192,6 +192,13 @@ interface Waiting {
   cancelDeadline?: () => void;
   cancelAbort?: () => void;
   cancelSend?: () => boolean;
+  /** Cancels a pending resubmission backoff timer; set only while one is armed. */
+  cancelRetry?: () => void;
+  /**
+   * Consumes a server capacity refusal: the request returns to waiting for a
+   * dispatch slot and is resubmitted. Set once the request is submittable.
+   */
+  refused?: () => void;
   submitted: boolean;
   terminal: boolean;
   transferDone: boolean;
@@ -234,6 +241,9 @@ export class ConnectionFault extends Error {
         : 'NOT_SUBMITTED';
   }
 }
+
+/** Pause before resubmitting a refused request when nothing else is in flight to wake it. */
+const RESUBMIT_BACKOFF_MS = 100;
 
 /**
  * Speaks frames on an already-open socket.
@@ -329,6 +339,7 @@ export function connect(options: ConnectOptions): Connected {
     if (waiting.get(id) === asker) waiting.delete(id);
     asker.cancelDeadline?.();
     asker.cancelAbort?.();
+    asker.cancelRetry?.();
     releaseIfSettled(asker);
     return true;
   }
@@ -411,6 +422,13 @@ export function connect(options: ConnectOptions): Connected {
           `response type or protocol version does not match ${CURRENT_VERSION}: received ${String(frame['protocol_version'])}`,
         );
       const reply = { outcome: outcomeIn(frame['payload']), raw: frame };
+      // Flow control, not an answer: the server confirmed it never started this
+      // request (it owns no queue entry, packet budget or reply slot), so the
+      // caller is not told and the request waits to be submitted again.
+      if (reply.outcome.code === 'CAPACITY_EXHAUSTED' && asker.refused) {
+        asker.refused();
+        return;
+      }
       if (terminate(id, asker)) asker.answered(reply);
     } catch (cause) {
       fail(
@@ -602,6 +620,37 @@ export function connect(options: ConnectOptions): Connected {
         asker.cancelAbort = () => signal.removeEventListener('abort', aborted);
         if (signal.aborted) aborted();
       }
+      /**
+       * Capacity refusal handling: back-pressure the caller never sees.
+       *
+       * <p>The request stays in `waiting` (so abort, deadline and `strand()`
+       * still settle it) and keeps its `id`: the server refused before owning
+       * anything, so sending it again is not a mutation replay. The launch
+       * bookkeeping is undone so that the normal `launch()` -> `transmit()` path
+       * can run again without double-counting `dispatched`; `submitted` is
+       * cleared because a close while waiting is honestly NOT_SUBMITTED.
+       *
+       * <p>Resubmission is the same closure's `launch`, so the deadline armed on
+       * the first transmit is neither renewed nor extended and alone bounds the
+       * whole loop; there is deliberately no attempt counter. It waits for the
+       * next release of another in-flight request; when none is in flight no
+       * release can wake it, so it retries after a short backoff instead
+       * (immediately when no scheduler exists, which is the ordered case and
+       * costs one network round trip per attempt).
+       */
+      asker.refused = (): void => {
+        dispatched--;
+        launched = false;
+        asker.submitted = false;
+        if (dispatched > 0) {
+          launchWaiters.push({ asker, proceed: launch });
+        } else if (deadline !== undefined) {
+          asker.cancelRetry = deadline.schedule(() => {
+            delete asker.cancelRetry;
+            launch();
+          }, RESUBMIT_BACKOFF_MS);
+        } else launch();
+      };
       const launch = (): void => {
         if (asker.terminal) return;
         if (!open) {
@@ -616,8 +665,12 @@ export function connect(options: ConnectOptions): Connected {
         transmit();
       };
       // Not idempotent: it counts a dispatch and sets `launched` unconditionally,
-      // so a caller must never transmit the same request twice.
+      // so a caller must never transmit the same request twice without first
+      // undoing that bookkeeping (see `asker.refused`). `sends` makes a stale
+      // writer completion from an earlier send unable to touch a later one.
+      let sends = 0;
       const transmit = (): void => {
+        const send = ++sends;
         dispatched++;
         launched = true;
         armDeadline();
@@ -632,10 +685,12 @@ export function connect(options: ConnectOptions): Connected {
             if (asker.terminal) sent.cancel();
             sent.settled.then(
               () => {
+                if (send !== sends) return;
                 asker.transferDone = true;
                 releaseIfSettled(asker);
               },
               (cause: unknown) => {
+                if (send !== sends) return;
                 asker.transferDone = true;
                 fail(
                   id,
