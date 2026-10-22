@@ -133,6 +133,7 @@ describe('concurrent dispatch lifecycle', () => {
     await second;
     connection.close();
   });
+  // Guards strand() settling parked callers; not red-before (the old code rejected at once).
   it('settles a parked caller when the connection closes', async () => {
     const wire = new Wire();
     let close: (() => void) | undefined;
@@ -194,6 +195,88 @@ describe('concurrent dispatch lifecycle', () => {
     await second;
     connection.close();
   });
+  it('sends nothing and fails NOT_SUBMITTED when closed while launch-parked', async () => {
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: { milliseconds: 30000, schedule: () => () => undefined },
+    });
+    const calls = [1, 2, 3, 4].map(() =>
+      connection.ask('project.list', {}).then(
+        () => 'ok',
+        (cause: { code: string }) => cause.code,
+      ),
+    );
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 2, maxIdBytes: 128 },
+    });
+    await flush();
+    // Two dispatched, two parked behind the depth.
+    expect(wire.sent).toHaveLength(3);
+    connection.close();
+    await flush();
+    // The frame count catches a launch pumped while strand() still sees an open socket.
+    expect(wire.sent).toHaveLength(3);
+    expect(await Promise.all(calls)).toEqual([
+      'RESPONSE_LOST',
+      'RESPONSE_LOST',
+      'NOT_SUBMITTED',
+      'NOT_SUBMITTED',
+    ]);
+  });
+  it('admits parked callers in arrival order', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const calls = [1, 2, 3, 4].map((n) =>
+      connection.ask('project.list', { n }),
+    );
+    await flush();
+    for (let n = 1; n <= 3; n++) {
+      wire.answer(n);
+      await flush();
+      expect(wire.sent).toHaveLength(n + 2);
+      expect(JSON.parse(wire.sent[n + 1]!).payload).toEqual({ n: n + 1 });
+    }
+    wire.answer(4);
+    await Promise.all(calls);
+    connection.close();
+  });
+  it('wakes a waiter when the physical writer fails', async () => {
+    class FailingWire extends Wire {
+      fail: (cause: unknown) => void = () => undefined;
+      submit(frame: string, submitted: () => void): RequestSend {
+        this.sent.push(frame);
+        let first = this.sent.length === 2;
+        const settled = new Promise<void>((resolve, reject) => {
+          if (first) this.fail = reject;
+          else resolve();
+        });
+        first = false;
+        if (this.sent.length > 1) submitted();
+        return { cancel: () => true, settled };
+      }
+    }
+    const wire = new FailingWire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = expect(
+      connection.ask('project.list', {}),
+    ).rejects.toMatchObject({ code: 'RESPONSE_LOST' });
+    const second = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    wire.fail(new Error('writer down'));
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    connection.close();
+  });
+  // Guards the new parked-abort listener; the old code also rejected, so this is not red-before.
   it('fails a parked request fast when its signal aborts', async () => {
     const wire = new Wire();
     const { connection, ready } = opening(wire, 1);

@@ -293,12 +293,16 @@ export function connect(options: ConnectOptions): Connected {
    * what is already in flight admits nothing until in-flight work drains below it.
    */
   function pump(): void {
-    while (launchWaiters.length > 0 && dispatched < maximum) {
-      const next = launchWaiters.shift()!;
-      if (!next.asker.terminal) next.proceed();
+    // Never launch once closed: strand() runs release() (hence pump) for each
+    // failed request while the socket is still open, and a frame sent then would
+    // reach the server after its caller was told it was not submitted.
+    while (open && launchWaiters.length > 0 && dispatched < maximum) {
+      const next = launchWaiters.shift();
+      if (next !== undefined && !next.asker.terminal) next.proceed();
     }
     while (slotWaiters.length > 0 && admitted < maximum) {
-      const next = slotWaiters.shift()!;
+      const next = slotWaiters.shift();
+      if (next === undefined) break;
       next.cancelAbort?.();
       admitted++;
       next.granted();
@@ -334,6 +338,9 @@ export function connect(options: ConnectOptions): Connected {
   function strand(why: string, cause?: PacketTransportFault): void {
     open = false;
     stranding = true;
+    // Launch-parked entries are also in `waiting` and fail below; drop them so
+    // nothing can transmit them.
+    launchWaiters.length = 0;
     // Nothing from a parked caller was sent, so it is safely NOT_SUBMITTED.
     for (const parked of slotWaiters.splice(0)) {
       parked.cancelAbort?.();
