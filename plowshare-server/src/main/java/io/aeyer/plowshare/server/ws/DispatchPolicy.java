@@ -23,8 +23,23 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
     resources = List.copyOf(resources);
   }
 
+  /**
+   * Reads that need no ordering on their connection. {@code board.topics}, {@code swarm.status} and
+   * {@code admin.status} are polled by the desktop client; left to the fall-through default each
+   * poll was a connection-wide barrier. They are safe to run concurrently because they only read,
+   * declare no resource key, and were never made correct by barrier ordering: a barrier's scope is
+   * one connection, not the data, so PostgreSQL transactions, locks and version fences remain the
+   * cross-process authority. A FINITE read still waits behind a running barrier on its connection.
+   *
+   * <p>The {@link #barrier()} fall-through in {@link #decode} is deliberately unchanged. An
+   * unaudited operation keeps the conservative ordered barrier until the slice 04 audit has
+   * classified its full effects and authority lifecycle; the remaining operations await that audit.
+   */
   private static final Set<String> FINITE =
       Set.of(
+          "board.topics",
+          "swarm.status",
+          "admin.status",
           "information.list",
           "information.facets",
           "information.read",
@@ -37,6 +52,7 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "relay.log",
           "schedule.list",
           "schedule.files");
+
   private static final Set<String> CONVERSATIONS =
       Set.of(
           "conversation.lifecycle",
