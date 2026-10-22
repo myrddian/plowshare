@@ -558,7 +558,28 @@ export function connect(options: ConnectOptions): Connected {
           ),
         );
       };
-      if (deadline !== undefined) {
+      /**
+       * Arms the request deadline, at most once per request.
+       *
+       * <p>Decision: the deadline does not cover waiting for a slot. It governs
+       * an in-flight request, the time the server has to answer. Waiting for
+       * admission, for dispatch negotiation, or behind the negotiated depth is
+       * flow control, not failure; charging it to the deadline would turn
+       * back-pressure into a timeout. It is therefore armed only when the frame
+       * is actually handed to the socket (`transmit`), never in `launch()`'s
+       * parking path.
+       *
+       * <p>The once-only guard is load-bearing: a request that is resubmitted
+       * after a refusal must stay bounded by its first deadline. Re-arming per
+       * attempt would let a resubmitting request wait forever.
+       *
+       * <p>A never-launched request has no timer; its only exits are abort and
+       * connection close, and `strand()` settles both parked sets.
+       */
+      let deadlineArmed = false;
+      const armDeadline = (): void => {
+        if (deadline === undefined || deadlineArmed) return;
+        deadlineArmed = true;
         const milliseconds = requestOptions.timeoutMs ?? deadline.milliseconds;
         asker.cancelDeadline = deadline.schedule(
           () =>
@@ -567,7 +588,7 @@ export function connect(options: ConnectOptions): Connected {
             ),
           milliseconds,
         );
-      }
+      };
       if (requestOptions.signal !== undefined) {
         const signal = requestOptions.signal;
         const aborted = (): void =>
@@ -592,6 +613,7 @@ export function connect(options: ConnectOptions): Connected {
       const transmit = (): void => {
         dispatched++;
         launched = true;
+        armDeadline();
         try {
           if (socket.submit !== undefined) {
             asker.transferDone = false;

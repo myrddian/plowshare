@@ -226,6 +226,130 @@ describe('concurrent dispatch lifecycle', () => {
       'NOT_SUBMITTED',
     ]);
   });
+  // Red before: the deadline was armed at submission, so a launch-parked request
+  // (admitted, waiting behind the negotiated depth) expired at 30s with no frame sent.
+  it('does not spend the deadline while launch-parked behind the depth', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    const outcomes: string[] = [];
+    const record = (name: string) => (settled: unknown) => {
+      outcomes.push(`${name}:${(settled as { code?: string })?.code ?? 'ok'}`);
+    };
+    const first = connection
+      .ask('project.list', {})
+      .then(record('first'), record('first'));
+    const second = connection
+      .ask('project.list', {})
+      .then(record('second'), record('second'));
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 1, maxIdBytes: 128 },
+    });
+    await flush();
+    // One in flight; the second is admitted but launch-parked.
+    expect(wire.sent).toHaveLength(2);
+    // The in-flight request expires; the parked one has not started its clock.
+    await vi.advanceTimersByTimeAsync(29000);
+    await vi.advanceTimersByTimeAsync(29000);
+    expect(outcomes).toEqual(['first:RESPONSE_LOST']);
+    await first;
+    await flush();
+    // The slot freed at 30s, so the parked request launched then and is timed
+    // from that moment: 58s elapsed is only 28s of its own budget.
+    expect(wire.sent).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(outcomes).toEqual(['first:RESPONSE_LOST']);
+    await vi.advanceTimersByTimeAsync(2000);
+    await second;
+    expect(outcomes).toEqual(['first:RESPONSE_LOST', 'second:RESPONSE_LOST']);
+    connection.close();
+  });
+  it('does not spend the deadline while parked for admission', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const first = connection.ask('project.list', {}, { timeoutMs: 600000 });
+    let settled = false;
+    const second = connection
+      .ask('project.list', {}, { timeoutMs: 1000 })
+      .then(() => {
+        settled = true;
+      });
+    await flush();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(settled).toBe(false);
+    expect(wire.sent).toHaveLength(2);
+    wire.answer(1);
+    await first;
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await second;
+    expect(settled).toBe(true);
+    connection.close();
+  });
+  it('settles never-launched requests on close with no deadline running', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    let close: (() => void) | undefined;
+    wire.addEventListener = (type, listener) => {
+      if (type === 'message') wire.listener = listener;
+      else if (type === 'close') close = () => listener({ data: '' });
+    };
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    // Two before negotiation (one will be launch-parked at depth 1), then one
+    // more after negotiation that parks for admission.
+    const calls = [1, 2].map(() =>
+      connection.ask('project.list', {}).then(
+        () => 'ok',
+        (cause: { code: string }) => cause.code,
+      ),
+    );
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 2, maxIdBytes: 128 },
+    });
+    await flush();
+    const more = [3, 4].map(() =>
+      connection.ask('project.list', {}).then(
+        () => 'ok',
+        (cause: { code: string }) => cause.code,
+      ),
+    );
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    close!();
+    await flush();
+    expect(await Promise.all([...calls, ...more])).toEqual([
+      'RESPONSE_LOST',
+      'RESPONSE_LOST',
+      'NOT_SUBMITTED',
+      'NOT_SUBMITTED',
+    ]);
+    expect(wire.sent).toHaveLength(3);
+  });
   it('admits parked callers in arrival order', async () => {
     const wire = new Wire();
     const { connection, ready } = opening(wire, 1);
