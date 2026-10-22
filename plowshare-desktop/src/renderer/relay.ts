@@ -6,6 +6,7 @@ import type {
   RelayOperateRequest,
   RelayControlAction,
 } from 'plowshare-client-ts/operations/relay';
+import { replyState } from '../shared.ts';
 import type { DesktopState } from '../shared.ts';
 import { background } from './events.ts';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
@@ -477,5 +478,5 @@ window.plowshare.subscribe(update);
 background(
   window.plowshare
     .request({ action: 'bootstrap' })
-    .then((reply) => update(reply.state)),
+    .then((reply) => update(replyState(reply))),
 );

@@ -2,6 +2,7 @@ import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { background } from './events.ts';
 import { installPaneResize } from './pane-resize.ts';
 import { installInformation } from './information.ts';
+import { replyState } from '../shared.ts';
 import type { DesktopState, Request } from '../shared.ts';
 import {
   emptyLibrary,
@@ -93,7 +94,10 @@ async function action(request: Request) {
   try {
     const reply = await window.plowshare.request(request);
     localError = '';
-    update(reply.state);
+    // A document operation answers with its payload and leaves state to
+    // subscribe(); every other action here answers with state.
+    if (reply.state) update(reply.state);
+    else render();
   } catch (error) {
     localError = error instanceof Error ? error.message : errorMessage(error);
     render();
@@ -730,7 +734,7 @@ background(
     memoryScreen = reply.libraryScreen === 'memories';
     initialized = true;
     if (memoryScreen) $<HTMLSelectElement>('#search-kind').value = 'recall';
-    update(reply.state);
+    update(replyState(reply));
   }),
 );
 

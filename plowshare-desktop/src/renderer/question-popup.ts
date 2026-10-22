@@ -2,6 +2,7 @@ import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { background } from './events.ts';
 import {
   runQuestion,
+  replyState,
   type DesktopState,
   type Request,
   type Reply,
@@ -92,11 +93,11 @@ export function installQuestionPopup(
     const sentIdentity = identity,
       sentQuestion = fingerprint;
     try {
-      const reply = await send(value);
-      if (identityOf(reply.state) !== sentIdentity || identity !== sentIdentity)
+      const next = replyState(await send(value));
+      if (identityOf(next) !== sentIdentity || identity !== sentIdentity)
         return;
       if (fingerprint === sentQuestion) error = '';
-      update(reply.state, scope, conversation);
+      update(next, scope, conversation);
     } catch (reason) {
       if (identity !== sentIdentity || fingerprint !== sentQuestion) return;
       error = reason instanceof Error ? reason.message : errorMessage(reason);

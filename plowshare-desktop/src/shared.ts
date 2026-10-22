@@ -765,7 +765,16 @@ export interface Reply {
   usage?: Replies[UsageOperation];
   proc?: ProcReplies[keyof ProcReplies];
   information?: Replies[`information.${InformationOperation}`];
-  state: DesktopState;
+  /**
+   * Present only when the replicated state is itself the answer, or when a
+   * caller reads it synchronously with the reply. Replies that carry a domain
+   * payload omit it: the whole blob is orders of magnitude larger than the
+   * answer, and `subscribe()` already delivers every state change the handler
+   * made before it returned. Read it through `replyState` where a call site
+   * expects it, so a missing state fails loudly instead of rendering stale
+   * state.
+   */
+  state?: DesktopState;
   conversation?: string;
   stageScope?: StageScope;
   notice?: string;
@@ -781,6 +790,20 @@ export interface DesktopApi {
   subscribeWorkspace?(
     listener: (message: WorkspaceMessage) => void,
   ): () => void;
+}
+/**
+ * The replicated state of a reply that carries one. Only handlers whose answer
+ * is the state itself include it, so a call site that needs it must name an
+ * action that returns it. An absent state is a wiring defect between the
+ * handler and the call site, never a runtime condition, so it fails here
+ * rather than rendering a stale or partial view.
+ */
+export function replyState(reply: Reply): DesktopState {
+  if (!reply.state)
+    throw new Error(
+      'This desktop reply carries no state; subscribe for state changes.',
+    );
+  return reply.state;
 }
 export const homeKey = (project?: string) => project ?? '';
 export const contextKey = (conversation: string, agent: string) =>

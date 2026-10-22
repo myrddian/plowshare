@@ -6,6 +6,7 @@ import type { Request as WsRequest } from 'plowshare-client-ts/operations/direct
 import type { Arrival } from 'plowshare-client-ts/binding/connection';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
+import { replyState } from './shared.ts';
 import {
   mkdtemp,
   mkdir,
@@ -590,7 +591,7 @@ await test('startup restores once with saved login and explicit disconnect preve
       workspace.dispatch({ action: 'bootstrap' }),
       workspace.dispatch({ action: 'bootstrap' }),
     ]);
-    assert.ok(replies.every((reply) => reply.state.connected));
+    assert.ok(replies.every((reply) => replyState(reply).connected));
     assert.equal(sessions.length, 1);
     assert.equal(saved.account, 'alice');
     await workspace.dispatch({ action: 'disconnect' });
@@ -600,9 +601,10 @@ await test('startup restores once with saved login and explicit disconnect preve
     const restarted = fixture(store);
     try {
       const reply = await restarted.workspace.dispatch({ action: 'bootstrap' });
-      assert.equal(reply.state.connected, false);
-      assert.equal(reply.state.base, saved.server);
-      assert.equal(reply.state.handle, saved.account);
+      const state = replyState(reply);
+      assert.equal(state.connected, false);
+      assert.equal(state.base, saved.server);
+      assert.equal(state.handle, saved.account);
       assert.equal(restarted.sessions.length, 0);
     } finally {
       await restarted.workspace.shutdown();
@@ -623,8 +625,9 @@ await test('connection preference write failures are visible without losing the 
   });
   try {
     const reply = await connect(workspace);
-    assert.equal(reply.state.connected, true);
-    assert.match(reply.state.connectionPersistenceError!, /could not be saved/);
+    const state = replyState(reply);
+    assert.equal(state.connected, true);
+    assert.match(state.connectionPersistenceError!, /could not be saved/);
   } finally {
     await workspace.shutdown();
   }

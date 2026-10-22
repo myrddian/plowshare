@@ -2,7 +2,7 @@ import { background } from './events.ts';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { displayText } from 'plowshare-client-ts/binding/values';
 import { installPaneResize } from './pane-resize.ts';
-import { activeJob, stoppedJob } from '../shared.ts';
+import { activeJob, stoppedJob, replyState } from '../shared.ts';
 import type { DesktopState, Job } from '../shared.ts';
 import {
   turnsOf,
@@ -77,7 +77,7 @@ const approvalControls = installApprovalControls(
   () => state,
   async (command) => {
     const reply = await window.plowshare.request(command);
-    update(reply.state);
+    update(replyState(reply));
     return reply;
   },
   render,
@@ -473,13 +473,13 @@ async function load(before?: number) {
   render();
   try {
     update(
-      (
+      replyState(
         await window.plowshare.request({
           action: 'history',
           conversation,
           ...(before === undefined ? {} : { before }),
-        })
-      ).state,
+        }),
+      ),
     );
     // A stage can be much older than the tail. Read backwards until its first visit
     // is covered, retaining complete entries and the server's ordinary pagination.
@@ -494,13 +494,13 @@ async function load(before?: number) {
       const cursor = history.oldest;
       if (!cursor) break;
       update(
-        (
+        replyState(
           await window.plowshare.request({
             action: 'history',
             conversation,
             before: cursor,
-          })
-        ).state,
+          }),
+        ),
       );
       if (state.history[conversation]?.oldest === cursor)
         throw new Error('Earlier trajectory history did not advance.');
@@ -604,7 +604,7 @@ void window.plowshare
   .then((reply) => {
     conversation = reply.conversation ?? '';
     stageScope = reply.stageScope;
-    update(reply.state);
+    update(replyState(reply));
     return load();
   })
   .catch((reason: unknown) => {

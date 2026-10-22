@@ -13,7 +13,13 @@ import { installProjectAccess } from './project-access.ts';
 import { installToolConnections } from './tool-connections.ts';
 import { installServerAdmin } from './server-admin.ts';
 import { installOperator } from './operator.ts';
-import { activeJob, stoppedJob, homeKey, contextKey } from '../shared.ts';
+import {
+  activeJob,
+  stoppedJob,
+  homeKey,
+  contextKey,
+  replyState,
+} from '../shared.ts';
 import type { DesktopState, Job, Request, WorkspaceRoute } from '../shared.ts';
 import { markdownHtml } from './markdown.ts';
 import { icon, mountIcons } from './icons.ts';
@@ -302,7 +308,9 @@ function error(message: string) {
 }
 async function request(command: Request) {
   const reply = await window.plowshare.request(command);
-  update(reply.state);
+  // Every action this window issues answers with state; a payload-only reply
+  // here would be a routing mistake rather than a reason to render stale state.
+  update(replyState(reply));
   if (reply.notice) error(reply.notice);
   return reply;
 }
