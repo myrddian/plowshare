@@ -217,7 +217,7 @@ func matches(key string, data []byte) bool {
 }
 func requestTyped[T any](ctx context.Context, c *Client, operation string, request any) (Reply[T], error) {
 	var result Reply[T]
-	reservation, err := c.admit()
+	reservation, err := c.admit(ctx, waitsForCapacity(ctx))
 	if err != nil {
 		return result, err
 	}

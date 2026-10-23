@@ -15,6 +15,28 @@ const packetCounts = new Map()
 const packetMax = new Map()
 const largeText = '\u0001'.repeat(5 * 1024 * 1024)
 const upgrades = new Map()
+/**
+ * Dispatch backpressure observations per session: the order request ids were
+ * submitted in, how many times each id was submitted, and whether a dispatch
+ * negotiation was attempted and refused. Asserted after each driver exits,
+ * because the contract is about resubmission of one request id rather than about
+ * any single frame.
+ *
+ * <p>The negotiation counters exist so `capacity-handshake-refuse` cannot pass
+ * vacuously. "No application work after a refused handshake" is also true of a
+ * language that never drove the case, and of an SDK that negotiates no dispatch
+ * at all, so the absence of frames is only evidence once a refused negotiation
+ * is known to have happened.
+ *
+ * <p>A case's `holdMs` says how long the fixture holds its first request before
+ * answering it. At an advertised window of one a second request cannot reach the
+ * fixture while the first is held — a conforming client parks it — so there is no
+ * frame to wait for and the hold ends on a timer. No assertion depends on the
+ * duration: while the hold is active the fixture fails the case if a second frame
+ * arrives, whatever the timing, which is what turns the hold into proof that the
+ * client parked.
+ */
+const capacityFacts = new Map()
 const failures = []
 const server = createServer((_, response) => response.writeHead(404).end())
 const connections = new Set()
@@ -44,18 +66,111 @@ server.on('upgrade', (request, socket, head) => {
             })
             const ws = fixtureSocket(physical)
             let first, second, selected = false, applicationStarted = false
+            // Backpressure cases are selected by the session's trailing segment, so the
+            // negotiated window can be overridden before any application request arrives.
+            const selection = cases.get(session.split('/').pop())
+            const backpressure = selection?.capacity ? selection : undefined
+            const facts = { order: [], attempts: new Map(), held: undefined, negotiations: 0, refusedNegotiations: 0 }
+            if (backpressure) capacityFacts.set(session, facts)
+            const envelope = (frame, body) => ws.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: fixture.protocolVersion, payload: body, futureEnvelope: true }))
+            /**
+             * Drives one dispatch backpressure case, from either the typed or the raw
+             * scenario path.
+             *
+             * <p>Attempts are counted per request id within this connection, never per
+             * session or per connection: a resubmission after `CAPACITY_EXHAUSTED`
+             * reuses its id, and that is the property under test. Counting per
+             * connection would make `capacity-refuse-once` indistinguishable from two
+             * separate requests.
+             */
+            const backpressureAnswer = (sent, test) => {
+                const attempt = (facts.attempts.get(sent.id) ?? 0) + 1
+                facts.attempts.set(sent.id, attempt)
+                facts.order.push(sent.id)
+                // Checked before the refusal branch so it covers refused attempts too: a
+                // client that resubmits instantly and forever is a hot retry loop, which the
+                // spec names an anti-goal, and this is what catches it without a clock. The
+                // bounds in the fixture leave an order of magnitude of headroom over what
+                // paced backoff produces, so a conforming client never comes near them.
+                //
+                // The bound is required rather than optional: comparing against an absent
+                // field would silently read `n <= undefined`, which is false for every n,
+                // and the case would fail on its first frame naming the wrong problem.
+                assert.equal(typeof test.expectedSubmissions, 'number',
+                    'capacity case "' + test.name + '" does not declare the required numeric expectedSubmissions bound')
+                assert.ok(facts.order.length <= test.expectedSubmissions,
+                    'more requests were submitted than the case expects; a paced resubmission would not reach this bound')
+                // Refusals apply to the connection's first request id only, so a case can
+                // refuse one request and watch what the requests behind it do. Documented in
+                // the fixture's `capacityContract.refusalScope`, because a driver author
+                // reading `"refusals": 1` would otherwise model it as per-request.
+                facts.first ??= sent.id
+                if (sent.id === facts.first && (test.refuseAlways === true || attempt <= (test.refusals ?? 0))) {
+                    envelope(sent, { code: 'CAPACITY_EXHAUSTED', said: 'fixture connection queue is full' })
+                    return
+                }
+                if (test.holdMs !== undefined) {
+                    if (facts.held === undefined) {
+                        facts.held = sent.id
+                        setTimeout(() => {
+                            facts.held = null
+                            // Guarded because this fires outside the message handler's try/catch.
+                            // Whenever a holding case FAILS, the driver unwinds and closes before
+                            // holdMs elapses; an unguarded write then throws from inside the timer
+                            // and kills the whole harness with an unrelated transport error,
+                            // hiding the assertion that actually failed. A dead socket here is
+                            // the normal shape of a failing run, not a fault of its own.
+                            // 1 is OPEN. The library WebSocket does carry the readyState constants, but this is
+                            // the fixture socket wrapper, which exposes readyState and nothing else.
+                            if (ws.readyState !== 1) return
+                            try {
+                                if (test.closeWhileParked) ws.terminate()
+                                else envelope(sent, test.response)
+                            } catch (cause) {
+                                failures.push(new Error('hold timer for ' + test.name
+                                    + ' could not answer: ' + (cause?.message ?? cause)))
+                            }
+                        }, test.holdMs)
+                        // Tells the driver the window is full, so it can prove the next call waits.
+                        ws.send(JSON.stringify({ kind: 'inbox.changed', unread: facts.order.length }))
+                        return
+                    }
+                    assert.equal(facts.held, null, 'a request was submitted while the advertised window was full')
+                    // Once the hold is over a `silentAfterWait` case answers nothing more, so
+                    // the only thing that can settle the request admitted next is its own
+                    // deadline. That silence is what lets the case distinguish a deadline armed
+                    // at transmit from no deadline and from the connection-level one; see the
+                    // fixture's `capacityContract.silentAfterWait`.
+                    if (test.silentAfterWait) return
+                }
+                envelope(sent, test.response)
+            }
             ws.on('message', wire => {
                 try {
                     const sent = JSON.parse(wire.toString())
                     assert.equal(sent.protocol_version, fixture.protocolVersion)
                     if (sent.type === 'transport.dispatch') {
+                        // A refused negotiation is never flow control: the server treats a second
+                        // selection on one connection as a protocol violation, so a resubmission
+                        // would turn a refusal into a teardown.
+                        assert.ok(!(selected && backpressure?.handshake), 'a refused dispatch negotiation was resubmitted')
                         assert.equal(selected, false, 'dispatch selected twice')
                         assert.equal(applicationStarted, false, 'dispatch selected after application request')
                         assert.deepEqual(sent.payload, {mode:'concurrent-v1'})
                         assert.equal(Object.hasOwn(sent, 'actingFor'), false)
                         selected = true
+                        // Published so the handshake case can assert a negotiation was really
+                        // attempted. Without this the only evidence is an empty frame list,
+                        // which an SDK that never negotiates dispatch also produces.
+                        facts.negotiations++
+                        if (backpressure?.handshake) {
+                            facts.refusedNegotiations++
+                            ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,
+                                payload:{code:'CAPACITY_EXHAUSTED',said:'fixture dispatch queue is full'}}))
+                            return
+                        }
                         ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,
-                            payload:{code:'OK',payload:{mode:'concurrent-v1',maxPending:64,maxIdBytes:128}}}))
+                            payload:{code:'OK',payload:{mode:'concurrent-v1',maxPending:backpressure?.maxPending ?? 64,maxIdBytes:128}}}))
                         return
                     }
                     applicationStarted = true
@@ -103,6 +218,7 @@ server.on('upgrade', (request, socket, head) => {
                         const name = session.split('/')[1]
                         const key = session + '/' + name
                         counts.set(key, (counts.get(key) ?? 0) + 1)
+                        if (backpressure) { backpressureAnswer(sent, backpressure); return }
                         const project = name => ({name,workspace:'fixture',machine:null,members:[],lent:[],exclusions:[],future:{discard:true}})
                         const answer = body => ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:body,futureEnvelope:true}))
                         if(name==='long-session'){answer({code:'OK',payload:[project('long-session')]});return}
@@ -167,6 +283,7 @@ server.on('upgrade', (request, socket, head) => {
                     if (name === 'cancel') { ws.send(JSON.stringify({ kind: 'fixture-submitted' })); return }
                     const test = cases.get(name)
                     assert.ok(test, 'unknown conformance case')
+                    if (test.capacity) { backpressureAnswer(sent, test); return }
                     if (test.silent) return
                     if (test.disconnect) { ws.terminate(); return }
                     if (test.push) {
@@ -211,6 +328,66 @@ try {
         assert.equal(upgrades.get(language + '-redirect'), 1, language + ' followed an authenticated upgrade redirect')
         for(const name of ['timeout','disconnect','cancel'])assert.equal(counts.get(language==='node'? language+(name==='cancel'?'-cancel':'')+'/'+name:'typed-'+language+'/'+name+'/'+name),1,language+' replayed '+name+' work')
         if(language!=='node')assert.equal(counts.get('typed-'+language+'/invalid-input/invalid-input'),undefined,'invalid input reached the transport')
+        // Dispatch backpressure: one request id, resubmitted, never replayed as new work.
+        const observed = name => capacityFacts.get('typed-'+language+'/'+name)
+            ?? {order:[],attempts:new Map(),negotiations:0,refusedNegotiations:0}
+        const bound = name => cases.get(name).expectedSubmissions
+        // Length and identity are asserted separately rather than compared against an
+        // expectation built out of the observation itself: `[order[0], order[0]]` holds
+        // whatever the ids are, so it reads as a tautology even though it is not.
+        const once = observed('capacity-refuse-once')
+        assert.equal(once.order.length, 2, language+' did not submit a once-refused request exactly twice')
+        assert.equal(new Set(once.order).size, 1, language+' resubmitted a refused request as new work')
+        // Upper and lower bound together: the lower proves the refusal was absorbed and
+        // retried, the upper proves the retry was paced rather than spun. With base 100ms
+        // against a 600ms deadline a paced client makes three or four attempts, so the
+        // bound is an order of magnitude away from conforming behaviour and nowhere near a
+        // hot loop. Neither assertion mentions a duration.
+        //
+        // Of the two, the LOWER bound is the fragile one and the place a later language
+        // will flake. Attempt two lands at t=50-100ms against a 600ms deadline, so only a
+        // stall of roughly 500ms between the first refusal and the resubmission can keep
+        // the count at one; the upper bound of eight has better than 2x headroom over the
+        // three or four attempts paced backoff makes. A failure here is a missing
+        // resubmission or a stalled machine, not over-eager retrying.
+        const always = observed('capacity-refuse-always')
+        assert.ok(always.order.length>=2, language+' did not resubmit a repeatedly refused request')
+        assert.ok(always.order.length<=bound('capacity-refuse-always'),
+            language+' resubmitted a refused request in a hot loop rather than on a paced backoff')
+        assert.equal(new Set(always.order).size, 1, language+' resubmitted a refused request as new work')
+        const windowOne = observed('capacity-window-one')
+        assert.equal(windowOne.order.length, 2, language+' did not submit the parked request once the window freed')
+        assert.equal(new Set(windowOne.order).size, 2, language+' lost a request id at a window of one')
+        // A refused request releases the dispatch slot it was using but keeps its place
+        // ahead of work parked behind it, so a later request never overtakes it: the order
+        // is A, A, B. An implementation that released admission on refusal produces A, B, A.
+        const slots = observed('capacity-slot-order')
+        assert.equal(slots.order.length, 3, language+' did not submit a refused request twice and the request behind it once')
+        assert.equal(slots.order[1], slots.order[0], language+' did not resubmit the refused request under its own id')
+        assert.notEqual(slots.order[2], slots.order[0], language+' overtook a backing-off request')
+        // The regression test for the originally reported bug, in two halves. This half is
+        // the frame count: three distinct ids reached the fixture, so the request that
+        // parked behind the held one was really transmitted once a slot freed. A deadline
+        // charged for the wait fires while the hold is still active and the request is
+        // never transmitted at all, which shows up here as two frames rather than three.
+        //
+        // The other half is the driver's: the fixture answers nothing after the hold
+        // (`silentAfterWait`), so the waiting request can only be settled by its own
+        // deadline, and the driver requires it to expire well before the connection-level
+        // timeout would. Together they separate "armed at transmit, for the caller's own
+        // duration" from "armed too early", "never armed" and "armed with the connection's
+        // duration" -- the last three being exactly what the SDKs under repair do, and the
+        // cheapest way to pass the first half alone is to delete the deadline entirely.
+        const waited = observed('capacity-deadline-survives-waiting')
+        assert.equal(waited.order.length, 3, language+' did not transmit a request that waited longer than its own timeout')
+        assert.equal(new Set(waited.order).size, 3, language+' lost a request id while waiting for a slot')
+        // A refused negotiation is only evidence once it is known to have happened: an
+        // empty frame list is equally true of a language that never drove the case.
+        const handshake = observed('capacity-handshake-refuse')
+        assert.equal(handshake.negotiations, 1, language+' did not negotiate dispatch exactly once')
+        assert.equal(handshake.refusedNegotiations, 1, language+' did not have a dispatch negotiation refused')
+        assert.equal(handshake.order.length, 0, language+' submitted work after a refused dispatch negotiation')
+        assert.equal(observed('capacity-close-while-parked').order.length, 1, language+' submitted a parked request at a full window')
     }
     assert.deepEqual(failures, [])
     console.log('Shared SDK conformance passed:', languages.join(', '))
