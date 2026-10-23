@@ -44,6 +44,11 @@ class AuthoredDocumentUploadTest {
             mock(DocumentStore.class),
             mock(Deliberation.class),
             new DocumentsProperties());
+    // This route omits a project, which means personal, and personal is the account's own
+    // project — so it is governed by that project's permissions. The grant is an account
+    // default; production answers MANAGER to an account on its own personal project.
+    when(members.role(io.aeyer.plowshare.server.personal.PersonalSpaces.name("author"), "author"))
+        .thenReturn(java.util.Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.MANAGER));
     controller.useInformationAccess(
         new InformationAccess(new EffectiveProjectPermissions(members), defaults));
     controller.useInformationCatalogue(catalogue);

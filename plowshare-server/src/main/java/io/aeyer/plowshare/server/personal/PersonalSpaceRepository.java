@@ -21,5 +21,11 @@ public interface PersonalSpaceRepository {
   Reserved reserve(String handle);
 
   /** Records storage readiness and membership together inside the same transaction. */
+  /**
+   * Grants the owner its role on its own personal project. Separate from {@link #initialized(long,
+   * String)} because the identity must not depend on storage being allocated.
+   */
+  void owns(long project, String handle);
+
   void initialized(long project, String handle);
 }

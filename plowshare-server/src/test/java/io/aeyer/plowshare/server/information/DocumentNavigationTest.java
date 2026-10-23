@@ -19,6 +19,13 @@ class DocumentNavigationTest {
       new DocumentNavigation(repository, access, UnitOfWork.NONE, true);
   final InformationRequest.Selection selection = InformationRequest.Selection.personal();
 
+  {
+    // Personal resolves to the account's own project and is governed by its permissions. The
+    // grant is an account default; production answers MANAGER on an account's personal project.
+    when(members.role(io.aeyer.plowshare.server.personal.PersonalSpaces.name("author"), "author"))
+        .thenReturn(java.util.Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.MANAGER));
+  }
+
   @Test
   void unavailableAuthorityStopsBeforeAnyResourceReadOrMutation() {
     var failure = new IllegalStateException("authority unavailable");
