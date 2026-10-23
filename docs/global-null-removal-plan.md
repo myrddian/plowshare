@@ -65,7 +65,7 @@ Of 21 nullable `project_id`/`project` columns, only 7 contain any nulls:
 | `inference_calls` | 3524 | 182262 | accounting rows; needs a decision |
 | `conversations` | 503 | 11917 | **the live defect** |
 | `conversation_allowance_state` | 503 | 11917 | mirrors `conversations` |
-| `information_resources` | 50 | 2620 | **already correct** — see below |
+| `information_resources` | 50 | 2620 | **suspect** — see below; populated is not correct |
 | `information_document_policies` | 48 | 2617 | follows `information_resources` |
 | `authority_scopes` | 9 | 23 | **correct by design**; knowledge and administration scopes have no project |
 | `relay_topics` | 2 | 47 | needs a decision |
@@ -73,12 +73,73 @@ Of 21 nullable `project_id`/`project` columns, only 7 contain any nulls:
 There are **zero memories, globally or at all**, so the global memory tier owes
 no migration. The fourteen remaining nullable columns hold no nulls.
 
-### `information_resources` is already done, and is the template
+**Treat every count here as a measurement of a repeatedly-migrated database,
+not as a statement of intent.** Rows can be internally consistent and still
+record the wrong thing, which is exactly what the `information_resources`
+section below documents. Verify what a path *writes today* before concluding
+anything from what is stored.
 
-Every one of its 2620 rows has an explicit `home_scope_id`; none lacks one. The
-50 rows whose `project_id` is null are all `ACCOUNT_KNOWLEDGE` scope, so a null
-project is **correct** for them — exactly as `AuthorityScope.AccountKnowledge`
-carries no `projectId`. Their `project_id` is vestigial, not unresolved.
+### `information_resources` is populated, and that is not the same as correct
+
+**Do not read this table as finished.** The database has been migrated
+repeatedly and things have broken in the process, so a populated column is
+evidence of a backfill having run, not of it having been right.
+
+Every one of its 2620 rows does have a `home_scope_id`, and the 50 rows with a
+null `project_id` are all `ACCOUNT_KNOWLEDGE`. An earlier draft of this plan
+concluded from that pair of facts that the table was done and the nulls
+correct. **That was wrong**, and the reason is visible one query deeper.
+
+Two live paths write what a person would call a personal document, to two
+different scopes:
+
+| spelling | namespace | `home_scope_id` kind | `project_id` |
+|---|---|---|---|
+| `{kind:"personal"}` | `account:<handle>` | `ACCOUNT_KNOWLEDGE` | **null** |
+| `{kind:"project", project:"personal:<hex>"}` | `project:personal:<hex>` | `PERSONAL` | the personal project |
+
+Verified by upload: ten corpus documents sent as `{kind:"personal"}` are all
+`ACCOUNT_KNOWLEDGE` with a null project, and one sent as a project naming the
+same home is `PERSONAL` with a real project. The split is exact across the
+table: **all 50 `ACCOUNT_KNOWLEDGE` rows have a null project, all 28 `PERSONAL`
+rows have one.** Their date ranges overlap (10-05→10-23 and 10-12→10-22), so
+this is two concurrent paths, not a clean before-and-after.
+
+The root is one line, `InformationContext.namespace()`:
+
+```java
+case ACCOUNT  -> "account:" + selection.account();
+case PERSONAL -> "account:" + account;        // same family as ACCOUNT
+case PROJECT  -> "project:" + selection.project();
+```
+
+`PERSONAL` and `ACCOUNT` share the `account:` family, and V157's resolver keys
+the scope off the namespace (`'account:'||a.legacy_handle` →
+`ACCOUNT_KNOWLEDGE`). So a typed personal selection is filed under the account's
+*knowledge* scope. This is the storage-level cause of the two mutually invisible
+partitions reported separately; `projectSelection` not normalizing is a symptom
+above it, not the root.
+
+**One consequence to weigh rather than assume.** `requireAccountAction`
+consults `AccountKnowledgePermissions` — which demands ADMIN with SELF coverage
+— only when `selection().scope() == ACCOUNT`. A PERSONAL selection therefore
+writes a row into that account's `ACCOUNT_KNOWLEDGE` scope without that gate
+being consulted. It is the caller's **own** scope, so this is not cross-account
+escalation, and the upload is legitimately authorized as a personal write. But
+two gates now give different answers about the same scope, and the gate pinned
+in `LiveAccountKnowledgePermissionsPinTest` is not the only way into it.
+
+**What is undecided, and needs a person.** Which scope a personal document
+*should* carry is a design question the data cannot answer: intent was not
+recorded, and both shapes exist. The user's ruling is that there must be exactly
+one resolution and one input for personal. Whichever is chosen, the 50 and the
+28 cannot both be right, and a migration must say what happens to the losing
+set.
+
+### V157 remains the template for adding a scope column
+
+Whatever the resolution, the mechanics of giving a table an explicit scope are
+established by `V157__knowledge_homes_and_write_authority.sql`:
 
 `V157__knowledge_homes_and_write_authority.sql` establishes the whole pattern:
 
