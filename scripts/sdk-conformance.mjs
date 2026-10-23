@@ -15,6 +15,23 @@ const packetCounts = new Map()
 const packetMax = new Map()
 const largeText = '\u0001'.repeat(5 * 1024 * 1024)
 const upgrades = new Map()
+/**
+ * Dispatch backpressure observations per session: the order request ids were
+ * submitted in, and how many times each id was submitted. Asserted after each
+ * driver exits, because the contract is about resubmission of one request id
+ * rather than about any single frame.
+ */
+const capacityFacts = new Map()
+/**
+ * How long a backpressure case holds its first request before answering it.
+ *
+ * <p>At an advertised window of one, a second request cannot reach the fixture
+ * while the first is held — a conforming client parks it — so there is no frame
+ * to wait for and the hold ends on a timer. The assertions do not depend on the
+ * duration: the fixture fails the case if a second frame arrives while the hold
+ * is active, whatever the timing.
+ */
+const CAPACITY_HOLD_MS = 250
 const failures = []
 const server = createServer((_, response) => response.writeHead(404).end())
 const connections = new Set()
@@ -44,18 +61,72 @@ server.on('upgrade', (request, socket, head) => {
             })
             const ws = fixtureSocket(physical)
             let first, second, selected = false, applicationStarted = false
+            // Backpressure cases are selected by the session's trailing segment, so the
+            // negotiated window can be overridden before any application request arrives.
+            const selection = cases.get(session.split('/').pop())
+            const backpressure = selection?.capacity ? selection : undefined
+            const facts = { order: [], attempts: new Map(), held: undefined }
+            if (backpressure) capacityFacts.set(session, facts)
+            const envelope = (frame, body) => ws.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: fixture.protocolVersion, payload: body, futureEnvelope: true }))
+            /**
+             * Drives one dispatch backpressure case, from either the typed or the raw
+             * scenario path.
+             *
+             * <p>Attempts are counted per request id within this connection, never per
+             * session or per connection: a resubmission after `CAPACITY_EXHAUSTED`
+             * reuses its id, and that is the property under test. Counting per
+             * connection would make `capacity-refuse-once` indistinguishable from two
+             * separate requests.
+             */
+            const backpressureAnswer = (sent, test) => {
+                const attempt = (facts.attempts.get(sent.id) ?? 0) + 1
+                facts.attempts.set(sent.id, attempt)
+                facts.order.push(sent.id)
+                // Refusals apply to the connection's first request id only, so a case can
+                // refuse one request and watch what the requests behind it do.
+                facts.first ??= sent.id
+                if (sent.id === facts.first && (test.refuseAlways === true || attempt <= (test.refusals ?? 0))) {
+                    envelope(sent, { code: 'CAPACITY_EXHAUSTED', said: 'fixture connection queue is full' })
+                    return
+                }
+                if (test.holdUntilSubmitted !== undefined) {
+                    if (facts.held === undefined) {
+                        facts.held = sent.id
+                        setTimeout(() => {
+                            facts.held = null
+                            if (test.closeWhileParked) ws.terminate()
+                            else envelope(sent, test.response)
+                        }, CAPACITY_HOLD_MS)
+                        // Tells the driver the window is full, so it can prove the next call waits.
+                        ws.send(JSON.stringify({ kind: 'inbox.changed', unread: facts.order.length }))
+                        return
+                    }
+                    assert.equal(facts.held, null, 'a request was submitted while the advertised window was full')
+                    assert.ok(facts.order.length <= test.holdUntilSubmitted, 'more requests were submitted than the advertised window allows')
+                }
+                envelope(sent, test.response)
+            }
             ws.on('message', wire => {
                 try {
                     const sent = JSON.parse(wire.toString())
                     assert.equal(sent.protocol_version, fixture.protocolVersion)
                     if (sent.type === 'transport.dispatch') {
+                        // A refused negotiation is never flow control: the server treats a second
+                        // selection on one connection as a protocol violation, so a resubmission
+                        // would turn a refusal into a teardown.
+                        assert.ok(!(selected && backpressure?.handshake), 'a refused dispatch negotiation was resubmitted')
                         assert.equal(selected, false, 'dispatch selected twice')
                         assert.equal(applicationStarted, false, 'dispatch selected after application request')
                         assert.deepEqual(sent.payload, {mode:'concurrent-v1'})
                         assert.equal(Object.hasOwn(sent, 'actingFor'), false)
                         selected = true
+                        if (backpressure?.handshake) {
+                            ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,
+                                payload:{code:'CAPACITY_EXHAUSTED',said:'fixture dispatch queue is full'}}))
+                            return
+                        }
                         ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,
-                            payload:{code:'OK',payload:{mode:'concurrent-v1',maxPending:64,maxIdBytes:128}}}))
+                            payload:{code:'OK',payload:{mode:'concurrent-v1',maxPending:backpressure?.maxPending ?? 64,maxIdBytes:128}}}))
                         return
                     }
                     applicationStarted = true
@@ -103,6 +174,7 @@ server.on('upgrade', (request, socket, head) => {
                         const name = session.split('/')[1]
                         const key = session + '/' + name
                         counts.set(key, (counts.get(key) ?? 0) + 1)
+                        if (backpressure) { backpressureAnswer(sent, backpressure); return }
                         const project = name => ({name,workspace:'fixture',machine:null,members:[],lent:[],exclusions:[],future:{discard:true}})
                         const answer = body => ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:body,futureEnvelope:true}))
                         if(name==='long-session'){answer({code:'OK',payload:[project('long-session')]});return}
@@ -167,6 +239,7 @@ server.on('upgrade', (request, socket, head) => {
                     if (name === 'cancel') { ws.send(JSON.stringify({ kind: 'fixture-submitted' })); return }
                     const test = cases.get(name)
                     assert.ok(test, 'unknown conformance case')
+                    if (test.capacity) { backpressureAnswer(sent, test); return }
                     if (test.silent) return
                     if (test.disconnect) { ws.terminate(); return }
                     if (test.push) {
@@ -211,6 +284,23 @@ try {
         assert.equal(upgrades.get(language + '-redirect'), 1, language + ' followed an authenticated upgrade redirect')
         for(const name of ['timeout','disconnect','cancel'])assert.equal(counts.get(language==='node'? language+(name==='cancel'?'-cancel':'')+'/'+name:'typed-'+language+'/'+name+'/'+name),1,language+' replayed '+name+' work')
         if(language!=='node')assert.equal(counts.get('typed-'+language+'/invalid-input/invalid-input'),undefined,'invalid input reached the transport')
+        // Dispatch backpressure: one request id, resubmitted, never replayed as new work.
+        const observed = name => capacityFacts.get('typed-'+language+'/'+name) ?? {order:[],attempts:new Map()}
+        const once = observed('capacity-refuse-once')
+        assert.deepEqual(once.order, [once.order[0], once.order[0]], language+' did not resubmit one refused request id exactly once')
+        const always = observed('capacity-refuse-always')
+        assert.ok(always.order.length>=2, language+' did not resubmit a repeatedly refused request')
+        assert.equal(new Set(always.order).size, 1, language+' resubmitted a refused request as new work')
+        const windowOne = observed('capacity-window-one')
+        assert.equal(windowOne.order.length, 2, language+' did not submit the parked request once the window freed')
+        assert.equal(new Set(windowOne.order).size, 2, language+' lost a request id at a window of one')
+        // A refused request releases the dispatch slot it was using but keeps its place
+        // ahead of work parked behind it, so a later request never overtakes it.
+        const slots = observed('capacity-slot-order')
+        assert.deepEqual(slots.order, [slots.order[0], slots.order[0], slots.order[2]], language+' overtook a backing-off request')
+        assert.notEqual(slots.order[0], slots.order[2], language+' lost a request id at a window of one')
+        assert.equal(observed('capacity-handshake-refuse').order.length, 0, language+' submitted work after a refused dispatch negotiation')
+        assert.equal(observed('capacity-close-while-parked').order.length, 1, language+' submitted a parked request at a full window')
     }
     assert.deepEqual(failures, [])
     console.log('Shared SDK conformance passed:', languages.join(', '))

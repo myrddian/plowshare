@@ -34,6 +34,9 @@ try {
     assert.equal(one.outcome.payload.sequence, 1)
     assert.equal(two.outcome.payload.sequence, 2)
     for (const test of fixture.cases) {
+        // Dispatch backpressure cases need the negotiated window and several requests;
+        // they are driven below, over the public typed connection.
+        if (test.capacity) continue
         const call = client.request('project.list', { scenario: test.name })
         if (test.delivery) await assert.rejects(call, error => error.delivery === test.delivery)
         else {
@@ -78,6 +81,59 @@ await full;
 await assert.rejects(capacity.request('project.list',{}), error => error.delivery==='NOT_SUBMITTED');
 capacity.close();
 assert.ok((await Promise.all(calls)).every(error => error.delivery==='UNKNOWN'));
+
+// Dispatch backpressure. CAPACITY_EXHAUSTED is flow control a caller never sees, the
+// advertised window is authoritative, and a refused negotiation is never resubmitted.
+const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token:'sdk-fixture-token',session:'typed-node/'+name,timeoutMs,
+    ...(onPush === undefined ? {} : {onPush})});
+{
+    const client = await openCapacity('capacity-refuse-once', 5000);
+    try { assert.deepEqual(requirePayload(await client.request('project.list',{})),[],'a refused request lost its answer'); }
+    finally { client.close(); }
+}
+{
+    // Refusals outlast the deadline armed at first transmit, so the loop ends in the
+    // caller's own timeout rather than hanging or surfacing the refusal.
+    const client = await openCapacity('capacity-refuse-always', 600);
+    try { await assert.rejects(client.request('project.list',{}), error => error.delivery==='NOT_SUBMITTED' && /deadline/.test(error.message)); }
+    finally { client.close(); }
+}
+{
+    let windowFull;
+    const full = new Promise(resolve => {windowFull = resolve});
+    const client = await openCapacity('capacity-window-one', 5000, () => windowFull());
+    try {
+        let secondDone = false;
+        const first = client.request('project.list',{});
+        const second = client.request('project.list',{}).then(reply => {secondDone = true; return reply});
+        await full;
+        assert.equal(secondDone,false,'B must wait while the advertised window of one is full');
+        assert.deepEqual(requirePayload(await first),[]);
+        assert.deepEqual(requirePayload(await second),[]);
+    } finally { client.close(); }
+}
+{
+    const client = await openCapacity('capacity-slot-order', 5000);
+    try {
+        const a = client.request('project.list',{});
+        const b = client.request('project.list',{});
+        assert.deepEqual(requirePayload(await a),[],'a refused request lost its answer');
+        assert.deepEqual(requirePayload(await b),[],'the request behind a refused one lost its answer');
+    } finally { client.close(); }
+}
+await assert.rejects(openCapacity('capacity-handshake-refuse', 5000), error => error.code==='NOT_SUBMITTED');
+{
+    let windowFull;
+    const full = new Promise(resolve => {windowFull = resolve});
+    const client = await openCapacity('capacity-close-while-parked', 5000, () => windowFull());
+    const held = client.request('project.list',{});
+    const parked = client.request('project.list',{});
+    await full;
+    // Nothing was written for the parked caller, so its delivery is unambiguous.
+    await assert.rejects(held, error => error.delivery==='UNKNOWN');
+    await assert.rejects(parked, error => error.delivery==='NOT_SUBMITTED');
+    client.close();
+}
 
 const management = await connectPlowshare({ origin, token: 'sdk-fixture-token', session: 'typed-node/provider-owner-compat' });
 try {
