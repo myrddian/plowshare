@@ -765,7 +765,29 @@ export interface Reply {
   usage?: Replies[UsageOperation];
   proc?: ProcReplies[keyof ProcReplies];
   information?: Replies[`information.${InformationOperation}`];
-  state: DesktopState;
+  /**
+   * The replicated state, on the replies that carry it — which is most of
+   * them, including payload-bearing replies that change state.
+   *
+   * It is absent on exactly the replies whose answer is a domain payload and
+   * whose callers need no state synchronously with that answer:
+   * `relay-operate`, `relay-read`, `proc-read`, `usage-read`, and every
+   * `information` operation except `ask`. Two of those do change state —
+   * `relay-read` and `proc-read` append to `conversations` through
+   * `retainConversation` — and they deliver the change through
+   * `emit()`/`subscribe()`, which reaches every subscriber regardless. Putting
+   * the blob in the reply as well only adds bytes orders of magnitude larger
+   * than the answer.
+   *
+   * `DesktopWorkspace` replaces a present state with its composite one, which
+   * also covers project children, and leaves an absent one absent, so the
+   * omission survives to the renderer. A handler whose caller must see a state
+   * change synchronously with the reply has to include state; among the
+   * payload handlers only `information`/`ask` does.
+   *
+   * Read it through {@link replyState} wherever a call site expects it.
+   */
+  state?: DesktopState;
   conversation?: string;
   stageScope?: StageScope;
   notice?: string;
@@ -781,6 +803,20 @@ export interface DesktopApi {
   subscribeWorkspace?(
     listener: (message: WorkspaceMessage) => void,
   ): () => void;
+}
+/**
+ * The replicated state of a reply that carries one. A call site that needs
+ * state synchronously with the reply must name an action that answers with
+ * it; {@link Reply.state} lists the replies that omit it. An absent state
+ * here is a mismatch between the handler and the call site, never a runtime
+ * condition, so it fails rather than rendering a stale or partial view.
+ */
+export function replyState(reply: Reply): DesktopState {
+  if (!reply.state)
+    throw new Error(
+      'This desktop reply carries no state; subscribe for state changes.',
+    );
+  return reply.state;
 }
 export const homeKey = (project?: string) => project ?? '';
 export const contextKey = (conversation: string, agent: string) =>

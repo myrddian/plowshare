@@ -967,10 +967,9 @@ export class DesktopClient {
         const answer = await this.ask('relay.operate', request.payload);
         if (answer.code !== 'OK')
           throw new Error(answer.said ?? 'Relay control refused');
-        return {
-          state: structuredClone(this.state),
-          relayControl: decodeReply('relay.operate', answer.payload),
-        };
+        // The acknowledgement is the answer; this control changes no replicated
+        // state, so the renderer keeps the state it already holds.
+        return { relayControl: decodeReply('relay.operate', answer.payload) };
       }
       case 'relay-read': {
         const answer = await this.ask(request.type, request.payload);
@@ -988,10 +987,9 @@ export class DesktopClient {
                 title: `Relay · ${branch.name}`,
               });
           }
-        return {
-          state: structuredClone(this.state),
-          relay,
-        };
+        // The log is the answer. Retained conversations above are main-process
+        // follow authority, which no renderer reads from this reply.
+        return { relay };
       }
       case 'proc-read': {
         const answer = await this.ask(request.type, request.payload);
@@ -1015,7 +1013,9 @@ export class DesktopClient {
               ...(row.project ? { project: row.project } : {}),
               title: row.agent ?? row.id,
             });
-        return { state: structuredClone(this.state), proc };
+        // The audit is the answer; retained conversations above are main-process
+        // follow authority, which no renderer reads from this reply.
+        return { proc };
       }
       case 'usage-open':
         await this.usage.open(request.type, request.filter);
@@ -1032,8 +1032,8 @@ export class DesktopClient {
           ].includes(request.type)
         )
           throw new Error('Unknown usage read.');
+        // The measurement is the answer; this read changes no replicated state.
         return {
-          state: structuredClone(this.state),
           usage: await this.usageClient.invoke(
             decodeUsageCall(request.type, request.payload),
           ),
@@ -1049,10 +1049,9 @@ export class DesktopClient {
           request.scope,
         );
         if (informationCall.operation !== 'ask')
-          return {
-            state: structuredClone(this.state),
-            information: await client.invoke(informationCall),
-          };
+          // The document answer is the reply; these operations change no
+          // replicated state.
+          return { information: await client.invoke(informationCall) };
         const generation = this.generation;
         const job: Job = {
           id: `pending-${randomUUID()}`,
@@ -1082,6 +1081,10 @@ export class DesktopClient {
           for (const event of held) this.push(event);
           this.poll(id);
           this.emit();
+          // The accepted question pushed a tracked job onto the state above.
+          // Library renders the asking document from the reply, and `emit()`
+          // reaches the renderer on a separate IPC interface whose ordering
+          // against this reply is not guaranteed, so the state stays here.
           return { state: structuredClone(this.state), information };
         } catch (error) {
           if (generation === this.generation) {

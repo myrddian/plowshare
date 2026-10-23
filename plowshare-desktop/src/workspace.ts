@@ -117,20 +117,66 @@ export class DesktopWorkspace {
   get board() {
     return this.control.board;
   }
+  /** Derived composite of the account session, its project children and the
+   * desktop-local values (FileStores, preferences, named connections, personal
+   * workspace, operator, authoring).
+   *
+   * Reading this property is cheap because it deep-copies nothing. **Treat the
+   * result as read-only.** Only the returned object itself is guaranteed to be
+   * freshly allocated and owned by the caller, so only a top-level assignment
+   * on it is safe. Nested values are shared by reference with
+   * `this.control.state`, a child client's state, or a desktop-local field, and
+   * writing into one corrupts the live session. A caller that must mutate the
+   * result uses {@link snapshot}, and so does a caller that holds any part of
+   * the result across an `await` — with the single exception argued below.
+   *
+   * What is rebuilt, precisely. Outside a live session nothing below the top
+   * level is rebuilt. In a live session `projects`, `projectFolders` and
+   * `projectPreparing` always are; `conversations`, `jobs`, `approvals`,
+   * `answeringApprovals`, `agents`, `history`, `contexts` and
+   * `contextSnapshots` are rebuilt only while at least one available project
+   * child exists, so with no project attached — the common case for a freshly
+   * connected account — they are the account session's own containers. Also in
+   * a live session, `files` is the visible project child's own object, or a
+   * fresh `{ status: 'off' }` when no child is visible. Nothing else is ever
+   * rebuilt: `library`, `activity`, `board`, `usage`, `personal` (except when a
+   * project error is merged into it), `authoring`, `operator`,
+   * `localFileStores`, `localPreferences`, `namedConnections`, `sync` and
+   * `liveHistory` are shared. So are the rows inside the rebuilt arrays, which
+   * are the account session's and the children's own row objects — except the
+   * `projectFolders` rows and the `{ name }` placeholders `projects` takes from
+   * the saved folder list, both of which are built here. This getter only reads
+   * what it shares.
+   *
+   * Holding a shared value across an `await`. Exactly one kind of value may be
+   * held: a single row out of `projects` or `conversations`, which is what the
+   * two callers that do it hold ({@link recoverProject},
+   * {@link conversationOwner}). That is sound because those rows are replaced,
+   * never written into — a project listing refresh, a recorded-folder change
+   * and a conversation listing or title change all build a new row, and
+   * `DesktopClient.retainConversation` deep-copies a row before storing it.
+   * Nothing else may be held. A `jobs` row is written onto in place throughout
+   * its lifecycle — its id, status, phase, streamed text and `events` are all
+   * assigned to the live row — as are `personal` and `authoring`; and the
+   * containers themselves are mutated rather than replaced, a new job or
+   * conversation being pushed or unshifted onto `jobs` and `conversations`.
+   *
+   * Returning the result over IPC needs no copy: Electron structured-clones
+   * `ipcMain.handle` replies and `webContents.send` arguments anyway. An
+   * `async` handler that captures the state and only then `await`s must still
+   * use {@link snapshot}, so its reply cannot observe a later change. */
   get state(): DesktopState {
-    const state = structuredClone(this.control.state);
-    if (this.localFileStores)
-      state.localFileStores = structuredClone(this.localFileStores);
+    const state: DesktopState = { ...this.control.state };
+    if (this.localFileStores) state.localFileStores = this.localFileStores;
     if (this.localPreferences !== undefined)
-      state.localPreferences = structuredClone(this.localPreferences);
-    state.namedConnections = structuredClone(this.namedConnections);
+      state.localPreferences = this.localPreferences;
+    state.namedConnections = this.namedConnections;
     if (this.selectedConnection !== undefined)
       state.selectedConnection = this.selectedConnection;
-    state.personal = structuredClone(this.personal);
-    if (this.operatorOwner)
-      state.operator = structuredClone(this.operatorOwner.state.operator);
+    state.personal = this.personal;
+    if (this.operatorOwner) state.operator = this.operatorOwner.state.operator;
     if (this.authoringIdentity === `${state.base}|${state.handle}`)
-      state.authoring = structuredClone(this.authoring);
+      state.authoring = this.authoring;
     if (state.mode !== 'live') return state;
     if (this.transitioning) {
       state.connected = false;
@@ -181,9 +227,11 @@ export class DesktopWorkspace {
           ...(child.state.answeringApprovals ?? []),
         ]),
       ];
-      Object.assign(state.agents, child.state.agents);
-      Object.assign(state.history, child.state.history);
-      Object.assign(state.contexts, child.state.contexts);
+      // Rebuilt rather than assigned into: the inherited maps are the account
+      // session's own objects, which this getter must not modify.
+      state.agents = { ...state.agents, ...child.state.agents };
+      state.history = { ...state.history, ...child.state.history };
+      state.contexts = { ...state.contexts, ...child.state.contexts };
       state.contextSnapshots = {
         ...state.contextSnapshots,
         ...child.state.contextSnapshots,
@@ -215,8 +263,13 @@ export class DesktopWorkspace {
           ...(error === undefined ? {} : { error }),
         };
       });
+    // Replaced rather than mutated: `state.personal` is this workspace's own
+    // `personal` field, which the project error must not be written into.
     if (state.personal && this.errors.has(state.personal.project))
-      state.personal.error = this.errors.get(state.personal.project);
+      state.personal = {
+        ...state.personal,
+        error: this.errors.get(state.personal.project),
+      };
     state.projectConfigError = this.configError;
     state.localMachine = thisMachine(process.env, hostname());
     state.projectPreparing = [...this.attachments.keys()];
@@ -229,6 +282,12 @@ export class DesktopWorkspace {
     state.sync = visibleChild?.state.sync;
     state.liveHistory = visibleChild?.state.liveHistory ?? state.liveHistory;
     return state;
+  }
+  /** Isolated deep copy of {@link state}, for the callers that mutate the
+   * result or keep it across an `await`. Every other caller should read
+   * {@link state}, which shares nested values and costs no deep copy. */
+  snapshot(): DesktopState {
+    return structuredClone(this.state);
   }
   private emit() {
     this.changed(this.state);
@@ -338,6 +397,10 @@ export class DesktopWorkspace {
       if (owner) return owner;
     }
     if (!row) throw new Error('Choose an available conversation.');
+    // `row` is shared with the owning session, and is read and handed on after
+    // the await. Sound because conversation rows are replaced rather than
+    // written into, and `retainConversation` deep-copies before storing. See
+    // the contract on `state`.
     const owner = await this.clientFor(row.project);
     owner.retainConversation(row);
     return owner;
@@ -612,6 +675,9 @@ export class DesktopWorkspace {
       throw new Error(
         'The recorded folder belongs to another machine or the server. Choose its location on this computer.',
       );
+    // `recorded` is shared with the owning session and is compared again after
+    // the await. Sound because project rows are replaced rather than written
+    // into; see the contract on `state`.
     const root = await realpath(recorded.workspace);
     this.same(token);
     if (root !== recorded.workspace)
@@ -1307,6 +1373,17 @@ export class DesktopWorkspace {
           .map((child) => child.dispatch({ action: 'approvals-refresh' })),
       );
     this.emit();
+    // An omitted `state` is the inner handler's decision: it answered with a
+    // domain payload and left any state change to the `emit()` above, which
+    // publishes the composite to every subscriber. Such a handler may well
+    // have changed state — `relay-read` and `proc-read` append to
+    // `conversations` — so this guard has to stay after that `emit()`, never
+    // before it. Every other `DesktopClient` reply carries that one client's
+    // state, which this workspace replaces with the composite covering project
+    // children. Keyed on the key's presence rather than an undefined value, so
+    // that it reads the same as {@link Reply.state} and as the payload-reply
+    // test in workspace.test.ts.
+    if (!('state' in reply)) return reply;
     return { ...reply, state: this.state };
   }
   private async rememberConnection(reconnect: boolean, name?: string) {

@@ -2,6 +2,7 @@ import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { background } from './events.ts';
 import { installPaneResize } from './pane-resize.ts';
 import { installInformation } from './information.ts';
+import { replyState } from '../shared.ts';
 import type { DesktopState, Request } from '../shared.ts';
 import {
   emptyLibrary,
@@ -93,7 +94,16 @@ async function action(request: Request) {
   try {
     const reply = await window.plowshare.request(request);
     localError = '';
-    update(reply.state);
+    // Every request routed through this funnel answers with state today: the
+    // only `information` operation reaching it is `ask`, which keeps its state
+    // deliberately, and the operations that omit state are issued elsewhere.
+    // The `else` arm is therefore defence for `Reply.state` being optional in
+    // the type, not a live path. Note that this site does not go through
+    // `replyState()`, so it will not fail loudly: if a later change strips
+    // `ask`'s state, this renders the previous snapshot silently instead of
+    // throwing.
+    if (reply.state) update(reply.state);
+    else render();
   } catch (error) {
     localError = error instanceof Error ? error.message : errorMessage(error);
     render();
@@ -730,7 +740,7 @@ background(
     memoryScreen = reply.libraryScreen === 'memories';
     initialized = true;
     if (memoryScreen) $<HTMLSelectElement>('#search-kind').value = 'recall';
-    update(reply.state);
+    update(replyState(reply));
   }),
 );
 

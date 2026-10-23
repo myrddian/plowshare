@@ -3,6 +3,7 @@ import { background } from './events.ts';
 import { decodeOperatorInput } from '../operator-input.ts';
 import { displayText } from 'plowshare-client-ts/binding/values';
 import { isList } from 'plowshare-client-ts/binding/values';
+import { replyState } from '../shared.ts';
 import type { DesktopApi, DesktopState } from '../shared.ts';
 import { OPERATOR_KINDS, type OperatorKind } from '../operator-shared.ts';
 const esc = (value: unknown) =>
@@ -472,7 +473,7 @@ export function installOperator(
         !dialog.open
       )
         return;
-      selectedIdentity = reply.state.operator!.identity;
+      selectedIdentity = replyState(reply).operator!.identity;
       render();
     } catch (e) {
       if (

@@ -10,6 +10,7 @@ import {
   swarmMembers,
   type SwarmMember,
 } from 'plowshare-client-ts/operations/swarm';
+import { replyState } from '../shared.ts';
 import type { DesktopState, Request } from '../shared.ts';
 import type { BoardView, TopicSummary, SeatView } from '../board-shared.ts';
 import { icon, mountIcons } from './icons.ts';
@@ -51,7 +52,7 @@ async function action(request: Request) {
   try {
     const reply = await window.plowshare.request(request);
     localError = '';
-    update(reply.state);
+    update(replyState(reply));
   } catch (error) {
     localError = error instanceof Error ? error.message : errorMessage(error);
     render();
@@ -454,7 +455,7 @@ background(
   window.plowshare.request({ action: 'bootstrap' }).then((reply) => {
     view = reply.boardView ?? 'board';
     initialized = true;
-    update(reply.state);
+    update(replyState(reply));
   }),
 );
 
@@ -846,7 +847,10 @@ $('#board-create-form').addEventListener(
           ? { maxModelCalls: Number(createBudget.value) }
           : {}),
       });
-      if (key === createStorageKey() && reply.state.board.opening?.notice) {
+      if (
+        key === createStorageKey() &&
+        replyState(reply).board.opening?.notice
+      ) {
         localStorage.removeItem(key);
         createIdentity = '';
         createTitle.value = '';
@@ -908,7 +912,7 @@ $('#board-topup-form').addEventListener(
         topic: topupRoot,
         maxModelCalls: Number(topupLimit.value),
       });
-      update(reply.state);
+      update(replyState(reply));
       topupDialog.close();
     } catch (error) {
       $('#topup-error').textContent = errorMessage(error);
@@ -1045,8 +1049,9 @@ $('#board-retry-form').addEventListener(
         ...retryDraft,
         reconcile,
       });
-      update(reply.state);
-      if (key === retryStorageKey() && reply.state.board.retrying?.notice) {
+      const current = replyState(reply);
+      update(current);
+      if (key === retryStorageKey() && current.board.retrying?.notice) {
         localStorage.removeItem(key);
         retryDraft = undefined;
         retryDialog.close();

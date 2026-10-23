@@ -382,13 +382,12 @@ async function openLibrary(
   )
     throw new Error('Choose an available project.');
   const screen = tab === 'memories' ? 'memories' : 'library';
-  const search = client.state.library?.search;
-  if (
-    search?.value?.kind &&
-    (screen === 'memories') !==
-      ['recall', 'navigate'].includes(search.value.kind)
-  )
-    client.state.library!.search = {};
+  // A reset of a search whose kind does not match the screen being opened used
+  // to stand here. It wrote into a deep copy of the state that was discarded on
+  // the next statement, so it cleared nothing and its guard only read fields;
+  // removed rather than kept, because preserving it meant deep-copying the
+  // whole state to accomplish nothing. Whether opening Library or Memories
+  // should clear a mismatched live search is a separate decision.
   const existing = libraries.get(screen);
   if (existing && !existing.isDestroyed()) {
     existing.show();
@@ -1165,7 +1164,9 @@ background(
           return { state: client.state };
         const folder = choice.filePaths[0];
         return {
-          state: client.state,
+          // Snapshotted because the package read below awaits after the state
+          // is captured, so the reply must not observe a later session change.
+          state: client.snapshot(),
           applicationPackage: { folder, files: await applicationFiles(folder) },
         };
       }

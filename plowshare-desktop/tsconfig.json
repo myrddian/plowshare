@@ -8,7 +8,12 @@
     "types": ["node"],
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "plowshare-client-ts/jobs": ["../sdk/typescript/src/jobs/lifecycle.ts"],
+      "plowshare-client-ts/binding/*": ["../sdk/typescript/src/binding/*.ts"],
+      "plowshare-client-ts/operations/*": ["../sdk/typescript/src/operations/*.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

@@ -6,13 +6,17 @@ for (const file of ['plowshare.png', 'plowshare.ico']) await copyFile(`assets/ic
 await copyFile('assets/icons/plowshare.png', 'build/renderer/app-icon.png');
 await build({ entryPoints: ['src/main.ts'], outfile: 'build/main.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'] });
 await build({ entryPoints: ['src/preload.ts'], outfile: 'build/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'] });
-await build({ entryPoints: ['src/renderer/app.ts'], outfile: 'build/renderer/app.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/trajectory.ts'], outfile: 'build/renderer/trajectory.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/activity.ts'], outfile: 'build/renderer/activity.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/board.ts'], outfile: 'build/renderer/board.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/library.ts'], outfile: 'build/renderer/library.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/usage.ts'], outfile: 'build/renderer/usage.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/relay.ts'], outfile: 'build/renderer/relay.js', bundle: true, platform: 'browser', target: 'chrome130' });
-await build({ entryPoints: ['src/renderer/proc.ts'], outfile: 'build/renderer/proc.js', bundle: true, platform: 'browser', target: 'chrome130' });
+// Renderers are parsed on the UI thread before first paint, so they ship
+// minified. External sourcemaps keep stack traces readable without being
+// fetched unless devtools are open.
+const renderer = { minify: true, sourcemap: true };
+await build({ entryPoints: ['src/renderer/app.ts'], outfile: 'build/renderer/app.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/trajectory.ts'], outfile: 'build/renderer/trajectory.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/activity.ts'], outfile: 'build/renderer/activity.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/board.ts'], outfile: 'build/renderer/board.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/library.ts'], outfile: 'build/renderer/library.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/usage.ts'], outfile: 'build/renderer/usage.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/relay.ts'], outfile: 'build/renderer/relay.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
+await build({ entryPoints: ['src/renderer/proc.ts'], outfile: 'build/renderer/proc.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
 for (const file of ['proc.html', 'proc.css', 'relay.html', 'relay.css', 'usage.html', 'usage.css', 'index.html', 'trajectory.html', 'activity.html', 'style.css', 'desktop.css', 'board.html', 'board.css', 'library.html', 'library.css']) await copyFile(`src/renderer/${file}`, `build/renderer/${file}`);
 console.log('Built Electron main, isolated preload and renderer.');

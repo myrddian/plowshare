@@ -6,6 +6,8 @@ import type { Request as WsRequest } from 'plowshare-client-ts/operations/direct
 import type { Arrival } from 'plowshare-client-ts/binding/connection';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
+import { replyState } from './shared.ts';
+import type { Reply, Request } from './shared.ts';
 import {
   mkdtemp,
   mkdir,
@@ -32,6 +34,8 @@ import type { JobStore, SavedJob } from './job-store.ts';
 import type { ProjectStore } from './project-config.ts';
 import type { ConnectionStore, SavedConnection } from './connection-config.ts';
 
+const relayRequestId = '00000000-0000-4000-8000-000000000011';
+const relayGeneration = '00000000-0000-4000-8000-000000000012';
 function fixture(
   connectionStore?: ConnectionStore,
   jobStore?: JobStore,
@@ -209,6 +213,77 @@ function fixture(
             return { code: 'OK', payload: { items: [], unread: 0 } };
           if (type === 'orchestration.list')
             return { code: 'OK', payload: { orchestrations: [] } };
+          // Payload-bearing reads used by the omitted-state test below. Each
+          // payload is the production decoder's minimal accepted shape.
+          if (type === 'information.list') return { code: 'OK', payload: [] };
+          // `information.ask` is the one payload-bearing information operation
+          // that must still answer with state; the job handle is what the
+          // production handler requires before it tracks the question. An
+          // accepted question is queued work, so the code is `ACCEPTED`.
+          if (type === 'information.ask')
+            return {
+              code: 'ACCEPTED',
+              payload: { job: 'ask-job', revision: 'document-1' },
+            };
+          if (type === 'proc.list')
+            return {
+              code: 'OK',
+              payload: {
+                snapshotAt: '2026-10-19T01:00:00Z',
+                selection: {
+                  visibility: 'mine',
+                  project: null,
+                  conversation: null,
+                  root: null,
+                  causation: null,
+                  active: null,
+                  after: null,
+                  limit: 50,
+                },
+                conversations: [],
+                total: 0,
+                cursor: null,
+                coverage: [],
+              },
+            };
+          if (type === 'usage.calls')
+            return {
+              code: 'OK',
+              payload: {
+                filters: { type: 'usage.calls', filter: {} },
+                calls: [],
+                cursor: null,
+                health: {
+                  watermark: '1',
+                  as_of: '2026-10-02T00:00:00Z',
+                  capture_enabled: true,
+                  historical_usage: 'not_imported',
+                },
+              },
+            };
+          if (type === 'relay.topics')
+            return {
+              code: 'OK',
+              payload: {
+                scope: { project: 'Research', system: false },
+                topics: [],
+              },
+            };
+          if (type === 'relay.operate')
+            return {
+              code: 'OK',
+              payload: {
+                requestId: relayRequestId,
+                project: 'Research',
+                topic: 'release.observed',
+                action: 'ACKNOWLEDGE_GAP',
+                subscriber: 'relay.notices.due',
+                deliveryId: null,
+                status: 'GAP_ACKNOWLEDGED',
+                seenThrough: '4',
+                completedAt: '2026-10-19T01:00:00Z',
+              },
+            };
           return { code: 'OK' };
         },
       },
@@ -590,7 +665,7 @@ await test('startup restores once with saved login and explicit disconnect preve
       workspace.dispatch({ action: 'bootstrap' }),
       workspace.dispatch({ action: 'bootstrap' }),
     ]);
-    assert.ok(replies.every((reply) => reply.state.connected));
+    assert.ok(replies.every((reply) => replyState(reply).connected));
     assert.equal(sessions.length, 1);
     assert.equal(saved.account, 'alice');
     await workspace.dispatch({ action: 'disconnect' });
@@ -600,9 +675,10 @@ await test('startup restores once with saved login and explicit disconnect preve
     const restarted = fixture(store);
     try {
       const reply = await restarted.workspace.dispatch({ action: 'bootstrap' });
-      assert.equal(reply.state.connected, false);
-      assert.equal(reply.state.base, saved.server);
-      assert.equal(reply.state.handle, saved.account);
+      const state = replyState(reply);
+      assert.equal(state.connected, false);
+      assert.equal(state.base, saved.server);
+      assert.equal(state.handle, saved.account);
       assert.equal(restarted.sessions.length, 0);
     } finally {
       await restarted.workspace.shutdown();
@@ -623,8 +699,9 @@ await test('connection preference write failures are visible without losing the 
   });
   try {
     const reply = await connect(workspace);
-    assert.equal(reply.state.connected, true);
-    assert.match(reply.state.connectionPersistenceError!, /could not be saved/);
+    const state = replyState(reply);
+    assert.equal(state.connected, true);
+    assert.match(state.connectionPersistenceError!, /could not be saved/);
   } finally {
     await workspace.shutdown();
   }
@@ -932,6 +1009,164 @@ await test('a refused saved folder is not retried by navigation or run preparati
     await workspace.dispatch({ action: 'scope', project: 'Research' });
     assert.equal(fileClaims.length, 3);
     assert.equal(workspace.state.files.status, 'ready');
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('payload replies reach the renderer without the replicated state, and state-only replies still get the composite', async () => {
+  const { workspace } = fixture();
+  try {
+    await connect(workspace);
+    // Each of these answers with a domain payload instead of state.
+    // DesktopClient omits `state`; this asserts the workspace tail does not
+    // put it back, which is the only layer the renderer talks to. `answer`
+    // names the payload field each one must still deliver, so losing the
+    // payload cannot pass for omitting the state.
+    const payloadRequests: { request: Request; answer: keyof Reply }[] = [
+      {
+        request: {
+          action: 'information',
+          operation: 'list',
+          scope: { kind: 'personal' },
+          payload: {},
+        },
+        answer: 'information',
+      },
+      {
+        request: { action: 'usage-read', type: 'usage.calls', payload: {} },
+        answer: 'usage',
+      },
+      {
+        request: { action: 'proc-read', type: 'proc.list', payload: {} },
+        answer: 'proc',
+      },
+      {
+        request: {
+          action: 'relay-read',
+          type: 'relay.topics',
+          payload: { project: 'Research' },
+        },
+        answer: 'relay',
+      },
+      {
+        request: {
+          action: 'relay-operate',
+          payload: {
+            requestId: relayRequestId,
+            project: 'Research',
+            topic: 'release.observed',
+            topicGeneration: relayGeneration,
+            action: 'ACKNOWLEDGE_GAP',
+            reason: 'Fixture gap acknowledgement',
+            subscriber: 'relay.notices.due',
+            subscriptionGeneration: relayGeneration,
+            expiredThrough: '4',
+          },
+        },
+        answer: 'relayControl',
+      },
+    ];
+    for (const { request, answer } of payloadRequests) {
+      const reply = await workspace.dispatch(request);
+      assert.equal(
+        'state' in reply,
+        false,
+        `${request.action} must answer with its payload alone`,
+      );
+      assert.notEqual(
+        reply[answer],
+        undefined,
+        `${request.action} must still answer with its ${answer} payload`,
+      );
+    }
+    // `information`/`ask` is the deliberate exception to the rule above. It
+    // pushes a tracked job onto the state and Library renders the asking
+    // document from this reply, while `emit()` arrives on a separate IPC
+    // interface whose ordering against the reply is not guaranteed. So this
+    // one payload reply must still carry state. Stripping it would leave
+    // Library's asking-document indicator rendering the previous snapshot,
+    // silently, because the renderer's library funnel does not use
+    // `replyState()`.
+    const asked = await workspace.dispatch({
+      action: 'information',
+      operation: 'ask',
+      scope: { kind: 'personal', includeGlobal: true },
+      payload: { revision: 'document-1', question: 'What does this say?' },
+    });
+    assert.notEqual(
+      asked.information,
+      undefined,
+      'information/ask must answer with its question payload',
+    );
+    const askedState = replyState(asked);
+    assert.ok(
+      askedState.jobs.some(
+        (job) => job.source === 'information' && job.revision === 'document-1',
+      ),
+      'information/ask must answer with the state that carries its tracked job',
+    );
+    // The same tail is how every state-only handler receives the composite
+    // state, including the fields only the workspace owns.
+    const stateOnly = await workspace.dispatch({ action: 'question-refresh' });
+    const state = replyState(stateOnly);
+    assert.equal(state.connected, true);
+    assert.equal(state.localMachine, thisMachine(process.env, hostname()));
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('reading state shares its nested values and snapshot() isolates them', async () => {
+  const { workspace } = fixture();
+  try {
+    await connect(workspace);
+    // `state` promises a freshly allocated top level and nested values shared
+    // by reference, so that reading it costs no deep copy. Identity is the
+    // only thing that distinguishes it from a copying getter: a
+    // `structuredClone` reintroduced here would keep every other assertion in
+    // this suite green while undoing the whole point of the property.
+    const first = workspace.state,
+      second = workspace.state;
+    assert.notEqual(
+      first,
+      second,
+      'each read of state must own its top-level object',
+    );
+    assert.equal(
+      first.activity,
+      second.activity,
+      'state must share `activity` by reference rather than copy it',
+    );
+    assert.equal(
+      first.jobs,
+      second.jobs,
+      'state must share `jobs` by reference rather than copy it',
+    );
+    assert.equal(
+      first.board,
+      second.board,
+      'state must share `board` by reference rather than copy it',
+    );
+    // `snapshot()` is the opposite contract: the callers that mutate the
+    // result or hold it across an `await` need an isolated deep copy.
+    const copy = workspace.snapshot();
+    assert.notEqual(
+      copy.activity,
+      first.activity,
+      'snapshot() must deep-copy `activity`',
+    );
+    assert.notEqual(copy.jobs, first.jobs, 'snapshot() must deep-copy `jobs`');
+    assert.notEqual(
+      copy.board,
+      first.board,
+      'snapshot() must deep-copy `board`',
+    );
+    assert.deepEqual(
+      copy.activity,
+      first.activity,
+      'snapshot() must copy `activity` faithfully, not replace it',
+    );
   } finally {
     await workspace.shutdown();
   }

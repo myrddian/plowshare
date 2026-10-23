@@ -79,18 +79,24 @@ function fixture() {
       payload.question = ask.payload.question;
     return { code: 'OK', payload };
   };
+  // `watch` lets a test inspect the state each broadcast would carry.
+  const emits = { count: 0, watch: () => {} };
   const client = new LibraryClient(
     () => state,
     checkedSender(async (ask) => {
       calls.push(ask);
       return reply(ask);
     }),
-    () => {},
+    () => {
+      emits.count++;
+      emits.watch();
+    },
   );
   return {
     state,
     client,
     calls,
+    emits,
     replies,
     setReply: (fn: typeof reply) => {
       reply = fn;
@@ -518,10 +524,16 @@ await test('document reader pages saved text and rejects foreign or malformed te
   });
   await f.client.document(id);
   assert.equal(f.state.library!.reader!.value!.text.length, 8192);
-  assert.deepEqual(field(f.calls.at(-1)!.payload, ['scope']), {
-    kind: 'personal',
-    includeGlobal: true,
-  });
+  // The saved-text read now leaves with `document.detail` rather than after
+  // it, so this looks the request up by type instead of taking the last call.
+  assert.deepEqual(
+    field(
+      present(f.calls.filter((a) => a.type === 'information.read').at(-1))
+        .payload,
+      ['scope'],
+    ),
+    { kind: 'personal', includeGlobal: true },
+  );
   await f.client.sourceText(id, 8192);
   assert.equal(f.state.library!.reader!.value!.text, 'Second page');
   const previous = structuredClone(f.state.library!.reader!.value);
@@ -582,4 +594,140 @@ await test('retained report handoff keeps project scope and can reopen the same 
   assert.equal(f.state.library!.report!.revision, id);
   await f.client.open('sources');
   assert.equal(f.state.library!.report, undefined);
+});
+/** The reader fixture pages 8,192 characters, so offset 8,192 is the next page. */
+function pagedSavedText(f: ReturnType<typeof fixture>, id: string) {
+  const original = 'A'.repeat(8192) + 'Second page';
+  f.setReply((ask) => {
+    if (ask.type !== 'information.read')
+      return { code: 'OK', payload: replyOf(f.replies, ask.type) };
+    const offset = ask.payload.offset ?? 0;
+    const value = original.slice(offset, offset + 8192);
+    return {
+      code: 'OK',
+      payload: {
+        revision: id,
+        start: offset,
+        end: offset + value.length,
+        total: original.length,
+        text: value,
+      },
+    };
+  });
+}
+await test('opening a document puts its detail and first saved text page on the wire together', async () => {
+  const f = fixture();
+  await f.client.documents('');
+  const id = present(f.replies['document.list'].documents[0]).documentId;
+  const paired = ['document.detail', 'information.read'];
+  const page = 'Saved page';
+  const seen: string[] = [];
+  let release!: () => void;
+  const both = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let inFlightAtFirstReply = 0;
+  f.setReply(async (ask) => {
+    const payload =
+      ask.type === 'information.read'
+        ? {
+            revision: id,
+            start: 0,
+            end: page.length,
+            total: page.length,
+            text: page,
+          }
+        : replyOf(f.replies, ask.type);
+    if (!paired.includes(ask.type)) return { code: 'OK', payload };
+    seen.push(ask.type);
+    if (seen.length === paired.length) release();
+    // A serial client never sends the second request, so this falls back to a
+    // timer instead of hanging the suite; the assertions below catch that.
+    await Promise.race([
+      both,
+      new Promise((resolve) => setTimeout(resolve, 250)),
+    ]);
+    inFlightAtFirstReply ||= seen.length;
+    return { code: 'OK', payload };
+  });
+  await f.client.document(id);
+  assert.deepEqual(seen, ['information.read', 'document.detail']);
+  assert.equal(inFlightAtFirstReply, 2);
+  assert.equal(f.state.library!.reader!.value!.text, page);
+  assert.equal(f.state.library!.document.value!.documentId, id);
+});
+await test('a document open broadcasts three times, and direct reader paging still announces itself', async () => {
+  const f = fixture();
+  await f.client.documents('');
+  const id = present(f.replies['document.list'].documents[0]).documentId;
+  pagedSavedText(f, id);
+  const opening = f.emits.count;
+  await f.client.document(id);
+  // Pending document read, its completion, and the reader's completion. The
+  // reader's own pending broadcast is gone: the first frame already shows the
+  // cleared reader slot while its text is in flight.
+  assert.equal(f.emits.count - opening, 3);
+  assert.equal(f.state.library!.reader!.value!.text.length, 8192);
+  const paging = f.emits.count;
+  await f.client.sourceText(id, 8192);
+  assert.equal(f.state.library!.reader!.value!.text, 'Second page');
+  assert.equal(f.emits.count - paging, 2);
+});
+await test('a refused document detail still surfaces its own error and leaves no reader text', async () => {
+  const f = fixture();
+  await f.client.documents('');
+  const id = present(f.replies['document.list'].documents[0]).documentId;
+  pagedSavedText(f, id);
+  f.setReply((ask) =>
+    ask.type === 'document.detail'
+      ? { code: 'BAD_REQUEST', said: 'Detail unavailable.' }
+      : {
+          code: 'OK',
+          payload: {
+            revision: id,
+            start: 0,
+            end: 4,
+            total: 4,
+            text: 'Late',
+          },
+        },
+  );
+  await f.client.document(id);
+  assert.equal(f.state.library!.document.error, 'Detail unavailable.');
+  assert.equal(f.state.library!.document.value, undefined);
+  // The concurrent saved-text reply is discarded unread, not applied, and its
+  // outcome never escapes as an unhandled rejection.
+  assert.equal(f.state.library!.reader!.value, undefined);
+  assert.equal(f.state.library!.reader!.error, undefined);
+});
+await test('a disconnected library sends nothing when a document is opened', async () => {
+  const f = fixture();
+  await f.client.documents('');
+  const id = present(f.replies['document.list'].documents[0]).documentId;
+  f.state.connected = false;
+  const sent = f.calls.length;
+  await assert.rejects(f.client.document(id), /Connect before reading/);
+  assert.equal(f.calls.length, sent);
+});
+await test('re-opening the displayed document keeps the reader pending broadcast', async () => {
+  const f = fixture();
+  await f.client.documents('');
+  const id = present(f.replies['document.list'].documents[0]).documentId;
+  pagedSavedText(f, id);
+  await f.client.document(id);
+  assert.equal(f.state.library!.reader!.value!.text.length, 8192);
+  // The displayed page survives a re-open, so the renderer shows that text
+  // rather than a pending state. The reader's own broadcast is therefore still
+  // required: it is what disables the paging controls while the refreshed page
+  // is in flight.
+  const pending: boolean[] = [];
+  f.emits.watch = () => {
+    pending.push(Boolean(f.state.library!.reader!.loading));
+  };
+  const reopening = f.emits.count;
+  await f.client.document(id);
+  f.emits.watch = () => {};
+  assert.ok(f.state.library!.reader!.value!.text.startsWith('A'));
+  assert.ok(pending.includes(true));
+  assert.equal(f.emits.count - reopening, 4);
 });
