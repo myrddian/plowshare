@@ -120,7 +120,8 @@ server.on('upgrade', (request, socket, head) => {
                             // and kills the whole harness with an unrelated transport error,
                             // hiding the assertion that actually failed. A dead socket here is
                             // the normal shape of a failing run, not a fault of its own.
-                            // 1 is OPEN; the ws instance does not carry the readyState constants.
+                            // 1 is OPEN. The library WebSocket does carry the readyState constants, but this is
+                            // the fixture socket wrapper, which exposes readyState and nothing else.
                             if (ws.readyState !== 1) return
                             try {
                                 if (test.closeWhileParked) ws.terminate()

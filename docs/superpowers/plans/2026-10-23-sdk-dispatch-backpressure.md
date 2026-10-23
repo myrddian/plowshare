@@ -40,10 +40,18 @@ JUnit tests in Task 5. One contract, four implementations, one place that says w
 - Each SDK keeps its own idioms, test framework and build. This is not a rewrite.
 - The shape of the two forms (two methods, a flag, an options field) is the implementer's call
   within each SDK's conventions. The contract is what must match, not the spelling.
-- **The fixture names wire codes; each SDK maps them to its own delivery vocabulary.** Go reports
-  the wire's `RESPONSE_LOST` as `UNKNOWN`, so its driver maps `deliveryAlternates` accordingly —
-  without that, `capacity-refuse-always` flakes on the transmit/refusal race the fixture documents.
-  .NET and Python need the same translation. Map it in the driver; do not change the fixture.
+- **The fixture states delivery values in SDK vocabulary, not wire codes — no driver maps them.**
+  This note previously said the opposite and told each driver to translate. It was wrong: every
+  `delivery` and `waitingDelivery` in the fixture is already SDK vocabulary (`UNKNOWN`,
+  `NOT_SUBMITTED`), and the one outlier, `deliveryAlternates: ["RESPONSE_LOST"]`, was a defect — the
+  TypeScript `ConnectionFault.delivery` getter maps `RESPONSE_LOST` to `UNKNOWN`, so node's
+  tolerance of it was unreachable and the flake it was added to fix was still live. The fixture now
+  says `["UNKNOWN"]`. Compare against the fixture's value directly.
+- **Arm the deadline after acquiring the writer lock, not before it.** The spec says "after any wait
+  for the conversion gate, the writer lock or the send lock". Go arms before its packet writer
+  semaphore, which is acceptable there because that semaphore is held across one bounded write — but
+  Python's `_send_lock` is the case the spec calls out by name, so Python must arm *after* acquiring
+  it or it reintroduces the fault in a smaller window.
 - **An SDK whose slot release is not synchronous needs a short allowance before closing** in
   `capacity-deadline-survives-waiting`. Node transmits the released sibling synchronously inside the
   expiring request's rejection path, so it needs none; Go's released caller is a separate goroutine
@@ -272,7 +280,12 @@ where the mode belongs. Waiting is a continuation here, not a held thread. A can
 
 As Task 2 Step 3, with injectable randomness.
 
-- [ ] **Step 4: Drive the seven scenarios, plus Review Focus 2, 3, 5, 6 and 7**
+- [ ] **Step 4: Drive the seven scenarios; cover Review Focus 2, 3, 5, 6 and 7**
+
+The seven scenarios belong in the conformance driver. The Review Focus cases may live in the SDK's
+own unit tests instead where that makes them deterministic — a cancellation race run a few hundred
+times under a race detector is something a driver cannot do — provided each is actually covered
+somewhere and the report says where.
 
 Cancellation during the wait, a resubmission not re-arming the deadline, and parked callers released
 on close — expressed in .NET terms: `OperationCanceledException`, the `Stopwatch` started once, and
@@ -325,7 +338,12 @@ Task cancellation is already the native signal; a cancelled wait raises `Cancell
 
 As Task 2 Step 3, with injectable randomness.
 
-- [ ] **Step 4: Drive the seven scenarios, plus Review Focus 2, 3, 5, 6 and 7**
+- [ ] **Step 4: Drive the seven scenarios; cover Review Focus 2, 3, 5, 6 and 7**
+
+The seven scenarios belong in the conformance driver. The Review Focus cases may live in the SDK's
+own unit tests instead where that makes them deterministic — a cancellation race run a few hundred
+times under a race detector is something a driver cannot do — provided each is actually covered
+somewhere and the report says where.
 
 Cancellation during the wait, a resubmission not re-arming the deadline, and parked callers released
 on close — expressed in Python terms: `CancelledError` while awaiting capacity, `end` computed once,
