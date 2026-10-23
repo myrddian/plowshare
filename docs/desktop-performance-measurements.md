@@ -52,9 +52,24 @@ needs the real desktop against this server, which remains the one untested
 combination.
 
 Behavioural checks on the new server all pass: a personal upload is accepted
-(PR #104 holds), a `global_read` write is still refused, the manual still has
-zero chapters, and the ten-document corpus is intact with 9 of its documents
-now auto-tagged — so the pipeline was progressing, not stuck.
+(PR #104 holds), a `global_read` write is still refused, and the ten-document
+corpus is intact with 9 of its documents now auto-tagged — so the pipeline was
+progressing, not stuck.
+
+**Correction, 24 October 2026: this document's claim that the manual has zero
+chapters was wrong.** The manual was installed on 2026-10-05 — 37 chapters,
+exactly the installer's dry-run count — into **`admin`'s `ACCOUNT_KNOWLEDGE`
+scope**, because `kind:personal` resolves to namespace `account:<handle>`
+(`InformationContext.namespace()`). The ACLs then enforce that correctly, so
+admin can read it and nobody else can: a manual meant to be public became one
+account's private documents.
+
+The error was method, not data. "Zero chapters" came from listing as
+`client-evaluation` with `global_read` and `personal`, both of which were
+genuinely empty of it, and generalising "this account cannot see it" into "it
+does not exist". No listing was made as `admin`, and the database was not
+queried by name. See `docs/global-null-removal-plan.md` for the root cause and
+the migration it implies.
 
 ---
 
@@ -264,12 +279,14 @@ Also untested:
   the harness found no chapter controls. Each click fires a `library-view`
   IPC, and the user's report mentions waiting on manual pages specifically.
   Worth measuring against a populated manual.
-- **Whether the manual is populated at all.** The user reported it "broke
-  during the permissions change", and the manual installer writes Markdown
-  chapters through the information write path — the path that was refused
-  until PR #104. A manual with no chapters, or one whose pages fail, would
-  look like slowness while actually being the write defect's shadow. Check
-  this before chasing performance.
+- ~~**Whether the manual is populated at all.**~~ **Answered, 24 October: it
+  is.** 37 chapters, installed 2026-10-05, in `admin`'s `ACCOUNT_KNOWLEDGE`
+  scope. The guess recorded here — that the installer had been refused by the
+  write path until PR #104 — was wrong; it succeeded two and a half weeks
+  before that defect mattered. The Manual tab is empty for every account except
+  `admin`, which is a placement defect being enforced correctly by the ACLs,
+  not slowness. Measuring the Manual against `admin` would give the populated
+  reading this document wanted.
 - **Connection count per window.** `connect + authenticate` is ~97 ms. If
   each window authenticates separately this is additive, and it is worth
   confirming whether windows share one session.

@@ -159,6 +159,47 @@ furrow-web, and three workers). Under this model they hold documents belonging
 in those accounts' personal projects. Only GLOBAL's `…005` is a real
 destination.
 
+### The worked example: the public manual is private to one account
+
+**37 manual chapters were installed on 2026-10-05, into `admin`'s
+`ACCOUNT_KNOWLEDGE` scope.** That is the installer's full chapter count, so the
+install succeeded. `kind:personal` resolved to namespace `account:admin`, which
+V157's resolver maps to that account's knowledge scope.
+
+The ACLs then enforce it exactly as written, which is why the symptom looks the
+way it does: `admin` can read the manual and no other account can. A manual
+meant to be public became one account's private documents. **The permission
+system is not broken — correct enforcement of wrong placement is the whole
+symptom**, and no document is readable by anyone who should not see it. Zero
+information resources sit in GLOBAL's `…005`, so nothing is over-shared either.
+
+This is the clearest consequence of the migration and multi-user changes, and it
+has been live since 5 October.
+
+**It also sharpens the migration, and makes it more than a re-point.** The 50
+misfiled rows do not share one destination:
+
+- The **37 manual chapters** are shared content. They belong in GLOBAL's
+  `…005`, not in `admin`'s personal project. That destination is currently
+  unreachable, because `executionHome` maps ACCOUNT to `Home.global()` and
+  admission refuses a global home — door 4. **So two defects meet on this one
+  feature, and the manual cannot be re-homed correctly until door 4 is fixed.**
+- The **remaining 13** (one other `admin` row, twelve `client-evaluation`) are
+  ordinary personal documents and belong in their owners' personal projects.
+
+A migration that moves all 50 the same way would be wrong. Splitting them needs
+a rule, and "was it installed by the manual installer" is a property of
+provenance, not of the row — so decide how the two sets are told apart before
+writing it.
+
+Three earlier documents in this repository claimed the manual had never been
+installed, and that the installer was blocked by the write path until PR #104.
+Both claims were wrong, and the method that produced them is worth not
+repeating: the manual was listed as `client-evaluation` under `global_read` and
+`personal`, both genuinely empty of it, and "this account cannot see it" was
+generalised into "it does not exist". A single listing as `admin`, or one query
+by name, would have shown 37 rows.
+
 ## The sweep: make everything resolve a PERSONAL selection the way #104 does
 
 PR #104 established the pattern at two sites, and the work is applying it
