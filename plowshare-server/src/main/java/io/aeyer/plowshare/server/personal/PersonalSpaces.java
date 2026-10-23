@@ -140,6 +140,47 @@ public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspac
    * Allocates the personal space's storage, after {@link #ensureIdentity(String)} has established
    * the identity it belongs to. The identity survives a storage failure: an account can hold
    * documents without a union, and only workspace and file operations need one.
+   *
+   * <h2>Known gap: a failed allocation is not reliably recoverable</h2>
+   *
+   * <p><b>There is no state recording that an allocation was attempted</b>, and that is the defect
+   * this note exists to describe rather than fix. What is tracked is one boolean, {@code
+   * projects.union_since IS NOT NULL}, which conflates "storage never started" with "storage
+   * half-built". The thing that actually distinguishes them is {@code hub.main().isEmpty()} — a
+   * <em>filesystem</em> check. So the source of truth for a database-tracked resource lives on
+   * disk.
+   *
+   * <p><b>The orphan.</b> {@code DataLayout.unionFor(id)} is {@code root/projects/<id>} and {@code
+   * projects.id} is {@code GENERATED ALWAYS AS IDENTITY}, whose sequence does not roll back. So if
+   * the project row is rolled back after a directory has been created, the next attempt gets a
+   * <em>new</em> id and therefore a different directory, and the half-written union at the old id
+   * is left behind with nothing recording that it ever belonged to an account. The guard above
+   * catches only the inverse — a row claiming initialization whose storage is missing — because
+   * that case does leave a durable record.
+   *
+   * <p><b>Why the split above is not yet a fix.</b> {@link #ensureIdentity(String)} commits the row
+   * before any directory is created only while no outer transaction is active. The configured
+   * {@code UnitOfWork} is a plain {@code TransactionTemplate}, so its propagation is {@code
+   * REQUIRED}: under an outer transaction both this method and {@code ensureIdentity} join it and a
+   * storage failure rolls the identity back again, restoring the orphan. The two callers today —
+   * the {@code AccountCreated} listener and the boot-time reconciliation — are not transactional,
+   * so it holds for them. <b>Nothing enforces that</b>, and a future transactional caller would
+   * reintroduce the problem silently.
+   *
+   * <p>The filesystem work is also not transactional at all, so a database rollback can orphan a
+   * directory whatever the ordering.
+   *
+   * <p><b>What a recoverable design needs.</b> The pattern already exists in this codebase: {@code
+   * application_identities} carries {@code state}, {@code reserved_by} and {@code reserved_at},
+   * while personal spaces got only the boolean. Shaped the same way, this wants the reservation
+   * durable <em>before</em> any directory exists, an explicit provisioning state so a crash is
+   * distinguishable from a fresh reserve, and resumption or cleanup keyed to that state. Resumption
+   * is otherwise already within reach: once the row is durable the id is stable, and each skeleton
+   * step is individually idempotent ({@code if (!Files.exists(...))}), so a retry into the same
+   * union completes it.
+   *
+   * <p>That is a schema change plus a lifecycle and wants its own pinning, so it is recorded here
+   * rather than attempted alongside the selection change this method's split belongs to.
    */
   public void ensure(String handle) {
     ensureIdentity(handle);
