@@ -40,6 +40,12 @@ JUnit tests in Task 5. One contract, four implementations, one place that says w
 - Each SDK keeps its own idioms, test framework and build. This is not a rewrite.
 - The shape of the two forms (two methods, a flag, an options field) is the implementer's call
   within each SDK's conventions. The contract is what must match, not the spelling.
+- **Each conformance driver opens its connection with a 5000ms connection timeout.** This is not
+  cosmetic and the fixture cannot enforce it: `capacity-deadline-survives-waiting` separates "the
+  request carries its own 300ms armed at transmit" from "it silently fell back to the connection's
+  timeout" by probing at 2500ms. A driver whose connection timeout is below ~2500ms makes those two
+  cases indistinguishable, so the scenario would pass for an implementation that dropped the
+  per-request timeout entirely. The number is recorded in the fixture's `capacityContract`.
 
 ## Review Focus
 
