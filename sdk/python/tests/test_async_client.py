@@ -105,7 +105,9 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)  # Admit tasks onto the deliberately held writer.
                 self.assertEqual(client._admitted, 64)
                 with self.assertRaises(TransportError) as refused:
-                    await client.request(MemoryIndexRequest())
+                    # The non-blocking form, which is what this bound is about: the
+                    # waiting form is the default and would park here instead.
+                    await client.request(MemoryIndexRequest(), wait_for_capacity=False)
                 self.assertEqual(refused.exception.delivery, "NOT_SUBMITTED")
                 self.assertEqual(peer.operations, ["transport.dispatch"])
                 calls[0].cancel()

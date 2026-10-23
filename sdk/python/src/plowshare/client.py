@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from types import TracebackType
@@ -28,6 +31,19 @@ from ._protocol import CODES, PROTOCOL_VERSION
 from .acting import ActingSelection
 
 T = TypeVar("T")
+
+# The server's dispatch refusal. It is flow control, not a fault: the waiting form
+# absorbs it and resubmits under the same request id, and the caller never sees
+# it. The dispatch negotiation is exempt; see _exchange.
+CAPACITY_EXHAUSTED = "CAPACITY_EXHAUSTED"
+
+# Resubmission pacing after a capacity refusal, in seconds, matching the reference
+# SDK's shipped values: the ceiling doubles with the refusal count up to the cap,
+# and the pause is half of it fixed and half random, so a client always pauses and
+# clients released together never retry in lockstep. The exponent is a pacing
+# input, not a bound: the bound is the deadline armed at the first transmit.
+BACKOFF_BASE = 0.1
+BACKOFF_CAP = 5.0
 
 
 class _SingleUpgrade(connect):
@@ -119,6 +135,19 @@ class Client:
         self._closed = False
         self._pending: dict[str, _Pending] = {}
         self._admitted = 0
+        # Two counters, as the reference SDK keeps them: _admitted is the
+        # advertised window, _dispatched is work actually on the wire. A capacity
+        # refusal releases only the dispatch count, so other already-admitted work
+        # can transmit while the refused request backs off, and the refused request
+        # keeps its place in the window instead of being overtaken by work that
+        # arrived after it.
+        self._dispatched = 0
+        # The FIFO queue of callers parked for an admission slot. Dispatch counts
+        # have no queue: a caller holding an admission is already guaranteed one,
+        # so parking for one is unreachable; see _acquire_dispatch.
+        self._slot_waiters: deque[asyncio.Future[None]] = deque()
+        # The resubmission jitter source, injectable so tests are deterministic.
+        self._random: Callable[[], float] = random.random
         self._held = 0
         self._idle = asyncio.Event()
         self._idle.set()
@@ -246,13 +275,36 @@ class Client:
         *,
         acting_for: ActingSelection | None = None,
         timeout: float | None = None,
+        wait_for_capacity: bool = True,
     ) -> Reply[T]:
-        """Return this request's typed reply; cancellation never replays remote work."""
+        """Return this request's typed reply; cancellation never replays remote work.
+
+        ``wait_for_capacity`` selects between the contract's two submission forms,
+        per call rather than per client, because the choice belongs to the caller's
+        role and not to the language.
+
+        The waiting form is the default: a full dispatch window is flow control, so
+        this call does not complete until the request has been transmitted, and a
+        ``CAPACITY_EXHAUSTED`` reply is absorbed and resubmitted rather than
+        surfaced. Waiting here is a pending task, never a held thread; cancel the
+        task to get out of it, which reports ``Delivery.NOT_SUBMITTED`` because
+        nothing was written.
+
+        ``wait_for_capacity=False`` is the non-blocking form, for a caller that
+        would rather shed load than be held -- a batch job under its own deadline.
+        It raises ``TransportError`` with ``Delivery.NOT_SUBMITTED`` immediately
+        when the window is full, performs no backoff and no resubmission, and
+        returns a ``CAPACITY_EXHAUSTED`` reply to the caller as an outcome.
+        """
         if acting_for is not None and not isinstance(acting_for, ActingSelection):
             raise ValueError("Invalid acting selection")
         operation, payload = encode_request(request)
         outcome = await self._exchange(
-            operation, payload, acting_for=acting_for, timeout=timeout
+            operation,
+            payload,
+            acting_for=acting_for,
+            timeout=timeout,
+            wait_for_capacity=wait_for_capacity,
         )
         if outcome.code in {
             "OK",
@@ -266,6 +318,148 @@ class Client:
             )
         return Reply(outcome.code, outcome.said, cast(T, outcome.payload))
 
+    async def _admit(self, wait: bool) -> None:
+        """Reserve one slot of the advertised window.
+
+        Nothing here is charged against the request deadline, which is armed later,
+        when the frame is written. The wait is bounded by task cancellation and by
+        the connection closing; a cancelled wait reports ``NOT_SUBMITTED`` and
+        leaves the accounting exactly as it was, because cancellation must never be
+        a way to leak capacity.
+
+        The fast path runs with no await at all, so it is atomic on the event loop:
+        a slot cannot be taken from under a caller mid-check. The strict ``<``, and
+        the empty-queue condition, are what stop a slot being taken ahead of a
+        caller already parked for one.
+        """
+        if self._closed:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"
+            )
+        if self._admitted < self._maximum and not self._slot_waiters:
+            self._admitted += 1
+            self._idle.clear()
+            return
+        if not wait:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"
+            )
+        parked: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._slot_waiters.append(parked)
+        try:
+            await parked
+        except asyncio.CancelledError:
+            # The slot may have been charged to us by _pump in the same instant we
+            # were cancelled: awaiting an already-resolved future still raises when
+            # the task is cancelled. Hand it straight back so the next parked
+            # caller receives it; otherwise just leave the queue.
+            if parked.done() and not parked.cancelled() and parked.exception() is None:
+                self._release_admission()
+            else:
+                try:
+                    self._slot_waiters.remove(parked)
+                except ValueError:  # Already dequeued by _pump or by stranding.
+                    pass
+            raise
+
+    def _pump(self) -> None:
+        """Hand freed admission slots to parked callers in FIFO order.
+
+        It runs from every release, so a failure frees capacity exactly like a
+        reply does. The slot is charged to the waiter before it is woken, so a
+        caller arriving later cannot steal what was granted, and FIFO order means
+        work that arrived later never overtakes a caller already parked. Nothing is
+        granted once the connection is closed; callers parked then are released by
+        _strand_slot_waiters.
+        """
+        while (
+            self._slot_waiters and self._admitted < self._maximum and not self._closed
+        ):
+            parked = self._slot_waiters.popleft()
+            if parked.done():
+                continue
+            self._admitted += 1
+            self._idle.clear()
+            parked.set_result(None)
+
+    def _release_admission(self) -> None:
+        self._admitted -= 1
+        if self._admitted == 0:
+            self._idle.set()
+        self._pump()
+
+    def _strand_slot_waiters(self) -> None:
+        """Release every caller parked for a slot once the connection is gone.
+
+        Their deadline never started -- it arms at transmit -- so without this a
+        parked caller would hang rather than be released. Nothing was written for
+        them, which makes ``NOT_SUBMITTED`` the one delivery claim that is
+        unambiguously safe here.
+        """
+        while self._slot_waiters:
+            parked = self._slot_waiters.popleft()
+            if not parked.done():
+                parked.set_exception(
+                    TransportError(
+                        Delivery.NOT_SUBMITTED,
+                        "Connection closed while waiting for an admission slot",
+                    )
+                )
+
+    def _acquire_dispatch(self) -> None:
+        """Take one of the connection's dispatch counts for one transmit attempt.
+
+        Holding an admission is always enough to be sure of a count, so this never
+        waits. A request holds at most one count and only while it is admitted, so
+        a caller that has not transmitted yet sees at most ``_admitted - 1``
+        dispatched, which is below the window. The window itself only ever changes
+        while nothing is admitted: ``_maximum`` is written at construction and once
+        after the handshake, whose own admission is released before that write.
+
+        The remaining branch is therefore an invariant violation, not flow control.
+        It is asserted rather than queued on, so the advertised window stays
+        authoritative: the request is refused without transmitting instead of
+        pushing the connection past the window the server advertised. A caller
+        seeing it has found a bug in this client's accounting, not a busy server.
+        """
+        if self._closed:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED, "Connection closed before writer admission"
+            )
+        if self._dispatched >= self._maximum:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED,
+                "Dispatch accounting exceeded the advertised window; no frame was written",
+            )
+        self._dispatched += 1
+
+    async def _pace(self, refusals: int) -> None:
+        """Wait out the pause owed for the refusals so far.
+
+        The exponent is a pacing input, not a bound. The bound is the deadline
+        armed at the first transmit, which is already in force around this call:
+        backoff time and the server's own processing time both count against the
+        caller's original timeout, so a request refused over and over ends in a
+        timeout rather than retrying forever. There is no retry ceiling and none is
+        wanted.
+
+        A pause ended by a close is ``NOT_SUBMITTED``: the refused attempt released
+        its dispatch count and the server did none of the work.
+        """
+        ceiling = min(BACKOFF_CAP, BACKOFF_BASE * 2 ** min(refusals, 16))
+        pause = ceiling / 2 + ceiling * self._random() / 2
+        stopped = asyncio.ensure_future(self._reader_closed.wait())
+        try:
+            await asyncio.wait({stopped}, timeout=pause)
+        finally:
+            stopped.cancel()
+            await asyncio.gather(stopped, return_exceptions=True)
+        if self._reader_closed.is_set():
+            raise TransportError(
+                Delivery.NOT_SUBMITTED,
+                "Connection closed while pacing a resubmission",
+            )
+
     async def _exchange(
         self,
         operation: str,
@@ -273,25 +467,49 @@ class Client:
         *,
         acting_for: ActingSelection | None = None,
         timeout: float | None = None,
+        wait_for_capacity: bool = True,
     ) -> _Outcome:
+        """Transmit one request, absorbing dispatch refusals, and return its reply.
+
+        The request deadline is armed when the frame is written, exactly once.
+        Waiting for an admission slot happens before that and is charged to
+        nothing; so does acquiring ``_send_lock``, which is why the deadline is
+        armed *after* the lock is held rather than around it. Taking a dispatch
+        count never waits at all. A resubmission re-enters the transmit below and
+        finds the deadline already armed, so it runs against what is left of it.
+
+        A ``CAPACITY_EXHAUSTED`` reply is absorbed when the caller chose the waiting
+        form: the dispatch count is released so other admitted work can transmit,
+        the admission slot is kept so later arrivals cannot overtake this request,
+        and the same request id is resubmitted after a jittered pause against the
+        deadline already armed. The server refused the work outright, having done
+        none of it, which is the only reason resubmitting is not the replay this
+        transport otherwise forbids. The dispatch negotiation is never resubmitted:
+        the server treats a second selection on one connection as a protocol
+        violation, so a retry would turn a refusal into a teardown.
+        """
         import math
 
         allowance = self.timeout if timeout is None else timeout
         if not math.isfinite(allowance) or allowance <= 0:
             raise ValueError("Choose a positive finite request timeout")
-        end = asyncio.get_running_loop().time() + allowance
-        # Event-loop-confined admission is atomic before the first await, including writer waiters.
-        if self._closed or self._admitted >= self._maximum:
-            raise TransportError(
-                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"
-            )
-        self._admitted += 1
-        self._idle.clear()
+        loop = asyncio.get_running_loop()
+        try:
+            await self._admit(wait_for_capacity)
+        except asyncio.CancelledError:
+            raise CancelledRequest(
+                "Request cancelled while waiting for dispatch capacity",
+                Delivery.NOT_SUBMITTED,
+            ) from None
         identity = str(uuid4())
-        future: asyncio.Future[_Outcome] = asyncio.get_running_loop().create_future()
-        waiting = _Pending(operation, future)
+        waiting = _Pending(operation, loop.create_future())
         size = 0
         packet_reserved = False
+        dispatched = False
+        # None until the first frame is written. It is the single record of whether
+        # the deadline has been armed, so "exactly once" is a property of one
+        # variable rather than of the control flow.
+        end: float | None = None
         try:
             wire = json.dumps(
                 {
@@ -326,24 +544,58 @@ class Client:
                 packet_reserved = True
             size = len(encoded)
             self._held += size
-            self._pending[identity] = waiting
-            async with asyncio.timeout_at(end):
-                async with self._send_lock:
-                    if self._closed:
-                        raise TransportError(
-                            Delivery.NOT_SUBMITTED,
-                            "Connection closed before writer admission",
-                        )
+            absorbs = wait_for_capacity and operation != "transport.dispatch"
+            # One scope for the whole life of the request, entered without a
+            # deadline and rescheduled to the armed one at the first transmit. A
+            # scope opened per attempt would let a resubmission re-arm; this one
+            # cannot, because reschedule is reached only while end is None.
+            async with asyncio.timeout_at(None) as deadline:
+                refusals = 0
+                while True:
+                    self._acquire_dispatch()
+                    dispatched = True
+                    # A fresh answer per attempt, under the same request id: the
+                    # previous attempt's future was settled by the refusal. Cleared
+                    # submission means a close during the next backoff is honestly
+                    # NOT_SUBMITTED, because the refused attempt left no work behind.
+                    waiting.submitted = False
+                    waiting.answer = loop.create_future()
+                    self._pending[identity] = waiting
+                    async with self._send_lock:
+                        if self._closed:
+                            raise TransportError(
+                                Delivery.NOT_SUBMITTED,
+                                "Connection closed before writer admission",
+                            )
+                        if end is None:
+                            # The frame is written below, so this is where the
+                            # deadline arms, and the only place it ever does. It is
+                            # inside the send lock on purpose: the wait for the
+                            # writer is client-side queueing and must not be charged
+                            # against the time the server is given to answer.
+                            end = loop.time() + allowance
+                            deadline.reschedule(end)
 
-                    def submitted() -> None:
-                        waiting.submitted = True
+                        def submitted() -> None:
+                            waiting.submitted = True
 
-                    if self._packets is not None:
-                        await self._packets.send(encoded, self._write_packet, submitted)
-                    else:
-                        waiting.submitted = True
-                        await self._socket.send(wire)
-                return await asyncio.shield(future)
+                        if self._packets is not None:
+                            await self._packets.send(
+                                encoded, self._write_packet, submitted
+                            )
+                        else:
+                            waiting.submitted = True
+                            await self._socket.send(wire)
+                    outcome = await asyncio.shield(waiting.answer)
+                    if not (absorbs and outcome.code == CAPACITY_EXHAUSTED):
+                        return outcome
+                    # Dispatch released, admission kept: capacity the server said it
+                    # cannot take is given back, the place in the window is not.
+                    dispatched = False
+                    self._dispatched -= 1
+                    self._pending.pop(identity, None)
+                    await self._pace(refusals)
+                    refusals += 1
         except TransportError:
             raise
         except asyncio.CancelledError:
@@ -354,6 +606,16 @@ class Client:
             raise CancelledRequest(
                 "Request cancelled before submission", Delivery.NOT_SUBMITTED
             ) from None
+        except TimeoutError:
+            # Named as a deadline only when one really expired, so a transport
+            # TimeoutError from elsewhere cannot claim to be an expiry.
+            expired = end is not None and loop.time() >= end
+            raise TransportError(
+                Delivery.UNKNOWN if waiting.submitted else Delivery.NOT_SUBMITTED,
+                "Request deadline expired; no request was replayed"
+                if expired
+                else "Request did not obtain a readable reply; no request was replayed",
+            ) from None
         except Exception:
             raise TransportError(
                 Delivery.UNKNOWN if waiting.submitted else Delivery.NOT_SUBMITTED,
@@ -361,16 +623,18 @@ class Client:
             ) from None
         finally:
             self._pending.pop(identity, None)
-            self._admitted -= 1
+            if dispatched:
+                self._dispatched -= 1
             self._held -= size
             if packet_reserved and self._packets is not None:
                 self._packets.release_outgoing(size)
-            if not future.done():
-                future.cancel()
-            elif not future.cancelled():
-                future.exception()
-            if self._admitted == 0:
-                self._idle.set()
+            if not waiting.answer.done():
+                waiting.answer.cancel()
+            elif not waiting.answer.cancelled():
+                waiting.answer.exception()
+            # Last, and after the byte charge is returned, so a caller woken by the
+            # pump inside this call sees the capacity it is about to use.
+            self._release_admission()
 
     async def _write_packet(self, packet: str) -> None:
         await self._socket.send(packet)
@@ -467,6 +731,7 @@ class Client:
                 self._packets.close()
                 self._abort_packets()
             self._reader_closed.set()
+            self._strand_slot_waiters()
             for waiting in self._pending.values():
                 answer = waiting.answer
                 if not answer.done():
@@ -505,6 +770,9 @@ class Client:
     async def close(self) -> None:
         if self._close_task is None:
             self._closed = True
+            # Promptly, rather than waiting for the reader to notice: a parked
+            # caller has no deadline of its own to fall back on.
+            self._strand_slot_waiters()
             self._close_task = asyncio.create_task(self._finish_close())
         # A caller detaching from close cannot cancel the connection's shared drain.
         await asyncio.shield(self._close_task)

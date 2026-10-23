@@ -32,6 +32,20 @@ Requests have a positive deadline (30 seconds by default) and at most 64 are out
 Cancelling a submitted request raises `CancelledRequest`, an `asyncio.CancelledError`
 with unknown delivery. Neither timeout nor cancellation repeats a mutation.
 
+The server advertises the connection's dispatch window and applies backpressure
+within it. `request()` waits for capacity by default: a full window parks the call
+until a slot frees, and a server `CAPACITY_EXHAUSTED` reply is absorbed and
+resubmitted under the same request id after a jittered pause, so a caller never
+handles it as a fault. `request(..., wait_for_capacity=False)` is the non-blocking
+form for a caller that would rather shed load than be held; it raises
+`TransportError` with `NOT_SUBMITTED` immediately on a full window and returns a
+`CAPACITY_EXHAUSTED` reply as an outcome. In both forms **the request deadline arms
+when the frame is written, exactly once**: waiting for a slot or for the writer is
+never charged against the time the server is given to answer, and a resubmission
+runs against what is left of the original deadline rather than a fresh one. Cancel
+the task to leave a wait for capacity; that raises `CancelledRequest` with
+`NOT_SUBMITTED`, because nothing was written.
+
 `next_push()` receives validated `ServerPush` DTOs from bare or enveloped notifications through a 256-entry queue;
 `dropped_pushes` counts overflow. Reconcile dropped events through durable status reads.
 Retain outgoing request UUIDs before submission; identical UUID/payload recovery is an
