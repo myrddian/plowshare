@@ -19,6 +19,109 @@ The full sequence and its reasoning live in
 [the admission plan](authority-scope-admission-plan.md). This file is the
 status layer on top of it, plus the things that plan does not cover.
 
+## Read this before deciding "constrain" or "remove"
+
+The private `plowshare` repository holds the full history (2242 commits, tip
+2026-10-06); only the public repository is squashed. An earlier claim in the
+admission plan that no archaeology was available was wrong, and that history
+settles what "no project" means:
+
+- **2026-08-26, `d691463f`** — `Home` is introduced by `feat(protocol): the
+  memory record and its four states`. Its Javadoc models **memories only**, and
+  states that `null` was chosen so the global tier is *unspellable*: "Global is
+  the absence of a project, not a project named 'global' … any code that
+  defaulted a missing project to a placeholder would silently write into the
+  tier every agent everywhere reads."
+- **2026-09-01** — accounts and authentication arrive.
+- **2026-10-03, `91ab6fea`** — "Add account Personal spaces **and make global an
+  abstract resource scope**". Personal gains a real `projects` row
+  (`projects.personal_owner`, name `personal:` + hex handle), which is why
+  `AuthorityScope.Personal` carries a `projectId` and why Personal was
+  repairable. Global becomes "the shared server setup and resource scope":
+  abstract, with no project row, and so it inherited `Home`'s `null`.
+
+**So global-as-a-scope is five weeks younger than `Home` and arrived with
+multi-user support.** From `91ab6fea` onward, `null` meant both the global
+memory retrieval tier and the global resource scope, and that single conflation
+produced every defect in this file: refused Personal uploads, the uninstallable
+public manual, and the SYSTEM ceiling admitting by omission. (The manual's
+failure is a misfiling, not an absence: 37 chapters were installed on
+2026-10-05 into `admin`'s `ACCOUNT_KNOWLEDGE` scope, where the ACLs
+correctly keep them private to that one account.)
+
+**The target is the representation, not the concept.** Global is kept and is
+already enumerated — `BuiltInIdentities.GLOBAL` (…004) and `GLOBAL_KNOWLEDGE`
+(…005). What goes is **`null` as the way global is spelled**, exactly as
+`global-scope-migration-map.md:64` puts it: "null scope representation replaced
+by explicit scope UUIDs". So the job is not to constrain global or to delete it,
+but to make a home or scope always stated, so that `project IS NULL` stops
+meaning anything.
+
+Judge each `Home.global()` by whether it is naming the memory retrieval tier or
+standing in for an unstated scope — not by its shape.
+
+### What production still holds (23 October 2026)
+
+Counts from the deployed database, because they bound the work:
+
+| | null-represented | total |
+|---|---|---|
+| `memories` | 0 | **0** |
+| `conversations` | **503** | 11917 |
+
+There are no memories at all, so the global memory tier holds nothing today and
+no migration is owed to it. The 503 null-home conversations are the whole of the
+remaining null-global data: 415 `delegation` and 88 `submission`, spanning
+2026-10-05 to 2026-10-23.
+
+**They are still being written.** A `document_pipeline` SUBMISSION log opened at
+a null home at 06:16:32 on 23 October, after that morning's deploy — seventeen
+seconds after the same upload correctly opened its log at
+`personal:636c69656e742d6576616c756174696f6e`. One upload, two logs, one of them
+null.
+
+The second site is `InformationStageHooks:81` and `:182`:
+
+```java
+Home home = project == null ? Home.global() : Home.of(project);
+```
+
+This is one of the sites tasks 1–3 deliberately did not touch, because it admits
+through `SystemOperations.admit` with a `selected` scope and so bypasses the
+global refusal (door 1 below). It is **not** a one-line fix: it derives its home
+from a stored project column (`state.project()`), not from a selection, so a null
+column cannot tell "this account's own space" from "no project at all" — the same
+information loss that closed personal admission. Resolving it to
+`PersonalSpaces.name(lease.owner())` would implement request omission and
+silently redirect a genuine global selection.
+
+Fixing it properly means the persisted log state carrying the resolved home that
+`InformationAccess.executionHome` already computes at write time, rather than a
+nullable project column. That is the explicit-scope cutover the migration map
+specified, and it is the next concrete piece of it.
+
+### The four doors that bypass the global refusal
+
+The whole constraint is one condition in `ConversationStore`, after which
+`write(...)` runs unconditionally:
+
+```java
+if (system == null && operations != null
+    && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
+  operations.admit(owner, operations.scope(home), Set.of(CONVERSATION_CREATE));
+```
+
+| # | door | state |
+|---|---|---|
+| 1 | SYSTEM work with no `selected` | open — falls back to `GLOBAL_KNOWLEDGE`, and the consistency check exempts the global branch |
+| 2 | `ConversationStore` built without `operations` | open — five constructors, one assigns it, so four skip admission silently |
+| 3 | any origin but `SUBMISSION`/`EVENT` | open — no admission; the 415 `delegation` rows arrive here |
+| 4 | `executionHome` ACCOUNT → `Home.global()` | refused — reaches admission and dies, so the Global knowledge destination is unreachable. **Not** why the manual is missing: the manual was installed on 2026-10-05, into `admin`'s `ACCOUNT_KNOWLEDGE` scope, and door 4 is why it cannot be *re-homed* to GLOBAL |
+
+Door 2 is the cheapest and least defensible: it is not a wrong ceiling but no
+authorization at all. Doors 1 and 3 are tasks 6–7. Door 4 needs the design
+decision in "The newest item" below.
+
 ## The invariants being conformed to
 
 None of this is new design. Every rule below was already written down, and
@@ -270,5 +373,13 @@ of correct behaviour.
 
 `authority-scope-admission-plan.md` still says production runs `b6ffc2bb` and
 names the deploy as the remaining gate. Both are now stale: production ran
-`5ef22ff0` before the 22 Oct release, now runs `8467c821`, and the live gate
-has passed.
+`5ef22ff0` before the 22 Oct release, then `8467c821`, and now `0785a3f0`; the
+live gate has passed.
+
+Its "the holdover hypothesis is disproved" section claimed that git history is
+squashed to one snapshot so "no archaeology is available either way". That was
+wrong — the private `plowshare` repository has the full history — and it was
+load-bearing, because it was used to argue the global branches could not be
+judged. The section has been corrected with the provenance above. The
+conclusion it reached still holds, but for a better reason: the global *memory
+tier* is original and live, so deleting those branches as dead would be wrong.
