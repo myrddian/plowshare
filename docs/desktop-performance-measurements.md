@@ -4,16 +4,65 @@ Measurements taken 22 October 2026 against deployed server `8467c821`
 (`http://192.168.1.16:8091`) with a real ten-document corpus, and against the
 local protocol fixture for client-side timings.
 
-**The headline is negative and should be read first: I could not reproduce
-the reported sluggishness.** Every path measured is fast. The server answers
-in milliseconds, the renderer opens a window in under 100 ms, and opening a
-document costs two frames. The bundle waste is real and now halved, but
-fixing it changed window-open time by nothing measurable.
+## Correction, 23 October 2026 — read this first
 
-That means the cause is still unidentified, and the most likely reason is
-stated under "What was not measured" — the one combination I could not test
-is the real desktop against the real server, which is exactly where the
-report came from.
+**The cause was found, by someone else, and these measurements were built to
+miss it.** The numbers below are sound. The inference drawn from them — "the
+server is not the bottleneck" — was not.
+
+`docs/specs/2026-10-23-dispatch-capacity-design.md` opens on this exact
+symptom: the desktop reporting bursts of `RESPONSE_LOST`, *"confirmed as a
+server-side stall, not a client defect. During the fault the desktop held six
+ESTABLISHED sockets to the server and the server's HTTP layer answered in 3ms.
+Frames arrive, the server holds them, and it says nothing."* Its summary of the
+defect is that *"the dispatch contract cannot express congestion at all, so
+congestion is delivered as silence."*
+
+The mechanism, from that design:
+
+| | per connection | global |
+|---|---|---|
+| queue depth (may be outstanding) | 64 | 1024 |
+| concurrency (actually executing) | 2 | 8 |
+
+Requests are admitted freely up to the depth bound and then queue behind the
+execution bound, and **queue time counts against the client's deadline,
+because the client's timer starts at submission rather than at execution.**
+A multi-window desktop holding six sockets can have hundreds of requests
+admitted against a global execution concurrency of eight, with nothing
+signalling congestion. Separately, the server *"kept exhausting its HikariCP
+pool"* (`95008be3`), where a pool-acquire timeout was indistinguishable from
+the database being unreachable.
+
+**Why this was measured and still missed.** Every probe here used **one**
+connection against an **idle** server — precisely the configuration in which
+queueing cannot occur. A fast server and a stalled desktop are not
+contradictory; they are the same picture, and the design doc's 3 ms HTTP
+during the fault agrees with the 5–7 ms p50 below. The p90 of 30–43 ms
+against that p50, on an idle server with a single client, was the faint edge
+of the queue; it is reported below and was not interpreted.
+
+The lesson is specific, and worth more than the numbers: **a latency probe
+that holds one connection cannot speak about contention, and must not be
+read as doing so.** Load, connection count and queue depth are the
+independent variables for this symptom.
+
+**Deployment gap.** The 32 commits fixing this are on `main` at `0785a3f0`
+and are **not deployed** — production runs `8467c821`. So every measurement
+here was taken against a server that still has the depth-64 queues, the
+unbounded pool and no backpressure. Re-measure after deploying, under real
+multi-window load, before trusting any of it.
+
+---
+
+The original headline follows, kept because the correction above is only
+legible against it.
+
+**I could not reproduce the reported sluggishness.** Every path measured is
+fast. The server answers in milliseconds, the renderer opens a window in
+under 100 ms, and opening a document costs two frames. The bundle waste is
+real and now halved, but fixing it changed window-open time by nothing
+measurable.
 
 ## Server-side latency, real corpus
 
