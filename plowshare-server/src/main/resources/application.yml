@@ -77,13 +77,100 @@ management:
 # LlmProperties rejects unknown keys and LlmConfig validates the fleet at boot.
 plowshare:
   transport:
+    # Request dispatch and read concurrency (EventChannelConfig). Each value below is
+    # the Java default, written out so an operator can see and override it.
+    # Details: docs/server-administration.md#request-dispatch-and-capacity
+    #
+    # Per-connection admission window advertised to clients (1..64). It bounds
+    # queueing, not execution; a request beyond it is answered CAPACITY_EXHAUSTED.
+    request-depth: ${PLOWSHARE_TRANSPORT_REQUEST_DEPTH:8}
+    # Requests of one connection executing at once. This is the only transport
+    # execution bound while request-global is 0, so raising it pressures the
+    # database pool.
+    request-per-connection: ${PLOWSHARE_TRANSPORT_REQUEST_PER_CONNECTION:2}
+    # Requests executing at once across all connections; 0 is unlimited, because
+    # the database pool (spring.datasource.hikari) is the real bound.
+    request-global: ${PLOWSHARE_TRANSPORT_REQUEST_GLOBAL:0}
+    # Long parked waits (such as information.await) across all connections; must
+    # be at least request-per-connection.
+    request-observers: ${PLOWSHARE_TRANSPORT_REQUEST_OBSERVERS:256}
+    # Concurrent event reads per connection and across the server.
+    event-read-concurrency: ${PLOWSHARE_TRANSPORT_EVENT_READ_CONCURRENCY:2}
+    event-read-global-concurrency: ${PLOWSHARE_TRANSPORT_EVENT_READ_GLOBAL_CONCURRENCY:8}
+    # Bytes of in-flight packet memory (2 GiB). Must hold one portable message,
+    # its conversion copies and bookkeeping, or startup fails.
+    packet-memory-bytes: ${PLOWSHARE_TRANSPORT_PACKET_MEMORY_BYTES:2147483648}
+    # How long shutdown waits for dispatched requests to finish (a Spring duration).
+    request-shutdown-drain: ${PLOWSHARE_TRANSPORT_REQUEST_SHUTDOWN_DRAIN:10s}
+    # How often the dispatch measurements are logged at TRACE, when changed, and
+    # how often the cumulative INFO summary is logged (Spring durations).
+    request-metrics-interval: ${PLOWSHARE_TRANSPORT_REQUEST_METRICS_INTERVAL:PT30S}
+    request-metrics-summary-interval: ${PLOWSHARE_TRANSPORT_REQUEST_METRICS_SUMMARY_INTERVAL:PT10M}
     # Native WebSocket Ping/Pong on idle event and file channels. This does not
     # renew authentication, run an operation or extend a pending request deadline.
+    # The PLOWSHARE_WS_KEEPALIVE_* names are legacy and kept so existing
+    # deployments keep working; new keys follow PLOWSHARE_ + the key path.
     keepalive:
       enabled: ${PLOWSHARE_WS_KEEPALIVE_ENABLED:true}
       interval: ${PLOWSHARE_WS_KEEPALIVE_INTERVAL:PT30S}
       pong-timeout: ${PLOWSHARE_WS_KEEPALIVE_PONG_TIMEOUT:PT30S}
       check-interval: ${PLOWSHARE_WS_KEEPALIVE_CHECK_INTERVAL:PT5S}
+  # Wait-only throttle in front of connection acquisition on the main pool
+  # (PoolAdmissionProperties). It only ever delays work, never refuses it, so
+  # pool exhaustion stays attributable. Durations here are Spring durations
+  # (20ms, 3s); this differs from Hikari's connection-timeout, a plain long in
+  # milliseconds.
+  #
+  # The permit count and delay threshold are DERIVED from
+  # spring.datasource.hikari.maximum-pool-size and are deliberately not keys:
+  #   permits   = pool size - permit-margin
+  #   threshold = floor(permits * threshold-fraction), at least 1
+  # so resizing the pool resizes the throttle, and no two numbers can disagree.
+  # Startup fails if fewer than two permits lie above the threshold.
+  #
+  # INVARIANT: ceiling must be at least 1s below
+  # spring.datasource.hikari.connection-timeout (default 5000 ms). Otherwise a
+  # throttle wait and a pool timeout look the same in the logs. The server
+  # refuses to start when it is broken, by design.
+  pool-admission:
+    # false removes the throttle entirely; acquisitions go straight to the pool.
+    enabled: ${PLOWSHARE_POOL_ADMISSION_ENABLED:true}
+    # Connections never handed out by the throttle, for consumers that bypass
+    # it: Flyway at boot and the /actuator/health probe. It does not size the
+    # third bypass class, a second connection on a thread that already holds one
+    # (PROPAGATION_REQUIRES_NEW); the throttle permits those when capacity is
+    # free and counts the rest as plowshare.pool.admission.overdraft.
+    permit-margin: ${PLOWSHARE_POOL_ADMISSION_PERMIT_MARGIN:2}
+    # Fraction of the permits at which delay begins, strictly between 0 and 1.
+    threshold-fraction: ${PLOWSHARE_POOL_ADMISSION_THRESHOLD_FRACTION:0.5}
+    # Delay unit of the curve just past the threshold; must be below ceiling.
+    base-quantum: ${PLOWSHARE_POOL_ADMISSION_BASE_QUANTUM:20ms}
+    # Longest delay applied to one acquisition; see the INVARIANT above.
+    ceiling: ${PLOWSHARE_POOL_ADMISSION_CEILING:3s}
+    # Half-life over which observed acquire-latency pressure decays.
+    pressure-window: ${PLOWSHARE_POOL_ADMISSION_PRESSURE_WINDOW:10s}
+  # Per-projection cache budgets (ProjectionCacheProperties). Every budget is a
+  # hard bound; invalid combinations fail startup. The version connections are
+  # a separate pool from the main one. Details: docs/server-administration.md.
+  projection-cache:
+    entries: ${PLOWSHARE_PROJECTION_CACHE_ENTRIES:256}
+    resident-bytes: ${PLOWSHARE_PROJECTION_CACHE_RESIDENT_BYTES:33554432}
+    loads: ${PLOWSHARE_PROJECTION_CACHE_LOADS:8}
+    loading-bytes: ${PLOWSHARE_PROJECTION_CACHE_LOADING_BYTES:67108864}
+    waiters: ${PLOWSHARE_PROJECTION_CACHE_WAITERS:256}
+    waiters-per-load: ${PLOWSHARE_PROJECTION_CACHE_WAITERS_PER_LOAD:64}
+    dependency-links: ${PLOWSHARE_PROJECTION_CACHE_DEPENDENCY_LINKS:8192}
+    # Largest single cached value; must fit within loading-bytes with headroom.
+    max-value-bytes: ${PLOWSHARE_PROJECTION_CACHE_MAX_VALUE_BYTES:8388608}
+    timeout: ${PLOWSHARE_PROJECTION_CACHE_TIMEOUT:5s}
+    # Cadence of the version-notification poll (at most 30s) and the delay
+    # before reconnecting a lost LISTEN session (at most 1m).
+    notification-poll: ${PLOWSHARE_PROJECTION_CACHE_NOTIFICATION_POLL:1s}
+    reconnect-delay: ${PLOWSHARE_PROJECTION_CACHE_RECONNECT_DELAY:1s}
+    max-pending-transactions: ${PLOWSHARE_PROJECTION_CACHE_MAX_PENDING_TRANSACTIONS:128}
+    max-projections: ${PLOWSHARE_PROJECTION_CACHE_MAX_PROJECTIONS:16}
+    # Connections of the separate projection-versions pool (1..32).
+    version-connections: ${PLOWSHARE_PROJECTION_CACHE_VERSION_CONNECTIONS:4}
   information:
     # Startup-only, server-wide operator controls; both default on. Account/project
     # roles, service-token ceilings, document access and reference policies still apply.
