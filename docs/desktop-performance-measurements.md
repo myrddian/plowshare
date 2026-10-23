@@ -4,6 +4,60 @@ Measurements taken 22 October 2026 against deployed server `8467c821`
 (`http://192.168.1.16:8091`) with a real ten-document corpus, and against the
 local protocol fixture for client-side timings.
 
+## Post-deploy measurement, 23 October 2026
+
+`0785a3f0` was deployed and the contention probe re-run. **The dispatch change
+is confirmed working, and it is not a latency improvement.**
+
+Six connections, cheap reads, varying in-flight depth. "adm" is requests
+admitted of those submitted.
+
+| conns × in-flight | before `8467c821` adm / p50 / p90 | after `0785a3f0` adm / p50 / p90 | refused |
+|---|---|---|---|
+| 1 × 1 | 12 / 7.4 / 8.2 | 12 / 8.6 / 11.8 | 0 |
+| 6 × 1 | 36 / 18.2 / 34.3 | 36 / 15.1 / **19.6** | 0 |
+| 6 × 4 | 96 / 32.8 / 44.0 | 96 / 45.2 / 67.7 | 0 |
+| 6 × 12 | **216** / 67.4 / 100.3 | **144** / 108.7 / 160.6 | **72** |
+
+**The decisive number is the refusal count, not the latency.** At 6 × 12, 72
+of 216 requests are refused *before submission* with "request cancelled or
+capacity exhausted before submission" — and it is **exactly 72 in all five
+post-deploy passes**, which is what a per-connection depth of 8 predicts
+arithmetically: (12 submitted − 8 depth) × 6 connections × 3 rounds = 72.
+That confirms `fce99bde`'s 64 → 8 from outside the server, deterministically.
+Before, all 216 were accepted and silently queued.
+
+So congestion is now an answer. The mechanism that produced the original
+`RESPONSE_LOST` — unbounded admission into a deep queue, with the client's
+deadline already running — is gone.
+
+**What these numbers do not establish.** Admitted latency under contention is
+higher, and that is partly by design: `95008be3` paces admission on a
+CoDel-style curve above half the pool rather than letting the pool exhaust.
+But the comparison is still confounded and should not be quoted as "slower":
+
+- The before-run hit a JVM warm for 19 hours; the after-run had 12 minutes.
+- Pass-to-pass scatter on the same warm container is ±20% (6 × 12 p50 moved
+  90.9 → 108.7 between two consecutive passes), so differences smaller than
+  that are noise. The refusal count, by contrast, did not vary at all.
+- The two sides measure different populations: before is p50 over all 216
+  queued, after is p50 over the 144 the server chose to admit.
+
+**And it does not establish the user experience.** The probe's SDK predates
+`ebd4cf1d` ("treat a capacity refusal as backpressure in the SDK"), so a
+refusal surfaces as a failure instead of being absorbed. The real desktop
+waits for a slot and resubmits under the same id, so a person sees a wait,
+not an error — and not a silent 30-second deadline expiry. Confirming that
+needs the real desktop against this server, which remains the one untested
+combination.
+
+Behavioural checks on the new server all pass: a personal upload is accepted
+(PR #104 holds), a `global_read` write is still refused, the manual still has
+zero chapters, and the ten-document corpus is intact with 9 of its documents
+now auto-tagged — so the pipeline was progressing, not stuck.
+
+---
+
 ## Correction, 23 October 2026 — read this first
 
 **The cause was found, by someone else, and these measurements were built to
