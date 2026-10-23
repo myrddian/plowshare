@@ -50,11 +50,44 @@ plowshare-agile --config "$AGILE_CONFIG" tickets list
 plowshare-agile --config "$AGILE_CONFIG" epics list
 ```
 
-Set the configured bearer variable privately. The CLI never accepts a bearer on
-its command line, logs it, logs in through HTTP, or silently selects a local server.
+The default **agent mode** requires a scoped `pss_` service credential in the
+configured bearer variable. It is noninteractive and never reads a saved user
+login or falls back to a human account. The CLI never accepts a bearer on its
+command line, logs it, or silently selects a local server.
 `check` probes public typed-document support. Document reads enforce navigation
 availability and current authority themselves; admission and schema assignment
 remain server-authorized and may be disabled even when reads succeed.
+
+### Reuse a Plowshare user login
+
+`--is-user` reuses a saved Plowshare user login through the public Python SDK.
+Install the matching SDK wheel from this release; no Node companion or additional
+authentication dependency is needed. The SDK owns selection, storage, locking and
+renewal. Excalibur does not parse login files or accept a password.
+
+```sh
+excalibur --config "$AGILE_CONFIG" --is-user --account "$PLOWSHARE_ACCOUNT" tickets list
+excalibur --config "$AGILE_CONFIG" --is-user --connection "$PLOWSHARE_CONNECTION" tickets list
+```
+
+Sign in with `plowshare-cli` first. Excalibur never asks for a password. Choose
+`--connection NAME` or `--account HANDLE`, before the subcommand. Named selections
+must match the configured server. Without a selector the SDK requires an
+unambiguous saved account for that origin; it never switches to another server.
+The SDK owns `~/.plowshare` state and supported legacy migrations, including
+`PLOWSHARE_CONFIG_DIR` overrides. Excalibur ignores the agent bearer in user mode.
+
+The SDK returns the current user access token and selected account. Only an
+explicit access rejection permits SDK renewal; the new pair is saved before
+Excalibur receives it. Uncertain renewal requires explicit login, never blind
+refresh replay. A proven native DNS/connect-refused failure preserves the previous
+saved pair. Board operations are not retried on authentication/transport failure; inspect and explicitly recover their retained request UUID instead.
+`--is-user` selects a credential source, not proof that a caller is human. Current
+server project membership, document ownership and grants still authorize every
+operation. This does not enable editing another principal's documents.
+
+`serve` remains a single configured service identity and refuses `--is-user`.
+Per-user web login is outside this CLI change.
 
 ## Commands
 
@@ -192,11 +225,18 @@ receipt; it never rebuilds a mutation from the latest ticket. The SDK does not
 automatically retry. Unknown delivery, interrupted settlement and unexpected
 replies leave the intent pending. A confirmed receipt is historical, not current
 ticket state; read the resource again. Recovery is bound to a non-reversible
-credential fingerprint, so even local inspection needs the configured bearer.
-Changing the bearer, origin, project or schema identities refuses recovery under
-that configuration. Recovery across credential rotation is not implemented: the
-CLI cannot safely infer that another bearer represents the same receipt owner.
-It never submits a pending mutation under a different identity to guess.
+credential fingerprint in agent mode, so even local inspection needs the
+configured service bearer. Those version-1 journals remain compatible and do
+not follow service-token rotation automatically.
+
+New user-mode journals use version 2, bound to the SDK-selected account, origin,
+project and schema identities rather than rotating access-token bytes. Renewing
+the same user's session preserves exact pending inputs and request UUIDs.
+Switching account, mode, server, project or schema identities refuses recovery.
+The SDK must establish a valid saved login even for local user-mode inspection;
+the server still enforces current authority and receipt ownership on recovery.
+Legacy credential-bound journals are never migrated implicitly into a user
+identity. Recovery never guesses that a different account owns an old receipt.
 
 Creation and tag assignment are separate commands/receipts. A failed membership
 write never repeats a confirmed ticket creation. Disk persistence uses flushed
@@ -217,7 +257,8 @@ orchestration. This package starts no agent, model or schedule automatically.
 
 ## Verify
 
-With the package, matching SDK and check dependencies installed:
+With the package, matching SDK, check dependencies and the `auth/` companion's
+development dependencies installed:
 
 ```sh
 python integrations/agile/scripts/check.py

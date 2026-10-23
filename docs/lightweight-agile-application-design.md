@@ -46,6 +46,14 @@ runs the separate web UI with explicit bind, port, public origin and web-access-
 configuration. Automatic type installation and running agent procedures remain
 outside this implementation.
 
+The CLI defaults to an explicit scoped service credential for agents. A person
+can pass `--is-user` and optionally `--account` or `--connection` to reuse a saved
+login through the public Python SDK, which owns selection, locking and renewal.
+User recovery binds the selected account, server, project and schemas across token
+renewal; legacy service journals keep their existing credential binding. Recovery
+retains the exact request UUID and inputs and remains an explicit action. The web
+app continues to use one configured service identity.
+
 ## First version
 
 One Application project contains one board. A person can create a ticket, write

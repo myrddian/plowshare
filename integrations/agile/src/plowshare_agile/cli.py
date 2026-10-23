@@ -13,6 +13,7 @@ from pathlib import Path
 
 from plowshare import Client, Refusal, TransportError
 
+from .auth import agent_credential, user_credential
 from .board import Board
 from .journal import Intent, Journal
 from .model import (
@@ -41,6 +42,13 @@ def parser() -> argparse.ArgumentParser:
         type=Path,
         help="Private TOML configuration; required for server commands",
     )
+    root.add_argument(
+        "--is-user",
+        action="store_true",
+        help="Reuse a saved Plowshare user login through the SDK",
+    )
+    root.add_argument("--account", help="Select a saved Plowshare user account")
+    root.add_argument("--connection", help="Select a named Plowshare connection")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="Probe public typed-document support")
     serve = commands.add_parser(
@@ -153,21 +161,12 @@ async def execute(args: argparse.Namespace) -> None:
     if args.config is None:
         raise ValueError("Server commands require --config")
     config = Configuration.read(args.config)
-    token = os.environ.get(config.token_environment)
-    if not token or token != token.strip():
-        raise ValueError("Set the configured bearer environment variable")
-    journal = Journal(config, token)
-    if args.command == "request" and args.action == "show":
-        intent, outcome = journal.read(args.request_id)
-        output(
-            {
-                "request_id": intent.request_id,
-                "action": intent.action,
-                "outcome": outcome,
-                "source": "local-request-journal",
-            }
+    if not args.is_user and (args.account is not None or args.connection is not None):
+        raise ValueError("--account and --connection require --is-user")
+    if args.is_user and args.command == "serve":
+        raise ValueError(
+            "serve requires agent mode; per-user web login is not implemented"
         )
-        return
     # Parse local creation/update inputs before opening any server connection.
     create_intent: Intent | None = None
     update_fields: TicketFields | None = None
@@ -207,6 +206,28 @@ async def execute(args: argparse.Namespace) -> None:
         if args.body_file.stat().st_size > 65536:
             raise ValueError("Body file exceeds 64 KiB")
         update_body = body_text(args.body_file.read_text(encoding="utf-8"))
+    credential = (
+        await user_credential(
+            config,
+            account=args.account,
+            connection=args.connection,
+        )
+        if args.is_user
+        else agent_credential(config)
+    )
+    token = credential.token
+    journal = Journal(config, token, user_account=credential.user_account)
+    if args.command == "request" and args.action == "show":
+        intent, outcome = journal.read(args.request_id)
+        output(
+            {
+                "request_id": intent.request_id,
+                "action": intent.action,
+                "outcome": outcome,
+                "source": "local-request-journal",
+            }
+        )
+        return
     if args.command == "serve":
         try:
             from .web import WebOptions, serve

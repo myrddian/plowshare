@@ -12,6 +12,12 @@ help. Obtain the private configuration path from the user or task environment;
 never guess a server or request their bearer in chat. Run CLI mutations only
 within the user's authorized task and configured identity's rights.
 
+CLI agent mode is the default and requires an explicit scoped service token.
+Do not add `--is-user` or reuse a person's saved login to gain missing authority.
+That flag is for an explicitly authorized user session; it uses the public Python SDK
+credential store and retains recovery under the selected account across renewal.
+`--account` and `--connection` select that user identity and require `--is-user`.
+
 List with `tickets list` or `epics list`; inspect a selected resource with
 `ticket show <UUID>` and optionally `--body`. Outputs are JSON. Use full UUIDs
 in commands. Several `--epic` filters intersect, and a ticket can belong to

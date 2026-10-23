@@ -14,6 +14,7 @@ from .model import (
     Configuration,
     EpicFields,
     TicketFields,
+    account_handle,
     body_text,
     choice,
     identity,
@@ -145,7 +146,9 @@ class Journal:
     are historical observations, not current permission or ticket-state proofs.
     """
 
-    def __init__(self, config: Configuration, credential: str):
+    def __init__(
+        self, config: Configuration, credential: str, *, user_account: str | None = None
+    ):
         self.root = config.state_directory
         if not credential or credential != credential.strip():
             raise ValueError("A credential is required to bind request recovery")
@@ -156,8 +159,17 @@ class Journal:
             "ticket_version": config.ticket_version,
             "epic_type": config.epic_type,
             "epic_version": config.epic_version,
-            "credential": hashlib.sha256(credential.encode()).hexdigest(),
         }
+        # The SDK owns the saved account identity and atomically persists renewal.
+        # User access tokens rotate within that identity; they must not invalidate
+        # pending request UUIDs. Agent/v1 bindings remain byte-for-byte compatible:
+        # no legacy credential journal is silently reassigned to a user account.
+        self.version = 1 if user_account is None else 2
+        if user_account is None:
+            binding["credential"] = hashlib.sha256(credential.encode()).hexdigest()
+        else:
+            binding["user_account"] = account_handle(user_account)
+            binding["auth_mode"] = "user"
         self.binding = hashlib.sha256(
             json.dumps(binding, sort_keys=True).encode()
         ).hexdigest()
@@ -172,7 +184,7 @@ class Journal:
         return (
             json.dumps(
                 {
-                    "version": 1,
+                    "version": self.version,
                     "binding": self.binding,
                     "intent": retained,
                     "outcome": outcome,
@@ -209,7 +221,7 @@ class Journal:
         )
         if (
             type(row["version"]) is not int
-            or row["version"] != 1
+            or row["version"] != self.version
             or row["binding"] != self.binding
         ):
             raise ValueError("Request belongs to another configuration")
