@@ -65,15 +65,18 @@ class PersonalSelectionAliasPinTest {
   // ------------------------------------------------- the two spellings, as they are today
 
   /**
-   * The defect in one assertion: a PERSONAL selection names no project and is spelled into the
-   * {@code account:} namespace family, which is what sends it to ACCOUNT_KNOWLEDGE in storage.
+   * <b>Inverted.</b> Previously a PERSONAL selection reached the interior as {@code Scope.PERSONAL}
+   * with a null project, spelled {@code account:alice} — the {@code account:} family that sends a
+   * row to ACCOUNT_KNOWLEDGE. It is now resolved to the project it names, so nothing downstream has
+   * to decide what an absent project means.
    */
   @Test
-  void a_personal_selection_carries_no_project_and_an_account_namespace() {
+  void a_personal_selection_resolves_to_its_personal_project() {
+    when(members.role(ALICE_PERSONAL, ALICE)).thenReturn(Optional.of(ProjectRole.MANAGER));
     var context = resolve(InformationContext.Selection.personal());
-    assertEquals(InformationContext.Scope.PERSONAL, context.selection().scope());
-    assertNull(context.selection().project(), "Selection forbids a project on a non-PROJECT scope");
-    assertEquals("account:" + ALICE, context.namespace());
+    assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
+    assertEquals(ALICE_PERSONAL, context.selection().project());
+    assertEquals("project:" + ALICE_PERSONAL, context.namespace());
   }
 
   /** The same home addressed as a project — the shape the alias should produce. */
@@ -86,13 +89,21 @@ class PersonalSelectionAliasPinTest {
     assertEquals("project:" + ALICE_PERSONAL, context.namespace());
   }
 
-  /** Both spellings name one resource, and today they disagree about how to say so. */
+  /**
+   * <b>Inverted, and this is the acceptance criterion.</b> Both spellings name one resource, and
+   * they now say so identically — same scope, same project, same namespace — so the stored scope
+   * cannot differ by how the caller spelled it. Previously they produced {@code account:alice} and
+   * {@code project:personal:<hex>}, which is why one upload landed in ACCOUNT_KNOWLEDGE and the
+   * other in the personal project.
+   */
   @Test
-  void the_two_spellings_of_one_home_produce_different_namespaces() {
+  void the_two_spellings_of_one_home_are_now_indistinguishable() {
     when(members.role(ALICE_PERSONAL, ALICE)).thenReturn(Optional.of(ProjectRole.MANAGER));
-    assertNotEquals(
-        resolve(InformationContext.Selection.personal()).namespace(),
-        resolve(InformationContext.Selection.project(ALICE_PERSONAL)).namespace());
+    var aliased = resolve(InformationContext.Selection.personal());
+    var explicit = resolve(InformationContext.Selection.project(ALICE_PERSONAL));
+    assertEquals(explicit.selection().scope(), aliased.selection().scope());
+    assertEquals(explicit.selection().project(), aliased.selection().project());
+    assertEquals(explicit.namespace(), aliased.namespace());
   }
 
   // ------------------------------------------- guards that must survive resolving the alias
@@ -112,13 +123,23 @@ class PersonalSelectionAliasPinTest {
   }
 
   /**
-   * Today a PERSONAL selection reaches no project permission check at all: it resolves with no
-   * project role configured. After the alias it will take the PROJECT branch, which demands READ,
-   * so this pin records the gap the change has to cover rather than open.
+   * <b>Inverted, and the one consequence worth stating loudly.</b> A PERSONAL selection used to
+   * reach no project permission check at all; it now takes the PROJECT branch and demands READ on
+   * the personal project like any other.
+   *
+   * <p>That is correct under the model — a personal space is a project, so it is governed by
+   * project permissions — but it means personal access now <b>depends on the owner holding a role
+   * on their own personal project</b>. In production {@code JdbcProjectMembers.role} answers
+   * MANAGER for {@code PersonalSpaces.name(handle)} to its owner, which is what {@link
+   * #the_owner_of_a_personal_project_passes_both_project_checks()} relies on. If that membership is
+   * ever absent — an uninitialised personal space, say — personal access is refused rather than
+   * silently permitted, and this pin is where that shows up.
    */
   @Test
-  void a_personal_selection_needs_no_project_role_today() {
+  void a_personal_selection_now_demands_a_role_on_its_personal_project() {
     when(members.role(anyString(), anyString())).thenReturn(Optional.empty());
+    assertThrows(CallerFault.class, () -> resolve(InformationContext.Selection.personal()));
+    when(members.role(ALICE_PERSONAL, ALICE)).thenReturn(Optional.of(ProjectRole.MANAGER));
     assertDoesNotThrow(() -> resolve(InformationContext.Selection.personal()));
   }
 
@@ -150,6 +171,26 @@ class PersonalSelectionAliasPinTest {
     when(members.role(bobPersonal, ALICE)).thenReturn(Optional.empty());
     assertThrows(
         CallerFault.class, () -> resolve(InformationContext.Selection.project(bobPersonal)));
+  }
+
+  /**
+   * Only user accounts have a personal space. A service account points at its project directly, so
+   * omission resolves to that project rather than inventing a personal one for it — and selecting
+   * personal explicitly is refused outright, pinned above.
+   */
+  @Test
+  void a_service_account_resolves_to_its_own_project_and_never_a_personal_space() {
+    var projects = mock(io.aeyer.plowshare.server.requests.RequestProjects.class);
+    String service = "@service/fixture";
+    when(projects.implicit(service)).thenReturn(Optional.of("app"));
+    when(members.role("app", service)).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+    var scoped = new InformationAccess(new EffectiveProjectPermissions(members), projects);
+
+    var context = scoped.resolve(service, null);
+    assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
+    assertEquals("app", context.selection().project());
+    assertEquals("project:app", context.namespace());
+    verify(members, never()).role(startsWith("personal:"), anyString());
   }
 
   // --------------------------------------------------------------- the ACCOUNT spelling

@@ -138,6 +138,14 @@ class InformationFeatureConfigTest {
   private final ProjectMembers members = mock(ProjectMembers.class);
   private final InformationRequest.Selection selection = InformationRequest.Selection.personal();
 
+  {
+    // A personal selection resolves to the account's personal project, so it is governed by that
+    // project's permissions like any other. The grant is an account default: production's
+    // authority_project_role answers MANAGER to an account on its own personal project.
+    when(members.role(io.aeyer.plowshare.server.personal.PersonalSpaces.name("reader"), "reader"))
+        .thenReturn(Optional.of(ProjectRole.MANAGER));
+  }
+
   private ApplicationContextRunner runner() throws IOException {
     var shipped =
         new YamlPropertySourceLoader().load("shipped", new ClassPathResource("application.yml"));

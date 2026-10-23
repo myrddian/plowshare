@@ -37,11 +37,24 @@ class PortableInformationTest {
           repository,
           navigation,
           mock(InformationNavigationService.class),
-          new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class))),
+          new InformationAccess(new EffectiveProjectPermissions(personalDefaults())),
           work,
           mock(InformationTransitions.class));
   final UUID revision = UUID.randomUUID(), resource = UUID.randomUUID();
   final InformationRequest.Selection selected = InformationRequest.Selection.personal();
+
+  /**
+   * A personal selection resolves to the account's personal project and is governed by that
+   * project's permissions like any other. The grant is an account default: production's {@code
+   * authority_project_role} answers MANAGER to an account on its own personal project.
+   */
+  static ProjectMembers personalDefaults(String... handles) {
+    var members = mock(ProjectMembers.class);
+    for (String handle : handles.length == 0 ? new String[] {"owner", "writer"} : handles)
+      when(members.role(io.aeyer.plowshare.server.personal.PersonalSpaces.name(handle), handle))
+          .thenReturn(Optional.of(ProjectRole.MANAGER));
+    return members;
+  }
 
   Information.Revision row(String subtype, String media, byte[] bytes) {
     var row = mock(Information.Revision.class);

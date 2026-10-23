@@ -46,8 +46,11 @@ class InformationScopesTest {
     for (var payload : List.of(Map.<String, Object>of(), fields)) {
       assertNull(InformationScopes.from(payload));
       when(defaults.implicit("human")).thenReturn(Optional.empty());
+      when(permissions.allows(any(), any(), any())).thenReturn(true);
+      // Omission means personal, and personal resolves to the account's own project.
       assertEquals(
-          InformationContext.Selection.personal(),
+          InformationContext.Selection.project(
+              io.aeyer.plowshare.server.personal.PersonalSpaces.name("human")),
           access.resolve("human", InformationScopes.from(payload)).selection());
       when(defaults.implicit("@service/application")).thenReturn(Optional.of("app"));
       when(permissions.allows(any(), any(), any())).thenReturn(true);

@@ -66,9 +66,45 @@ public final class InformationAccess {
               .implicit(account)
               .map(project -> projectSelection(account, project))
               .orElseGet(InformationContext.Selection::personal);
+    selection = resolvePersonalAlias(account, selection);
     InformationContext context = new InformationContext(account, selection);
     requireSelection(context);
     return boundary == null ? context : context.within(boundary);
+  }
+
+  /**
+   * Resolves {@code kind:personal} to the project it names, because that is all it is.
+   *
+   * <p>An account is an identity, not a container. What gives a user account information to hold is
+   * that it resolves to a personal space, and a personal space is fundamentally a <b>project</b> —
+   * as an Application is. Projects in any form are the resources; accounts are the identities that
+   * reach them. So PERSONAL is an alias for {@code {kind:"project", project:"personal:<hex>"}} and
+   * is resolved here, once, so that nothing inside the server has to decide what an absent project
+   * means.
+   *
+   * <p>This is deliberately the <b>only</b> place the alias is resolved. Deciding it per consumer
+   * is what let the two spellings drift: {@link InformationContext#namespace()} spelled PERSONAL
+   * into the {@code account:} family while PROJECT went to {@code project:}, and the stored scope
+   * is keyed off the namespace, so one upload's row landed in the account's knowledge scope and the
+   * other in its personal project. After this, {@code Scope.PERSONAL} is an input kind on the wire
+   * that no longer exists by the time any gate, namespace or home is computed.
+   *
+   * <p>The service-token refusal is made here rather than left to {@link
+   * #requireSelection(InformationContext)}, because that check is expressed against {@code
+   * Scope.PERSONAL} and would stop firing the moment the alias resolved. It is kept there too: that
+   * method is public and must defend itself.
+   *
+   * <p>Ownership needs no separate check. The resolved name is this account's own personal project
+   * by construction, and a client naming another account's personal project arrives as an ordinary
+   * PROJECT selection, where {@code requireSelection} already demands a role that {@code
+   * JdbcProjectMembers.role} does not grant on someone else's personal space.
+   */
+  private InformationContext.Selection resolvePersonalAlias(
+      String account, InformationContext.Selection selection) {
+    if (selection.scope() != InformationContext.Scope.PERSONAL) return selection;
+    if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account))
+      throw new CallerFault("Service tokens cannot select Personal information");
+    return InformationContext.Selection.project(PersonalSpaces.name(account));
   }
 
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
