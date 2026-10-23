@@ -46,10 +46,78 @@ memory retrieval tier and the global resource scope, and that single conflation
 produced every defect in this file: refused Personal uploads, the uninstallable
 public manual, and the SYSTEM ceiling admitting by omission.
 
-The practical consequence: **"removed" is a more plausible target than
-"constrained".** The memory tier is original, live and correct and stays; the
-resource scope layered on top of its representation is the late addition. Judge
-each `Home.global()` by which of the two it means, not by its shape.
+**The target is the representation, not the concept.** Global is kept and is
+already enumerated — `BuiltInIdentities.GLOBAL` (…004) and `GLOBAL_KNOWLEDGE`
+(…005). What goes is **`null` as the way global is spelled**, exactly as
+`global-scope-migration-map.md:64` puts it: "null scope representation replaced
+by explicit scope UUIDs". So the job is not to constrain global or to delete it,
+but to make a home or scope always stated, so that `project IS NULL` stops
+meaning anything.
+
+Judge each `Home.global()` by whether it is naming the memory retrieval tier or
+standing in for an unstated scope — not by its shape.
+
+### What production still holds (23 October 2026)
+
+Counts from the deployed database, because they bound the work:
+
+| | null-represented | total |
+|---|---|---|
+| `memories` | 0 | **0** |
+| `conversations` | **503** | 11917 |
+
+There are no memories at all, so the global memory tier holds nothing today and
+no migration is owed to it. The 503 null-home conversations are the whole of the
+remaining null-global data: 415 `delegation` and 88 `submission`, spanning
+2026-10-05 to 2026-10-23.
+
+**They are still being written.** A `document_pipeline` SUBMISSION log opened at
+a null home at 06:16:32 on 23 October, after that morning's deploy — seventeen
+seconds after the same upload correctly opened its log at
+`personal:636c69656e742d6576616c756174696f6e`. One upload, two logs, one of them
+null.
+
+The second site is `InformationStageHooks:81` and `:182`:
+
+```java
+Home home = project == null ? Home.global() : Home.of(project);
+```
+
+This is one of the sites tasks 1–3 deliberately did not touch, because it admits
+through `SystemOperations.admit` with a `selected` scope and so bypasses the
+global refusal (door 1 below). It is **not** a one-line fix: it derives its home
+from a stored project column (`state.project()`), not from a selection, so a null
+column cannot tell "this account's own space" from "no project at all" — the same
+information loss that closed personal admission. Resolving it to
+`PersonalSpaces.name(lease.owner())` would implement request omission and
+silently redirect a genuine global selection.
+
+Fixing it properly means the persisted log state carrying the resolved home that
+`InformationAccess.executionHome` already computes at write time, rather than a
+nullable project column. That is the explicit-scope cutover the migration map
+specified, and it is the next concrete piece of it.
+
+### The four doors that bypass the global refusal
+
+The whole constraint is one condition in `ConversationStore`, after which
+`write(...)` runs unconditionally:
+
+```java
+if (system == null && operations != null
+    && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
+  operations.admit(owner, operations.scope(home), Set.of(CONVERSATION_CREATE));
+```
+
+| # | door | state |
+|---|---|---|
+| 1 | SYSTEM work with no `selected` | open — falls back to `GLOBAL_KNOWLEDGE`, and the consistency check exempts the global branch |
+| 2 | `ConversationStore` built without `operations` | open — five constructors, one assigns it, so four skip admission silently |
+| 3 | any origin but `SUBMISSION`/`EVENT` | open — no admission; the 415 `delegation` rows arrive here |
+| 4 | `executionHome` ACCOUNT → `Home.global()` | refused — reaches admission and dies, which is why the public manual cannot install |
+
+Door 2 is the cheapest and least defensible: it is not a wrong ceiling but no
+authorization at all. Doors 1 and 3 are tasks 6–7. Door 4 needs the design
+decision in "The newest item" below.
 
 ## The invariants being conformed to
 

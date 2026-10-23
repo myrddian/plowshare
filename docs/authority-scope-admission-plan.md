@@ -153,10 +153,13 @@ uninstallable public manual, and the SYSTEM ceiling admitting by omission — an
 
 Two consequences for this plan:
 
-1. **Global-as-a-scope is a late addition, not a foundational concept.** It
-   postdates `Home` by five weeks and arrived with multi-user support. "Removed"
-   is therefore a more plausible target than "constrained", and the memory tier
-   is a separate thing that stays.
+1. **The target is the representation, not the concept.** Global still exists and
+   is kept; it is enumerated and defined — `BuiltInIdentities.GLOBAL` (…004) and
+   `GLOBAL_KNOWLEDGE` (…005). What goes is **`null` as the way global is
+   spelled**, which is `global-scope-migration-map.md:64` verbatim: "null scope
+   representation replaced by explicit scope UUIDs". So neither "constrain
+   global" nor "remove global" names the work. The work is that a home or scope
+   must always be stated, and `project IS NULL` must stop meaning anything.
 2. **`AuthorityScope.AccountKnowledge` is most likely that abstract scope**, typed
    in terms of "an account's knowledge" when the only reachable such account is
    `BuiltInIdentities.GLOBAL` (`InformationContext.Selection.account` throws for
