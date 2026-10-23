@@ -196,15 +196,21 @@ with `ctx.Err()` as the cause, consistent with the existing `TransportError` sha
 
 - [ ] **Step 3: Absorb `CAPACITY_EXHAUSTED`**
 
-On that outcome, release the window slot, back off (base 100ms, cap 5000ms, doubling, half fixed
-half random), and resubmit under the same id against the already-armed deadline. Take the randomness
+On that outcome, release the **dispatch** count so other already-admitted work can transmit, but
+**keep the admission slot** — see the spec's slot-release paragraph, and note that releasing
+admission here produces `A, B, A` and fails `capacity-slot-order`. Then back off (base 100ms, cap
+5000ms, doubling, half fixed half random) and resubmit under the same id against the already-armed
+deadline. The harness's `expectedSubmissions` is an observation ceiling on what a conforming client
+does, not licence to add a retry ceiling of your own; the Global Constraints forbid one. Take the randomness
 from an injectable source so the driver is deterministic. Never for the `control` negotiation.
 
-- [ ] **Step 4: Drive the six scenarios**
+- [ ] **Step 4: Drive the seven scenarios**
 
-Add them to `sdk/go/cmd/conformance`, plus the three per-SDK Review Focus cases: cancellation
-during the wait (2), a resubmission not re-arming the deadline (3), and parked callers released on
-close (5).
+Add them to `sdk/go/cmd/conformance`, plus the per-SDK Review Focus cases: cancellation during the
+wait (2), a resubmission not re-arming the deadline (3), parked callers released on close (5), the
+parked request observably still pending before close rather than refused locally (6), and a request
+that waited longer than its own timeout still carrying that timeout from transmit — not no deadline
+at all (7).
 
 - [ ] **Step 5: Run**
 
@@ -251,7 +257,7 @@ where the mode belongs. Waiting is a continuation here, not a held thread. A can
 
 As Task 2 Step 3, with injectable randomness.
 
-- [ ] **Step 4: Drive the six scenarios, plus Review Focus 2, 3 and 5**
+- [ ] **Step 4: Drive the seven scenarios, plus Review Focus 2, 3, 5, 6 and 7**
 
 Cancellation during the wait, a resubmission not re-arming the deadline, and parked callers released
 on close — expressed in .NET terms: `OperationCanceledException`, the `Stopwatch` started once, and
@@ -304,7 +310,7 @@ Task cancellation is already the native signal; a cancelled wait raises `Cancell
 
 As Task 2 Step 3, with injectable randomness.
 
-- [ ] **Step 4: Drive the six scenarios, plus Review Focus 2, 3 and 5**
+- [ ] **Step 4: Drive the seven scenarios, plus Review Focus 2, 3, 5, 6 and 7**
 
 Cancellation during the wait, a resubmission not re-arming the deadline, and parked callers released
 on close — expressed in Python terms: `CancelledError` while awaiting capacity, `end` computed once,
@@ -333,7 +339,7 @@ larger change to the build and is not what this plan is for.
 - Test: `sdk/java/src/test/java/io/aeyer/plowshare/sdk/AsyncExchangeTest.java`
 
 **Interfaces:**
-- Consumes: nothing from earlier tasks. The contract is the Global Constraints above and the six
+- Consumes: nothing from earlier tasks. The contract is the Global Constraints above and the seven
   behaviours Task 1's scenario names describe.
 - Produces: a third component on `RequestOptions`, whose existing shape is
   `RequestOptions(Duration timeout, RequestCancellation cancellation)` with a
