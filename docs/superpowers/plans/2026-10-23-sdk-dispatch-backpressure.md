@@ -47,6 +47,16 @@ JUnit tests in Task 5. One contract, four implementations, one place that says w
   TypeScript `ConnectionFault.delivery` getter maps `RESPONSE_LOST` to `UNKNOWN`, so node's
   tolerance of it was unreachable and the flake it was added to fix was still live. The fixture now
   says `["UNKNOWN"]`. Compare against the fixture's value directly.
+- **Clear the "submitted" flag the moment a refusal is absorbed, before the backoff pause.** The
+  deadline fires during that pause in essentially every run, and if the flag is still set the
+  request reports the tolerated alternate (`UNKNOWN`) instead of the primary `NOT_SUBMITTED` — which
+  `capacityContract.deliveryAlternates` calls non-conforming, since the alternate is tolerated only
+  for the sub-millisecond transmit/refusal race. `NOT_SUBMITTED` is the stronger claim and the one
+  the spec says callers may act on, so getting this wrong silently costs callers that guarantee.
+  TypeScript clears it inside `refused()` before scheduling the backoff; Go's pacing returns
+  `NotSubmitted` from its context-done branch. Python shipped it wrong and it escaped review-by-test
+  because both assertions accepted either code — **assert the primary code on a pause expiry**, not
+  a set containing both.
 - **Arm the deadline after acquiring the writer lock, not before it.** The spec says "after any wait
   for the conversion gate, the writer lock or the send lock". Go arms before its packet writer
   semaphore, which is acceptable there because that semaphore is held across one bounded write — but
@@ -443,7 +453,13 @@ git commit -m "fix: Java SDK waits for dispatch capacity and arms the deadline a
 
 - [ ] **Step 1: Run the full harness**
 
-Run: `./gradlew sdkCheck`
+Run: `node scripts/sdk-conformance.mjs --languages=node`, then `--languages=go` and
+`--languages=python`, plus `./gradlew :plowshare-client-ts:check` and
+`:plowshare-client-node:check` if the shared binding changed.
+
+**Not `./gradlew sdkCheck`.** That was this step's original instruction and it is wrong while .NET is
+deferred: `sdkCheck` depends on `sdkBuild`, which fails for the absent `dotnet` toolchain before any
+language runs. The per-language drivers are the equivalent coverage for the four SDKs that can run.
 Expected: PASS for all four languages.
 
 - [ ] **Step 2: Establish that `node` exercises the inherited path**

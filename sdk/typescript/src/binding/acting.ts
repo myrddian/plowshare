@@ -8,6 +8,22 @@ export interface RequestOptions {
   readonly signal?: RequestSignal;
   /** Invocation-through-reply allowance; overrides the connection default locally. */
   readonly timeoutMs?: number;
+  /**
+   * Shed load instead of waiting for dispatch capacity. Local only; never
+   * serialized.
+   *
+   * <p>The waiting form is the default: a request meeting a full window parks
+   * until a slot frees, and a server `CAPACITY_EXHAUSTED` is flow control the
+   * caller never sees. With this set the same request fails at once with
+   * `NOT_SUBMITTED` — nothing was written — and a refusal is handed back as the
+   * request's own outcome, with no backoff and no resubmission.
+   *
+   * <p>It is per call rather than per connection because the choice belongs to
+   * the caller's role, not to the SDK: an interactive caller has nothing useful
+   * to do with a refusal but wait, while a batch job under its own deadline may
+   * prefer to drop the work.
+   */
+  readonly nonBlocking?: boolean;
 }
 /** Structural AbortSignal subset keeps the neutral SDK independent of DOM/Node types. */
 export interface RequestSignal {
@@ -26,7 +42,8 @@ export function actingOptions(options?: RequestOptions): RequestOptions {
     options === null ||
     Array.isArray(options) ||
     Object.keys(options).some(
-      (key) => !['actingFor', 'signal', 'timeoutMs'].includes(key),
+      (key) =>
+        !['actingFor', 'signal', 'timeoutMs', 'nonBlocking'].includes(key),
     )
   )
     throw new Error('Invalid request options');
@@ -47,11 +64,19 @@ export function actingOptions(options?: RequestOptions): RequestOptions {
       typeof options.signal.removeEventListener !== 'function')
   )
     throw new Error('Choose a request cancellation signal');
+  // Rejected rather than coerced: a truthy string or 1 here would silently buy
+  // load shedding, and the two forms differ in whether a caller is told the
+  // server refused it.
+  if ('nonBlocking' in options && typeof options.nonBlocking !== 'boolean')
+    throw new Error('Choose whether to wait for dispatch capacity');
   const local = {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.timeoutMs === undefined
       ? {}
       : { timeoutMs: options.timeoutMs }),
+    ...(options.nonBlocking === undefined
+      ? {}
+      : { nonBlocking: options.nonBlocking }),
   };
   if (!('actingFor' in options)) return local;
   const selection = options.actingFor;

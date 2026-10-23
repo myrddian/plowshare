@@ -28,6 +28,26 @@ describe('request-scoped acting selection', () => {
       'actingFor',
     );
   });
+  it('keeps the capacity-wait choice local and boolean', () => {
+    expect(actingOptions({ nonBlocking: true })).toEqual({
+      nonBlocking: true,
+    });
+    expect(actingOptions({ nonBlocking: false })).toEqual({
+      nonBlocking: false,
+    });
+    // Coercion here would buy load shedding by accident, and the two forms differ
+    // in whether a caller is told the server refused its request.
+    for (const invalid of ['yes', 1, null])
+      expect(() =>
+        actingOptions({ nonBlocking: invalid } as unknown as {
+          nonBlocking?: boolean;
+        }),
+      ).toThrow();
+    // A local choice about waiting is nobody else's business: it never serializes.
+    expect(
+      asking('1', 'project.list', {}, { nonBlocking: true }),
+    ).not.toHaveProperty('nonBlocking');
+  });
   it('refuses malformed selection and proof exchange before submission', () => {
     expect(() =>
       actingOptions({ actingFor: { context: '1-1-1-1-1' } }),

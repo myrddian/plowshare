@@ -195,8 +195,13 @@ class AsyncOpeningTest {
         for (int i = 0; i < 4; i++)
           outstanding.add(client.requestAsync("admin.status", java.util.Map.of()));
         for (var request : outstanding) assertFalse(request.toCompletableFuture().isDone());
-        // The negotiated depth, not the protocol ceiling of 64, is what bounds admission.
-        var fifth = client.requestAsync("admin.status", java.util.Map.of());
+        // The negotiated depth, not the protocol ceiling of 64, is what bounds admission. Asked
+        // through the non-blocking form, because the waiting default parks at the bound instead.
+        var fifth =
+            client.requestAsync(
+                "admin.status",
+                java.util.Map.of(),
+                RequestOptions.nonBlocking(Duration.ofSeconds(3)));
         assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure(fifth).delivery());
       } finally {
         client.closeAsync();

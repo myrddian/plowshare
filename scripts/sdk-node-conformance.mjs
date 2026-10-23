@@ -227,6 +227,44 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
             'the sibling carrying only the connection deadline must still be pending when the waiting request expires');
     } finally { client.close(); }
 }
+{
+    // The explicit non-blocking form. The contract requires two forms and the seven cases
+    // above all drive the waiting default, so this is the only assertion that an SDK offers
+    // the second one at all. Its two halves:
+    //
+    //   1. A CAPACITY_EXHAUSTED reply is the CALLER'S outcome, not flow control. The waiting
+    //      form absorbs that code and resubmits under the same id; this form reports it
+    //      through the ordinary refused-reply channel and stops. `expectedSubmissions` of 2
+    //      in the fixture is what pins "no backoff and no resubmission at all" -- a single
+    //      retry of the refused id would be a third frame.
+    //   2. A full window is an immediate NOT_SUBMITTED. Proved by order, not by a clock: the
+    //      fixture holds B for `holdMs`, and C is submitted while that hold is active, so a
+    //      form that queued for the slot could not settle C before B. `heldDone` is read
+    //      after C has already rejected, which makes it a state check rather than a race --
+    //      B would have to have been answered and its continuation run to be true, against
+    //      the fixture's 300ms hold.
+    //
+    // Both forms arm the deadline at transmit, so nothing here turns on the connection's
+    // 5000ms timeout; it only has to outlast the hold, which it does twenty times over.
+    const test = cases.get('capacity-non-blocking');
+    let windowFull;
+    const full = new Promise(resolve => {windowFull = resolve});
+    const client = await openCapacity('capacity-non-blocking', 5000, () => windowFull());
+    try {
+        const refused = await client.request('project.list',{},{nonBlocking:true});
+        assert.equal(refused.kind,'refused','a non-blocking caller must be told the server refused it');
+        assert.equal(refused.outcome.code,test.surfacedCode,
+            'the non-blocking form must surface the refusal code rather than absorb it as flow control');
+        assert.throws(() => requirePayload(refused), Refusal);
+        let heldDone = false;
+        const held = client.request('project.list',{},{nonBlocking:true}).then(reply => {heldDone = true; return reply});
+        await full;
+        await assert.rejects(client.request('project.list',{},{nonBlocking:true}),
+            error => error.delivery===test.delivery && /window is full/.test(error.message));
+        assert.equal(heldDone,false,'the non-blocking refusal must arrive while the window is still full');
+        assert.deepEqual(requirePayload(await held),[],'the held request lost its answer');
+    } finally { client.close(); }
+}
 await assert.rejects(openCapacity('capacity-handshake-refuse', 5000), error => error.code==='NOT_SUBMITTED');
 {
     let windowFull;
