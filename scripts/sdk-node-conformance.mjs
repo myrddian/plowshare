@@ -78,8 +78,22 @@ const capacity = await connectPlowshare({origin,token:'sdk-fixture-token',sessio
 const calls = Array.from({length:64},() => capacity.request('project.list',{}).then(
     () => {throw new Error('Held capacity call unexpectedly succeeded')}, error => error));
 await full;
-await assert.rejects(capacity.request('project.list',{}), error => error.delivery==='NOT_SUBMITTED');
+// The advertised window is authoritative and the 65th request PARKS rather than failing
+// fast. This assertion used to demand an immediate NOT_SUBMITTED, which was the behaviour
+// #105 deliberately replaced: the binding now waits for a slot, and a never-launched
+// request carries no deadline at all ("A never-launched request has no timer; its only
+// exits are abort and connection close" -- connection.ts). Fail-fast would reject in the
+// same tick, so still being pending after a pause is what distinguishes waiting from
+// refusing. Closing the connection is what settles it, and NOT_SUBMITTED is honest
+// because nothing was ever transmitted -- which is also why the 64-frame count below
+// still holds.
+const pending = Symbol('pending');
+const parked = capacity.request('project.list',{});
+const raced = await Promise.race([parked.then(() => 'settled', () => 'settled'),
+    new Promise(resolve => setTimeout(() => resolve(pending), 250))]);
+assert.equal(raced, pending, 'the 65th request must wait for a slot, not fail fast');
 capacity.close();
+assert.equal((await parked.then(() => null, error => error.delivery)), 'NOT_SUBMITTED');
 assert.ok((await Promise.all(calls)).every(error => error.delivery==='UNKNOWN'));
 
 // Dispatch backpressure. CAPACITY_EXHAUSTED is flow control a caller never sees, the
