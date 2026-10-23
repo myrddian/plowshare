@@ -19,6 +19,38 @@ The full sequence and its reasoning live in
 [the admission plan](authority-scope-admission-plan.md). This file is the
 status layer on top of it, plus the things that plan does not cover.
 
+## Read this before deciding "constrain" or "remove"
+
+The private `plowshare` repository holds the full history (2242 commits, tip
+2026-10-06); only the public repository is squashed. An earlier claim in the
+admission plan that no archaeology was available was wrong, and that history
+settles what "no project" means:
+
+- **2026-08-26, `d691463f`** — `Home` is introduced by `feat(protocol): the
+  memory record and its four states`. Its Javadoc models **memories only**, and
+  states that `null` was chosen so the global tier is *unspellable*: "Global is
+  the absence of a project, not a project named 'global' … any code that
+  defaulted a missing project to a placeholder would silently write into the
+  tier every agent everywhere reads."
+- **2026-09-01** — accounts and authentication arrive.
+- **2026-10-03, `91ab6fea`** — "Add account Personal spaces **and make global an
+  abstract resource scope**". Personal gains a real `projects` row
+  (`projects.personal_owner`, name `personal:` + hex handle), which is why
+  `AuthorityScope.Personal` carries a `projectId` and why Personal was
+  repairable. Global becomes "the shared server setup and resource scope":
+  abstract, with no project row, and so it inherited `Home`'s `null`.
+
+**So global-as-a-scope is five weeks younger than `Home` and arrived with
+multi-user support.** From `91ab6fea` onward, `null` meant both the global
+memory retrieval tier and the global resource scope, and that single conflation
+produced every defect in this file: refused Personal uploads, the uninstallable
+public manual, and the SYSTEM ceiling admitting by omission.
+
+The practical consequence: **"removed" is a more plausible target than
+"constrained".** The memory tier is original, live and correct and stays; the
+resource scope layered on top of its representation is the late addition. Judge
+each `Home.global()` by which of the two it means, not by its shape.
+
 ## The invariants being conformed to
 
 None of this is new design. Every rule below was already written down, and
@@ -270,5 +302,13 @@ of correct behaviour.
 
 `authority-scope-admission-plan.md` still says production runs `b6ffc2bb` and
 names the deploy as the remaining gate. Both are now stale: production ran
-`5ef22ff0` before the 22 Oct release, now runs `8467c821`, and the live gate
-has passed.
+`5ef22ff0` before the 22 Oct release, then `8467c821`, and now `0785a3f0`; the
+live gate has passed.
+
+Its "the holdover hypothesis is disproved" section claimed that git history is
+squashed to one snapshot so "no archaeology is available either way". That was
+wrong — the private `plowshare` repository has the full history — and it was
+load-bearing, because it was used to argue the global branches could not be
+judged. The section has been corrected with the provenance above. The
+conclusion it reached still holds, but for a better reason: the global *memory
+tier* is original and live, so deleting those branches as dead would be wrong.

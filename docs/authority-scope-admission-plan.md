@@ -107,8 +107,64 @@ are live, not dead:
   `EntryStore.CONVERSATIONS_AWAITING_THE_LEARNER` has no origin or home predicate.
 - `Curator` — no global branch exists.
 
-**Deleting them as dead would be wrong.** Git history is squashed to one snapshot
-(`cd7f68ab`), so no archaeology is available either way.
+**Deleting them as dead would be wrong**, because the memory tier is live. But the
+claim previously made here — that "git history is squashed to one snapshot
+(`cd7f68ab`), so no archaeology is available either way" — **was wrong**, and it
+was load-bearing. The public repository is squashed; the full history is in the
+private `plowshare` repository (2242 commits, tip 2026-10-06). See
+[the provenance below](#where-global-as-a-scope-came-from).
+
+## Where global-as-a-scope came from
+
+Read from the private history, which settles what the two meanings of "no
+project" are and which of them is original.
+
+| date | commit | event |
+|---|---|---|
+| 2026-08-26 | `d691463f` | `Home` introduced, in `feat(protocol): the memory record and its four states` |
+| 2026-09-01 | — | accounts and authentication arrive |
+| 2026-10-03 | `91ab6fea` | "Add account Personal spaces **and make global an abstract resource scope**" |
+
+`Home`'s original Javadoc is explicit that it models **memories only**, and that
+`null` was chosen deliberately to make the global tier unspellable:
+
+> Which of the two tiers a memory lives in: a named project, or global.
+>
+> **Global is the absence of a project, not a project named "global".** If the
+> global tier were spelled as the project string `global`, then a real project
+> that happened to be called that — or any code that defaulted a missing project
+> to a placeholder — would silently write into the tier every agent everywhere
+> reads. Modelling it as `null` makes that unspellable.
+
+Five weeks later, `91ab6fea` did two things at once. Personal spaces got a real
+`projects` row (`projects.personal_owner`, internal name `personal:` plus the
+hex-encoded handle, per `docs/personal-space.md` as added by that commit) — which
+is **why Personal was repairable**: `AuthorityScope.Personal` carries a
+`projectId`. In the same change, global was promoted from a memory tier to "the
+shared server setup and resource scope": abstract, with no project row.
+
+`Home`'s `null` was the only "no project" representation available, so the new
+abstract global *resource scope* inherited it. From that commit onward, `null`
+meant both "the global memory retrieval tier" and "the global resource scope".
+
+**That conflation is the whole defect family** — refused Personal uploads, the
+uninstallable public manual, and the SYSTEM ceiling admitting by omission — and
+`Home`'s own Javadoc had warned against precisely it.
+
+Two consequences for this plan:
+
+1. **Global-as-a-scope is a late addition, not a foundational concept.** It
+   postdates `Home` by five weeks and arrived with multi-user support. "Removed"
+   is therefore a more plausible target than "constrained", and the memory tier
+   is a separate thing that stays.
+2. **`AuthorityScope.AccountKnowledge` is most likely that abstract scope**, typed
+   in terms of "an account's knowledge" when the only reachable such account is
+   `BuiltInIdentities.GLOBAL` (`InformationContext.Selection.account` throws for
+   any other id, and only two call sites resolve a knowledge scope at all). The
+   authority substrate postdates the private repository's tip, so this is a
+   well-supported reading rather than a proven one. If only Global's knowledge
+   scope will ever exist, a `GlobalKnowledge(ScopeId)` variant carrying no
+   `AccountId` would make the sealed interface honest.
 
 ## Tasks
 
