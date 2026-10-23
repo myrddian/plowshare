@@ -1070,8 +1070,17 @@ public final class Plowshare implements AutoCloseable {
       refusals = request.refusals++;
     }
     releaseDispatch(request);
+    // Only the wakeup belongs on CLOCK. That is one process-wide thread on which every request's
+    // deadline fires, for every connection in the JVM, and resubmit re-encodes the whole envelope
+    // before it takes the connection monitor: a multi-megabyte re-encode there would delay
+    // deadline enforcement for unrelated requests. The handoff costs the pause nothing in
+    // accuracy, and cancelling the ScheduledFuture after it has fired is already not what stops a
+    // resubmission -- resubmit re-checks request.terminal under the monitor before it offers.
     ScheduledFuture<?> pause =
-        CLOCK.schedule(() -> resubmit(request), pauseNanos(refusals), TimeUnit.NANOSECONDS);
+        CLOCK.schedule(
+            () -> Thread.ofVirtual().name("plowshare-sdk-resubmit").start(() -> resubmit(request)),
+            pauseNanos(refusals),
+            TimeUnit.NANOSECONDS);
     boolean terminal;
     synchronized (request) {
       terminal = request.terminal;
@@ -1285,21 +1294,76 @@ public final class Plowshare implements AutoCloseable {
     checkDrained();
   }
 
+  /**
+   * How long an interrupted blocking caller waits for the exchange it just cancelled to report
+   * where it actually stood. The cancellation settles a parked or queued request on the cancelling
+   * thread itself; only a settlement that has to cross the completion executor needs this grace, so
+   * it is a bound on a pathology, not a tunable deployment value.
+   */
+  private static final Duration INTERRUPT_SETTLEMENT = Duration.ofSeconds(1);
+
   static <T> T await(CompletionStage<T> stage) throws IOException {
+    return await(stage, null);
+  }
+
+  /**
+   * Blocks for the reply, converting an interrupt into the delivery the exchange itself reports
+   * rather than assuming the worst.
+   *
+   * <p>With the waiting submission form as the default, parking for dispatch capacity is the
+   * ordinary way a blocking caller meets a full window, and such a request provably has not been
+   * written. Reporting {@link Delivery#UNKNOWN} for it would invert the one delivery claim a caller
+   * may act on without the replay prohibition. So when the caller owns a {@code cancellation}, the
+   * interrupt is turned into that signal and the delivery is read off the resulting settlement:
+   * {@code NOT_SUBMITTED} while the request is parked or queued, {@code UNKNOWN} once the frame has
+   * been written. A reply that won the race is returned, since discarding a known answer is its own
+   * dishonesty.
+   *
+   * <p>The interrupt is restored only after that wait: re-setting it first would make the wait
+   * throw immediately and lose the settlement it exists to read. Without a cancellation signal
+   * there is nothing to settle the exchange with, so the outcome genuinely is unknown.
+   */
+  static <T> T await(CompletionStage<T> stage, RequestCancellation cancellation)
+      throws IOException {
+    CompletableFuture<T> answer = stage.toCompletableFuture();
     try {
-      return stage.toCompletableFuture().get();
+      return answer.get();
     } catch (InterruptedException interrupted) {
-      stage.toCompletableFuture().cancel(false);
-      Thread.currentThread().interrupt();
-      throw new TransportException(Delivery.UNKNOWN, "Interrupted; outcome may be unknown");
+      if (cancellation == null) {
+        answer.cancel(false);
+        Thread.currentThread().interrupt();
+        throw new TransportException(Delivery.UNKNOWN, "Interrupted; outcome may be unknown");
+      }
+      cancellation.cancel();
+      try {
+        return answer.get(INTERRUPT_SETTLEMENT.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (ExecutionException settled) {
+        throw interrupted(settled);
+      } catch (InterruptedException | TimeoutException | CancellationException unsettled) {
+        throw new TransportException(Delivery.UNKNOWN, "Interrupted; outcome may be unknown");
+      } finally {
+        Thread.currentThread().interrupt();
+      }
     } catch (ExecutionException failed) {
-      Throwable cause = failed.getCause();
-      while (cause instanceof CompletionException && cause.getCause() != null)
-        cause = cause.getCause();
+      Throwable cause = cause(failed);
       if (cause instanceof IOException io) throw io;
       if (cause instanceof RuntimeException runtime) throw runtime;
       throw new IOException("Plowshare request failed", cause);
     }
+  }
+
+  /** Keeps the cancelled exchange's own delivery and says what ended the wait. */
+  private static IOException interrupted(ExecutionException settled) {
+    return cause(settled) instanceof TransportException transport
+        ? new TransportException(transport.delivery(), "Interrupted; " + transport.getMessage())
+        : new TransportException(Delivery.UNKNOWN, "Interrupted; outcome may be unknown");
+  }
+
+  private static Throwable cause(ExecutionException failed) {
+    Throwable cause = failed.getCause();
+    while (cause instanceof CompletionException && cause.getCause() != null)
+      cause = cause.getCause();
+    return cause;
   }
 
   private static final class TimeoutExceptionWrapper extends IOException {}

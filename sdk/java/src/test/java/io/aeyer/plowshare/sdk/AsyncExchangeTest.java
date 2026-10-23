@@ -342,17 +342,26 @@ class AsyncExchangeTest {
       long started = System.nanoTime();
       var call =
           client.requestAsync(
-              "admin.status", Map.of(), RequestOptions.defaults(Duration.ofMillis(400)));
+              "admin.status", Map.of(), RequestOptions.defaults(Duration.ofMillis(600)));
       var failure = assertInstanceOf(Plowshare.TransportException.class, failure(call));
       long elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis();
-      // The pauses are 50, 100, 200 and 400ms, so the 400ms deadline expires inside one of
-      // them, never within 50ms of a transmit. A pause expiry is NOT_SUBMITTED exactly: the
-      // refused attempt released its dispatch count and the server did none of the work.
+      // With the jitter pinned the pauses are exactly 50, 100, 200 and 400ms, so transmits land
+      // at 0, 50, 150 and 350ms and the next would be at 750ms. A single deadline armed at the
+      // first transmit therefore expires at 600ms, inside the fourth pause: four frames, and an
+      // elapsed time that is the caller's own timeout rather than a multiple of it.
+      //
+      // Both bounds are load-bearing. The ceiling falsifies a per-attempt deadline, which would
+      // re-arm 600ms at the 350ms transmit and so run to at least 950ms. The floor falsifies the
+      // opposite error, a caller that loses its own timeout and fails early or instantly.
       assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery(), failure.getMessage());
       assertTrue(failure.getMessage().contains("deadline"), failure.getMessage());
+      assertTrue(elapsed >= 550, "the caller lost its own timeout: " + elapsed);
       assertTrue(
-          elapsed < 1500, "the deadline was re-armed or extended by a resubmission: " + elapsed);
-      assertTrue(fixture.requests.size() >= 2, "a refusal must be resubmitted at all");
+          elapsed < 900, "the deadline was re-armed or extended by a resubmission: " + elapsed);
+      assertEquals(
+          4,
+          fixture.requests.size(),
+          "the pinned pauses admit exactly four transmits inside one 600ms deadline");
     }
   }
 
@@ -364,15 +373,27 @@ class AsyncExchangeTest {
       var held = api.statusAsync().toCompletableFuture();
       var first = fixture.take();
       var waiting =
-          api.statusAsync(RequestOptions.defaults(Duration.ofMillis(150))).toCompletableFuture();
+          api.statusAsync(RequestOptions.defaults(Duration.ofMillis(300))).toCompletableFuture();
       // Four times its own timeout at the window bound. The deadline arms at the write, so
       // none of this is charged against the time the server is given to answer.
-      Thread.sleep(600);
+      Thread.sleep(1200);
       assertFalse(waiting.isDone(), "the wait for capacity consumed the request deadline");
       fixture.answer(first, Map.of("handle", "held", "serverAdmin", false));
       assertEquals("held", held.get(3, TimeUnit.SECONDS).handle());
-      fixture.answer(fixture.take(), Map.of("handle", "waiting", "serverAdmin", false));
-      assertEquals("waiting", waiting.get(3, TimeUnit.SECONDS).handle());
+      // The other half of the property, and the half an answered request cannot show: once
+      // admitted, the request gets its own full duration measured from the transmit. Nothing
+      // answers it, so the only thing that can settle it is its own 300ms deadline -- neither
+      // instantly, which is what a deadline armed at submission would now do, nor at the 5s
+      // connection timeout, which is what no deadline at all would leave it to.
+      fixture.take();
+      long transmitted = System.nanoTime();
+      var failure = assertInstanceOf(Plowshare.TransportException.class, failure(waiting));
+      long elapsed = Duration.ofNanos(System.nanoTime() - transmitted).toMillis();
+      assertTrue(failure.getMessage().contains("deadline"), failure.getMessage());
+      // Transmitted and unanswered: the server may have done the work, so UNKNOWN is correct.
+      assertEquals(Plowshare.Delivery.UNKNOWN, failure.delivery(), failure.getMessage());
+      assertTrue(elapsed >= 250, "the admitted request did not get its own duration: " + elapsed);
+      assertTrue(elapsed < 1500, "the deadline was not armed at the transmit: " + elapsed);
     }
   }
 
@@ -422,6 +443,53 @@ class AsyncExchangeTest {
       fixture.answer(first, Map.of());
       assertTrue(held.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
       // Cancellation is never a way to leak capacity: the window admits again.
+      var next = client.requestAsync("admin.status", Map.of());
+      fixture.answer(fixture.take(), Map.of());
+      assertTrue(next.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
+    }
+  }
+
+  @Test
+  void an_interrupt_while_parked_for_capacity_reports_NOT_SUBMITTED_to_a_blocking_caller()
+      throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      var held = client.requestAsync("admin.status", Map.of());
+      var first = fixture.take();
+      var api = new AdministrationClient(client);
+      var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+      var interruptObserved = new java.util.concurrent.atomic.AtomicBoolean();
+      var returned = new CountDownLatch(1);
+      // The waiting form is the default, so this is the ordinary way a blocking caller meets a
+      // full window: parked, with nothing written on its behalf.
+      var blocked =
+          new Thread(
+              () -> {
+                try {
+                  api.status();
+                } catch (Throwable failure) {
+                  thrown.set(failure);
+                } finally {
+                  interruptObserved.set(Thread.currentThread().isInterrupted());
+                  returned.countDown();
+                }
+              });
+      blocked.start();
+      assertNull(
+          fixture.requests.poll(300, TimeUnit.MILLISECONDS), "the blocking caller must park");
+      blocked.interrupt();
+      assertTrue(returned.await(3, TimeUnit.SECONDS), "an interrupted caller must be released");
+      var failure = assertInstanceOf(Plowshare.TransportException.class, thrown.get());
+      // The request provably was not written, so NOT_SUBMITTED is the only honest claim; the
+      // weaker UNKNOWN would wrongly tell the caller the server may have done the work.
+      assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery(), failure.getMessage());
+      assertTrue(failure.getMessage().contains("Interrupted"), failure.getMessage());
+      assertTrue(interruptObserved.get(), "the interrupt must be restored for the caller");
+      assertNull(
+          fixture.requests.poll(200, TimeUnit.MILLISECONDS), "an interrupted wait writes nothing");
+      // The abandoned wait took no accounting with it: the window admits again.
+      fixture.answer(first, Map.of());
+      assertTrue(held.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
       var next = client.requestAsync("admin.status", Map.of());
       fixture.answer(fixture.take(), Map.of());
       assertTrue(next.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
