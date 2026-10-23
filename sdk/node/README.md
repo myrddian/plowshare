@@ -14,7 +14,12 @@ try {
 
 Requests preserve the full raw envelope, correlate replies and have a 30-second
 default deadline (`timeoutMs` overrides it). `ConnectionFault.delivery` distinguishes
-not submitted, unknown and invalid response. Pass `onPush` for notifications.
+not submitted, unknown and invalid response. A request meeting a full dispatch
+window waits for a slot and never sees a `CAPACITY_EXHAUSTED` refusal; pass
+`{ nonBlocking: true }` in a request's options to shed load instead, which rejects
+with `NOT_SUBMITTED` at a full window and returns a refusal as the request's own
+outcome. Both forms inherit [the shared binding's behaviour](../typescript/README.md).
+Pass `onPush` for notifications.
 There is no automatic reconnect, application HTTP fallback or mutation replay.
 The root SDK does not persist/refresh credentials or lend a directory. Build a
 local npm archive with `pnpm pack`. The published dependency metadata uses the

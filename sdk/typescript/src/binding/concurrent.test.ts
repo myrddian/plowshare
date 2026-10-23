@@ -411,6 +411,83 @@ describe('concurrent dispatch lifecycle', () => {
     await expect(second).resolves.toEqual({ code: 'OK', payload: [] });
     connection.close();
   });
+  /**
+   * The explicit non-blocking form. The contract requires two forms and every
+   * test above drives the waiting default, so these three are what keep the
+   * other one reachable.
+   */
+  it('surfaces a capacity refusal to a non-blocking caller and never resubmits it', async () => {
+    vi.useFakeTimers();
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const asked = connection.ask('project.list', {}, { nonBlocking: true });
+    await flush();
+    wire.answer(1, refusal);
+    // The exact outcome, not merely "not OK": a caller asking to shed load acts
+    // on this code, and the waiting form's whole job is that it never arrives.
+    await expect(asked).resolves.toEqual(refusal);
+    // No backoff and no resubmission at all: nothing is armed and nothing more
+    // is written, however far the clock advances.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wire.sent).toHaveLength(2);
+    connection.close();
+  });
+  it('refuses a non-blocking request at a full admission window without a frame', async () => {
+    const wire = new Wire();
+    const { connection, ready } = opening(wire, 1);
+    await ready;
+    const held = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(2);
+    await expect(
+      connection.ask('project.list', {}, { nonBlocking: true }),
+    ).rejects.toMatchObject({ code: 'NOT_SUBMITTED' });
+    // Nothing was encoded, let alone written, which is what makes NOT_SUBMITTED
+    // the safe claim; and the shed must not have cost the held request its slot.
+    expect(wire.sent).toHaveLength(2);
+    wire.answer(1);
+    await expect(held).resolves.toEqual({ code: 'OK', payload: [] });
+    const after = connection.ask('project.list', {});
+    await flush();
+    expect(wire.sent).toHaveLength(3);
+    wire.answer(2);
+    await after;
+    connection.close();
+  });
+  it('refuses a non-blocking request parked behind the negotiated depth', async () => {
+    const wire = new Wire();
+    const connection = connect({
+      socket: wire,
+      dispatchMode: 'concurrent-v1',
+      deadline: {
+        milliseconds: 30000,
+        schedule: (callback, milliseconds) => {
+          const timer = setTimeout(callback, milliseconds);
+          return () => clearTimeout(timer);
+        },
+      },
+    });
+    // Both are admitted against the pre-negotiation ceiling of 64, so the second
+    // meets the *launch* queue rather than the admission check once the server
+    // advertises a depth of one. That is the second place the two forms diverge,
+    // and a shed only in `exchange` would park this one instead of failing it.
+    const first = connection.ask('project.list', {});
+    const shed = connection
+      .ask('project.list', {}, { nonBlocking: true })
+      .then(() => 'ok', codeOf);
+    wire.answer(0, {
+      code: 'OK',
+      payload: { mode: 'concurrent-v1', maxPending: 1, maxIdBytes: 128 },
+    });
+    await flush();
+    expect(await shed).toBe('NOT_SUBMITTED');
+    expect(wire.sent).toHaveLength(2);
+    wire.answer(1);
+    await expect(first).resolves.toEqual({ code: 'OK', payload: [] });
+    connection.close();
+  });
   // Guards the new drain path (timers push straight to transmit). Deliberately
   // NOT red-before: the old code also drained this scenario, only reordered.
   it('resubmits both of two simultaneous refusals', async () => {

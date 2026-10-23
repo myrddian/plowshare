@@ -12,6 +12,21 @@ const reply = await client.request('project.list', {})
 const projects = requirePayload(reply)
 ```
 
+A full dispatch window is flow control, not failure. By default `request` does not
+complete until the frame has been written: it waits for a slot, and a
+`CAPACITY_EXHAUSTED` reply is absorbed — the dispatch count is released, the window
+slot is kept, and the same request id is resubmitted after a jittered pause (100ms
+base, doubling, 5s cap) against the deadline already armed at the first transmit, so
+repeated refusals end in the caller's own timeout rather than retrying forever.
+The request deadline is armed when the frame is written and never re-armed, so time
+spent waiting for capacity is not charged against it; an `AbortSignal` passed as
+`signal` ends a wait with `NOT_SUBMITTED` and leaves capacity as it was.
+`{ nonBlocking: true }` in a request's options selects the fail-fast form for a
+caller that would rather shed load: a full window rejects with `NOT_SUBMITTED` in
+the same call and nothing is written, and a refusal is handed back as the request's
+own outcome (`CAPACITY_EXHAUSTED`) instead of being absorbed and retried. The
+dispatch negotiation is never resubmitted, in either form.
+
 The SDK retains the entire raw envelope alongside the checked outcome. It exposes
 all registered operations through typed request payloads, with narrower
 convenience methods for runs, jobs, conversations and outgoing work. Build a local

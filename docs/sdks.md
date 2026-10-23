@@ -87,9 +87,14 @@ TypeScript/Node expose `closeAsync()` to await transport-owned physical buffers;
 and Go `Close` share their shutdown drain and wait for admitted converters,
 writers and byte leases, without waiting for application code to consume results.
 
-TypeScript requests accept local `signal` and `timeoutMs` options; neither appears
-in the wire payload or acting selection. `timeoutMs` overrides the connection's
-default for that call. Neutral TypeScript compositions supply a deadline scheduler
+TypeScript requests accept local `signal`, `timeoutMs` and `nonBlocking` options;
+none appears in the wire payload or acting selection. `timeoutMs` overrides the
+connection's default for that call. `nonBlocking` selects the explicit fail-fast
+form of the dispatch backpressure contract — a full window rejects with
+`NOT_SUBMITTED` without writing anything, and a `CAPACITY_EXHAUSTED` refusal is
+returned as the request's own outcome instead of being absorbed and resubmitted;
+the waiting default is what every other request gets. Each SDK spells the choice
+in its own idiom, per call rather than per connection. Neutral TypeScript compositions supply a deadline scheduler
 and await `ready()` when selecting concurrent mode. Python accepts an optional
 per-request timeout and task cancellation; .NET uses cancellation tokens, and Go
 uses contexts. Admission includes calls waiting for the writer and retained

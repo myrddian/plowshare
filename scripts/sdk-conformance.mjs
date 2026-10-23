@@ -388,6 +388,27 @@ try {
         assert.equal(handshake.refusedNegotiations, 1, language+' did not have a dispatch negotiation refused')
         assert.equal(handshake.order.length, 0, language+' submitted work after a refused dispatch negotiation')
         assert.equal(observed('capacity-close-while-parked').order.length, 1, language+' submitted a parked request at a full window')
+        // The explicit non-blocking form, which the other seven cases cannot reach: they all
+        // drive the waiting default, so an SDK exposing no second form would pass them all.
+        // Two frames and two ids is the whole claim about pacing -- the refused request was
+        // submitted once and never resubmitted (no backoff, no retry), and the request that
+        // met the full window produced no frame at all. A form that absorbed the refusal
+        // would show three frames with two distinct ids; one that queued for the slot would
+        // show three distinct ids.
+        //
+        // Guarded by language because only `node` drives it today. Go and Python do have a
+        // non-blocking form (`WithoutCapacityWait`, `wait_for_capacity=False`) and their
+        // drivers are free to adopt this case; until they do, asserting it for them would
+        // fail on an undriven scenario rather than on a missing behaviour. The guard is
+        // deliberately a language list and not "assert only what was observed", which is
+        // the vacuous pass the handshake case exists to rule out.
+        if (language === 'node') {
+            const explicit = observed('capacity-non-blocking')
+            assert.equal(explicit.order.length, 2,
+                language+' did not submit the non-blocking refusal exactly once and the held request exactly once')
+            assert.equal(new Set(explicit.order).size, 2,
+                language+' resubmitted a request its caller asked not to wait, or transmitted one that met a full window')
+        }
     }
     assert.deepEqual(failures, [])
     console.log('Shared SDK conformance passed:', languages.join(', '))

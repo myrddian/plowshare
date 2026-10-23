@@ -515,6 +515,16 @@ export function connect(options: ConnectOptions): Connected {
       admitted++;
       return submit(type, payload, options, control);
     }
+    // The non-blocking form sheds the request here rather than parking it. Nothing
+    // was encoded, let alone written, so NOT_SUBMITTED is the unambiguous claim and
+    // a caller may act on it without the replay prohibition applying.
+    if (options.nonBlocking === true)
+      return Promise.reject(
+        new ConnectionFault(
+          'NOT_SUBMITTED',
+          'the dispatch window is full and this request asked not to wait for capacity; nothing was submitted',
+        ),
+      );
     return reserveSlot(options.signal).then(() =>
       submit(type, payload, options, control),
     );
@@ -663,7 +673,11 @@ export function connect(options: ConnectOptions): Connected {
        * a refusal into a teardown. A refused negotiation fails honestly instead.
        */
       let refusals = 0;
-      if (deadline !== undefined && !control)
+      // Never installed for the non-blocking form either: absorbing the refusal is
+      // precisely what that caller asked not to have done. Without this handler the
+      // `CAPACITY_EXHAUSTED` frame settles the request like any other answer, so the
+      // code reaches the caller through the outcome channel it already handles.
+      if (deadline !== undefined && !control && !requestOptions.nonBlocking)
         asker.refused = (): void => {
           if (!launched) return;
           dispatched--;
@@ -691,6 +705,16 @@ export function connect(options: ConnectOptions): Connected {
         }
         // Wait behind the negotiated depth rather than fail; pump() resumes FIFO.
         if (dispatched >= maximum || launchWaiters.length > 0) {
+          // Both queues are the same wait as far as a caller is concerned, so the
+          // non-blocking form must shed here as well as in `exchange`. This is the
+          // arm that fires when a window reserved before negotiation turns out to be
+          // narrower than 64, or when depth is free but earlier work is queued ahead.
+          if (requestOptions.nonBlocking === true) {
+            detached(
+              'the dispatch window is full and this request asked not to wait for capacity; nothing was submitted',
+            );
+            return;
+          }
           launchWaiters.push({ asker, proceed: transmit });
           return;
         }
