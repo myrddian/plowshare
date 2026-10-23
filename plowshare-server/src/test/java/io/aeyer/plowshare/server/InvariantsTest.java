@@ -250,6 +250,29 @@ class InvariantsTest {
           "(^|/)(build|out|target|dist|obj|node_modules|__pycache__|\\.gradle)/"
               + "|\\.(class|jar|war|o|a|so|dylib|dll|exe|pdb|nupkg|pyc|tsbuildinfo)$");
 
+  /**
+   * The one {@code @Transactional} in the server, and why it is allowed to stay.
+   *
+   * <p>{@code AdminStore.create} is a boot-time insert of a single row, called only by {@code
+   * AdminSeed}. It publishes {@code PersonalSpaces.AccountCreated} inside the transaction, and
+   * Spring publishes synchronously, so the listener runs on this thread and inside this boundary --
+   * but {@code PersonalSpaces.created} is the only listener and it makes no model call and blocks
+   * on no other thread, so the boundary encloses nothing that can wait.
+   *
+   * <p>Naming it here rather than deleting the annotation keeps this a guard over new code instead
+   * of a refactor of working code. It does not exempt the file from {@link
+   * #no_transaction_boundary_also_calls_the_embedding_client()}: that scan treats an annotated file
+   * as a boundary too, so adding a model call here still fails, and this entry cannot hide it.
+   */
+  private static final Set<String> TRANSACTIONAL_ON_PURPOSE =
+      Set.of("plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/AdminStore.java");
+
+  /**
+   * A {@code @Transactional} annotation at the start of a line, in either the imported or the fully
+   * qualified form.
+   */
+  private static final Pattern TRANSACTIONAL = Pattern.compile("^@(?:[\\w.]+\\.)?Transactional\\b");
+
   private static final Pattern CLIENT_MAIN_JAVA = Pattern.compile("^sdk/java/src/main/.*\\.java$");
   private static final Pattern SERVER_MAIN_JAVA =
       Pattern.compile("^plowshare-server/src/main/.*\\.java$");
@@ -990,6 +1013,128 @@ class InvariantsTest {
         output,
         "compiled or packaged output is tracked; it belongs to a build directory and not to the"
             + " index — drop it with `git rm --cached` and make sure .gitignore covers it");
+  }
+
+  /**
+   * No server source carries a {@code @Transactional} annotation.
+   *
+   * <p>Not a style rule. The boundary in this server is drawn programmatically, by {@code
+   * UnitOfWork} and {@code TransactionTemplate}, specifically so it can be made <em>narrower than
+   * the model call</em>. Five {@code @Transactional} annotations on {@code MemoryController} once
+   * wrapped the embedding call too, and an exception escaping the model lost the memory the request
+   * had just written. {@code UnitOfWork} exists to have replaced them; {@code MemoryController}'s
+   * javadoc says, in bold, not to put them back.
+   *
+   * <p>Since the database admission throttle landed, re-adding one costs more than it used to. The
+   * throttle waits and never refuses, so a thread inside a transaction holds a pool permit; if it
+   * then blocks on a model call whose dispatch thread needs a permit of its own, the two cannot
+   * resolve and no acquire timeout breaks the cycle any more. The old price was a {@code 500} and a
+   * lost memory. The new price is a wedged request that stays wedged.
+   *
+   * <p>Four javadoc paragraphs asked for this and nothing checked it. This does.
+   */
+  @Test
+  void no_server_source_carries_a_transactional_annotation() throws IOException {
+    List<String> annotated =
+        declaring(TRANSACTIONAL, within(SERVER_MAIN_JAVA)).stream()
+            .filter(path -> !TRANSACTIONAL_ON_PURPOSE.contains(path))
+            .toList();
+    assertEquals(
+        List.of(),
+        annotated,
+        "a @Transactional annotation is back in the server. The boundary here is programmatic"
+            + " (UnitOfWork, TransactionTemplate) so that it stays narrower than any model call --"
+            + " see MemoryController's javadoc, which says not to add these, and AdmissionThrottle's"
+            + " contract for why a transaction that waits on another thread's database work now"
+            + " wedges instead of timing out");
+  }
+
+  /**
+   * No file that opens a transaction boundary also calls the embedding client.
+   *
+   * <p>The companion to the invariant above, for the boundary this server actually uses. A {@code
+   * TransactionTemplate} around an {@code embed} call is the programmatic form of the same mistake,
+   * and carries the same two costs: a failure below the model loses the enclosed write, and a
+   * thread holding a pool permit blocks on a dispatch thread that needs one.
+   *
+   * <h2>What this does and does not catch</h2>
+   *
+   * <p>It is lexical and file-scoped, not a call graph. It catches the direct shape -- one file
+   * that both opens a boundary and calls the client -- which is the shape the incident took and the
+   * shape a later edit is most likely to take. It does <b>not</b> catch a boundary that reaches a
+   * model call through a collaborator, and it is scoped to {@code embed} because the chat entry
+   * points are named {@code complete} and {@code stream}, which cannot be told apart lexically from
+   * {@code CompletableFuture.complete} and {@code Stream.stream}. Both gaps are real; the audit
+   * that closed them once is recorded in {@code AdmissionThrottle}'s contract, which also says
+   * where it stopped.
+   *
+   * <p>The scan is over bytes, so a comment or javadoc writing {@code .embed(} literally counts as
+   * a call. That is the same trade the key and address scans in this class already make, and it
+   * fails toward noticing rather than away from it; the message says which file to look at.
+   *
+   * <p>The boundary side is the union of files constructing a {@code TransactionTemplate} and files
+   * carrying a {@code @Transactional} annotation, so a file named in {@code
+   * TRANSACTIONAL_ON_PURPOSE} is still checked here. An allowlist entry excuses the annotation,
+   * never the model call.
+   *
+   * <p>Both scans are asserted non-empty, because two empty sets intersect cleanly and would report
+   * this invariant held while measuring nothing.
+   */
+  @Test
+  void no_transaction_boundary_also_calls_the_embedding_client() throws IOException {
+    List<String> boundaries =
+        union(
+            scan("new TransactionTemplate(", within(SERVER_MAIN_JAVA)),
+            declaring(TRANSACTIONAL, within(SERVER_MAIN_JAVA)));
+    List<String> modelCalls = scan(".embed(", within(SERVER_MAIN_JAVA));
+
+    assertFalse(
+        boundaries.isEmpty(),
+        "no server source opens a transaction boundary at all, so this invariant just compared"
+            + " two empty sets -- the boundary moved and this scan no longer knows where it is");
+    assertFalse(
+        modelCalls.isEmpty(),
+        "no server source calls .embed(, so this invariant just compared two empty sets -- the"
+            + " embedding client was renamed and this scan no longer knows what it is looking for");
+
+    List<String> both = boundaries.stream().filter(modelCalls::contains).sorted().toList();
+    assertEquals(
+        List.of(),
+        both,
+        "these files open a transaction boundary and call the embedding client: a failure below the"
+            + " model loses the enclosed write, and a thread holding a database permit blocks on a"
+            + " dispatch thread that needs one, which no longer times out. Close the boundary"
+            + " before the model call, as Archive.applyVerdict does");
+  }
+
+  /**
+   * Tracked files in {@code scope} that declare {@code annotation}, sorted.
+   *
+   * <p>Anchored to the start of the stripped line on purpose: {@code @Transactional} appears in
+   * this repository many times inside javadoc explaining why it was removed, and a plain substring
+   * scan would read that documentation as the very violation it warns against.
+   *
+   * <p>{@code annotation} is a pattern rather than a literal so it can accept the fully qualified
+   * form too. {@code @org.springframework.transaction.annotation.Transactional} needs no import and
+   * so is the form most likely to be added by someone working around a missing one, which a literal
+   * {@code startsWith} would have missed entirely.
+   */
+  private static List<String> declaring(Pattern annotation, Predicate<String> scope)
+      throws IOException {
+    List<String> holders = new ArrayList<>();
+    for (String path : matching(scope)) {
+      Path file = ROOT.resolve(path);
+      if (!Files.isRegularFile(file)) {
+        continue;
+      }
+      for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+        if (annotation.matcher(line.strip()).find()) {
+          holders.add(path);
+          break;
+        }
+      }
+    }
+    return holders.stream().sorted().toList();
   }
 
   /**
