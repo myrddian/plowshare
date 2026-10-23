@@ -88,6 +88,134 @@ duration string such as `5s` fails to bind and the server will not start. The
 timeout is short on purpose: starvation then fails fast and names the pool instead
 of looking like a lost response at the client's request deadline.
 
+All `plowshare.transport` dispatch keys are written out in `application.yml` with
+their defaults and can be overridden by the environment variable formed from the
+key: `PLOWSHARE_TRANSPORT_` plus the key in upper snake case, for example
+`PLOWSHARE_TRANSPORT_REQUEST_DEPTH`. The remaining keys are
+`event-read-concurrency` (`2`, per connection), `event-read-global-concurrency`
+(`8`), `packet-memory-bytes` (`2147483648`; it must hold one portable message with
+its conversion copies or startup fails), `request-shutdown-drain` (`10s`, a
+Spring duration), `request-metrics-interval` (`PT30S`, how often the dispatch
+measurements are logged at TRACE when changed) and
+`request-metrics-summary-interval` (`PT10M`, how often the cumulative INFO
+summary is logged). The keepalive block keeps its existing `PLOWSHARE_WS_KEEPALIVE_*`
+names.
+
+### Database admission throttle
+
+A wait-only throttle sits in front of connection acquisition on the main pool. It
+delays work as the pool fills and never refuses it, so pool exhaustion remains
+distinguishable in logs. Settings live under `plowshare.pool-admission`; each is
+overridden by `PLOWSHARE_POOL_ADMISSION_` plus the key in upper snake case.
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `true` | `false` removes the throttle; acquisitions go straight to the pool. |
+| `permit-margin` | `2` | Connections never handed out by the throttle, for consumers that bypass it (Flyway at boot, the actuator health probe). |
+| `threshold-fraction` | `0.5` | Fraction of the permits at which delay begins, strictly between 0 and 1. |
+| `base-quantum` | `20ms` | Delay unit just past the threshold; must be below `ceiling`. |
+| `ceiling` | `3s` | Longest delay applied to one acquisition. |
+| `pressure-window` | `10s` | Half-life over which observed acquire-latency pressure decays. |
+
+These are Spring durations (`20ms`, `3s`), unlike the pool timeout above, which is a
+plain millisecond count.
+
+The permit count and the delay threshold are **derived** from the pool size and are
+not settable: `permits = pool size - permit-margin` and `threshold =
+floor(permits * threshold-fraction)`, at least 1. Resizing `PLOWSHARE_DB_POOL`
+resizes the throttle, so the two cannot disagree. Startup fails if fewer than two
+permits lie above the threshold.
+
+**Invariant.** `ceiling` must be at least one second below the pool acquire timeout
+(`PLOWSHARE_DB_CONNECTION_TIMEOUT`, default 5000 ms). Otherwise a throttle wait and
+an exhausted-pool timeout look the same in the logs and the throttle's attribution
+is lost. The server enforces this at startup and **refuses to boot** when it is
+broken; that is by design. Raise the acquire timeout before raising the ceiling.
+
+#### What the ceiling does not bound
+
+`ceiling` bounds only the **pacing** delay: the per-acquisition wait the curve
+applies as the pool fills. It is not a bound on how long an acquisition can take.
+Once every permit is held, the next caller blocks until a permit is freed, and that
+wait has **no bound at all**. The throttle only ever waits, so a saturated pool now
+produces unbounded request latency instead of the 5-second pool-acquire failure it
+produced before. This is deliberate — a capacity refusal raised mid-request would
+let an SDK replay a partially applied operation — but it changes what an incident
+looks like: requests queue and slow down rather than failing, and nothing times out
+on the server's side.
+
+Watch `plowshare.pool.admission.saturation.wait` for it. It records only the
+semaphore wait, separately from the pacing delay, so it is the one meter that shows
+this stall. As a rule of thumb at the shipped settings, a maximum of a few hundred
+milliseconds is ordinary burst queuing; sustained waits past roughly one second mean
+callers are queueing for connections rather than being paced, and a maximum of
+several seconds means requests are being held for the duration of someone else's
+work. The usual cause is a connection held across a network or model call rather
+than too little pool; `PLOWSHARE_DB_POOL` is what to raise once that is ruled out.
+Compare it with `plowshare.pool.admission.delay` to tell the two apart: pacing rising
+while the saturation wait stays near zero is the throttle doing its job.
+
+#### Meters
+
+All under `/actuator/metrics`, and the only place pool pressure is visible, since the
+throttle never produces a client-visible outcome.
+
+| Meter | Type | What it shows |
+| --- | --- | --- |
+| `plowshare.pool.admission.held` | gauge | Permits currently held. |
+| `plowshare.pool.admission.permits` | gauge | Permits configured (pool size less `permit-margin`). |
+| `plowshare.pool.admission.threshold` | gauge | Occupancy at which delay begins. |
+| `plowshare.pool.admission.delayed` | counter | Acquisitions the curve delayed at all. |
+| `plowshare.pool.admission.delay` | timer | Pacing delay applied per delayed acquisition. |
+| `plowshare.pool.admission.saturated` | counter | Acquisitions that blocked because every permit was held. |
+| `plowshare.pool.admission.saturation.wait` | timer | Time those acquisitions spent blocked; see above. |
+| `plowshare.pool.admission.overdraft` | counter | Nested acquisitions admitted without a permit: none was free, a waiter was queued ahead, or the thread was already interrupted. |
+
+None of them carries a tag, so the set is constant whatever the traffic.
+
+An `overdraft` is a thread holding a second physical connection against a single
+permit: a `PROPAGATION_REQUIRES_NEW` transaction inside another, or a nested query
+inside a row mapper. Such a borrow normally takes a permit of its own, but at
+saturation it is admitted without one, because making it wait would deadlock the
+thread against itself. The same happens when a waiter is already queued for a permit
+(the nested borrow does not jump the queue) or the thread was already interrupted. A
+sustained non-zero count therefore means real pool use is running above `permits`, and
+the pool — not `permit-margin` — is what to raise.
+
+This is the price of the no-deadlock guarantee, and it has a limit. Each overdraft is
+a real connection the throttle did not count, so enough simultaneous overdrafts use up
+the `permit-margin` connections and then the pool itself. At that point a borrow fails
+on the pool's own acquire timeout, the same indistinguishable pool-named error the
+throttle otherwise removes. Watch `overdraft` together with `held` at or near
+`permits`: a rising `overdraft` while `held` stays pinned at the ceiling is the
+warning. The remedy is to raise the pool size, which raises `permits` with it; raising
+`permit-margin` does not help, since it only reserves connections the throttle never
+hands out.
+
+### Projection cache budgets
+
+Projection caches are bounded by explicit budgets under `plowshare.projection-cache`,
+all written out in `application.yml` and overridden by
+`PLOWSHARE_PROJECTION_CACHE_` plus the key in upper snake case. Invalid or
+inconsistent values fail startup.
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `entries` | `256` | Cached entries. |
+| `resident-bytes` | `33554432` | Bytes held by cached values. |
+| `loads` | `8` | Loads in flight at once. |
+| `loading-bytes` | `67108864` | Bytes of values being loaded. |
+| `waiters` | `256` | Callers waiting on loads, in total. |
+| `waiters-per-load` | `64` | Callers waiting on one load. |
+| `dependency-links` | `8192` | Dependency links between entries. |
+| `max-value-bytes` | `8388608` | Largest single value; must fit within `loading-bytes` with headroom. |
+| `timeout` | `5s` | How long a caller waits for a load. |
+| `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
+| `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
+| `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
+| `max-projections` | `16` | Distinct projections (1..64). |
+| `version-connections` | `4` | Connections of the separate `projection-versions` pool (1..32). |
+
 ### Actuator endpoints
 
 The `health`, `info` and `metrics` actuator endpoints are exposed on the main API
