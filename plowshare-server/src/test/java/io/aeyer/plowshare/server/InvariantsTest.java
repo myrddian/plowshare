@@ -222,6 +222,34 @@ class InvariantsTest {
    */
   private static final List<String> TRACKED = tracked();
 
+  /**
+   * Ignored by one of this repository's own rules and tracked anyway, on purpose.
+   *
+   * <p>{@code /LICENSE} is ignored at {@code .gitignore} line 62 and committed deliberately, so it
+   * is named here rather than loosening the rule that protects the rest of the tree.
+   */
+  private static final Set<String> IGNORED_ON_PURPOSE = Set.of("LICENSE");
+
+  /**
+   * Build output that belongs in the tree.
+   *
+   * <p>{@code gradle-wrapper.jar} is how a fresh clone bootstraps Gradle, so no build can have
+   * produced it before it is needed.
+   */
+  private static final Set<String> OUTPUT_ON_PURPOSE = Set.of("gradle/wrapper/gradle-wrapper.jar");
+
+  /**
+   * Compiled or packaged build output: class and object files, archives, native libraries, and the
+   * conventional output directories of the toolchains this repository builds with.
+   *
+   * <p>Matched with {@code find}, so each directory alternative is anchored to a whole path segment
+   * — {@code docs/building.md} is not {@code build/}.
+   */
+  private static final Pattern BUILD_OUTPUT =
+      Pattern.compile(
+          "(^|/)(build|out|target|dist|obj|node_modules|__pycache__|\\.gradle)/"
+              + "|\\.(class|jar|war|o|a|so|dylib|dll|exe|pdb|nupkg|pyc|tsbuildinfo)$");
+
   private static final Pattern CLIENT_MAIN_JAVA = Pattern.compile("^sdk/java/src/main/.*\\.java$");
   private static final Pattern SERVER_MAIN_JAVA =
       Pattern.compile("^plowshare-server/src/main/.*\\.java$");
@@ -906,6 +934,62 @@ class InvariantsTest {
     assertEquals(
         List.of(document),
         scan(root, tracked, KEY_PREFIX, path -> !UNDER_SRC.matcher(path).matches()));
+  }
+
+  /**
+   * No tracked file is one the repository's own {@code .gitignore} rules say to ignore.
+   *
+   * <p>This is the general form of a mistake this repository has already made: compiled Java output
+   * under {@code sdk/java/build/} was committed while {@code .gitignore} line 2 already held {@code
+   * build/}, and nothing noticed until it was in published history, where removing it costs a
+   * rewrite of every commit after it. {@code .gitignore} cannot defend against this by itself,
+   * because it governs what {@code git add} picks up by default and says nothing about what the
+   * index already holds: {@code git add -f}, a tool that stages on its own, or a rule written after
+   * the files were committed all pass straight by it.
+   *
+   * <p>Asserted over this repository's own ignore files only, via {@code
+   * --exclude-per-directory=.gitignore} rather than {@code --exclude-standard}. The latter also
+   * reads {@code .git/info/exclude} and the user's global ignore file, which would make this
+   * invariant depend on whose machine ran it.
+   */
+  @Test
+  void no_tracked_file_is_one_the_repository_ignores() {
+    List<String> ignoredButTracked = new ArrayList<>();
+    for (String path :
+        git(ROOT, "ls-files", "--cached", "--ignored", "--exclude-per-directory=.gitignore", "-z")
+            .split("\0")) {
+      if (!path.isEmpty() && !IGNORED_ON_PURPOSE.contains(path)) {
+        ignoredButTracked.add(path);
+      }
+    }
+    assertEquals(
+        List.of(),
+        ignoredButTracked.stream().sorted().toList(),
+        "these files are tracked even though this repository's .gitignore says to ignore them,"
+            + " which is exactly how build output reached published history once already; either"
+            + " drop them with `git rm --cached`, or name the path in IGNORED_ON_PURPOSE with the"
+            + " reason it belongs in the index");
+  }
+
+  /**
+   * No compiled or packaged build output is tracked, whether or not an ignore rule happens to cover
+   * it.
+   *
+   * <p>The invariant above catches output some rule already names. This one catches the case where
+   * that rule never existed — a new module, or a toolchain whose output directory nobody thought to
+   * add — because noticing late costs the same history rewrite either way.
+   */
+  @Test
+  void no_build_output_is_tracked() {
+    List<String> output =
+        matching(path -> BUILD_OUTPUT.matcher(path).find()).stream()
+            .filter(path -> !OUTPUT_ON_PURPOSE.contains(path))
+            .toList();
+    assertEquals(
+        List.of(),
+        output,
+        "compiled or packaged output is tracked; it belongs to a build directory and not to the"
+            + " index — drop it with `git rm --cached` and make sure .gitignore covers it");
   }
 
   /**
