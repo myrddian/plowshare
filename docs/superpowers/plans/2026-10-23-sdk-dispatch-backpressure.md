@@ -27,7 +27,9 @@ JUnit tests in Task 5. One contract, four implementations, one place that says w
 - Backoff: base 100ms, cap 5000ms, doubling on the refusal count, half fixed and half random,
   randomness injectable so tests are deterministic.
 - The loop's bound is the deadline armed at first transmit. Do not add a retry ceiling.
-- A refused request releases its window slot while backing off and rejoins the queue at the back.
+- A refused request releases its dispatch count while backing off but keeps its admission slot, so
+  it rejoins the back of the dispatch queue and not of the admission queue. The earlier wording here
+  said the opposite; see the spec's corrected slot-release paragraph.
 - The `control` dispatch negotiation is never resubmitted.
 - `maxPending` from the handshake is authoritative, validated within `[1, 64]`.
 - Every SDK honours cancellation while waiting for local capacity; a cancelled wait is
@@ -41,10 +43,11 @@ JUnit tests in Task 5. One contract, four implementations, one place that says w
 
 ## Review Focus
 
-Five failure modes the spec implies that no task's happy path exercises. Each has a test assigned to
-the task that owns the code. Items 1 and 4 are driven by harness scenarios from Task 1; items 2, 3
-and 5 are **per-SDK cases every one of Tasks 2-5 must add**, because each language's cancellation,
-transmit point and close path differ.
+Seven failure modes the spec implies that no task's happy path exercises. Each has a test assigned to
+the task that owns the code. Items 1, 4, 5 and 6 are driven by harness scenarios from Task 1;
+items 2 and 3 are **per-SDK cases every one of Tasks 2-5 must add**, because each language's
+cancellation, transmit point and close path differ. Items 6 and 7 were added by the review of
+Task 1: each names a way a scenario can report success without the behaviour being present.
 
 1. **A backing-off request starved by later arrivals.** It keeps its admission slot precisely so
    this cannot happen; an implementation that releases admission on refusal lets every new arrival
@@ -56,10 +59,20 @@ transmit point and close path differ.
 3. **A resubmission re-arming the deadline.** The retry path re-enters transmit, which is exactly
    where the deadline is armed; "exactly once" has to survive that. → Tasks 2-5.
 4. **A server that refuses forever.** The caller must get its original timeout, not a hang and not
-   an extended deadline. → Task 1 scenario, asserted in Tasks 2-5.
+   an extended deadline. → Task 1 `capacity-refuse-always`, asserted in Tasks 2-5. The scenario also
+   bounds the observed attempt count, because a client that resubmits instantly and forever
+   satisfies "ends in a timeout" too; the bound separates pacing from a hot loop without asserting
+   any duration.
 5. **Connection close while callers are parked waiting for capacity.** Every parked caller must be
    released as `NOT_SUBMITTED` rather than hanging until its deadline, which never started. →
    Tasks 2-5.
+6. **A fail-fast client passing a parking scenario by coincidence.** `capacity-close-while-parked`'s
+   three facts — one frame, `UNKNOWN` held, `NOT_SUBMITTED` parked — are all produced by a client
+   that refuses locally and immediately, which is how the Go baseline passed it while never parking.
+   The scenario therefore also asserts the parked request is *still pending* before the close. →
+   Task 1, asserted in Tasks 2-5.
+7. **A deadline charged for the wait for capacity.** The originally reported bug, and the one no SDK
+   has a test for. → Task 1 `capacity-deadline-survives-waiting`, asserted in Tasks 2-5.
 
 ---
 
@@ -77,7 +90,7 @@ behaviours in JUnit.
 - Consumes: the existing fixture shape `{name, response:{code, payload}}`, selected by the driver
   sending `payload.scenario`, and the existing handshake reply that advertises
   `mode:'concurrent-v1', maxPending:64` (`sdk-conformance.mjs:58`).
-- Produces: six scenario names, and a handshake override so a case can advertise a small window.
+- Produces: seven scenario names, and a handshake override so a case can advertise a small window.
   Tasks 2-5 depend on these exact strings:
   - `capacity-refuse-once` — refuses the first attempt with `CAPACITY_EXHAUSTED`, then answers `OK`.
     Proves a refusal is absorbed and the caller sees a reply.
@@ -92,14 +105,25 @@ behaviours in JUnit.
     produces `A, B, A` and fails this.
   - `capacity-handshake-refuse` — refuses the `control` negotiation with `CAPACITY_EXHAUSTED`.
     Proves no SDK resubmits a handshake; the harness fails the case if it sees a second selection.
+  - `capacity-deadline-survives-waiting` — with `maxPending:1`, holds the first request for longer
+    than the second request's own timeout, then frees the window. The second must still complete:
+    the deadline arms at transmit, so the wait is not charged against it. This is the regression test
+    for the originally reported bug (Review Focus 7).
   - `capacity-close-while-parked` — with `maxPending:1`, holds the first request and closes the
-    socket while a second is parked. Proves parked callers are released (Review Focus 5).
+    socket while a second is parked. Proves parked callers are released (Review Focus 5), and
+    asserts the parked request is still pending before the close so a fail-fast client cannot pass
+    it by coincidence (Review Focus 6).
 
-- [ ] **Step 1: Add the six cases to the fixture**
+- [ ] **Step 1: Add the seven cases to the fixture**
 
-Each case carries what the harness needs to drive it: a `response`, and where relevant
-`refusals` (integer), `maxPending` (integer), `holdUntilSubmitted` (integer) and
-`closeWhileParked` (boolean). Keep the existing 11 cases untouched.
+Each case carries what the harness needs to drive it: a `response` (every case, including the
+refusing ones, so an unexpected request id never produces a frame with no payload), and where
+relevant `refusals` (integer), `refuseAlways` (boolean), `maxPending` (integer), `holdMs` (integer —
+presence makes it a holding case), `waitingTimeoutMs` (integer — the per-request timeout of the
+request that parks), `expectedSubmissions` (integer — upper bound on total submissions) and
+`closeWhileParked` (boolean). A `capacityContract` block in the fixture documents the fields and the
+refusal narrowing, because `"refusals": 1` applies only to the connection's first request id and a
+driver author would otherwise model it per-request. Keep the existing 11 cases untouched.
 
 - [ ] **Step 2: Implement the scenarios in `scripts/sdk-conformance.mjs`**
 
@@ -111,7 +135,7 @@ the case if a `control` selection arrives twice on one connection.
 Count attempts by request id, not by session: a resubmission reuses the id, and that is the property
 being tested.
 
-- [ ] **Step 3: Drive all six from the Node driver**
+- [ ] **Step 3: Drive all seven from the Node driver**
 
 Add the cases to `scripts/sdk-node-conformance.mjs`, following the existing driver style — plain
 assertions, and `assert(!first.done())`-style checks for "B completes while A is held" as

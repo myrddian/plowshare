@@ -1,5 +1,14 @@
 {
   "protocolVersion": "plowshare-v1",
+  "capacityContract": {
+    "purpose": "The dispatch backpressure contract, defined once here so the Go, .NET, Python and Node drivers assert the same behaviour. Cases carrying \"capacity\": true need a negotiated window and several requests, so a generic per-case loop must skip them and drive them explicitly.",
+    "refusalScope": "A case refuses only the connection's FIRST request id. \"refusals\" and \"refuseAlways\" describe what happens to that one request, not to every request on the connection: requests submitted behind it are always answered. The narrowing is deliberate and load-bearing -- it is what lets a case refuse one request and observe what the work queued behind it does (capacity-slot-order). Do not model \"refusals\": 1 as \"the first attempt of every request is refused\".",
+    "expectedSubmissions": "Upper bound on the total number of application request frames the fixture expects on the connection, counting each resubmission under the same id as another submission. It is what separates paced resubmission from the hot retry loop the spec names an anti-goal, without asserting any duration: a client that resubmits instantly and forever blows through the bound long before any clock is consulted.",
+    "holdMs": "How long the fixture holds the connection's first request before answering it (or, with \"closeWhileParked\", before closing the socket). Its presence is what makes a case a holding case. While the hold is active the fixture fails the case if a second frame arrives, so \"the client parked rather than over-submitting\" is proved by frame order rather than by timing.",
+    "waitingTimeoutMs": "The per-request timeout a driver must give the request that parks behind the held one. It is deliberately much shorter than \"holdMs\": the request waits several times its own timeout for a slot and must still succeed, because the deadline arms at transmit and never charges the wait.",
+    "deliveryAlternates": "Some capacity cases admit more than one honest delivery code, and a driver must accept any of them. capacity-refuse-always ends in a deadline expiry; the request is almost always inside a backoff pause when the deadline fires, which is NOT_SUBMITTED, but a deadline that lands in the sub-millisecond window between a transmit and the refusal arriving reports RESPONSE_LOST, and that is equally truthful. The invariant the case actually guarantees is a deadline expiry and never a CAPACITY_EXHAUSTED surfaced to the caller; pinning one delivery code makes the case flaky rather than strict.",
+    "handshake": "Refuses the \"control\" dispatch negotiation with CAPACITY_EXHAUSTED. A refused negotiation is never flow control and is never resubmitted: the server treats a second selection on one connection as a protocol violation. The harness asserts a negotiation was actually attempted and refused, so a language that never drives the case cannot report success."
+  },
   "cases": [
     { "name": "success", "response": { "code": "OK", "payload": { "nullable": null, "future": { "nested": [1, "two"] } }, "futureOutcome": true } },
     { "name": "refusal", "response": { "code": "CONFLICT", "said": "fixture refusal" } },
@@ -12,11 +21,12 @@
     { "name": "push", "push": true, "response": { "code": "OK", "payload": {} } },
     { "name": "timeout", "silent": true, "delivery": "UNKNOWN" },
     { "name": "disconnect", "disconnect": true, "delivery": "UNKNOWN" },
-    { "name": "capacity-refuse-once", "capacity": true, "refusals": 1, "response": { "code": "OK", "payload": [] } },
-    { "name": "capacity-refuse-always", "capacity": true, "refuseAlways": true, "delivery": "NOT_SUBMITTED" },
-    { "name": "capacity-window-one", "capacity": true, "maxPending": 1, "holdUntilSubmitted": 2, "response": { "code": "OK", "payload": [] } },
-    { "name": "capacity-slot-order", "capacity": true, "maxPending": 1, "refusals": 1, "response": { "code": "OK", "payload": [] } },
-    { "name": "capacity-handshake-refuse", "capacity": true, "handshake": true, "delivery": "NOT_SUBMITTED" },
-    { "name": "capacity-close-while-parked", "capacity": true, "maxPending": 1, "holdUntilSubmitted": 1, "closeWhileParked": true, "delivery": "UNKNOWN" }
+    { "name": "capacity-refuse-once", "capacity": true, "refusals": 1, "expectedSubmissions": 2, "response": { "code": "OK", "payload": [] } },
+    { "name": "capacity-refuse-always", "capacity": true, "refuseAlways": true, "expectedSubmissions": 8, "response": { "code": "OK", "payload": [] }, "delivery": "NOT_SUBMITTED", "deliveryAlternates": ["RESPONSE_LOST"] },
+    { "name": "capacity-window-one", "capacity": true, "maxPending": 1, "holdMs": 250, "expectedSubmissions": 2, "response": { "code": "OK", "payload": [] } },
+    { "name": "capacity-slot-order", "capacity": true, "maxPending": 1, "refusals": 1, "expectedSubmissions": 3, "response": { "code": "OK", "payload": [] } },
+    { "name": "capacity-deadline-survives-waiting", "capacity": true, "maxPending": 1, "holdMs": 900, "waitingTimeoutMs": 300, "expectedSubmissions": 2, "response": { "code": "OK", "payload": [] } },
+    { "name": "capacity-handshake-refuse", "capacity": true, "handshake": true, "expectedSubmissions": 0, "response": { "code": "OK", "payload": [] }, "delivery": "NOT_SUBMITTED" },
+    { "name": "capacity-close-while-parked", "capacity": true, "maxPending": 1, "holdMs": 1000, "expectedSubmissions": 1, "closeWhileParked": true, "delivery": "UNKNOWN" }
   ]
 }

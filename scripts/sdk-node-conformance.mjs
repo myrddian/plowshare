@@ -12,6 +12,7 @@ if(!binding)throw new Error('Installed SDK wire binding is missing')
 const { connect } = await import(pathToFileURL(binding).href)
 const { default: WebSocket } = await import(pathToFileURL(resolve.resolve('ws')).href)
 const fixture = JSON.parse(await readFile(process.env.PLOWSHARE_SDK_FIXTURES, 'utf8'))
+const cases = new Map(fixture.cases.map(value => [value.name, value]))
 const catalog = JSON.parse(await readFile(process.env.PLOWSHARE_SDK_CATALOG, 'utf8'))
 assert.deepEqual(OPERATIONS, catalog.operations)
 const origin = process.argv[2]
@@ -87,6 +88,13 @@ await full;
 // refusing. Closing the connection is what settles it, and NOT_SUBMITTED is honest
 // because nothing was ever transmitted -- which is also why the 64-frame count below
 // still holds.
+//
+// The 250ms pause must stay well under this connection's timeoutMs of 5000. At t=5000
+// the 64 held requests expire of their own deadlines, free their slots, and the parked
+// request would transmit -- which would break both the `=== 64` frame count the shared
+// harness asserts and the NOT_SUBMITTED below, since the request would then have been
+// sent. The margin is 20x; it is a bound on how long this pause may grow, not a
+// duration the assertion measures.
 const pending = Symbol('pending');
 const parked = capacity.request('project.list',{});
 const raced = await Promise.race([parked.then(() => 'settled', () => 'settled'),
@@ -108,8 +116,20 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
 {
     // Refusals outlast the deadline armed at first transmit, so the loop ends in the
     // caller's own timeout rather than hanging or surfacing the refusal.
+    //
+    // Both deliveries in the fixture are accepted, and the looseness is the strict
+    // reading rather than a relaxation. The guaranteed invariant is a deadline expiry
+    // that is never a surfaced CAPACITY_EXHAUSTED -- a refusal arrives as a `Refusal`,
+    // which carries no deadline message. Which delivery code it carries depends on where
+    // the deadline lands: NOT_SUBMITTED inside a backoff pause (`refused()` clears
+    // `submitted`, connection.ts:671) and RESPONSE_LOST in the sub-millisecond window
+    // between a transmit and the refusal arriving (:713, :731). Insisting on
+    // NOT_SUBMITTED alone made this case fail roughly one run in forty, and the failing
+    // run was reporting a truthful code, not a defect.
+    const test = cases.get('capacity-refuse-always');
+    const honest = [test.delivery, ...test.deliveryAlternates];
     const client = await openCapacity('capacity-refuse-always', 600);
-    try { await assert.rejects(client.request('project.list',{}), error => error.delivery==='NOT_SUBMITTED' && /deadline/.test(error.message)); }
+    try { await assert.rejects(client.request('project.list',{}), error => honest.includes(error.delivery) && /deadline/.test(error.message)); }
     finally { client.close(); }
 }
 {
@@ -121,6 +141,12 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
         const first = client.request('project.list',{});
         const second = client.request('project.list',{}).then(reply => {secondDone = true; return reply});
         await full;
+        // This one check does rest on a timing margin, and it is worth naming rather than
+        // denying: `secondDone` is read after the fixture's "window is full" push has been
+        // delivered, and B would have to have been transmitted, answered and its
+        // continuation run for it to be true. The fixture holds A for 250ms, so the margin
+        // is that 250ms against a local round trip plus a microtask -- three orders of
+        // magnitude. Shortening the hold is what would put this at risk.
         assert.equal(secondDone,false,'B must wait while the advertised window of one is full');
         assert.deepEqual(requirePayload(await first),[]);
         assert.deepEqual(requirePayload(await second),[]);
@@ -135,6 +161,34 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
         assert.deepEqual(requirePayload(await b),[],'the request behind a refused one lost its answer');
     } finally { client.close(); }
 }
+{
+    // The regression test for the originally reported bug: client-side queue time must not
+    // be charged against the request deadline. A request is parked at the window bound for
+    // longer than its own timeout, then admitted, and must still be answered.
+    //
+    // The numbers, and what they protect. The fixture advertises a window of one and holds
+    // A for `holdMs` (900ms). B is given a per-request timeout of `waitingTimeoutMs`
+    // (300ms) and parks the instant A takes the single slot, so it waits three times its
+    // own timeout before a slot frees. If the wait were charged against B's deadline, B
+    // would fail at t=300 -- 600ms before it could possibly be transmitted, so the failure
+    // is not a near miss. If the deadline arms at transmit, B gets the full 300ms from
+    // t=900 against a fixture that answers in the same tick. Both margins are deliberately
+    // wide, and neither is measured here: that B really waited out the hold is proved by
+    // the fixture, which fails the case if a second frame arrives while the hold is active,
+    // not by any clock in this driver.
+    const test = cases.get('capacity-deadline-survives-waiting');
+    let windowFull;
+    const full = new Promise(resolve => {windowFull = resolve});
+    const client = await openCapacity('capacity-deadline-survives-waiting', 5000, () => windowFull());
+    try {
+        const held = client.request('project.list',{});
+        const waited = client.request('project.list',{},{timeoutMs:test.waitingTimeoutMs});
+        await full;
+        assert.deepEqual(requirePayload(await held),[]);
+        assert.deepEqual(requirePayload(await waited),[],
+            'a request held past its own timeout lost its deadline to the wait for capacity');
+    } finally { client.close(); }
+}
 await assert.rejects(openCapacity('capacity-handshake-refuse', 5000), error => error.code==='NOT_SUBMITTED');
 {
     let windowFull;
@@ -143,6 +197,20 @@ await assert.rejects(openCapacity('capacity-handshake-refuse', 5000), error => e
     const held = client.request('project.list',{});
     const parked = client.request('project.list',{});
     await full;
+    // Without this race the case proves nothing. Its other three facts -- one frame on the
+    // wire, UNKNOWN for the held caller, NOT_SUBMITTED for the parked one -- are all
+    // equally true of a client that refuses locally and immediately, which is why the Go
+    // baseline passed it while never parking anything. Fail-fast settles `parked` in the
+    // same tick, so finding it still pending here is what distinguishes parking from
+    // refusing, and only then does the release on close mean anything.
+    //
+    // The pause lives inside the fixture's 1000ms hold, which is what ends this case by
+    // closing the socket, and well under the connection's timeoutMs of 5000. If it ever
+    // approached either, `parked` would settle on its own and the race would report
+    // "settled" for a conforming client.
+    const raced = await Promise.race([parked.then(() => 'settled', () => 'settled'),
+        new Promise(resolve => setTimeout(() => resolve(pending), 200))]);
+    assert.equal(raced, pending, 'the parked request must wait for a slot, not fail fast');
     // Nothing was written for the parked caller, so its delivery is unambiguous.
     await assert.rejects(held, error => error.delivery==='UNKNOWN');
     await assert.rejects(parked, error => error.delivery==='NOT_SUBMITTED');
