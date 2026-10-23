@@ -118,20 +118,16 @@ func (c *Client) grantAdmissionLocked() {
 	c.admitted++
 }
 
-// pumpLocked hands freed capacity to parked callers, dispatch counts first and
-// then admission slots, in FIFO order. It runs from every release, so a failure
-// frees capacity exactly like a reply does. The counter is charged to the waiter
-// before it is woken, so a caller arriving later cannot steal what was granted,
-// and FIFO order means work that arrived later never overtakes a caller already
-// parked. Nothing is granted once the connection is closed; callers parked then
-// are released through c.done.
+// pumpLocked hands freed admission slots to parked callers in FIFO order. It
+// runs from every release, so a failure frees capacity exactly like a reply
+// does. The slot is charged to the waiter before it is woken, so a caller
+// arriving later cannot steal what was granted, and FIFO order means work that
+// arrived later never overtakes a caller already parked. Nothing is granted once
+// the connection is closed; callers parked then are released through c.done.
+//
+// Only admission is queued. Dispatch counts need no queue because a caller
+// holding an admission is already guaranteed one; see acquireDispatch.
 func (c *Client) pumpLocked() {
-	for len(c.launchWaiters) > 0 && c.dispatched < c.maximum && !c.closed {
-		next := c.launchWaiters[0]
-		c.launchWaiters = c.launchWaiters[1:]
-		c.dispatched++
-		close(next)
-	}
 	for len(c.slotWaiters) > 0 && c.admitted < c.maximum && !c.closed {
 		next := c.slotWaiters[0]
 		c.slotWaiters = c.slotWaiters[1:]
@@ -214,49 +210,37 @@ func (c *Client) admit(ctx context.Context, wait bool) (*admission, error) {
 // refused request backs off, and the refused request keeps its place in the
 // window instead of being overtaken by work that arrived after it.
 //
-// Holding an admission is normally enough to be sure of a count: a request holds
-// at most one dispatch count and only while it is admitted, so a caller that has
-// not transmitted yet sees at most admitted-1 dispatched, which is below the
-// window. The wait below binds only if the advertised window is ever lowered
-// under work already admitted, and it is here so the advertised window stays
-// authoritative if it is.
-func (c *Client) acquireDispatch(ctx context.Context) error {
+// Holding an admission is always enough to be sure of a count, so this never
+// waits. A request holds at most one dispatch count and only while it is
+// admitted, so a caller that has not transmitted yet sees at most admitted-1
+// dispatched, which is below the window. The window itself only ever changes
+// while nothing is admitted: c.maximum is written at construction and once
+// after the handshake, and the negotiation's own admission is released before
+// that write. Nothing in the protocol lowers the window under live work.
+//
+// The remaining branch is therefore an invariant violation, not flow control. It
+// is reported rather than assumed away so the advertised window stays
+// authoritative: the request is refused without transmitting instead of pushing
+// the connection past the window the server advertised. A caller seeing it has
+// found a bug in this client's accounting, not a busy server.
+func (c *Client) acquireDispatch() error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed {
-		c.mu.Unlock()
 		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed before submission")}
 	}
-	if c.dispatched < c.maximum && len(c.launchWaiters) == 0 {
-		c.dispatched++
-		c.mu.Unlock()
-		return nil
+	if c.dispatched >= c.maximum {
+		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("dispatch accounting exceeded the advertised window; no frame was written")}
 	}
-	parked := make(chan struct{})
-	c.launchWaiters = append(c.launchWaiters, parked)
-	c.mu.Unlock()
-	var cause error
-	select {
-	case <-parked:
-		return nil
-	case <-ctx.Done():
-		cause = ctx.Err()
-	case <-c.done:
-		cause = errors.New("connection closed while waiting to transmit")
-	}
-	c.mu.Lock()
-	granted := !abandonLocked(&c.launchWaiters, parked)
-	c.mu.Unlock()
-	if granted {
-		c.releaseDispatch()
-	}
-	return &TransportError{Delivery: NotSubmitted, Cause: cause}
+	c.dispatched++
+	return nil
 }
 
-// releaseDispatch returns one dispatch count and offers it to parked work.
+// releaseDispatch returns one dispatch count. It wakes nobody: admission is the
+// only queued capacity, and an admission slot frees on release, not here.
 func (c *Client) releaseDispatch() {
 	c.mu.Lock()
 	c.dispatched--
-	c.pumpLocked()
 	c.mu.Unlock()
 }
 
@@ -333,13 +317,13 @@ type Client struct {
 	// dispatched counts requests currently on the wire. A capacity refusal
 	// releases this and keeps its admission slot; see acquireDispatch.
 	dispatched int
-	// slotWaiters and launchWaiters are the FIFO queues of callers parked for an
-	// admission slot and for a dispatch count. Both are guarded by mu and drained
-	// by pumpLocked.
-	slotWaiters   []chan struct{}
-	launchWaiters []chan struct{}
+	// slotWaiters is the FIFO queue of callers parked for an admission slot,
+	// guarded by mu and drained by pumpLocked. Dispatch counts have no queue:
+	// an admitted caller is always owed one, so parking for one is unreachable.
+	slotWaiters []chan struct{}
 	// random is the resubmission jitter source, injectable so tests are
-	// deterministic. Nil means math/rand/v2.
+	// deterministic. Nil means math/rand/v2. Guarded by mu like every other field
+	// here: a test substituting it does so while the reader goroutine is live.
 	random  func() float64
 	closed  bool
 	pushes  chan ServerPush
@@ -459,9 +443,11 @@ func (c *Client) backoff(ctx context.Context, refusals int) error {
 		ceiling = shifted
 	}
 	jitter := mathrand.Float64
+	c.mu.Lock()
 	if c.random != nil {
 		jitter = c.random
 	}
+	c.mu.Unlock()
 	pause := ceiling/2 + time.Duration(float64(ceiling)*jitter()/2)
 	timer := time.NewTimer(pause)
 	defer timer.Stop()
@@ -492,8 +478,10 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 // owns the only loop in this client.
 //
 // The request deadline is armed when the frame is written, exactly once. Waiting
-// for an admission slot, for the conversion gate or for a dispatch count is
-// bounded by the caller's context alone and is charged to nothing.
+// for an admission slot or for the conversion gate happens before that and is
+// bounded by the caller's context alone, charged to nothing. Taking a dispatch
+// count never waits at all. The writer semaphore inside packets.send is the one
+// wait on the far side of arming, and counts against the deadline by design.
 //
 // A CAPACITY_EXHAUSTED reply is absorbed: the dispatch count is released so other
 // admitted work can transmit, the admission slot is kept so later arrivals cannot
@@ -536,7 +524,7 @@ func (c *Client) requestReserved(ctx context.Context, operation string, body []b
 		}
 	}()
 	for refusals := 0; ; refusals++ {
-		if err = c.acquireDispatch(sending); err != nil {
+		if err = c.acquireDispatch(); err != nil {
 			return outcome{}, err
 		}
 		dispatching = true

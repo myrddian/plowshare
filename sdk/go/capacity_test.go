@@ -236,7 +236,10 @@ func refusingClient(t *testing.T, server *httptest.Server, timeout time.Duration
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	// Deterministic pacing: the whole jittered half, so the pause is the ceiling.
+	// Written under mu because the field is read under mu by backoff.
+	c.mu.Lock()
 	c.random = func() float64 { return 1 }
+	c.mu.Unlock()
 	return c
 }
 

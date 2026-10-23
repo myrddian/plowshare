@@ -32,12 +32,14 @@ context cancellation/deadline.
 Retain request UUIDs before outgoing submission; recovery is an explicit caller action.
 
 The request deadline is armed when the frame is written, and exactly once. Waiting
-for the dispatch window, for the conversion gate or for the writer is bounded by
-the caller's context alone, so client-side queue time is never charged against the
-time the server is given to answer. `WithRequestTimeout` overrides the
-connection's duration for one request and is armed the same way; a context
-deadline of the caller's own still starts immediately, which is why it is not the
-mechanism here.
+for the dispatch window or for the conversion gate happens before arming and is
+bounded by the caller's context alone, so client-side queue time is never charged
+against the time the server is given to answer. The writer semaphore is the one
+wait inside the armed window: it is taken as the frame is written, so it counts
+against the request's deadline like the server's own processing time does.
+`WithRequestTimeout` overrides the connection's duration for one request and is
+armed the same way; a context deadline of the caller's own still starts
+immediately, which is why it is not the mechanism here.
 
 A full window is flow control, not failure: by default a request waits for a slot
 and a `CAPACITY_EXHAUSTED` reply is absorbed — the dispatch count is released, the

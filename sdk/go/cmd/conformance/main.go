@@ -85,17 +85,15 @@ func milliseconds(value int) time.Duration { return time.Duration(value) * time.
 // deliveryAlternates means the case admits exactly its delivery and nothing
 // else, so nothing is assumed present.
 //
-// An alternate is named at the wire layer, where a transmitted request whose
-// answer never arrived is RESPONSE_LOST. This SDK reports that as UNKNOWN: the
-// frame was written, so the work may have been done.
+// Every delivery value in the fixture, principal and alternate alike, is SDK
+// vocabulary: it is compared to what the SDK reports directly and is never
+// translated from a wire code. A case that would need translation is a fixture
+// defect, not something for a driver to paper over.
 func (s scenario) honest(observed plowshare.Delivery) bool {
 	if observed == s.Delivery {
 		return true
 	}
 	for _, alternate := range s.DeliveryAlternates {
-		if alternate == "RESPONSE_LOST" && observed == plowshare.Unknown {
-			return true
-		}
 		if observed == plowshare.Delivery(alternate) {
 			return true
 		}
@@ -408,9 +406,11 @@ func backpressure(ctx context.Context, origin string, cases map[string]scenario)
 		// is submitted while the first is inside its backoff pause -- the window in
 		// which a client that had released its admission slot would be overtaken.
 		// The first backoff is at least half of the 100ms base, so the pause below
-		// cannot outlast it. If the sleep instead lands before the first request is
-		// transmitted, the two simply swap roles: the fixture refuses whichever id
-		// arrives first, and the harness asserts order, not identity.
+		// cannot outlast it. The sleep buys that window and nothing more: at
+		// maxPending 1 the order is A, A, B however it lands, because B parks for
+		// admission until A settles and A is always the first frame. A shorter or
+		// absent sleep is still correct, it just stops exercising the overtaking
+		// window the case exists to close.
 		time.Sleep(25 * time.Millisecond)
 		two := submit(ctx, client)
 		for _, each := range []struct {
