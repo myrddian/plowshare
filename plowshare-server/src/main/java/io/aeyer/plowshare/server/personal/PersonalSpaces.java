@@ -109,10 +109,40 @@ public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspac
     for (String handle : repository.accounts()) ensure(handle);
   }
 
-  public void ensure(String handle) {
+  /**
+   * Provisions the personal space's <b>identity</b>: its project row and the owner's grant on it.
+   *
+   * <p>This is deliberately independent of storage. An account is an identity and its personal
+   * space is the resource it resolves to, so adding a document there needs the project and the
+   * owner's permission on it and nothing on disk. Allocating the union is a separate concern, for
+   * workspace and file operations, and {@link #ensure(String)} does that.
+   *
+   * <p>They were previously one step, with the owner's grant written only after the skeleton had
+   * been created and committed. That coupling became load-bearing once a personal selection started
+   * being governed by the personal project's permissions: on a server with no data directory — a
+   * supported configuration, since {@code DataLayout.keepsAnything()} is {@code root != null} — or
+   * for an account whose storage provisioning failed, there was no project and no grant, so a
+   * personal document could not be added at all.
+   */
+  public void ensureIdentity(String handle) {
     BuiltInIdentities.requireOrdinaryAccount(handle);
     if (repository.serviceAccount(handle))
       throw new CallerFault("Service accounts have no Personal space; supply a project");
+    transactions.inTransaction(
+        () -> {
+          long id = repository.reserve(handle).id();
+          repository.owns(id, handle);
+          return id;
+        });
+  }
+
+  /**
+   * Allocates the personal space's storage, after {@link #ensureIdentity(String)} has established
+   * the identity it belongs to. The identity survives a storage failure: an account can hold
+   * documents without a union, and only workspace and file operations need one.
+   */
+  public void ensure(String handle) {
+    ensureIdentity(handle);
     String name = name(handle);
     if (!data.keepsAnything())
       throw new IllegalStateException("Personal spaces require PLOWSHARE_DATA_DIR");

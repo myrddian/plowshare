@@ -83,6 +83,10 @@ public class JdbcPersonalSpaceRepository implements PersonalSpaceRepository {
             project,
             handle)
         != 1) throw new IllegalStateException("Personal identity changed during initialization");
+  }
+
+  @Override
+  public void owns(long project, String handle) {
     jdbc.update(
         "INSERT INTO project_members(project_id, handle,role) VALUES (?, ?, 'MANAGER') ON CONFLICT DO NOTHING",
         project,
