@@ -114,8 +114,21 @@ server.on('upgrade', (request, socket, head) => {
                         facts.held = sent.id
                         setTimeout(() => {
                             facts.held = null
-                            if (test.closeWhileParked) ws.terminate()
-                            else envelope(sent, test.response)
+                            // Guarded because this fires outside the message handler's try/catch.
+                            // Whenever a holding case FAILS, the driver unwinds and closes before
+                            // holdMs elapses; an unguarded write then throws from inside the timer
+                            // and kills the whole harness with an unrelated transport error,
+                            // hiding the assertion that actually failed. A dead socket here is
+                            // the normal shape of a failing run, not a fault of its own.
+                            // 1 is OPEN; the ws instance does not carry the readyState constants.
+                            if (ws.readyState !== 1) return
+                            try {
+                                if (test.closeWhileParked) ws.terminate()
+                                else envelope(sent, test.response)
+                            } catch (cause) {
+                                failures.push(new Error('hold timer for ' + test.name
+                                    + ' could not answer: ' + (cause?.message ?? cause)))
+                            }
                         }, test.holdMs)
                         // Tells the driver the window is full, so it can prove the next call waits.
                         ws.send(JSON.stringify({ kind: 'inbox.changed', unread: facts.order.length }))

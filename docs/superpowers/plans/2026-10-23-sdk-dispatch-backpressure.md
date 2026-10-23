@@ -40,6 +40,15 @@ JUnit tests in Task 5. One contract, four implementations, one place that says w
 - Each SDK keeps its own idioms, test framework and build. This is not a rewrite.
 - The shape of the two forms (two methods, a flag, an options field) is the implementer's call
   within each SDK's conventions. The contract is what must match, not the spelling.
+- **The fixture names wire codes; each SDK maps them to its own delivery vocabulary.** Go reports
+  the wire's `RESPONSE_LOST` as `UNKNOWN`, so its driver maps `deliveryAlternates` accordingly —
+  without that, `capacity-refuse-always` flakes on the transmit/refusal race the fixture documents.
+  .NET and Python need the same translation. Map it in the driver; do not change the fixture.
+- **An SDK whose slot release is not synchronous needs a short allowance before closing** in
+  `capacity-deadline-survives-waiting`. Node transmits the released sibling synchronously inside the
+  expiring request's rejection path, so it needs none; Go's released caller is a separate goroutine
+  and closing immediately after the state check loses the third frame. Expect the same for .NET's
+  continuations and Python's tasks, and document any pause as a timing argument rather than a signal.
 - **Each conformance driver opens its connection with a 5000ms connection timeout.** This is not
   cosmetic and the fixture cannot enforce it: `capacity-deadline-survives-waiting` separates "the
   request carries its own 300ms armed at transmit" from "it silently fell back to the connection's
