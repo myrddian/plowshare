@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import { DesktopClient, validatedBase } from './client.ts';
 import type { Connector } from './client.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
-import { contextKey, stoppedJob } from './shared.ts';
+import { contextKey, replyState, stoppedJob } from './shared.ts';
 
 function fixture(nativeSessions?: NativeSessions) {
   let push: (value: unknown) => void = () => {};
@@ -2655,7 +2655,7 @@ await test('regular project managers use project access commands without server 
     role: 'VIEWER',
   });
   assert.deepEqual(reply.administration, access);
-  assert.equal(reply.state.serverAdmin, false);
+  assert.equal(replyState(reply).serverAdmin, false);
   assert.deepEqual(
     f.calls.filter((row) => row.type === 'project.member.role').at(-1)?.payload,
     { project: 'integration', handle: 'worker', role: 'VIEWER' },

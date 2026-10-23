@@ -19,6 +19,7 @@ import {
   questionAction,
   cancelControl,
 } from './run-controls.ts';
+import { replyState } from '../shared.ts';
 import type { ActivityView, DesktopState, Request } from '../shared.ts';
 import { icon, mountIcons } from './icons.ts';
 import { escapeHtml as esc, markdownHtml } from './markdown.ts';
@@ -44,7 +45,7 @@ const approvalControls = installApprovalControls(
   () => state,
   async (command) => {
     const reply = await window.plowshare.request(command);
-    update(reply.state);
+    update(replyState(reply));
     return reply;
   },
   render,
@@ -110,7 +111,7 @@ async function action(request: Request) {
   try {
     const reply = await window.plowshare.request(request);
     localError = '';
-    update(reply.state);
+    update(replyState(reply));
   } catch (error) {
     localError = error instanceof Error ? error.message : 'Request failed.';
     render();
@@ -675,7 +676,7 @@ background(
     view = reply.view ?? 'inbox';
     pageGroup = groupOf(view);
     initialized = true;
-    update(reply.state);
+    update(replyState(reply));
   }),
 );
 

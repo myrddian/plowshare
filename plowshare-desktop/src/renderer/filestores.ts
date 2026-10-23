@@ -1,3 +1,4 @@
+import { replyState } from '../shared.ts';
 import type { DesktopState, Reply, Request } from '../shared.ts';
 import { ownedEvent } from './events.ts';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
@@ -52,7 +53,8 @@ export function installFileStores(request: (value: Request) => Promise<Reply>) {
         alias: get<HTMLInputElement>('#filestore-alias').value,
         root: get<HTMLInputElement>('#filestore-root').value,
       });
-      if (reply.state.localFileStores?.status === 'loaded') dialog.close();
+      if (replyState(reply).localFileStores?.status === 'loaded')
+        dialog.close();
     }),
   );
   // Prevent normal form navigation even when validation or an asynchronous save fails.

@@ -8,6 +8,7 @@ import {
   decodeReply,
 } from 'plowshare-client-ts/operations/schema';
 import { background } from './events.ts';
+import { replyState } from '../shared.ts';
 import type { DesktopState } from '../shared.ts';
 
 let panel: ProcPanel | undefined;
@@ -56,5 +57,5 @@ window.addEventListener('pagehide', () => panel?.destroy());
 background(
   window.plowshare
     .request({ action: 'bootstrap' })
-    .then((reply) => update(reply.state)),
+    .then((reply) => update(replyState(reply))),
 );

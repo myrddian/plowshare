@@ -5,6 +5,7 @@ import {
   mountUsagePanel,
   type UsagePanel,
 } from '../../../plowshare-console/src/screens/usage-panel.ts';
+import { replyState } from '../shared.ts';
 import type { DesktopState } from '../shared.ts';
 let panel: UsagePanel | undefined;
 let state: DesktopState;
@@ -30,13 +31,13 @@ function update(next: DesktopState) {
       storage: localStorage,
       select: async (type, filter) => {
         update(
-          (
+          replyState(
             await window.plowshare.request({
               action: 'usage-open',
               type,
               filter,
-            })
-          ).state,
+            }),
+          ),
         );
       },
       read: async (type, payload) =>
@@ -63,5 +64,5 @@ window.addEventListener('pagehide', () => {
 background(
   window.plowshare
     .request({ action: 'bootstrap' })
-    .then((reply) => update(reply.state)),
+    .then((reply) => update(replyState(reply))),
 );
