@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	mathrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -102,39 +103,181 @@ type pending struct {
 type admission struct {
 	owner      *Client
 	bytes      int
-	deadline   time.Time
 	converting bool
 	released   atomic.Bool
 }
 
-func (c *Client) admit() (*admission, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed || c.admitted >= c.maximum {
-		return nil, &TransportError{Delivery: NotSubmitted, Cause: packetCapacity}
-	}
+// grantAdmissionLocked charges one slot of the advertised window to a new owner.
+// The caller holds c.mu. The idle channel belongs to one nonempty admission
+// generation, so it is created with the generation's first slot and closed when
+// its last is released.
+func (c *Client) grantAdmissionLocked() {
 	if c.admitted == 0 {
 		c.idle = make(chan struct{})
 	}
 	c.admitted++
-	return &admission{owner: c, deadline: time.Now().Add(c.timeout)}, nil
+}
+
+// pumpLocked hands freed capacity to parked callers, dispatch counts first and
+// then admission slots, in FIFO order. It runs from every release, so a failure
+// frees capacity exactly like a reply does. The counter is charged to the waiter
+// before it is woken, so a caller arriving later cannot steal what was granted,
+// and FIFO order means work that arrived later never overtakes a caller already
+// parked. Nothing is granted once the connection is closed; callers parked then
+// are released through c.done.
+func (c *Client) pumpLocked() {
+	for len(c.launchWaiters) > 0 && c.dispatched < c.maximum && !c.closed {
+		next := c.launchWaiters[0]
+		c.launchWaiters = c.launchWaiters[1:]
+		c.dispatched++
+		close(next)
+	}
+	for len(c.slotWaiters) > 0 && c.admitted < c.maximum && !c.closed {
+		next := c.slotWaiters[0]
+		c.slotWaiters = c.slotWaiters[1:]
+		c.grantAdmissionLocked()
+		close(next)
+	}
+}
+
+// abandonLocked removes a parked waiter from its queue. A false return means the
+// capacity was granted as the waiter was leaving, and the caller must hand it
+// back: a cancelled or closed-out wait leaves the accounting exactly as it was.
+func abandonLocked(queue *[]chan struct{}, parked chan struct{}) bool {
+	for at, waiter := range *queue {
+		if waiter == parked {
+			*queue = append((*queue)[:at], (*queue)[at+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// admit reserves one slot of the advertised window.
+//
+// The waiting form is the default: a full window is flow control, so the caller
+// parks until a slot frees rather than failing. WithoutCapacityWait selects the
+// fail-fast form, which reports NOT_SUBMITTED in the same call for a caller that
+// would rather shed load than be held.
+//
+// Nothing here is charged against the request deadline, which is armed later,
+// when the frame is written. The wait is bounded by the caller's context and by
+// the connection closing, and a cancelled wait returns NOT_SUBMITTED with
+// ctx.Err() as its cause while leaving the accounting untouched: cancellation is
+// never a way to leak capacity.
+func (c *Client) admit(ctx context.Context, wait bool) (*admission, error) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed before admission")}
+	}
+	// Strict `<`, and only with an empty queue, so a slot is never taken ahead of
+	// a caller already parked for one.
+	if c.admitted < c.maximum && len(c.slotWaiters) == 0 {
+		c.grantAdmissionLocked()
+		c.mu.Unlock()
+		return &admission{owner: c}, nil
+	}
+	if !wait {
+		c.mu.Unlock()
+		return nil, &TransportError{Delivery: NotSubmitted, Cause: packetCapacity}
+	}
+	parked := make(chan struct{})
+	c.slotWaiters = append(c.slotWaiters, parked)
+	c.mu.Unlock()
+	var cause error
+	select {
+	case <-parked:
+		return &admission{owner: c}, nil
+	case <-ctx.Done():
+		cause = ctx.Err()
+	case <-c.done:
+		cause = errors.New("connection closed while waiting for an admission slot")
+	}
+	c.mu.Lock()
+	granted := !abandonLocked(&c.slotWaiters, parked)
+	c.mu.Unlock()
+	if granted {
+		// The slot was charged to us as we were leaving. Hand it straight back so
+		// the next parked caller receives it.
+		(&admission{owner: c}).release()
+	}
+	return nil, &TransportError{Delivery: NotSubmitted, Cause: cause}
+}
+
+// acquireDispatch takes one of the connection's dispatch counts, which a request
+// holds from its transmit until its settlement or its refusal.
+//
+// Two counters are kept, as the reference keeps them: admission is the advertised
+// window, dispatch is work actually on the wire. A capacity refusal releases only
+// the dispatch count, so other already-admitted work can transmit while the
+// refused request backs off, and the refused request keeps its place in the
+// window instead of being overtaken by work that arrived after it.
+//
+// Holding an admission is normally enough to be sure of a count: a request holds
+// at most one dispatch count and only while it is admitted, so a caller that has
+// not transmitted yet sees at most admitted-1 dispatched, which is below the
+// window. The wait below binds only if the advertised window is ever lowered
+// under work already admitted, and it is here so the advertised window stays
+// authoritative if it is.
+func (c *Client) acquireDispatch(ctx context.Context) error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed before submission")}
+	}
+	if c.dispatched < c.maximum && len(c.launchWaiters) == 0 {
+		c.dispatched++
+		c.mu.Unlock()
+		return nil
+	}
+	parked := make(chan struct{})
+	c.launchWaiters = append(c.launchWaiters, parked)
+	c.mu.Unlock()
+	var cause error
+	select {
+	case <-parked:
+		return nil
+	case <-ctx.Done():
+		cause = ctx.Err()
+	case <-c.done:
+		cause = errors.New("connection closed while waiting to transmit")
+	}
+	c.mu.Lock()
+	granted := !abandonLocked(&c.launchWaiters, parked)
+	c.mu.Unlock()
+	if granted {
+		c.releaseDispatch()
+	}
+	return &TransportError{Delivery: NotSubmitted, Cause: cause}
+}
+
+// releaseDispatch returns one dispatch count and offers it to parked work.
+func (c *Client) releaseDispatch() {
+	c.mu.Lock()
+	c.dispatched--
+	c.pumpLocked()
+	c.mu.Unlock()
 }
 
 // convert serializes transient codec copies before their exact wire size is known.
 // It is released after encoding/byte charge, never while waiting for a reply.
+//
+// The wait is bounded by the caller's context alone. Nothing before the frame is
+// written may consume the request deadline, which is the defect this fixes: the
+// deadline used to be armed at admission, so a request could fail for running out
+// of time it never had.
 func (a *admission) convert(ctx context.Context) error {
-	deadline, cancel := context.WithDeadline(ctx, a.deadline)
-	defer cancel()
 	select {
 	case a.owner.converter <- struct{}{}:
 		a.converting = true
-	case <-deadline.Done():
-		return &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
+	case <-ctx.Done():
+		return &TransportError{Delivery: NotSubmitted, Cause: ctx.Err()}
 	case <-a.owner.done:
 		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed before conversion")}
 	}
-	if deadline.Err() != nil {
-		return &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
+	if ctx.Err() != nil {
+		return &TransportError{Delivery: NotSubmitted, Cause: ctx.Err()}
 	}
 	a.owner.mu.Lock()
 	closed := a.owner.closed
@@ -171,6 +314,8 @@ func (a *admission) release() {
 	if a.owner.admitted == 0 {
 		close(a.owner.idle)
 	}
+	// Every ending funnels here, so a failed request frees a slot like a reply.
+	a.owner.pumpLocked()
 	a.owner.mu.Unlock()
 }
 
@@ -185,11 +330,22 @@ type Client struct {
 	admitted  int
 	maximum   int
 	held      int
-	closed    bool
-	pushes    chan ServerPush
-	dropped   atomic.Uint64
-	cancel    context.CancelFunc
-	done      chan struct{}
+	// dispatched counts requests currently on the wire. A capacity refusal
+	// releases this and keeps its admission slot; see acquireDispatch.
+	dispatched int
+	// slotWaiters and launchWaiters are the FIFO queues of callers parked for an
+	// admission slot and for a dispatch count. Both are guarded by mu and drained
+	// by pumpLocked.
+	slotWaiters   []chan struct{}
+	launchWaiters []chan struct{}
+	// random is the resubmission jitter source, injectable so tests are
+	// deterministic. Nil means math/rand/v2.
+	random  func() float64
+	closed  bool
+	pushes  chan ServerPush
+	dropped atomic.Uint64
+	cancel  context.CancelFunc
+	done    chan struct{}
 	// idle belongs to one nonempty admission generation. Close fences admission
 	// before observing it, so no later generation can escape the shared drain.
 	idle      chan struct{}
@@ -248,7 +404,7 @@ func Connect(ctx context.Context, origin, token string, options Options) (*Clien
 	}
 	socket.SetReadLimit(1048576)
 	lifetime, cancel := context.WithCancel(context.Background())
-	c := &Client{Session: options.Session, socket: socket, timeout: options.Timeout, pending: map[string]*pending{}, converter: make(chan struct{}, 1), maximum: 64, pushes: make(chan ServerPush, 256), cancel: cancel, done: make(chan struct{})}
+	c := &Client{Session: options.Session, socket: socket, timeout: options.Timeout, pending: map[string]*pending{}, converter: make(chan struct{}, 1), maximum: 64, pushes: make(chan ServerPush, 256), cancel: cancel, done: make(chan struct{}), random: mathrand.Float64}
 	if !options.LegacyTransport {
 		c.packets = newPackets(socket)
 	}
@@ -274,9 +430,54 @@ func Connect(ctx context.Context, origin, token string, options Options) (*Clien
 	return c, nil
 }
 
+// capacityExhausted is the server's dispatch refusal. It is flow control, not a
+// fault: the waiting form absorbs it and resubmits, and the caller never sees it.
+const capacityExhausted = "CAPACITY_EXHAUSTED"
+
+// Resubmission pacing after a capacity refusal, matching the reference SDK's
+// shipped values: the ceiling doubles with the refusal count up to the cap, and
+// the pause is half of it fixed and half random, so a client always pauses and
+// clients released together never retry in lockstep.
+const (
+	resubmitBackoffBase = 100 * time.Millisecond
+	resubmitBackoffCap  = 5000 * time.Millisecond
+)
+
+// backoff waits out the pause owed for the refusals so far.
+//
+// The exponent is a pacing input, not a bound. The bound is the deadline armed on
+// the first transmit, which ctx carries here: backoff time and the server's own
+// processing time both count against the caller's original timeout, so a request
+// refused over and over ends in a timeout rather than retrying forever. There is
+// no retry ceiling and none is wanted.
+//
+// A pause ended by the deadline or by a close is NOT_SUBMITTED: the refused
+// attempt released its dispatch count and the server did none of the work.
+func (c *Client) backoff(ctx context.Context, refusals int) error {
+	ceiling := resubmitBackoffCap
+	if shifted := resubmitBackoffBase << min(refusals, 16); shifted < ceiling {
+		ceiling = shifted
+	}
+	jitter := mathrand.Float64
+	if c.random != nil {
+		jitter = c.random
+	}
+	pause := ceiling/2 + time.Duration(float64(ceiling)*jitter()/2)
+	timer := time.NewTimer(pause)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return &TransportError{Delivery: NotSubmitted, Cause: ctx.Err()}
+	case <-c.done:
+		return &TransportError{Delivery: NotSubmitted, Cause: errors.New("connection closed while pacing a resubmission")}
+	}
+}
+
 // request owns correlation and the raw envelope; generated methods own DTO conversion.
 func (c *Client) request(ctx context.Context, operation string, body []byte) (outcome, error) {
-	reservation, err := c.admit()
+	reservation, err := c.admit(ctx, waitsForCapacity(ctx))
 	if err != nil {
 		return outcome{}, err
 	}
@@ -286,6 +487,22 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 	}
 	return c.requestReserved(ctx, operation, body, reservation)
 }
+
+// requestReserved transmits one request whose admission slot is already held, and
+// owns the only loop in this client.
+//
+// The request deadline is armed when the frame is written, exactly once. Waiting
+// for an admission slot, for the conversion gate or for a dispatch count is
+// bounded by the caller's context alone and is charged to nothing.
+//
+// A CAPACITY_EXHAUSTED reply is absorbed: the dispatch count is released so other
+// admitted work can transmit, the admission slot is kept so later arrivals cannot
+// overtake this request, and the same request id is resubmitted after a jittered
+// pause against the deadline already armed. The server refused the work outright,
+// having done none of it, which is the only reason resubmitting a request is not
+// the replay this transport otherwise forbids. The dispatch negotiation is never
+// resubmitted: the server treats a second selection on one connection as a
+// protocol violation, so a retry would turn a refusal into a teardown.
 func (c *Client) requestReserved(ctx context.Context, operation string, body []byte, reservation *admission) (outcome, error) {
 	id := identity()
 	envelope := map[string]any{"id": id, "type": operation, "protocol_version": ProtocolVersion, "payload": json.RawMessage(body)}
@@ -303,40 +520,79 @@ func (c *Client) requestReserved(ctx context.Context, operation string, body []b
 		return outcome{}, err
 	}
 	reservation.releaseConversion()
-	deadline, cancel := context.WithDeadline(ctx, reservation.deadline)
-	defer cancel()
+	// sending is the caller's context until the first transmit arms the request
+	// deadline, and the armed context afterwards. Every resubmission reuses it, so
+	// the first transmit's deadline bounds the request's whole life.
+	sending, armed := ctx, false
+	absorbs := operation != "transport.dispatch" && waitsForCapacity(ctx)
 	waiting := &pending{operation: operation, answer: make(chan response, 1)}
-	c.mu.Lock()
-	if c.closed || deadline.Err() != nil {
-		c.mu.Unlock()
-		return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
-	}
-	c.pending[id] = waiting
-	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, id); c.mu.Unlock() }()
-	if c.packets != nil {
-		err = c.packets.send(deadline, wire, func() { waiting.submitted.Store(true) })
-	} else {
-		if deadline.Err() != nil {
-			return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: deadline.Err()}
+	// Held between a successful acquireDispatch and the attempt's end, so a
+	// refusal, a failure and a reply each release it exactly once.
+	dispatching := false
+	defer func() {
+		if dispatching {
+			c.releaseDispatch()
 		}
-		waiting.submitted.Store(true)
-		err = c.socket.Write(deadline, websocket.MessageText, wire)
-	}
-	if err != nil {
-		if !waiting.submitted.Load() || errors.Is(err, packetCapacity) {
-			return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: err}
+	}()
+	for refusals := 0; ; refusals++ {
+		if err = c.acquireDispatch(sending); err != nil {
+			return outcome{}, err
 		}
-		return outcome{}, &TransportError{Delivery: Unknown, Cause: err}
-	}
-	select {
-	case answer := <-waiting.answer:
-		if answer.err == nil && slices.Contains([]string{"OK", "CREATED", "ACCEPTED", "NO_CONTENT"}, answer.reply.Code) && !deploymentMatches(operation, body, answer.reply.Payload) {
-			return outcome{}, &TransportError{Delivery: InvalidResponse, Cause: contractError}
+		dispatching = true
+		// Cleared per attempt: a close during the next backoff is honestly
+		// NOT_SUBMITTED, because the refused attempt left no work behind.
+		waiting.submitted.Store(false)
+		c.mu.Lock()
+		if c.closed || sending.Err() != nil {
+			c.mu.Unlock()
+			return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: sending.Err()}
 		}
-		return answer.reply, answer.err
-	case <-deadline.Done():
-		return outcome{}, &TransportError{Delivery: Unknown, Cause: deadline.Err()}
+		c.pending[id] = waiting
+		c.mu.Unlock()
+		if !armed {
+			// The frame is written below, so this is where the deadline arms, and the
+			// only place it ever does: a resubmission finds it already armed and runs
+			// against what is left of it.
+			armed = true
+			deadline, stop := context.WithTimeout(ctx, c.requestTimeout(ctx))
+			defer stop()
+			sending = deadline
+		}
+		if c.packets != nil {
+			err = c.packets.send(sending, wire, func() { waiting.submitted.Store(true) })
+		} else {
+			if sending.Err() != nil {
+				return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: sending.Err()}
+			}
+			waiting.submitted.Store(true)
+			err = c.socket.Write(sending, websocket.MessageText, wire)
+		}
+		if err != nil {
+			if !waiting.submitted.Load() || errors.Is(err, packetCapacity) {
+				return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: err}
+			}
+			return outcome{}, &TransportError{Delivery: Unknown, Cause: err}
+		}
+		select {
+		case answer := <-waiting.answer:
+			if answer.err == nil && answer.reply.Code == capacityExhausted && absorbs {
+				// Dispatch released, admission kept: capacity the server said it cannot
+				// take is given back, the place in the window is not.
+				dispatching = false
+				c.releaseDispatch()
+				if err = c.backoff(sending, refusals); err != nil {
+					return outcome{}, err
+				}
+				continue
+			}
+			if answer.err == nil && slices.Contains([]string{"OK", "CREATED", "ACCEPTED", "NO_CONTENT"}, answer.reply.Code) && !deploymentMatches(operation, body, answer.reply.Payload) {
+				return outcome{}, &TransportError{Delivery: InvalidResponse, Cause: contractError}
+			}
+			return answer.reply, answer.err
+		case <-sending.Done():
+			return outcome{}, &TransportError{Delivery: Unknown, Cause: sending.Err()}
+		}
 	}
 }
 
@@ -446,6 +702,56 @@ func (c *Client) Close() error {
 		<-idle
 	}
 	return nil
+}
+
+// Per-request dispatch options. They are carried on the caller's context, the
+// same seam WithActingContext already uses, so every generated operation accepts
+// them without a second method per operation.
+type (
+	// capacityWaitKey marks a context whose requests shed load instead of waiting.
+	capacityWaitKey struct{}
+	// requestTimeoutKey carries a per-request timeout, armed at transmit.
+	requestTimeoutKey struct{}
+)
+
+// WithoutCapacityWait selects the non-blocking submission form for requests made
+// with the returned context: a full dispatch window returns NOT_SUBMITTED in the
+// same call instead of waiting for a slot, and a server CAPACITY_EXHAUSTED is
+// returned to the caller as an outcome rather than absorbed and resubmitted.
+//
+// The default is the waiting form. This is for a caller that would rather shed
+// load than be held — a batch job under its own deadline — and the choice
+// belongs to the call site, not to the client.
+func WithoutCapacityWait(ctx context.Context) context.Context {
+	return context.WithValue(ctx, capacityWaitKey{}, false)
+}
+
+// waitsForCapacity reports whether a request waits for dispatch capacity.
+func waitsForCapacity(ctx context.Context) bool {
+	waits, selected := ctx.Value(capacityWaitKey{}).(bool)
+	return !selected || waits
+}
+
+// WithRequestTimeout overrides the connection's timeout for requests made with
+// the returned context. Like the connection's own, it is armed when the request's
+// frame is written and never before, so a request may wait longer for local
+// capacity than its timeout without consuming any of it.
+//
+// It is a context value rather than a context deadline precisely because a
+// context deadline starts running immediately, which is the defect this fixes.
+func WithRequestTimeout(ctx context.Context, timeout time.Duration) (context.Context, error) {
+	if timeout <= 0 {
+		return nil, errors.New("choose a positive request timeout")
+	}
+	return context.WithValue(ctx, requestTimeoutKey{}, timeout), nil
+}
+
+// requestTimeout is the duration a request's deadline is armed with at transmit.
+func (c *Client) requestTimeout(ctx context.Context) time.Duration {
+	if selected, ok := ctx.Value(requestTimeoutKey{}).(time.Duration); ok && selected > 0 {
+		return selected
+	}
+	return c.timeout
 }
 
 // actingContextKey is private so request metadata can only be selected through validation.
