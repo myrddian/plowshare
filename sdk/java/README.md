@@ -38,6 +38,26 @@ Replies must match ID, type and protocol version. Typed methods throw when the s
 OkHttp's network thread. The queue holds 256 pushes; `droppedPushes()` reports loss,
 which callers reconcile through durable reads. Callback exceptions are isolated.
 
+The server advertises the connection's dispatch window and applies backpressure
+within it, and `RequestOptions.Capacity` is where a call site chooses how to meet a
+full one. The waiting form is the default: the call does not complete until the
+request has been transmitted, a full window parks the caller, and a server
+`CAPACITY_EXHAUSTED` reply is absorbed and resubmitted under the same request id
+after a jittered pause (100ms base, doubling, 5s cap), so a caller sees a reply or
+a timeout and never the code. `RequestOptions.nonBlocking(timeout)`, or
+`withoutCapacityWait()` on options that already carry a cancellation, selects the
+fail-fast form for a caller that would rather shed load than be held: a full window
+throws `TransportException` with `NOT_SUBMITTED` in the same call, and a refusal is
+returned as the request's own outcome with no backoff and no resubmission. In both
+forms **the request deadline arms when the frame is written, exactly once**: the
+wait for a window slot and the wait in the writer queue are charged against
+nothing, and a resubmission runs against what is left of the original deadline
+rather than a fresh one, so repeated refusals end in the caller's own timeout.
+Interrupt a blocking caller, or fire the `RequestCancellation` in its
+`RequestOptions`, to leave a wait for capacity; that reports `NOT_SUBMITTED`,
+because nothing was written. The dispatch negotiation is never resubmitted, in
+either form.
+
 No request is automatically replayed. `TransportException.delivery()` distinguishes
 `NOT_SUBMITTED`, `UNKNOWN` and `INVALID_RESPONSE`. Timeout, interruption and connection
 loss leave submitted mutations uncertain. Retain operation-level request IDs where

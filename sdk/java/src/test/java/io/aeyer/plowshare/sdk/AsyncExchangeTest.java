@@ -345,14 +345,21 @@ class AsyncExchangeTest {
               "admin.status", Map.of(), RequestOptions.defaults(Duration.ofMillis(600)));
       var failure = assertInstanceOf(Plowshare.TransportException.class, failure(call));
       long elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis();
-      // With the jitter pinned the pauses are exactly 50, 100, 200 and 400ms, so transmits land
-      // at 0, 50, 150 and 350ms and the next would be at 750ms. A single deadline armed at the
-      // first transmit therefore expires at 600ms, inside the fourth pause: four frames, and an
-      // elapsed time that is the caller's own timeout rather than a multiple of it.
+      // The elapsed interval is the property this test owns, and both of its bounds are
+      // load-bearing. The ceiling falsifies a per-attempt deadline, which would re-arm 600ms at
+      // the 350ms transmit and so run to at least 950ms. The floor falsifies the opposite error,
+      // a caller that loses its own timeout and fails early or instantly.
       //
-      // Both bounds are load-bearing. The ceiling falsifies a per-attempt deadline, which would
-      // re-arm 600ms at the 350ms transmit and so run to at least 950ms. The floor falsifies the
-      // opposite error, a caller that loses its own timeout and fails early or instantly.
+      // The frame count below is a corollary of that interval, not a second property: with the
+      // jitter pinned the pauses are exactly 50, 100, 200 and 400ms, so transmits land at 0, 50,
+      // 150 and 350ms, the next would be at 750ms, and the one deadline armed at the first
+      // transmit expires at 600ms inside the fourth pause. The exact 4 held in every run, under
+      // CPU contention included, and it is kept because it falsifies a hot retry loop and a
+      // client that never resubmits with no slack at all. But it is the part to loosen: a
+      // machine slow enough to push the third transmit past 600ms produces 3 frames while the
+      // contract is still perfectly honoured, and the right response to that is a range --
+      // `>= 2` to still falsify no resubmission, `<= 4` to still falsify a hot loop -- not a
+      // hunt for a regression. Do not loosen the elapsed bounds; they are the assertion.
       assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery(), failure.getMessage());
       assertTrue(failure.getMessage().contains("deadline"), failure.getMessage());
       assertTrue(elapsed >= 550, "the caller lost its own timeout: " + elapsed);
@@ -362,6 +369,47 @@ class AsyncExchangeTest {
           4,
           fixture.requests.size(),
           "the pinned pauses admit exactly four transmits inside one 600ms deadline");
+    }
+  }
+
+  @Test
+  void a_duplicate_refusal_resubmits_once_and_leaves_the_advertised_window_intact()
+      throws Exception {
+    try (var fixture = new Fixture();
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      // Jitter pinned to its fixed half: the first pause is 50ms and the second, were there a
+      // second, would be 100ms, so the poll below outlasts both.
+      client.resubmitRandomness(() -> 0.0);
+      var call = client.requestAsync("admin.status", Map.of());
+      var first = fixture.take();
+      // Reply multiplicity is an external value. The conforming first-party server answers a
+      // request once, but a client must not be made to replay by a peer that answers twice: the
+      // second refusal carries the same request id and must change nothing.
+      fixture.reply(first, "CAPACITY_EXHAUSTED", null);
+      fixture.reply(first, "CAPACITY_EXHAUSTED", null);
+      var retry = fixture.take();
+      assertEquals(
+          first.path("id").asText(),
+          retry.path("id").asText(),
+          "a refusal is resubmitted under the same request id");
+      var duplicate = fixture.requests.poll(400, TimeUnit.MILLISECONDS);
+      assertNull(
+          duplicate,
+          () ->
+              "the duplicate refusal produced a second frame under id "
+                  + duplicate.path("id").asText()
+                  + ", written while the resubmission was still outstanding");
+      fixture.answer(retry, Map.of());
+      assertTrue(call.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
+      // The dispatch count taken at the write was returned exactly once, so the advertised
+      // window is intact. A leak of even one narrows it for the connection's life and makes a
+      // later request fail with this client's internal accounting message, so the proof is that
+      // the full advertised count still transmits.
+      List<CompletionStage<Plowshare.Reply>> batch = new ArrayList<>();
+      for (int i = 0; i < 64; i++) batch.add(client.requestAsync("admin.status", Map.of()));
+      for (int i = 0; i < 64; i++) fixture.answer(fixture.take(), Map.of());
+      for (var queued : batch)
+        assertTrue(queued.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
     }
   }
 
@@ -500,7 +548,11 @@ class AsyncExchangeTest {
   void the_dispatch_negotiation_is_not_resubmitted_when_refused() throws Exception {
     try (var fixture = new Fixture(64, true)) {
       var opening = fixture.open(Plowshare.DispatchMode.CONCURRENT);
-      assertInstanceOf(IOException.class, failure(opening));
+      // The exact values, not the IOException supertype: a socket teardown is also an
+      // IOException, so the supertype would let one pass as a refused negotiation.
+      var failure = assertInstanceOf(Plowshare.TransportException.class, failure(opening));
+      assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery(), failure.getMessage());
+      assertTrue(failure.getMessage().contains("Server did not negotiate"), failure.getMessage());
       // A second dispatch selection on one connection is a protocol violation, so a refused
       // negotiation fails honestly instead of being paced and retried.
       Thread.sleep(400);

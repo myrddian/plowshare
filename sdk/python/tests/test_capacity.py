@@ -163,6 +163,28 @@ class CapacityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await held).require_payload(), ())
             self.assertEqual(len(peer.frames), 1)
 
+    # The other half of the non-blocking form, and the half that distinguishes it from
+    # the default: a CAPACITY_EXHAUSTED reply is handed back through the outcome
+    # channel the caller already handles rather than absorbed as flow control. The
+    # waiting form would pace and resubmit this, so the single frame is what tells the
+    # two forms apart. Inverting the absorb condition in _exchange fails this case on
+    # the frame count and on the returned code.
+    async def test_non_blocking_form_surfaces_a_refusal_as_the_requests_own_outcome(
+        self,
+    ) -> None:
+        peer = CapacityPeer(refusals=1)
+        async with peer.open() as client:
+            reply = await client.request(
+                MemoryIndexRequest(), wait_for_capacity=False
+            )
+            self.assertEqual(reply.code, "CAPACITY_EXHAUSTED")
+            self.assertEqual(
+                len(peer.frames), 1, "the non-blocking form resubmitted a refusal"
+            )
+            # No backoff, no resubmission, and nothing retained: the refusal settled the
+            # call, so the window is clear the moment it returns.
+            self.assertEqual((client._admitted, client._dispatched), (0, 0))
+
     # Review Focus 2, first half. Cancelling the wait for local capacity returns
     # promptly, reports NOT_SUBMITTED in Python's own cancellation currency, and
     # leaves the accounting exactly as it was: the slot the cancelled caller never

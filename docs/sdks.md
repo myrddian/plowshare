@@ -79,8 +79,9 @@ Java offers `connectAsync`, `closeAsync`, `AsyncServerClient` and typed `*Async`
 facade methods returning `CompletionStage`. Blocking methods await the same
 exchange engine. Completions run off the socket reader and coordination locks;
 reserved completion capacity bounds callbacks that block. `RequestOptions`
-provides a per-call deadline and `RequestCancellation` detaches a caller without
-cancelling durable server work.
+provides a per-call deadline and, through `Capacity` / `nonBlocking` /
+`withoutCapacityWait`, the dispatch backpressure contract's two submission forms;
+`RequestCancellation` detaches a caller without cancelling durable server work.
 
 TypeScript/Node expose `closeAsync()` to await transport-owned physical buffers;
 `close()` retains immediate stop semantics. Python `close`, .NET `DisposeAsync`,
@@ -93,12 +94,14 @@ connection's default for that call. `nonBlocking` selects the explicit fail-fast
 form of the dispatch backpressure contract — a full window rejects with
 `NOT_SUBMITTED` without writing anything, and a `CAPACITY_EXHAUSTED` refusal is
 returned as the request's own outcome instead of being absorbed and resubmitted;
-the waiting default is what every other request gets. Each SDK spells the choice
-in its own idiom, per call rather than per connection. Neutral TypeScript compositions supply a deadline scheduler
-and await `ready()` when selecting concurrent mode. Python accepts an optional
-per-request timeout and task cancellation; .NET uses cancellation tokens, and Go
-uses contexts. Admission includes calls waiting for the writer and retained
-physical transfers, with count and byte limits. Cancellation before a possible
+the waiting default is what every other request gets. Java, Python, Go and Node
+spell the same choice in their own idiom, per call rather than per connection;
+.NET is pending and still has only the fail-fast form. Neutral TypeScript
+compositions supply a deadline scheduler and await `ready()` when selecting
+concurrent mode. Python accepts an optional per-request timeout and task
+cancellation; .NET uses cancellation tokens, and Go uses contexts. Admission
+includes calls waiting for the writer and retained physical transfers, with count
+and byte limits. Cancellation before a possible
 write is `NOT_SUBMITTED`; after a possible write the outcome remains `UNKNOWN`.
 Late replies cannot settle a later request, and cancellation never triggers replay.
 

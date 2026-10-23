@@ -341,8 +341,13 @@ class Client:
             self._idle.clear()
             return
         if not wait:
+            # Its own sentence, distinct from the closed-connection refusal above: a caller
+            # that chose to shed load must be able to tell a full window from a gone
+            # connection, and both arrive through the same exception type.
             raise TransportError(
-                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"
+                Delivery.NOT_SUBMITTED,
+                "The dispatch window is full and this request asked not to wait for"
+                " capacity; nothing was written",
             )
         parked: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._slot_waiters.append(parked)
@@ -456,7 +461,11 @@ class Client:
             # Awaiting in a finally while a cancellation of this coroutine may be in
             # flight is safe here: the awaited task was just cancelled, so gather
             # returns at the next loop step, and return_exceptions keeps its
-            # CancelledError from displacing whatever is already propagating.
+            # CancelledError from displacing whatever is already propagating. A
+            # second cancellation delivered during that one loop step would surface
+            # from the gather itself rather than from the first one's unwinding;
+            # it is still a CancelledError from the same submission path, so
+            # _exchange's handler reports the same delivery either way.
             await asyncio.gather(stopped, return_exceptions=True)
         if self._reader_closed.is_set():
             raise TransportError(

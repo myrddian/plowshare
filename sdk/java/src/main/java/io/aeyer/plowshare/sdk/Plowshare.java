@@ -648,9 +648,13 @@ public final class Plowshare implements AutoCloseable {
         waiter = null;
         granted = null;
       } else if (options.capacity() == RequestOptions.Capacity.NON_BLOCKING) {
+        // Its own sentence, distinct from the closed-connection refusal above: a caller that
+        // chose to shed load must be able to tell a full window from a gone connection.
         return CompletableFuture.failedFuture(
             new TransportException(
-                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"));
+                Delivery.NOT_SUBMITTED,
+                "The dispatch window is full and this request asked not to wait for capacity;"
+                    + " nothing was written"));
       } else {
         waiter = new SlotWaiter();
         slotWaiters.add(waiter);
@@ -915,11 +919,18 @@ public final class Plowshare implements AutoCloseable {
   }
 
   /**
-   * Returns one dispatch count, at most once per acquisition. It wakes nobody: admission is the
-   * only queued capacity, and an admission slot frees on settlement, not here.
+   * Returns one dispatch count, at most once per acquisition, and reports whether this call was
+   * that one release. It wakes nobody: admission is the only queued capacity, and an admission slot
+   * frees on settlement, not here.
+   *
+   * <p>The return value is the launch state {@link #refused} guards on. A request holds a count
+   * only between its write and its settlement or refusal, so {@code false} means this request is
+   * not currently launched and whatever is asking has already been answered for.
    */
-  private void releaseDispatch(Pending request) {
-    if (request.dispatching.compareAndSet(true, false)) dispatched.decrementAndGet();
+  private boolean releaseDispatch(Pending request) {
+    if (!request.dispatching.compareAndSet(true, false)) return false;
+    dispatched.decrementAndGet();
+    return true;
   }
 
   private void writeLoop() {
@@ -1062,6 +1073,18 @@ public final class Plowshare implements AutoCloseable {
     int refusals;
     synchronized (request) {
       if (request.terminal) return;
+      // Launch state, not terminality, is the guard, matching the reference binding's
+      // `if (!launched) return;` (sdk/typescript/src/binding/connection.ts). Reply multiplicity is
+      // an external value: a server that answers one request id with two refusals is not the
+      // conforming first-party server, but it must not be able to make this client misbehave.
+      // Terminality alone would let the second refusal schedule a second pause, overwrite and
+      // leak the first ScheduledFuture, and put a second frame on the wire under the same id
+      // while the first was still outstanding -- exactly the replay the design's non-goals
+      // forbid. It would also narrow the window for the connection's life, because the two
+      // resulting transmits each take a dispatch count while settlement returns only one.
+      // Consuming the count here makes the duplicate the no-op it is in the reference, and the
+      // consumption is inside this lock so a deadline can never observe a half-absorbed refusal.
+      if (!releaseDispatch(request)) return;
       // Cleared the moment the refusal is absorbed and before the pause, not at the top of the
       // next attempt: the refused attempt left no work behind, so a deadline or a cancellation
       // landing in the pause -- which is where it almost always lands -- is honestly
@@ -1069,7 +1092,6 @@ public final class Plowshare implements AutoCloseable {
       request.submitted = false;
       refusals = request.refusals++;
     }
-    releaseDispatch(request);
     // Only the wakeup belongs on CLOCK. That is one process-wide thread on which every request's
     // deadline fires, for every connection in the JVM, and resubmit re-encodes the whole envelope
     // before it takes the connection monitor: a multi-megabyte re-encode there would delay
@@ -1295,10 +1317,17 @@ public final class Plowshare implements AutoCloseable {
   }
 
   /**
-   * How long an interrupted blocking caller waits for the exchange it just cancelled to report
-   * where it actually stood. The cancellation settles a parked or queued request on the cancelling
-   * thread itself; only a settlement that has to cross the completion executor needs this grace, so
-   * it is a bound on a pathology, not a tunable deployment value.
+   * The bound on how long an interrupted blocking caller waits for the exchange it just cancelled
+   * to report where it actually stood. It is not an expected mode: on every path this transport
+   * has, the settlement is already available and the wait returns immediately. A parked waiter is
+   * abandoned on the cancelling thread by {@link #abandon}; a request still registering in {@link
+   * #submitAdmitted} registers on an already-cancelled signal, which fires inside {@link
+   * RequestCancellation#register}; and an in-flight request's {@link #detach} completes through a
+   * virtual-thread-per-task executor with no queue to sit behind. What is left is a completion that
+   * never arrives at all, and for that the conservative answer below -- {@code UNKNOWN} with the
+   * interrupt restored -- is the right one. So this is a bound on a settlement that never crosses
+   * the executor, not a tunable deployment value and not a second a caller should expect to spend
+   * here.
    */
   private static final Duration INTERRUPT_SETTLEMENT = Duration.ofSeconds(1);
 
