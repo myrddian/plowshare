@@ -92,6 +92,12 @@ server.on('upgrade', (request, socket, head) => {
                 // spec names an anti-goal, and this is what catches it without a clock. The
                 // bounds in the fixture leave an order of magnitude of headroom over what
                 // paced backoff produces, so a conforming client never comes near them.
+                //
+                // The bound is required rather than optional: comparing against an absent
+                // field would silently read `n <= undefined`, which is false for every n,
+                // and the case would fail on its first frame naming the wrong problem.
+                assert.equal(typeof test.expectedSubmissions, 'number',
+                    'capacity case "' + test.name + '" does not declare the required numeric expectedSubmissions bound')
                 assert.ok(facts.order.length <= test.expectedSubmissions,
                     'more requests were submitted than the case expects; a paced resubmission would not reach this bound')
                 // Refusals apply to the connection's first request id only, so a case can
@@ -116,6 +122,12 @@ server.on('upgrade', (request, socket, head) => {
                         return
                     }
                     assert.equal(facts.held, null, 'a request was submitted while the advertised window was full')
+                    // Once the hold is over a `silentAfterWait` case answers nothing more, so
+                    // the only thing that can settle the request admitted next is its own
+                    // deadline. That silence is what lets the case distinguish a deadline armed
+                    // at transmit from no deadline and from the connection-level one; see the
+                    // fixture's `capacityContract.silentAfterWait`.
+                    if (test.silentAfterWait) return
                 }
                 envelope(sent, test.response)
             }
@@ -317,6 +329,13 @@ try {
         // against a 600ms deadline a paced client makes three or four attempts, so the
         // bound is an order of magnitude away from conforming behaviour and nowhere near a
         // hot loop. Neither assertion mentions a duration.
+        //
+        // Of the two, the LOWER bound is the fragile one and the place a later language
+        // will flake. Attempt two lands at t=50-100ms against a 600ms deadline, so only a
+        // stall of roughly 500ms between the first refusal and the resubmission can keep
+        // the count at one; the upper bound of eight has better than 2x headroom over the
+        // three or four attempts paced backoff makes. A failure here is a missing
+        // resubmission or a stalled machine, not over-eager retrying.
         const always = observed('capacity-refuse-always')
         assert.ok(always.order.length>=2, language+' did not resubmit a repeatedly refused request')
         assert.ok(always.order.length<=bound('capacity-refuse-always'),
@@ -332,12 +351,22 @@ try {
         assert.equal(slots.order.length, 3, language+' did not submit a refused request twice and the request behind it once')
         assert.equal(slots.order[1], slots.order[0], language+' did not resubmit the refused request under its own id')
         assert.notEqual(slots.order[2], slots.order[0], language+' overtook a backing-off request')
-        // The regression test for the originally reported bug: the parked request waits
-        // several times its own timeout for a slot, and the fixture answers it rather than
-        // the client failing it, so the deadline cannot have been charged for the wait.
+        // The regression test for the originally reported bug, in two halves. This half is
+        // the frame count: three distinct ids reached the fixture, so the request that
+        // parked behind the held one was really transmitted once a slot freed. A deadline
+        // charged for the wait fires while the hold is still active and the request is
+        // never transmitted at all, which shows up here as two frames rather than three.
+        //
+        // The other half is the driver's: the fixture answers nothing after the hold
+        // (`silentAfterWait`), so the waiting request can only be settled by its own
+        // deadline, and the driver requires it to expire well before the connection-level
+        // timeout would. Together they separate "armed at transmit, for the caller's own
+        // duration" from "armed too early", "never armed" and "armed with the connection's
+        // duration" -- the last three being exactly what the SDKs under repair do, and the
+        // cheapest way to pass the first half alone is to delete the deadline entirely.
         const waited = observed('capacity-deadline-survives-waiting')
-        assert.equal(waited.order.length, 2, language+' did not transmit a request that waited longer than its own timeout')
-        assert.equal(new Set(waited.order).size, 2, language+' lost a request id while waiting for a slot')
+        assert.equal(waited.order.length, 3, language+' did not transmit a request that waited longer than its own timeout')
+        assert.equal(new Set(waited.order).size, 3, language+' lost a request id while waiting for a slot')
         // A refused negotiation is only evidence once it is known to have happened: an
         // empty frame list is equally true of a language that never drove the case.
         const handshake = observed('capacity-handshake-refuse')

@@ -127,7 +127,11 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
     // NOT_SUBMITTED alone made this case fail roughly one run in forty, and the failing
     // run was reporting a truthful code, not a defect.
     const test = cases.get('capacity-refuse-always');
-    const honest = [test.delivery, ...test.deliveryAlternates];
+    // Defaulted rather than spread straight: `deliveryAlternates` is absent on every other
+    // case in the fixture, where absence means "this case admits its `delivery` and nothing
+    // else", and a driver author copying this line for one of those would crash on the
+    // spread. Documented in the fixture's `capacityContract.deliveryAlternates`.
+    const honest = [test.delivery, ...(test.deliveryAlternates ?? [])];
     const client = await openCapacity('capacity-refuse-always', 600);
     try { await assert.rejects(client.request('project.list',{}), error => honest.includes(error.delivery) && /deadline/.test(error.message)); }
     finally { client.close(); }
@@ -162,20 +166,39 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
     } finally { client.close(); }
 }
 {
-    // The regression test for the originally reported bug: client-side queue time must not
-    // be charged against the request deadline. A request is parked at the window bound for
-    // longer than its own timeout, then admitted, and must still be answered.
+    // The regression test for the originally reported bug. Two things must hold: client-side
+    // queue time must not be charged against the request deadline, AND the deadline the
+    // request then runs on must be its own, armed when the frame was transmitted.
     //
-    // The numbers, and what they protect. The fixture advertises a window of one and holds
-    // A for `holdMs` (900ms). B is given a per-request timeout of `waitingTimeoutMs`
-    // (300ms) and parks the instant A takes the single slot, so it waits three times its
-    // own timeout before a slot frees. If the wait were charged against B's deadline, B
-    // would fail at t=300 -- 600ms before it could possibly be transmitted, so the failure
-    // is not a near miss. If the deadline arms at transmit, B gets the full 300ms from
-    // t=900 against a fixture that answers in the same tick. Both margins are deliberately
-    // wide, and neither is measured here: that B really waited out the hold is proved by
-    // the fixture, which fails the case if a second frame arrives while the hold is active,
-    // not by any clock in this driver.
+    // Shape. The fixture advertises a window of one and holds A for `holdMs` (900ms). B,
+    // carrying a per-request timeout of `waitingTimeoutMs` (300ms), and a sibling carrying
+    // only the connection's 5000ms both park the instant A takes the single slot. When the
+    // hold ends, A is answered and B is admitted -- and from then on the fixture answers
+    // nothing (`silentAfterWait`), so B's own deadline is the only thing that can settle it.
+    // B must expire with a deadline error, while the sibling, admitted when B's slot frees,
+    // is still pending; the pending sibling is what shows the silence is a fixture state
+    // rather than a dead or closed connection.
+    //
+    // Why the silence. An earlier version of this case answered B in the same tick it was
+    // admitted, so it passed on "B was answered" -- which is equally true of the fix, of a
+    // request carrying NO deadline at all, and of one silently running on the connection's
+    // 5000ms. That matters because the three SDKs this contract is written for all arm the
+    // deadline too early, and the cheapest way to pass "B was answered" is to delete the
+    // premature arm and forget to re-arm at transmit, leaving an unbounded hold -- the one
+    // case the spec calls unsafe. The four directions now land in different places:
+    //   - armed at creation (charged for the wait): B expires at t=300, during the hold, so
+    //     it is never transmitted. The shared harness sees two frames where it demands three.
+    //   - never armed: B never settles, and the probe below expires first.
+    //   - armed with the connection's duration: B expires at t=900+5000=5900, and the probe
+    //     below expires first.
+    //   - armed at transmit with B's own 300ms: B expires at t=1200. Only this one passes.
+    //
+    // The numbers, and what they protect. Correct expiry is at holdMs + waitingTimeoutMs =
+    // 1200ms after the window fills. The probe is `waitingProbeMs` (2500ms) from the same
+    // push, which leaves 1300ms of scheduler tolerance above the correct expiry and 3400ms
+    // of margin below the 5900ms of a request wrongly on the connection's deadline. Both
+    // margins exceed 1200ms, so neither direction is a near miss. Widening the connection's
+    // timeoutMs widens the lower margin; shortening holdMs is what would narrow the upper.
     const test = cases.get('capacity-deadline-survives-waiting');
     let windowFull;
     const full = new Promise(resolve => {windowFull = resolve});
@@ -183,10 +206,25 @@ const openCapacity = (name, timeoutMs, onPush) => connectPlowshare({origin,token
     try {
         const held = client.request('project.list',{});
         const waited = client.request('project.list',{},{timeoutMs:test.waitingTimeoutMs});
+        // The sibling's rejection on close is expected, so both settlements are absorbed
+        // here rather than left as an unhandled rejection.
+        let siblingSettled = false;
+        client.request('project.list',{}).then(() => {siblingSettled = true}, () => {siblingSettled = true});
         await full;
         assert.deepEqual(requirePayload(await held),[]);
-        assert.deepEqual(requirePayload(await waited),[],
-            'a request held past its own timeout lost its deadline to the wait for capacity');
+        const outcome = await Promise.race([waited.then(() => 'answered', error => error),
+            new Promise(resolve => setTimeout(() => resolve(pending), test.waitingProbeMs))]);
+        assert.notEqual(outcome, pending,
+            'the waiting request did not expire on a deadline of its own: it is carrying no deadline or the connection timeout, not one armed at transmit');
+        assert.notEqual(outcome, 'answered', 'the fixture must answer nothing once the hold is over');
+        assert.equal(outcome.delivery, test.waitingDelivery,
+            'the waiting request was transmitted, so its expiry may have left work done and is UNKNOWN');
+        assert.match(outcome.message, /deadline/,
+            'a connection teardown must not pass as a deadline expiry');
+        // Read only after the waiting request has settled, so this is a state check and not
+        // a race: it is the proof the connection was alive and the silence deliberate.
+        assert.equal(siblingSettled, false,
+            'the sibling carrying only the connection deadline must still be pending when the waiting request expires');
     } finally { client.close(); }
 }
 await assert.rejects(openCapacity('capacity-handshake-refuse', 5000), error => error.code==='NOT_SUBMITTED');
