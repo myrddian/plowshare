@@ -304,7 +304,13 @@ class CapacityTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(TransportError) as expired:
                 await client.request(MemoryIndexRequest())
             elapsed = loop.time() - started
-            self.assertIn(expired.exception.delivery, ("NOT_SUBMITTED", "UNKNOWN"))
+            # Pinned, not a tolerant set. The deadline expires during a backoff
+            # pause, where the refused attempt has left no work behind, so the
+            # stronger NOT_SUBMITTED is owed. The contract tolerates the UNKNOWN
+            # alternate only for the sub-millisecond transmit/refusal race, which
+            # this staged pause is not; accepting either here is what let a client
+            # that always reported the alternate pass.
+            self.assertEqual(expired.exception.delivery, "NOT_SUBMITTED")
             self.assertIn("deadline", str(expired.exception))
             # A deadline re-armed per attempt never expires against a server that
             # refuses forever, so an upper bound is the assertion that matters. It
@@ -314,6 +320,23 @@ class CapacityTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(elapsed, 0.5, "the caller lost its own timeout")
             self.assertGreaterEqual(len(peer.frames), 2, "nothing was resubmitted")
             self.assertEqual(len(set(peer.frames)), 1, "a refusal became new work")
+            self.assertEqual((client._admitted, client._dispatched), (0, 0))
+
+    # The other exit from a backoff pause, and the same claim: a cancellation while
+    # the resubmission is being paced is NOT_SUBMITTED, because the refused attempt
+    # released its dispatch count and the server did none of the work. Staged inside
+    # the fixed 50ms half of the first pause, so no race decides the answer.
+    async def test_cancellation_during_a_backoff_pause_is_not_submitted(self) -> None:
+        peer = CapacityPeer(refuse_always=True)
+        async with peer.open(timeout=5) as client:
+            call = asyncio.create_task(client.request(MemoryIndexRequest()))
+            await asyncio.wait_for(peer.refused.wait(), 1)
+            await asyncio.sleep(0.01)
+            self.assertEqual((client._admitted, client._dispatched), (1, 0))
+            call.cancel()
+            with self.assertRaises(CancelledRequest) as cancelled:
+                await call
+            self.assertEqual(cancelled.exception.delivery, "NOT_SUBMITTED")
             self.assertEqual((client._admitted, client._dispatched), (0, 0))
 
     # Review Focus 5. A caller parked for a slot has no deadline of its own -- it

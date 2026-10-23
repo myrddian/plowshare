@@ -453,6 +453,10 @@ class Client:
             await asyncio.wait({stopped}, timeout=pause)
         finally:
             stopped.cancel()
+            # Awaiting in a finally while a cancellation of this coroutine may be in
+            # flight is safe here: the awaited task was just cancelled, so gather
+            # returns at the next loop step, and return_exceptions keeps its
+            # CancelledError from displacing whatever is already propagating.
             await asyncio.gather(stopped, return_exceptions=True)
         if self._reader_closed.is_set():
             raise TransportError(
@@ -474,8 +478,12 @@ class Client:
         The request deadline is armed when the frame is written, exactly once.
         Waiting for an admission slot happens before that and is charged to
         nothing; so does acquiring ``_send_lock``, which is why the deadline is
-        armed *after* the lock is held rather than around it. Taking a dispatch
-        count never waits at all. A resubmission re-enters the transmit below and
+        armed *after* the lock is held rather than around it. That wait therefore
+        has no bound of the waiter's own: it is bounded only transitively, by every
+        holder of the lock arming its deadline before its write and so releasing
+        the lock within its own timeout. A holder that writes before arming would
+        leave waiters behind it unbounded. Taking a dispatch count never waits at
+        all. A resubmission re-enters the transmit below and
         finds the deadline already armed, so it runs against what is left of it.
 
         A ``CAPACITY_EXHAUSTED`` reply is absorbed when the caller chose the waiting
@@ -555,10 +563,9 @@ class Client:
                     self._acquire_dispatch()
                     dispatched = True
                     # A fresh answer per attempt, under the same request id: the
-                    # previous attempt's future was settled by the refusal. Cleared
-                    # submission means a close during the next backoff is honestly
-                    # NOT_SUBMITTED, because the refused attempt left no work behind.
-                    waiting.submitted = False
+                    # previous attempt's future was settled by the refusal. The
+                    # submission flag is already False here: it starts that way and
+                    # is cleared where a refusal is absorbed, below.
                     waiting.answer = loop.create_future()
                     self._pending[identity] = waiting
                     async with self._send_lock:
@@ -594,6 +601,13 @@ class Client:
                     dispatched = False
                     self._dispatched -= 1
                     self._pending.pop(identity, None)
+                    # Cleared before the pause, not at the top of the next attempt:
+                    # the refused attempt left no work behind, so for the whole
+                    # backoff -- which is where a deadline or a cancellation almost
+                    # always lands -- this request is honestly NOT_SUBMITTED. Clearing
+                    # it after the pause would make every such exit report the
+                    # tolerated UNKNOWN alternate instead of the stronger claim.
+                    waiting.submitted = False
                     await self._pace(refusals)
                     refusals += 1
         except TransportError:
@@ -609,7 +623,11 @@ class Client:
         except TimeoutError:
             # Named as a deadline only when one really expired, so a transport
             # TimeoutError from elsewhere cannot claim to be an expiry.
-            expired = end is not None and loop.time() >= end
+            # The scope's own signal, not a clock comparison: asyncio may fire a
+            # timer up to the loop's clock resolution early, so loop.time() >= end
+            # can still be false on a genuine expiry. The end is not None guard
+            # keeps an inner TimeoutError from claiming an expiry that never armed.
+            expired = end is not None and deadline.expired()
             raise TransportError(
                 Delivery.UNKNOWN if waiting.submitted else Delivery.NOT_SUBMITTED,
                 "Request deadline expired; no request was replayed"
