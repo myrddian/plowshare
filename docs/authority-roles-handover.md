@@ -44,7 +44,10 @@ settles what "no project" means:
 multi-user support.** From `91ab6fea` onward, `null` meant both the global
 memory retrieval tier and the global resource scope, and that single conflation
 produced every defect in this file: refused Personal uploads, the uninstallable
-public manual, and the SYSTEM ceiling admitting by omission.
+public manual, and the SYSTEM ceiling admitting by omission. (The manual's
+failure is a misfiling, not an absence: 37 chapters were installed on
+2026-10-05 into `admin`'s `ACCOUNT_KNOWLEDGE` scope, where the ACLs
+correctly keep them private to that one account.)
 
 **The target is the representation, not the concept.** Global is kept and is
 already enumerated — `BuiltInIdentities.GLOBAL` (…004) and `GLOBAL_KNOWLEDGE`
@@ -113,7 +116,7 @@ if (system == null && operations != null
 | 1 | SYSTEM work with no `selected` | open — falls back to `GLOBAL_KNOWLEDGE`, and the consistency check exempts the global branch |
 | 2 | `ConversationStore` built without `operations` | open — five constructors, one assigns it, so four skip admission silently |
 | 3 | any origin but `SUBMISSION`/`EVENT` | open — no admission; the 415 `delegation` rows arrive here |
-| 4 | `executionHome` ACCOUNT → `Home.global()` | refused — reaches admission and dies, which is why the public manual cannot install |
+| 4 | `executionHome` ACCOUNT → `Home.global()` | refused — reaches admission and dies, so the Global knowledge destination is unreachable. **Not** why the manual is missing: the manual was installed on 2026-10-05, into `admin`'s `ACCOUNT_KNOWLEDGE` scope, and door 4 is why it cannot be *re-homed* to GLOBAL |
 
 Door 2 is the cheapest and least defensible: it is not a wrong ceiling but no
 authorization at all. Doors 1 and 3 are tasks 6–7. Door 4 needs the design
