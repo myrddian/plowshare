@@ -68,6 +68,23 @@ public final class Plowshare implements AutoCloseable {
   private final Duration timeout;
   private final String session;
 
+  /**
+   * The server's dispatch refusal. It is flow control, not a fault: the waiting form absorbs it and
+   * resubmits, and the caller never sees it. The {@code control} negotiation is exempt.
+   */
+  private static final String CAPACITY_EXHAUSTED = "CAPACITY_EXHAUSTED";
+
+  private static final String NEGOTIATION = "transport.dispatch";
+
+  /**
+   * Resubmission pacing after a capacity refusal, matching the reference SDK's shipped values: the
+   * ceiling doubles with the refusal count up to the cap, and the pause is half of it fixed and
+   * half random, so a client always pauses and clients released together never retry in lockstep.
+   */
+  private static final Duration RESUBMIT_BACKOFF_BASE = Duration.ofMillis(100);
+
+  private static final Duration RESUBMIT_BACKOFF_CAP = Duration.ofMillis(5000);
+
   private static final int MAX_PENDING = 64;
   private static final long MAX_QUEUED_BYTES =
       io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_CONNECTION_BYTES;
@@ -88,36 +105,76 @@ public final class Plowshare implements AutoCloseable {
   /**
    * A request's terminal state is independent of transport ownership. A timed-out send keeps its
    * bytes reserved until the physical sender finishes; a queued cancellation writes nothing.
+   *
+   * <p>{@code allowance} is the duration the caller granted, held unspent until the writer arms
+   * {@code timer} at the write. {@code absorbs} records the submission form once, at admission, so
+   * the reader does not have to re-derive it.
+   *
+   * <p>An absorbing request keeps {@code envelope}, the fields its frame is encoded from, and
+   * re-encodes on a resubmission; {@code frame} and the byte charge it gates are released as soon
+   * as the frame is written, and a resubmission charges its bytes again. It deliberately does not
+   * cache the encoded frame: that would hold a second copy of the whole request, which for a large
+   * payload is megabytes retained from the write until the reply, for a refusal that in almost
+   * every request never comes.
    */
   private static final class Pending {
     final String id;
     final String type;
+    final long allowance;
+    final boolean absorbs;
+    final Envelope envelope;
     String frame;
     final int bytes;
-    final long deadline;
     final CompletableFuture<Reply> answer = new CompletableFuture<>();
     boolean submitted;
     boolean terminal;
     boolean sending;
     boolean released;
+    boolean armed;
+    int refusals;
+
+    /** Pairs with the connection's dispatch count, so releasing it twice is impossible. */
+    final java.util.concurrent.atomic.AtomicBoolean dispatching =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
     ScheduledFuture<?> timer;
+    ScheduledFuture<?> pause;
     AutoCloseable cancellation;
 
-    Pending(String id, String type, String frame, int bytes, long deadline) {
-      this.id = id;
-      this.type = type;
+    Pending(Envelope envelope, String frame, int bytes, long allowance, boolean absorbs) {
+      this.id = envelope.id();
+      this.type = envelope.type();
+      this.envelope = absorbs ? envelope : null;
       this.frame = frame;
       this.bytes = bytes;
-      this.deadline = deadline;
+      this.allowance = allowance;
+      this.absorbs = absorbs;
     }
+  }
+
+  /**
+   * One caller parked for an admission slot. The slot is charged to the waiter before it is woken,
+   * so a caller arriving later cannot steal what FIFO order already granted. {@code settled} is the
+   * single record of whether this waiter has been granted or abandoned, so a cancellation racing a
+   * grant resolves one way only.
+   */
+  private static final class SlotWaiter {
+    final CompletableFuture<Void> granted = new CompletableFuture<>();
+    boolean settled;
+    AutoCloseable registration;
   }
 
   private final ConcurrentMap<String, Pending> pending = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, CompletableFuture<Reply>> delivering =
       new ConcurrentHashMap<>();
   private final BlockingQueue<Pending> outgoing = new ArrayBlockingQueue<>(MAX_PENDING);
-  // A reservation stays held while completion invokes user continuations. Nested requests
-  // either reserve independent capacity or fail immediately; they never await their own permit.
+  // A reservation stays held while completion invokes user continuations. The waiting form is the
+  // default, so a nested request submitted from a continuation parks for a permit that the
+  // continuation itself is holding. That wait ends when another request settles, when the caller's
+  // RequestCancellation fires, or when the connection closes -- never on a deadline, which is armed
+  // only at transmit. A continuation that blocks on a nested request while every permit is held by
+  // other blocked continuations must therefore pass a cancellation or select
+  // RequestOptions.Capacity.NON_BLOCKING, which still fails such a call immediately.
   private final Semaphore completions = new Semaphore(MAX_PENDING);
   private final ExecutorService completionExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private final CompletableFuture<Void> drained = new CompletableFuture<>();
@@ -126,6 +183,39 @@ public final class Plowshare implements AutoCloseable {
   private final Thread writer;
   private long queuedBytes;
   private int reserved;
+
+  /**
+   * Requests currently on the wire. Two counters are kept, as the reference SDK keeps them: {@code
+   * reserved} with {@link #slotWaiters} is the advertised window, this is work actually dispatched.
+   * A capacity refusal releases only this one, so other already-admitted work can transmit while
+   * the refused request backs off, and the refused request keeps its place in the window instead of
+   * being overtaken by work that arrived after it.
+   *
+   * <p>Atomic rather than monitor-guarded on purpose. The writer and the completion executor are
+   * virtual threads, and on this release a virtual thread that contends for a monitor pins its
+   * carrier, so the per-request path must not add monitor acquisitions to the hot path.
+   */
+  private final java.util.concurrent.atomic.AtomicInteger dispatched =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  /**
+   * Callers parked for an admission slot, in arrival order. Dispatch counts need no queue: a caller
+   * holding an admission is already guaranteed one, so parking for one is unreachable. See {@link
+   * #acquireDispatch}.
+   */
+  private final java.util.ArrayDeque<SlotWaiter> slotWaiters = new java.util.ArrayDeque<>();
+
+  /**
+   * Whether {@link #slotWaiters} is nonempty, published so a release can skip {@link
+   * #pumpAdmission} without taking the connection monitor. Written only under that monitor,
+   * alongside every change to the queue, and read without it; a stale {@code true} costs one
+   * needless pump and a stale {@code false} cannot happen, because the flag is set before the
+   * waiter that needs pumping can be granted anything.
+   */
+  private volatile boolean parked;
+
+  /** The resubmission jitter source, injectable so tests are deterministic. */
+  private volatile java.util.function.DoubleSupplier random = Math::random;
 
   /**
    * Call window the server advertised in the dispatch handshake, within {@code [1, MAX_PENDING]}.
@@ -456,6 +546,15 @@ public final class Plowshare implements AutoCloseable {
             });
   }
 
+  /**
+   * Replaces the resubmission jitter source so a test can stage a deterministic pause. A supplier
+   * outside {@code [0, 1]} is clamped rather than trusted; the fixed half of every pause means a
+   * client always pauses whatever the source returns.
+   */
+  void resubmitRandomness(java.util.function.DoubleSupplier source) {
+    random = Objects.requireNonNull(source, "source");
+  }
+
   public String session() {
     return session;
   }
@@ -531,53 +630,202 @@ public final class Plowshare implements AutoCloseable {
       Map<String, ?> payload,
       io.aeyer.plowshare.protocol.ActingContext.Selection selection,
       RequestOptions options) {
-    long started = System.nanoTime();
     Objects.requireNonNull(payload, "payload");
     Objects.requireNonNull(options, "options");
     if (type == null || !type.matches("[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+"))
       throw new IllegalArgumentException("a dotted frame type is required");
+    SlotWaiter waiter;
+    java.util.List<SlotWaiter> granted;
     synchronized (this) {
-      if (!connected() || reserved >= window || !completions.tryAcquire())
+      if (!connected())
         return CompletableFuture.failedFuture(
             new TransportException(
                 Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"));
-      reserved++;
+      // Strict bounds, and only with an empty queue, so a slot is never taken ahead of a caller
+      // already parked for one.
+      if (slotWaiters.isEmpty() && reserved < window && completions.tryAcquire()) {
+        reserved++;
+        waiter = null;
+        granted = null;
+      } else if (options.capacity() == RequestOptions.Capacity.NON_BLOCKING) {
+        return CompletableFuture.failedFuture(
+            new TransportException(
+                Delivery.NOT_SUBMITTED, "Connection closed or request capacity exceeded"));
+      } else {
+        waiter = new SlotWaiter();
+        slotWaiters.add(waiter);
+        parked = true;
+        // Draining here, with the waiter already queued and published, is what makes the
+        // monitor-free fast path in pumpAdmission safe: a permit released between the failed
+        // attempt above and this publication would otherwise find no waiter to hand it to.
+        granted = drainWaitersLocked();
+      }
     }
+    // Serialization stays outside the connection monitor: a large frame must not hold it.
+    if (waiter == null) return submitAdmitted(type, payload, selection, options);
+    completeGrants(granted);
+    // Nothing from here to the write is charged against the request deadline, which the writer arms
+    // at the write. The wait is bounded by the caller's cancellation and by the connection closing.
+    observe(waiter, options.cancellation());
+    return waiter.granted.thenCompose(ready -> submitAdmitted(type, payload, selection, options));
+  }
+
+  /**
+   * Registers a parked caller's cancellation signal, if it has one. A signal that has already fired
+   * abandons the waiter inside {@link RequestCancellation#register}; a grant that won the race
+   * leaves nothing to observe, so the registration is closed rather than left behind.
+   */
+  private void observe(SlotWaiter waiter, RequestCancellation cancellation) {
+    if (cancellation == null) return;
+    AutoCloseable registration =
+        cancellation.register(
+            () ->
+                abandon(
+                    waiter,
+                    "Request cancelled while waiting for dispatch capacity; nothing was written"));
+    synchronized (this) {
+      if (!waiter.settled) {
+        waiter.registration = registration;
+        return;
+      }
+    }
+    closeRegistration(registration);
+  }
+
+  /**
+   * Removes a parked caller from the queue and fails its call {@code NOT_SUBMITTED}. The waiter
+   * holds no accounting until it is granted, so this leaves the in-flight state exactly as it was:
+   * cancellation is never a way to leak capacity.
+   */
+  private void abandon(SlotWaiter waiter, String why) {
+    AutoCloseable registration;
+    synchronized (this) {
+      if (waiter.settled) return;
+      waiter.settled = true;
+      slotWaiters.remove(waiter);
+      parked = !slotWaiters.isEmpty();
+      registration = waiter.registration;
+      waiter.registration = null;
+    }
+    closeRegistration(registration);
+    waiter.granted.completeExceptionally(new TransportException(Delivery.NOT_SUBMITTED, why));
+  }
+
+  /**
+   * Hands freed admission slots to parked callers in FIFO order. It runs from every release, so a
+   * failure frees capacity exactly like a reply does, and work that arrived later never overtakes a
+   * caller already parked. Nothing is granted once the connection is closed; callers parked then
+   * are released by {@link #strand}.
+   */
+  private void pumpAdmission() {
+    // No caller is parked in the overwhelming majority of releases, and the writer and the
+    // completion executor are virtual threads whose carriers this monitor would pin. The volatile
+    // read keeps that path free of it; requestAsync drains for itself once its waiter is
+    // published, so skipping here can never leave a waiter stranded.
+    if (!parked) return;
+    java.util.List<SlotWaiter> granted;
+    synchronized (this) {
+      granted = drainWaitersLocked();
+    }
+    completeGrants(granted);
+  }
+
+  /**
+   * Charges every admission slot that is free to the callers at the head of the queue. The caller
+   * holds the connection monitor; the granted waiters are woken outside it by {@link
+   * #completeGrants}.
+   */
+  private java.util.List<SlotWaiter> drainWaitersLocked() {
+    java.util.List<SlotWaiter> granted = null;
+    while (!slotWaiters.isEmpty() && connected() && reserved < window && completions.tryAcquire()) {
+      SlotWaiter next = slotWaiters.poll();
+      next.settled = true;
+      reserved++;
+      if (granted == null) granted = new java.util.ArrayList<>();
+      granted.add(next);
+    }
+    parked = !slotWaiters.isEmpty();
+    return granted;
+  }
+
+  /**
+   * Wakes granted callers. Their {@code registration} is read without the monitor, which is safe
+   * because the drain that granted them ran on this thread and marked them settled, so {@link
+   * #observe} and {@link #abandon} will not touch it again.
+   */
+  private void completeGrants(java.util.List<SlotWaiter> granted) {
+    if (granted == null) return;
+    for (SlotWaiter waiter : granted) {
+      AutoCloseable registration = waiter.registration;
+      waiter.registration = null;
+      closeRegistration(registration);
+      // Completed off the releasing thread, which may be the socket reader: a granted caller goes
+      // on to serialize and enqueue its frame, which is not that thread's work.
+      Thread.ofVirtual().name("plowshare-sdk-admission").start(() -> waiter.granted.complete(null));
+    }
+  }
+
+  /** A parked caller has no deadline of its own, so a close is what releases it. */
+  private void releaseParked() {
+    java.util.List<SlotWaiter> waiting;
+    synchronized (this) {
+      if (slotWaiters.isEmpty()) return;
+      waiting = new java.util.ArrayList<>(slotWaiters);
+    }
+    for (SlotWaiter waiter : waiting)
+      abandon(waiter, "Connection closed while waiting for dispatch capacity");
+  }
+
+  private static void closeRegistration(AutoCloseable registration) {
+    if (registration == null) return;
+    try {
+      registration.close();
+    } catch (Exception impossible) {
+      throw new IllegalStateException(impossible);
+    }
+  }
+
+  /**
+   * Serializes, registers and enqueues one request whose admission slot is already held.
+   *
+   * <p>The deadline is not armed here. The caller's allowance travels with the request and the
+   * writer arms it at the write, so neither the wait for an admission slot nor the wait in the
+   * writer queue is charged against the time the server is given to answer.
+   */
+  private CompletionStage<Reply> submitAdmitted(
+      String type,
+      Map<String, ?> payload,
+      io.aeyer.plowshare.protocol.ActingContext.Selection selection,
+      RequestOptions options) {
     Pending request;
     try {
-      String id = UUID.randomUUID().toString();
-      String frame =
-          JSON.writeValueAsString(
-              new Envelope(
-                  id,
-                  type,
-                  Envelope.CURRENT_VERSION,
-                  new java.util.LinkedHashMap<>(payload),
-                  selection));
+      Envelope envelope =
+          new Envelope(
+              UUID.randomUUID().toString(),
+              type,
+              Envelope.CURRENT_VERSION,
+              new java.util.LinkedHashMap<>(payload),
+              selection);
+      String id = envelope.id();
+      String frame = JSON.writeValueAsString(envelope);
       int bytes = frame.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
       if (bytes
           > (packets == null
               ? 1024 * 1024
               : io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES))
         throw new TransportException(Delivery.NOT_SUBMITTED, "Encoded request exceeds allowance");
-      request = new Pending(id, type, frame, bytes, started + options.timeout().toNanos());
+      request =
+          new Pending(
+              envelope,
+              frame,
+              bytes,
+              options.timeout().toNanos(),
+              options.capacity() == RequestOptions.Capacity.WAITING && !NEGOTIATION.equals(type));
       synchronized (this) {
         if (!connected() || queuedBytes + bytes > MAX_QUEUED_BYTES || !reserveProcess(bytes))
           throw new TransportException(Delivery.NOT_SUBMITTED, "Request byte capacity exceeded");
         queuedBytes += bytes;
         pending.put(id, request);
-        // Installing the timer before publishing to the writer prevents fast replies leaking it.
-        request.timer =
-            CLOCK.schedule(
-                () ->
-                    detach(
-                        request,
-                        null,
-                        new TransportException(
-                            delivery(request),
-                            "Request deadline expired; no request was replayed")),
-                Math.max(0, request.deadline - System.nanoTime()),
-                TimeUnit.NANOSECONDS);
         AutoCloseable registration =
             options.cancellation() == null
                 ? null
@@ -608,6 +856,7 @@ public final class Plowshare implements AutoCloseable {
         reserved--;
       }
       completions.release();
+      pumpAdmission();
       checkDrained();
       return CompletableFuture.failedFuture(failure);
     }
@@ -628,21 +877,91 @@ public final class Plowshare implements AutoCloseable {
     }
   }
 
+  /**
+   * Takes one of the connection's dispatch counts for one transmit attempt, held from the write
+   * until the request settles or is refused.
+   *
+   * <p>Holding an admission is always enough to be sure of a count, so this never waits. A request
+   * holds at most one count and only while it is admitted, so a request that has not transmitted
+   * yet sees at most {@code reserved - 1} dispatched, which is below the window. The window itself
+   * only ever changes while nothing is admitted: it is written once, after the handshake, before
+   * the connection is handed to callers.
+   *
+   * <p>The remaining branch is therefore an invariant violation, not flow control. It is reported
+   * rather than assumed away so the advertised window stays authoritative: the request is refused
+   * without transmitting instead of pushing the connection past the depth the server advertised. A
+   * caller seeing it has found a bug in this client's accounting, not a busy server.
+   */
+  private boolean acquireDispatch(Pending request) {
+    String refusal = null;
+    if (!connected()) refusal = "Connection closed before submission; nothing was written";
+    else {
+      int bound = window;
+      while (true) {
+        int held = dispatched.get();
+        if (held >= bound) {
+          refusal = "Dispatch accounting exceeded the advertised window; no frame was written";
+          break;
+        }
+        if (dispatched.compareAndSet(held, held + 1)) {
+          request.dispatching.set(true);
+          break;
+        }
+      }
+    }
+    if (refusal == null) return true;
+    detach(request, null, new TransportException(Delivery.NOT_SUBMITTED, refusal));
+    return false;
+  }
+
+  /**
+   * Returns one dispatch count, at most once per acquisition. It wakes nobody: admission is the
+   * only queued capacity, and an admission slot frees on settlement, not here.
+   */
+  private void releaseDispatch(Pending request) {
+    if (request.dispatching.compareAndSet(true, false)) dispatched.decrementAndGet();
+  }
+
   private void writeLoop() {
     try {
       while (!closed && !lost) {
         Pending request = outgoing.take();
         synchronized (request) {
           if (request.terminal) continue;
-          if (closed || lost || request.deadline - System.nanoTime() <= 0) {
-            detach(
-                request,
-                null,
-                new TransportException(Delivery.NOT_SUBMITTED, "Queued request deadline expired"));
-            continue;
+        }
+        if (!acquireDispatch(request)) continue;
+        boolean terminal;
+        synchronized (request) {
+          terminal = request.terminal;
+          if (!terminal && !request.armed) {
+            // The frame is written below, so this is where the deadline arms, and the only place
+            // it ever does: a resubmission finds it already armed and runs against what is left.
+            // Installing the timer here, under this lock and before the write, also prevents a
+            // fast reply leaking it. A request that has not been transmitted has no deadline to
+            // expire; it is bounded by its cancellation and by the connection closing.
+            request.armed = true;
+            request.timer =
+                CLOCK.schedule(
+                    () ->
+                        detach(
+                            request,
+                            null,
+                            new TransportException(
+                                delivery(request),
+                                "Request deadline expired; no request was replayed")),
+                    request.allowance,
+                    TimeUnit.NANOSECONDS);
           }
-          request.sending = true;
-          request.submitted = true;
+          if (!terminal) {
+            request.sending = true;
+            request.submitted = true;
+          }
+        }
+        // The dispatch count is taken before this lock and released outside it: the connection
+        // monitor is only ever taken before a request's, never after it.
+        if (terminal) {
+          releaseDispatch(request);
+          continue;
         }
         try {
           if (packets != null) packets.send(request.frame);
@@ -704,17 +1023,13 @@ public final class Plowshare implements AutoCloseable {
                   transport.getMessage())
               : failure;
     }
+    releaseDispatch(request);
     delivering.put(request.id, request.answer);
     pending.remove(request.id, request);
     outgoing.remove(request);
     if (request.timer != null) request.timer.cancel(false);
-    if (request.cancellation != null) {
-      try {
-        request.cancellation.close();
-      } catch (Exception impossible) {
-        throw new IllegalStateException(impossible);
-      }
-    }
+    if (request.pause != null) request.pause.cancel(false);
+    closeRegistration(request.cancellation);
     releaseBytes(request);
     completionExecutor.execute(
         () -> {
@@ -724,12 +1039,113 @@ public final class Plowshare implements AutoCloseable {
           } finally {
             delivering.remove(request.id, request.answer);
             completions.release();
+            pumpAdmission();
           }
         });
     synchronized (this) {
       reserved--;
     }
+    pumpAdmission();
     checkDrained();
+  }
+
+  /**
+   * Absorbs one {@code CAPACITY_EXHAUSTED} reply as flow control and paces a resubmission under the
+   * same request id, against the deadline already armed.
+   *
+   * <p>The dispatch count is released so other admitted work can transmit; the admission slot is
+   * kept so later arrivals cannot overtake this request. The server refused the work outright,
+   * having done none of it, which is the only reason resubmitting is not the replay this transport
+   * otherwise forbids.
+   */
+  private void refused(Pending request) {
+    int refusals;
+    synchronized (request) {
+      if (request.terminal) return;
+      // Cleared the moment the refusal is absorbed and before the pause, not at the top of the
+      // next attempt: the refused attempt left no work behind, so a deadline or a cancellation
+      // landing in the pause -- which is where it almost always lands -- is honestly
+      // NOT_SUBMITTED. Clearing it after the pause would report the weaker UNKNOWN instead.
+      request.submitted = false;
+      refusals = request.refusals++;
+    }
+    releaseDispatch(request);
+    ScheduledFuture<?> pause =
+        CLOCK.schedule(() -> resubmit(request), pauseNanos(refusals), TimeUnit.NANOSECONDS);
+    boolean terminal;
+    synchronized (request) {
+      terminal = request.terminal;
+      if (!terminal) request.pause = pause;
+    }
+    if (terminal) pause.cancel(false);
+  }
+
+  /**
+   * The pause owed for the refusals so far: half of the ceiling fixed and half random, so a client
+   * always pauses and clients released together never retry in lockstep.
+   *
+   * <p>The exponent is a pacing input, not a bound. The bound is the deadline armed at the first
+   * transmit, which is already in force here, so backoff time and the server's own processing time
+   * both count against the caller's original timeout and a request refused over and over ends in a
+   * timeout rather than retrying forever. There is no retry ceiling and none is wanted.
+   */
+  private long pauseNanos(int refusals) {
+    long ceiling =
+        Math.min(
+            RESUBMIT_BACKOFF_CAP.toNanos(),
+            RESUBMIT_BACKOFF_BASE.toNanos() << Math.min(refusals, 16));
+    return ceiling / 2 + (long) (ceiling * Math.clamp(random.getAsDouble(), 0.0, 1.0) / 2);
+  }
+
+  /**
+   * Rejoins the back of the dispatch queue once a refusal's pause has been waited out.
+   *
+   * <p>The previous attempt's frame and byte charge were released as soon as it was written, so the
+   * frame is re-encoded from the request's own envelope and its bytes charged again here. The
+   * encoding is deterministic -- the same fields, the same id, the same mapper -- and its length is
+   * checked against the charge the request was admitted under rather than assumed. The connection
+   * bound is re-checked too: a resubmission is new outgoing work and is refused like any other if
+   * the connection cannot hold it.
+   */
+  private void resubmit(Pending request) {
+    String frame;
+    try {
+      frame = JSON.writeValueAsString(request.envelope);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      // The same envelope already encoded once, at admission.
+      detach(
+          request,
+          null,
+          new TransportException(
+              Delivery.NOT_SUBMITTED, "Resubmitted request could not be encoded again"));
+      return;
+    }
+    Throwable failure = null;
+    synchronized (this) {
+      synchronized (request) {
+        if (request.terminal) return;
+        request.pause = null;
+        if (closed || lost)
+          failure =
+              new TransportException(
+                  Delivery.NOT_SUBMITTED, "Connection closed while pacing a resubmission");
+        else if (frame.getBytes(java.nio.charset.StandardCharsets.UTF_8).length != request.bytes)
+          failure =
+              new TransportException(
+                  Delivery.NOT_SUBMITTED, "Resubmitted request did not re-encode to its own size");
+        else if (queuedBytes + request.bytes > MAX_QUEUED_BYTES || !reserveProcess(request.bytes))
+          failure =
+              new TransportException(Delivery.NOT_SUBMITTED, "Request byte capacity exceeded");
+        else {
+          queuedBytes += request.bytes;
+          request.released = false;
+          request.frame = frame;
+          if (!outgoing.offer(request))
+            failure = new IllegalStateException("Reserved writer capacity unavailable");
+        }
+      }
+    }
+    if (failure != null) detach(request, null, failure);
   }
 
   private void checkDrained() {
@@ -828,6 +1244,10 @@ public final class Plowshare implements AutoCloseable {
                 Delivery.INVALID_RESPONSE, "unreadable Plowshare response; outcome is unknown"));
         return;
       }
+      if (CAPACITY_EXHAUSTED.equals(outcome.get("code").asText()) && waiting.absorbs) {
+        refused(waiting);
+        return;
+      }
       detach(
           waiting,
           new Reply(
@@ -856,6 +1276,7 @@ public final class Plowshare implements AutoCloseable {
     }
     if (packets != null) packets.close();
     writer.interrupt();
+    releaseParked();
     for (Pending waiting : pending.values())
       detach(
           waiting,

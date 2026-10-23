@@ -90,9 +90,13 @@ class AsyncExchangeTest {
       var api = new AdministrationClient(client);
       List<CompletionStage<AdministrationClient.Status>> calls = new ArrayList<>();
       for (int i = 0; i < 64; i++) calls.add(api.statusAsync());
+      // The non-blocking form: the waiting form would park here rather than fail, which is what
+      // a_request_at_the_window_bound_waits_instead_of_failing covers.
       assertEquals(
           Plowshare.Delivery.NOT_SUBMITTED,
-          assertInstanceOf(Plowshare.TransportException.class, failure(api.statusAsync()))
+          assertInstanceOf(
+                  Plowshare.TransportException.class,
+                  failure(api.statusAsync(RequestOptions.nonBlocking(Duration.ofSeconds(3)))))
               .delivery());
       fixture.take();
       client.closeAsync().toCompletableFuture().get(3, TimeUnit.SECONDS);
@@ -123,9 +127,13 @@ class AsyncExchangeTest {
       for (int i = 0; i < 64; i++)
         fixture.answer(fixture.take(), Map.of("handle", "blocked", "serverAdmin", false));
       assertTrue(entered.await(3, TimeUnit.SECONDS));
+      // The non-blocking form still fails such a call immediately, which is the escape a
+      // continuation holding a permit has from parking behind itself.
       assertEquals(
           Plowshare.Delivery.NOT_SUBMITTED,
-          assertInstanceOf(Plowshare.TransportException.class, failure(api.statusAsync()))
+          assertInstanceOf(
+                  Plowshare.TransportException.class,
+                  failure(api.statusAsync(RequestOptions.nonBlocking(Duration.ofSeconds(3)))))
               .delivery());
       client.closeAsync().toCompletableFuture().get(3, TimeUnit.SECONDS);
     } finally {
@@ -155,7 +163,8 @@ class AsyncExchangeTest {
   }
 
   @Test
-  void queuedCancellationAndDeadlineDoNotWaitForHeldSegmentCredits() throws Exception {
+  void queuedCancellationDoesNotWaitForHeldSegmentCreditsAndQueuedTimeIsUncharged()
+      throws Exception {
     try (var server = new MockWebServer()) {
       var packets = new ArrayBlockingQueue<JsonNode>(8);
       server.enqueue(
@@ -192,15 +201,24 @@ class AsyncExchangeTest {
         assertEquals(
             Plowshare.Delivery.NOT_SUBMITTED,
             assertInstanceOf(Plowshare.TransportException.class, failure(queued)).delivery());
-        var expired =
+        // A request still in the writer queue has not been transmitted, so it has no deadline to
+        // expire: its own allowance is unspent until the writer arms it at the write. Time held
+        // behind a writer waiting on segment credit is charged against nothing, and a close is
+        // what settles such a request.
+        var queuedBehindCredit =
             new ScheduleClient(client)
                 .listPageAsync(
                     "fixture", null, 50, RequestOptions.defaults(Duration.ofMillis(100)));
-        assertEquals(
-            Plowshare.Delivery.NOT_SUBMITTED,
-            assertInstanceOf(Plowshare.TransportException.class, failure(expired)).delivery());
+        Thread.sleep(400);
+        assertFalse(
+            queuedBehindCredit.toCompletableFuture().isDone(),
+            "queued time was charged against the request deadline");
         assertTrue(packets.isEmpty());
         client.closeAsync().toCompletableFuture().get(3, TimeUnit.SECONDS);
+        assertEquals(
+            Plowshare.Delivery.NOT_SUBMITTED,
+            assertInstanceOf(Plowshare.TransportException.class, failure(queuedBehindCredit))
+                .delivery());
         assertEquals(
             Plowshare.Delivery.UNKNOWN,
             assertInstanceOf(Plowshare.TransportException.class, failure(first)).delivery());
@@ -267,6 +285,178 @@ class AsyncExchangeTest {
     }
   }
 
+  @Test
+  void a_request_at_the_window_bound_waits_instead_of_failing() throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      var api = new AdministrationClient(client);
+      var held = api.statusAsync().toCompletableFuture();
+      var first = fixture.take();
+      var parked = api.statusAsync().toCompletableFuture();
+      assertNull(
+          fixture.requests.poll(300, TimeUnit.MILLISECONDS),
+          "a request at the window bound must park rather than over-submit");
+      assertFalse(parked.isDone(), "a full window is flow control, not a fault");
+      fixture.answer(first, Map.of("handle", "held", "serverAdmin", false));
+      assertEquals("held", held.get(3, TimeUnit.SECONDS).handle());
+      fixture.answer(fixture.take(), Map.of("handle", "parked", "serverAdmin", false));
+      assertEquals("parked", parked.get(3, TimeUnit.SECONDS).handle());
+    }
+  }
+
+  @Test
+  void a_refused_request_is_resubmitted_under_the_same_id_and_the_caller_sees_a_reply()
+      throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      // Jitter pinned to its fixed half: the pause is 50ms and nothing here waits on chance.
+      client.resubmitRandomness(() -> 0.0);
+      var api = new AdministrationClient(client);
+      var refused = api.statusAsync().toCompletableFuture();
+      var first = fixture.take();
+      // Parked for admission before the refusal. A refusal releases the dispatch count and
+      // keeps the admission slot, so the order must be A, A, B and never A, B, A.
+      var behind = api.statusAsync().toCompletableFuture();
+      fixture.reply(first, "CAPACITY_EXHAUSTED", null);
+      var retry = fixture.take();
+      assertEquals(
+          first.path("id").asText(),
+          retry.path("id").asText(),
+          "a refusal is resubmitted under the same request id");
+      fixture.answer(retry, Map.of("handle", "retried", "serverAdmin", false));
+      assertEquals("retried", refused.get(3, TimeUnit.SECONDS).handle());
+      var last = fixture.take();
+      assertNotEquals(first.path("id").asText(), last.path("id").asText());
+      fixture.answer(last, Map.of("handle", "behind", "serverAdmin", false));
+      assertEquals("behind", behind.get(3, TimeUnit.SECONDS).handle());
+    }
+  }
+
+  @Test
+  void repeated_refusals_end_in_the_callers_own_timeout_and_never_re_arm_the_deadline()
+      throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      fixture.refuseEverything = true;
+      client.resubmitRandomness(() -> 0.0);
+      long started = System.nanoTime();
+      var call =
+          client.requestAsync(
+              "admin.status", Map.of(), RequestOptions.defaults(Duration.ofMillis(400)));
+      var failure = assertInstanceOf(Plowshare.TransportException.class, failure(call));
+      long elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis();
+      // The pauses are 50, 100, 200 and 400ms, so the 400ms deadline expires inside one of
+      // them, never within 50ms of a transmit. A pause expiry is NOT_SUBMITTED exactly: the
+      // refused attempt released its dispatch count and the server did none of the work.
+      assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery(), failure.getMessage());
+      assertTrue(failure.getMessage().contains("deadline"), failure.getMessage());
+      assertTrue(
+          elapsed < 1500, "the deadline was re-armed or extended by a resubmission: " + elapsed);
+      assertTrue(fixture.requests.size() >= 2, "a refusal must be resubmitted at all");
+    }
+  }
+
+  @Test
+  void the_deadline_is_not_consumed_by_waiting_for_capacity() throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      var api = new AdministrationClient(client);
+      var held = api.statusAsync().toCompletableFuture();
+      var first = fixture.take();
+      var waiting =
+          api.statusAsync(RequestOptions.defaults(Duration.ofMillis(150))).toCompletableFuture();
+      // Four times its own timeout at the window bound. The deadline arms at the write, so
+      // none of this is charged against the time the server is given to answer.
+      Thread.sleep(600);
+      assertFalse(waiting.isDone(), "the wait for capacity consumed the request deadline");
+      fixture.answer(first, Map.of("handle", "held", "serverAdmin", false));
+      assertEquals("held", held.get(3, TimeUnit.SECONDS).handle());
+      fixture.answer(fixture.take(), Map.of("handle", "waiting", "serverAdmin", false));
+      assertEquals("waiting", waiting.get(3, TimeUnit.SECONDS).handle());
+    }
+  }
+
+  @Test
+  void the_non_blocking_form_still_fails_immediately_with_NOT_SUBMITTED() throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      var held = client.requestAsync("admin.status", Map.of());
+      var first = fixture.take();
+      var shed =
+          client.requestAsync(
+              "admin.status", Map.of(), RequestOptions.nonBlocking(Duration.ofSeconds(3)));
+      assertEquals(
+          Plowshare.Delivery.NOT_SUBMITTED,
+          assertInstanceOf(Plowshare.TransportException.class, failure(shed)).delivery());
+      fixture.answer(first, Map.of());
+      assertTrue(held.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
+      // The non-blocking form reports a refusal as an outcome rather than absorbing it.
+      var surfaced =
+          client.requestAsync(
+              "admin.status", Map.of(), RequestOptions.nonBlocking(Duration.ofSeconds(3)));
+      fixture.reply(fixture.take(), "CAPACITY_EXHAUSTED", null);
+      assertEquals(
+          "CAPACITY_EXHAUSTED", surfaced.toCompletableFuture().get(3, TimeUnit.SECONDS).code());
+      assertNull(
+          fixture.requests.poll(300, TimeUnit.MILLISECONDS),
+          "the non-blocking form performs no resubmission");
+    }
+  }
+
+  @Test
+  void a_cancelled_wait_for_capacity_reports_NOT_SUBMITTED_and_frees_its_slot() throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      var held = client.requestAsync("admin.status", Map.of());
+      var first = fixture.take();
+      var cancellation = new RequestCancellation();
+      var parked =
+          client.requestAsync(
+              "admin.status", Map.of(), new RequestOptions(Duration.ofSeconds(3), cancellation));
+      cancellation.cancel();
+      var failure = assertInstanceOf(Plowshare.TransportException.class, failure(parked));
+      assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery());
+      assertTrue(failure.getMessage().contains("cancelled"), failure.getMessage());
+      assertNull(
+          fixture.requests.poll(200, TimeUnit.MILLISECONDS), "a cancelled wait writes nothing");
+      fixture.answer(first, Map.of());
+      assertTrue(held.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
+      // Cancellation is never a way to leak capacity: the window admits again.
+      var next = client.requestAsync("admin.status", Map.of());
+      fixture.answer(fixture.take(), Map.of());
+      assertTrue(next.toCompletableFuture().get(3, TimeUnit.SECONDS).successful());
+    }
+  }
+
+  @Test
+  void the_dispatch_negotiation_is_not_resubmitted_when_refused() throws Exception {
+    try (var fixture = new Fixture(64, true)) {
+      var opening = fixture.open(Plowshare.DispatchMode.CONCURRENT);
+      assertInstanceOf(IOException.class, failure(opening));
+      // A second dispatch selection on one connection is a protocol violation, so a refused
+      // negotiation fails honestly instead of being paced and retried.
+      Thread.sleep(400);
+      assertEquals(1, fixture.negotiations, "a refused negotiation must never be resubmitted");
+    }
+  }
+
+  @Test
+  void callers_parked_for_capacity_are_released_when_the_connection_closes() throws Exception {
+    try (var fixture = new Fixture(1);
+        var client = fixture.connect(Plowshare.DispatchMode.CONCURRENT)) {
+      var held = client.requestAsync("admin.status", Map.of());
+      fixture.take();
+      var parked = client.requestAsync("admin.status", Map.of()).toCompletableFuture();
+      assertFalse(parked.isDone());
+      // A parked caller has no deadline of its own, so a close is what must release it.
+      var drained = client.closeAsync();
+      var failure = assertInstanceOf(Plowshare.TransportException.class, failure(parked));
+      assertEquals(Plowshare.Delivery.NOT_SUBMITTED, failure.delivery());
+      assertInstanceOf(Plowshare.TransportException.class, failure(held));
+      drained.toCompletableFuture().get(3, TimeUnit.SECONDS);
+    }
+  }
+
   private static Throwable failure(CompletionStage<?> stage) throws Exception {
     var thrown =
         assertThrows(
@@ -283,7 +473,18 @@ class AsyncExchangeTest {
     volatile WebSocket socket;
     volatile int negotiations;
 
+    /** Answers every application frame CAPACITY_EXHAUSTED as it arrives, after recording it. */
+    volatile boolean refuseEverything;
+
     Fixture() {
+      this(64, false);
+    }
+
+    Fixture(int maxPending) {
+      this(maxPending, false);
+    }
+
+    Fixture(int maxPending, boolean refuseNegotiation) {
       server.enqueue(
           new MockResponse()
               .withWebSocketUpgrade(
@@ -301,10 +502,21 @@ class AsyncExchangeTest {
                           negotiations++;
                           assertEquals(
                               "concurrent-v1", request.path("payload").path("mode").asText());
-                          answer(
-                              request,
-                              Map.of("mode", "concurrent-v1", "maxPending", 64, "maxIdBytes", 128));
-                        } else requests.add(request);
+                          if (refuseNegotiation) reply(request, "CAPACITY_EXHAUSTED", null);
+                          else
+                            answer(
+                                request,
+                                Map.of(
+                                    "mode",
+                                    "concurrent-v1",
+                                    "maxPending",
+                                    maxPending,
+                                    "maxIdBytes",
+                                    128));
+                          return;
+                        }
+                        requests.add(request);
+                        if (refuseEverything) reply(request, "CAPACITY_EXHAUSTED", null);
                       } catch (IOException failure) {
                         throw new AssertionError(failure);
                       }
@@ -312,17 +524,19 @@ class AsyncExchangeTest {
                   }));
     }
 
-    Plowshare connect(Plowshare.DispatchMode mode) throws Exception {
+    CompletionStage<Plowshare> open(Plowshare.DispatchMode mode) {
       return Plowshare.connectAsync(
-              server.url("/").toString(),
-              "fixture",
-              "async-fixture",
-              Duration.ofSeconds(5),
-              null,
-              Plowshare.TransportMode.LEGACY,
-              mode)
-          .toCompletableFuture()
-          .get(3, TimeUnit.SECONDS);
+          server.url("/").toString(),
+          "fixture",
+          "async-fixture",
+          Duration.ofSeconds(5),
+          null,
+          Plowshare.TransportMode.LEGACY,
+          mode);
+    }
+
+    Plowshare connect(Plowshare.DispatchMode mode) throws Exception {
+      return open(mode).toCompletableFuture().get(3, TimeUnit.SECONDS);
     }
 
     JsonNode take() throws InterruptedException {
