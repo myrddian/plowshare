@@ -129,12 +129,82 @@ escalation, and the upload is legitimately authorized as a personal write. But
 two gates now give different answers about the same scope, and the gate pinned
 in `LiveAccountKnowledgePermissionsPinTest` is not the only way into it.
 
-**What is undecided, and needs a person.** Which scope a personal document
-*should* carry is a design question the data cannot answer: intent was not
-recorded, and both shapes exist. The user's ruling is that there must be exactly
-one resolution and one input for personal. Whichever is chosen, the 50 and the
-28 cannot both be right, and a migration must say what happens to the losing
-set.
+### The decision, given 23 October 2026
+
+**A personal space is a project.** There is nothing special about it in the
+core; the specialness is workflows and tooling around it, mostly outside
+Plowshare itself — the same relationship Applications have to Projects.
+
+So **there is no personal tier.** `kind:personal` is *shorthand* for "the
+personal project this principal has access to", and it resolves to that
+project's address. For a service account running a project, that principal's
+"personal" is that Project or Application. A "personal memory" is therefore
+just a memory in your personal project, and memories keep two real tiers.
+
+That settles which of the two observed shapes is right:
+
+| spelling | scope | project | verdict |
+|---|---|---|---|
+| `{kind:"project", project:"personal:<hex>"}` | `PERSONAL` | real | **correct** — project-shaped |
+| `{kind:"personal"}` | `ACCOUNT_KNOWLEDGE` | null | **the break** |
+
+The 28 `PERSONAL` rows are right. The 50 `ACCOUNT_KNOWLEDGE` rows are what
+moves. And the two things `ACCOUNT` conflates are now named: the shared global
+knowledge destination, and an account's own space — where the second should not
+be an account-knowledge scope at all, because it is a project.
+
+**Consequence: the seven non-global `ACCOUNT_KNOWLEDGE` scopes become
+vestigial.** One exists per account (admin, enzo, client-evaluation,
+furrow-web, and three workers). Under this model they hold documents belonging
+in those accounts' personal projects. Only GLOBAL's `…005` is a real
+destination.
+
+## The sweep: make everything resolve a PERSONAL selection the way #104 does
+
+PR #104 established the pattern at two sites, and the work is applying it
+consistently:
+
+```diff
+- Home home = project == null ? Home.global() : Home.of(project);
++ Home home = InformationAccess.executionHome(context);
+```
+
+`executionHome` resolves PERSONAL to `Home.of(PersonalSpaces.name(account))` —
+the personal *project address* — which is exactly the shorthand-resolves-to-a-
+project model above. Six decision sites in `information/` were left unconverted,
+and they are not equally convertible:
+
+| site | sees an `InformationContext`? | consequence |
+|---|---|---|
+| `InformationStageHooks:81,182` | yes | likely mechanical, as #104 |
+| `InformationLifecycle:577,615,680` | **no** | blocked; works from `repository.projectName(lease.project())` |
+| `BoundPreparationEmbeddings:74` | **no** | blocked; same shape |
+
+A site with no context cannot resolve the shorthand, because a null column
+cannot distinguish a personal space from no project. **So the ordering is
+forced**, and the storage change must come first.
+
+Outside `information/`, four sites need judging individually rather than
+converting — each may legitimately mean the global memory tier:
+`Orchestrations.homeOf` (a child inherits its parent's tier; correct if parents
+carry a resolved project), `ImageSidecars:76`, `SkillFileHooks:120`,
+`BoundEmbeddingRepairs:44`.
+
+### `namespace()` is the root, and is not a free edit
+
+```java
+case PERSONAL -> "account:" + account;          // sends PERSONAL into the ACCOUNT family
+case PROJECT  -> "project:" + selection.project();
+```
+
+Under the decision above this should resolve to the personal project's address,
+`"project:" + PersonalSpaces.name(account)`. Two cautions:
+
+1. `namespace()` is documented as the "stable destination locator for
+   receipts", so changing it re-homes existing receipts.
+2. `information_resources_home_name` is `UNIQUE (home_scope_id, source_name)`.
+   A document may already exist under **both** spellings, so the migration has
+   a collision case to decide, not merely a re-point.
 
 ### V157 remains the template for adding a scope column
 
