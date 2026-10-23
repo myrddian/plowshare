@@ -141,6 +141,12 @@ addresses.
 | `go` | yes | `NotSubmitted` | **at admission** | unhandled |
 | `dotnet` | max 64 | `NotSubmitted` | **at admission** | unhandled |
 
+**This table is the baseline, not the current state.** It records what each SDK did before the work
+and is kept as the evidence of the original fault. As implemented: `go`, `python` and `java` now wait
+by default, arm the deadline at the write and absorb `CAPACITY_EXHAUSTED`, each with an explicit
+non-blocking form; `typescript` gained the non-blocking form it was missing, which `node` inherits
+through `plowshare-client-ts`; `dotnet` is unchanged and deferred for lack of a toolchain.
+
 `sdk/node` imports `plowshare-client-ts/binding/connection`, so it inherits the reference behaviour
 and needs verification rather than implementation. Four SDKs need work: Java, Python, Go, .NET.
 

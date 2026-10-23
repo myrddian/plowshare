@@ -453,7 +453,13 @@ git commit -m "fix: Java SDK waits for dispatch capacity and arms the deadline a
 
 - [ ] **Step 1: Run the full harness**
 
-Run: `./gradlew sdkCheck`
+Run: `node scripts/sdk-conformance.mjs --languages=node`, then `--languages=go` and
+`--languages=python`, plus `./gradlew :plowshare-client-ts:check` and
+`:plowshare-client-node:check` if the shared binding changed.
+
+**Not `./gradlew sdkCheck`.** That was this step's original instruction and it is wrong while .NET is
+deferred: `sdkCheck` depends on `sdkBuild`, which fails for the absent `dotnet` toolchain before any
+language runs. The per-language drivers are the equivalent coverage for the four SDKs that can run.
 Expected: PASS for all four languages.
 
 - [ ] **Step 2: Establish that `node` exercises the inherited path**
