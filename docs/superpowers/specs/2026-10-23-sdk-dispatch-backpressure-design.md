@@ -196,12 +196,24 @@ treats a second dispatch selection on one connection as a protocol violation, so
 convert a refusal into a teardown. A refused negotiation fails honestly. This matches the reference
 and is not a per-SDK choice.
 
-**A refused request releases its window slot while it backs off**, and rejoins the queue at the
-back. The reference decrements its in-flight count on refusal and announces the freed slot so other
-parked work can use it. This matters for correctness in two directions: holding the slot would idle
-capacity the server has explicitly said it can take, and failing to release it would let a
-long-backing-off request be counted against `maxPending` forever. Admission is FIFO and a
-resubmission does not keep its old queue position.
+**A refused request releases its dispatch count but keeps its admission slot.** This paragraph
+previously said the opposite — that it releases its window slot and rejoins the queue at the back —
+which was wrong, and wrong in a way four implementations would have inherited. The reference keeps
+two counters: `admitted` with `slotWaiters` for the window, and `dispatched` with `launchWaiters`
+for work in flight. A refusal decrements `dispatched` only (`connection.ts:669`); `admitted` is
+released at settlement (`:543`, `:566`). So the refused request retains its place in the window and
+rejoins the back of the *dispatch* queue, not the admission queue.
+
+The observable consequence, which a scenario pins: with a window of 1, request A refused and
+request B parked for admission *before* that refusal, the order is **A, A, B** — B waits through A's
+backoff and A's successful retry. An implementation that released admission on refusal would
+produce A, B, A.
+
+Keeping admission is also the safer behaviour, not merely the shipped one. Releasing it would let
+newly arriving requests overtake a backing-off request repeatedly, which is exactly the starvation
+the FIFO rule exists to prevent; retaining it means a refused caller cannot be pushed to the back of
+the queue by work that arrived after it. What a refusal must not do is hold the *dispatch* count,
+because that would idle capacity the server has explicitly said it can take.
 
 **Every request in these four SDKs has a deadline**, so the question of an unbounded no-deadline
 retry loop does not arise here. Each carries a connection-level timeout and falls back to it
@@ -266,7 +278,8 @@ The contract above is the thing to test, in each SDK, with its own framework:
 - Resubmission pacing always pauses and is never lockstep across callers.
 - Repeated refusals end in a timeout rather than retrying forever, and the deadline is not re-armed
   per attempt.
-- A request refused and backing off does not occupy a window slot.
+- A request refused and backing off releases its dispatch count, retains its admission slot, and is
+  not overtaken by work that parked for admission before the refusal.
 - The dispatch handshake is not resubmitted on refusal.
 - A wait for local capacity returns promptly when cancelled, reports `NOT_SUBMITTED` in the
   language's own cancellation currency, and leaves in-flight accounting unchanged.

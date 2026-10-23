@@ -46,10 +46,10 @@ the task that owns the code. Items 1 and 4 are driven by harness scenarios from 
 and 5 are **per-SDK cases every one of Tasks 2-5 must add**, because each language's cancellation,
 transmit point and close path differ.
 
-1. **A backing-off request starved by later arrivals.** It released its slot; if it rejoins anywhere
-   but the back of a FIFO, or if new calls can overtake it indefinitely, a refused caller can wait
-   forever inside a bound that is supposed to be its own deadline. → Task 1 scenario, asserted in
-   Tasks 2-5.
+1. **A backing-off request starved by later arrivals.** It keeps its admission slot precisely so
+   this cannot happen; an implementation that releases admission on refusal lets every new arrival
+   overtake it, and a refused caller can then wait out its whole deadline behind work that arrived
+   later. → Task 1 `capacity-slot-order`, asserted in Tasks 2-5.
 2. **Cancellation racing the socket write.** Cancel firing as the frame goes out must not report
    `NOT_SUBMITTED` for something that was sent, double-release a slot, or leave accounting skewed.
    → Tasks 2-5.
@@ -85,9 +85,11 @@ behaviours in JUnit.
     timeout rather than hanging.
   - `capacity-window-one` — advertises `maxPending:1`, then holds the first request open until a
     second has been submitted. Proves the window is honoured and the second call waits.
-  - `capacity-slot-order` — with `maxPending:1`, refuses request A once, then expects A before any
-    request submitted after A's refusal. Proves a backing-off request rejoins at the back of the
-    queue but is not overtaken indefinitely (Review Focus 1).
+  - `capacity-slot-order` — with `maxPending:1`, request B parks for admission, then request A is
+    refused once. The order is `A, A, B`: a refusal releases the dispatch count but keeps the
+    admission slot, so A is not overtaken by B even though B parked first (Review Focus 1). See the
+    spec's corrected slot-release paragraph; an implementation that releases admission on refusal
+    produces `A, B, A` and fails this.
   - `capacity-handshake-refuse` — refuses the `control` negotiation with `CAPACITY_EXHAUSTED`.
     Proves no SDK resubmits a handshake; the harness fails the case if it sees a second selection.
   - `capacity-close-while-parked` — with `maxPending:1`, holds the first request and closes the
@@ -148,6 +150,13 @@ git commit -m "test: define the dispatch backpressure contract in the SDK confor
 - Consumes: Task 1's scenario names.
 - Produces: nothing other SDKs depend on. Go's two forms are its own call.
 
+- [ ] **Step 0: Skip the capacity cases in the generic loop first**
+
+The fixture marks the backpressure cases `capacity: true` so a driver's generic case loop can skip
+them and drive them deliberately instead. Until that skip is added this driver aborts on the first
+one and every unrelated assertion after it stops running. Add the skip before anything else, exactly
+as the node driver does, and confirm the rest of the existing suite still passes.
+
 - [ ] **Step 1: Move the deadline to transmit**
 
 `admit()` currently returns `&admission{owner: c, deadline: time.Now().Add(c.timeout)}` (`:120`), so
@@ -196,6 +205,12 @@ git commit -m "fix: Go SDK waits for dispatch capacity and arms the deadline at 
 **Interfaces:**
 - Consumes: Task 1's scenario names.
 
+- [ ] **Step 0: Skip the capacity cases in the generic loop first**
+
+The fixture marks the backpressure cases `capacity: true`. Add the skip to this driver's generic case
+loop before anything else, as the node driver does, or the driver aborts on the first one and every
+unrelated assertion after it stops running.
+
 - [ ] **Step 1: Move the deadline to transmit**
 
 `:55` starts a `Stopwatch` when the admission is constructed and `:61` throws "Request deadline
@@ -241,6 +256,12 @@ git commit -m "fix: .NET SDK waits for dispatch capacity and arms the deadline a
 
 **Interfaces:**
 - Consumes: Task 1's scenario names.
+
+- [ ] **Step 0: Skip the capacity cases in the generic loop first**
+
+The fixture marks the backpressure cases `capacity: true`. Add the skip to this driver's generic case
+loop before anything else, as the node driver does, or the driver aborts on the first one and every
+unrelated assertion after it stops running.
 
 - [ ] **Step 1: Move the deadline to transmit**
 
