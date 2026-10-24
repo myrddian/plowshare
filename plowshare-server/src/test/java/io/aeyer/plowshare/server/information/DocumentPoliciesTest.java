@@ -78,6 +78,10 @@ class DocumentPoliciesTest {
     jdbc.update(
         "INSERT INTO admins (handle, password_hash) VALUES"
             + " ('alice', 'hash'), ('bob', 'hash'), ('operator', 'hash')");
+    // A personal selection resolves to the account's personal project, so these fixtures need
+    // that identity to exist as production provisions it.
+    for (String handle : java.util.List.of("alice", "bob", "operator"))
+      io.aeyer.plowshare.server.testing.AuthorityFixtures.personalIdentity(jdbc, handle);
     jdbc.update("INSERT INTO projects (name) VALUES ('research')");
     jdbc.update(
         "INSERT INTO project_members (project_id, handle)"
@@ -193,7 +197,13 @@ class DocumentPoliciesTest {
         CallerFault.class,
         () -> access.resolve("alice", InformationContext.Selection.project("unknown")));
     assertEquals(List.of("alice"), members.members("research"));
-    assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM projects", Integer.class));
+    // A refused selection must create nothing. Name the projects rather than count them: personal
+    // spaces are projects too, so every account the fixture provisions adds a row that has nothing
+    // to do with this invariant.
+    assertEquals(
+        List.of("research"),
+        jdbc.queryForList(
+            "SELECT name FROM projects WHERE personal_owner IS NULL ORDER BY name", String.class));
   }
 
   @Test
@@ -254,7 +264,7 @@ class DocumentPoliciesTest {
   }
 
   @Test
-  void audit_failure_rolls_back_the_ownership_change() {
+  void a_refused_assignment_leaves_no_ownership_change_or_audit_row() {
     UUID id = document("legacy");
     var missingActor =
         new DocumentPolicyAssignments(
@@ -264,8 +274,13 @@ class DocumentPoliciesTest {
             access,
             CLOCK,
             "missing");
+    // An unregistered operator used to get as far as the audit insert and be stopped by its
+    // foreign key. The gate now resolves the actor's own omitted selection first, and that is the
+    // actor's personal project, which an account outside the registry does not have — so the
+    // refusal arrives earlier and as a CallerFault. What is pinned either way is that a refused
+    // assignment writes nothing: the ownership change and its audit row stand or fall together.
     assertThrows(
-        DataIntegrityViolationException.class,
+        CallerFault.class,
         () ->
             missingActor.assign(
                 "missing",
@@ -634,8 +649,10 @@ class DocumentPoliciesTest {
           return null;
         });
     assertEquals(List.of(revision), inputs.inputsOf(recipient, "alice"));
+    // A personal selection is an alias for the account's personal project, so the scope the job
+    // records is that project. Nothing here is account-scoped any more.
     assertEquals(
-        "personal",
+        "project",
         jdbc.queryForObject(
             "SELECT scope FROM information_job_inputs WHERE job_id=?", String.class, recipient));
     assertFalse(inputs.logAllowed(recipient, "bob"));
@@ -1229,8 +1246,11 @@ class DocumentPoliciesTest {
     assertThrows(
         NotFoundFault.class,
         () -> catalogue.requireReadable(access.resolve("bob", null), revision));
+    // Uploaded under a personal selection, which resolves to the account's personal project, so
+    // the policy row is an ordinary project policy with that project set. 'personal' as a stored
+    // visibility meant "no project", and an account's information now always has one.
     assertEquals(
-        "personal",
+        "project",
         jdbc.queryForObject(
             "SELECT visibility FROM information_document_policies WHERE document_id=?",
             String.class,

@@ -55,4 +55,25 @@ public final class AuthorityFixtures {
               jdbc.execute("ALTER TABLE authority_grants ENABLE TRIGGER authority_grant_insert");
             });
   }
+
+  /**
+   * Provisions an account's personal space the way the server does, so a fixture can make a
+   * personal selection.
+   *
+   * <p>A personal selection is an alias for the account's personal project, so it is governed by
+   * that project's permissions like any other. The owner's grant arrives with the identity rather
+   * than with storage, which is what {@code PersonalSpaces.ensureIdentity} does and what this
+   * mirrors — reserve the project, then grant its owner. No union is created: a fixture that only
+   * reads or writes information needs the identity, not storage.
+   *
+   * <p>Without this, {@code access.resolve(handle, null)} resolves to a personal project that does
+   * not exist and is refused for holding no role, which is not what such a test is about.
+   */
+  public static void personalIdentity(JdbcTemplate jdbc, String handle) {
+    var repository =
+        new io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository(
+            Objects.requireNonNull(jdbc, "jdbc"));
+    long project = repository.reserve(Objects.requireNonNull(handle, "handle")).id();
+    repository.owns(project, handle);
+  }
 }

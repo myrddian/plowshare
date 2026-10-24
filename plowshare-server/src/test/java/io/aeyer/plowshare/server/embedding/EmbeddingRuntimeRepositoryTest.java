@@ -55,6 +55,8 @@ class EmbeddingRuntimeRepositoryTest {
     spaces = new JdbcEmbeddingSpaceRepository(jdbc);
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES('alice','fixture'),('bob','fixture')");
+    for (String handle : java.util.List.of("alice", "bob"))
+      io.aeyer.plowshare.server.testing.AuthorityFixtures.personalIdentity(jdbc, handle);
   }
 
   @BeforeEach
@@ -214,7 +216,11 @@ class EmbeddingRuntimeRepositoryTest {
         new RetrievalService(store, mock(EmbeddingClient.class), "unused legacy", 768)
             .checkingConfiguration();
     service.useDualEmbeddings(dual);
-    var access = new InformationAccess(new EffectiveProjectPermissions(mock(ProjectMembers.class)));
+    // A personal selection is an alias for the account's personal project, so it is checked as an
+    // ordinary project read. The real membership source answers from the rows the fixture
+    // provisioned; a mock would deny alice her own space and say nothing about embeddings.
+    var access =
+        new InformationAccess(new EffectiveProjectPermissions(new JdbcProjectMembers(jdbc)));
     var personal = access.resolve("alice", InformationContext.Selection.personal());
     var reader = service.scoped(access, personal);
     assertEquals(
