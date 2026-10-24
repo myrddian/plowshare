@@ -9,6 +9,7 @@ import { FileStores } from 'plowshare-client-node/filestores';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { decodeDesktopRequest } from './request-boundary.ts';
 import { WorkspacePage } from './workspace-page.ts';
+import { Telemetry } from './telemetry.ts';
 import { JobJournal } from './job-store.ts';
 import { retainedReport } from './retained-report.ts';
 import type { LibraryView } from './library-shared.ts';
@@ -541,7 +542,10 @@ background(
         return new Response('Not found', { status: 404 });
       return net.fetch(pathToFileURL(join(__dirname, 'renderer', file)).href);
     });
-    ipcMain.handle('plowshare:request', async (event, value: unknown) => {
+    const dispatchRequest = async (
+      event: Electron.IpcMainInvokeEvent,
+      value: unknown,
+    ) => {
       const main =
         window && !window.isDestroyed() && event.sender === window.webContents;
       const held = [...trajectories.values()].find(
@@ -1275,6 +1279,89 @@ background(
           });
       }
       return client.dispatch(request);
+    };
+    // One row per command, joined by a correlation id the preload supplies. The surface and the
+    // main process's own duration are known only here; the issue and paint marks only in the
+    // renderer. Neither side can describe a slow command alone.
+    const telemetry = new Telemetry();
+    const observed = new Map<string, { surface: string; serverMs: number }>();
+    const surfaceOf = (
+      event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
+    ) => {
+      const sender = event.sender;
+      if (window && !window.isDestroyed() && sender === window.webContents)
+        return 'main';
+      for (const [view, page] of libraries)
+        if (!page.isDestroyed() && sender === page.webContents) return view;
+      for (const [view, page] of boards)
+        if (!page.isDestroyed() && sender === page.webContents)
+          return `board:${view}`;
+      if (
+        relayPage &&
+        !relayPage.isDestroyed() &&
+        sender === relayPage.webContents
+      )
+        return 'relay';
+      if (
+        procPage &&
+        !procPage.isDestroyed() &&
+        sender === procPage.webContents
+      )
+        return 'proc';
+      if (
+        usagePage &&
+        !usagePage.isDestroyed() &&
+        sender === usagePage.webContents
+      )
+        return 'usage';
+      for (const row of trajectories.values())
+        if (!row.window.isDestroyed() && sender === row.window.webContents)
+          return 'trajectory';
+      for (const page of activities.values())
+        if (!page.window.isDestroyed() && sender === page.window.webContents)
+          return 'activity';
+      return 'other';
+    };
+    ipcMain.handle(
+      'plowshare:request',
+      async (event, value: unknown, correlation: unknown) => {
+        if (!telemetry.enabled) return dispatchRequest(event, value);
+        const started = performance.now();
+        try {
+          return await dispatchRequest(event, value);
+        } finally {
+          // Bounded: a renderer that never reports back must not accumulate entries. The cap is
+          // generous next to any real concurrency and the oldest entry is the least useful.
+          if (observed.size > 256)
+            observed.delete(observed.keys().next().value as string);
+          observed.set(`${event.sender.id}:${String(correlation)}`, {
+            surface: surfaceOf(event),
+            serverMs: performance.now() - started,
+          });
+        }
+      },
+    );
+    ipcMain.on('plowshare:telemetry', (event, row: unknown) => {
+      if (!telemetry.enabled || row === null || typeof row !== 'object') return;
+      const sent = row as Record<string, unknown>;
+      const key = `${event.sender.id}:${String(sent['correlation'])}`;
+      const joined = observed.get(key);
+      observed.delete(key);
+      const number = (value: unknown) =>
+        typeof value === 'number' && Number.isFinite(value)
+          ? Math.round(value * 10) / 10
+          : null;
+      const replyMs = number(sent['replyMs']);
+      if (replyMs === null) return;
+      telemetry.record({
+        surface: joined?.surface ?? surfaceOf(event),
+        action: typeof sent['action'] === 'string' ? sent['action'] : 'unknown',
+        depth: typeof sent['depth'] === 'number' ? sent['depth'] : 0,
+        replyMs,
+        renderMs: number(sent['renderMs']),
+        serverMs: joined ? Math.round(joined.serverMs * 10) / 10 : null,
+        ok: sent['ok'] !== false,
+      });
     });
     openWindow();
     app.on('activate', () => {
