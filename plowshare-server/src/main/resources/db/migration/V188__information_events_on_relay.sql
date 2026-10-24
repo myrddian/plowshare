@@ -37,6 +37,33 @@ ALTER TABLE relay_admissions DROP CONSTRAINT relay_admissions_payload_kind_check
 ALTER TABLE relay_admissions ADD CONSTRAINT relay_admissions_payload_kind_check
     CHECK (payload_kind IN ('EMPTY','TEXT','SCHEDULE_DUE','LIFECYCLE','WAKE_REQUESTED','INFORMATION_CHANGED'));
 
+-- One definition of "this subscription's authority is still valid", so the consume gate and the
+-- wake-hint audience cannot drift apart.
+--
+-- Decision 0038 resolves a subscription's read authority once, at establishment, and records it in
+-- relay_subscription_authority; validity afterwards has three independent failure routes and all
+-- three must be checked. The consume gate needed one row's verdict and the hint fan-out needs the
+-- set of accounts whose verdict is VALID, and writing that condition twice is exactly the
+-- duplication decision 0037 exists to remove -- one layer down, where a drift between the two
+-- would mean hinting to an account the consume path refuses.
+--
+-- NULL inputs are NOT_ESTABLISHED rather than an error: an account that never established
+-- authority is indistinguishable from one whose record was withdrawn, and both must be refused the
+-- same way. The generation comparison is the real revocation; the age only caps the exposure when
+-- a revocation was missed, which is why it is a separate branch and not a substitute.
+CREATE FUNCTION relay_subscription_authority_validity(
+    recorded_generation UUID, current_generation UUID, established_at TIMESTAMPTZ,
+    maximum_age INTERVAL, now_at TIMESTAMPTZ) RETURNS TEXT LANGUAGE SQL IMMUTABLE AS $$
+    SELECT CASE
+        WHEN $1 IS NULL OR $2 IS NULL OR $3 IS NULL THEN 'NOT_ESTABLISHED'
+        WHEN $1 <> $2 THEN 'GENERATION_CHANGED'
+        WHEN $3 + $4 <= $5 THEN 'EXPIRED'
+        ELSE 'VALID' END;
+$$;
+
+COMMENT ON FUNCTION relay_subscription_authority_validity(UUID,UUID,TIMESTAMPTZ,INTERVAL,TIMESTAMPTZ) IS
+    'Whether an established Relay subscription authority is still valid, and if not, why (0038).';
+
 -- The revision's own event history, which is not delivery and not a per-subscriber inbox.
 -- information.status shows an owner what happened to their document, and that has to outlive a
 -- Relay topic's retention window -- four days by default -- and be answerable by revision, which a

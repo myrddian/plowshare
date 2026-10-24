@@ -86,6 +86,11 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
   }
 
   @Override
+  public java.util.List<String> audience(Relay.Scope scope, String topic) {
+    return authority.validReaders(new Relay.TopicKey(scope, topic), maximumAge, clock.get());
+  }
+
+  @Override
   public Relay.Read consume(String account, Request request, int limit) {
     var key = established(account, request);
     return relay.read(key, limit);

@@ -262,20 +262,6 @@ public final class JdbcRelayRepository implements RelayRepository {
   }
 
   @Override
-  public java.util.List<String> readers(Relay.TopicKey key) {
-    Objects.requireNonNull(key, "key");
-    // Bounded deliberately: this drives wake hints, and an unbounded fan-out of them would
-    // reintroduce exactly the per-account loop decision 0037 removed from the publish path.
-    return jdbc.queryForList(
-        "SELECT DISTINCT reader_account FROM relay_subscriptions"
-            + " WHERE scope_key=? AND topic=? AND reader_account IS NOT NULL"
-            + " ORDER BY reader_account LIMIT 1000",
-        String.class,
-        RelayScopeCodec.write(key),
-        key.name());
-  }
-
-  @Override
   public Relay.Read read(Relay.SubscriptionKey key, int limit) {
     Objects.requireNonNull(key, "key");
     RelayValues.limit(limit, 1000);

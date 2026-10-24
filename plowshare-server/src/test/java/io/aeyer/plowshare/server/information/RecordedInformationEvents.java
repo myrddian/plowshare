@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.protocol.Information;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,28 +22,17 @@ public final class RecordedInformationEvents implements InformationEvents {
     announced.add(event);
   }
 
+  /**
+   * Deliberately unimplemented. Reading an event feed is a question about delivery authority — who
+   * may receive an event for which scope — and this fake has no scopes, no subscriptions and no
+   * read authority to answer it with. Returning everything to everyone would make a test asserting
+   * "an account without access sees nothing" pass against an implementation that delivered to it.
+   * Such a test needs a real broker; {@code RelayInformationEventsDatabaseTest} is where it lives.
+   */
   @Override
-  public synchronized Information.Events read(InformationContext context, long after, int limit) {
-    var page = new ArrayList<Information.Event>();
-    long cursor = after;
-    for (long position = after + 1;
-        position <= announced.size() && page.size() < limit;
-        position++) {
-      var event = announced.get((int) position - 1);
-      cursor = position;
-      page.add(
-          new Information.Event(
-              position,
-              event.revision(),
-              event.generation(),
-              event.stage(),
-              event.action(),
-              event.detail() == null ? "" : event.detail(),
-              Instant.EPOCH,
-              context.corpus().documentType(),
-              null));
-    }
-    return new Information.Events(page, cursor);
+  public Information.Events read(InformationContext context, long after, int limit) {
+    throw new UnsupportedOperationException(
+        "an information event feed needs a real Relay broker, not a recording fake");
   }
 
   /** Everything announced since this fake was created, in announcement order. */

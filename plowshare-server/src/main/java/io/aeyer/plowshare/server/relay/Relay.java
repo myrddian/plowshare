@@ -65,17 +65,6 @@ public interface Relay {
    */
   Optional<Subscription> subscribeAsReader(SubscriptionKey key, Start start, String reader);
 
-  /**
-   * The accounts holding read-tier consumer groups on this topic, at most 1,000, in a stable order.
-   *
-   * <p>This is the audience of a topic as Relay already records it, resolved in one set-based read
-   * rather than by asking a permission predicate per candidate account. It reports who has a
-   * durable position, not who may read: a subscription's read authority was established when it was
-   * established and is re-checked on consumption, so this answers "who is listening" and is only
-   * safe for a wake hint, never for deciding disclosure.
-   */
-  List<String> readers(TopicKey key);
-
   /** Reads 1..1,000 retained publications after the seen position, reporting any expired gap. */
   Read read(SubscriptionKey key, int limit);
 

@@ -95,7 +95,8 @@ class RelayInformationEventsTest {
     when(relay.publish(eq(topic), any()))
         .thenAnswer(
             call -> new Relay.Publication(topic, 42, T0, call.getArgument(1, Relay.Draft.class)));
-    when(relay.readers(topic)).thenReturn(List.of("reader", "author"));
+    when(consumption.audience(new Relay.ProjectScope(7), TOPIC))
+        .thenReturn(List.of("reader", "author"));
 
     events.publish(occurrence("private processing details"));
 
@@ -117,7 +118,8 @@ class RelayInformationEventsTest {
                 "ready",
                 "private processing details",
                 T0));
-    // Recipients come from the topic's subscriptions, in one read, and only as a wake hint.
+    // The audience comes from Relay in one read, and only as a wake hint. It is the authorized
+    // audience and not the subscriber list: a hint names a revision, so sending one discloses.
     assertEquals(List.of("reader", "author"), hinted);
   }
 

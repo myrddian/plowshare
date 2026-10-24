@@ -114,22 +114,34 @@ public final class RelayInformationEvents implements InformationEvents {
             event.action(),
             event.detail(),
             publication.event().occurredAt()));
-    transactions.afterCommit(() -> hint(topic, event, publication.position()));
+    // The audience is resolved after commit, not captured during it, so a membership change
+    // committing in between withdraws the hint rather than being raced past by it.
+    transactions.afterCommit(() -> hint(resolved.scope(), event, publication.position()));
   }
 
   /**
-   * Wakes the accounts subscribed to this topic once the publication is committed.
+   * Wakes the topic's current audience once the publication is committed.
    *
-   * <p>This is the only fan-out left and it is a hint, not delivery: recipients come from Relay
-   * subscriptions in one set-based read, nothing is persisted per recipient, and a lost hint costs
-   * a reader only latency because its durable position still holds the event. {@link AccountPushes}
-   * never throws, and this runs after commit so it can neither roll back nor delay the mutation.
+   * <p>This is the only fan-out left and it is a hint, not delivery: the audience comes from Relay
+   * in one set-based read, nothing is persisted per recipient, and a lost hint costs a reader only
+   * latency because its durable position still holds the event. {@link AccountPushes} never throws,
+   * and this runs after commit so it can neither roll back nor delay the mutation.
+   *
+   * <p>The audience, not the subscriber list. A hint names a revision, its generation and a stream
+   * position, so sending one is a disclosure and is governed by the same invariant delivery is: no
+   * account may receive an information event for a scope it may not read. A {@code
+   * relay_subscriptions} row outlives the withdrawal of its authority — revocation removes the
+   * authority record and leaves the subscription — so hinting to every subscriber would keep
+   * telling a revoked account which document changed and when, while the consume path refused it.
+   * {@link RelayConsumption#audience} answers with the accounts whose authority is established and
+   * still valid, by the one definition the consume gate also uses.
    */
-  private void hint(Relay.TopicKey topic, Occurrence event, long position) {
+  private void hint(Relay.Scope scope, Occurrence event, long position) {
     var body =
         new AccountEvent.InformationChanged(
             position, event.revision(), Math.toIntExact(event.generation()));
-    for (String account : relay.readers(topic)) pushes.push(account, body);
+    for (String account : consumption.audience(scope, Relay.INFORMATION_CHANGED))
+      pushes.push(account, body);
   }
 
   @Override

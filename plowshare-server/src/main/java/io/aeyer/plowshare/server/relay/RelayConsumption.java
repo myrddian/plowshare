@@ -38,6 +38,24 @@ public interface RelayConsumption {
   Relay.Subscription subscribe(String account, Request request, Relay.Start start);
 
   /**
+   * The accounts currently entitled to receive from this topic: those whose subscription authority
+   * is established and still valid, under this broker's configured window.
+   *
+   * <p>It takes no account because it acts for none. It answers "who may be told that something
+   * changed", which a server-side publisher asks before sending a wake hint — and a hint is a
+   * disclosure, so the answer has to be the audience and not merely the subscriber list. A
+   * subscription row outlives the withdrawal of its authority; this does not report that account.
+   *
+   * <p>One set-based read. Never a permission predicate per candidate account: that is the shape
+   * that cost 3,996 ms for a single information event and is what decision 0037 removed.
+   *
+   * <p>An unregistered topic is an empty audience rather than a fault: nothing can be entitled to a
+   * topic that does not exist, and the caller is a publisher that has nothing to be refused. The
+   * scope is the typed one the publisher already holds, so no name has to be translated back.
+   */
+  java.util.List<String> audience(Relay.Scope scope, String topic);
+
+  /**
    * Reads at most {@code limit} (1..1,000) retained publications after the seen position, reporting
    * any expired gap. Reading never advances a position, so it writes no consumer state.
    *

@@ -36,11 +36,6 @@ public interface RelayRepository {
   Optional<Relay.Subscription> subscribeAsReader(
       Relay.SubscriptionKey key, Relay.Start start, String reader, Instant now);
 
-  /**
-   * At most 1,000 distinct read-tier owners of consumer groups on this topic, ordered by handle.
-   */
-  List<String> readers(Relay.TopicKey key);
-
   /** Returns a coherent bounded log/cursor snapshot; no position or timestamp changes. */
   Relay.Read read(Relay.SubscriptionKey key, int limit);
 

@@ -1808,22 +1808,11 @@ class DocumentPoliciesTest {
                 "UPDATE information_revisions SET source_bytes=? WHERE id=?",
                 "replaced".getBytes(),
                 revision));
-    var feed =
-        io.aeyer.plowshare.server.information.InformationFixtures.view(
-            catalogue.events(alice, 0, 100));
-    assertFalse(((List<?>) feed.get("events")).isEmpty());
-    assertTrue(
-        ((List<?>)
-                io.aeyer.plowshare.server.information.InformationFixtures.view(
-                        catalogue.events(access.resolve("bob", null), 0, 100))
-                    .get("events"))
-            .isEmpty());
-    assertTrue(
-        ((List<?>)
-                io.aeyer.plowshare.server.information.InformationFixtures.view(
-                        catalogue.events(alice, ((Number) feed.get("cursor")).longValue(), 100))
-                    .get("events"))
-            .isEmpty());
+    // Who receives an information event is no longer a filter inside a cursor read: delivery
+    // follows a Relay subscription, so "alice sees this and bob does not" is a question about
+    // subscription authority against a real broker. It is pinned in
+    // RelayInformationEventsDatabaseTest, in every state bob can be in, rather than here against a
+    // composition that has no broker and could only answer it by pretending.
   }
 
   @Test
@@ -2592,17 +2581,9 @@ class DocumentPoliciesTest {
             .stream()
             .map(r -> r.get("id"))
             .toList());
-    for (Object row :
-        (List<?>)
-            io.aeyer.plowshare.server.information.InformationFixtures.view(
-                    catalogue.events(alice, 0, 100))
-                .get("events"))
-      assertEquals(prose.revision(), ((Map<?, ?>) row).get("revision_id"));
-    for (Object row :
-        (List<?>)
-            io.aeyer.plowshare.server.information.InformationFixtures.view(
-                    catalogue.events(codeContext, 0, 100))
-                .get("events")) assertEquals(code.revision(), ((Map<?, ?>) row).get("revision_id"));
+    // The event feed's corpus isolation moved with the feed itself: a page now reports only the
+    // selected corpus by filtering the published payload, which RelayInformationEventsTest pins
+    // together with the cursor still moving past what it filtered out.
     assertEquals(
         "java",
         io.aeyer.plowshare.server.information.InformationFixtures.view(
