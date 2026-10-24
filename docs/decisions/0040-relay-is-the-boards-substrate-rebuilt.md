@@ -43,21 +43,41 @@ Messaging got its own API and lifecycle, but its storage and transport were neve
 extraction commit exists. The wake traffic having already moved is the clearest evidence that the
 replacement was begun and left unfinished rather than reconsidered.
 
-## Why it stalled, which is the part worth fixing
+## Why it stalled, and the part that is drift rather than design
 
-**Relay cannot be extended from outside, so nothing was ever built "on top" of it.**
-`RelayPayload.java` states the cost directly — each new system topic needs a validated DTO and a
-codec version — and `Relay.java:147,152` hard-codes the topic literals `message.wake.requested`,
-`board.wake.requested` and `schedule.due` inside the core domain record. Adding a family requires a
-new enum value, a codec case and a CHECK-constraint migration.
+**Relay is content-agnostic by intent. It should not know what a payload means.** In principle the
+one general message kind is all it ever needed; a consumer interprets the content it receives.
 
-Of the five payload kinds, **one** (`TEXT`) is a general message. The other four were added inside
-Relay core. So moving a family onto Relay is a core change by construction, which is the opposite
-of the stated intent that systems build on top. That is the gap between intent and mechanism, and
-it explains the stall better than neglect does: every migration onto Relay has had to pay a core
-change, including the two this project just completed.
+What is in the tree does not match that. `RelayPayload.Kind` carries `EMPTY`, `TEXT`,
+`SCHEDULE_DUE`, `LIFECYCLE`, `WAKE_REQUESTED` and `INFORMATION_CHANGED`; `RelayPayload` states the
+cost — each new system topic needs a validated DTO and a codec version — and `Relay.java:147,152`
+hard-codes the topic literals `message.wake.requested`, `board.wake.requested` and `schedule.due`
+so that a topic name must agree with a payload kind.
 
-Any plan that assumes families can be added from outside is wrong until that changes.
+**That accumulation is drift, not a design property.** Each family was given a type instead of
+using the general one, and the operator has since instructed that it stop: Relay does not care what
+the content is, and should not. So the earlier reading of this record — that Relay "cannot be
+extended from outside" and a migration is "a core change by construction" — described the symptom
+as though it were the architecture. It is not. A family that publishes the general message needs no
+enum value, no codec case, no CHECK migration and no SDK change.
+
+The practical rule that follows: **a new family adds no payload kind.** If a family appears to need
+one, the content belongs in the payload and the interpretation belongs in the consumer. The
+topic-name-to-payload-kind agreement constraints exist only to police the kinds, and they become
+unnecessary as the kinds go.
+
+### This record's own author did it too
+
+The information-event cutover (V188) added `INFORMATION_CHANGED`: a sixth enum value, a codec case,
+two CHECK constraints, and a widening of the `kind` allowlist across five SDK bindings. It should
+have published the general message and let the consumer interpret it. Removing it is a follow-up
+worth taking, and it would also delete that SDK change — and with it the version-skew risk that an
+un-updated client rejects an information log page, which was the only client-visible consequence of
+that work.
+
+Recording it here rather than quietly is the point: the drift is easy to repeat, because adding a
+type feels like modelling the domain properly, and the cost only shows up as the next family's
+core change.
 
 ## Clarifications this record exists to pin down
 
@@ -88,8 +108,9 @@ Any plan that assumes families can be added from outside is wrong until that cha
   and worked around it by publishing with a NULL project, which resolves to
   `SystemScope.SERVER` and therefore to server administrators only. Decision 0039 rejects that
   workaround.
-- **Extensibility should be settled before the next family moves.** Otherwise each one keeps paying
-  a core change, and the intent that systems build on top of Relay never becomes true.
+- **No further payload kinds.** The next family publishes the general message. Nothing about
+  extensibility needs to be designed first; what needs to stop is adding types, and the existing
+  six are a cleanup rather than a blocker.
 
 ## Related records
 
