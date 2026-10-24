@@ -33,9 +33,13 @@ class InformationAccessTest {
                 : java.util.List.of(home),
             boundary.memoryHomes());
         var filter = InformationSql.read(context, "r");
-        assertTrue(filter.sql().contains("knowledge_document_in_boundary"));
+        // The boundary is decided once per query: the readable scope set and the general-read
+        // permission are hoisted into scalar subqueries, leaving set membership per row. The
+        // ceiling is unchanged, which is what this test is about.
+        assertTrue(filter.sql().contains("knowledge_document_admitted"));
+        assertTrue(filter.sql().contains("knowledge_readable_scopes"));
         assertEquals(
-            java.util.List.of(actor, "research", general), filter.arguments().subList(5, 8));
+            java.util.List.of(general, actor, actor, "research"), filter.arguments().subList(5, 9));
         assertEquals(
             boundary,
             context
