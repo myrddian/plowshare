@@ -46,7 +46,8 @@ class RelayEventPublicationTest {
     // Derived the way the publisher derives it, from the scope, rather than written down here: a
     // test that spelled the name would be the counterexample FiredEventTopicNameIsPrivateTest
     // exists to forbid, and would stop being a test of the derivation.
-    topic = new Relay.TopicKey(Relay.SystemScope.SERVER, EventTopics.of(Relay.SystemScope.SERVER));
+    topic =
+        new Relay.TopicKey(Relay.SystemScope.SERVER, EventTopics.fired(Relay.SystemScope.SERVER));
     subscription = new Relay.SubscriptionKey(topic, "builtin.events");
   }
 

@@ -127,7 +127,7 @@ public final class RelayEventPublication implements EventPublication {
     String by = EventPayload.identity(actor, "actor");
     boundary.requireOutsideTransaction();
 
-    var topic = new Relay.TopicKey(SCOPE, EventTopics.of(SCOPE));
+    var topic = new Relay.TopicKey(SCOPE, EventTopics.fired(SCOPE));
     var subscription = new Relay.SubscriptionKey(topic, SUBSCRIBER);
     var payload =
         new RelayPayload.Text(FiredEventCodec.write(new FiredEventCodec.Notice(named, carried)));

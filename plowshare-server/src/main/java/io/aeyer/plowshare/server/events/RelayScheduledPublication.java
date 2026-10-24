@@ -60,7 +60,10 @@ public final class RelayScheduledPublication implements ScheduledPublication {
               var scope = schedules.claimPublication(selected, following);
               if (scope.isEmpty())
                 return java.util.Optional.<List<ScheduledArrival.Arrival>>empty();
-              var topic = new Relay.TopicKey(scope.get(), "schedule.due");
+              // Derived inside this package from the scope just claimed, never written down: a
+              // topic name is private to the system that owns it (decision 0040). schedule.define
+              // is this family's public contract; where its occurrences travel is not.
+              var topic = new Relay.TopicKey(scope.get(), EventTopics.scheduled(scope.get()));
               relay.registerTopic(
                   topic, RelayPayload.Kind.SCHEDULE_DUE, Relay.Policy.systemDefault());
               var subscription = new Relay.SubscriptionKey(topic, "builtin.scheduling");

@@ -52,7 +52,7 @@ class RelayContractTest {
               kind.name(), "carried opaquely", null, null, null);
       case SCHEDULE_DUE ->
           new io.aeyer.plowshare.protocol.RelayLog.Payload(
-              kind.name(), null, "daily", "schedule.due", NOW);
+              kind.name(), null, "daily", "digest.due", NOW);
       case LIFECYCLE ->
           new io.aeyer.plowshare.protocol.RelayLog.Payload(
               kind.name(),
@@ -145,12 +145,12 @@ class RelayContractTest {
 
   @Test
   void explicit_system_scope_cannot_be_coerced_to_a_project() {
-    var system = new Relay.TopicKey(Relay.SystemScope.SERVER, "schedule.due");
-    var project = new Relay.TopicKey(1, "schedule.due");
+    var system = new Relay.TopicKey(Relay.SystemScope.SERVER, "release.observed");
+    var project = new Relay.TopicKey(1, "release.observed");
     assertNotEquals(system, project);
     assertThrows(IllegalArgumentException.class, system::projectId);
     for (var scope : List.of(Relay.SystemScope.SERVER, new Relay.ProjectScope(Long.MAX_VALUE))) {
-      var key = new Relay.TopicKey(scope, "schedule.due");
+      var key = new Relay.TopicKey(scope, "release.observed");
       assertEquals(scope, RelayScopeCodec.read(RelayScopeCodec.write(key)));
     }
     for (String malformed :
@@ -193,18 +193,40 @@ class RelayContractTest {
     assertEquals(1L, new Relay.Policy(Duration.ofSeconds(1), 1L).maxRecords());
   }
 
+  /**
+   * The schedule payload keeps its database precision, and its kind is no longer tied to a name.
+   *
+   * <p>This test used to assert the opposite: that a topic named {@code schedule.due} had to carry
+   * {@code SCHEDULE_DUE} and that nothing else could. That agreement is gone — a topic name is
+   * private to the system that owns it (decision 0040), and the schedules family derives its own
+   * inside {@code server/events} — so both directions are now legal and are asserted as legal here.
+   * The kind itself is untouched; only the name moved.
+   */
   @Test
-  void schedule_topic_has_a_registered_family_and_database_precision() {
-    var key = new Relay.TopicKey(1, "schedule.due");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new Relay.Topic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault(), 0, 0));
-    assertThrows(
-        IllegalArgumentException.class,
+  void the_schedule_payload_keeps_its_precision_and_its_kind_names_no_topic() {
+    assertDoesNotThrow(
+        () ->
+            new Relay.Topic(
+                new Relay.TopicKey(1, "occurrence.sample"),
+                RelayPayload.Kind.TEXT,
+                Relay.Policy.systemDefault(),
+                0,
+                0));
+    assertDoesNotThrow(
         () ->
             new Relay.Topic(
                 new Relay.TopicKey(1, "other"),
                 RelayPayload.Kind.SCHEDULE_DUE,
+                Relay.Policy.systemDefault(),
+                0,
+                0));
+    // The one agreement that remains, and should: the wake families are Relay's own topics.
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new Relay.Topic(
+                new Relay.TopicKey(Relay.SystemScope.SERVER, "board.wake.requested"),
+                RelayPayload.Kind.TEXT,
                 Relay.Policy.systemDefault(),
                 0,
                 0));

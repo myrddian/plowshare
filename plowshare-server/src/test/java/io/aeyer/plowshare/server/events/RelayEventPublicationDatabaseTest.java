@@ -61,7 +61,7 @@ class RelayEventPublicationDatabaseTest {
   private EventPublication publication;
 
   /** The name under test, derived rather than spelled: see {@link EventTopics}. */
-  private static final String TOPIC = EventTopics.of(Relay.SystemScope.SERVER);
+  private static final String TOPIC = EventTopics.fired(Relay.SystemScope.SERVER);
 
   private static final Relay.TopicKey KEY = new Relay.TopicKey(Relay.SystemScope.SERVER, TOPIC);
 

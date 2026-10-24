@@ -45,10 +45,16 @@ class DurableRelayTest {
   void invalid_family_or_read_bounds_fail_before_persistence() {
     var repository = mock(RelayRepository.class);
     Relay broker = new DurableRelay(repository, Instant::now);
-    var key = new Relay.TopicKey(1, "schedule.due");
+    var key = new Relay.TopicKey(1, "release.observed");
+    // The wake families are the only ones still bound to a name, and they are Relay's own topics;
+    // the schedule.due agreement this used to assert is gone with the literal.
     assertThrows(
         IllegalArgumentException.class,
-        () -> broker.configureTopic(key, RelayPayload.Kind.EMPTY, Relay.Policy.systemDefault()));
+        () ->
+            broker.configureTopic(
+                new Relay.TopicKey(Relay.SystemScope.SERVER, "board.wake.requested"),
+                RelayPayload.Kind.EMPTY,
+                Relay.Policy.systemDefault()));
     assertThrows(
         IllegalArgumentException.class,
         () -> broker.read(new Relay.SubscriptionKey(key, "route-a"), 1001));
