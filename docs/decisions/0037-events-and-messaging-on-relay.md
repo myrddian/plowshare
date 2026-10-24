@@ -112,11 +112,15 @@ causing it is worth keeping.
   subscription at publication time, so an account that gains read access later does not
   retroactively receive earlier events. This is Relay's existing semantics for every other
   publication and is accepted rather than special-cased.
-- **The substrate is replaced, not shadowed.** Publisher and consumer move in one change and the
-  old tables go with it. A dual-write release was considered and rejected: it keeps the fence, the
-  global sequence and the cursor alive for a release, which is the substrate this record exists to
-  remove, and it buys only the continuity of in-flight cursors over one deployment. Existing
-  `information_events` rows are not migrated; they are instance history, not a contract.
+- **The substrate is replaced, not shadowed, and the break is clean.** Publisher and consumer move
+  in one change and the old tables are dropped with it. A dual-write release was considered and
+  rejected: it keeps the fence, the global sequence and the cursor alive for a release, which is
+  the substrate this record exists to remove, and it buys only the continuity of in-flight cursors
+  over one deployment. No installation is being migrated, so there is nothing for a compatibility
+  layer to serve — existing `information_events` rows are instance history, not a contract, and a
+  shim for their shape is cruft with no reader. Retaining a subscriber inbox is justified only by a
+  functional need, such as topic expiration losing input a consumer still requires, which is why
+  the schedules migration kept firing records. It is never justified as backward compatibility.
 - **Set-equality with the old fan-out is explicitly NOT a requirement.** It cannot be: frozen
   emit-time recipients and subscription-time delivery are different semantics, and demanding both
   would re-impose the design being removed. What must hold instead is the authorization invariant
