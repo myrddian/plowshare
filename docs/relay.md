@@ -633,7 +633,7 @@ erDiagram
         TEXT correlation_id
         TEXT causation_id
         INTEGER schema_version
-        JSONB payload "<=256 KiB"
+        JSONB payload "text <=50 MiB; see the TEXT allowance"
         JSONB relay_causation "rootId parentId depth"
     }
 
@@ -667,7 +667,7 @@ erDiagram
         TEXT event_id
         TEXT publisher
         TEXT payload_kind
-        JSONB payload
+        JSONB payload "same ceiling; a copy per subscriber"
         TEXT routing_path
         TEXT routing_source
         TEXT routing_hash
@@ -844,6 +844,20 @@ sequence cannot express commit order. `relay_publications` is the append-only lo
 A scope is a text key, not a project id: `project:<id>` for a project topic and
 `system` for a server-wide one, with the nullable `relay_topics.project_id`
 cascading real project deletion while system topics survive it.
+
+Both tables bound `payload` identically: an object whose `text` member is at most
+50 MiB of raw UTF-8, inside a separately bounded encoded envelope. That ceiling is
+the portable storage contract, not the admission policy — new TEXT appends are
+checked against `plowshare.relay.max-text-bytes` (5 MiB by default), so lowering
+the allowance never blocks reading or admitting what is already retained.
+
+Because admission copies the payload per subscriber, one publication near the
+ceiling is stored once in `relay_publications` and again for every subscriber that
+admits it. The copy is what lets retention delete a prefix of the log while
+admitted work keeps its input, so the cost is the point rather than an oversight;
+it is also the reason the deployment allowance defaults well below the ceiling.
+Topics carrying large TEXT want few subscribers, or a reference payload whose
+bytes live elsewhere.
 
 `relay_subscriptions` holds each subscriber's independent position. It has no
 foreign key to a publication on purpose, so an offset outlives the records
