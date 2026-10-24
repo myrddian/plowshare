@@ -201,6 +201,76 @@ Two further consequences worth keeping:
   either can commit past events the other never read. This is why decision 0038 namespaces a
   read-tier subscriber's group per account, and it is a Kafka-derived property, not a Relay quirk.
 
+## Topic cardinality: a subscriber per principal, not a topic per principal
+
+This has been asked twice in design discussion and answered by guesswork both times, so the
+measurements are recorded here. They come from a synthetic PostgreSQL 16 carrying the two tables'
+exact DDL, not from the repository suite, and the extrapolations past 600k topics are linear from
+two points.
+
+**Reads do not care how many topics exist.** `topic` is a leading column of
+`relay_publications`' primary key (`scope_key, topic, position` — `scope_key` since V120 renamed
+and retyped it), so one topic's page is an index range scan: 0.086 ms and 11 buffers at 600k
+topics.
+
+**Retention is where cardinality bites, and it is not the topic count that drives it.**
+`topicsToPrune` joins every `relay_topics` row to its oldest unexpired publication and applies the
+retention test *after* the join, ordering by `published_at`. The planner takes a parallel hash join
+and discards most of what it built. At 600k topics over 3M publications: **1,558 ms, 61,359
+buffers, roughly 500 MB of temp traffic per cycle, to return 100 candidates.** Forcing the
+index-probe plan is worse. So the sweep's cost tracks the **whole publication log**, not the number
+of topics, and it runs on a fixed interval regardless.
+
+**The gating number is retention, not topic count.** Oldest-first ordering gives each eligible
+topic a lag proportional to the eligible set, so overshoot stays within the retention window only
+while the eligible count stays near `1.667 × retention_seconds`. At the four-day default that is
+around 576,000 topics — but **about 500 at a five-minute retention and about 100 at sixty seconds.**
+A topic per conversation with short retention fails in the hundreds, not the hundred-thousands.
+
+**Nothing garbage-collects a drained topic.** The only delete is operator-initiated and refuses a
+topic that still has a subscription or a retained publication. So short-lived topics leave a
+permanent residue that every later sweep reads. The cost of churn is paid after the churn,
+indefinitely. That absence is the real capability gap, not the sweep's shape.
+
+### The conclusion, and it follows the rule above
+
+**A family that wants a topic per principal should want a subscriber per principal.** Decision 0038
+already put the per-principal entity in `relay_subscriptions` — `reader:<account>:<group>` names, a
+`reader_account` column, an index on `(scope_key, reader_account)` — and read-tier consumption is a
+bare range read with no admission row and no payload copy. The sweep scans **topics**; it never
+touches subscribers. Decision 0037 made exactly this call for information events: one topic per
+scope, audience from subscriptions, deliberately replacing a per-recipient substrate.
+
+Per-publish writes are not a concern either way: `relay_topics.last_position` and
+`relay_subscriptions.seen_through` are single-row HOT-eligible updates, and higher cardinality
+*reduces* contention on them.
+
+### If Relay ever must carry topic cardinality itself
+
+- The measured fix is an application-maintained deadline column with partial indexes: **0.041 ms
+  and 104 buffers against 1,558 ms and 61,359** — about four orders of magnitude. The `OR` and the
+  single `ORDER BY` are what force the bad plan; two index-driven queries merged in the application
+  is the shape that works.
+- A generated column or expression index cannot express it: `timestamptz + interval` is STABLE, not
+  IMMUTABLE, so PostgreSQL refuses both.
+- **Partitioning is a dead end** — it does not change the sweep's cost shape and it collides with
+  the contiguous-retained-prefix invariant.
+- **Retuning the knobs is a dead end** — the topic batch size is hard-capped at 100 in two places.
+  Recorded so it is not attempted a third time.
+
+### Deferred, and why
+
+`RelayMaintenance` schedules the sweep with a bare fixed delay and has no lease or leader election,
+unlike leased consumption, which is carefully fenced. On a multi-node deployment every node would
+run the whole sweep and the scan cost would multiply by node count. **There is no cluster setup, so
+this is not a current consideration** — recorded only so it is not rediscovered as a surprise if one
+ever appears.
+
+Two smaller findings from the same analysis: `relay_topics.project_id` is the family's only
+unindexed foreign-key child column, so cascading one project costs a sequential scan (50 ms at
+600k topics); and `RelayWorkers` refuses past 256 subscriptions per node, which is a separate wall
+for any work-tier per-principal design.
+
 ## Consequences for the work that remains
 
 - The remaining work is **finishing a replacement**, not migrating a foreign system onto a new one.
