@@ -143,6 +143,17 @@ class RelayPayloadSweepTest {
   }
 
   @Test
+  void horizonQueryUsesScopeKeyNotTheRenamedProjectId() {
+    referencedWith(NOW.plus(Duration.ofHours(5)), false);
+    store.sweep(NOW, 10);
+    var sql = ArgumentCaptor.forClass(String.class);
+    verify(jdbc).query(sql.capture(), anyMapper(), any(Object[].class));
+    // V120 renamed project_id to scope_key on the publication, admission and delivery tables.
+    assertTrue(sql.getValue().contains("scope_key"));
+    assertFalse(sql.getValue().contains("project_id"));
+  }
+
+  @Test
   void honoursTheConfiguredBatchLimit() {
     when(jdbc.queryForList(anyString(), eq(String.class), any(), anyInt())).thenReturn(List.of());
     store.sweep(NOW, 7);

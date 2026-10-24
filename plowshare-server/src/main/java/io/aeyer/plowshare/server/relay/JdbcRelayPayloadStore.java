@@ -178,25 +178,25 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
             SELECT GREATEST(
                 (SELECT max(r.published_at + t.retention_seconds * interval '1 second')
                    FROM relay_publications r
-                   JOIN relay_topics t ON t.project_id=r.project_id AND t.name=r.topic
+                   JOIN relay_topics t ON t.scope_key=r.scope_key AND t.name=r.topic
                   WHERE r.payload_digest=?),
                 (SELECT max(GREATEST(a.admitted_at, COALESCE(
                             (SELECT max(d.updated_at) FROM relay_deliveries d
-                              WHERE d.project_id=a.project_id AND d.topic=a.topic
+                              WHERE d.scope_key=a.scope_key AND d.topic=a.topic
                                 AND d.subscriber=a.subscriber
                                 AND d.publication_position=a.publication_position),
                             a.admitted_at)) + ? * interval '1 second')
                    FROM relay_admissions a
                   WHERE a.payload_digest=? AND NOT EXISTS (
                         SELECT 1 FROM relay_deliveries d
-                         WHERE d.project_id=a.project_id AND d.topic=a.topic
+                         WHERE d.scope_key=a.scope_key AND d.topic=a.topic
                            AND d.subscriber=a.subscriber
                            AND d.publication_position=a.publication_position
                            AND d.state NOT IN ('ACCEPTED','FAILED','ABANDONED')))),
                 EXISTS (SELECT 1 FROM relay_admissions a
                          WHERE a.payload_digest=? AND EXISTS (
                                SELECT 1 FROM relay_deliveries d
-                                WHERE d.project_id=a.project_id AND d.topic=a.topic
+                                WHERE d.scope_key=a.scope_key AND d.topic=a.topic
                                   AND d.subscriber=a.subscriber
                                   AND d.publication_position=a.publication_position
                                   AND d.state NOT IN ('ACCEPTED','FAILED','ABANDONED')))
