@@ -26,6 +26,9 @@ final class RelayValues {
    */
   private static final String READER = "reader:";
 
+  /** Matches {@code RelayPort.identity}, which reports stored names back in log inspection. */
+  private static final int MAX_SUBSCRIBER = 256;
+
   /**
    * Builds the stored consumer-group name for a read-tier subscription from the authenticated
    * account. The server derives it; a caller supplies only the logical group name, so it cannot
@@ -36,8 +39,13 @@ final class RelayValues {
     if (account.indexOf(':') >= 0)
       throw new IllegalArgumentException("subscription reader must not contain a colon");
     String stored = READER + account + ':' + name(group, "subscriber");
-    if (stored.length() > 512)
-      throw new IllegalArgumentException("read-tier subscriber name is too long for this account");
+    // The stored name is reported back through RelayPort.identity in log inspection, which bounds
+    // identities at 256. Exceeding it would make a topic's log page unreadable for everyone on
+    // that topic rather than inconveniencing the one caller, so the budget is spent here, with an
+    // actionable error, instead of being discovered there.
+    if (stored.length() > MAX_SUBSCRIBER)
+      throw new IllegalArgumentException(
+          "read-tier subscriber name is too long for this account; shorten the group name");
     return stored;
   }
 
@@ -52,7 +60,8 @@ final class RelayValues {
    */
   static String subscriber(String value) {
     if (!reader(value)) return name(value, "subscriber");
-    if (value.length() > 512) throw new IllegalArgumentException("subscriber name is too long");
+    if (value.length() > MAX_SUBSCRIBER)
+      throw new IllegalArgumentException("subscriber name is too long");
     int split = value.indexOf(':', READER.length());
     if (split < 0 || split == READER.length())
       throw new IllegalArgumentException("read-tier subscriber must name its owning account");

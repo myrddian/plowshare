@@ -114,7 +114,9 @@ ALTER TABLE relay_subscriptions ADD CONSTRAINT relay_subscription_group_namespac
         -- The read tier. The owner is spelled in the name, and the column must agree with it.
         length(reader_account) BETWEEN 1 AND 256
         AND position(':' in reader_account) = 0
-        AND length(subscriber) <= 512
+        -- 256, like every other identity reported through the port contract: a longer name
+        -- would be stored here and then rejected when a log page named it.
+        AND length(subscriber) <= 256
         -- starts_with, not LIKE: an account containing % or _ must not become a wildcard.
         AND starts_with(subscriber, 'reader:' || reader_account || ':')
         AND substring(subscriber from char_length('reader:' || reader_account || ':') + 1)

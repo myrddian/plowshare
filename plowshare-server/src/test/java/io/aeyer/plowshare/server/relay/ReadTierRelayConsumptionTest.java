@@ -126,6 +126,27 @@ class ReadTierRelayConsumptionTest {
   }
 
   @Test
+  void a_derived_group_name_still_fits_the_contract_that_reports_it_back() {
+    // Log inspection maps stored group names into RelayLog.Subscriber, which bounds an identity at
+    // 256. A derived name that exceeded it would be storable and then make the topic's log page
+    // unreadable for every account on that topic, so the budget is enforced where the name is made.
+    var longest = "a".repeat(247);
+    var derived = Relay.SubscriptionKey.reader(TOPIC, longest, "n").subscriber();
+    assertEquals(256, derived.length());
+    assertDoesNotThrow(
+        () -> new io.aeyer.plowshare.protocol.RelayLog.Subscriber(derived, "1", now, null));
+    // One character more is refused at the boundary rather than discovered at the log page.
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> Relay.SubscriptionKey.reader(TOPIC, longest + "a", "n"));
+    assertThrows(
+        IllegalArgumentException.class, () -> Relay.SubscriptionKey.reader(TOPIC, longest, "no"));
+    // A colon in an account would make the owner inside the name ambiguous.
+    assertThrows(
+        IllegalArgumentException.class, () -> Relay.SubscriptionKey.reader(TOPIC, "a:b", "n"));
+  }
+
+  @Test
   void the_same_logical_name_from_two_accounts_is_two_independent_groups() {
     var mine = Relay.SubscriptionKey.reader(TOPIC, VIEWER, "notices");
     var theirs = Relay.SubscriptionKey.reader(TOPIC, "contributor", "notices");
