@@ -548,14 +548,25 @@ class JdbcRelayRepositoryTest {
             jdbc.update(
                 "UPDATE relay_topics SET max_records=0 WHERE project_id=?", topic.projectId()));
     repository.append(topic, draft("one"), T0);
+    // V193 dropped the publication's own payload column, so the shape constraint and the bytes
+    // both live in relay_payloads now, reached through payload_digest. Corrupting the stored row
+    // is what a reader sees through its join. Content addressing means this reaches any other
+    // publication holding identical content, which is inherent and not a change in this test's
+    // intent: the old statement likewise corrupted every publication in the scope.
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "UPDATE relay_publications SET payload='[]'::jsonb WHERE scope_key=?",
+                """
+                UPDATE relay_payloads SET payload='[]'::jsonb WHERE digest IN
+                  (SELECT payload_digest FROM relay_publications WHERE scope_key=?)
+                """,
                 RelayScopeCodec.write(topic)));
     jdbc.update(
-        "UPDATE relay_publications SET payload='{\"unknown\":1}'::jsonb WHERE scope_key=?",
+        """
+        UPDATE relay_payloads SET payload='{"unknown":1}'::jsonb WHERE digest IN
+          (SELECT payload_digest FROM relay_publications WHERE scope_key=?)
+        """,
         RelayScopeCodec.write(topic));
     repository.subscribe(a, Relay.Start.OLDEST_RETAINED, T0);
     assertThrows(IllegalArgumentException.class, () -> repository.read(a, 100));

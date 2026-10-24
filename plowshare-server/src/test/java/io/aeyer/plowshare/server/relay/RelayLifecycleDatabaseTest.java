@@ -427,7 +427,9 @@ class RelayLifecycleDatabaseTest {
     assertTrue(nativeInboxes.claim(binding, lease, ordinary.id(), at.plusSeconds(2)));
     assertFalse(
         jdbc.queryForObject(
-                "SELECT string_agg(payload::text,'') FROM relay_publications", String.class)
+                "SELECT string_agg(q.payload::text,'') FROM relay_publications p"
+                    + " JOIN relay_payloads q ON q.digest=p.payload_digest",
+                String.class)
             .contains("private command"));
   }
 
@@ -580,7 +582,9 @@ class RelayLifecycleDatabaseTest {
     assertEquals(2, relay.topic(topic("orchestration.ended")).lastPosition());
     assertFalse(
         jdbc.queryForObject(
-                "SELECT string_agg(payload::text,'') FROM relay_publications", String.class)
+                "SELECT string_agg(q.payload::text,'') FROM relay_publications p"
+                    + " JOIN relay_payloads q ON q.digest=p.payload_digest",
+                String.class)
             .contains("private"));
     var group = new Relay.SubscriptionKey(topic("approval.resolved"), "test.lifecycle");
     relay.subscribe(group, Relay.Start.OLDEST_RETAINED);
@@ -648,7 +652,9 @@ class RelayLifecycleDatabaseTest {
       assertEquals(1, relay.topic(topic(name)).lastPosition());
     assertFalse(
         jdbc.queryForObject(
-                "SELECT string_agg(payload::text,'') FROM relay_publications", String.class)
+                "SELECT string_agg(q.payload::text,'') FROM relay_publications p"
+                    + " JOIN relay_payloads q ON q.digest=p.payload_digest",
+                String.class)
             .contains("private content"));
   }
 

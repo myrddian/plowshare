@@ -161,6 +161,12 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
                   // boundary is unchanged. The outer list names the event fields explicitly
                   // instead of *: payload_bytes serves the window only and must not reach the
                   // record boundedProjection sizes.
+                  //
+                  // page_bytes does change type. octet_length returned integer, so the old sum
+                  // was bigint; byte_length is bigint, so the sum is now numeric. Only the
+                  // comparison against the budget and the jsonb rendering of the projected
+                  // record depend on it, and an integral numeric compares and renders as the
+                  // same digits, so neither the page boundary nor the sized bytes move.
                   "SELECT "
                       + EVENT_FIELDS
                       + ",page_bytes FROM (SELECT candidates.*, SUM(payload_bytes + 4096)"

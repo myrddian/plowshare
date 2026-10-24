@@ -337,7 +337,17 @@ public final class JdbcRelayRepository implements RelayRepository {
                   // exactly what this window used to compute from the publication's own copy, so
                   // the page boundary is unchanged. The window stays outside the LIMIT: a window
                   // function is evaluated before LIMIT, so summing inside the candidate query
-                  // would budget against every matching row rather than the page.
+                  // would budget against every matching row rather than the page. page_bytes is
+                  // now numeric rather than bigint, because byte_length is bigint where
+                  // octet_length returned integer; only the comparison against the budget below
+                  // depends on it, and an integral numeric compares the same.
+                  //
+                  // This page keeps SELECT *, so payload_bytes reaches the result set, which the
+                  // row mapper ignores. That is safe only because this is a plain query. The
+                  // inspection log's page names its outer columns instead, because
+                  // JdbcRelayLogRepository.boundedProjection sizes the projected record with
+                  // to_jsonb, where an extra column would shift the projection-cache bound.
+                  // Anything that later wraps this page that way must do the same.
                   "SELECT * FROM (SELECT candidates.*, SUM(payload_bytes + 4096)"
                       + " OVER (ORDER BY position) AS page_bytes FROM (SELECT "
                       + PUBLICATION_COLUMNS

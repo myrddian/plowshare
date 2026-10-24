@@ -42,6 +42,7 @@ class RelayPayloadReadPathTest {
   private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
   private static final Relay.TopicKey TOPIC = new Relay.TopicKey(7, "events");
   private static final int BUDGET = SegmentedMessages.MAX_MESSAGE_BYTES - 1024 * 1024;
+  private static final UUID BRANCH_ID = new UUID(0, 9);
 
   private final List<Query> queries = new ArrayList<>();
   private JdbcTemplate jdbc;
@@ -178,6 +179,28 @@ class RelayPayloadReadPathTest {
     readsThroughTheStore(only("relay_publications").sql());
   }
 
+  /**
+   * {@code append}'s locked read is a third use of {@code PUBLICATION_COLUMNS}, distinct from the
+   * page and from {@code retained}. The unlocked existence probe beside it selects no payload, so
+   * it is correctly left without a join; this targets the full projection by a column only it
+   * names.
+   */
+  @Test
+  void theLockedRetainedReadInAppendGoesThroughTheStore() {
+    answerQueries(
+        (sql, mapper) -> {
+          if (sql.contains("FROM relay_topics")) return List.of(mapper.mapRow(topicRow(), 0));
+          return List.of();
+        });
+    broker()
+        .append(
+            TOPIC,
+            new Relay.Draft(
+                "event-9", "publisher", T0, null, null, new RelayPayload.Text("bytes"), null),
+            T0);
+    readsThroughTheStore(only("relay_causation::text").sql());
+  }
+
   @Test
   void appendNoLongerWritesThePayloadBytesIntoThePublication() {
     answerQueries(
@@ -244,12 +267,17 @@ class RelayPayloadReadPathTest {
     assertTrue(
         bounded.sql().contains("octet_length(to_jsonb(projected)::text)"),
         "the bounded projection must keep sizing the projected record");
-    // The joined length is a helper for the window, not part of the projected record: leaking it
-    // would change the bytes the bound is compared against.
-    assertFalse(
-        bounded.sql().contains("payload_bytes,page_bytes")
-            || bounded.sql().contains("byte_length,page_bytes"),
-        () -> "the payload length leaked into the projected record: " + bounded.sql());
+    // The joined length is a helper for the window, not part of the projected record. Pin the
+    // outer list positively: a revert to SELECT * would carry payload_bytes into the record
+    // to_jsonb sizes and move the bound, and this is the assertion that catches it. Stated as an
+    // absence it would pass against SELECT * as well, which proves nothing.
+    assertTrue(
+        bounded
+            .sql()
+            .contains(
+                "SELECT position,event_id,publisher,occurred_at,published_at,correlation_id,"
+                    + "causation_id,relay_causation,schema_version,payload,page_bytes FROM ("),
+        () -> "the projected record is no longer exactly the event fields: " + bounded.sql());
   }
 
   @Test
@@ -341,6 +369,50 @@ class RelayPayloadReadPathTest {
     assertEquals(
         "payload 1", ((RelayPayload.Text) admission.publication().event().payload()).text());
     readsThroughTheStore(only("relay_admissions").sql());
+  }
+
+  /**
+   * The worker dispatch hot path. {@code claim} and {@code find} share the {@code JOIN} constant,
+   * which is a different constant from the one {@code admission} uses, so neither is covered by the
+   * admission read above.
+   */
+  @Test
+  void claimReadsTheAdmissionThroughTheStore() {
+    answerQueries(
+        (sql, mapper) -> {
+          if (sql.contains("RETURNING")) return List.of(mapper.mapRow(claimedRow(), 0));
+          if (sql.contains("relay_deliveries")) return List.of(mapper.mapRow(readyRow(), 0));
+          return List.of();
+        });
+    var deliveries = new JdbcRelayDeliveryRepository(jdbc, UnitOfWork.NONE);
+    var claimed =
+        deliveries
+            .claim(
+                new Relay.SubscriptionKey(TOPIC, "group"),
+                "worker-1",
+                java.time.Duration.ofSeconds(30),
+                T0)
+            .orElseThrow();
+    assertEquals("payload 1", ((RelayPayload.Text) claimed.publication().event().payload()).text());
+    readsThroughTheStore(only("FOR UPDATE OF d SKIP LOCKED").sql());
+  }
+
+  @Test
+  void deliveryLookupReadsTheAdmissionThroughTheStore() {
+    answerQueries(
+        (sql, mapper) -> {
+          if (sql.contains("relay_deliveries")) return List.of(mapper.mapRow(readyRow(), 0));
+          return List.of();
+        });
+    var deliveries = new JdbcRelayDeliveryRepository(jdbc, UnitOfWork.NONE);
+    var found =
+        deliveries
+            .delivery(
+                new RelayDeliveries.DeliveryKey(
+                    new Relay.SubscriptionKey(TOPIC, "group"), BRANCH_ID))
+            .orElseThrow();
+    assertEquals("payload 1", ((RelayPayload.Text) found.publication().event().payload()).text());
+    readsThroughTheStore(only("relay_deliveries").sql());
   }
 
   @Test
@@ -467,6 +539,31 @@ class RelayPayloadReadPathTest {
     when(row.getString("routing_source")).thenReturn("export default 1;");
     when(row.getString("routing_hash")).thenReturn(RelayPort.hash("export default 1;"));
     when(row.getInt("branch_count")).thenReturn(0);
+    return row;
+  }
+
+  /** A READY branch over the admission above: no lease, no worker, no receipt, no failure. */
+  private static ResultSet readyRow() throws SQLException {
+    var row = admissionRow();
+    when(row.getObject("id", UUID.class)).thenReturn(BRANCH_ID);
+    when(row.getString("state")).thenReturn("READY");
+    when(row.getLong("fence")).thenReturn(0L);
+    when(row.getObject("lease_until", OffsetDateTime.class)).thenReturn(null);
+    when(row.getString("branch_name")).thenReturn("fanout");
+    when(row.getString("receiver")).thenReturn("relay.publish");
+    when(row.getString("publish_to")).thenReturn("downstream.notices");
+    return row;
+  }
+
+  /** The lifecycle fields {@code transition} reads back after the claim update. */
+  private static ResultSet claimedRow() throws SQLException {
+    var row = mock(ResultSet.class);
+    when(row.getString("state")).thenReturn("CLAIMED");
+    when(row.getLong("fence")).thenReturn(1L);
+    when(row.getString("worker")).thenReturn("worker-1");
+    when(row.getObject("lease_until", OffsetDateTime.class))
+        .thenReturn(T0.plusSeconds(30).atOffset(ZoneOffset.UTC));
+    when(row.getObject("updated_at", OffsetDateTime.class)).thenReturn(T0.atOffset(ZoneOffset.UTC));
     return row;
   }
 

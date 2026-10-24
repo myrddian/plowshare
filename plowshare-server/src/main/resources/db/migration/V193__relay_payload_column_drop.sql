@@ -12,6 +12,14 @@
 -- order and with the same digest function V192 used: SHA-256 over the UTF-8 text of PostgreSQL's
 -- JSONB rendering, lowercase hex. ejection_at is now(), so the first sweep examines these rows and
 -- finds every one of them referenced.
+--
+-- The lock is taken first, and for the same reason the backfill exists. A server predating the
+-- digest can still be appending when this migration starts; without the lock it could commit a
+-- null-digest row between the backfill and SET NOT NULL, which would then fail. The failure is a
+-- cleanly aborted migration rather than data loss, but the window is avoidable. DROP COLUMN needs
+-- ACCESS EXCLUSIVE on both tables regardless, so taking it up front only moves the wait earlier
+-- and makes the whole migration one atomic step against a quiet table.
+LOCK TABLE relay_publications, relay_admissions IN ACCESS EXCLUSIVE MODE;
 
 INSERT INTO relay_payloads(digest, payload, byte_length, ejection_at)
 SELECT DISTINCT ON (digest) digest, payload, octet_length(payload::text), now()
