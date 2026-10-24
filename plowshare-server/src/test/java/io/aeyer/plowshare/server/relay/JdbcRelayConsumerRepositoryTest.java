@@ -86,7 +86,7 @@ class JdbcRelayConsumerRepositoryTest {
     subscription = new Relay.SubscriptionKey(topic, "relay.notices.release");
     broker = new JdbcRelayRepository(jdbc, transactions);
     deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
-    consumers = new JdbcRelayConsumerRepository(jdbc, transactions, deliveries);
+    consumers = new JdbcRelayConsumerRepository(jdbc, transactions, deliveries, broker);
     broker.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     broker.subscribe(subscription, Relay.Start.OLDEST_RETAINED, Instant.now());
     decision =

@@ -73,6 +73,12 @@ public final class DurableRelay implements Relay {
   }
 
   @Override
+  public Optional<Subscription> subscribeAsReader(SubscriptionKey key, Start start, String reader) {
+    return repository.subscribeAsReader(
+        key, start, RelayValues.identity(reader, "subscription reader"), clock.get());
+  }
+
+  @Override
   public Subscription subscribe(SubscriptionKey key, Start start) {
     return repository.subscribe(
         Objects.requireNonNull(key, "key"),

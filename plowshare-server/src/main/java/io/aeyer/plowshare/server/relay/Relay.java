@@ -41,6 +41,23 @@ public interface Relay {
   /** Registers independently; repeating registration returns the existing position unchanged. */
   Subscription subscribe(SubscriptionKey key, Start start);
 
+  /**
+   * Registers a consumer group belonging to one read-tier account (decision 0038).
+   *
+   * <p>{@code subscriber} is a consumer group and {@code seenThrough} is that group's committed
+   * offset. Two independent consumers sharing one group name do not each receive the stream — they
+   * divide it, and either may commit an offset past events the other never read. A read-tier reader
+   * therefore gets its own group: {@code key} must be in this reader's {@code
+   * reader:<account>:<name>} namespace, which the server derives from the authenticated account, so
+   * a project-declared group name is not expressible here and a work-tier registration cannot
+   * express a reader's. Ownership is then a property of the identity rather than something each
+   * writer has to adjudicate.
+   *
+   * <p>Empty means the group exists and is not this reader's — the backstop behind the namespace.
+   * Repeating it for the same owner is idempotent and leaves the committed offset untouched.
+   */
+  Optional<Subscription> subscribeAsReader(SubscriptionKey key, Start start, String reader);
+
   /** Reads 1..1,000 retained publications after the seen position, reporting any expired gap. */
   Read read(SubscriptionKey key, int limit);
 
@@ -95,10 +112,20 @@ public interface Relay {
     }
   }
 
+  /**
+   * A topic and the consumer group reading it. {@code subscriber} is the group's stored name, which
+   * is either a work-tier (project-declared) name or a read-tier {@code reader:<account>:<name>}
+   * name; the two namespaces are disjoint, so a group identity always says which tier owns it.
+   */
   record SubscriptionKey(TopicKey topic, String subscriber) {
     public SubscriptionKey {
       Objects.requireNonNull(topic, "topic");
-      subscriber = RelayValues.name(subscriber, "subscriber");
+      subscriber = RelayValues.subscriber(subscriber);
+    }
+
+    /** Builds the read-tier group identity for one account from a logical group name. */
+    public static SubscriptionKey reader(TopicKey topic, String account, String group) {
+      return new SubscriptionKey(topic, RelayValues.readerSubscriber(account, group));
     }
   }
 

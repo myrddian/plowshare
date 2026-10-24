@@ -171,8 +171,39 @@ public class RelayConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayConsumerRepository relayConsumerRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, RelayDeliveryRepository deliveries) {
-    return new JdbcRelayConsumerRepository(jdbc, transactions, deliveries);
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayDeliveryRepository deliveries,
+      RelayRepository subscriptions) {
+    return new JdbcRelayConsumerRepository(jdbc, transactions, deliveries, subscriptions);
+  }
+
+  @Bean
+  @DependsOnDatabaseInitialization
+  public RelaySubscriptionAuthority relaySubscriptionAuthority(JdbcTemplate jdbc) {
+    return new JdbcRelaySubscriptionAuthority(jdbc);
+  }
+
+  /**
+   * Read-tier subscription and consumption (decision 0038). The maximum age is read here so a
+   * deployment that omits it fails at startup, not on a caller's first subscription.
+   */
+  @Bean
+  public RelayConsumption relayConsumption(
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      Relay relay,
+      RelayConsumerRepository consumers,
+      RelaySubscriptionAuthority authority,
+      RelayProperties properties) {
+    return new ReadTierRelayConsumption(
+        members,
+        projects,
+        relay,
+        consumers,
+        authority,
+        properties.subscriptionMaximumAge(),
+        Instant::now);
   }
 
   @Bean

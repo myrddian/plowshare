@@ -16,12 +16,21 @@ public final class JdbcRelayConsumerRepository implements RelayConsumerRepositor
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
   private final RelayDeliveryRepository deliveries;
+  private final RelayRepository subscriptions;
 
+  /**
+   * The broker repository owns cursor writes — the topic lock, monotonicity and outstanding-gap
+   * rules live there — so a leased advance joins it rather than reimplementing its SQL here.
+   */
   public JdbcRelayConsumerRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, RelayDeliveryRepository deliveries) {
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayDeliveryRepository deliveries,
+      RelayRepository subscriptions) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.transactions = Objects.requireNonNull(transactions);
     this.deliveries = Objects.requireNonNull(deliveries);
+    this.subscriptions = Objects.requireNonNull(subscriptions);
   }
 
   @Override
@@ -105,6 +114,63 @@ public final class JdbcRelayConsumerRepository implements RelayConsumerRepositor
         lease.worker(),
         lease.account(),
         lease.epoch());
+  }
+
+  @Override
+  public Optional<Lease> acquireAsReader(
+      Relay.SubscriptionKey subscription, String account, Duration duration) {
+    Objects.requireNonNull(subscription);
+    RelayValues.identity(account, "consumer account");
+    RelayDeliveries.requireLease(duration);
+    // The INSERT's source row is the subscription, selected only when this account owns it. A
+    // work-tier subscriber (reader_account IS NULL) and another reader's both select nothing, so
+    // no lease row can be created or taken over for a subscription that is not the caller's.
+    // The worker identity is the account, so the account's own second call extends rather than
+    // contends, while a work-tier pipeline worker — which names itself per pass — cannot match.
+    return jdbc
+        .query(
+            """
+        INSERT INTO relay_consumer_leases(scope_key,topic,subscriber,worker,account,epoch,lease_until)
+        SELECT s.scope_key,s.topic,s.subscriber,?,?,1,clock_timestamp() + (? * interval '1 microsecond')
+          FROM relay_subscriptions s
+          WHERE s.scope_key=? AND s.topic=? AND s.subscriber=? AND s.reader_account=?
+        ON CONFLICT (scope_key,topic,subscriber) DO UPDATE SET
+          worker=EXCLUDED.worker, account=EXCLUDED.account,
+          epoch=relay_consumer_leases.epoch+1,
+          lease_until=clock_timestamp() + (? * interval '1 microsecond')
+        WHERE relay_consumer_leases.lease_until<=clock_timestamp()
+           OR (relay_consumer_leases.worker=EXCLUDED.worker AND relay_consumer_leases.account=EXCLUDED.account)
+        RETURNING epoch,lease_until
+        """,
+            (row, index) ->
+                new Lease(
+                    subscription,
+                    account,
+                    account,
+                    row.getLong("epoch"),
+                    row.getObject("lease_until", OffsetDateTime.class).toInstant()),
+            account,
+            account,
+            duration.toNanos() / 1000,
+            RelayScopeCodec.write(subscription.topic()),
+            subscription.topic().name(),
+            subscription.subscriber(),
+            account,
+            duration.toNanos() / 1000)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public Relay.Subscription advanceSeen(Lease lease, long position) {
+    Objects.requireNonNull(lease);
+    return transactions.inTransaction(
+        () -> {
+          requireLive(lease);
+          var advanced = subscriptions.advanceSeen(lease.subscription(), position, now());
+          requireLive(lease);
+          return advanced;
+        });
   }
 
   @Override

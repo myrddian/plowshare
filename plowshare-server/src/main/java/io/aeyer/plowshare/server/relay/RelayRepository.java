@@ -28,6 +28,14 @@ public interface RelayRepository {
   /** Atomically registers an explicit baseline, without resetting an existing subscription. */
   Relay.Subscription subscribe(Relay.SubscriptionKey key, Relay.Start start, Instant now);
 
+  /**
+   * Atomically registers a read-tier-owned subscription; see {@link Relay#subscribeAsReader}. The
+   * owner is decided by the row that already exists, never by the caller's claim, so an existing
+   * work-tier or foreign-reader row yields empty rather than changing hands.
+   */
+  Optional<Relay.Subscription> subscribeAsReader(
+      Relay.SubscriptionKey key, Relay.Start start, String reader, Instant now);
+
   /** Returns a coherent bounded log/cursor snapshot; no position or timestamp changes. */
   Relay.Read read(Relay.SubscriptionKey key, int limit);
 

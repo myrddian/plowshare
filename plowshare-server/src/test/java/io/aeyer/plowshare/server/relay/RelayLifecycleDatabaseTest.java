@@ -88,7 +88,8 @@ class RelayLifecycleDatabaseTest {
     repository = new JdbcRelayRepository(jdbc, work);
     relay = new DurableRelay(repository, Instant::now);
     consumers =
-        new JdbcRelayConsumerRepository(jdbc, work, new JdbcRelayDeliveryRepository(jdbc, work));
+        new JdbcRelayConsumerRepository(
+            jdbc, work, new JdbcRelayDeliveryRepository(jdbc, work), repository);
     firings = new JdbcFiringStore(jdbc);
     nativeInboxes = new JdbcRelayNativeRepository(jdbc, work, relay, consumers, firings);
     sources = new JdbcRelaySourceRepository(jdbc, work, relay, nativeInboxes);
