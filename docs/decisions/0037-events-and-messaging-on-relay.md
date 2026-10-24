@@ -92,6 +92,33 @@ scope is already the unit the read predicates resolve (`information_root_readabl
 `event.fire` and `message.*` each need the same decision made against their own authority unit
 before they move; this record does not pre-empt them beyond the rule above.
 
+Relay scopes are `Relay.ProjectScope(projectId)` or `Relay.SystemScope.SERVER`
+(`RelayScopeCodec`), so `authority_scopes.kind` for the revision's home scope maps as:
+
+| home scope kind | Relay topic scope |
+|---|---|
+| PROJECT | `ProjectScope(scope.project_id)` |
+| PERSONAL | `ProjectScope(scope.project_id)` — a personal space is a project |
+| ACCOUNT_KNOWLEDGE | `ProjectScope(owner's personal project)`, via the V185 alias |
+| GLOBAL_KNOWLEDGE | none exists; see the blockers below |
+| ADMINISTRATION, RESTRICTED | fail loudly; no fallback topic |
+
+### Blocked on two Relay authority changes
+
+Recorded separately because their surfaces differ:
+
+- **`0038-relay-read-tier-subscribers-project-scoped.md`.** Relay gates consumption on
+  `members.mayWork` (CONTRIBUTOR and above) because consuming takes a lease and a lease is a write,
+  while information read authority admits VIEWER. Without it, moving information events onto
+  project topics would silently narrow who receives them. It unblocks PROJECT, PERSONAL and
+  ACCOUNT_KNOWLEDGE — under the V185 alias, every information resource on the installation.
+- **`0039-relay-audiences-for-scopeless-content.md`.** GLOBAL_KNOWLEDGE has no project, and
+  `SystemScope.SERVER` is the internal worker scope, so global-read content has no expressible
+  audience. Deferred: the case is reachable but currently empty. Until it lands, this
+  migration's implementation must **fail loudly** on a GLOBAL_KNOWLEDGE home scope rather than
+  guess a topic — a refused publication is a visible defect, one delivered to the wrong audience
+  is not.
+
 ### Order of work
 
 1. `information.events` — it holds an installation-wide lock and is measured at 3,996 ms per event.
