@@ -248,3 +248,39 @@ store, including through symlinks. Existing absolute-root workflows still work.
 User approvals, project membership, exclusions and local command settings remain
 authoritative. Portable server/Application FileStore references and Application
 runtime writable areas are a separate server capability.
+
+## Optional client timing
+
+Set `PLOWSHARE_DESKTOP_TELEMETRY` to an absolute CSV path to record one row per
+command. It is off when the variable is unset, and no file is created. A
+relative path is refused at startup rather than resolved against whatever
+directory the application was started in.
+
+```sh
+PLOWSHARE_DESKTOP_TELEMETRY=/absolute/path/client-timing.csv
+```
+
+Each row carries `issuedAt`, the `surface` that issued the command (the main
+window, a library window, proc and so on), the `action`, the `depth` of
+requests already in flight from that renderer, three cumulative durations and
+`ok`. The durations subtract into the three stages a command can be slow in:
+
+| stage | how to read it |
+| --- | --- |
+| `serverMs` | the main process's own dispatch — server time plus SDK |
+| `replyMs` − `serverMs` | IPC and main-process overhead |
+| `renderMs` − `replyMs` | the renderer's update, to the first frame painted after the reply |
+
+`depth` is what to look at when latency rises under concurrency rather than in
+isolation: a command issued at depth 0 and the same command at depth 12 are
+different measurements.
+
+`renderMs` is the first frame painted after the reply resolved, which is the
+final update when a screen renders synchronously on resolve. A caller that does
+further asynchronous work after its reply finishes after that mark, so the row
+understates it. It is empty rather than zero when no frame arrives, because a
+hidden or backgrounded window is never asked to paint — and `serverMs` is empty
+when the request never reached the main process.
+
+Writing never fails an interaction it is only observing: a write failure is
+reported once and the file is then left alone.
