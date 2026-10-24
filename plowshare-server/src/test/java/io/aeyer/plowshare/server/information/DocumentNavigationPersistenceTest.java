@@ -49,7 +49,12 @@ class DocumentNavigationPersistenceTest {
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('alice','fixture',false),('bob','fixture',false),('viewer','fixture',false),('admin','fixture',true)");
     jdbc.update("INSERT INTO projects(name) VALUES('operations'),('restricted')");
     jdbc.update(
-        "INSERT INTO project_members(project_id,handle,role) SELECT id,'alice','MANAGER' FROM projects");
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'alice','MANAGER' FROM projects WHERE personal_owner IS NULL");
+    // After the membership inserts above, which select every project: provisioning the personal
+    // projects first would make those statements insert a duplicate owner row.
+    for (String handle : java.util.List.of("alice", "bob", "viewer", "admin"))
+      io.aeyer.plowshare.server.testing.AuthorityFixtures.personalIdentity(jdbc, handle);
+
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'viewer','VIEWER' FROM projects WHERE name='operations'");
     jdbc.update(
@@ -798,7 +803,7 @@ class DocumentNavigationPersistenceTest {
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,account_kind,must_change_password,server_admin) VALUES('@service/fixture','fixture','SERVICE',false,false)");
     jdbc.update(
-        "INSERT INTO project_members(project_id,handle,role) SELECT id,'@service/fixture','CONTRIBUTOR' FROM projects");
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'@service/fixture','CONTRIBUTOR' FROM projects WHERE personal_owner IS NULL");
     var machine =
         new InformationContext(
                 "@service/fixture",

@@ -201,12 +201,18 @@ class PersonalInformationWriteAuthorityDatabaseTest {
     return new JdbcPersonalSpaceRepository(jdbc).reserve(handle).id();
   }
 
+  /** The owner's grant, written when the identity is provisioned rather than when storage is. */
+  private void own(String handle, long project) {
+    new JdbcPersonalSpaceRepository(jdbc).owns(project, handle);
+  }
+
   private void initialize(String handle, long project) {
     new JdbcPersonalSpaceRepository(jdbc).initialized(project, handle);
   }
 
   private long personalSpace(String handle) {
     long project = reserve(handle);
+    own(handle, project);
     initialize(handle, project);
     return project;
   }
@@ -245,13 +251,21 @@ class PersonalInformationWriteAuthorityDatabaseTest {
     var accepted = upload(OWNER, personalScope(), "notes.md");
     assertEquals(Code.ACCEPTED, accepted.code(), accepted.said());
 
-    // The row is actually written, in the account's own information namespace.
+    // The row is written in the account's own personal project, not an account namespace: a
+    // personal selection is an alias for that project, so it is addressed the way any project is.
     assertEquals(
         1,
         jdbc.queryForObject(
             "SELECT count(*) FROM information_resources WHERE namespace=? AND source_name='notes.md'",
             Integer.class,
-            "account:" + OWNER));
+            "project:" + PersonalSpaces.name(OWNER)));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM information_resources WHERE namespace=?",
+            Integer.class,
+            "account:" + OWNER),
+        "the account namespace is no longer a destination for a personal write");
 
     // One admission, retained against the PERSONAL scope of this account and its own home.
     var personal = assertInstanceOf(AuthorityScope.Personal.class, scopeOf(OWNER));
@@ -288,7 +302,7 @@ class PersonalInformationWriteAuthorityDatabaseTest {
    * authority_membership_changed} trigger fires.
    */
   @Test
-  void the_personal_write_grant_comes_from_the_membership_row_personal_initialization_writes() {
+  void the_personal_write_grant_comes_from_identity_provisioning_not_storage() {
     long project = reserve(OWNER);
     String name = PersonalSpaces.name(OWNER);
 
@@ -307,7 +321,11 @@ class PersonalInformationWriteAuthorityDatabaseTest {
         () -> policy.admit(OWNER, personal, Set.of(AuthorityAction.CONVERSATION_CREATE)));
     assertEquals(Code.BAD_REQUEST, upload(OWNER, personalScope(), "early.md").code());
 
-    initialize(OWNER, project);
+    // The grant arrives with the identity, not with storage: PersonalSpaces.ensureIdentity writes
+    // it before any union exists, so an account can hold documents even where storage could not be
+    // allocated. Storage initialization is called afterwards here only to show it is not what
+    // grants.
+    own(OWNER, project);
 
     assertEquals(
         "MANAGER",
@@ -409,8 +427,9 @@ class PersonalInformationWriteAuthorityDatabaseTest {
     // A PERSONAL upload by `other` reaches its own space, never the owner's.
     assertEquals(Code.ACCEPTED, upload(OTHER, personalScope(), "mine.md").code());
     assertEquals(
-        List.of("account:" + OTHER),
-        jdbc.queryForList("SELECT namespace FROM information_resources", String.class));
+        List.of("project:" + PersonalSpaces.name(OTHER)),
+        jdbc.queryForList("SELECT namespace FROM information_resources", String.class),
+        "the write lands in this account's own personal project and nowhere else");
     // Every admission this account ever obtained, including the two taken explicitly above: its
     // own personal space and atlas, and never the owner's personal space.
     assertEquals(
