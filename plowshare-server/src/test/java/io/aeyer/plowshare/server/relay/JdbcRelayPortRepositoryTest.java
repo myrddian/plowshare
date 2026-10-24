@@ -109,7 +109,12 @@ class JdbcRelayPortRepositoryTest {
             new JdbcRelayRepository(
                 jdbc,
                 transactions,
-                new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1))),
+                new JdbcRelayPayloadStore(
+                    jdbc,
+                    transactions,
+                    java.time.Duration.ofHours(1),
+                    java.time.Duration.ofHours(24),
+                    java.time.Duration.ofDays(30))),
             Instant::now);
     ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
     relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
@@ -225,7 +230,12 @@ class JdbcRelayPortRepositoryTest {
             new JdbcRelayRepository(
                 jdbc,
                 transactions,
-                new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)),
+                new JdbcRelayPayloadStore(
+                    jdbc,
+                    transactions,
+                    java.time.Duration.ofHours(1),
+                    java.time.Duration.ofHours(24),
+                    java.time.Duration.ofDays(30)),
                 new RelayTextLimit(RelayPort.MAX_TEXT_BYTES)),
             Instant::now);
     ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
@@ -517,7 +527,12 @@ class JdbcRelayPortRepositoryTest {
     new JdbcRelayRepository(
             jdbc,
             transactions,
-            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)))
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)))
         .prune(topic, Instant.now(), 100);
     var gap = ports.consume(topic, "reviewer", request);
     assertEquals(RelayPort.Status.GAP, gap.status());

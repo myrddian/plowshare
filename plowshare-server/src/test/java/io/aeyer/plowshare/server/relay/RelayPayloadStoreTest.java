@@ -29,7 +29,9 @@ class RelayPayloadStoreTest {
   @BeforeEach
   void setUp() {
     jdbc = mock(JdbcTemplate.class);
-    store = new JdbcRelayPayloadStore(jdbc, UnitOfWork.NONE, Duration.ofHours(1));
+    store =
+        new JdbcRelayPayloadStore(
+            jdbc, UnitOfWork.NONE, Duration.ofHours(1), Duration.ofHours(24), Duration.ofDays(30));
   }
 
   @Test
@@ -58,7 +60,13 @@ class RelayPayloadStoreTest {
 
   private Timestamp ejectionFor(Instant now) {
     var template = mock(JdbcTemplate.class);
-    var local = new JdbcRelayPayloadStore(template, UnitOfWork.NONE, Duration.ofHours(1));
+    var local =
+        new JdbcRelayPayloadStore(
+            template,
+            UnitOfWork.NONE,
+            Duration.ofHours(1),
+            Duration.ofHours(24),
+            Duration.ofDays(30));
     local.store(new RelayPayload.Text("x"), now);
     var args = ArgumentCaptor.forClass(Object.class);
     verify(template)

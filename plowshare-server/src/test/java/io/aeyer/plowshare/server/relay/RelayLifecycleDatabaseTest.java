@@ -87,7 +87,14 @@ class RelayLifecycleDatabaseTest {
     jdbc.update("DELETE FROM relay_source_events");
     repository =
         new JdbcRelayRepository(
-            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(repository, Instant::now);
     consumers =
         new JdbcRelayConsumerRepository(
@@ -199,7 +206,12 @@ class RelayLifecycleDatabaseTest {
                 new JdbcRelayRepository(
                     jdbc,
                     work,
-                    new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1))),
+                    new JdbcRelayPayloadStore(
+                        jdbc,
+                        work,
+                        java.time.Duration.ofHours(1),
+                        java.time.Duration.ofHours(24),
+                        java.time.Duration.ofDays(30))),
                 Instant::now),
             nativeInboxes);
     publishAll();

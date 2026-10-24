@@ -79,7 +79,14 @@ class RelayScheduledPublicationDatabaseTest {
     firings = new JdbcFiringStore(jdbc);
     repository =
         new JdbcRelayRepository(
-            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(repository, () -> AT);
     dispatcher = mock(Dispatcher.class);
     intake = new Intake(triggers, firings, dispatcher, () -> AT);

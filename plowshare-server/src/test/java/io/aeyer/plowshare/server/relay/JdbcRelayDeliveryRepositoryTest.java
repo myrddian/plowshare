@@ -84,7 +84,12 @@ class JdbcRelayDeliveryRepositoryTest {
         new JdbcRelayRepository(
             jdbc,
             transactions,
-            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     log.configureTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     log.subscribe(subscription, Relay.Start.OLDEST_RETAINED, T0);
@@ -181,7 +186,12 @@ class JdbcRelayDeliveryRepositoryTest {
         new JdbcRelayRepository(
             jdbc,
             transactions,
-            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)),
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)),
             new RelayTextLimit(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES));
     var draft =
         new Relay.Draft(

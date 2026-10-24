@@ -160,7 +160,14 @@ class RelayInformationEventsDatabaseTest {
     hinted.clear();
     broker =
         new JdbcRelayRepository(
-            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(broker, () -> now);
     var consumers =
         new JdbcRelayConsumerRepository(

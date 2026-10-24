@@ -136,7 +136,11 @@ class TickerTest {
                 jdbc,
                 transactions,
                 new io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore(
-                    jdbc, transactions, java.time.Duration.ofHours(1))),
+                    jdbc,
+                    transactions,
+                    java.time.Duration.ofHours(1),
+                    java.time.Duration.ofHours(24),
+                    java.time.Duration.ofDays(30))),
             clock),
         intake,
         transactions,

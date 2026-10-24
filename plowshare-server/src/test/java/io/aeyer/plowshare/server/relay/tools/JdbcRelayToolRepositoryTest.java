@@ -110,7 +110,12 @@ class JdbcRelayToolRepositoryTest {
         new JdbcRelayRepository(
             jdbc,
             transactions,
-            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     repository =
         new JdbcRelayToolRepository(jdbc, transactions, new DurableRelay(broker, () -> NOW));
     var binding =

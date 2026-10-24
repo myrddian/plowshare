@@ -70,7 +70,14 @@ class JdbcRelayWorkTest {
     sub = new Relay.SubscriptionKey(topic, "relay.notices.release");
     broker =
         new JdbcRelayRepository(
-            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     deliveries = new JdbcRelayDeliveryRepository(jdbc, work);
     executions = new JdbcRelayExecutions(jdbc, () -> AT);
     logs = new JdbcRelayLogRepository(jdbc, work);

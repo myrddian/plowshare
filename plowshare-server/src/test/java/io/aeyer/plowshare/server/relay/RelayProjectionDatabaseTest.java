@@ -431,7 +431,14 @@ class RelayProjectionDatabaseTest {
     final Relay.SubscriptionKey subscription;
     final RelayRepository broker =
         new JdbcRelayRepository(
-            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     final JdbcProjectionVersions versions = new JdbcProjectionVersions(jdbc, source(), 128);
     final CountingJdbc counting = new CountingJdbc(data);
     final ProjectionCaches caches;

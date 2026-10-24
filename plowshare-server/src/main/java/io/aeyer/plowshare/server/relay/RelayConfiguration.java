@@ -65,7 +65,12 @@ public class RelayConfiguration {
   @DependsOnDatabaseInitialization
   public RelayPayloadStore relayPayloadStore(
       JdbcTemplate jdbc, UnitOfWork transactions, RelayProperties properties) {
-    return new JdbcRelayPayloadStore(jdbc, transactions, properties.getPayloadStagingWindow());
+    return new JdbcRelayPayloadStore(
+        jdbc,
+        transactions,
+        properties.getPayloadStagingWindow(),
+        properties.getPayloadDeferralCeiling(),
+        properties.getSettledRetention());
   }
 
   @Bean
@@ -495,7 +500,8 @@ public class RelayConfiguration {
       RelayProperties properties,
       RelayOperationRepository operations,
       RelayNativeRepository nativeInboxes,
-      RelayApprovalInboxRepository approvals) {
+      RelayApprovalInboxRepository approvals,
+      RelayPayloadStore payloads) {
     var maintenance =
         new RelayMaintenance(
             repository,
@@ -506,6 +512,7 @@ public class RelayConfiguration {
             operations,
             nativeInboxes);
     maintenance.useApprovalInbox(approvals);
+    maintenance.usePayloads(payloads);
     return maintenance;
   }
 }

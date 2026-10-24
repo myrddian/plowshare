@@ -187,7 +187,12 @@ class HostedScopePersistenceTest {
         new JdbcRelayRepository(
             jdbc,
             transactions,
-            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     var relay = new DurableRelay(broker, () -> f.clock.instant());
     var spyRelay = spy(relay);
     doAnswer(

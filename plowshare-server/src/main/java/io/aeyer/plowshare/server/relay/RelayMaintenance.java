@@ -26,9 +26,15 @@ public final class RelayMaintenance
   private final ScheduledExecutorService executor;
   private final AtomicBoolean started = new AtomicBoolean();
   private RelayApprovalInboxRepository approvalInbox;
+  private RelayPayloadStore payloads;
 
   public void useApprovalInbox(RelayApprovalInboxRepository repository) {
     approvalInbox = Objects.requireNonNull(repository);
+  }
+
+  /** Registers payload reclamation; without a store the pass is skipped. */
+  public void usePayloads(RelayPayloadStore store) {
+    payloads = Objects.requireNonNull(store);
   }
 
   public RelayMaintenance(
@@ -71,6 +77,10 @@ public final class RelayMaintenance
     for (var topic : repository.topicsToPrune(now, properties.getTopicBatchSize())) {
       deleted += repository.prune(topic, now, properties.getPublicationBatchSize());
     }
+    // After the publication prune so references it just removed are already gone when payloads are
+    // examined. Only payloads whose ejection_at has matured are examined, and each examination
+    // re-checks reachability.
+    if (payloads != null) deleted += payloads.sweep(now, properties.getPayloadSweepBatch());
     return deleted;
   }
 

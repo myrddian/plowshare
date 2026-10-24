@@ -47,6 +47,34 @@ class RelayMaintenanceTest {
   }
 
   @Test
+  void sweep_includes_the_payload_pass_in_the_returned_count() {
+    var repository = mock(RelayRepository.class);
+    var payloads = mock(RelayPayloadStore.class);
+    var properties = new RelayProperties();
+    properties.setPayloadSweepBatch(25);
+    Instant now = Instant.parse("2026-10-05T01:00:00Z");
+    when(repository.topicsToPrune(now, properties.getTopicBatchSize()))
+        .thenReturn(List.of(new Relay.TopicKey(1, "release.observed")));
+    when(repository.prune(any(), eq(now), anyInt())).thenReturn(3);
+    when(payloads.sweep(now, 25)).thenReturn(2);
+    try (var maintenance =
+        new RelayMaintenance(
+            repository,
+            mock(RelayDeliveryRepository.class),
+            mock(RelayExecutions.class),
+            properties,
+            () -> now,
+            mock(RelayOperationRepository.class),
+            mock(RelayNativeRepository.class))) {
+      maintenance.usePayloads(payloads);
+      assertEquals(5, maintenance.sweep());
+    }
+    var order = inOrder(repository, payloads);
+    order.verify(repository).prune(any(), eq(now), anyInt());
+    order.verify(payloads).sweep(now, 25);
+  }
+
+  @Test
   void disabled_cleanup_does_not_query_on_startup() {
     var repository = mock(RelayRepository.class);
     var deliveries = mock(RelayDeliveryRepository.class);

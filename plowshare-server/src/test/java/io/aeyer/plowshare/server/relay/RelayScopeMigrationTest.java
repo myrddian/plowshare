@@ -99,7 +99,12 @@ class RelayScopeMigrationTest {
         new JdbcRelayRepository(
             jdbc,
             transactions,
-            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     var deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     var project = new Relay.TopicKey(projectId, "release.observed");
     var subscription = new Relay.SubscriptionKey(project, "notices");
