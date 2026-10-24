@@ -53,6 +53,11 @@ class RootDocumentPolicyPersistenceTest {
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,must_change_password,server_admin,account_kind) VALUES('app','fixture',false,false,'SERVICE'),(?,'fixture',false,false,'SERVICE_TOKEN')",
         service);
+    // An operation that resolves an omitted selection lands on the actor's personal project, so
+    // every user account here needs that identity to exist as production provisions it. Service
+    // accounts have none: they resolve to the project their token names.
+    for (String handle : List.of("manager", "contributor", "reader", "outside", "admin"))
+      AuthorityFixtures.personalIdentity(jdbc, handle);
     jdbc.update("INSERT INTO projects(name) VALUES('one'),('two')");
     for (var member :
         Map.of(
