@@ -13,13 +13,6 @@ import java.util.Optional;
  * Seen positions track availability, not successful handling; reading never advances a position.
  */
 public interface Relay {
-  /**
-   * The one topic name carrying {@link RelayPayload.Kind#INFORMATION_CHANGED}, in every project
-   * scope that homes information (decision 0037). Declared here because the broker's topic
-   * invariant and the publishing family must agree on the same literal.
-   */
-  String INFORMATION_CHANGED = "information.changed";
-
   /** Creates a topic or changes its policy; an existing payload family cannot be changed. */
   Topic configureTopic(TopicKey key, RelayPayload.Kind kind, Policy policy);
 
@@ -185,9 +178,6 @@ public interface Relay {
             "Native wake families require their private system topics");
       if (key.name().equals("schedule.due") != (kind == RelayPayload.Kind.SCHEDULE_DUE))
         throw new IllegalArgumentException("schedule.due requires its registered payload family");
-      if (key.name().equals(INFORMATION_CHANGED) != (kind == RelayPayload.Kind.INFORMATION_CHANGED))
-        throw new IllegalArgumentException(
-            "information.changed requires its registered payload family");
     }
   }
 

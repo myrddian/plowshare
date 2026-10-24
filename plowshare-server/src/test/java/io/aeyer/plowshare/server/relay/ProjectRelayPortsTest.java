@@ -49,6 +49,34 @@ class ProjectRelayPortsTest {
                 List.of("filters"))));
   }
 
+  /**
+   * A port grant reaches exactly the topics it names, and the shipped default names none.
+   *
+   * <p>This used to be stated about one subsystem's topic, by name. It no longer can be, and that
+   * is the point: an internal topic name is private to the system that owns it, so the information
+   * family derives its name inside its own package and nothing here knows it. The pin generalises
+   * instead, which is the stronger statement — a grant is per topic name, so no configuration
+   * reaches a topic it did not spell, whoever owns it. The subsystem-specific half, that no
+   * configuration can reach the derived name, lives with the name in {@code InformationTopicsTest}.
+   */
+  @Test
+  void a_port_grant_reaches_only_the_topics_it_names() {
+    var unconfigured = new RelayPortProperties();
+    for (var direction : RelayPortProperties.Direction.values())
+      assertFalse(
+          unconfigured.permits("reviewer", "project", "custom.topic", direction, null),
+          "the shipped default grants no port at all");
+    allow();
+    for (var direction : RelayPortProperties.Direction.values())
+      assertFalse(
+          properties.permits("reviewer", "project", "server.owned.topic", direction, null),
+          "a configured deployment must not reach a topic its bindings never named");
+    assertTrue(
+        properties.permits(
+            "reviewer", "project", "custom.topic", RelayPortProperties.Direction.INGRESS, null),
+        "and the binding it did name still works, so the refusals above are not vacuous");
+  }
+
   @Test
   void membership_does_not_open_a_port_and_personal_ownership_cannot_be_bypassed() {
     when(members.mayWork("project", "reviewer")).thenReturn(true);
