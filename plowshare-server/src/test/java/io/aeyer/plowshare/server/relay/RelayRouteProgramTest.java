@@ -11,12 +11,12 @@ class RelayRouteProgramTest {
   static final String DECLARATION =
       """
       export const manifest = {version: 1, subscriptions: [
-        {name: 'due', topic: 'schedule.due', kind: 'schedule.due', start: 'oldest-retained'}
+        {name: 'due', topic: 'occurrence.sample', kind: 'schedule.due', start: 'oldest-retained'}
       ]};
       """;
   static final Relay.Publication INPUT =
       new Relay.Publication(
-          new Relay.TopicKey(9, "schedule.due"),
+          new Relay.TopicKey(9, "occurrence.sample"),
           9007199254740993L,
           Instant.EPOCH,
           new Relay.Draft(
@@ -201,7 +201,14 @@ class RelayRouteProgramTest {
       for (String declaration :
           List.of(
               "export const manifest = {version:2,subscriptions:[]};",
-              "export const manifest = {version:1,subscriptions:[{name:'n',topic:'schedule.due',kind:'text',start:'latest'}]};",
+              // A kind outside the closed vocabulary. This case used to be a manifest whose topic
+              // was 'schedule.due' with kind 'text', refused by the topic-name-to-payload-kind
+              // agreement; that agreement is gone with the literal, since a topic name is private
+              // to the system that owns it. The kind vocabulary itself is still closed, which is
+              // what this case now exercises.
+              "export const manifest = {version:1,subscriptions:[{name:'n',topic:'occurrence.sample',kind:'unknown',start:'latest'}]};",
+              // And a topic name no scope admits, refused before the kind is even reached.
+              "export const manifest = {version:1,subscriptions:[{name:'n',topic:'Not A Topic',kind:'text',start:'latest'}]};",
               "export const manifest = {version:1,subscriptions:[],unknown:true};"))
         assertThrows(
             RuntimeException.class,

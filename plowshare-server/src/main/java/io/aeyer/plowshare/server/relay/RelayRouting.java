@@ -90,14 +90,24 @@ public interface RelayRouting {
     }
   }
 
+  /**
+   * One subscription a project's routing manifest declares.
+   *
+   * <p>No topic-name-to-payload-kind agreement is enforced, deliberately. This record used to
+   * require that a manifest naming the topic {@code schedule.due} declared {@code SCHEDULE_DUE} and
+   * that nothing else did — the same leak as the check {@code Relay.Topic} carried, from the
+   * operator-facing side. The schedules family now derives its topic name inside {@code
+   * server/events} and no manifest can spell it, so the first half of that agreement had nothing
+   * left to match and the second half would have forbidden a manifest from declaring the kind at
+   * all. The payload kind remains part of the manifest vocabulary; what it is not is a claim about
+   * the topic's name.
+   */
   record Subscription(String name, String topic, RelayPayload.Kind kind, Relay.Start start) {
     public Subscription {
       name = folder(name);
       topic = RelayValues.topic(topic);
       Objects.requireNonNull(kind, "kind");
       Objects.requireNonNull(start, "start");
-      if (topic.equals("schedule.due") != (kind == RelayPayload.Kind.SCHEDULE_DUE))
-        throw new IllegalArgumentException("schedule.due requires its registered payload family");
     }
   }
 

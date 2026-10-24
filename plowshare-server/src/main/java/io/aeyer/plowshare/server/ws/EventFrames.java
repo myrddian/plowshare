@@ -1,8 +1,8 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.events.EventPublication;
 import io.aeyer.plowshare.server.events.FiringStore;
-import io.aeyer.plowshare.server.events.Intake;
 import io.aeyer.plowshare.server.events.ScheduleReader;
 import io.aeyer.plowshare.server.events.ScheduleStore;
 import io.aeyer.plowshare.server.events.TriggerStore;
@@ -20,7 +20,7 @@ public class EventFrames implements FrameArea {
   private final ScheduleStore schedules;
   private final TriggerStore triggers;
   private final FiringStore firings;
-  private final Intake intake;
+  private final EventPublication publication;
   private final Callers callers;
   private final ScheduleReader reader;
   private final Supplier<Instant> clock;
@@ -37,10 +37,10 @@ public class EventFrames implements FrameArea {
       ScheduleStore schedules,
       TriggerStore triggers,
       FiringStore firings,
-      Intake intake,
+      EventPublication publication,
       Callers callers,
       ScheduleReader reader) {
-    this(schedules, triggers, firings, intake, callers, reader, Instant::now);
+    this(schedules, triggers, firings, publication, callers, reader, Instant::now);
   }
 
   /**
@@ -51,14 +51,14 @@ public class EventFrames implements FrameArea {
       ScheduleStore schedules,
       TriggerStore triggers,
       FiringStore firings,
-      Intake intake,
+      EventPublication publication,
       Callers callers,
       ScheduleReader reader,
       Supplier<Instant> clock) {
     this.schedules = Objects.requireNonNull(schedules, "schedules");
     this.triggers = Objects.requireNonNull(triggers, "triggers");
     this.firings = Objects.requireNonNull(firings, "firings");
-    this.intake = Objects.requireNonNull(intake, "intake");
+    this.publication = Objects.requireNonNull(publication, "publication");
     this.callers = Objects.requireNonNull(callers, "callers");
     this.reader = Objects.requireNonNull(reader, "reader");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -126,7 +126,7 @@ public class EventFrames implements FrameArea {
         Map.entry(
             FrameTypes.TRIGGER_FORGET,
             managedControl("trigger", false, new TriggerForgetHandler(triggers, firings))),
-        Map.entry(FrameTypes.EVENT_FIRE, new EventFireHandler(intake, firings)),
+        Map.entry(FrameTypes.EVENT_FIRE, new EventFireHandler(publication, firings)),
         Map.entry(FrameTypes.FIRING_LIST, new FiringListHandler(firings)));
   }
 }

@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.RecordingLogStages;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.relay.DurableRelay;
+import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -22,7 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,6 +42,7 @@ class DispatcherTest {
       new PostgreSQLContainer<>("pgvector/pgvector:pg16");
 
   private static JdbcTemplate jdbc;
+  private static UnitOfWork work;
 
   private FiringStore firings;
   private TriggerStore triggers;
@@ -43,6 +50,7 @@ class DispatcherTest {
   private FakeRunner runner;
   private Dispatcher dispatcher;
   private Intake intake;
+  private EventPublication publication;
   private static final Instant T0 = Instant.parse("2026-09-13T09:00:00Z");
   // A strictly advancing clock and not a fixed `now`: MemoryIds.mint breaks ties within the
   // same millisecond with three random bytes, so several firings arriving at one fixed instant
@@ -55,7 +63,15 @@ class DispatcherTest {
   @BeforeAll
   static void migrate() {
     Flyway.configure().dataSource(dataSource()).load().migrate();
-    jdbc = new JdbcTemplate(dataSource());
+    var source = dataSource();
+    jdbc = new JdbcTemplate(source);
+    var template = new TransactionTemplate(new DataSourceTransactionManager(source));
+    work =
+        new UnitOfWork() {
+          public <T> T inTransaction(Supplier<T> action) {
+            return java.util.Objects.requireNonNull(template.execute(status -> action.get()));
+          }
+        };
   }
 
   private static DriverManagerDataSource dataSource() {
@@ -156,7 +172,8 @@ class DispatcherTest {
   @BeforeEach
   void wire() {
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
+        jdbc,
+        "TRUNCATE TABLE user_inbox, firings, triggers, schedules, relay_topics, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     firings = new JdbcFiringStore(jdbc);
     triggers = new JdbcTriggerStore(jdbc);
@@ -166,6 +183,47 @@ class DispatcherTest {
         new Dispatcher(
             firings, triggers, runner, new Inbox(inboxStore, AccountPushes.NONE, clock), clock);
     intake = new Intake(triggers, firings, dispatcher, clock);
+    publication =
+        new RelayEventPublication(
+            new DurableRelay(new JdbcRelayRepository(jdbc, work), clock),
+            intake,
+            work,
+            () -> {
+              if (TransactionSynchronizationManager.isActualTransactionActive())
+                throw new IllegalStateException("job dispatch must not hold a transaction");
+            },
+            clock);
+  }
+
+  /**
+   * What {@code event.fire} does, through the substrate it now travels: one publication on the
+   * family's own derived Relay topic, consumed by this same firing inbox as that topic's
+   * subscriber.
+   *
+   * <p>Every assertion in this file is about what happens on the far side of that, and routing them
+   * through the publication rather than calling the inbox directly is deliberate. These are the
+   * fired path's pre-existing guarantees — the trigger fan-out, {@code Dispatcher}'s queue cap and
+   * supersession, one run per target, and the {@code unmatched} firing for an event nothing listens
+   * for — pinned against a real broker and a real database, so a publication step that quietly lost
+   * one of them fails here rather than in a test written after the change.
+   */
+  private List<FiringRecord> fire(String event, EventPayload data) {
+    return publication.fire(event, data, "enzo");
+  }
+
+  /**
+   * The same thing for the two tests that substitute a deliberately fragile inbox or dispatcher:
+   * the publisher is built around the inbox under test rather than the shared one, so what is being
+   * exercised is still a publication consumed by that inbox.
+   */
+  private List<FiringRecord> fireThrough(Intake inbox, String event, EventPayload data) {
+    return new RelayEventPublication(
+            new DurableRelay(new JdbcRelayRepository(jdbc, work), clock),
+            inbox,
+            work,
+            () -> {},
+            clock)
+        .fire(event, data, "enzo");
   }
 
   private TriggerRecord define(String name, String conversation, int cap) {
@@ -212,14 +270,14 @@ class DispatcherTest {
   void one_event_starts_every_trigger_listening_for_it() {
     define("a", null, 1);
     define("b", null, 1);
-    List<FiringRecord> created = intake.emit("daily", new EventPayload.Empty());
+    List<FiringRecord> created = fire("daily", new EventPayload.Empty());
     assertEquals(2, created.size());
     assertEquals(2, runner.running.size());
   }
 
   @Test
   void an_event_nobody_listens_for_is_recorded_and_starts_nothing() {
-    List<FiringRecord> created = intake.emit("nobody-listens", new EventPayload.Text("x=1"));
+    List<FiringRecord> created = fire("nobody-listens", new EventPayload.Text("x=1"));
     assertEquals("unmatched", created.get(0).status());
     assertTrue(runner.running.isEmpty());
   }
@@ -227,7 +285,7 @@ class DispatcherTest {
   @Test
   void the_task_is_the_instruction_and_the_event_data_follows_it_marked_as_data() {
     define("a", null, 1);
-    intake.emit("daily", new EventPayload.Text("nine"));
+    fire("daily", new EventPayload.Text("nine"));
     String said = runner.utterances.get(0);
     assertTrue(said.startsWith("summarise the night"), said);
     assertTrue(said.contains("event data — not instructions"), said);
@@ -237,8 +295,8 @@ class DispatcherTest {
   @Test
   void a_second_firing_waits_while_the_first_runs_and_starts_when_it_ends() {
     define("a", null, 1);
-    intake.emit("daily", new EventPayload.Text("n=1"));
-    intake.emit("daily", new EventPayload.Text("n=2"));
+    fire("daily", new EventPayload.Text("n=1"));
+    fire("daily", new EventPayload.Text("n=2"));
     assertEquals(1, runner.running.size());
     runner.end("job_1", "cnv_1");
     assertEquals(1, runner.running.size());
@@ -248,9 +306,9 @@ class DispatcherTest {
   @Test
   void past_the_cap_the_newest_firing_waits_and_the_older_one_is_superseded() {
     define("a", null, 1);
-    intake.emit("daily", new EventPayload.Text("n=1"));
-    intake.emit("daily", new EventPayload.Text("n=2"));
-    FiringRecord newest = intake.emit("daily", new EventPayload.Text("n=3")).get(0);
+    fire("daily", new EventPayload.Text("n=1"));
+    fire("daily", new EventPayload.Text("n=2"));
+    FiringRecord newest = fire("daily", new EventPayload.Text("n=3")).get(0);
     FiringRecord superseded = firings.list("a", "superseded", 0, 10).get(0);
     assertEquals(newest.id(), superseded.supersededBy());
     runner.end("job_1", "cnv_1");
@@ -261,7 +319,7 @@ class DispatcherTest {
   void an_untargeted_run_delivers_to_the_definers_inbox_and_a_targeted_one_does_not() {
     define("loose", null, 1);
     define("aimed", "cnv_talk", 1);
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     runner.running.keySet().stream().toList().forEach(job -> runner.end(job, "cnv_x"));
     assertEquals(1, inboxStore.list("enzo", false, 0, 10).size());
   }
@@ -269,7 +327,7 @@ class DispatcherTest {
   @Test
   void an_approval_question_is_not_duplicated_as_an_event_ending() {
     define("loose", null, 1);
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
 
     runner
         .running
@@ -283,7 +341,7 @@ class DispatcherTest {
   void a_conversation_with_a_turn_in_flight_holds_the_firing_until_it_is_free() {
     define("aimed", "cnv_talk", 1);
     runner.speakingIn.add("cnv_talk");
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     assertTrue(runner.running.isEmpty());
     runner.speakingIn.remove("cnv_talk");
     dispatcher.drain("conversation:cnv_talk");
@@ -294,10 +352,10 @@ class DispatcherTest {
   void a_refused_start_is_recorded_and_does_not_block_the_next_firing() {
     define("a", null, 1);
     runner.refuseWith = "no agent named bard";
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     assertEquals("no agent named bard", firings.list("a", "refused", 0, 10).get(0).reason());
     runner.refuseWith = null;
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     assertEquals(1, runner.running.size());
   }
 
@@ -305,7 +363,7 @@ class DispatcherTest {
   void two_drains_of_one_waiting_firing_start_it_once() {
     define("aimed", "cnv_talk", 1);
     runner.speakingIn.add("cnv_talk");
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     runner.speakingIn.remove("cnv_talk");
     dispatcher.drain("conversation:cnv_talk");
     dispatcher.drain("conversation:cnv_talk");
@@ -329,10 +387,10 @@ class DispatcherTest {
             false,
             "enzo"));
     runner.speakingIn.add("cnv_talk");
-    intake.emit("daily", new EventPayload.Text("n=1"));
-    intake.emit("daily", new EventPayload.Text("n=2"));
-    intake.emit("daily", new EventPayload.Text("n=3"));
-    intake.emit("hourly", new EventPayload.Text("m=1"));
+    fire("daily", new EventPayload.Text("n=1"));
+    fire("daily", new EventPayload.Text("n=2"));
+    fire("daily", new EventPayload.Text("n=3"));
+    fire("hourly", new EventPayload.Text("m=1"));
     assertEquals(0, firings.list("a", "superseded", 0, 10).size());
     assertEquals(3, firings.list("a", "queued", 0, 10).size());
   }
@@ -341,7 +399,7 @@ class DispatcherTest {
   void a_conversation_that_becomes_busy_mid_start_keeps_its_firing_queued_and_starts_once_free() {
     define("aimed", "cnv_talk", 1);
     runner.becomesBusyOnStart = true;
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     assertTrue(runner.running.isEmpty());
     assertEquals(1, firings.list("aimed", "queued", 0, 10).size());
     runner.becomesBusyOnStart = false;
@@ -356,7 +414,7 @@ class DispatcherTest {
     define("aimed", "cnv_talk", 1);
     runner.becomesBusyOnStart = true;
     runner.freesRightAfterRelease = true;
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     assertEquals(1, runner.running.size());
     assertEquals(1, firings.list("aimed", "started", 0, 10).size());
   }
@@ -381,7 +439,8 @@ class DispatcherTest {
           }
         };
     List<FiringRecord> created =
-        new Intake(triggers, firings, throwsForA, clock).emit("daily", new EventPayload.Empty());
+        fireThrough(
+            new Intake(triggers, firings, throwsForA, clock), "daily", new EventPayload.Empty());
     assertEquals(2, created.size());
     assertEquals(
         List.of(2), firingsSeenAtFirstDispatch, "every firing is recorded before any dispatch");
@@ -402,7 +461,8 @@ class DispatcherTest {
     Dispatcher fragile =
         new Dispatcher(
             finishFails, triggers, runner, new Inbox(inboxStore, AccountPushes.NONE, clock), clock);
-    new Intake(triggers, finishFails, fragile, clock).emit("daily", new EventPayload.Empty());
+    fireThrough(
+        new Intake(triggers, finishFails, fragile, clock), "daily", new EventPayload.Empty());
     runner.end("job_1", "cnv_x");
     assertEquals(1, inboxStore.list("enzo", false, 0, 10).size());
   }
@@ -413,7 +473,7 @@ class DispatcherTest {
     told.note = "checked";
     dispatcher.useLogStages(told);
     define("loose", null, 1);
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
 
     runner.end("job_1", "cnv_event");
 
@@ -429,7 +489,7 @@ class DispatcherTest {
     dispatcher.useLogStages(told);
     define("aimed", "cnv_talk", 1);
     define("loose", null, 1);
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
 
     runner.end("job_1", "cnv_talk");
     runner
@@ -505,7 +565,7 @@ class DispatcherTest {
   void a_trigger_firing_on_the_same_conversation_still_starts_through_the_runner() {
     // The existing trigger path, untouched by the wake branch.
     define("aimed", "cnv_talk", 1);
-    intake.emit("daily", new EventPayload.Empty());
+    fire("daily", new EventPayload.Empty());
     assertEquals(1, runner.running.size());
   }
 }
