@@ -1,11 +1,13 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,10 +47,13 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
   @Override
   public String store(RelayPayload payload, Instant now) {
     String json = RelayPayloadCodec.write(payload);
-    String digest = io.aeyer.plowshare.protocol.RelayPort.hash(json);
-    // Truncating to the hour makes every payload stored in the same hour share one ejection_at,
-    // so the ejection index stays dense in a few values rather than one per microsecond.
-    Instant ejection = RelayValues.time(now).plus(stagingWindow).truncatedTo(ChronoUnit.HOURS);
+    String digest = RelayPort.hash(json);
+    // Round up to the next hour boundary so the staging window is a guaranteed minimum: the row
+    // is never sweep-eligible before now + window. Bucketing by hour keeps many payloads sharing
+    // one ejection_at, so a sweep pass is a batch rather than a scan.
+    Instant earliest = RelayValues.time(now).plus(stagingWindow);
+    Instant ejection = earliest.truncatedTo(ChronoUnit.HOURS);
+    if (ejection.isBefore(earliest)) ejection = ejection.plus(Duration.ofHours(1));
     jdbc.update(
         """
         INSERT INTO relay_payloads(digest,payload,byte_length,ejection_at)
@@ -80,7 +85,7 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
       if (digest == null || !DIGEST.matcher(digest).matches())
         throw new IllegalArgumentException("digest must be 64 lowercase hex characters");
     }
-    var placeholders = String.join(",", java.util.Collections.nCopies(distinct.size(), "?"));
+    var placeholders = String.join(",", Collections.nCopies(distinct.size(), "?"));
     var found = new LinkedHashMap<String, RelayStoredPayload>();
     jdbc.query(
         "SELECT digest,payload::text,byte_length FROM relay_payloads WHERE digest IN ("

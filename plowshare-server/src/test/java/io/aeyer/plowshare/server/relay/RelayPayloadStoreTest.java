@@ -8,10 +8,12 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -54,13 +56,36 @@ class RelayPayloadStoreTest {
     assertNotEquals(first, store.store(new RelayPayload.Text("different"), NOW));
   }
 
-  @Test
-  void storeTruncatesEjectionToTheHour() {
-    store.store(new RelayPayload.Text("x"), NOW);
+  private Timestamp ejectionFor(Instant now) {
+    var template = mock(JdbcTemplate.class);
+    var local = new JdbcRelayPayloadStore(template, UnitOfWork.NONE, Duration.ofHours(1));
+    local.store(new RelayPayload.Text("x"), now);
     var args = ArgumentCaptor.forClass(Object.class);
-    verify(jdbc)
+    verify(template)
         .update(anyString(), args.capture(), args.capture(), args.capture(), args.capture());
-    assertEquals(Timestamp.from(Instant.parse("2026-10-25T11:00:00Z")), args.getAllValues().get(3));
+    return (Timestamp) args.getAllValues().get(3);
+  }
+
+  @Test
+  void storeRoundsEjectionUpToTheNextHourBoundary() {
+    assertEquals(
+        Timestamp.from(Instant.parse("2026-10-25T12:00:00Z")),
+        ejectionFor(Instant.parse("2026-10-25T10:42:17.123456Z")));
+  }
+
+  @Test
+  void storeNeverEjectsBeforeNowPlusTheStagingWindow() {
+    var now = Instant.parse("2026-10-25T10:59:59Z");
+    var ejection = ejectionFor(now).toInstant();
+    assertFalse(ejection.isBefore(Instant.parse("2026-10-25T11:59:59Z")));
+    assertEquals(Instant.parse("2026-10-25T12:00:00Z"), ejection);
+  }
+
+  @Test
+  void storeLeavesAnExactHourBoundaryUnchanged() {
+    assertEquals(
+        Timestamp.from(Instant.parse("2026-10-25T11:00:00Z")),
+        ejectionFor(Instant.parse("2026-10-25T10:00:00Z")));
   }
 
   @Test
@@ -80,7 +105,7 @@ class RelayPayloadStoreTest {
     doAnswer(
             call -> {
               var handler = (RowCallbackHandler) call.getArgument(1);
-              var row = mock(java.sql.ResultSet.class);
+              var row = mock(ResultSet.class);
               when(row.getString(1)).thenReturn("a".repeat(64));
               when(row.getString(2)).thenReturn("{\"text\": \"hi\"}");
               when(row.getLong(3)).thenReturn(14L);
@@ -91,7 +116,7 @@ class RelayPayloadStoreTest {
         .query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
     var loaded = store.load(digests);
     verify(jdbc, times(1)).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
-    assertEquals(java.util.Set.of("a".repeat(64)), loaded.keySet());
+    assertEquals(Set.of("a".repeat(64)), loaded.keySet());
     assertEquals(14L, loaded.get("a".repeat(64)).byteLength());
   }
 
