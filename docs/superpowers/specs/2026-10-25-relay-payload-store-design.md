@@ -1,7 +1,7 @@
 # Relay content-addressed payload store
 
 Date: 2026-10-25
-Status: design, two decisions outstanding (see "Outstanding decisions")
+Status: design, one decision outstanding (see "Outstanding decision")
 
 ## Why this exists
 
@@ -72,6 +72,11 @@ These would make the change a failure even if it functioned:
 - Any path in which the examination date authorizes a deletion.
 - Raw JSON crossing into a domain contract. JSON text stays inside the
   persistence boundary, as it does today.
+- The substrate learning anything new about payload families. Relay carries
+  bytes; the system using them owns their encoding and decoding. A codec added
+  to Relay on the information system's behalf is the specific mistake this rule
+  exists to prevent — it imported that system's concerns into the substrate, and
+  removing it is why `information_events` went away on this branch.
 - Per-topic physical tables or dynamic SQL identifiers in this path.
 - A read path that fetches payloads per record. Batched reads (consume returns
   up to 100) must join, not loop.
@@ -125,15 +130,38 @@ only a `KEY SHARE` lock on the payload row, so concurrent publishes of the same
 hot digest do not block each other — only a concurrent delete of that digest
 does, which is precisely the race to serialise.
 
-**The table stores no `payload_kind`.** The digest addresses content, and a
-family is a property of the *referencing* row, not of the bytes: a publication's
-family comes from `relay_topics.payload_kind` and an admission's from its own
-`payload_kind` column. Storing the family beside the bytes would make one digest
-assert a family that a differently-familied reference could contradict, and would
-require a new invariant — that two families can never produce identical bytes —
-which holds today only as an accident of `RelayPayloadCodec`'s disjoint field
-sets across the current six families. Keeping the family with the reference
-needs no such invariant and cannot be broken by adding a family later.
+**The table stores no `payload_kind`.** The first reason is mechanical: the digest
+addresses content, and a family is a property of the *referencing* row, not of the
+bytes. A publication's family comes from `relay_topics.payload_kind` and an
+admission's from its own `payload_kind` column. Storing the family beside the
+bytes would let one digest assert a family that a differently-familied reference
+contradicts, and would need a new invariant — that two families can never produce
+identical bytes — which holds today only as an accident of `RelayPayloadCodec`'s
+disjoint field sets across the current six families.
+
+The second reason is the architectural one, and it is the stronger: Relay is a
+substrate. The payload store's job is to hold bytes and reclaim them, and
+encoding is the using system's responsibility. A family-agnostic store is
+therefore the correct shape independently of the collision argument, and stays
+correct as families are added.
+
+### One known leak, left as it is
+
+The `CHECK` above inspects `payload->'text'`, so the substrate does know that one
+family keeps its content in a member called `text`. That knowledge is inherited
+from `V135`, not introduced here, and this design moves it rather than adding to
+it.
+
+A substrate-pure version of this table would bound `octet_length` alone and leave
+the 50 MiB text bound where the family is known — the application already enforces
+it on every new append through `RelayTextLimit.validateNew`, so the database
+`CHECK` is belt-and-braces rather than the only guard.
+
+*(My call: keep `V135`'s constraint unchanged, because changing an enforced limit
+is a non-goal of this change and semantic preservation is the point. Recorded
+here because it is a live example of the class of leak being removed elsewhere,
+and it is a one-line change to the migration if the substrate boundary should win
+instead.)*
 
 ### byte_length is load-bearing, not decorative
 
@@ -181,8 +209,29 @@ at all; the *n*-way amplification disappears here rather than being compressed.
 `ejection_at` on insert is `now()` plus the configured staging window, truncated
 to the hour.
 
-**Where this insert commits is an outstanding decision.** See "Outstanding
-decisions" below; it is the one structural question in the design.
+**The insert commits ahead of the append, in its own transaction.** *(Decided.)*
+
+`JdbcRelayRepository` joins the caller's domain transaction, so an append can sit
+inside a long-lived one. Were the payload insert to share it, `ON CONFLICT
+(digest) DO NOTHING` against a digest another uncommitted transaction had just
+inserted would block on the unique index until that transaction ended — two
+publishers in unrelated topics and scopes, contending today on nothing,
+serialising on identical content. Dedup makes that collision *more* likely, since
+identical content is the case it exists to exploit.
+
+Committing the payload first removes that, and makes the staging path a 50 MiB
+payload will eventually want reachable rather than hypothetical. Three
+consequences follow and must be built deliberately:
+
+- **The staging window is load-bearing now.** Between the payload commit and the
+  referencing insert the bytes are unreferenced, and only the window protects
+  them from the sweep. It must comfortably exceed the longest append.
+- **A rolled-back or failed append leaves an orphan payload.** This is correct and
+  self-correcting: the sweep reclaims it once the window matures. It is never a
+  wrong read, because nothing references it.
+- **Append's failure handling grows a case.** A payload committed for an append
+  that then fails is not an error to report; the retry re-derives the same digest
+  and the `ON CONFLICT` makes the second insert a no-op.
 
 ### Digest definition
 
@@ -331,11 +380,16 @@ payload row: a cached snapshot changes only when a publication or admission
 changes, and those tables still bump the counter. A sweep deletes only
 unreferenced bytes, which by definition appear in no snapshot. *(My call.)*
 
-If the outstanding write-placement decision goes to an out-of-band commit, this
-stays correct for the same reason — but the migration's backfill `UPDATE` of both
-large tables does fire those statement triggers inside the Flyway transaction,
-firing `nextval` and one `pg_notify('plowshare_projection_changes','relay')` per
-statement. That is once per statement, not per row, and is harmless.
+This holds under the out-of-band payload commit for the same reason — a committed
+payload that nothing references yet invalidates no snapshot, and the referencing
+insert that follows bumps the counter as it always did. A payload insert that
+fired the trigger would invalidate every cached relay snapshot on every publish,
+which is the concrete reason to keep the table out of the set.
+
+Separately, the migration's backfill `UPDATE` of both large tables does fire those
+statement triggers inside the Flyway transaction, firing `nextval` and one
+`pg_notify('plowshare_projection_changes','relay')` per statement. That is once
+per statement, not per row, and is harmless.
 
 ## Migration
 
@@ -353,12 +407,12 @@ Steps 2–4 rewrite both of the largest tables in the schema, holding `ACCESS
 EXCLUSIVE` while doing so, over rows that may individually be 50 MiB. Whether
 that is acceptable is an outstanding decision, below.
 
-## Outstanding decisions
+## Outstanding decision
 
-Two questions remain that change what gets built, and neither is the builder's to
+One question remains that changes what gets built, and it is not the builder's to
 guess.
 
-### 1. Must existing Relay rows survive this change?
+### Must existing Relay rows survive this change?
 
 `V188__information_events_on_relay.sql` dropped `information_events` outright on
 the grounds that no installation was being migrated and existing rows were
@@ -374,30 +428,6 @@ becomes two releases: nullable column with dual write, a bounded background
 backfiller, then a second migration to enforce and drop. That is roughly one
 slice against four.
 
-### 2. Does the payload insert commit inside the append transaction, or ahead of it?
-
-`JdbcRelayRepository` joins the caller's domain transaction, so an append can sit
-inside a long-lived one. `INSERT ... ON CONFLICT (digest) DO NOTHING` against a
-digest another uncommitted transaction just inserted blocks on the unique index
-until that transaction ends — so two publishers in unrelated topics and scopes,
-which contend on nothing today, would serialise on identical content. Dedup makes
-that collision more likely, not less, since identical content is the case it
-exists to exploit.
-
-- **Inside the append transaction** (as drafted): simplest, no orphans, the
-  staging window stays a forward-looking convenience. Cost: first-writer
-  contention on a hot digest, bounded only by the other transaction's duration.
-- **Committed ahead of the append**, in its own transaction: no cross-publisher
-  blocking, and the streaming path a 50 MiB payload will eventually want becomes
-  reachable. Cost: the staging window becomes load-bearing for correctness now
-  rather than later, a rolled-back append leaves an orphan blob for the sweep,
-  and append's failure handling grows a case.
-
-My recommendation is the second, because the first trades an unbounded stall on
-the write path for simplicity the sweep already provides — but it changes a
-documented contract area and makes a configuration value load-bearing, so it is
-not mine to settle.
-
 ## Configuration
 
 | Setting | Default | Meaning |
@@ -407,8 +437,12 @@ not mine to settle.
 | `plowshare.relay.payload-sweep-batch` | 100 | Candidates examined per pass |
 
 The staging window must exceed the longest possible gap between a payload insert
-and its referencing insert. Under decision 2's first option that gap is zero;
-under the second it is the window's whole purpose.
+and its referencing insert. Because the payload commits ahead of the append, that
+gap is real on every publish and the window is what keeps the sweep off bytes
+about to be referenced. One hour is generous against any plausible append, which
+is the intent: the only cost of generosity is that an orphan from a failed append
+lingers that long, and the only cost of stinginess is reclaiming bytes a publish
+still needs.
 
 ## Verification
 
