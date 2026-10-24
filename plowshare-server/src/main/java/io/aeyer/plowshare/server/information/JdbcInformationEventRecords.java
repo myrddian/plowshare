@@ -9,10 +9,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /**
  * Owns the home-scope lookup and the revision row lock behind {@link InformationEventRecords}.
  *
- * <p>Two statements, both bounded to one revision. Neither takes an installation-wide lock and
- * neither evaluates a readability predicate per candidate account: the audience is the home scope's
- * project, and who receives a publication is decided by Relay subscriptions rather than by a
- * recipient set computed here.
+ * <p>Three statements: two bounded to one revision, and a page-bounded read of the revision history
+ * that supplies an owner its own events' detail -- the field that deliberately never enters a Relay
+ * publication, because a publication is readable by the whole topic audience and outlives the
+ * record it describes. None takes an installation-wide lock and none evaluates a readability
+ * predicate per candidate account: the audience is the home scope's project, and who receives a
+ * publication is decided by Relay subscriptions rather than by a recipient set computed here.
  */
 public final class JdbcInformationEventRecords implements InformationEventRecords {
   private final JdbcTemplate jdbc;
@@ -91,6 +93,39 @@ public final class JdbcInformationEventRecords implements InformationEventRecord
         entry.action(),
         entry.detail() == null ? "" : entry.detail(),
         entry.recordedAt().atOffset(java.time.ZoneOffset.UTC));
+  }
+
+  @Override
+  public Map<Long, String> details(Relay.Scope scope, java.util.Set<Long> positions) {
+    Objects.requireNonNull(positions, "positions");
+    if (!(scope instanceof Relay.ProjectScope project))
+      throw new IllegalStateException("an information event history read needs a project audience");
+    if (positions.size() > 100)
+      throw new IllegalArgumentException("an information event detail read is bounded to one page");
+    if (positions.isEmpty()) return Map.of();
+
+    // One statement for the whole page rather than one per event. The placeholder count is derived
+    // from the bounded set size above, so nothing from a request is concatenated into the SQL; the
+    // positions themselves are bound.
+    var arguments = new java.util.ArrayList<Object>(positions.size() + 1);
+    arguments.add(project.projectId());
+    arguments.addAll(positions);
+    String placeholders = String.join(",", java.util.Collections.nCopies(positions.size(), "?"));
+
+    var found = new java.util.HashMap<Long, String>();
+    jdbc.query(
+        "SELECT relay_position,detail FROM information_revision_events"
+            + " WHERE relay_project=? AND relay_position IN ("
+            + placeholders
+            + ")",
+        row -> {
+          // A row recorded without detail stores the empty string, which is the same answer as no
+          // row at all, so it is left out rather than returned as a present empty value.
+          String detail = row.getString("detail");
+          if (detail != null && !detail.isEmpty()) found.put(row.getLong("relay_position"), detail);
+        },
+        arguments.toArray());
+    return Map.copyOf(found);
   }
 
   /**

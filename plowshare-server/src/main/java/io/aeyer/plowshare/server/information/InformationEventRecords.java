@@ -66,6 +66,23 @@ public interface InformationEventRecords {
    */
   void append(Entry entry);
 
+  /**
+   * The stage detail each of these topic positions recorded, for one project's history.
+   *
+   * <p>This exists because {@code detail} is owner-only and a Relay publication is not: the topic's
+   * log is readable by the topic's audience, so carrying detail through the broker would publish it
+   * to every project member. It is read here instead, from the revision's own history, which is
+   * keyed by revision and cascades away with it.
+   *
+   * <p><b>This is not an authorization boundary.</b> It answers for whatever positions it is given
+   * and decides nothing about who may see them; the caller resolves ownership first and asks only
+   * for its own events. One bounded statement per page, never one per event.
+   *
+   * @param positions at most 100, matching the read path's page limit; an empty set reads nothing
+   * @return detail by position, omitting positions with no history row and those recorded empty
+   */
+  java.util.Map<Long, String> details(Relay.Scope scope, java.util.Set<Long> positions);
+
   /** One published event as its revision's history keeps it, at the position Relay gave it. */
   record Entry(
       UUID revision,
@@ -95,7 +112,7 @@ public interface InformationEventRecords {
    * <p>{@code documentType}, {@code documentSubtype} and {@code owner} come from the same row as
    * the scope. They are carried into the publication so that reading a page needs no second query
    * per event: the old reader joined them, and {@code owner} is what decides whether a reader sees
-   * an event's detail.
+   * an event's detail. The detail itself is not carried -- see {@link InformationEventCodec}.
    */
   record Audience(Relay.Scope scope, String documentType, String documentSubtype, String owner) {
     public Audience {

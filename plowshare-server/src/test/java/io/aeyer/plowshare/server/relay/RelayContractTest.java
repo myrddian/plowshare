@@ -10,6 +10,72 @@ import org.junit.jupiter.api.Test;
 class RelayContractTest {
   private static final Instant NOW = Instant.parse("2026-10-05T01:00:00.123456789Z");
 
+  /**
+   * The structural pin that stops the drift V188 introduced and V189 removed.
+   *
+   * <p>Relay carries a contract and stores content opaquely; it does not interpret it and it does
+   * not know its consumers. A payload family named after one -- INFORMATION_CHANGED was the case --
+   * makes every new consumer a change to the broker's enum, its codec, the persisted CHECK
+   * vocabulary, the protocol's kind allowlist and five SDKs, and leaves an un-updated client
+   * rejecting a log page it has no business interpreting. A consumer that needs structure encodes
+   * it into the general message and owns the codec, as RelayToolCodec and InformationEventCodec do.
+   *
+   * <p>So this asserts the exact set rather than a property of it: a new family must be argued for
+   * here, by name, as a general one.
+   */
+  @Test
+  void the_payload_families_are_general_and_none_is_named_after_a_consumer() {
+    assertEquals(
+        java.util.List.of("EMPTY", "TEXT", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"),
+        java.util.Arrays.stream(RelayPayload.Kind.values()).map(Enum::name).toList(),
+        "a payload family per consumer is the drift decision 0037's cutover introduced");
+    // The protocol's public allowlist is the same vocabulary, so an SDK cannot be left able to
+    // name a family the broker no longer has, or refuse one it does.
+    for (var kind : RelayPayload.Kind.values())
+      assertDoesNotThrow(
+          () -> inspected(kind), () -> kind + " is a broker family the protocol rejects");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new io.aeyer.plowshare.protocol.RelayLog.Payload(
+                "INFORMATION_CHANGED", null, null, null, null),
+        "the protocol must not keep naming a family the broker no longer has");
+  }
+
+  /** The same family as the log-inspection boundary reports it, with that family's own fields. */
+  private static io.aeyer.plowshare.protocol.RelayLog.Payload inspected(RelayPayload.Kind kind) {
+    return switch (kind) {
+      case EMPTY ->
+          new io.aeyer.plowshare.protocol.RelayLog.Payload(kind.name(), null, null, null, null);
+      case TEXT ->
+          new io.aeyer.plowshare.protocol.RelayLog.Payload(
+              kind.name(), "carried opaquely", null, null, null);
+      case SCHEDULE_DUE ->
+          new io.aeyer.plowshare.protocol.RelayLog.Payload(
+              kind.name(), null, "daily", "schedule.due", NOW);
+      case LIFECYCLE ->
+          new io.aeyer.plowshare.protocol.RelayLog.Payload(
+              kind.name(),
+              null,
+              null,
+              null,
+              null,
+              new io.aeyer.plowshare.protocol.RelayLog.Lifecycle(
+                  "job.ended", "job_fixture", "CANCELLED", null, null),
+              null);
+      case WAKE_REQUESTED ->
+          new io.aeyer.plowshare.protocol.RelayLog.Payload(
+              kind.name(),
+              null,
+              null,
+              null,
+              null,
+              null,
+              new io.aeyer.plowshare.protocol.RelayLog.Wake(
+                  "fir_fixture", "conversation:cnv_fixture", "MESSAGE"));
+    };
+  }
+
   @Test
   void scheduled_payload_names_preserve_existing_event_identity_bounds() {
     var payload = new RelayPayload.ScheduleDue("s".repeat(1024), "e".repeat(1024), NOW);

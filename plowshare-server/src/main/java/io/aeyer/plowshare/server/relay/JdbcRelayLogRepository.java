@@ -294,15 +294,6 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
                     change.related());
             case RelayPayload.ScheduleDue due -> textWeight(due.schedule(), due.emits());
             case RelayPayload.WakeRequested wake -> textWeight(wake.firing(), wake.target());
-            case RelayPayload.InformationChanged changed ->
-                textWeight(
-                    changed.revision(),
-                    changed.stage(),
-                    changed.action(),
-                    changed.detail(),
-                    changed.documentType(),
-                    changed.documentSubtype(),
-                    changed.owner());
             case RelayPayload.Empty ignored -> 0;
           };
     }
