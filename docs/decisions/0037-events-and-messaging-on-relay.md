@@ -228,9 +228,13 @@ Two further notes for whoever picks this up:
 
 Two corrections to this record's own framing follow from 0040:
 
-- **Messaging is not a performance case.** Its ordering is already Relay's mechanism — a topic-row
-  `FOR UPDATE` then an insert, with per-topic cursors — and it has no recipient fan-out. Moving it
-  is consolidation. The 3,996 ms fan-out was specific to information events and is now removed.
+- **Messaging's ordering is weaker than Relay's.** An earlier version of this note claimed it was
+  "already Relay's mechanism — a topic-row `FOR UPDATE` then an insert, with per-topic cursors".
+  That was false. The messaging send path takes no topic lock, `board_messages.seq` is a global
+  `GENERATED ALWAYS AS IDENTITY` sequence, and messaging reads no cursor at all; it serialises on a
+  per-mailbox advisory lock. See 0040. Moving it onto Relay would therefore **improve** its
+  ordering. It still has no recipient fan-out, and nothing has been measured failing, so it is not
+  urgent in the way information events were — but it must not be described as already sound.
 - **Messaging still lives in `server/board/`**, on `board_messages` and `board_message_*` tables,
   not in a separately extracted module. The rule below still holds; the size of the move is larger
   than this record implied.
