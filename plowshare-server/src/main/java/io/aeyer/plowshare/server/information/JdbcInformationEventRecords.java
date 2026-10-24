@@ -52,15 +52,8 @@ public final class JdbcInformationEventRecords implements InformationEventRecord
     String kind = (String) row.get("kind");
     String builtin = (String) row.get("builtin");
     Long project =
-        switch (kind == null ? "" : kind) {
-          // A personal space is a project, so PERSONAL needs no alias of its own.
-          case "PROJECT", "PERSONAL" -> number(row.get("project_id"));
-          // V185: an account's knowledge scope and its personal project are the same place, so the
-          // knowledge scope's audience is that project's. GLOBAL_KNOWLEDGE shares this kind but has
-          // a built-in account and no personal project, and it is the case decision 0039 defers.
-          case "ACCOUNT_KNOWLEDGE" -> builtin == null ? number(row.get("personal_project")) : null;
-          default -> null;
-        };
+        audienceProject(
+            kind, builtin, number(row.get("project_id")), number(row.get("personal_project")));
     if (project == null)
       throw new Unaddressable(
           "no Relay audience exists for an information event homed in "
@@ -98,6 +91,33 @@ public final class JdbcInformationEventRecords implements InformationEventRecord
         entry.action(),
         entry.detail() == null ? "" : entry.detail(),
         entry.recordedAt().atOffset(java.time.ZoneOffset.UTC));
+  }
+
+  /**
+   * The project whose Relay topic a home scope maps to, or {@code null} when none exists.
+   *
+   * <p>Separated from the query on purpose, so the mapping can be decided — and disagreed with —
+   * for combinations the schema will not currently produce. {@code builtin} being checked before a
+   * project is used is the load-bearing conjunct: GLOBAL_KNOWLEDGE shares {@code
+   * ACCOUNT_KNOWLEDGE}'s kind, and today it also happens to have no personal project, so dropping
+   * that conjunct would route global-read content to a real audience the moment either fact changed
+   * while every database fixture kept passing. {@code InformationEventAudienceMappingTest} supplies
+   * the combination the database cannot.
+   *
+   * <p>Only PROJECT and PERSONAL use {@code project}. RESTRICTED has one too and must never reach
+   * an audience through it; ADMINISTRATION and any kind this does not recognise are refused the
+   * same way, because an unrecognised home is not a reason to guess.
+   */
+  static Long audienceProject(String kind, String builtin, Long project, Long personalProject) {
+    if (builtin != null) return null;
+    return switch (kind == null ? "" : kind) {
+      // A personal space is a project, so PERSONAL needs no alias of its own.
+      case "PROJECT", "PERSONAL" -> project;
+      // V185: an account's knowledge scope and its personal project are the same place, so the
+      // knowledge scope's audience is that project's.
+      case "ACCOUNT_KNOWLEDGE" -> personalProject;
+      default -> null;
+    };
   }
 
   private static Long number(Object value) {
