@@ -37,7 +37,21 @@ import org.mockito.InOrder;
 class RelayInformationEventsTest {
   private static final Instant T0 = Instant.parse("2026-10-24T09:00:00Z");
   private static final String PROJECT = "atlas";
-  private static final String TOPIC = "information.changed";
+
+  /**
+   * The derived topic name for the one project this fixture publishes in, spelled out rather than
+   * obtained from {@link InformationTopics}.
+   *
+   * <p>Calling the production derivation here would make every assertion below agree with whatever
+   * the derivation currently returns, which is no assertion at all. Written as a literal, these
+   * pins say what name the publisher and the reader must actually use, and a change to the recipe
+   * fails them. {@code InformationTopicsTest} is where the literal itself is tied to the
+   * derivation; the agreement with PostgreSQL is pinned in {@code
+   * RelayInformationEventsDatabaseTest}.
+   */
+  private static final String TOPIC =
+      "information.events.54d797420829941468803660fe5007bd0d8a59dacf07b04f3df76ae82f9b7e32";
+
   private static final String GROUP = "information.events";
   private static final UUID REVISION = UUID.randomUUID();
 
