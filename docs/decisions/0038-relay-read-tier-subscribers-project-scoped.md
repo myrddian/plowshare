@@ -71,11 +71,10 @@ Separate **topic read authority** from **consumer-state authority**.
   project write access. The authority to advance a position is: the caller may read the topic, and
   the lease row being written is the caller's own. Per-subscriber bookkeeping is the subscriber's
   state.
-- **Delivering a publication to a subscriber still requires that the subscriber may read the
-  topic**, evaluated at delivery, not only at subscription. A subscription is not a lease on
-  authority; access revoked between subscribing and delivering must stop delivery. This mirrors the
-  rule the information read path already follows — "check every operation again; an earlier context
-  is not a membership lease" in `InformationAccess.requireSelection`.
+- **Authority is established when the subscription is established, and a subscription is valid
+  until invalidated.** Delivery does not re-resolve authority per publication. A subscription
+  carries its validity; it ends when something invalidates it, and at the latest when a
+  configurable maximum age elapses — whichever comes first. See "Subscription validity" below.
 - **Work and manage tiers are unchanged.** Publishing, ports, receiver dispatch, topic
   registration and configuration keep their current checks. Nothing in this record widens who may
   publish or administer a topic.
@@ -87,12 +86,12 @@ Separate **topic read authority** from **consumer-state authority**.
   content and already inspect the log.
 - **Lease contention is unchanged.** Leases remain exclusive per `(scope, topic, subscriber)`;
   admitting read-tier subscribers adds subscribers, not contention within one subscription.
-- **Delivery-time authority checks cost a read.** Re-checking at delivery rather than trusting the
-  subscription is a per-delivery authorization resolution, which this codebase has repeatedly found
-  to be the expensive pattern. It must resolve the topic's audience once per delivery batch, not
-  once per publication per account — the mistake that made the information-event fan-out cost
-  3,996 ms for a single event. The implementation is expected to hoist it the way
-  `knowledge_readable_scopes` (V184) hoisted the document read boundary.
+- **Revocation is bounded, not immediate.** An account whose read access is withdrawn can keep
+  receiving from an established subscription until that subscription is invalidated, and in the
+  worst case until the maximum age elapses. This is the deliberate trade for not resolving
+  authority per publication — the pattern that made the information-event fan-out cost 3,996 ms for
+  a single event. The window is configurable precisely so the exposure is a deployment choice
+  rather than a property of the design.
 
 ## Alternatives rejected
 
@@ -111,9 +110,30 @@ Separate **topic read authority** from **consumer-state authority**.
   internal server wake topics gated on `isServerAdmin`, and admitting accounts to it would expose
   them. The alternative that replaces it belongs to `0039`.
 
-## Open question for the authorizing decision
+## Subscription validity
 
-Whether the delivery-time authority re-check is required, or whether subscription-time authority is
-sufficient with revocation handled by removing subscriptions. The former is safer and matches the
-information read path's existing rule; the latter is cheaper and matches how Relay treats
-subscriptions today. This record proposes the former and flags that it is the costlier choice.
+A subscription is valid from the moment its authority was checked until it is invalidated.
+Invalidation has two triggers, and the second is a floor under the first:
+
+- **Explicit invalidation**, which is the normal path. Anything that changes who may read the topic
+  invalidates subscriptions against it — a membership or role change, a scope's read authority
+  changing, the topic being reset. Relay already has the mechanism: `relay_subscriptions` carries a
+  `generation` alongside `seen_through`/`seen_at`, and a subscription whose generation no longer
+  matches the topic's is not valid. Revocation should bump that generation rather than wait.
+- **A configurable maximum age**, which is the fallback. However subscriptions are invalidated,
+  none is trusted beyond a configured window; past it, authority is re-established or the
+  subscription lapses. `relay_consumer_leases` already expresses a bounded window this way with
+  `epoch` and `lease_until`.
+
+The practical effect is bounded staleness with an explicit bound. Authority resolution happens once
+per subscription rather than once per delivery, so delivery stays cheap, and the exposure from a
+missed invalidation is capped by configuration instead of being unbounded.
+
+Two things the implementation must not do:
+
+- **Do not treat the window as the primary mechanism.** If revocation relies on expiry rather than
+  invalidation, the configured window becomes the actual revocation latency for every change. The
+  window exists to bound the failure of invalidation, not to replace it.
+- **Do not re-resolve the audience per publication.** Whatever revalidates a subscription resolves
+  the topic's audience once, for that subscription — not once per publication per account.
+  `knowledge_readable_scopes` (V184) is the precedent for hoisting that resolution.
