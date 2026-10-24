@@ -20,12 +20,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * receiver's reconciliation. Input and pinned sources survive topic eviction.
  */
 public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepository {
+  // An admission names its payload bytes by digest; relay_payloads holds them once. Every read of
+  // an admission joins the store in its own query, so no caller fetches bytes per record. The
+  // payload family stays on the admission row: the store holds bytes and never learns a family.
   private static final String INPUT_COLUMNS =
       """
       a.scope_key,a.topic,a.subscriber,a.publication_position,a.event_id,a.publisher,
       a.occurred_at,a.published_at,a.correlation_id,a.causation_id,a.relay_causation::text,a.payload_kind,a.schema_version,
-      a.payload::text,a.routing_path,a.routing_source,a.routing_hash,a.branch_count,a.admitted_at
+      q.payload::text,a.routing_path,a.routing_source,a.routing_hash,a.branch_count,a.admitted_at
       """;
+  private static final String PAYLOAD_JOIN = " JOIN relay_payloads q ON q.digest=a.payload_digest ";
   private static final String BRANCH_COLUMNS =
       """
       d.id,d.branch_index,d.branch_name,d.receiver,d.publish_to,d.handler_path,d.handler_source,d.handler_hash,
@@ -35,6 +39,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
       """
       FROM relay_deliveries d JOIN relay_admissions a ON a.scope_key=d.scope_key AND a.topic=d.topic
           AND a.subscriber=d.subscriber AND a.publication_position=d.publication_position
+        JOIN relay_payloads q ON q.digest=a.payload_digest
       """;
   private static final String LIFECYCLE_COLUMNS =
       "state,fence,worker,lease_until,updated_at,receipt_namespace,receipt_id,failure_code";
@@ -119,8 +124,10 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
               jdbc
                   .query(
                       """
-          SELECT event_id,publisher,occurred_at,published_at,correlation_id,causation_id,relay_causation::text,schema_version,payload::text
-          FROM relay_publications WHERE scope_key=? AND topic=? AND position=?
+          SELECT p.event_id,p.publisher,p.occurred_at,p.published_at,p.correlation_id,p.causation_id,
+              p.relay_causation::text,p.schema_version,q.payload::text
+          FROM relay_publications p JOIN relay_payloads q ON q.digest=p.payload_digest
+          WHERE p.scope_key=? AND p.topic=? AND p.position=?
           """,
                       (row, index) -> publication(row, topic, key.position(), retained.kind()),
                       RelayScopeCodec.write(topic),
@@ -135,9 +142,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
               jdbc.update(
                   """
           INSERT INTO relay_admissions(scope_key,topic,subscriber,publication_position,event_id,publisher,
-              occurred_at,published_at,correlation_id,causation_id,relay_causation,payload_kind,schema_version,payload,
+              occurred_at,published_at,correlation_id,causation_id,relay_causation,payload_kind,schema_version,
               payload_digest,routing_path,routing_source,routing_hash,branch_count,admitted_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,1,?::jsonb,
+          VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,1,
               (SELECT payload_digest FROM relay_publications WHERE scope_key=? AND topic=? AND position=?),
               ?,?,?,?,?)
           """,
@@ -153,7 +160,6 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   publication.event().causationId(),
                   RelayCausationCodec.write(publication.event().causation()),
                   retained.kind().name(),
-                  RelayPayloadCodec.write(publication.event().payload()),
                   RelayScopeCodec.write(topic),
                   topic.name(),
                   key.position(),
@@ -220,7 +226,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
             .query(
                 "SELECT "
                     + INPUT_COLUMNS
-                    + " FROM relay_admissions a WHERE a.scope_key=? AND a.topic=? AND a.subscriber=? AND a.publication_position=? FOR SHARE OF a",
+                    + " FROM relay_admissions a"
+                    + PAYLOAD_JOIN
+                    + "WHERE a.scope_key=? AND a.topic=? AND a.subscriber=? AND a.publication_position=? FOR SHARE OF a",
                 (row, index) -> input(row),
                 RelayScopeCodec.write(subscription.topic()),
                 subscription.topic().name(),

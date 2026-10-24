@@ -22,8 +22,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcRelayRepository implements RelayRepository {
   private static final String TOPIC_COLUMNS =
       "scope_key, name, payload_kind, retention_seconds, max_records, last_position, expired_through, generation";
+  // The payload bytes live once in relay_payloads; a publication names them by digest. Every read
+  // of a publication joins the store in its own query, so a page of records costs one query and
+  // the running byte sum below can use the length PostgreSQL already recorded.
   private static final String PUBLICATION_COLUMNS =
-      "position, event_id, publisher, occurred_at, published_at, correlation_id, causation_id, relay_causation::text, schema_version, payload::text";
+      "p.position, p.event_id, p.publisher, p.occurred_at, p.published_at, p.correlation_id,"
+          + " p.causation_id, p.relay_causation::text, p.schema_version, q.payload::text";
+  private static final String PUBLICATION_SOURCE =
+      " FROM relay_publications p JOIN relay_payloads q ON q.digest=p.payload_digest";
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
@@ -145,7 +151,8 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.query(
                   "SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND event_id=?",
+                      + PUBLICATION_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.event_id=?",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -164,7 +171,6 @@ public final class JdbcRelayRepository implements RelayRepository {
             textLimit.validateNew(draft.payload());
             digestToWrite = payloads.store(draft.payload(), admittedAt);
           }
-          String payload = RelayPayloadCodec.write(draft.payload());
           long position = Math.addExact(topic.lastPosition(), 1);
           changed(
               jdbc.update(
@@ -176,9 +182,9 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.update(
                   """
           INSERT INTO relay_publications(scope_key,topic,position,event_id,publisher,occurred_at,
-              published_at,correlation_id,causation_id,relay_causation,schema_version,payload,
+              published_at,correlation_id,causation_id,relay_causation,schema_version,
               payload_digest)
-          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?::jsonb,?)
+          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?)
           """,
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -190,7 +196,6 @@ public final class JdbcRelayRepository implements RelayRepository {
                   draft.correlationId(),
                   draft.causationId(),
                   RelayCausationCodec.write(draft.causation()),
-                  payload,
                   digestToWrite));
           return new Relay.Publication(key, position, admittedAt, draft);
         });
@@ -299,7 +304,8 @@ public final class JdbcRelayRepository implements RelayRepository {
               .query(
                   "SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND event_id=?",
+                      + PUBLICATION_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.event_id=?",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -327,11 +333,18 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.query(
                   // Bound database materialization before decoding large payloads. Adding per-row
                   // metadata headroom preserves a contiguous prefix; a short page never skips work.
-                  "SELECT * FROM (SELECT candidates.*, SUM(octet_length(payload::text) + 4096)"
+                  // byte_length is the stored payload's octet_length(payload::text), which is
+                  // exactly what this window used to compute from the publication's own copy, so
+                  // the page boundary is unchanged. The window stays outside the LIMIT: a window
+                  // function is evaluated before LIMIT, so summing inside the candidate query
+                  // would budget against every matching row rather than the page.
+                  "SELECT * FROM (SELECT candidates.*, SUM(payload_bytes + 4096)"
                       + " OVER (ORDER BY position) AS page_bytes FROM (SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND position>?"
-                      + " ORDER BY position LIMIT ?) candidates) bounded"
+                      + ", q.byte_length AS payload_bytes"
+                      + PUBLICATION_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.position>?"
+                      + " ORDER BY p.position LIMIT ?) candidates) bounded"
                       + " WHERE page_bytes <= ? ORDER BY position",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key.topic()),

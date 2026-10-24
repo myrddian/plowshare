@@ -24,8 +24,21 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
   private final ProjectionCache<Snapshot> pagesCache;
   private static final String TOPIC_COLUMNS =
       "scope_key,name,payload_kind,retention_seconds,max_records,last_position,expired_through,generation";
+  // A publication names its payload bytes by digest; relay_payloads holds them once. Both reads
+  // join the store in their own query, so an event page costs one query however many rows it has.
   private static final String EVENT_COLUMNS =
-      "position,event_id,publisher,occurred_at,published_at,correlation_id,causation_id,relay_causation::text AS relay_causation,schema_version,payload::text AS payload";
+      "p.position,p.event_id,p.publisher,p.occurred_at,p.published_at,p.correlation_id,p.causation_id,p.relay_causation::text AS relay_causation,p.schema_version,q.payload::text AS payload";
+  private static final String EVENT_SOURCE =
+      " FROM relay_publications p JOIN relay_payloads q ON q.digest=p.payload_digest";
+
+  /**
+   * The names {@link #EVENT_COLUMNS} produces. The bounded page re-projects exactly these plus
+   * {@code page_bytes}, so the record {@link #boundedProjection} sizes with {@code to_jsonb} holds
+   * the same fields it held when the bytes came from the publication's own column: the joined
+   * length is a window input, never part of the projection the cache bound is compared against.
+   */
+  private static final String EVENT_FIELDS =
+      "position,event_id,publisher,occurred_at,published_at,correlation_id,causation_id,relay_causation,schema_version,payload";
 
   public JdbcRelayLogRepository(JdbcTemplate jdbc, UnitOfWork work) {
     this(jdbc, work, ProjectionCache.direct(), ProjectionCache.direct());
@@ -87,7 +100,8 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
                   .query(
                       "SELECT "
                           + EVENT_COLUMNS
-                          + " FROM relay_publications WHERE scope_key=? AND topic=? ORDER BY position DESC LIMIT 1",
+                          + EVENT_SOURCE
+                          + " WHERE p.scope_key=? AND p.topic=? ORDER BY p.position DESC LIMIT 1",
                       (row, index) -> publication(row, topic.get()),
                       scope,
                       key.name())
@@ -142,11 +156,20 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
           var events =
               boundedProjection(
                   // Apply the byte prefix in SQL, before JDBC materializes/decodes large rows.
-                  "SELECT * FROM (SELECT candidates.*, SUM(octet_length(payload::text) + 4096)"
+                  // byte_length is the stored payload's octet_length(payload::text), the same
+                  // quantity this window computed from the publication's own copy, so the page
+                  // boundary is unchanged. The outer list names the event fields explicitly
+                  // instead of *: payload_bytes serves the window only and must not reach the
+                  // record boundedProjection sizes.
+                  "SELECT "
+                      + EVENT_FIELDS
+                      + ",page_bytes FROM (SELECT candidates.*, SUM(payload_bytes + 4096)"
                       + " OVER (ORDER BY position) AS page_bytes FROM (SELECT "
                       + EVENT_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND position>?"
-                      + " ORDER BY position LIMIT ?) candidates) bounded"
+                      + ",q.byte_length AS payload_bytes"
+                      + EVENT_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.position>?"
+                      + " ORDER BY p.position LIMIT ?) candidates) bounded"
                       + " WHERE page_bytes <= ? ORDER BY position",
                   "position",
                   bound,
