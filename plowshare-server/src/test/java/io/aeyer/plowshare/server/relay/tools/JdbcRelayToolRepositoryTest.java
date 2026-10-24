@@ -8,6 +8,7 @@ import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.DurableRelay;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import io.aeyer.plowshare.server.relay.Relay;
 import java.time.Duration;
@@ -105,7 +106,11 @@ class JdbcRelayToolRepositoryTest {
             jdbc.queryForObject(
                 "INSERT INTO projects(name,workspace) VALUES('tool-fixture','fixture') RETURNING id",
                 Long.class));
-    broker = new JdbcRelayRepository(jdbc, transactions);
+    broker =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
     repository =
         new JdbcRelayToolRepository(jdbc, transactions, new DurableRelay(broker, () -> NOW));
     var binding =

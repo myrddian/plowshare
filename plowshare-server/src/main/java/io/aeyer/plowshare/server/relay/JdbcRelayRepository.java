@@ -27,15 +27,22 @@ public final class JdbcRelayRepository implements RelayRepository {
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
+  private final RelayPayloadStore payloads;
   private final RelayTextLimit textLimit;
 
-  public JdbcRelayRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
-    this(jdbc, transactions, RelayTextLimit.DEFAULT);
+  public JdbcRelayRepository(
+      JdbcTemplate jdbc, UnitOfWork transactions, RelayPayloadStore payloads) {
+    this(jdbc, transactions, payloads, RelayTextLimit.DEFAULT);
   }
 
-  public JdbcRelayRepository(JdbcTemplate jdbc, UnitOfWork transactions, RelayTextLimit textLimit) {
+  public JdbcRelayRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayPayloadStore payloads,
+      RelayTextLimit textLimit) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
+    this.payloads = Objects.requireNonNull(payloads, "payloads");
     this.textLimit = Objects.requireNonNull(textLimit, "textLimit");
   }
 
@@ -100,6 +107,26 @@ public final class JdbcRelayRepository implements RelayRepository {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
+    // The payload is committed before the topic transaction opens, on purpose. Inside it, ON
+    // CONFLICT DO NOTHING would make a publisher wait on another's uncommitted insert of the same
+    // digest, serialising publishers that share nothing but identical content. Committed ahead,
+    // the insert is a no-op for every later publisher and the topic lock covers only position
+    // allocation. The price is that an append that then fails or rolls back leaves an
+    // unreferenced payload. That is correct, not an error: the staging window protects it while a
+    // retry (which derives the same digest) references it, and the sweep reclaims it otherwise.
+    //
+    // An identical repeat of a retained event stores nothing. The unlocked probe can only be
+    // stale in one direction (a concurrent first append), which costs one redundant idempotent
+    // store; the retained check under the topic lock below stays the authority.
+    // The text allowance is checked here, before the bytes are written, so a refused payload
+    // never reaches the store. A lowered allowance still recovers an identical retained event
+    // because the probe returns before this check.
+    String digest = null;
+    if (!isRetained(key, draft.eventId())) {
+      textLimit.validateNew(draft.payload());
+      digest = payloads.store(draft.payload(), admittedAt);
+    }
+    String payloadDigest = digest;
     return transactions.inTransaction(
         () -> {
           Relay.Topic topic = topic(key, true);
@@ -120,9 +147,14 @@ public final class JdbcRelayRepository implements RelayRepository {
               throw new IllegalArgumentException("Relay event ID conflicts with retained content");
             return original;
           }
-          // Check only a new append under the topic lock: a lowered deployment allowance must
-          // still recover an identical retained UUID and must never advance a refused position.
-          textLimit.validateNew(draft.payload());
+          // The probe saw a retained event that pruning removed before the topic lock was taken, so
+          // nothing was stored. This is a genuinely new append: validate and store it here. It is
+          // the only path that stores under the lock, and only after a race with expiry.
+          String digestToWrite = payloadDigest;
+          if (digestToWrite == null) {
+            textLimit.validateNew(draft.payload());
+            digestToWrite = payloads.store(draft.payload(), admittedAt);
+          }
           String payload = RelayPayloadCodec.write(draft.payload());
           long position = Math.addExact(topic.lastPosition(), 1);
           changed(
@@ -135,8 +167,9 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.update(
                   """
           INSERT INTO relay_publications(scope_key,topic,position,event_id,publisher,occurred_at,
-              published_at,correlation_id,causation_id,relay_causation,schema_version,payload)
-          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?::jsonb)
+              published_at,correlation_id,causation_id,relay_causation,schema_version,payload,
+              payload_digest)
+          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?::jsonb,?)
           """,
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -148,9 +181,21 @@ public final class JdbcRelayRepository implements RelayRepository {
                   draft.correlationId(),
                   draft.causationId(),
                   RelayCausationCodec.write(draft.causation()),
-                  payload));
+                  payload,
+                  digestToWrite));
           return new Relay.Publication(key, position, admittedAt, draft);
         });
+  }
+
+  /** Unlocked existence probe for an event ID; see {@link #append} for why it may be stale. */
+  private boolean isRetained(Relay.TopicKey key, String eventId) {
+    return !jdbc.query(
+            "SELECT 1 FROM relay_publications WHERE scope_key=? AND topic=? AND event_id=?",
+            (row, index) -> Boolean.TRUE,
+            RelayScopeCodec.write(key),
+            key.name(),
+            eventId)
+        .isEmpty();
   }
 
   @Override

@@ -125,7 +125,11 @@ class RelayApprovalInboxDatabaseTest {
             });
     notifications = new ApprovalDelivery(approvals, people, inbox::settle);
     notifications.useRelayDelivery(true);
-    broker = new JdbcRelayRepository(jdbc, transactions);
+    broker =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
     relay = new DurableRelay(broker, () -> NOW);
     consumers =
         new JdbcRelayConsumerRepository(

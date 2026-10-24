@@ -130,7 +130,17 @@ class RelayPayloadStoreTest {
     verify(jdbc).queryForList(sql.capture(), eq(String.class), any(), eq(2));
     assertTrue(sql.getValue().contains("ejection_at<=?"));
     assertTrue(sql.getValue().contains("ORDER BY ejection_at"));
-    verify(jdbc, times(2)).update(anyString(), any(Object.class));
+    var delete = ArgumentCaptor.forClass(String.class);
+    verify(jdbc, times(2)).update(delete.capture(), any(Object.class));
+    // Reachability is checked by the delete itself, against both referencing tables.
+    assertTrue(
+        delete
+            .getValue()
+            .contains("NOT EXISTS (SELECT 1 FROM relay_publications r WHERE r.payload_digest"));
+    assertTrue(
+        delete
+            .getValue()
+            .contains("NOT EXISTS (SELECT 1 FROM relay_admissions a WHERE a.payload_digest"));
   }
 
   @Test

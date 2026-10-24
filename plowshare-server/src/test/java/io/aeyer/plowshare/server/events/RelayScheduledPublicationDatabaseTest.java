@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.DurableRelay;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
@@ -76,7 +77,9 @@ class RelayScheduledPublicationDatabaseTest {
     schedules = new JdbcScheduleStore(jdbc);
     triggers = new JdbcTriggerStore(jdbc);
     firings = new JdbcFiringStore(jdbc);
-    repository = new JdbcRelayRepository(jdbc, work);
+    repository =
+        new JdbcRelayRepository(
+            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
     relay = new DurableRelay(repository, () -> AT);
     dispatcher = mock(Dispatcher.class);
     intake = new Intake(triggers, firings, dispatcher, () -> AT);

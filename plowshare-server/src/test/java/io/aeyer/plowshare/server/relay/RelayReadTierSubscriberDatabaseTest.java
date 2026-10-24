@@ -135,7 +135,9 @@ class RelayReadTierSubscriberDatabaseTest {
           member.getValue());
 
     now = T0;
-    broker = new JdbcRelayRepository(jdbc, work);
+    broker =
+        new JdbcRelayRepository(
+            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
     relay = new DurableRelay(broker, () -> now);
     consumers =
         new JdbcRelayConsumerRepository(

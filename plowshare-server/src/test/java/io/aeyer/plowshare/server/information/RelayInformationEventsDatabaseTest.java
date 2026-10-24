@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.relay.DurableRelay;
 import io.aeyer.plowshare.server.relay.JdbcRelayConsumerRepository;
 import io.aeyer.plowshare.server.relay.JdbcRelayDeliveryRepository;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import io.aeyer.plowshare.server.relay.JdbcRelaySubscriptionAuthority;
 import io.aeyer.plowshare.server.relay.ReadTierRelayConsumption;
@@ -157,7 +158,9 @@ class RelayInformationEventsDatabaseTest {
 
     now = T0;
     hinted.clear();
-    broker = new JdbcRelayRepository(jdbc, work);
+    broker =
+        new JdbcRelayRepository(
+            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
     relay = new DurableRelay(broker, () -> now);
     var consumers =
         new JdbcRelayConsumerRepository(

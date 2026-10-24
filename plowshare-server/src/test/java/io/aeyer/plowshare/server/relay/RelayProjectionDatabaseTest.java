@@ -429,7 +429,9 @@ class RelayProjectionDatabaseTest {
     final String project = "relay-cache-" + UUID.randomUUID();
     final Relay.TopicKey topic;
     final Relay.SubscriptionKey subscription;
-    final RelayRepository broker = new JdbcRelayRepository(jdbc, work);
+    final RelayRepository broker =
+        new JdbcRelayRepository(
+            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
     final JdbcProjectionVersions versions = new JdbcProjectionVersions(jdbc, source(), 128);
     final CountingJdbc counting = new CountingJdbc(data);
     final ProjectionCaches caches;

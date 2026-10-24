@@ -136,8 +136,10 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   """
           INSERT INTO relay_admissions(scope_key,topic,subscriber,publication_position,event_id,publisher,
               occurred_at,published_at,correlation_id,causation_id,relay_causation,payload_kind,schema_version,payload,
-              routing_path,routing_source,routing_hash,branch_count,admitted_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,1,?::jsonb,?,?,?,?,?)
+              payload_digest,routing_path,routing_source,routing_hash,branch_count,admitted_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,1,?::jsonb,
+              (SELECT payload_digest FROM relay_publications WHERE scope_key=? AND topic=? AND position=?),
+              ?,?,?,?,?)
           """,
                   RelayScopeCodec.write(topic),
                   topic.name(),
@@ -152,6 +154,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   RelayCausationCodec.write(publication.event().causation()),
                   retained.kind().name(),
                   RelayPayloadCodec.write(publication.event().payload()),
+                  RelayScopeCodec.write(topic),
+                  topic.name(),
+                  key.position(),
                   source.path(),
                   source.source(),
                   source.sha256(),

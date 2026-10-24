@@ -95,7 +95,11 @@ class RelayScopeMigrationTest {
             return Objects.requireNonNull(template.execute(status -> work.get()));
           }
         };
-    var broker = new JdbcRelayRepository(jdbc, transactions);
+    var broker =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
     var deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     var project = new Relay.TopicKey(projectId, "release.observed");
     var subscription = new Relay.SubscriptionKey(project, "notices");

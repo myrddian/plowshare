@@ -101,9 +101,10 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
   }
 
   /**
-   * Deletes matured candidates, oldest first, one transaction each. Nothing references a payload
-   * yet, so a candidate is deleted unconditionally; the reachability guards arrive with the
-   * referencing columns.
+   * Deletes matured candidates, oldest first, one transaction each. Reachability is the only
+   * authority: the delete itself carries the guard, so a publication or admission that references
+   * the digest, including one committed after the candidate was selected, keeps its row. The
+   * foreign keys are the backstop; the guard keeps a referenced candidate from raising one.
    */
   @Override
   public int sweep(Instant now, int limit) {
@@ -118,7 +119,14 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
     for (String digest : candidates)
       removed +=
           transactions.inTransaction(
-              () -> jdbc.update("DELETE FROM relay_payloads p WHERE p.digest=?", digest));
+              () ->
+                  jdbc.update(
+                      """
+                      DELETE FROM relay_payloads p WHERE p.digest=?
+                        AND NOT EXISTS (SELECT 1 FROM relay_publications r WHERE r.payload_digest=p.digest)
+                        AND NOT EXISTS (SELECT 1 FROM relay_admissions a WHERE a.payload_digest=p.digest)
+                      """,
+                      digest));
     return removed;
   }
 }

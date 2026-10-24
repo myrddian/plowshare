@@ -85,7 +85,9 @@ class RelayLifecycleDatabaseTest {
         VALUES('brd_fixture','fixture','brd_fixture',0,'fixture','fixture','operator','person','operator','open',100,0,1,clock_timestamp())
         """);
     jdbc.update("DELETE FROM relay_source_events");
-    repository = new JdbcRelayRepository(jdbc, work);
+    repository =
+        new JdbcRelayRepository(
+            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
     relay = new DurableRelay(repository, Instant::now);
     consumers =
         new JdbcRelayConsumerRepository(
@@ -193,7 +195,12 @@ class RelayLifecycleDatabaseTest {
         new JdbcRelaySourceRepository(
             jdbc,
             work,
-            new DurableRelay(new JdbcRelayRepository(jdbc, work), Instant::now),
+            new DurableRelay(
+                new JdbcRelayRepository(
+                    jdbc,
+                    work,
+                    new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1))),
+                Instant::now),
             nativeInboxes);
     publishAll();
     var group = new Relay.SubscriptionKey(topic("job.ended"), "test.causation");

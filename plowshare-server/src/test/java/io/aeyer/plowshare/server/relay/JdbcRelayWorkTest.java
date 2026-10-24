@@ -68,7 +68,9 @@ class JdbcRelayWorkTest {
                 Long.class));
     topic = new Relay.TopicKey(id, "release.observed");
     sub = new Relay.SubscriptionKey(topic, "relay.notices.release");
-    broker = new JdbcRelayRepository(jdbc, work);
+    broker =
+        new JdbcRelayRepository(
+            jdbc, work, new JdbcRelayPayloadStore(jdbc, work, java.time.Duration.ofHours(1)));
     deliveries = new JdbcRelayDeliveryRepository(jdbc, work);
     executions = new JdbcRelayExecutions(jdbc, () -> AT);
     logs = new JdbcRelayLogRepository(jdbc, work);

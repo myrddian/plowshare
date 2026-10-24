@@ -74,7 +74,11 @@ class JdbcRelayRepositoryTest {
     topic = new Relay.TopicKey(Objects.requireNonNull(project), "release.observed");
     a = new Relay.SubscriptionKey(topic, "route-a");
     b = new Relay.SubscriptionKey(topic, "route-b");
-    repository = new JdbcRelayRepository(jdbc, transactions);
+    repository =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(jdbc, transactions, java.time.Duration.ofHours(1)));
     repository.configureTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
   }
 

@@ -132,7 +132,12 @@ class TickerTest {
     return new RelayScheduledPublication(
         store,
         new io.aeyer.plowshare.server.relay.DurableRelay(
-            new io.aeyer.plowshare.server.relay.JdbcRelayRepository(jdbc, transactions), clock),
+            new io.aeyer.plowshare.server.relay.JdbcRelayRepository(
+                jdbc,
+                transactions,
+                new io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore(
+                    jdbc, transactions, java.time.Duration.ofHours(1))),
+            clock),
         intake,
         transactions,
         () -> {
