@@ -12,8 +12,13 @@ advancing that position. A seen position means input became available to that
 subscriber, not that execution finished. Board remains a message board and swarms
 keep their existing behavior.
 
-The scheduler publishes `schedule.due` through Relay. Its built-in subscriber
-admits existing firing rows in the same transaction as schedule advancement and
+The scheduler publishes due occurrences through Relay, to a topic whose name it
+derives from the scope it is publishing for. That name is private to the events
+subsystem and is deliberately not written down here or anywhere else outside it:
+a topic name is an implementation detail of the system that owns it, not an
+identifier any other party holds. `schedule.define` is the family's public
+contract; where its occurrences travel is not. Its built-in subscriber admits
+existing firing rows in the same transaction as schedule advancement and
 publication. Jobs start after commit through the existing event dispatcher.
 Job, approval, orchestration, public Board and private messaging lifecycle changes
 publish committed reference notices through a transactional outbox. Messaging and
@@ -165,7 +170,7 @@ import access. It declares subscriptions and returns named receiver selections:
 export const manifest = {
   version: 1,
   subscriptions: [
-    {name: 'due', topic: 'schedule.due', kind: 'schedule.due', start: 'oldest-retained'}
+    {name: 'due', topic: 'release.observed', kind: 'text', start: 'oldest-retained'}
   ]
 };
 
@@ -248,11 +253,20 @@ with an unavailable result rather than acquiring orchestration authority.
 
 ## Retention and processing
 
-Topic retention defaults to four days. Optional `topics.json` overrides:
+Topic retention defaults to four days. Optional `topics.json` overrides it per
+topic, by name:
 
 ```json
-{"version":1,"topics":{"schedule.due":{"retentionDays":4,"maxRecords":10000}}}
+{"version":1,"topics":{"release.observed":{"retentionDays":4,"maxRecords":10000}}}
 ```
+
+Only a topic a project can name can be overridden this way, which excludes the
+topics a subsystem derives for itself. **A schedule topic's retention is no
+longer configurable by name and keeps the four-day default.** That is accepted
+rather than overlooked: a name a project can configure is also a name an
+operator can grant an external ingress port to, because
+`RelayPortProperties.permits` is pure data with no code-owned reservation of
+topic names, and withdrawing the name withdraws both at once.
 
 Retention removes a prefix of publications and records its expiry boundary.
 Lagging subscriptions report a gap. It does not silently advance or acknowledge

@@ -34,11 +34,24 @@ import java.util.Objects;
  * lowercase hex — reused rather than reinvented, which is also what keeps the result inside the
  * schema's bounds: {@code information.events.} plus 64 hex characters is 83 characters, and every
  * segment matches the {@code ^[a-z][a-z0-9]*([._-][a-z0-9]+)*$} rule every topic-name column
- * applies, because hex digits are lowercase alphanumerics. The tightest length a topic name faces
- * in the schema is the 160 characters {@code relay_source_events.topic} allows, which 83 clears;
- * {@code V190__information_topic_derived_name.sql} records where each bound comes from, and {@code
- * RelayInformationEventsDatabaseTest} asserts acceptance by storing the name rather than by
- * restating the rule here.
+ * applies, because hex digits are lowercase alphanumerics. Every topic-name column bounds the name
+ * at 1024 characters, which 83 clears; {@code RelayInformationEventsDatabaseTest} asserts
+ * acceptance by storing the name rather than by restating the rule here.
+ *
+ * <p><b>Correction, on the bound.</b> An earlier version of this comment said "the tightest length
+ * a topic name faces in the schema is the 160 characters {@code relay_source_events.topic} allows",
+ * and {@code V190__information_topic_derived_name.sql}'s header says the same at greater length.
+ * <b>Both are wrong, and were already wrong when they were written.</b> 160 was the original bound
+ * in three places — {@code relay_topics.name} (V117), {@code relay_deliveries.publish_to} (V119)
+ * and {@code relay_source_events.topic} (V124) — and {@code V141__relay_topic_name_capacity.sql}
+ * drops and recreates all three at 1024 in one migration. So there is no 160-character topic bound
+ * anywhere, and no column is tighter than another. V190's header cannot be corrected, because a
+ * shipped migration is never edited; the correction lives here instead, which is where a reader
+ * following the derivation will actually reach it. Nothing about the derivation changes: 83 clears
+ * 1024 as comfortably as it cleared 160. {@code EventTopics} in {@code server/events}, which
+ * derives the fired-event and scheduled-occurrence names the same way, states the real bound and
+ * has its own pin read it out of {@code pg_constraint} rather than restating a number a migration
+ * can move — which is the shape to prefer if this comment ever needs a number again.
  *
  * <p><b>Nothing in the name is legible.</b> A project name and an account handle are the two things
  * the old literal was in danger of acquiring as topics multiplied, and neither enters the digest in
