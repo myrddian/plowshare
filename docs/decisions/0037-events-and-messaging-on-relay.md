@@ -189,11 +189,38 @@ All three are rejected on the same ground: they invest in substrates that should
 Two were missed when this record was written, and both change how it should be executed.
 
 - **`0008-relay-external-work-and-a2a-mapping.md`** already decided that the outgoing family moves
-  onto Relay, in eight slices, with status "architecture direction agreed; implementation planned".
-  None shipped — `server/outgoing/` contains no Relay reference. This record was written without
-  knowledge of 0008, so two independent records now govern the same family's migration. **They must
-  be reconciled before either is executed**, and 0008's slices are the earlier and more specific
-  plan.
+  onto Relay, in eight slices (EW01–EW08), with status "architecture direction agreed;
+  implementation planned". None shipped — `server/outgoing/` contains no Relay reference. This
+  record was written without knowledge of 0008. They are reconciled below rather than left to
+  collide.
+
+### Reconciling 0008 and this record
+
+They do not conflict; they sit at different altitudes. **0008 is the specific plan for the
+external-work and A2A family**; this record is the general rule for every family. Where both speak,
+0008's slices are the more detailed instruction for that family and should be followed; this record
+constrains *how*, and 0040 constrains what Relay may be asked to do.
+
+0008 was recorded on 2026-10-09 against snapshot `35ffa6e0` and instructs that "implementation must
+recheck current main and reconcile changes before proceeding". That recheck is now overdue, and
+these are the changes it has to absorb:
+
+| since 0008's snapshot | what EW01–EW08 must absorb |
+|---|---|
+| Read-tier subscribers (0038, V187) | EW01/EW03's authorization decisions: consumption is `mayUse`, not `mayWork`, and a reader's consumer group is namespaced per account |
+| Information events on Relay (V188), then on the general message (V189) | EW01 need not re-derive the carrier: **no new payload kind**, a codec owned by the consuming system, content opaque to the broker |
+| Relay is mechanism, not policy (0040) | EW01's "payload references and authorization decisions": publish only what the topic's whole audience may see, and verify your own publishers rather than asking the broker to |
+| Topic names are private to the owning system (0040) | the external-work topic is not a shared literal |
+| Messaging still lives in `server/board/` on the v0 substrate (0040) | EW04's "migrate existing work" is larger than 0008 assumed — it is finishing a v0→v1 replacement, not porting a module |
+| No non-project Relay audience exists (0039) | a dependency 0008 does not name: if an external peer's audience is not a project, EW03 is blocked on 0039 |
+
+Two further notes for whoever picks this up:
+
+- 0008's subject is the integration whose core growth `0001-integration-boundary.md` forbids. EW01's
+  audit should establish what A2A put into core and whether it belongs there, rather than treating
+  the current surface as the baseline to preserve.
+- The ordering in this record — information events, then `event.fire`, then messaging — stands, and
+  0008's slices are the inside of the third step. Nothing in 0008 needs to precede the first two.
 - **`0040-relay-is-the-boards-substrate-rebuilt.md`** records the lineage this record assumed away.
   The Board substrate is Relay v0 and Relay is v1, built fresh in parallel rather than by
   retrofitting the Board; board and messaging were to be rebuilt on v1 and never were. So the
