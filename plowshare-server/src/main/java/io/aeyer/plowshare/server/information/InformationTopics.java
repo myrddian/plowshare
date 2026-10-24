@@ -32,9 +32,13 @@ import java.util.Objects;
  * is over the scope's identity alone, so the same scope always yields the same name and two scopes
  * yield different ones. The digest is {@link RelayPort#hash} — SHA-256 over UTF-8 rendered as
  * lowercase hex — reused rather than reinvented, which is also what keeps the result inside the
- * schema's bounds: {@code information.events.} plus 64 hex characters is 83 characters, well under
- * the 160-character limit {@code relay_subscriptions} applies, and every segment matches the shared
- * {@code ^[a-z][a-z0-9]*([._-][a-z0-9]+)*$} rule because hex digits are lowercase alphanumerics.
+ * schema's bounds: {@code information.events.} plus 64 hex characters is 83 characters, and every
+ * segment matches the {@code ^[a-z][a-z0-9]*([._-][a-z0-9]+)*$} rule every topic-name column
+ * applies, because hex digits are lowercase alphanumerics. The tightest length a topic name faces
+ * in the schema is the 160 characters {@code relay_source_events.topic} allows, which 83 clears;
+ * {@code V190__information_topic_derived_name.sql} records where each bound comes from, and {@code
+ * RelayInformationEventsDatabaseTest} asserts acceptance by storing the name rather than by
+ * restating the rule here.
  *
  * <p><b>Nothing in the name is legible.</b> A project name and an account handle are the two things
  * the old literal was in danger of acquiring as topics multiplied, and neither enters the digest in

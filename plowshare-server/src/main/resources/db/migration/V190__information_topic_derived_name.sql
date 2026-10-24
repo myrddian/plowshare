@@ -12,10 +12,15 @@
 --
 -- The new name is 'information.events.' || sha256('plowshare.information.events/1:' || <scope>),
 -- lowercase hex, derived only inside server/information (InformationTopics) by the publisher and
--- the consumer independently. It is 83 characters and every segment is lowercase alphanumeric, so
--- it satisfies the shared relay name rule -- length <= 160 and
--- '^[a-z][a-z0-9]*([._-][a-z0-9]+)*$' -- that relay_topics (V117, widened to 1024 by V141),
--- relay_subscriptions and relay_source_events each apply. Derived is not secret: the digest is
+-- the consumer independently. It is 83 characters and every segment is lowercase alphanumeric.
+-- The constraints it has to satisfy, read out of the migrations rather than assumed: every
+-- topic-name column in the schema applies '^[a-z][a-z0-9]*([._-][a-z0-9]+)*$', and the lengths
+-- differ -- relay_topics.name allows 1024 (V117's 160, widened by V141), relay_deliveries.publish_to
+-- 1024 (V119, likewise widened), and relay_source_events.topic 160 (V124), which is the tightest
+-- bound a topic name faces. relay_subscriptions, relay_admissions, relay_consumer_leases and the
+-- rest carry the name as a bare TEXT column under a foreign key, with their own 160-character rule
+-- applying to subscriber rather than to topic. 83 clears all of them. Derived is not secret: the
+-- digest is
 -- recomputable by anyone who knows the recipe, and the structural barrier remains the publisher
 -- check RelayInformationEvents applies before decoding. What is withdrawn is the name as a
 -- published address.
