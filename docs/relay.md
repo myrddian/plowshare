@@ -613,7 +613,7 @@ erDiagram
         TEXT scope_key PK "project:<id> or system"
         TEXT name PK "lower-case segments, <=1024"
         BIGINT project_id FK "NULL for system topics"
-        TEXT payload_kind "EMPTY TEXT SCHEDULE_DUE LIFECYCLE WAKE_REQUESTED INFORMATION_CHANGED"
+        TEXT payload_kind "EMPTY TEXT SCHEDULE_DUE LIFECYCLE WAKE_REQUESTED"
         BIGINT retention_seconds
         BIGINT max_records "nullable"
         BIGINT last_position "allocated under row lock"
