@@ -597,3 +597,275 @@ not broker throughput. A recorded [before/after measurement](../test-support/per
 documents the timeout investigation. Database concurrency tests separately cover
 publication ordering/idempotency, consumer ownership and exclusive branch claims;
 they require the explicit full-database test mode.
+
+## Schema
+
+The diagram below is the current Relay schema, from migrations `V117` through
+`V188`. `PK, FK` marks a column belonging to both the primary key and a
+composite foreign key. Columns carrying only `CHECK` bounds are listed without
+them; the migrations remain the authority for every constraint.
+
+```mermaid
+erDiagram
+    projects ||--o{ relay_topics : "scopes (NULL = system)"
+
+    relay_topics {
+        TEXT scope_key PK "project:<id> or system"
+        TEXT name PK "lower-case segments, <=1024"
+        BIGINT project_id FK "NULL for system topics"
+        TEXT payload_kind "EMPTY TEXT SCHEDULE_DUE LIFECYCLE WAKE_REQUESTED INFORMATION_CHANGED"
+        BIGINT retention_seconds
+        BIGINT max_records "nullable"
+        BIGINT last_position "allocated under row lock"
+        BIGINT expired_through
+        UUID generation "reset invalidates subscriptions"
+    }
+
+    relay_topics ||--o{ relay_publications : "append-only log"
+    relay_publications {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        BIGINT position PK "commit order"
+        TEXT event_id UK "idempotency per topic"
+        TEXT publisher
+        TIMESTAMPTZ occurred_at
+        TIMESTAMPTZ published_at
+        TEXT correlation_id
+        TEXT causation_id
+        INTEGER schema_version
+        JSONB payload "<=256 KiB"
+        JSONB relay_causation "rootId parentId depth"
+    }
+
+    relay_topics ||--o{ relay_subscriptions : "named cursors"
+    relay_subscriptions {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK
+        BIGINT seen_through "offset, outlives expiry"
+        TIMESTAMPTZ seen_at
+        UUID generation
+        TEXT reader_account "set iff reader: name"
+    }
+
+    relay_subscriptions ||--o{ relay_subscription_authority : "read authority per account"
+    relay_subscription_authority {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        TEXT account PK
+        UUID topic_generation "must match topic"
+        TIMESTAMPTZ established_at
+    }
+
+    relay_subscriptions ||--o{ relay_admissions : "admitted + routed"
+    relay_admissions {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        BIGINT publication_position PK
+        TEXT event_id
+        TEXT publisher
+        TEXT payload_kind
+        JSONB payload
+        TEXT routing_path
+        TEXT routing_source
+        TEXT routing_hash
+        INTEGER branch_count
+        TIMESTAMPTZ admitted_at
+        JSONB relay_causation
+    }
+
+    relay_admissions ||--o{ relay_deliveries : "one row per branch"
+    relay_deliveries {
+        UUID id PK
+        TEXT scope_key FK
+        TEXT topic FK
+        TEXT subscriber FK
+        BIGINT publication_position FK
+        INTEGER branch_index UK
+        TEXT branch_name UK
+        TEXT receiver
+        TEXT handler_path
+        TEXT handler_source
+        TEXT handler_hash
+        TEXT state "READY CLAIMED DISPATCHING ACCEPTED FAILED UNCERTAIN ABANDONED*"
+        BIGINT fence "claim epoch"
+        TEXT worker
+        TIMESTAMPTZ lease_until
+        TEXT receipt_namespace "set iff ACCEPTED"
+        TEXT receipt_id
+        TEXT failure_code
+        TEXT publish_to
+        TEXT work_agent
+        TEXT work_project
+        TEXT work_definition
+    }
+
+    relay_subscriptions ||--o| relay_consumer_leases : "exclusive consumer"
+    relay_consumer_leases {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        TEXT worker
+        TEXT account
+        BIGINT epoch
+        TIMESTAMPTZ lease_until
+    }
+
+    relay_subscriptions ||--o| relay_sdk_batches : "in-flight SDK batch"
+    relay_sdk_batches {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        TEXT account
+        UUID consumer_id
+        UUID batch_id
+        BIGINT fence
+        BIGINT through_position
+        BIGINT gap_through "nullable"
+        TIMESTAMPTZ lease_until
+        BOOLEAN acknowledged
+    }
+
+    relay_subscriptions ||--o| relay_native_consumers : "server-side wake target"
+    relay_native_consumers {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        TEXT target
+        TEXT account FK "admins.handle"
+        BIGINT project_id FK "projects.id"
+    }
+
+    relay_native_consumers ||--o{ relay_native_gap_recoveries : "retention gaps"
+    relay_native_gap_recoveries {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        BIGINT expired_through PK
+        BIGINT pending_inbox
+        TIMESTAMPTZ recovered_at
+    }
+
+    relay_subscriptions ||--o{ relay_approval_gap_recoveries : "approval gaps"
+    relay_approval_gap_recoveries {
+        TEXT scope_key PK, FK
+        TEXT topic PK, FK
+        TEXT subscriber PK, FK
+        BIGINT expired_through PK
+        BIGINT pending_approvals
+        TIMESTAMPTZ recovered_at
+    }
+
+    projects ||--o{ relay_executions : ""
+    relay_executions {
+        UUID request_id PK "client idempotency"
+        TEXT account
+        BIGINT project_id FK
+        TEXT handler_source
+        TEXT handler_hash
+        TEXT receipt_namespace
+        TEXT receipt_id
+        TEXT conversation_id FK "conversations.id"
+        TIMESTAMPTZ started_at
+        TIMESTAMPTZ accepted_at
+    }
+
+    projects ||--o{ relay_operator_receipts : ""
+    relay_operator_receipts {
+        UUID request_id PK
+        BIGINT project_id FK
+        TEXT account
+        TEXT fingerprint
+        TEXT topic
+        TEXT action "ACKNOWLEDGE_GAP RECONCILE ABANDON REMOVE_SUBSCRIPTION REMOVE_TOPIC"
+        TEXT subscriber
+        UUID delivery_id
+        TEXT reason
+        TEXT status
+        BIGINT seen_through
+        TIMESTAMPTZ completed_at
+    }
+
+    projects ||--o{ relay_source_events : "lifecycle outbox"
+    relay_source_events {
+        UUID id PK
+        BIGINT sequence UK "identity"
+        BIGINT project_id FK "NULL for wake requests"
+        TEXT topic
+        TEXT family "LIFECYCLE or WAKE_REQUESTED"
+        TEXT subject
+        TEXT state
+        TEXT context
+        TEXT related
+        TIMESTAMPTZ occurred_at
+        TIMESTAMPTZ captured_at
+        JSONB relay_causation
+    }
+
+    projects ||--o{ relay_tool_invocations : ""
+    relay_tool_invocations {
+        UUID id PK
+        BIGINT project_id FK
+        TEXT account
+        TEXT run_id
+        TEXT call_id
+        TEXT fingerprint
+        TEXT binding
+        TEXT request
+        JSONB causation
+        TEXT result
+        TEXT agent
+        JSONB hosted
+        TIMESTAMPTZ occurred_at
+        TIMESTAMPTZ completed_at
+    }
+
+    information_revisions ||--o{ information_revision_events : "history by relay position"
+    information_revision_events {
+        UUID revision_id PK, FK
+        BIGINT relay_project PK, FK
+        BIGINT relay_position PK "position Relay allocated"
+        BIGINT generation
+        TEXT actor_handle FK
+        TEXT stage
+        TEXT action
+        TEXT detail
+        TIMESTAMPTZ recorded_at
+    }
+```
+
+Two tables form the spine. `relay_topics` owns a scope's topics and allocates
+positions under its own row lock, in the appending transaction, because a global
+sequence cannot express commit order. `relay_publications` is the append-only log;
+`event_id` is unique per topic, so a retried publish is the same record.
+
+A scope is a text key, not a project id: `project:<id>` for a project topic and
+`system` for a server-wide one, with the nullable `relay_topics.project_id`
+cascading real project deletion while system topics survive it.
+
+`relay_subscriptions` holds each subscriber's independent position. It has no
+foreign key to a publication on purpose, so an offset outlives the records
+retention has already removed. Everything per-subscriber hangs off it:
+
+- `relay_subscription_authority` records the read authority resolved once when a
+  subscription is established, keyed by account as well as by subscription, with
+  `topic_generation` as its invalidation fence. Membership changes delete rows in
+  the same transaction as the change.
+- `relay_admissions` copies the publication and its selected routes at admission.
+  `relay_deliveries` is one row per fan-out branch and carries the claim state
+  machine: `state`, the `fence` epoch, `worker`, `lease_until`, and then either an
+  accepted receipt or a `failure_code`.
+- Consumer bookkeeping is one row per subscription: `relay_consumer_leases` for an
+  exclusive worker, `relay_sdk_batches` for an in-flight SDK batch, and
+  `relay_native_consumers` for a server-side wake target. The two gap-recovery
+  tables record each retention boundary a lagging consumer had to cross.
+
+The remaining tables sit beside the log rather than on it. `relay_executions` and
+`relay_operator_receipts` give handler runs and operator actions request-id
+idempotency. `relay_source_events` is the lifecycle outbox, with an identity
+sequence of its own to order currently visible rows and a nullable project for
+wake requests. `relay_tool_invocations` records tool calls with their causation.
+`information_revision_events` is the one non-`relay_` table keyed by a Relay
+position: revision history kept after the second delivery substrate was removed.
