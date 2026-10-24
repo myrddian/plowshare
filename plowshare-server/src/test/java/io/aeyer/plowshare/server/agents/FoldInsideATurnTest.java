@@ -111,7 +111,7 @@ class FoldInsideATurnTest {
         "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_route_bindings, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans,"
             + " digest_revisions, memory_provenance, conversations, turns, compactions,"
             + " entries, citations, orchestrations, orchestration_messages, board_topics,"
-            + " board_messages, board_seats, firings, user_inbox");
+            + " board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     turns = new TurnStore(jdbc);
     compactions = new CompactionStore(jdbc);
