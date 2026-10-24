@@ -1,7 +1,7 @@
 # Relay content-addressed payload store
 
 Date: 2026-10-25
-Status: design, one decision outstanding (see "Outstanding decision")
+Status: design, awaiting approval
 
 ## Why this exists
 
@@ -72,11 +72,16 @@ These would make the change a failure even if it functioned:
 - Any path in which the examination date authorizes a deletion.
 - Raw JSON crossing into a domain contract. JSON text stays inside the
   persistence boundary, as it does today.
-- The substrate learning anything new about payload families. Relay carries
-  bytes; the system using them owns their encoding and decoding. A codec added
-  to Relay on the information system's behalf is the specific mistake this rule
-  exists to prevent — it imported that system's concerns into the substrate, and
-  removing it is why `information_events` went away on this branch.
+- The substrate learning anything new about payload families. The platform is
+  layered: a system that exposes an API and involves messaging publishes through
+  Relay, but Relay is never that system's interface. The information system uses
+  Relay for its events and exposes its own API to its own clients, which is why
+  encoding and decoding belong to the using system and not here.
+  [Decision 0037](../../decisions/0037-events-and-messaging-on-relay.md) states
+  the first half — events and messaging are wrappers over Relay. This design
+  depends on the second half: a codec added to Relay on the information system's
+  behalf imported that system's concerns into the substrate, and removing it is
+  why `information_events` went away on this branch.
 - Per-topic physical tables or dynamic SQL identifiers in this path.
 - A read path that fetches payloads per record. Batched reads (consume returns
   up to 100) must join, not loop.
@@ -404,29 +409,28 @@ One new Flyway migration:
    the `V135` payload `CHECK`s those tables carry.
 
 Steps 2–4 rewrite both of the largest tables in the schema, holding `ACCESS
-EXCLUSIVE` while doing so, over rows that may individually be 50 MiB. Whether
-that is acceptable is an outstanding decision, below.
+EXCLUSIVE` while doing so, over rows that may individually be 50 MiB.
 
-## Outstanding decision
+**One migration is correct, and a dual-write release is not merely unnecessary
+but contrary to accepted policy.**
+[Decision 0037](../../decisions/0037-events-and-messaging-on-relay.md) settles
+this: "No installation is being migrated, so there is nothing for a compatibility
+layer to serve", and it considered and rejected a dual-write release for exactly
+the continuity this one would buy. It also sets the bar for the one case that
+would justify retaining data — a functional need, such as topic expiration losing
+input a consumer still requires — and states that backward compatibility is never
+that justification.
 
-One question remains that changes what gets built, and it is not the builder's to
-guess.
+No such functional need arises here. The backfill derives digests from the rows
+already present, so the clean break loses nothing: existing publications and
+admissions keep their payloads, by reference, across the migration. The
+`ACCESS EXCLUSIVE` stall is therefore bounded by whatever a development
+installation holds, not by a production corpus.
 
-### Must existing Relay rows survive this change?
-
-`V188__information_events_on_relay.sql` dropped `information_events` outright on
-the grounds that no installation was being migrated and existing rows were
-"instance history rather than a contract" — while the same migration cites a
-measurement taken on a live installation. Both readings therefore have precedent
-in this repository.
-
-If Relay publication and admission rows are likewise instance history, the
-migration collapses to one slice: add the column, discard or trivially backfill,
-enforce `NOT NULL`, drop `payload`. If they are a contract, the plan needs
-current row counts, the largest stored row, and the tolerable startup stall, and
-becomes two releases: nullable column with dual write, a bounded background
-backfiller, then a second migration to enforce and drop. That is roughly one
-slice against four.
+If that ever stops being true, the dual-write path is the documented fallback:
+nullable `payload_digest`, dual write, a bounded background backfiller, then a
+second migration to enforce `NOT NULL` and drop `payload`. It should not be built
+pre-emptively, and adopting it would need its own decision against 0037.
 
 ## Configuration
 
