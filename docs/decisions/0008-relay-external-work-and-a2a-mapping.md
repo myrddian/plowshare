@@ -9,6 +9,15 @@ or additional A2A capabilities have shipped.
 The inspected source snapshot is `35ffa6e06578576e5af19728b08658b22384801c`.
 Implementation must recheck current main and reconcile changes before proceeding.
 
+## Later records that govern this one
+
+This record's own instruction — recheck current main and reconcile before proceeding — is overdue.
+`0037-events-and-messaging-on-relay.md` states the general rule for every family moving onto Relay
+and carries the reconciliation table for EW01–EW08; `0040-relay-is-the-boards-substrate-rebuilt.md`
+records what Relay may and may not be asked to do, and that messaging still runs the previous
+generation of the substrate. Read both before starting EW01. Nothing in this record has shipped:
+`server/outgoing/` contains no Relay reference.
+
 ## Problem and decision
 
 Plowshare has a durable Relay broker with public SDK topic ports, external tool
