@@ -95,10 +95,15 @@ before they move; this record does not pre-empt them beyond the rule above.
 ### Order of work
 
 1. `information.events` — it holds an installation-wide lock and is measured at 3,996 ms per event.
+   Publisher, consumer and table removal are one change; see the consequences above.
 2. `event.fire` — `Intake` keeps triggers and firings directly; no ordering fence, so this is
    reshaping rather than unblocking.
 3. `message.*` / outgoing — largest surface, and external peers make its delivery contract the most
    exposed.
+
+The reason for the order is the measured cost, not risk appetite. A system that takes fourteen
+seconds to open a document does not scale, and no amount of preserved behaviour from the mechanism
+causing it is worth keeping.
 
 ### Consequences accepted
 
@@ -107,10 +112,23 @@ before they move; this record does not pre-empt them beyond the rule above.
   subscription at publication time, so an account that gains read access later does not
   retroactively receive earlier events. This is Relay's existing semantics for every other
   publication and is accepted rather than special-cased.
-- **Each cutover is dual-write, then drain.** Live consumers hold cursors into the current tables.
-  Publish to both for one release so an in-flight cursor is never stranded, then remove the cursor
-  reader once the subscription path is the only consumer. A one-step move would drop records
-  sitting between a reader's cursor and the switch.
+- **The substrate is replaced, not shadowed.** Publisher and consumer move in one change and the
+  old tables go with it. A dual-write release was considered and rejected: it keeps the fence, the
+  global sequence and the cursor alive for a release, which is the substrate this record exists to
+  remove, and it buys only the continuity of in-flight cursors over one deployment. Existing
+  `information_events` rows are not migrated; they are instance history, not a contract.
+- **Set-equality with the old fan-out is explicitly NOT a requirement.** It cannot be: frozen
+  emit-time recipients and subscription-time delivery are different semantics, and demanding both
+  would re-impose the design being removed. What must hold instead is the authorization invariant
+  below.
+
+### The one invariant that does not bend
+
+No account may receive an information event for a scope it may not read. This is a security
+property, not a compatibility guarantee, and it is the thing to pin: delivery is driven by
+subscription, so the test is that a subscription cannot exist, or cannot deliver, for an account
+that fails the scope's read authority. Everything else about the old mechanism's behaviour is
+free to change.
 
 ## Alternatives rejected
 
@@ -120,8 +138,9 @@ All three are rejected on the same ground: they invest in substrates that should
   scope once and ask which accounts may read that scope, replacing 13 × (2 + N) predicate
   evaluations. It is the smallest change available and would remove most of the measured cost — but
   it leaves a global advisory lock, a global sequence, a bespoke cursor and a parallel recipients
-  table standing. Acceptable **only** as a stopgap if the migration is deferred, and then recorded
-  as such.
+  table standing. It was briefly adopted as a first step and withdrawn: making the wrong substrate
+  cheaper is how it survives. Acceptable only if the migration is abandoned, which would need its
+  own record.
 - **Replace the fence with an XID watermark.** The primitives exist and are already used by the
   projection cache: `pg_snapshot_xip(pg_current_snapshot())` and `pg_xact_status(xid::xid8)`,
   documented in `V175__projection_cache_version_fences.sql`. A commit-settled watermark would make
