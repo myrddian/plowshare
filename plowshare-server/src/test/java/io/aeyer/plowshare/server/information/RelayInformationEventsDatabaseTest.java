@@ -360,6 +360,70 @@ class RelayInformationEventsDatabaseTest {
         events.read(reader(AUTHOR, PROJECT), 0, 50).events().getFirst().detail());
   }
 
+  /**
+   * The read path that regressed, pinned against real rows.
+   *
+   * <p>{@code relay.log} serves a project's topics to any project member and reports a general
+   * message's content verbatim, so it is a second read path over the same publications -- and one
+   * gated on membership rather than on resource ownership. While detail travelled in the payload it
+   * was therefore readable there by every member, including the non-owner that {@code
+   * information.events} withholds it from. Detail is not in the publication any more, and this
+   * asserts it on the log view itself rather than on the notice, because the log view is where the
+   * leak appeared.
+   */
+  @Test
+  void the_topics_log_discloses_no_owner_only_detail_to_a_member_who_is_not_the_owner() {
+    UUID revision = projectHomed();
+    publish(revision, "derive", "ready", "private processing details");
+
+    var inspection =
+        new io.aeyer.plowshare.server.relay.ScopedRelayInspection(
+            new JdbcProjectMembers(jdbc),
+            new Workspaces(),
+            new io.aeyer.plowshare.server.relay.JdbcRelayLogRepository(jdbc, work));
+    var page =
+        inspection.log(
+            VIEWER,
+            new io.aeyer.plowshare.protocol.RelayLog.Query(PROJECT, false, TOPIC, null, 50));
+
+    assertEquals(1, page.events().size(), "the publication is visible to a project member");
+    var payload = page.events().getFirst().payload();
+    assertEquals("TEXT", payload.kind(), "an information notice is the general message");
+    assertFalse(
+        payload.text().contains("private processing details"),
+        "owner-only detail must not be readable through the topic's log");
+    assertFalse(payload.text().contains("detail"), "the publication does not name the field");
+    // Nor does the publisher name the account behind the change to everyone who can inspect it.
+    assertFalse(page.events().getFirst().publisher().contains(AUTHOR));
+    assertTrue(page.events().getFirst().publisher().startsWith("information:"));
+    // The owner's own read path still answers, from the history rather than from the publication.
+    assertEquals(
+        "private processing details",
+        events.read(reader(AUTHOR, PROJECT), 0, 50).events().getFirst().detail());
+  }
+
+  /**
+   * Deletion now deletes. A publication is immutable and retained for the topic's policy window, so
+   * a detail published into one outlived the removal of the revision it described; the history
+   * cascades with the revision instead, and the event's own existence is all that survives.
+   */
+  @Test
+  void deleting_a_revision_takes_its_detail_with_it_rather_than_leaving_it_in_the_topic() {
+    UUID revision = projectHomed();
+    publish(revision, "derive", "ready", "private processing details");
+    assertEquals(
+        "private processing details",
+        events.read(reader(AUTHOR, PROJECT), 0, 50).events().getFirst().detail());
+
+    jdbc.update("DELETE FROM information_revisions WHERE id=?", revision);
+
+    assertEquals(0, history(revision), "the history cascades with the revision");
+    assertEquals(1, publications(projectId), "the publication is immutable and remains");
+    var page = events.read(reader(AUTHOR, PROJECT), 0, 50);
+    assertEquals(1, page.events().size(), "the event still occupied a position");
+    assertEquals("", page.events().getFirst().detail(), "and its detail is no longer answerable");
+  }
+
   /** A subscription row for this account exists on the topic, whatever its authority now says. */
   private boolean subscribed(String account) {
     return Objects.requireNonNull(

@@ -15,21 +15,31 @@ import java.util.UUID;
 /**
  * The information-event notice as it travels inside Relay's general message.
  *
+ * <p><b>Owner-only content must never enter a Relay publication.</b> A publication is readable by
+ * the topic's audience -- {@code relay.log} serves a project's topics to any project member, and a
+ * general message's content is reported verbatim there -- so a field the information read path
+ * shows to one account only cannot be carried through the broker without that read path becoming
+ * the second, ungated one. A publication is also immutable and retained for the topic's policy
+ * window, so content placed in one outlives the deletion of the record it describes. That is why
+ * the stage's free-form {@code detail} is not a field of this notice: it stays in {@code
+ * information_revision_events}, which is keyed by revision, cascades away when the revision is
+ * deleted, and is read for the owner at read time by {@link RelayInformationEvents}. Nothing here
+ * may acquire a field whose audience is narrower than the topic's.
+ *
  * <p>Relay is a publish/subscribe substrate: it carries a contract and stores a publication's
  * content opaquely. A payload family per consumer would make every new consumer a change to the
  * broker, so the structure an information subscriber needs is encoded here, by the publishing
  * subsystem, written into {@code RelayPayload.Text}, and decoded here on the read path. This is the
  * same arrangement {@code RelayToolCodec} uses for hosted tool envelopes.
  *
- * <p>The codec owns the wire shape and nothing else. It does not decide who may read a notice and
- * it does not redact: {@code owner} is carried so that {@link RelayInformationEvents} can reapply
- * the owner-only {@code detail} redaction in memory, and applying it remains that reader's job.
+ * <p>The codec owns the wire shape and nothing else. It does not decide who may read a notice:
+ * {@code owner} is carried so that {@link RelayInformationEvents} can tell whose events these are
+ * without a query per event, and deciding what that entitles a reader to remains the reader's job.
  *
  * <p>Validation is the notice's own invariant and runs in the record's constructor, so a notice
  * that was decoded is a notice that was validated. Every field the catalogue publishes is required
- * to be present on the wire; {@code detail} and {@code documentSubtype} are written as JSON null
- * when absent rather than omitted, so a missing key is a corrupt payload rather than an absent
- * value.
+ * to be present on the wire; {@code documentSubtype} is written as JSON null when absent rather
+ * than omitted, so a missing key is a corrupt payload rather than an absent value.
  */
 public final class InformationEventCodec {
   /**
@@ -40,7 +50,7 @@ public final class InformationEventCodec {
 
   private static final String SCHEMA = "schema";
 
-  /** The complete wire field allowlist: the envelope version plus the notice's eight fields. */
+  /** The complete wire field allowlist: the envelope version plus the notice's seven fields. */
   private static final Set<String> FIELDS =
       Set.of(
           SCHEMA,
@@ -48,13 +58,12 @@ public final class InformationEventCodec {
           "generation",
           "stage",
           "action",
-          "detail",
           "documentType",
           "documentSubtype",
           "owner");
 
-  // A notice is small, but detail is free-form text bounded only by Relay's text rule, so the
-  // parser's string allowance is that same rule rather than Jackson's much smaller default.
+  // Every field is a bounded identity, so the parser's string allowance is the broker's own text
+  // rule: generous enough never to refuse a well-formed notice, and still a ceiling.
   private static final ObjectMapper JSON =
       JsonMapper.builder(
               com.fasterxml.jackson.core.JsonFactory.builder()
@@ -73,21 +82,19 @@ public final class InformationEventCodec {
    * One information event, carrying only what a subscriber needs in order to invalidate what it
    * holds and render the change. The catalogue retains the revision itself.
    *
-   * <p>{@code owner} is the home resource's author and exists for one reason: {@code detail} was
-   * only ever shown to that account, and the publication is read back by every subscriber on the
-   * topic. Carrying the owner in the notice lets the read path reapply that redaction in memory, so
-   * no reader gains detail it could not see before and no per-event query is needed to decide it.
+   * <p>{@code owner} is the home resource's author. It is carried because the read path shows an
+   * event's stage detail to that account alone, and resolving whose event this is from the notice
+   * costs no query. The detail itself is not carried; see the class comment.
    *
-   * <p>{@code detail} and {@code documentSubtype} are absent rather than empty when unset. The
-   * event's position in the topic is its sequence and the publication's {@code occurredAt} is its
-   * recorded time, so neither is duplicated here.
+   * <p>{@code documentSubtype} is absent rather than empty when unset. The event's position in the
+   * topic is its sequence and the publication's {@code occurredAt} is its recorded time, so neither
+   * is duplicated here. The stage's {@code detail} is deliberately not here; see the class comment.
    */
   public record Notice(
       String revision,
       long generation,
       String stage,
       String action,
-      String detail,
       String documentType,
       String documentSubtype,
       String owner) {
@@ -99,10 +106,6 @@ public final class InformationEventCodec {
       documentType = identity(documentType);
       if (documentSubtype != null) documentSubtype = identity(documentSubtype);
       owner = identity(owner);
-      // Detail is free-form diagnostic text a stage wrote, so it is bounded by the broker's text
-      // rule rather than the identity rule, and an empty one is carried as absent.
-      if (detail != null && detail.isBlank()) detail = null;
-      if (detail != null) detail = RelayPort.text(detail);
     }
   }
 
@@ -117,7 +120,6 @@ public final class InformationEventCodec {
     value.put("generation", notice.generation());
     value.put("stage", notice.stage());
     value.put("action", notice.action());
-    value.put("detail", notice.detail());
     value.put("documentType", notice.documentType());
     value.put("documentSubtype", notice.documentSubtype());
     value.put("owner", notice.owner());
@@ -133,8 +135,8 @@ public final class InformationEventCodec {
    *
    * @throws IllegalArgumentException if the text is not a notice of this envelope version, carries
    *     a field outside the allowlist, omits one, or fails the notice's own validation. The message
-   *     is fixed: a parser diagnostic can quote the payload, and a notice's detail is not disclosed
-   *     to whoever provoked the failure.
+   *     is fixed rather than derived: a parser diagnostic can quote the payload it rejected, and a
+   *     publication's content is not disclosed to whoever provoked the failure.
    */
   public static Notice read(String source) {
     try {
@@ -155,7 +157,6 @@ public final class InformationEventCodec {
           integer(value, "generation"),
           text(value, "stage"),
           text(value, "action"),
-          optionalText(value, "detail"),
           text(value, "documentType"),
           optionalText(value, "documentSubtype"),
           text(value, "owner"));

@@ -46,6 +46,20 @@ public final class RelayInformationEvents implements InformationEvents {
    */
   private static final String TOPIC = "information.changed";
 
+  /**
+   * The publisher namespace every information notice is issued under, following the convention
+   * {@code RelayMessageReview} established with {@code filter:}: a server-owned prefix and the
+   * actor's hash rather than the handle, so the publication attributes itself without naming an
+   * account to everyone who can inspect the topic's log.
+   *
+   * <p>It is also what the read path trusts. Relay is content-agnostic by design, so it does not
+   * police who may publish under a topic name on this subsystem's behalf, and the registered
+   * payload family is the general message every publisher produces. The structural question "is
+   * this an information notice?" therefore belongs here: a publication this subsystem did not issue
+   * is not decoded, so a forged payload never reaches {@link InformationEventCodec}.
+   */
+  private static final String PUBLISHER = "information:";
+
   /** Bounded: a page write is a few statements, and a wedged lease must not outlive a request. */
   private static final Duration LEASE = Duration.ofSeconds(30);
 
@@ -99,7 +113,6 @@ public final class RelayInformationEvents implements InformationEvents {
                     event.generation(),
                     event.stage(),
                     event.action(),
-                    event.detail(),
                     resolved.documentType(),
                     resolved.documentSubtype(),
                     resolved.owner())));
@@ -110,7 +123,12 @@ public final class RelayInformationEvents implements InformationEvents {
     var occurredAt = clock.get();
     var draft =
         new Relay.Draft(
-            "information:" + UUID.randomUUID(), event.actor(), occurredAt, null, null, payload);
+            "information:" + UUID.randomUUID(),
+            PUBLISHER + io.aeyer.plowshare.protocol.RelayPort.hash(event.actor()),
+            occurredAt,
+            null,
+            null,
+            payload);
     var publication = relay.publish(topic, draft);
     // The revision's own history, at the position Relay just allocated, in this same transaction.
     // It is not a second log: it has no sequence of its own and nothing reads it by cursor. See
@@ -183,21 +201,52 @@ public final class RelayInformationEvents implements InformationEvents {
     commit(account, request, subscription, topic, after);
 
     var page = consumption.consume(account, request, limit);
-    var events = new ArrayList<Information.Event>(page.publications().size());
+    var selected = new ArrayList<Relay.Publication>(page.publications().size());
+    var notices = new ArrayList<InformationEventCodec.Notice>(page.publications().size());
+    var mine = new java.util.HashSet<Long>();
     long cursor = Math.max(after, page.subscription().seenThrough());
     for (var publication : page.publications()) {
       cursor = publication.position();
-      // A decode failure propagates rather than being skipped: the notice is this subsystem's own
-      // writing, so an undecodable one on this topic is corruption or a foreign publication, and
-      // serving a silently shortened page would hide it. A corrupt payload failed the page before
-      // this change too, one layer lower, in the broker's own codec.
+      // Not ours, so not interpreted. The cursor still moves past it: refusing the page would let
+      // one foreign row wedge this subscriber's feed for the topic's whole retention window, and
+      // a row this subsystem did not write is not its data to fail over.
+      if (!issuedHere(publication.event().publisher())) continue;
+      // Ours, so a malformed one is corruption and propagates. Serving a silently shortened page
+      // would hide it, and a corrupt payload failed the page before the carrier changed too, one
+      // layer lower, in the broker's own codec.
       if (!(publication.event().payload() instanceof RelayPayload.Text message))
         throw new IllegalStateException("information event topic carries a non-message payload");
       var notice = InformationEventCodec.read(message.text());
-      if (notice.documentType().equals(context.corpus().documentType()))
-        events.add(event(publication, notice, account));
+      if (!notice.documentType().equals(context.corpus().documentType())) continue;
+      selected.add(publication);
+      notices.add(notice);
+      if (notice.owner().equals(account)) mine.add(publication.position());
     }
+    // Detail is the home resource's owner's alone, so it is never published and is read here, for
+    // this account's own events only, in one statement for the page rather than one per event.
+    var details =
+        mine.isEmpty() ? java.util.Map.<Long, String>of() : records.details(key.scope(), mine);
+    var events = new ArrayList<Information.Event>(selected.size());
+    for (int index = 0; index < selected.size(); index++)
+      events.add(event(selected.get(index), notices.get(index), details));
     return new Information.Events(events, cursor);
+  }
+
+  /**
+   * Whether this subsystem issued the publication.
+   *
+   * <p>Relay is a content-agnostic substrate: it carries a contract, registers the general message
+   * family every publisher produces, and does not reserve a topic name for one consumer -- that
+   * would be the broker policing a consumer's vocabulary, which is the drift this family's payload
+   * kind already was. So the consumer declines to trust the publisher instead. The namespace is
+   * server-owned and an external publisher cannot reach it: {@code RelayPort.publisher} derives
+   * every SDK identity as {@code sdk:<hash>} and no transport lets a caller choose its own.
+   */
+  private static boolean issuedHere(String publisher) {
+    return publisher != null
+        && publisher.length() == PUBLISHER.length() + 64
+        && publisher.startsWith(PUBLISHER)
+        && publisher.substring(PUBLISHER.length()).matches("[0-9a-f]{64}");
   }
 
   /**
@@ -252,20 +301,26 @@ public final class RelayInformationEvents implements InformationEvents {
   }
 
   /**
-   * One publication as the operation's reply shape. {@code detail} is withheld from every account
-   * but the home resource's owner, which is the redaction the previous reader applied in SQL; the
-   * owner travels in the payload so reapplying it costs no query.
+   * One publication as the operation's reply shape, with the same fields the previous reader
+   * returned.
+   *
+   * <p>{@code detail} is withheld from every account but the home resource's owner, which is the
+   * redaction the previous reader applied in SQL. It reaches here only through {@code details},
+   * which the caller populated for this account's own events, so a non-owner's event has no entry
+   * and reports the empty string exactly as before. A deleted revision takes its history with it,
+   * so detail also stops being answerable at that moment rather than four days later.
    */
   private static Information.Event event(
-      Relay.Publication publication, InformationEventCodec.Notice notice, String account) {
-    boolean owner = notice.owner().equals(account);
+      Relay.Publication publication,
+      InformationEventCodec.Notice notice,
+      java.util.Map<Long, String> details) {
     return new Information.Event(
         publication.position(),
         UUID.fromString(notice.revision()),
         notice.generation(),
         notice.stage(),
         notice.action(),
-        owner && notice.detail() != null ? notice.detail() : "",
+        details.getOrDefault(publication.position(), ""),
         publication.event().occurredAt(),
         notice.documentType(),
         notice.documentSubtype());

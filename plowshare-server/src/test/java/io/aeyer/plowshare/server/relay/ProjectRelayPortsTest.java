@@ -49,6 +49,35 @@ class ProjectRelayPortsTest {
                 List.of("filters"))));
   }
 
+  /**
+   * Defence in depth, not the mechanism.
+   *
+   * <p>While information.changed declared a payload family of its own, an SDK publish could not
+   * land on it whatever the configuration said: the transport always produces the general message
+   * and the kinds disagreed. The topic now carries that general message, so this port grant is all
+   * that stands between an external publisher and the topic. The real barrier is on the consumer
+   * side -- {@code RelayInformationEvents} verifies a publication's publisher before decoding it --
+   * because a deployment that configured this binding would still be permitted here. What this pins
+   * is that no shipped or test configuration does so.
+   */
+  @Test
+  void no_shipped_configuration_opens_the_information_topic_as_an_external_port() {
+    var unconfigured = new RelayPortProperties();
+    for (var direction : RelayPortProperties.Direction.values())
+      assertFalse(
+          unconfigured.permits("reviewer", "project", "information.changed", direction, null),
+          "the shipped default grants no port at all");
+    allow();
+    assertFalse(
+        properties.permits(
+            "reviewer",
+            "project",
+            "information.changed",
+            RelayPortProperties.Direction.INGRESS,
+            null),
+        "an information event is published by the server, never through a port");
+  }
+
   @Test
   void membership_does_not_open_a_port_and_personal_ownership_cannot_be_bypassed() {
     when(members.mayWork("project", "reviewer")).thenReturn(true);

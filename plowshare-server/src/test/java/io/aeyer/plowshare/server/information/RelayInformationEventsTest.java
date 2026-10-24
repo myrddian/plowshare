@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.events.AccountPushes;
@@ -99,6 +100,18 @@ class RelayInformationEventsTest {
         .thenReturn(List.of("reader", "author"));
 
     events.publish(occurrence("private processing details"));
+
+    // What reached the broker, asserted on the draft itself: the notice carries no detail, and the
+    // publisher is this subsystem's own namespaced identity rather than the actor's handle.
+    var draft = org.mockito.ArgumentCaptor.forClass(Relay.Draft.class);
+    verify(relay).publish(eq(topic), draft.capture());
+    String carried = ((RelayPayload.Text) draft.getValue().payload()).text();
+    assertFalse(
+        carried.contains("private processing details"),
+        "owner-only detail must never enter a Relay publication");
+    assertFalse(carried.contains("detail"), "the publication must not even name the field");
+    assertEquals(issuer("author"), draft.getValue().publisher());
+    assertFalse(draft.getValue().publisher().contains("author"), "the log must not name the actor");
 
     var order = inOrder(records, relay);
     order.verify(records).resolve(REVISION);
@@ -196,28 +209,32 @@ class RelayInformationEventsTest {
         expired);
   }
 
-  private Relay.Publication publication(long position, String owner, String type, String detail) {
+  /** The server-owned publisher identity a genuine notice is issued under. */
+  private static String issuer(String actor) {
+    return "information:" + io.aeyer.plowshare.protocol.RelayPort.hash(actor);
+  }
+
+  private Relay.Publication publication(long position, String owner, String type) {
+    return publication(position, owner, type, issuer(owner));
+  }
+
+  private Relay.Publication publication(
+      long position, String owner, String type, String publisher) {
+    return published(
+        position,
+        publisher,
+        new RelayPayload.Text(
+            InformationEventCodec.write(
+                new InformationEventCodec.Notice(
+                    REVISION.toString(), 3, "derive", "ready", type, "markdown", owner))));
+  }
+
+  private Relay.Publication published(long position, String publisher, RelayPayload payload) {
     return new Relay.Publication(
         new Relay.TopicKey(7, TOPIC),
         position,
         T0,
-        new Relay.Draft(
-            "information:" + position,
-            owner,
-            T0,
-            null,
-            null,
-            new RelayPayload.Text(
-                InformationEventCodec.write(
-                    new InformationEventCodec.Notice(
-                        REVISION.toString(),
-                        3,
-                        "derive",
-                        "ready",
-                        detail,
-                        type,
-                        "markdown",
-                        owner)))));
+        new Relay.Draft("information:" + position, publisher, T0, null, null, payload));
   }
 
   private RelayConsumerRepository.Lease lease() {
@@ -257,24 +274,92 @@ class RelayInformationEventsTest {
 
   @Test
   void detail_reaches_the_home_resources_owner_and_no_other_subscriber() {
-    readable(2, 0, 0, publication(1, "author", "document", "private processing details"));
+    readable(2, 0, 0, publication(1, "author", "document"));
+    // Detail lives in the revision's own history, not in the publication, and is read only for
+    // the positions the caller has established are its own.
+    when(records.details(new Relay.ProjectScope(7), java.util.Set.of(1L)))
+        .thenReturn(java.util.Map.of(1L, "private processing details"));
+
     var others = events.read(context(InformationContext.Selection.project(PROJECT)), 0, 50);
     assertEquals(1, others.events().size());
     assertEquals("", others.events().getFirst().detail());
+    // A non-owner's read asks the history for nothing at all; there is no detail to withhold.
+    verify(records, never()).details(any(), any());
 
     var owner = new InformationContext("author", InformationContext.Selection.project(PROJECT));
     var mine = events.read(owner, 0, 50);
     assertEquals("private processing details", mine.events().getFirst().detail());
+    verify(records).details(new Relay.ProjectScope(7), java.util.Set.of(1L));
+  }
+
+  /**
+   * The structural barrier the payload family used to supply, restored on the consumer side.
+   *
+   * <p>While the topic declared a family of its own, an SDK publish could not land on it: the
+   * transport always produces the general message, and the kinds disagreed. The topic now carries
+   * that same general message, so the broker no longer answers "is this an information notice?" --
+   * and it should not, because reserving a consumer's topic name is the broker policing a
+   * consumer's vocabulary. The consumer answers it instead, by declining to trust a publisher it
+   * did not issue under.
+   */
+  @Test
+  void a_publication_this_subsystem_did_not_issue_is_never_interpreted() {
+    var forged =
+        publication(
+            1, "author", "document", io.aeyer.plowshare.protocol.RelayPort.publisher("intruder"));
+    readable(
+        3, 0, 0, forged, publication(2, "author", "document"), publication(3, "x", "document"));
+
+    var page = events.read(context(InformationContext.Selection.project(PROJECT)), 0, 50);
+
+    assertEquals(
+        List.of(2L, 3L),
+        page.events().stream().map(Information.Event::sequence).toList(),
+        "an SDK publisher's row must not be served as an information event");
+    // The cursor still clears it. Refusing the page would let one foreign row wedge this
+    // subscriber's feed for the topic's whole retention window.
+    assertEquals(3, page.cursor());
+  }
+
+  @Test
+  void a_forged_publication_is_rejected_before_anything_decodes_its_payload() {
+    // Not a notice at all, and not even the general message. The publisher check runs first, so
+    // nothing here is parsed, cast or interpreted -- it is simply not this subsystem's row.
+    readable(
+        1,
+        0,
+        0,
+        published(
+            1,
+            io.aeyer.plowshare.protocol.RelayPort.publisher("intruder"),
+            new RelayPayload.Lifecycle("job.ended", "job_fixture", "CANCELLED", null, null)));
+
+    var page = events.read(context(InformationContext.Selection.project(PROJECT)), 0, 50);
+    assertEquals(List.of(), page.events());
+    assertEquals(1, page.cursor());
+  }
+
+  /**
+   * A publication this subsystem <i>did</i> issue, carrying something it could not have written.
+   * That is corruption of its own data rather than someone else's row, so it fails the page loudly
+   * instead of being skipped.
+   */
+  @Test
+  void our_own_publication_that_cannot_be_decoded_fails_the_page_rather_than_shortening_it() {
+    readable(1, 0, 0, published(1, issuer("author"), new RelayPayload.Text("not a notice")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> events.read(context(InformationContext.Selection.project(PROJECT)), 0, 50));
+
+    readable(2, 0, 0, published(2, issuer("author"), new RelayPayload.Empty()));
+    assertThrows(
+        IllegalStateException.class,
+        () -> events.read(context(InformationContext.Selection.project(PROJECT)), 0, 50));
   }
 
   @Test
   void a_page_reports_only_the_selected_corpus_while_its_cursor_still_moves_past_the_rest() {
-    readable(
-        2,
-        0,
-        0,
-        publication(1, "author", "code", null),
-        publication(2, "author", "document", null));
+    readable(2, 0, 0, publication(1, "author", "code"), publication(2, "author", "document"));
     var page = events.read(context(InformationContext.Selection.project(PROJECT)), 0, 50);
     assertEquals(List.of(2L), page.events().stream().map(event -> event.sequence()).toList());
     assertEquals(2, page.cursor(), "a filtered page must still let the caller make progress");
