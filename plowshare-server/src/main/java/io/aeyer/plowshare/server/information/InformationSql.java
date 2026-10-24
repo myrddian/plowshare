@@ -66,12 +66,22 @@ public final class InformationSql {
         .contains(revision == null ? "" : revision))
       throw new IllegalArgumentException("revision must belong to the repository vocabulary");
     if (context.readBoundary() == null) return new Filter("true", List.of());
+    // Both non-revision arguments are resolved once for the whole query, as scalar subqueries the
+    // planner lifts into an InitPlan, and only membership is left per row. Evaluated per row these
+    // cost more than the predicate they replace: the readable scope set resolves project roles for
+    // every scope, and that is exactly the repeated permission resolution this removes. The
+    // admitted set is identical, which KnowledgeBoundaryHoistingDatabaseTest checks in both
+    // directions rather than assuming.
     return new Filter(
-        "knowledge_document_in_boundary(" + revision + ",?,?,?)",
+        "knowledge_document_admitted("
+            + revision
+            + ",(SELECT ?::boolean AND information_global_read_member(?::text))"
+            + ",ARRAY(SELECT knowledge_readable_scopes(?::text,?::text)))",
         java.util.Arrays.asList(
+            context.readBoundary().globalRead(),
             context.account(),
-            context.readBoundary().home().project(),
-            context.readBoundary().globalRead()));
+            context.account(),
+            context.readBoundary().home().project()));
   }
 
   /** Legacy readers omit every typed or explicit-only revision before discovery and paging. */
