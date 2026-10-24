@@ -86,6 +86,67 @@ Recording it here rather than quietly is the point: the drift is easy to repeat,
 type feels like modelling the domain properly, and the cost only shows up as the next family's
 core change.
 
+## The pattern, which is not specific to Relay
+
+The Board/Relay story above is one instance of something that has happened at every layer of this
+system. Each subsystem was built **before** the substrate that should carry it existed, the
+substrate arrived days or weeks later, the migration was intended, and it happened only sometimes.
+Dates from the private history, which is the only place they are visible — the public repository is
+squashed snapshots:
+
+| built | substrate that should carry it | moved? |
+|---|---|---|
+| delegation — `orchestrations`, `orchestration_messages` (`adbfb506`, 2026-09-14) | messaging (2026-10-03) | no |
+| the Board — `V74` (it *is* Relay v0) | Relay v1 (`184f1932`, 2026-10-05) | no |
+| messaging — `BoardMessaging` (`6a74107e`, 2026-10-03), built on the Board | Relay v1 | no |
+| information events — `information_events` (`63391fad`, 2026-10-02) | Relay v1 | **yes** |
+| `event.fire` | Relay v1 | in progress |
+| schedules | Relay v1 | yes |
+
+So six families, three migrated. None of the six was a mistake when written: in every case the
+substrate did not exist yet, and building against it was impossible. Information events predate
+Relay by three days; delegation predates messaging by nineteen.
+
+### Why this is an abstraction failure rather than six oversights
+
+The intent was recorded each time, and each time the move was meant to be cheap because the API
+would not change — delegation in particular was to move onto messaging **keeping its API the
+same**. That is the test of whether an abstraction is in the right place: a substrate can be
+swapped underneath a contract without the callers noticing.
+
+It was not cheap, because the boundary was not where the work had to move through:
+
+- `information_events` could not move without a payload kind, a codec case and a CHECK migration,
+  because Relay had no opaque carrier anyone had noticed — so the family's details had to enter the
+  broker. Removing that kind afterwards was a larger change than the original migration.
+- messaging cannot move while `BoardMessaging` *is* the Board transport in the same object; its
+  javadoc says so — "private messaging is a board transport: same messages, firings, leases and
+  turn scheduler". The agent-facing contract is one method wide (`Sender.send`), and that seam is
+  fine; the implementation behind it is not separable.
+- delegation cannot move onto messaging while `orchestration_messages` is where its messages live,
+  even though messaging's `Request` already carries `replyTo`, `replyExpected`, `finalReply` and
+  `callId` — the primitives a sync caller needs.
+
+The cost is visible in operation, not only in design. The orchestrations listing was measured at
+about eight seconds on the live installation, running `information_log_readable` as a row filter —
+a consequence of delegation owning its own message store, with its own listing and its own per-row
+permission check.
+
+### What actually prevents the next instance
+
+Not vigilance, and not this record. Two structural pins, both already in the tree:
+
+- the payload families stay at five general kinds, asserted by a test that names them, so a family
+  adding its own type fails a build rather than requiring someone to remember the rule;
+- a derived topic name appears in no source file outside the subsystem that derives it, so a name
+  cannot quietly become a shared contract.
+
+The general principle those two instantiate: **a detail that should be private must be prevented
+from becoming shared by something that fails, not by something that is documented.** Every failure
+recorded here was a detail leaking upward — a payload kind into the broker's enum, a topic name
+into its domain record, an owner-only field into a publication served to a whole audience. Each
+looked locally reasonable. None was defended on the merits once noticed.
+
 ## Relay is mechanism, not policy
 
 Relay carries a contract. It does not interpret content and it does not enforce a consumer's rules.
