@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.events;
 
-import io.aeyer.plowshare.server.faults.CallerFault;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -9,8 +8,16 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Where every event arrives, whoever raised it: the ticker, event.fire, a future adapter. */
-public class Intake implements ScheduledArrival {
+/**
+ * Where every event arrives, whoever raised it: the ticker, event.fire, a future adapter.
+ *
+ * <p>Both families now reach this inbox as Relay subscribers rather than by calling it directly —
+ * {@code RelayScheduledPublication} through {@link ScheduledArrival}, {@code RelayEventPublication}
+ * through {@link FiredArrival} — and both contracts split recording from dispatching for the same
+ * reason: recording is database work that joins the publisher's transaction, and dispatching starts
+ * jobs and must not run inside one.
+ */
+public class Intake implements ScheduledArrival, FiredArrival {
 
   private static final Logger log = LoggerFactory.getLogger(Intake.class);
 
@@ -27,56 +34,42 @@ public class Intake implements ScheduledArrival {
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  public List<FiringRecord> emit(String event, EventPayload data) {
-    return emit(event, data, null, null);
-  }
-
-  public List<FiringRecord> emit(String event, EventPayload data, String schedule, Instant fireAt) {
-    if (event == null || event.isBlank()) {
-      throw new CallerFault("an event needs a name; triggers listen for it by that name");
-    }
-    try {
-      event = EventPayload.identity(event, "event");
-    } catch (IllegalArgumentException invalid) {
-      throw new CallerFault("event needs a bounded identity without padding or control characters");
-    }
-    data = data == null ? new EventPayload.Empty() : data;
-    EventPayloadCodec.require(event, null, schedule, fireAt, data);
-    Instant at = clock.get();
+  /**
+   * {@inheritDoc}
+   *
+   * <p>No queue lock and no supersession, deliberately, and this is the behaviour the move onto
+   * Relay had to preserve rather than improve. The scheduled path locks every target queue and
+   * supersedes before acknowledging its publication because a tick is claimed once and no job may
+   * start from its record step. A fired event is not claimed and its firing is handed over
+   * immediately afterwards, so the trigger's queue cap is applied by {@code Dispatcher.dispatch} at
+   * that point, exactly where it was applied before. Adding the scheduled policy here would change
+   * what a fired event does; omitting the cap altogether would lose it.
+   *
+   * <p>The event name and data are validated by the publisher before anything is appended; the
+   * revalidation here is the inbox defending its own invariant for a notice that reached it from a
+   * publication rather than from a caller.
+   */
+  @Override
+  public List<ScheduledArrival.Arrival> recordFired(String event, EventPayload data, Instant now) {
+    EventPayloadCodec.require(event, null, null, null, data);
+    Objects.requireNonNull(now, "arrival time");
     List<TriggerRecord> listening = triggers.listening(event);
-    List<FiringRecord> created = new ArrayList<>();
+    var arrivals = new ArrayList<ScheduledArrival.Arrival>();
     if (listening.isEmpty()) {
-      firings.arrive(event, data, schedule, fireAt, null, at).ifPresent(created::add);
-      return created;
-    }
-    // Every firing is recorded before any is dispatched, and each dispatch is its own try: a
-    // tick is claimed once, so a trigger whose dispatch throws must not cost the triggers
-    // after it their firing. What was recorded and not started is drained later like any
-    // waiting firing.
-    List<TriggerRecord> arrivedFor = new ArrayList<>();
-    for (TriggerRecord trigger : listening) {
+      // An event nothing listens for is still accounted for, as one firing naming no trigger.
       firings
-          .arrive(event, data, schedule, fireAt, trigger, at)
-          .ifPresent(
-              firing -> {
-                created.add(firing);
-                arrivedFor.add(trigger);
-              });
+          .arrive(event, data, null, null, null, now)
+          .ifPresent(firing -> arrivals.add(new ScheduledArrival.Arrival(firing, null)));
+      return List.copyOf(arrivals);
     }
-    for (int i = 0; i < created.size(); i++) {
-      FiringRecord firing = created.get(i);
-      TriggerRecord trigger = arrivedFor.get(i);
-      try {
-        dispatcher.dispatch(firing, trigger);
-      } catch (RuntimeException undispatched) {
-        log.warn(
-            "firing {} of trigger {} was recorded but could not be dispatched",
-            firing.id(),
-            trigger.name(),
-            undispatched);
-      }
-    }
-    return created;
+    // Every firing is recorded before any is dispatched: a trigger whose dispatch throws must not
+    // cost the triggers after it their firing. What was recorded and not started is drained later
+    // like any waiting firing.
+    for (TriggerRecord trigger : listening)
+      firings
+          .arrive(event, data, null, null, trigger, now)
+          .ifPresent(firing -> arrivals.add(new ScheduledArrival.Arrival(firing, trigger)));
+    return List.copyOf(arrivals);
   }
 
   @Override
@@ -130,7 +123,7 @@ public class Intake implements ScheduledArrival {
         // Publication and every firing already committed. A lost hint must not report the
         // occurrence as unaccepted or retry its effects; ordinary firing recovery drains it.
         log.warn(
-            "scheduled firing {} was recorded but could not be dispatched",
+            "firing {} was recorded but could not be dispatched",
             arrival.firing().id(),
             unavailable);
       }

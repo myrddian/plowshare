@@ -105,17 +105,29 @@ class EventPayloadCodecTest {
     assertNull(error.getCause());
   }
 
+  /**
+   * And nothing is published either. The refusals are the publisher's first act, before the topic
+   * is registered or anything is appended, so an event the family will not accept leaves no
+   * publication behind for a subscriber to copy — which a validation step placed after the append
+   * would not give.
+   */
   @Test
-  void invalid_input_has_no_repository_or_dispatch_effect() {
+  void invalid_input_has_no_repository_dispatch_or_publication_effect() {
     var triggers = mock(TriggerStore.class);
     var firings = mock(FiringStore.class);
     var dispatcher = mock(Dispatcher.class);
+    var relay = mock(io.aeyer.plowshare.server.relay.Relay.class);
     var intake = new Intake(triggers, firings, dispatcher, () -> AT);
-    assertThrows(CallerFault.class, () -> intake.emit("event\nforged", new EventPayload.Empty()));
+    var publication =
+        new RelayEventPublication(
+            relay, intake, io.aeyer.plowshare.server.archive.UnitOfWork.NONE, () -> {}, () -> AT);
+    assertThrows(
+        CallerFault.class,
+        () -> publication.fire("event\nforged", new EventPayload.Empty(), "enzo"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> intake.emit("manual", new EventPayload.Scheduled("tick", AT)));
-    verifyNoInteractions(triggers, firings, dispatcher);
+        () -> publication.fire("manual", new EventPayload.Scheduled("tick", AT), "enzo"));
+    verifyNoInteractions(triggers, firings, dispatcher, relay);
   }
 
   @Test
