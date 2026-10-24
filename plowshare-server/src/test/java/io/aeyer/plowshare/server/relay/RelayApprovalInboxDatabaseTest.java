@@ -129,7 +129,7 @@ class RelayApprovalInboxDatabaseTest {
     relay = new DurableRelay(broker, () -> NOW);
     consumers =
         new JdbcRelayConsumerRepository(
-            jdbc, transactions, new JdbcRelayDeliveryRepository(jdbc, transactions));
+            jdbc, transactions, new JdbcRelayDeliveryRepository(jdbc, transactions), broker);
     sources =
         new JdbcRelaySourceRepository(jdbc, transactions, relay, mock(RelayNativeRepository.class));
     repository =

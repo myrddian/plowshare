@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.relay;
 
 import java.time.Duration;
-import java.util.Objects;
 
 /**
  * Read-tier subscription and consumption (decision 0038).
@@ -24,12 +23,17 @@ import java.util.Objects;
  */
 public interface RelayConsumption {
   /**
-   * Establishes a subscription on an existing topic and records the caller's read authority over
-   * it. Repeating it re-establishes the authority record, which is how a lapsed subscription is
-   * renewed; the stored cursor is untouched.
+   * Establishes a subscription owned by this account on an existing topic and records its read
+   * authority over it. Repeating it re-establishes the authority record, which is how a lapsed
+   * subscription is renewed; the stored cursor is untouched.
+   *
+   * <p>The subscriber name must be this account's own or unused. A work-tier, project-declared
+   * subscriber cannot be adopted: its cursor is shared state whose owner would skip events if
+   * someone else advanced it.
    *
    * @throws io.aeyer.plowshare.server.faults.CallerFault if the account may not read the topic's
-   *     project, or the topic does not exist — a read-tier caller may not bring a topic into being
+   *     project, the topic does not exist — a read-tier caller may not bring a topic into being —
+   *     or the subscriber name belongs to the work tier or another reader
    */
   Relay.Subscription subscribe(String account, Request request, Relay.Start start);
 
@@ -43,12 +47,16 @@ public interface RelayConsumption {
   Relay.Read consume(String account, Request request, int limit);
 
   /**
-   * Advances the subscription's own seen position, monotonically and only to a retained position.
+   * Advances the subscription's own seen position under a lease this caller holds, monotonically
+   * and only to a retained position. The lease is required, not a convenience: the position write
+   * and the ownership check commit in one transaction, so an absent or lapsed lease is never an
+   * opening to move a position — least of all another subscriber's.
    *
    * @throws io.aeyer.plowshare.server.faults.CallerFault if the account may not read the topic, the
-   *     subscription is no longer valid, or the consumer state belongs to another live owner
+   *     subscription is no longer valid, or the lease is not this caller's live lease on it
    */
-  Relay.Subscription advance(String account, Request request, long position);
+  Relay.Subscription advance(
+      String account, Request request, RelayConsumerRepository.Lease lease, long position);
 
   /**
    * Takes or extends the caller's own lease on the subscription for exclusive consumption. A lease
@@ -65,13 +73,19 @@ public interface RelayConsumption {
   /** Releases a lease this caller holds. A stale release cannot disturb its successor. */
   void release(String account, Request request, RelayConsumerRepository.Lease lease);
 
-  /** The addressed subscription. Project and topic names are validated, never trusted. */
+  /**
+   * The addressed subscription. Project and topic names are validated, never trusted.
+   *
+   * <p>{@code subscriber} is the caller's <b>logical</b> consumer-group name, not a stored group
+   * identity. The server prefixes it with the authenticated account, so the same logical name used
+   * by two accounts is two independent groups with independent committed offsets, and no caller can
+   * name the project's work-tier pipeline group or another reader's.
+   */
   record Request(String project, String topic, String subscriber) {
     public Request {
       project = RelayValues.identity(project, "project");
       topic = RelayValues.topic(topic);
       subscriber = RelayValues.name(subscriber, "subscriber");
-      Objects.requireNonNull(project);
     }
   }
 }

@@ -171,8 +171,11 @@ public class RelayConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayConsumerRepository relayConsumerRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, RelayDeliveryRepository deliveries) {
-    return new JdbcRelayConsumerRepository(jdbc, transactions, deliveries);
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayDeliveryRepository deliveries,
+      RelayRepository subscriptions) {
+    return new JdbcRelayConsumerRepository(jdbc, transactions, deliveries, subscriptions);
   }
 
   @Bean

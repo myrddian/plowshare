@@ -65,3 +65,65 @@ CREATE TRIGGER relay_subscription_authority_member_update AFTER UPDATE ON projec
 CREATE TRIGGER relay_subscription_authority_member_delete AFTER DELETE ON project_members
     REFERENCING OLD TABLE AS changed_rows FOR EACH STATEMENT
     EXECUTE FUNCTION relay_subscription_authority_revoked();
+
+-- A consumer group's name decides whose group it is, so two tiers cannot share one.
+--
+-- relay_subscriptions.subscriber is a CONSUMER GROUP and seen_through is that group's committed
+-- offset. Two independent consumers sharing one group name do not each receive the stream -- they
+-- divide it, and either may commit an offset past events the other never read. A read-tier reader
+-- must therefore get its OWN group, not a share of the project's pipeline group.
+--
+-- The namespaces are disjoint in the schema rather than adjudicated by each writer. A work-tier
+-- (project-declared) group keeps exactly the name rule it has always had, which cannot contain a
+-- colon. A read-tier group is 'reader:<account>:<name>', and the constraint requires the row's
+-- reader_account to be the account spelled inside its own name. So:
+--
+--   * a read-tier caller cannot express a project-declared name -- the server builds the stored
+--     name from the authenticated account, and a name without the prefix fails the reader branch;
+--   * a work-tier registration cannot express a reader name -- it has no reader_account, and the
+--     work-tier branch forbids the colon;
+--   * reader_account cannot be set wrongly, because it must match the name. It is a projection of
+--     the name for indexing and revocation, not an independent fact a writer has to get right.
+--
+-- An earlier attempt made reader_account the fence on its own. It required every writer to
+-- adjudicate ownership correctly, and the work-tier writer -- INSERT ... ON CONFLICT DO NOTHING
+-- followed by a read of the existing row -- silently adopted a reader-owned row instead. An
+-- asymmetric fence is worse than none, because it reads as protected.
+ALTER TABLE relay_subscriptions ADD COLUMN reader_account TEXT;
+
+DO $$
+DECLARE existing TEXT;
+BEGIN
+    -- The V117 inline column check is replaced, not weakened: its work-tier branch is carried
+    -- across unchanged. Dropping it by predicate rather than by name survives its auto-generated
+    -- identifier having been assigned by a column definition.
+    FOR existing IN SELECT conname FROM pg_constraint
+        WHERE conrelid='relay_subscriptions'::regclass AND contype='c'
+          AND pg_get_constraintdef(oid) LIKE '%subscriber%'
+    LOOP
+        EXECUTE format('ALTER TABLE relay_subscriptions DROP CONSTRAINT %I', existing);
+    END LOOP;
+END $$;
+
+ALTER TABLE relay_subscriptions ADD CONSTRAINT relay_subscription_group_namespace CHECK (
+    CASE WHEN reader_account IS NULL THEN
+        -- The work tier, exactly as V117 defined it. No colon, so no reader name is expressible.
+        length(subscriber) <= 160
+        AND subscriber ~ '^[a-z][a-z0-9]*([._-][a-z0-9]+)*$'
+    ELSE
+        -- The read tier. The owner is spelled in the name, and the column must agree with it.
+        length(reader_account) BETWEEN 1 AND 256
+        AND position(':' in reader_account) = 0
+        AND length(subscriber) <= 512
+        -- starts_with, not LIKE: an account containing % or _ must not become a wildcard.
+        AND starts_with(subscriber, 'reader:' || reader_account || ':')
+        AND substring(subscriber from char_length('reader:' || reader_account || ':') + 1)
+            ~ '^[a-z][a-z0-9]*([._-][a-z0-9]+)*$'
+    END
+);
+
+COMMENT ON COLUMN relay_subscriptions.reader_account IS
+    'Read-tier owner, matching the account inside the group name; NULL for work-tier groups (0038).';
+
+CREATE INDEX relay_subscriptions_reader ON relay_subscriptions(scope_key, reader_account)
+    WHERE reader_account IS NOT NULL;

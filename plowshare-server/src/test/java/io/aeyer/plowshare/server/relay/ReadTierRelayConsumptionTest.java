@@ -34,8 +34,13 @@ class ReadTierRelayConsumptionTest {
   private static final String PROJECT = "atlas";
   private static final long PROJECT_ID = 9;
   private static final Duration WINDOW = Duration.ofHours(12);
+  private static final Relay.TopicKey TOPIC = new Relay.TopicKey(PROJECT_ID, "release.observed");
+
+  /** The stored group identity the server derives for the viewer from the logical name. */
   private static final Relay.SubscriptionKey KEY =
-      new Relay.SubscriptionKey(new Relay.TopicKey(PROJECT_ID, "release.observed"), "notices");
+      Relay.SubscriptionKey.reader(TOPIC, VIEWER, "notices");
+
+  private static final Duration LEASE = Duration.ofMinutes(2);
   private static final RelayConsumption.Request REQUEST =
       new RelayConsumption.Request(PROJECT, "release.observed", "notices");
 
@@ -61,7 +66,10 @@ class ReadTierRelayConsumptionTest {
   private void established() {
     when(authority.validate(KEY, VIEWER, WINDOW, now))
         .thenReturn(RelaySubscriptionAuthority.Validity.VALID);
-    when(consumers.writableBy(KEY, VIEWER)).thenReturn(true);
+  }
+
+  private RelayConsumerRepository.Lease lease(String account) {
+    return new RelayConsumerRepository.Lease(KEY, account, account, 3, now.plusSeconds(120));
   }
 
   private Relay.Subscription subscription(long seen) {
@@ -77,10 +85,13 @@ class ReadTierRelayConsumptionTest {
         .thenReturn(
             new Relay.Topic(
                 KEY.topic(), RelayPayload.Kind.TEXT, Relay.Policy.systemDefault(), 3, 0));
-    when(relay.subscribe(KEY, Relay.Start.OLDEST_RETAINED)).thenReturn(subscription(0));
+    when(relay.subscribeAsReader(KEY, Relay.Start.OLDEST_RETAINED, VIEWER))
+        .thenReturn(Optional.of(subscription(0)));
     assertEquals(
         0, consumption.subscribe(VIEWER, REQUEST, Relay.Start.OLDEST_RETAINED).seenThrough());
     verify(authority).establish(KEY, VIEWER, now);
+    // The work-tier registration path is never used, so no project-declared group can be adopted.
+    verify(relay, never()).subscribe(any(), any());
     // Registration is never attempted: an absent topic is refused, not created.
     verify(relay, never()).registerTopic(any(), any(), any());
     verify(relay, never()).configureTopic(any(), any(), any());
@@ -90,8 +101,44 @@ class ReadTierRelayConsumptionTest {
         .thenReturn(new Relay.Read(subscription(0), Optional.empty(), List.of()));
     assertTrue(consumption.consume(VIEWER, REQUEST, 10).publications().isEmpty());
 
-    when(relay.advanceSeen(KEY, 2)).thenReturn(subscription(2));
-    assertEquals(2, consumption.advance(VIEWER, REQUEST, 2).seenThrough());
+    var held = lease(VIEWER);
+    when(consumers.advanceSeen(held, 2)).thenReturn(subscription(2));
+    assertEquals(2, consumption.advance(VIEWER, REQUEST, held, 2).seenThrough());
+  }
+
+  @Test
+  void the_stored_group_identity_is_derived_from_the_account_not_taken_from_the_request() {
+    viewer();
+    when(relay.topic(TOPIC))
+        .thenReturn(
+            new Relay.Topic(TOPIC, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault(), 3, 0));
+    when(relay.subscribeAsReader(any(), any(), anyString()))
+        .thenReturn(Optional.of(subscription(0)));
+    consumption.subscribe(VIEWER, REQUEST, Relay.Start.OLDEST_RETAINED);
+    // Asserted on the identity that reaches the broker, not on the one the request asked for: a
+    // prefix that is merely intended is a prefix that is not applied.
+    verify(relay)
+        .subscribeAsReader(
+            argThat(key -> key.subscriber().equals("reader:viewer:notices")),
+            eq(Relay.Start.OLDEST_RETAINED),
+            eq(VIEWER));
+    assertNotEquals("notices", KEY.subscriber());
+  }
+
+  @Test
+  void the_same_logical_name_from_two_accounts_is_two_independent_groups() {
+    var mine = Relay.SubscriptionKey.reader(TOPIC, VIEWER, "notices");
+    var theirs = Relay.SubscriptionKey.reader(TOPIC, "contributor", "notices");
+    assertNotEquals(mine, theirs);
+    assertNotEquals(mine.subscriber(), theirs.subscriber());
+    // And neither can ever equal a project-declared name, because that namespace has no colon.
+    for (var key : List.of(mine, theirs)) {
+      assertTrue(key.subscriber().startsWith("reader:"));
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new Relay.SubscriptionKey(TOPIC, key.subscriber() + ":extra"));
+    }
+    assertEquals("notices", new Relay.SubscriptionKey(TOPIC, "notices").subscriber());
   }
 
   @Test
@@ -102,7 +149,7 @@ class ReadTierRelayConsumptionTest {
     assertThrows(
         CallerFault.class, () -> consumption.subscribe(VIEWER, REQUEST, Relay.Start.LATEST));
     verify(relay, never()).registerTopic(any(), any(), any());
-    verify(relay, never()).subscribe(any(), any());
+    verify(relay, never()).subscribeAsReader(any(), any(), anyString());
     verifyNoInteractions(authority);
   }
 
@@ -113,17 +160,15 @@ class ReadTierRelayConsumptionTest {
     when(projects.id(PROJECT)).thenReturn(PROJECT_ID);
     when(projects.personalOwner(PROJECT)).thenReturn(Optional.empty());
     when(members.mayUse(PROJECT, "stranger")).thenReturn(false);
-    established();
     when(authority.validate(any(), eq("stranger"), any(), any()))
         .thenReturn(RelaySubscriptionAuthority.Validity.VALID);
-    when(consumers.writableBy(any(), eq("stranger"))).thenReturn(true);
     assertThrows(
         CallerFault.class, () -> consumption.subscribe("stranger", REQUEST, Relay.Start.LATEST));
     assertThrows(CallerFault.class, () -> consumption.consume("stranger", REQUEST, 1));
-    assertThrows(CallerFault.class, () -> consumption.advance("stranger", REQUEST, 1));
     assertThrows(
-        CallerFault.class, () -> consumption.lease("stranger", REQUEST, Duration.ofMinutes(2)));
-    verifyNoInteractions(relay);
+        CallerFault.class, () -> consumption.advance("stranger", REQUEST, lease("stranger"), 1));
+    assertThrows(CallerFault.class, () -> consumption.lease("stranger", REQUEST, LEASE));
+    verifyNoInteractions(relay, consumers);
   }
 
   @Test
@@ -137,16 +182,43 @@ class ReadTierRelayConsumptionTest {
   // --------------------------------------- pin 3: another subscriber's consumer state is refused
 
   @Test
-  void consumer_state_held_by_another_account_cannot_be_written() {
+  void a_group_that_is_not_this_accounts_cannot_be_leased() {
     viewer();
-    when(authority.validate(KEY, VIEWER, WINDOW, now))
-        .thenReturn(RelaySubscriptionAuthority.Validity.VALID);
-    when(consumers.writableBy(KEY, VIEWER)).thenReturn(false);
-    assertThrows(CallerFault.class, () -> consumption.advance(VIEWER, REQUEST, 2));
-    assertThrows(
-        CallerFault.class, () -> consumption.lease(VIEWER, REQUEST, Duration.ofMinutes(2)));
-    verify(relay, never()).advanceSeen(any(), anyLong());
+    established();
+    // Empty is how the repository reports "not this account's group, or leased by another owner".
+    when(consumers.acquireAsReader(KEY, VIEWER, LEASE)).thenReturn(Optional.empty());
+    assertThrows(CallerFault.class, () -> consumption.lease(VIEWER, REQUEST, LEASE));
+    // And the work-tier acquire is never reached, so the reader fence cannot be sidestepped.
     verify(consumers, never()).acquire(any(), any(), any(), any());
+  }
+
+  @Test
+  void committing_an_offset_requires_a_live_lease_rather_than_an_absent_one() {
+    viewer();
+    established();
+    var held = lease(VIEWER);
+    // No live lease row: the repository fence throws, and that is a refusal, not a server fault.
+    when(consumers.advanceSeen(held, 2))
+        .thenThrow(new IllegalStateException("Relay consumer ownership is stale"));
+    assertThrows(CallerFault.class, () -> consumption.advance(VIEWER, REQUEST, held, 2));
+    verify(relay, never()).advanceSeen(any(), anyLong());
+  }
+
+  @Test
+  void a_lease_for_another_group_or_account_cannot_commit_this_groups_offset() {
+    viewer();
+    established();
+    var foreign = new RelayConsumerRepository.Lease(KEY, "other", "other", 4, now.plusSeconds(60));
+    var elsewhere =
+        new RelayConsumerRepository.Lease(
+            Relay.SubscriptionKey.reader(TOPIC, VIEWER, "other"),
+            VIEWER,
+            VIEWER,
+            4,
+            now.plusSeconds(60));
+    assertThrows(CallerFault.class, () -> consumption.advance(VIEWER, REQUEST, foreign, 2));
+    assertThrows(CallerFault.class, () -> consumption.advance(VIEWER, REQUEST, elsewhere, 2));
+    verify(consumers, never()).advanceSeen(any(), anyLong());
   }
 
   @Test
@@ -170,14 +242,12 @@ class ReadTierRelayConsumptionTest {
             RelaySubscriptionAuthority.Validity.GENERATION_CHANGED,
             RelaySubscriptionAuthority.Validity.EXPIRED)) {
       when(authority.validate(KEY, VIEWER, WINDOW, now)).thenReturn(invalid);
-      when(consumers.writableBy(KEY, VIEWER)).thenReturn(true);
       assertThrows(CallerFault.class, () -> consumption.consume(VIEWER, REQUEST, 1));
-      assertThrows(CallerFault.class, () -> consumption.advance(VIEWER, REQUEST, 1));
-      assertThrows(
-          CallerFault.class, () -> consumption.lease(VIEWER, REQUEST, Duration.ofMinutes(2)));
+      assertThrows(CallerFault.class, () -> consumption.advance(VIEWER, REQUEST, lease(VIEWER), 1));
+      assertThrows(CallerFault.class, () -> consumption.lease(VIEWER, REQUEST, LEASE));
     }
     verify(relay, never()).read(any(), anyInt());
-    verify(relay, never()).advanceSeen(any(), anyLong());
+    verifyNoInteractions(consumers);
   }
 
   @Test
@@ -189,7 +259,6 @@ class ReadTierRelayConsumptionTest {
             members, projects, relay, consumers, authority, other, () -> now);
     when(authority.validate(KEY, VIEWER, other, now))
         .thenReturn(RelaySubscriptionAuthority.Validity.VALID);
-    when(consumers.writableBy(KEY, VIEWER)).thenReturn(true);
     when(relay.read(KEY, 1))
         .thenReturn(new Relay.Read(subscription(0), Optional.empty(), List.of()));
     configured.consume(VIEWER, REQUEST, 1);

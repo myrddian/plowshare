@@ -69,7 +69,18 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
     // Reading the topic first keeps the refusal honest: a read-tier caller must not create a topic,
     // and an absent topic is a caller fault rather than a broker invariant failure.
     requireTopic(key);
-    var subscription = relay.subscribe(key, start);
+    // Ownership of the subscriber name, not just of the lease. relay_subscriptions is keyed by
+    // subscriber name, so a read-tier caller that could register against a work-tier,
+    // project-declared subscriber would be able to move the pipeline's cursor and make it skip the
+    // events it stepped over. Refusing the name here is what makes that unreachable.
+    var subscription =
+        relay
+            .subscribeAsReader(key, start, account)
+            .orElseThrow(
+                () ->
+                    new CallerFault(
+                        "Relay subscriber is not available to a read-tier account: "
+                            + request.subscriber()));
     authority.establish(key, account, clock.get());
     return subscription;
   }
@@ -81,25 +92,34 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
   }
 
   @Override
-  public Relay.Subscription advance(String account, Request request, long position) {
+  public Relay.Subscription advance(
+      String account, Request request, RelayConsumerRepository.Lease lease, long position) {
+    Objects.requireNonNull(lease, "lease");
     var key = established(account, request);
-    requireOwnState(key, account);
-    return relay.advanceSeen(key, position);
+    // Checked here so an obviously foreign token is refused without a query; the fence that
+    // actually decides is the locked ownership check inside the leased advance, which no caller
+    // can satisfy by constructing a lease value.
+    if (!lease.subscription().equals(key) || !lease.account().equals(account))
+      throw new CallerFault("Relay lease belongs to another subscription or account");
+    try {
+      return consumers.advanceSeen(lease, position);
+    } catch (IllegalStateException stale) {
+      // A lease that has lapsed, been reassigned or never existed is a refusal, not a server
+      // fault: without a live lease there is no authority to move a position at all.
+      throw new CallerFault("Relay consumer lease is not live; take the lease again");
+    }
   }
 
   @Override
   public RelayConsumerRepository.Lease lease(String account, Request request, Duration duration) {
     var key = established(account, request);
-    requireOwnState(key, account);
-    // The worker identity is the account itself, so a second lease call by the same account extends
-    // its own lease instead of contending with it, while a work-tier pipeline worker — which names
-    // itself per pass — can never be mistaken for it.
     return consumers
-        .acquire(key, account, account, duration)
+        .acquireAsReader(key, account, duration)
         .orElseThrow(
             () ->
                 new CallerFault(
-                    "Relay subscription is leased by another consumer: " + request.subscriber()));
+                    "Relay subscriber is not this account's, or is leased by another consumer: "
+                        + request.subscriber()));
   }
 
   @Override
@@ -121,7 +141,11 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
       throw new CallerFault("Relay topic is unavailable to this account");
     var id = projects.id(request.project());
     if (id == null || id < 1) throw new CallerFault("Relay topic is unavailable to this account");
-    return new Relay.SubscriptionKey(new Relay.TopicKey(id, request.topic()), request.subscriber());
+    // The stored group identity is derived here, from the authenticated account, and the request
+    // carries only the logical group name. A caller therefore cannot name the project's pipeline
+    // group, nor another reader's: it has no way to express a group identity at all.
+    return Relay.SubscriptionKey.reader(
+        new Relay.TopicKey(id, request.topic()), account, request.subscriber());
   }
 
   /** Read authority plus a subscription whose authority record is still valid. */
@@ -132,11 +156,6 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
       throw new CallerFault(
           "Relay subscription is no longer valid (" + validity + "); subscribe again");
     return key;
-  }
-
-  private void requireOwnState(Relay.SubscriptionKey key, String account) {
-    if (!consumers.writableBy(key, account))
-      throw new CallerFault("Relay consumer state belongs to another account");
   }
 
   private void requireTopic(Relay.SubscriptionKey key) {

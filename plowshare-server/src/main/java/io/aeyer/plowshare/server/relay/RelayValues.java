@@ -20,6 +20,50 @@ final class RelayValues {
     return value;
   }
 
+  /**
+   * The read-tier consumer-group prefix. A work-tier name cannot contain a colon, so the two
+   * namespaces are disjoint; see V187 for the matching schema constraint.
+   */
+  private static final String READER = "reader:";
+
+  /**
+   * Builds the stored consumer-group name for a read-tier subscription from the authenticated
+   * account. The server derives it; a caller supplies only the logical group name, so it cannot
+   * express a project-declared name and cannot land in another account's group.
+   */
+  static String readerSubscriber(String account, String group) {
+    identity(account, "subscription reader");
+    if (account.indexOf(':') >= 0)
+      throw new IllegalArgumentException("subscription reader must not contain a colon");
+    String stored = READER + account + ':' + name(group, "subscriber");
+    if (stored.length() > 512)
+      throw new IllegalArgumentException("read-tier subscriber name is too long for this account");
+    return stored;
+  }
+
+  /** Whether this stored name belongs to the read-tier namespace rather than the work tier. */
+  static boolean reader(String subscriber) {
+    return subscriber != null && subscriber.startsWith(READER);
+  }
+
+  /**
+   * Validates a stored consumer-group name in either namespace. Work-tier names keep their original
+   * rule; read-tier names must carry a non-empty owner and a valid logical name.
+   */
+  static String subscriber(String value) {
+    if (!reader(value)) return name(value, "subscriber");
+    if (value.length() > 512) throw new IllegalArgumentException("subscriber name is too long");
+    int split = value.indexOf(':', READER.length());
+    if (split < 0 || split == READER.length())
+      throw new IllegalArgumentException("read-tier subscriber must name its owning account");
+    String account = value.substring(READER.length(), split);
+    if (account.indexOf(':') >= 0)
+      throw new IllegalArgumentException("invalid read-tier subscriber");
+    identity(account, "subscription reader");
+    name(value.substring(split + 1), "subscriber");
+    return value;
+  }
+
   static String identity(String value, String field) {
     if (value == null
         || value.isBlank()

@@ -154,9 +154,61 @@ public final class JdbcRelayRepository implements RelayRepository {
   }
 
   @Override
+  public Optional<Relay.Subscription> subscribeAsReader(
+      Relay.SubscriptionKey key, Relay.Start start, String reader, Instant now) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(start, "start");
+    RelayValues.identity(reader, "subscription reader");
+    // The stored name must be the one this account's namespace produces. The schema requires the
+    // same agreement between reader_account and the name, so neither can be written alone.
+    if (!key.subscriber().startsWith("reader:" + reader + ":"))
+      throw new IllegalArgumentException(
+          "a read-tier subscription must use this account's consumer group namespace");
+    Instant establishedAt = RelayValues.time(now);
+    return transactions.inTransaction(
+        () -> {
+          Relay.Topic topic = topic(key.topic(), true);
+          long baseline =
+              start == Relay.Start.LATEST ? topic.lastPosition() : topic.expiredThrough();
+          // The namespace already makes a cross-tier collision unnameable; this conflict clause is
+          // the backstop, and it is in the one place a backstop belongs -- the statement that
+          // writes the row, so it cannot race the writer it is checking. A row whose
+          // reader_account is NULL or another account's does not satisfy the WHERE, so no row is
+          // returned and nothing is written. The no-op SET exists only because ON CONFLICT DO
+          // UPDATE requires an assignment: the stored cursor and generation must survive a
+          // repeated registration untouched.
+          return jdbc
+              .query(
+                  """
+          INSERT INTO relay_subscriptions(scope_key,topic,subscriber,seen_through,seen_at,reader_account)
+          VALUES(?,?,?,?,?,?) ON CONFLICT(scope_key,topic,subscriber) DO UPDATE
+            SET reader_account=relay_subscriptions.reader_account
+            WHERE relay_subscriptions.reader_account=EXCLUDED.reader_account
+          RETURNING seen_through,seen_at,generation
+          """,
+                  (row, index) -> subscriptionRow(row, key),
+                  RelayScopeCodec.write(key.topic()),
+                  key.topic().name(),
+                  key.subscriber(),
+                  baseline,
+                  timestamp(establishedAt),
+                  reader)
+              .stream()
+              .findFirst();
+        });
+  }
+
+  @Override
   public Relay.Subscription subscribe(Relay.SubscriptionKey key, Relay.Start start, Instant now) {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(start, "start");
+    // This path registers a work-tier group and has no reader_account to write, so the schema's
+    // work-tier branch would reject the INSERT. The conflict path would not reach that branch
+    // though: ON CONFLICT DO NOTHING followed by a read of the existing row would quietly adopt a
+    // reader's group and share its committed offset. Refusing the namespace here closes that.
+    if (RelayValues.reader(key.subscriber()))
+      throw new IllegalArgumentException(
+          "a work-tier subscription cannot use a read-tier consumer group name");
     Instant establishedAt = RelayValues.time(now);
     return transactions.inTransaction(
         () -> {
