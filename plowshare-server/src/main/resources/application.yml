@@ -685,6 +685,11 @@ plowshare:
     delivery-batch-size: ${PLOWSHARE_RELAY_DELIVERY_BATCH_SIZE:1000}
     settled-retention: ${PLOWSHARE_RELAY_SETTLED_RETENTION:P30D}
     operator-retention: ${PLOWSHARE_RELAY_OPERATOR_RETENTION:P90D}
+    # Longest a subscription is trusted without re-establishing its read authority (decision 0038).
+    # Revocation happens by invalidation -- a membership change withdraws authority immediately --
+    # and this only bounds the exposure if an invalidation is missed. Required: there is no default
+    # in code, so removing this line fails startup rather than widening the window silently.
+    subscription-maximum-age: ${PLOWSHARE_RELAY_SUBSCRIPTION_MAXIMUM_AGE:PT12H}
   messaging:
     personal:
       # Personal is identified by persisted account ownership, not its display label.

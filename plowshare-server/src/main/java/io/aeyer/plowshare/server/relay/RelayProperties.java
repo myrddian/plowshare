@@ -79,6 +79,39 @@ public final class RelayProperties {
     operatorRetention = new Relay.Policy(value, null).retention();
   }
 
+  private Duration subscriptionMaximumAge;
+
+  /**
+   * Longest a Relay subscription is trusted without its read authority being re-established
+   * (decision 0038). This bounds the failure of explicit invalidation; it is not the revocation
+   * mechanism, and shortening it is not a substitute for invalidating on a membership change.
+   *
+   * <p>There is deliberately no default. A deployment that omits it gets an actionable startup
+   * failure rather than a permissive window nobody chose.
+   */
+  public Duration getSubscriptionMaximumAge() {
+    return subscriptionMaximumAge;
+  }
+
+  public void setSubscriptionMaximumAge(Duration value) {
+    if (value == null
+        || value.getNano() != 0
+        || value.compareTo(Duration.ofMinutes(1)) < 0
+        || value.compareTo(Duration.ofDays(30)) > 0)
+      throw new IllegalArgumentException(
+          "Relay subscription maximum age must be whole seconds, 1 minute through 30 days");
+    subscriptionMaximumAge = value;
+  }
+
+  /** The configured window, or an actionable failure when the deployment did not supply one. */
+  public Duration subscriptionMaximumAge() {
+    if (subscriptionMaximumAge == null)
+      throw new IllegalStateException(
+          "plowshare.relay.subscription-maximum-age is required; it bounds how long a Relay"
+              + " subscription is trusted without re-establishing its read authority");
+    return subscriptionMaximumAge;
+  }
+
   private int maxForwardingHops = 8;
 
   public int getMaxForwardingHops() {

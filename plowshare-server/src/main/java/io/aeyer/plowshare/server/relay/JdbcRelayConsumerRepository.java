@@ -108,6 +108,30 @@ public final class JdbcRelayConsumerRepository implements RelayConsumerRepositor
   }
 
   @Override
+  public boolean writableBy(Relay.SubscriptionKey subscription, String account) {
+    Objects.requireNonNull(subscription);
+    RelayValues.identity(account, "consumer account");
+    // Database time, like every other lease decision here: a caller's clock must not decide that
+    // another account's live lease has expired.
+    var owner =
+        jdbc
+            .query(
+                """
+        SELECT account,lease_until<=clock_timestamp() AS stale FROM relay_consumer_leases
+        WHERE scope_key=? AND topic=? AND subscriber=?
+        """,
+                (row, index) -> new Owner(row.getString("account"), row.getBoolean("stale")),
+                RelayScopeCodec.write(subscription.topic()),
+                subscription.topic().name(),
+                subscription.subscriber())
+            .stream()
+            .findFirst();
+    return owner.isEmpty() || owner.get().stale() || owner.get().account().equals(account);
+  }
+
+  private record Owner(String account, boolean stale) {}
+
+  @Override
   public void requireOwned(Lease lease) {
     if (!org.springframework.transaction.support.TransactionSynchronizationManager
         .isActualTransactionActive())

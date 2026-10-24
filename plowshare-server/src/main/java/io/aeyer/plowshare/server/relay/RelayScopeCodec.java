@@ -5,7 +5,12 @@ final class RelayScopeCodec {
   private RelayScopeCodec() {}
 
   static String write(Relay.TopicKey topic) {
-    return topic.scope() instanceof Relay.ProjectScope project
+    return write(topic.scope());
+  }
+
+  /** For rows keyed by scope alone, such as a scope-wide authority sweep. */
+  static String write(Relay.Scope scope) {
+    return scope instanceof Relay.ProjectScope project
         ? "project:" + project.projectId()
         : "system";
   }

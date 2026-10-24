@@ -31,6 +31,17 @@ public interface RelayConsumerRepository {
   /** Releases only the matching owner/epoch. A stale release cannot disturb its successor. */
   void release(Lease lease);
 
+  /**
+   * Whether this account may write the subscription's consumer state, which is the second half of
+   * the authority to advance a position (decision 0038): the row being written must be the caller's
+   * own. True when no lease row exists, when its owner's lease has expired — reassignment after a
+   * crash — or when the account already holds it. False while another account holds it live.
+   *
+   * <p>This is an ownership question only. It is never a substitute for topic read authority, and a
+   * caller must establish that separately.
+   */
+  boolean writableBy(Relay.SubscriptionKey subscription, String account);
+
   record Lease(
       Relay.SubscriptionKey subscription,
       String worker,
