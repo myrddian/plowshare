@@ -42,7 +42,8 @@ class InformationDiscoveryCacheTest {
           ProjectionCache.direct(),
           ProjectionCache.direct(),
           lists,
-          facets);
+          facets,
+          new RecordedInformationEvents());
   final InformationContext context =
       new InformationContext("reader", InformationContext.Selection.personal()).withView(true);
   final UUID revision = UUID.randomUUID(), resource = UUID.randomUUID();
@@ -329,7 +330,9 @@ class InformationDiscoveryCacheTest {
 
   @Test
   void directConstructorsPreserveTheOriginalOneQueryReadContracts() {
-    var direct = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), allowances);
+    var direct =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), allowances, new RecordedInformationEvents());
     assertEquals(1, direct.list(context, 20, 0, null).size());
     assertEquals(2, direct.facets(context, null, null).total());
     assertEquals(1, listSql.size());

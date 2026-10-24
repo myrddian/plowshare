@@ -53,8 +53,6 @@ class InformationQueueLifecycleTest {
             new InformationLifecycle.Gates() {});
     var acquisitions = mock(InformationAcquisitions.class);
     when(acquisitions.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
-    var events = mock(InformationEventPublisher.class);
-    when(events.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
     var invalidations = mock(InformationInvalidationPublisher.class);
     doAnswer(
             invocation -> {
@@ -63,7 +61,7 @@ class InformationQueueLifecycleTest {
             })
         .when(acquisitions)
         .close();
-    var queue = new InformationQueueLifecycle(lifecycle, acquisitions, events, invalidations);
+    var queue = new InformationQueueLifecycle(lifecycle, acquisitions, invalidations);
     var context = new GenericApplicationContext();
     context.registerBean(
         "repositoryDependencies",
@@ -106,7 +104,6 @@ class InformationQueueLifecycleTest {
       lifecycle.close();
       verify(acquisitions).start();
       verify(acquisitions).close();
-      verify(events).close();
       verify(invalidations).close();
     } finally {
       release.countDown();
@@ -122,11 +119,9 @@ class InformationQueueLifecycleTest {
     when(lifecycle.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
     var acquisitions = mock(InformationAcquisitions.class);
     when(acquisitions.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
-    var events = mock(InformationEventPublisher.class);
-    when(events.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
     var invalidations = mock(InformationInvalidationPublisher.class);
-    var queue = new InformationQueueLifecycle(lifecycle, acquisitions, events, invalidations);
-    var entered = new CountDownLatch(3);
+    var queue = new InformationQueueLifecycle(lifecycle, acquisitions, invalidations);
+    var entered = new CountDownLatch(2);
     org.mockito.stubbing.Answer<Void> drain =
         invocation -> {
           assertFalse(Thread.holdsLock(queue));
@@ -137,7 +132,6 @@ class InformationQueueLifecycleTest {
         };
     doAnswer(drain).when(lifecycle).close();
     doAnswer(drain).when(acquisitions).close();
-    doAnswer(drain).when(events).close();
     queue.start();
     queue.stop();
     queue.onApplicationEvent(null);
@@ -149,8 +143,6 @@ class InformationQueueLifecycleTest {
     verify(lifecycle).close();
     verify(acquisitions).start();
     verify(acquisitions).close();
-    verify(events).start();
-    verify(events).close();
     verify(invalidations).close();
   }
 
@@ -160,16 +152,13 @@ class InformationQueueLifecycleTest {
     when(lifecycle.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
     var acquisitions = mock(InformationAcquisitions.class);
     when(acquisitions.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
-    var events = mock(InformationEventPublisher.class);
-    when(events.shutdownCompletion()).thenReturn(CompletableFuture.completedFuture(null));
     var invalidations = mock(InformationInvalidationPublisher.class);
-    var queue = new InformationQueueLifecycle(lifecycle, acquisitions, events, invalidations);
+    var queue = new InformationQueueLifecycle(lifecycle, acquisitions, invalidations);
     queue.stop();
     queue.onApplicationEvent(null);
     assertFalse(queue.isRunning());
     verify(lifecycle, never()).start();
     verify(acquisitions, never()).start();
-    verify(events, never()).start();
     verify(invalidations, never()).start();
   }
 }

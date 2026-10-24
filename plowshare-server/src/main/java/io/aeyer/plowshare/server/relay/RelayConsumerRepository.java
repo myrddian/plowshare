@@ -58,6 +58,15 @@ public interface RelayConsumerRepository {
    */
   Relay.Subscription advanceSeen(Lease lease, long position);
 
+  /**
+   * Acknowledges an expired boundary on the leased subscription under the same locked ownership
+   * check as {@link #advanceSeen}. Loss must be acknowledged before a position can move past it, so
+   * without this a subscription whose oldest records were pruned could never make progress again.
+   *
+   * @throws IllegalStateException if the lease is not the live owner of the subscription
+   */
+  Relay.Subscription acknowledgeGap(Lease lease, long expiredThrough);
+
   record Lease(
       Relay.SubscriptionKey subscription,
       String worker,

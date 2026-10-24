@@ -58,7 +58,9 @@ class AuthoredInformationPersistenceTest {
     types = new JdbcInformationContentTypeRepository(jdbc);
     content = new JdbcInformationContentRepository(jdbc, types);
     projections = new JdbcInformationProjectionRepository(jdbc, content);
-    catalogue = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    catalogue =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
   }
 
   InformationContent.Contract published() {

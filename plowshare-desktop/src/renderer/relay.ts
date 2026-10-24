@@ -161,6 +161,13 @@ function eventCard(event: RelayEvent): HTMLElement {
           : 'Board wake requested';
       message.textContent = payload.wake?.target ?? '';
       break;
+    case 'INFORMATION_CHANGED':
+      heading.textContent = 'Information changed';
+      // Log inspection carries this family's name only. Its content is read through
+      // information.events, which withholds an event's detail from everyone but its owner.
+      message.textContent =
+        'Read this event through the information events view.';
+      break;
     case 'EMPTY':
       heading.textContent = 'Signal published';
       message.textContent = 'This event has no message body.';

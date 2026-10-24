@@ -369,9 +369,19 @@ public final class RelayLog {
   }
 
   private static void kind(String value) {
+    // INFORMATION_CHANGED is carried here as a name only: log inspection reports that an
+    // information event occupied a position, by whom and when, and never its content. The content
+    // is read through information.events, which withholds an event's detail from every account but
+    // the home resource's owner, and that redaction must not be bypassed by inspecting the log.
     if (value == null
-        || !Set.of("EMPTY", "TEXT", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED").contains(value))
-      throw new IllegalArgumentException("Invalid Relay payload kind");
+        || !Set.of(
+                "EMPTY",
+                "TEXT",
+                "SCHEDULE_DUE",
+                "LIFECYCLE",
+                "WAKE_REQUESTED",
+                "INFORMATION_CHANGED")
+            .contains(value)) throw new IllegalArgumentException("Invalid Relay payload kind");
   }
 
   private static void hash(String value) {

@@ -38,6 +38,24 @@ public interface RelayConsumption {
   Relay.Subscription subscribe(String account, Request request, Relay.Start start);
 
   /**
+   * The accounts currently entitled to receive from this topic: those whose subscription authority
+   * is established and still valid, under this broker's configured window.
+   *
+   * <p>It takes no account because it acts for none. It answers "who may be told that something
+   * changed", which a server-side publisher asks before sending a wake hint — and a hint is a
+   * disclosure, so the answer has to be the audience and not merely the subscriber list. A
+   * subscription row outlives the withdrawal of its authority; this does not report that account.
+   *
+   * <p>One set-based read. Never a permission predicate per candidate account: that is the shape
+   * that cost 3,996 ms for a single information event and is what decision 0037 removed.
+   *
+   * <p>An unregistered topic is an empty audience rather than a fault: nothing can be entitled to a
+   * topic that does not exist, and the caller is a publisher that has nothing to be refused. The
+   * scope is the typed one the publisher already holds, so no name has to be translated back.
+   */
+  java.util.List<String> audience(Relay.Scope scope, String topic);
+
+  /**
    * Reads at most {@code limit} (1..1,000) retained publications after the seen position, reporting
    * any expired gap. Reading never advances a position, so it writes no consumer state.
    *
@@ -57,6 +75,23 @@ public interface RelayConsumption {
    */
   Relay.Subscription advance(
       String account, Request request, RelayConsumerRepository.Lease lease, long position);
+
+  /**
+   * Acknowledges an exact expired boundary on the caller's own subscription, under a lease this
+   * caller holds. The same three conditions as {@link #advance} apply, for the same reasons: this
+   * writes consumer state, so it is authorized by read authority, a valid subscription and
+   * ownership of the row, never by project write access.
+   *
+   * <p>Without it a subscription cannot pass retention loss: {@link #advance} refuses to move a
+   * position over an unacknowledged gap, so a reader that was away longer than the topic's
+   * retention would re-read the same page indefinitely.
+   *
+   * @throws io.aeyer.plowshare.server.faults.CallerFault if the account may not read the topic, the
+   *     subscription is no longer valid, the lease is not this caller's live lease on it, or the
+   *     boundary is not the subscription's current expired boundary
+   */
+  Relay.Subscription acknowledgeGap(
+      String account, Request request, RelayConsumerRepository.Lease lease, long expiredThrough);
 
   /**
    * Takes or extends the caller's own lease on the subscription for exclusive consumption. A lease

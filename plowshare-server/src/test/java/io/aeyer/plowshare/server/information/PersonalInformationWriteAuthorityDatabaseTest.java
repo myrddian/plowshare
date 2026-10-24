@@ -137,7 +137,9 @@ class PersonalInformationWriteAuthorityDatabaseTest {
             new EffectiveProjectPermissions(members),
             io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY,
             new LiveAccountKnowledgePermissions(identities, grants, authority));
-    var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var records =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
     var readable = new java.util.concurrent.atomic.AtomicReference<InformationReadAccess>();
     var logs =
         new InformationJobs(

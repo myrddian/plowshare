@@ -21,7 +21,8 @@ import org.springframework.jdbc.core.RowMapper;
 class JdbcInformationCatalogueReadBudgetTest {
   final JdbcTemplate jdbc = mock(JdbcTemplate.class);
   final JdbcInformationCatalogueRepository repository =
-      new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+      new JdbcInformationCatalogueRepository(
+          jdbc, Clock.systemUTC(), new RecordedInformationEvents());
   final InformationContext context =
       new InformationContext("reader", InformationContext.Selection.project("one"))
           .withView(true)

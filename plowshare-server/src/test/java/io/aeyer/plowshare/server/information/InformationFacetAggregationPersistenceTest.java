@@ -61,7 +61,9 @@ class InformationFacetAggregationPersistenceTest {
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES('reader','fixture'),('other','fixture')");
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
-    catalogue = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    catalogue =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
     navigation = new JdbcInformationNavigationRepository(jdbc, new JdbcProjectMembers(jdbc));
   }
 

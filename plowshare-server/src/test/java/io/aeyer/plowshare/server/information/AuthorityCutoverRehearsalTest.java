@@ -135,7 +135,9 @@ class AuthorityCutoverRehearsalTest {
     var members = new JdbcProjectMembers(jdbc);
     var access = new InformationAccess(new EffectiveProjectPermissions(members));
     var work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
-    var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var records =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
     var catalogue = InformationFixtures.catalogue(jdbc, work, access, Clock.systemUTC());
     var router = router(catalogue, access, members);
     assertTrue(listed(router, "reader").isEmpty());

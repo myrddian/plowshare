@@ -75,6 +75,28 @@ final class RelayPayloadCodec {
               text(value, "target"),
               RelayPayload.WakeKind.valueOf(text(value, "type")));
         }
+        case INFORMATION_CHANGED -> {
+          fields(
+              value,
+              Set.of(
+                  "revision",
+                  "generation",
+                  "stage",
+                  "action",
+                  "detail",
+                  "documentType",
+                  "documentSubtype",
+                  "owner"));
+          yield new RelayPayload.InformationChanged(
+              text(value, "revision"),
+              integer(value, "generation"),
+              text(value, "stage"),
+              text(value, "action"),
+              optionalText(value, "detail"),
+              text(value, "documentType"),
+              optionalText(value, "documentSubtype"),
+              text(value, "owner"));
+        }
         case SCHEDULE_DUE -> {
           fields(value, Set.of("schedule", "emits", "fireAt"));
           yield new RelayPayload.ScheduleDue(
@@ -104,6 +126,14 @@ final class RelayPayloadCodec {
               if (!names.contains(name))
                 throw new IllegalArgumentException("unsupported Relay payload field");
             });
+  }
+
+  /** A persisted whole number; a float, a string or an absent field is a corrupt payload. */
+  private static long integer(JsonNode value, String name) {
+    JsonNode field = value.get(name);
+    if (field == null || !field.isIntegralNumber() || !field.canConvertToLong())
+      throw new IllegalArgumentException("Relay payload field requires a whole number");
+    return field.longValue();
   }
 
   private static String optionalText(JsonNode value, String name) {

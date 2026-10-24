@@ -86,6 +86,11 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
   }
 
   @Override
+  public java.util.List<String> audience(Relay.Scope scope, String topic) {
+    return authority.validReaders(new Relay.TopicKey(scope, topic), maximumAge, clock.get());
+  }
+
+  @Override
   public Relay.Read consume(String account, Request request, int limit) {
     var key = established(account, request);
     return relay.read(key, limit);
@@ -107,6 +112,23 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
       // A lease that has lapsed, been reassigned or never existed is a refusal, not a server
       // fault: without a live lease there is no authority to move a position at all.
       throw new CallerFault("Relay consumer lease is not live; take the lease again");
+    }
+  }
+
+  @Override
+  public Relay.Subscription acknowledgeGap(
+      String account, Request request, RelayConsumerRepository.Lease lease, long expiredThrough) {
+    Objects.requireNonNull(lease, "lease");
+    var key = established(account, request);
+    if (!lease.subscription().equals(key) || !lease.account().equals(account))
+      throw new CallerFault("Relay lease belongs to another subscription or account");
+    try {
+      return consumers.acknowledgeGap(lease, expiredThrough);
+    } catch (IllegalStateException refused) {
+      // A lapsed or foreign lease and a boundary that has since moved are both refusals: neither
+      // is an opening to mark loss acknowledged on a subscription this caller does not own now.
+      throw new CallerFault(
+          "Relay consumer lease is not live, or the expired boundary has changed");
     }
   }
 

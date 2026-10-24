@@ -46,6 +46,26 @@ public interface RelaySubscriptionAuthority {
       Relay.SubscriptionKey subscription, String account, Duration maximumAge, Instant now);
 
   /**
+   * The accounts whose authority over this topic is established and <b>still valid</b> — every one
+   * of them, and nothing else.
+   *
+   * <p>This is the audience of a topic as Relay records it, and it exists because a wake hint is a
+   * disclosure: telling an account that something changed names a revision and a position to it. An
+   * account whose authority has lapsed by any of the three routes must stop learning that, so this
+   * applies the same {@code relay_subscription_authority_validity} definition {@link #validate}
+   * does, in one set-based read. It is deliberately not "every subscriber row on the topic": a
+   * subscription row survives revocation, and only its authority record does not.
+   *
+   * <p>It resolves the audience once per call, never a permission predicate per candidate account —
+   * that shape cost 3,996 ms for a single information event and is what decision 0037 removed.
+   *
+   * <p>{@code maximumAge} must be positive. The result is ordered by account and bounded only by
+   * the topic's established subscriptions, which is a meaningful bound rather than an arbitrary
+   * one: an account appears here because it subscribed and its authority still holds.
+   */
+  java.util.List<String> validReaders(Relay.TopicKey topic, Duration maximumAge, Instant now);
+
+  /**
    * Invalidates every record against this topic by moving the topic's incarnation, so no subsequent
    * validation of an existing record can succeed. The topic must exist.
    */

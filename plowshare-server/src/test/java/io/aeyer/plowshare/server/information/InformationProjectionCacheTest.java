@@ -29,7 +29,12 @@ class InformationProjectionCacheTest {
       new RecordingCache<>();
   final JdbcInformationCatalogueRepository repository =
       new JdbcInformationCatalogueRepository(
-          jdbc, Clock.systemUTC(), mock(AllowanceRepository.class), metadata, text);
+          jdbc,
+          Clock.systemUTC(),
+          mock(AllowanceRepository.class),
+          metadata,
+          text,
+          new RecordedInformationEvents());
   final InformationContext context =
       new InformationContext("reader", InformationContext.Selection.personal()).withView(true);
   final UUID revision = UUID.randomUUID(), resource = UUID.randomUUID();
@@ -241,7 +246,10 @@ class InformationProjectionCacheTest {
   void oldConstructorsKeepTheirSingleDirectReadAndNeedNoCacheInfrastructure() {
     var direct =
         new JdbcInformationCatalogueRepository(
-            jdbc, Clock.systemUTC(), mock(AllowanceRepository.class));
+            jdbc,
+            Clock.systemUTC(),
+            mock(AllowanceRepository.class),
+            new RecordedInformationEvents());
     assertTrue(direct.authorizedMetadata(context, revision).isPresent());
     assertTrue(direct.authorizedText(context, revision).isPresent());
     assertTrue(scalarSql.isEmpty());

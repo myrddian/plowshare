@@ -63,37 +63,69 @@ public final class JdbcRelaySubscriptionAuthority implements RelaySubscriptionAu
       Relay.SubscriptionKey subscription, String account, Duration maximumAge, Instant now) {
     Objects.requireNonNull(subscription, "subscription");
     RelayValues.identity(account, "subscription authority account");
-    if (maximumAge == null || maximumAge.isZero() || maximumAge.isNegative())
-      throw new IllegalArgumentException("subscription maximum age must be positive");
+    requirePositive(maximumAge);
     Instant at = RelayValues.time(now);
-    var record =
+    // The verdict comes from relay_subscription_authority_validity, which is the one definition of
+    // validity in the system (V188). It is not re-expressed here, because the wake-hint audience
+    // below applies the same function as a set predicate, and two parallel notions of "valid" that
+    // could drift would mean hinting to an account this gate refuses.
+    var verdict =
         jdbc
             .query(
                 """
-        SELECT a.topic_generation,a.established_at,t.generation AS current_generation
+        SELECT relay_subscription_authority_validity(
+            a.topic_generation,t.generation,a.established_at,
+            (? * interval '1 microsecond'),?) AS validity
         FROM relay_subscription_authority a
         JOIN relay_topics t ON t.scope_key=a.scope_key AND t.name=a.topic
         WHERE a.scope_key=? AND a.topic=? AND a.subscriber=? AND a.account=?
         """,
-                (row, index) ->
-                    new Record(
-                        row.getObject("topic_generation", UUID.class),
-                        row.getObject("current_generation", UUID.class),
-                        row.getObject("established_at", OffsetDateTime.class).toInstant()),
+                (row, index) -> row.getString("validity"),
+                micros(maximumAge),
+                java.sql.Timestamp.from(at),
                 RelayScopeCodec.write(subscription.topic()),
                 subscription.topic().name(),
                 subscription.subscriber(),
                 account)
             .stream()
             .findFirst();
-    if (record.isEmpty()) return Validity.NOT_ESTABLISHED;
-    var found = record.get();
-    // Both conditions are checked, and neither substitutes for the other. The generation is the
-    // real revocation; the age only caps the exposure if a revocation was missed.
-    if (!found.topicGeneration().equals(found.currentGeneration()))
-      return Validity.GENERATION_CHANGED;
-    if (!found.establishedAt().plus(maximumAge).isAfter(at)) return Validity.EXPIRED;
-    return Validity.VALID;
+    // No row and a withdrawn row are the same refusal, which is why absence is not an error.
+    return verdict.map(Validity::valueOf).orElse(Validity.NOT_ESTABLISHED);
+  }
+
+  @Override
+  public java.util.List<String> validReaders(
+      Relay.TopicKey topic, Duration maximumAge, Instant now) {
+    Objects.requireNonNull(topic, "topic");
+    requirePositive(maximumAge);
+    Instant at = RelayValues.time(now);
+    // One query for the whole audience, with the same predicate the single-subscription gate uses.
+    // DISTINCT because one account may hold several groups on a topic and a hint is per account.
+    return jdbc.queryForList(
+        """
+        SELECT DISTINCT a.account
+        FROM relay_subscription_authority a
+        JOIN relay_topics t ON t.scope_key=a.scope_key AND t.name=a.topic
+        WHERE a.scope_key=? AND a.topic=?
+          AND relay_subscription_authority_validity(
+              a.topic_generation,t.generation,a.established_at,
+              (? * interval '1 microsecond'),?)='VALID'
+        ORDER BY a.account
+        """,
+        String.class,
+        RelayScopeCodec.write(topic),
+        topic.name(),
+        micros(maximumAge),
+        java.sql.Timestamp.from(at));
+  }
+
+  private static long micros(Duration maximumAge) {
+    return maximumAge.toNanos() / 1000;
+  }
+
+  private static void requirePositive(Duration maximumAge) {
+    if (maximumAge == null || maximumAge.isZero() || maximumAge.isNegative())
+      throw new IllegalArgumentException("subscription maximum age must be positive");
   }
 
   @Override
@@ -116,6 +148,4 @@ public final class JdbcRelaySubscriptionAuthority implements RelaySubscriptionAu
         RelayScopeCodec.write(scope),
         account);
   }
-
-  private record Record(UUID topicGeneration, UUID currentGeneration, Instant establishedAt) {}
 }

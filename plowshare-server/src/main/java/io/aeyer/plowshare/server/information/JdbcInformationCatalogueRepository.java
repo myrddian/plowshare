@@ -25,15 +25,23 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final ProjectionCache<Optional<AuthorizedText>> textCache;
   private final ProjectionCache<List<Information.Revision>> listCache;
   private final ProjectionCache<Information.Facets> facetsCache;
+  private final InformationEvents events;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
-  public JdbcInformationCatalogueRepository(JdbcTemplate jdbc, Clock clock) {
-    this(jdbc, clock, new JdbcAllowanceRepository(jdbc));
+  /**
+   * Every constructor requires an event publisher, because every catalogue mutation announces
+   * itself. There is deliberately no overload that leaves it out: a composition that cannot
+   * announce a change would stop invalidating what readers hold, silently, and a default chosen
+   * here would be that composition's excuse.
+   */
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc, Clock clock, InformationEvents events) {
+    this(jdbc, clock, new JdbcAllowanceRepository(jdbc), events);
   }
 
   public JdbcInformationCatalogueRepository(
-      JdbcTemplate jdbc, Clock clock, AllowanceRepository allowances) {
-    this(jdbc, clock, allowances, ProjectionCache.direct(), ProjectionCache.direct());
+      JdbcTemplate jdbc, Clock clock, AllowanceRepository allowances, InformationEvents events) {
+    this(jdbc, clock, allowances, ProjectionCache.direct(), ProjectionCache.direct(), events);
   }
 
   public JdbcInformationCatalogueRepository(
@@ -41,7 +49,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       Clock clock,
       AllowanceRepository allowances,
       ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
-      ProjectionCache<Optional<AuthorizedText>> textCache) {
+      ProjectionCache<Optional<AuthorizedText>> textCache,
+      InformationEvents events) {
     this(
         jdbc,
         clock,
@@ -49,7 +58,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         metadataCache,
         textCache,
         ProjectionCache.direct(),
-        ProjectionCache.direct());
+        ProjectionCache.direct(),
+        events);
   }
 
   public JdbcInformationCatalogueRepository(
@@ -59,7 +69,9 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
       ProjectionCache<Optional<AuthorizedText>> textCache,
       ProjectionCache<List<Information.Revision>> listCache,
-      ProjectionCache<Information.Facets> facetsCache) {
+      ProjectionCache<Information.Facets> facetsCache,
+      InformationEvents events) {
+    this.events = Objects.requireNonNull(events);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
     this.allowances = Objects.requireNonNull(allowances);
@@ -350,10 +362,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             Information.Completion.class));
   }
 
+  /**
+   * One revision's own event history, owner-only, read by revision and never by cursor. {@code
+   * sequence} is the Relay position the publication was given, so this history and {@code
+   * information.events} name the same event by the same number.
+   */
   public List<Information.Event> revisionEvents(UUID revision) {
     return jdbc
         .queryForList(
-            "SELECT sequence,generation,stage,action,detail,recorded_at FROM information_events WHERE revision_id=? ORDER BY sequence",
+            "SELECT relay_position AS sequence,generation,stage,action,detail,recorded_at"
+                + " FROM information_revision_events WHERE revision_id=?"
+                + " ORDER BY recorded_at,relay_project,relay_position",
             revision)
         .stream()
         .map(row -> decode(row, Information.Event.class))
@@ -551,27 +570,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         .toList();
   }
 
+  /**
+   * Reads one page of this account's own durable Relay subscription (decision 0037).
+   *
+   * <p>The {@code sequence > cursor} scan this replaced read a global {@code BIGSERIAL}, which is
+   * why its writer needed a commit-order fence: a sequence maximum is not commit order, so a reader
+   * could advance past a lower sequence that committed later and lose it. A Relay topic's positions
+   * are gapless and commit-ordered by construction, so the whole question disappears with the
+   * cursor.
+   */
   public Information.Events events(InformationContext context, long after, int limit) {
-    if (after < 0 || limit < 1 || limit > 100)
-      throw new CallerFault("event cursor must be nonnegative and limit between 1 and 100");
-    List<Object> args = new ArrayList<>();
-    args.add(context.account());
-    args.addAll(selectionArgs(context));
-    args.add(context.corpus().documentType());
-    args.add(after);
-    args.add(limit);
-    List<Map<String, Object>> events =
-        jdbc.queryForList(
-            "SELECT e.sequence,e.revision_id,e.generation,e.stage,e.action,CASE WHEN q.owner_handle=? THEN e.detail ELSE '' END AS detail,e.recorded_at,r.document_type,r.document_subtype"
-                + " FROM information_events e JOIN information_revision_allowances r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id"
-                + " WHERE "
-                + readableSql(context)
-                + " AND r.document_type=? AND e.sequence>? ORDER BY e.sequence LIMIT ?",
-            args.toArray());
-    long cursor =
-        events.isEmpty() ? after : ((Number) events.getLast().get("sequence")).longValue();
-    return new Information.Events(
-        events.stream().map(row -> decode(row, Information.Event.class)).toList(), cursor);
+    return events.read(context, after, limit);
   }
 
   public Information.Evidence evidence(InformationContext context, UUID id) {
@@ -800,45 +809,26 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           + "(SELECT jsonb_build_object('type',v.type_id,'version',v.id,'ordinal',v.ordinal,'slug',t.slug,'label',t.label,'definitionHash',v.definition_hash) FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version JOIN information_content_types t ON t.id=v.type_id WHERE c.revision_id=r.id) AS \"contentType\",CASE WHEN r.processing_policy='explicit_only' THEN r.processing_policy END AS \"processingPolicy\","
           + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id";
 
+  /**
+   * Announces one catalogue change on Relay (decision 0037).
+   *
+   * <p>No persistence of its own remains here, which is the point. What stood in this method was a
+   * second durable log: a {@code pg_advisory_xact_lock} on one key hashed from a fixed name — one
+   * key for the whole installation, held to the end of the transaction — an {@code INSERT …
+   * RETURNING} against a global {@code BIGSERIAL}, and a recipient fan-out that asked {@code
+   * information_readable} once per administrator and once per administrator-project pair inside
+   * that critical section. One event with 13 administrators measured 3,996 ms and serialized every
+   * other event in the installation for its duration.
+   *
+   * <p>Relay owns all of it now: its lock is on one topic row in one project, positions are gapless
+   * per topic, and the recipients are that topic's subscribers. The revision row lock moved into
+   * {@link InformationEventRecords#resolve}, which still takes it first and for the same deadlock
+   * reason.
+   */
   public void event(
       UUID revision, long generation, String actor, String stage, String action, String detail) {
-    if (generation < 1) throw new IllegalArgumentException("event generation must be positive");
-
-    // The event foreign key needs this lock too. Take it before the global commit-order
-    // fence: a worker can already hold FOR UPDATE on this revision when publishing its
-    // own event. Holding the fence while waiting for that worker creates a deadlock.
-    // Transactions publishing multiple revisions must lock all of them before the fence.
-    jdbc.queryForObject(
-        "SELECT id FROM information_revision_allowances WHERE id=? FOR KEY SHARE",
-        UUID.class,
-        revision);
-    jdbc.queryForObject(
-        "SELECT pg_advisory_xact_lock(hashtextextended('information-event-order',0)) IS NULL",
-        Boolean.class);
-    Long sequence =
-        jdbc.queryForObject(
-            "INSERT INTO information_events(revision_id,generation,actor_handle,stage,action,detail) VALUES(?,?,?,?,?,?) RETURNING sequence",
-            Long.class,
-            revision,
-            generation,
-            actor,
-            stage,
-            action,
-            detail == null ? "" : detail);
-    jdbc.update(
-        "INSERT INTO information_event_recipients(sequence,account) SELECT ?,a.handle FROM admins a WHERE information_readable(?,a.handle,'global_read',NULL,false) OR information_readable(?,a.handle,'personal',NULL,true)"
-            + " OR EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.handle=a.handle AND information_readable(?,a.handle,'project',p.name,true)) ON CONFLICT DO NOTHING",
-        sequence,
-        revision,
-        revision,
-        revision);
-    if (List.of("withdrawn", "excluded", "deleted", "unshared", "unlinked").contains(action))
-      jdbc.update(
-          "INSERT INTO information_event_recipients(sequence,account) SELECT ?,x.account FROM information_event_recipients x JOIN information_events e ON e.sequence=x.sequence"
-              + " WHERE e.revision_id=? AND e.sequence<? ON CONFLICT DO NOTHING",
-          sequence,
-          revision,
-          sequence);
+    events.publish(
+        new InformationEvents.Occurrence(revision, generation, actor, stage, action, detail));
   }
 
   private long generation(UUID revision) {
@@ -1164,7 +1154,12 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       jdbc.update(
           "UPDATE information_reports SET details=CAST('{\"deleted\":true}' AS jsonb) WHERE revision_id=?",
           revision);
-      jdbc.update("UPDATE information_events SET detail='[deleted]' WHERE revision_id=?", revision);
+      // A Relay publication is immutable, so the copy a subscriber may still read expires with
+      // the topic's retention rather than being scrubbed. The durable history is scrubbed here,
+      // which is where a deleted revision's detail would otherwise outlive the deletion.
+      jdbc.update(
+          "UPDATE information_revision_events SET detail='[deleted]' WHERE revision_id=?",
+          revision);
     }
     if (state.equals("active")) {
       for (String stage : STAGES)

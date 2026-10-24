@@ -32,6 +32,7 @@ class RootDocumentPolicyPersistenceTest {
   JdbcTemplate jdbc;
   UnitOfWork work;
   JdbcInformationCatalogueRepository records;
+  RecordedInformationEvents announced;
   JdbcInformationNavigationRepository navigation;
   String service = "@service/" + UUID.randomUUID();
   UUID token = UUID.randomUUID();
@@ -82,7 +83,8 @@ class RootDocumentPolicyPersistenceTest {
         "INSERT INTO service_token_scopes(token_id,project_id,role) SELECT ?,id,'VIEWER' FROM projects WHERE name='one'",
         token);
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
-    records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    announced = new RecordedInformationEvents();
+    records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), announced);
     navigation = new JdbcInformationNavigationRepository(jdbc, new JdbcProjectMembers(jdbc));
   }
 
@@ -375,8 +377,20 @@ class RootDocumentPolicyPersistenceTest {
     assertTrue(records.readable(general("reader"), first.revision()));
   }
 
+  /**
+   * Unsharing a root announces an invalidation for <b>every</b> revision of the resource, not only
+   * the one whose audience changed, because a cached historical or pinned read of any of them is
+   * now stale. That is the part of the previous recipient fan-out that was behaviour rather than
+   * substrate, and it survived the move onto Relay (decision 0037).
+   *
+   * <p>What is deliberately no longer asserted here is the old mechanism: a frozen recipient set
+   * per event, a global-read reader served from {@code information_events} by cursor, and detail
+   * redacted inside that query. Delivery now follows subscription, and the redaction is reapplied
+   * when a page is read; both are pinned against a real broker in {@code
+   * RelayInformationEventsDatabaseTest}.
+   */
   @Test
-  void general_read_events_redact_execution_details_and_invalidate_every_revision() {
+  void unsharing_a_root_announces_an_invalidation_for_every_revision_of_the_resource() {
     var first = original();
     var next = admit(project("contributor"), "shared.md", first.revision(), List.of());
     share(project("manager"), next.revision(), true);
@@ -386,19 +400,21 @@ class RootDocumentPolicyPersistenceTest {
               first.revision(), 1, "manager", "derive", "stage.pre", "private processing details");
           return null;
         });
-    assertTrue(
-        records.events(general(service), 0, 100).events().stream()
-            .allMatch(event -> event.detail().isEmpty()));
-    assertTrue(new JdbcInformationEventRepository(jdbc, work).readable(first.revision(), service));
+    assertEquals(
+        1,
+        announced.announced().stream()
+            .filter(
+                event ->
+                    event.revision().equals(first.revision()) && event.stage().equals("derive"))
+            .count());
     share(project("manager"), next.revision(), false);
     for (UUID revision : List.of(first.revision(), next.revision()))
       assertEquals(
           1,
-          jdbc.queryForObject(
-              "SELECT count(*) FROM information_events WHERE revision_id=? AND action='unshared'",
-              Integer.class,
-              revision));
-    assertTrue(records.events(general(service), 0, 100).events().isEmpty());
+          announced.announced().stream()
+              .filter(
+                  event -> event.revision().equals(revision) && event.action().equals("unshared"))
+              .count());
   }
 
   @Test

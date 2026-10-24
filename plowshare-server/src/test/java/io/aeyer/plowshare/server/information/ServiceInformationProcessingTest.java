@@ -136,12 +136,14 @@ class ServiceInformationProcessingTest {
   @Test
   void serviceOwnedSourceCompletesExtractionWithoutTokenMembershipOrOwnershipRewrite() {
     UUID revision = retained(PRINCIPAL, project);
+    var announced = new RecordedInformationEvents();
     var catalogue =
         InformationFixtures.catalogue(
             jdbc,
             work,
             new InformationAccess(new EffectiveProjectPermissions(members)),
-            Clock.systemUTC());
+            Clock.systemUTC(),
+            announced);
     var lifecycle =
         new InformationLifecycle(
             repository,
@@ -184,13 +186,16 @@ class ServiceInformationProcessingTest {
             "SELECT q.owner_handle FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id WHERE r.id=?",
             String.class,
             revision));
+    // Every event this revision announced names the service principal as its actor, which is the
+    // attribution the service execution path must not lose. Announcements rather than rows: an
+    // event is a Relay publication now, and this composition is not wired to a broker.
     assertEquals(
         Set.of(PRINCIPAL),
-        new HashSet<>(
-            jdbc.queryForList(
-                "SELECT DISTINCT actor_handle FROM information_events WHERE revision_id=?",
-                String.class,
-                revision)));
+        announced.announced().stream()
+            .filter(event -> event.revision().equals(revision))
+            .map(InformationEvents.Occurrence::actor)
+            .collect(java.util.stream.Collectors.toSet()));
+    assertFalse(announced.announced().isEmpty(), "the revision must have announced something");
   }
 
   @ParameterizedTest
@@ -584,7 +589,9 @@ class ServiceInformationProcessingTest {
             PRINCIPAL,
             new InformationContext.Selection(
                 InformationContext.Scope.PROJECT, "automation", false));
-    var commands = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var commands =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
     var command =
         work.inTransaction(
             () -> commands.reserve(context, revision, UUID.randomUUID(), "a".repeat(64)));
