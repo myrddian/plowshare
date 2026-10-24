@@ -22,6 +22,9 @@ import java.util.function.Supplier;
  * home scope maps to, and read-back through the calling account's own read-tier subscription
  * (decision 0038).
  *
+ * <p>The topic's name is derived from that home scope and never written down anywhere: see {@link
+ * InformationTopics} for why a topic name is private to the system that owns it.
+ *
  * <p>There is no second log. There is no installation-wide ordering fence — Relay's lock on one
  * topic row in one project is the ordering mechanism. There is no recipient table and no permission
  * predicate evaluated per candidate account — a topic's audience is the accounts that may read the
@@ -39,13 +42,6 @@ import java.util.function.Supplier;
  * position. See {@link InformationEventRecords#append}.
  */
 public final class RelayInformationEvents implements InformationEvents {
-  /**
-   * The one topic name this family publishes to, in every project scope that homes information
-   * (decision 0037). It lives here rather than in the broker: Relay carries a contract and does not
-   * know its consumers, so a consumer's topic name is the consumer's to own.
-   */
-  private static final String TOPIC = "information.changed";
-
   /**
    * The publisher namespace every information notice is issued under, following the convention
    * {@code RelayMessageReview} established with {@code filter:}: a server-owned prefix and the
@@ -100,7 +96,9 @@ public final class RelayInformationEvents implements InformationEvents {
   public void publish(Occurrence event) {
     Objects.requireNonNull(event, "event");
     var resolved = records.resolve(event.revision());
-    var topic = new Relay.TopicKey(resolved.scope(), TOPIC);
+    // Derived from the home scope, inside this package, by the publisher and the consumer
+    // independently. See InformationTopics: a topic name is private to the system that owns it.
+    var topic = new Relay.TopicKey(resolved.scope(), InformationTopics.of(resolved.scope()));
     // The general message, not a family of this subsystem's own. Relay stores the notice opaquely
     // and never interprets it; the structure a subscriber needs is encoded by
     // InformationEventCodec here and decoded by it on the read path below.
@@ -146,7 +144,7 @@ public final class RelayInformationEvents implements InformationEvents {
             publication.event().occurredAt()));
     // The audience is resolved after commit, not captured during it, so a membership change
     // committing in between withdraws the hint rather than being raced past by it.
-    transactions.afterCommit(() -> hint(resolved.scope(), event, publication.position()));
+    transactions.afterCommit(() -> hint(topic, event, publication.position()));
   }
 
   /**
@@ -166,11 +164,15 @@ public final class RelayInformationEvents implements InformationEvents {
    * {@link RelayConsumption#audience} answers with the accounts whose authority is established and
    * still valid, by the one definition the consume gate also uses.
    */
-  private void hint(Relay.Scope scope, Occurrence event, long position) {
+  private void hint(Relay.TopicKey topic, Occurrence event, long position) {
     var body =
         new AccountEvent.InformationChanged(
             position, event.revision(), Math.toIntExact(event.generation()));
-    for (String account : consumption.audience(scope, TOPIC)) pushes.push(account, body);
+    // The key the publication was appended under, not a second derivation of it: the audience must
+    // be the audience of the topic that was written, even if a later recipe change made the two
+    // differ.
+    for (String account : consumption.audience(topic.scope(), topic.name()))
+      pushes.push(account, body);
   }
 
   @Override
@@ -181,7 +183,10 @@ public final class RelayInformationEvents implements InformationEvents {
     String project = project(context);
     Long id = projects.id(project);
     if (id == null) return new Information.Events(List.of(), after);
-    var key = new Relay.TopicKey(new Relay.ProjectScope(id), TOPIC);
+    // The consumer derives the name from the scope it is reading, with no knowledge of what the
+    // publisher did. The derivation is a pure function of the scope, so the two always agree.
+    var scope = new Relay.ProjectScope(id);
+    var key = new Relay.TopicKey(scope, InformationTopics.of(scope));
 
     Relay.Topic topic;
     try {
@@ -194,7 +199,7 @@ public final class RelayInformationEvents implements InformationEvents {
     }
 
     String account = context.account();
-    var request = new RelayConsumption.Request(project, TOPIC, GROUP);
+    var request = new RelayConsumption.Request(project, key.name(), GROUP);
     // Establishes — or re-establishes, which is how a lapsed subscription renews — this account's
     // read authority over the topic. A refusal here is the invariant doing its job and propagates.
     var subscription = consumption.subscribe(account, request, Relay.Start.OLDEST_RETAINED);

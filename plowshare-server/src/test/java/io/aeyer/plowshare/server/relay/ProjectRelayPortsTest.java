@@ -50,32 +50,31 @@ class ProjectRelayPortsTest {
   }
 
   /**
-   * Defence in depth, not the mechanism.
+   * A port grant reaches exactly the topics it names, and the shipped default names none.
    *
-   * <p>While information.changed declared a payload family of its own, an SDK publish could not
-   * land on it whatever the configuration said: the transport always produces the general message
-   * and the kinds disagreed. The topic now carries that general message, so this port grant is all
-   * that stands between an external publisher and the topic. The real barrier is on the consumer
-   * side -- {@code RelayInformationEvents} verifies a publication's publisher before decoding it --
-   * because a deployment that configured this binding would still be permitted here. What this pins
-   * is that no shipped or test configuration does so.
+   * <p>This used to be stated about one subsystem's topic, by name. It no longer can be, and that
+   * is the point: an internal topic name is private to the system that owns it, so the information
+   * family derives its name inside its own package and nothing here knows it. The pin generalises
+   * instead, which is the stronger statement — a grant is per topic name, so no configuration
+   * reaches a topic it did not spell, whoever owns it. The subsystem-specific half, that no
+   * configuration can reach the derived name, lives with the name in {@code InformationTopicsTest}.
    */
   @Test
-  void no_shipped_configuration_opens_the_information_topic_as_an_external_port() {
+  void a_port_grant_reaches_only_the_topics_it_names() {
     var unconfigured = new RelayPortProperties();
     for (var direction : RelayPortProperties.Direction.values())
       assertFalse(
-          unconfigured.permits("reviewer", "project", "information.changed", direction, null),
+          unconfigured.permits("reviewer", "project", "custom.topic", direction, null),
           "the shipped default grants no port at all");
     allow();
-    assertFalse(
+    for (var direction : RelayPortProperties.Direction.values())
+      assertFalse(
+          properties.permits("reviewer", "project", "server.owned.topic", direction, null),
+          "a configured deployment must not reach a topic its bindings never named");
+    assertTrue(
         properties.permits(
-            "reviewer",
-            "project",
-            "information.changed",
-            RelayPortProperties.Direction.INGRESS,
-            null),
-        "an information event is published by the server, never through a port");
+            "reviewer", "project", "custom.topic", RelayPortProperties.Direction.INGRESS, null),
+        "and the binding it did name still works, so the refusals above are not vacuous");
   }
 
   @Test

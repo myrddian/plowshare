@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.information;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
@@ -75,7 +76,15 @@ class RelayInformationEventsDatabaseTest {
   private static final String VIEWER = "viewer";
   private static final String STRANGER = "stranger";
   private static final String ELSEWHERE = "elsewhere";
-  private static final String TOPIC = "information.changed";
+
+  /** The literal the topic name used to be, kept only so its absence can be asserted. */
+  private static final String WITHDRAWN = "information.changed";
+
+  /** The derivation's own namespace and the expression V190 reconstructs it with in SQL. */
+  private static final String DERIVATION =
+      "'information.events.' || encode(sha256(('plowshare.information.events/1:' || ?)::bytea),"
+          + " 'hex')";
+
   private static final Duration WINDOW = Duration.ofHours(12);
   private static final Instant T0 = Instant.parse("2026-10-24T09:00:00Z");
 
@@ -285,17 +294,32 @@ class RelayInformationEventsDatabaseTest {
     return "project:" + project;
   }
 
+  /**
+   * The topic name a project's information events live under.
+   *
+   * <p>Derived here rather than spelled out, because these pins are about rows and audiences and
+   * would be unreadable with an 83-character literal repeated per project. That makes the queries
+   * agree with the derivation by construction, so the two assertions the derivation itself needs
+   * are made explicitly and separately: {@link
+   * #the_stored_topic_name_is_the_derived_one_and_the_literal_is_nowhere} asserts what PostgreSQL
+   * holds, and {@link #the_topic_name_postgresql_derives_is_the_one_java_derives} asserts the
+   * migration's SQL expression and this method produce the same string.
+   */
+  private static String topic(long project) {
+    return InformationTopics.of(new Relay.ProjectScope(project));
+  }
+
   private Integer publications(long project) {
     return jdbc.queryForObject(
         "SELECT count(*) FROM relay_publications WHERE scope_key=? AND topic=?",
         Integer.class,
         scope(project),
-        TOPIC);
+        topic(project));
   }
 
+  /** Every topic row, whatever its name: "no topic was brought into being" admits no exceptions. */
   private Integer topics() {
-    return jdbc.queryForObject(
-        "SELECT count(*) FROM relay_topics WHERE name=?", Integer.class, TOPIC);
+    return jdbc.queryForObject("SELECT count(*) FROM relay_topics", Integer.class);
   }
 
   private Integer history(UUID revision) {
@@ -310,7 +334,7 @@ class RelayInformationEventsDatabaseTest {
         "SELECT subscriber FROM relay_subscriptions WHERE scope_key=? AND topic=? ORDER BY subscriber",
         String.class,
         scope(project),
-        TOPIC);
+        topic(project));
   }
 
   private Long committed(long project, String account) {
@@ -318,7 +342,7 @@ class RelayInformationEventsDatabaseTest {
         "SELECT seen_through FROM relay_subscriptions WHERE scope_key=? AND topic=? AND subscriber=?",
         Long.class,
         scope(project),
-        TOPIC,
+        topic(project),
         "reader:" + account + ":information.events");
   }
 
@@ -327,10 +351,123 @@ class RelayInformationEventsDatabaseTest {
         jdbc.queryForObject(
             "SELECT count(*) FROM relay_subscription_authority WHERE topic=?",
             Integer.class,
-            TOPIC));
+            topic(projectId)));
   }
 
   // ---- pins -----------------------------------------------------------------------------------
+
+  /**
+   * What reached the broker, asserted on what PostgreSQL holds rather than on what was requested.
+   *
+   * <p>A test that only checked the argument the publisher passed would pass just as happily if the
+   * broker stored something else, so every assertion here reads the stored rows back. The literal
+   * the name used to be is asserted absent from the three tables keyed on it, in every scope, which
+   * is the part that would catch a derivation applied on one path and not the other.
+   */
+  @Test
+  void the_stored_topic_name_is_the_derived_one_and_the_literal_is_nowhere() {
+    publish(projectHomed(), "derive", "ready", "");
+    publish(personalHomed(), "intake", "retained", "");
+    events.read(reader(VIEWER, PROJECT), 0, 50);
+
+    assertEquals(
+        List.of(topic(personalId), topic(projectId)).stream().sorted().toList(),
+        jdbc.queryForList("SELECT name FROM relay_topics ORDER BY name", String.class),
+        "the stored topic names are the derived ones");
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_topics WHERE name=?", Integer.class, WITHDRAWN),
+        "no topic may exist under the withdrawn literal");
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_publications WHERE topic=?", Integer.class, WITHDRAWN),
+        "nothing may be published under the withdrawn literal");
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_subscriptions WHERE topic=?", Integer.class, WITHDRAWN),
+        "and no subscription may be established against it");
+    // The two scopes are two topics. One name shared across scopes would merge two audiences.
+    assertNotEquals(topic(projectId), topic(personalId));
+  }
+
+  /**
+   * The derivation in Java and the one in {@code V190__information_topic_derived_name.sql} are the
+   * same function.
+   *
+   * <p>This is the pin the migration's comment points at. The two derivations are written in
+   * different languages, run at different times, and a disagreement would not fail anything else:
+   * the migration would rename live rows to a name no publisher or consumer ever asks for, so every
+   * subscriber's cursor would be stranded under a name nothing reads. The expression below is the
+   * migration's own, applied to the scope keys V120 stores.
+   */
+  @Test
+  void the_topic_name_postgresql_derives_is_the_one_java_derives() {
+    // The expression below is the migration's, established by reading it out of the shipped file
+    // rather than by having been copied from it once. Without this step the pin would compare Java
+    // against a transcription, and a change to the migration alone would not fail anything.
+    String migration;
+    try (var shipped =
+        RelayInformationEventsDatabaseTest.class
+            .getClassLoader()
+            .getResourceAsStream("db/migration/V190__information_topic_derived_name.sql")) {
+      migration = new String(Objects.requireNonNull(shipped).readAllBytes(), UTF_8);
+    } catch (java.io.IOException unreadable) {
+      throw new AssertionError(unreadable);
+    }
+    assertTrue(
+        migration.replaceAll("\\s+", " ").contains(DERIVATION.replace("?", "scope_key")),
+        "the expression this pin evaluates must be the one V190 applies to relay_topics.scope_key");
+
+    assertEquals(
+        topic(projectId),
+        jdbc.queryForObject("SELECT " + DERIVATION, String.class, scope(projectId)));
+    assertEquals(
+        topic(personalId),
+        jdbc.queryForObject("SELECT " + DERIVATION, String.class, scope(personalId)));
+    assertEquals(
+        InformationTopics.of(Relay.SystemScope.SERVER),
+        jdbc.queryForObject("SELECT " + DERIVATION, String.class, "system"),
+        "the server scope is derivable too, so the migration can rename a row holding one");
+    assertNotEquals(
+        topic(projectId),
+        jdbc.queryForObject("SELECT " + DERIVATION, String.class, scope(personalId)),
+        "and the SQL separates scopes as well, rather than agreeing on one constant");
+  }
+
+  /**
+   * The derived name satisfies the schema's own name rule, asserted by storing it.
+   *
+   * <p>Not by a regular expression in Java, which would only restate the migration's. {@code
+   * relay_topics.name} is checked by publishing — its CHECK is the 1024-character form V141 left —
+   * and {@code relay_source_events.topic} is checked directly here because its CHECK is the
+   * stricter 160-character one, which is the bound the name has to stay inside.
+   */
+  @Test
+  void the_derived_name_is_accepted_by_the_real_schema_including_its_strictest_bound() {
+    publish(projectHomed(), "derive", "ready", "");
+    assertEquals(1, publications(projectId), "relay_topics accepted the name");
+
+    assertDoesNotThrow(
+        () ->
+            jdbc.update(
+                "INSERT INTO relay_source_events(project_id,topic,family,subject,state,occurred_at)"
+                    + " VALUES(?,?,'LIFECYCLE','fixture','fixture',now())",
+                projectId,
+                topic(projectId)),
+        "the strictest relay topic-name CHECK in the schema must accept the derived name");
+    // And the bound it was accepted against is real: one character more is refused.
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "INSERT INTO relay_source_events(project_id,topic,family,subject,state,occurred_at)"
+                    + " VALUES(?,?,'LIFECYCLE','fixture','fixture',now())",
+                projectId,
+                topic(projectId) + ".UPPER"));
+  }
 
   @Test
   void a_project_homed_event_publishes_to_that_projects_topic_and_reaches_a_reader() {
@@ -384,7 +521,8 @@ class RelayInformationEventsDatabaseTest {
     var page =
         inspection.log(
             VIEWER,
-            new io.aeyer.plowshare.protocol.RelayLog.Query(PROJECT, false, TOPIC, null, 50));
+            new io.aeyer.plowshare.protocol.RelayLog.Query(
+                PROJECT, false, topic(projectId), null, 50));
 
     assertEquals(1, page.events().size(), "the publication is visible to a project member");
     var payload = page.events().getFirst().payload();
@@ -431,7 +569,7 @@ class RelayInformationEventsDatabaseTest {
                 "SELECT count(*) FROM relay_subscriptions WHERE scope_key=? AND topic=? AND reader_account=?",
                 Integer.class,
                 scope(projectId),
-                TOPIC,
+                topic(projectId),
                 account))
         > 0;
   }
@@ -456,7 +594,8 @@ class RelayInformationEventsDatabaseTest {
         List.of(),
         List.copyOf(hinted),
         "a hint names a revision, so an account with no established authority must not get one");
-    assertEquals(List.of(), consumption.audience(new Relay.ProjectScope(projectId), TOPIC));
+    assertEquals(
+        List.of(), consumption.audience(new Relay.ProjectScope(projectId), topic(projectId)));
   }
 
   /**
@@ -477,10 +616,10 @@ class RelayInformationEventsDatabaseTest {
     // change; the subscription row is left exactly where it was.
     publish(projectHomed(), "intake", "retained", "");
     events.read(reader(VIEWER, PROJECT), 0, 50);
-    assertEquals(List.of(VIEWER), consumption.audience(scope, TOPIC));
+    assertEquals(List.of(VIEWER), consumption.audience(scope, topic(projectId)));
     jdbc.update("DELETE FROM project_members WHERE project_id=? AND handle=?", projectId, VIEWER);
     assertTrue(subscribed(VIEWER), "the subscription row must outlive its authority record");
-    assertEquals(List.of(), consumption.audience(scope, TOPIC));
+    assertEquals(List.of(), consumption.audience(scope, topic(projectId)));
     hinted.clear();
     publishAndHint(projectHomed(), "ready");
     assertEquals(List.of(), List.copyOf(hinted), "a revoked account must stop being told");
@@ -491,11 +630,11 @@ class RelayInformationEventsDatabaseTest {
         projectId,
         VIEWER);
     events.read(reader(VIEWER, PROJECT), 0, 50);
-    assertEquals(List.of(VIEWER), consumption.audience(scope, TOPIC));
-    authority.invalidateTopic(new Relay.TopicKey(projectId, TOPIC));
+    assertEquals(List.of(VIEWER), consumption.audience(scope, topic(projectId)));
+    authority.invalidateTopic(new Relay.TopicKey(projectId, topic(projectId)));
     assertTrue(subscribed(VIEWER));
     assertEquals(1, authorityRows(), "the record must still be there, and still be refused");
-    assertEquals(List.of(), consumption.audience(scope, TOPIC));
+    assertEquals(List.of(), consumption.audience(scope, topic(projectId)));
     hinted.clear();
     publishAndHint(projectHomed(), "ready");
     assertEquals(
@@ -505,11 +644,11 @@ class RelayInformationEventsDatabaseTest {
     // fallback bound alone must withhold the hint. A join against the authority table that
     // forgot the age would pass both routes above and fail here.
     events.read(reader(VIEWER, PROJECT), 0, 50);
-    assertEquals(List.of(VIEWER), consumption.audience(scope, TOPIC));
+    assertEquals(List.of(VIEWER), consumption.audience(scope, topic(projectId)));
     now = now.plus(WINDOW).plusSeconds(1);
     assertTrue(subscribed(VIEWER));
     assertEquals(1, authorityRows());
-    assertEquals(List.of(), consumption.audience(scope, TOPIC));
+    assertEquals(List.of(), consumption.audience(scope, topic(projectId)));
     hinted.clear();
     publishAndHint(projectHomed(), "ready");
     assertEquals(
@@ -529,7 +668,7 @@ class RelayInformationEventsDatabaseTest {
           () ->
               consumption.subscribe(
                   outsider,
-                  new RelayConsumption.Request(PROJECT, TOPIC, "information.events"),
+                  new RelayConsumption.Request(PROJECT, topic(projectId), "information.events"),
                   Relay.Start.OLDEST_RETAINED));
     }
     assertEquals(
@@ -557,7 +696,7 @@ class RelayInformationEventsDatabaseTest {
         () ->
             consumption.subscribe(
                 VIEWER,
-                new RelayConsumption.Request(PROJECT, TOPIC, "information.events"),
+                new RelayConsumption.Request(PROJECT, topic(projectId), "information.events"),
                 Relay.Start.OLDEST_RETAINED));
   }
 
