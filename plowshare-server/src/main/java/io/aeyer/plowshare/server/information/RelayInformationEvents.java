@@ -39,6 +39,13 @@ import java.util.function.Supplier;
  * position. See {@link InformationEventRecords#append}.
  */
 public final class RelayInformationEvents implements InformationEvents {
+  /**
+   * The one topic name this family publishes to, in every project scope that homes information
+   * (decision 0037). It lives here rather than in the broker: Relay carries a contract and does not
+   * know its consumers, so a consumer's topic name is the consumer's to own.
+   */
+  private static final String TOPIC = "information.changed";
+
   /** Bounded: a page write is a few statements, and a wedged lease must not outlive a request. */
   private static final Duration LEASE = Duration.ofSeconds(30);
 
@@ -79,18 +86,23 @@ public final class RelayInformationEvents implements InformationEvents {
   public void publish(Occurrence event) {
     Objects.requireNonNull(event, "event");
     var resolved = records.resolve(event.revision());
-    var topic = new Relay.TopicKey(resolved.scope(), Relay.INFORMATION_CHANGED);
-    relay.registerTopic(topic, RelayPayload.Kind.INFORMATION_CHANGED, Relay.Policy.systemDefault());
+    var topic = new Relay.TopicKey(resolved.scope(), TOPIC);
+    // The general message, not a family of this subsystem's own. Relay stores the notice opaquely
+    // and never interprets it; the structure a subscriber needs is encoded by
+    // InformationEventCodec here and decoded by it on the read path below.
+    relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     var payload =
-        new RelayPayload.InformationChanged(
-            event.revision().toString(),
-            event.generation(),
-            event.stage(),
-            event.action(),
-            event.detail(),
-            resolved.documentType(),
-            resolved.documentSubtype(),
-            resolved.owner());
+        new RelayPayload.Text(
+            InformationEventCodec.write(
+                new InformationEventCodec.Notice(
+                    event.revision().toString(),
+                    event.generation(),
+                    event.stage(),
+                    event.action(),
+                    event.detail(),
+                    resolved.documentType(),
+                    resolved.documentSubtype(),
+                    resolved.owner())));
     // A fresh identity per event, deliberately. Broker deduplication keys on the event ID, and the
     // catalogue legitimately records the same revision, stage and action more than once — two
     // retries of one stage are two events — so a content-derived identity would collapse them into
@@ -140,8 +152,7 @@ public final class RelayInformationEvents implements InformationEvents {
     var body =
         new AccountEvent.InformationChanged(
             position, event.revision(), Math.toIntExact(event.generation()));
-    for (String account : consumption.audience(scope, Relay.INFORMATION_CHANGED))
-      pushes.push(account, body);
+    for (String account : consumption.audience(scope, TOPIC)) pushes.push(account, body);
   }
 
   @Override
@@ -152,7 +163,7 @@ public final class RelayInformationEvents implements InformationEvents {
     String project = project(context);
     Long id = projects.id(project);
     if (id == null) return new Information.Events(List.of(), after);
-    var key = new Relay.TopicKey(new Relay.ProjectScope(id), Relay.INFORMATION_CHANGED);
+    var key = new Relay.TopicKey(new Relay.ProjectScope(id), TOPIC);
 
     Relay.Topic topic;
     try {
@@ -165,7 +176,7 @@ public final class RelayInformationEvents implements InformationEvents {
     }
 
     String account = context.account();
-    var request = new RelayConsumption.Request(project, Relay.INFORMATION_CHANGED, GROUP);
+    var request = new RelayConsumption.Request(project, TOPIC, GROUP);
     // Establishes — or re-establishes, which is how a lapsed subscription renews — this account's
     // read authority over the topic. A refusal here is the invariant doing its job and propagates.
     var subscription = consumption.subscribe(account, request, Relay.Start.OLDEST_RETAINED);
@@ -176,9 +187,15 @@ public final class RelayInformationEvents implements InformationEvents {
     long cursor = Math.max(after, page.subscription().seenThrough());
     for (var publication : page.publications()) {
       cursor = publication.position();
-      if (publication.event().payload() instanceof RelayPayload.InformationChanged changed
-          && changed.documentType().equals(context.corpus().documentType()))
-        events.add(event(publication, changed, account));
+      // A decode failure propagates rather than being skipped: the notice is this subsystem's own
+      // writing, so an undecodable one on this topic is corruption or a foreign publication, and
+      // serving a silently shortened page would hide it. A corrupt payload failed the page before
+      // this change too, one layer lower, in the broker's own codec.
+      if (!(publication.event().payload() instanceof RelayPayload.Text message))
+        throw new IllegalStateException("information event topic carries a non-message payload");
+      var notice = InformationEventCodec.read(message.text());
+      if (notice.documentType().equals(context.corpus().documentType()))
+        events.add(event(publication, notice, account));
     }
     return new Information.Events(events, cursor);
   }
@@ -240,17 +257,17 @@ public final class RelayInformationEvents implements InformationEvents {
    * owner travels in the payload so reapplying it costs no query.
    */
   private static Information.Event event(
-      Relay.Publication publication, RelayPayload.InformationChanged changed, String account) {
-    boolean owner = changed.owner().equals(account);
+      Relay.Publication publication, InformationEventCodec.Notice notice, String account) {
+    boolean owner = notice.owner().equals(account);
     return new Information.Event(
         publication.position(),
-        UUID.fromString(changed.revision()),
-        changed.generation(),
-        changed.stage(),
-        changed.action(),
-        owner && changed.detail() != null ? changed.detail() : "",
+        UUID.fromString(notice.revision()),
+        notice.generation(),
+        notice.stage(),
+        notice.action(),
+        owner && notice.detail() != null ? notice.detail() : "",
         publication.event().occurredAt(),
-        changed.documentType(),
-        changed.documentSubtype());
+        notice.documentType(),
+        notice.documentSubtype());
   }
 }

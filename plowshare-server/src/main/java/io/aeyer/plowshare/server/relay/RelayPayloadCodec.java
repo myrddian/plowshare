@@ -75,28 +75,6 @@ final class RelayPayloadCodec {
               text(value, "target"),
               RelayPayload.WakeKind.valueOf(text(value, "type")));
         }
-        case INFORMATION_CHANGED -> {
-          fields(
-              value,
-              Set.of(
-                  "revision",
-                  "generation",
-                  "stage",
-                  "action",
-                  "detail",
-                  "documentType",
-                  "documentSubtype",
-                  "owner"));
-          yield new RelayPayload.InformationChanged(
-              text(value, "revision"),
-              integer(value, "generation"),
-              text(value, "stage"),
-              text(value, "action"),
-              optionalText(value, "detail"),
-              text(value, "documentType"),
-              optionalText(value, "documentSubtype"),
-              text(value, "owner"));
-        }
         case SCHEDULE_DUE -> {
           fields(value, Set.of("schedule", "emits", "fireAt"));
           yield new RelayPayload.ScheduleDue(

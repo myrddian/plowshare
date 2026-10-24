@@ -102,9 +102,7 @@ class RelayInformationEventsTest {
 
     var order = inOrder(records, relay);
     order.verify(records).resolve(REVISION);
-    order
-        .verify(relay)
-        .registerTopic(topic, RelayPayload.Kind.INFORMATION_CHANGED, Relay.Policy.systemDefault());
+    order.verify(relay).registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     order.verify(relay).publish(eq(topic), any());
     verify(records)
         .append(
@@ -192,7 +190,7 @@ class RelayInformationEventsTest {
   private Relay.Topic topic(long last, long expired) {
     return new Relay.Topic(
         new Relay.TopicKey(7, TOPIC),
-        RelayPayload.Kind.INFORMATION_CHANGED,
+        RelayPayload.Kind.TEXT,
         Relay.Policy.systemDefault(),
         last,
         expired);
@@ -209,8 +207,17 @@ class RelayInformationEventsTest {
             T0,
             null,
             null,
-            new RelayPayload.InformationChanged(
-                REVISION.toString(), 3, "derive", "ready", detail, type, "markdown", owner)));
+            new RelayPayload.Text(
+                InformationEventCodec.write(
+                    new InformationEventCodec.Notice(
+                        REVISION.toString(),
+                        3,
+                        "derive",
+                        "ready",
+                        detail,
+                        type,
+                        "markdown",
+                        owner)))));
   }
 
   private RelayConsumerRepository.Lease lease() {
