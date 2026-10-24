@@ -112,7 +112,7 @@ Recorded separately because their surfaces differ:
   while information read authority admits VIEWER. Without it, moving information events onto
   project topics would silently narrow who receives them. It unblocks PROJECT, PERSONAL and
   ACCOUNT_KNOWLEDGE — under the V185 alias, every information resource on the installation.
-- **`0039-relay-audiences-for-scopeless-content.md`.** GLOBAL_KNOWLEDGE has no project, and
+- **`0039-relay-audiences-beyond-a-project.md`.** GLOBAL_KNOWLEDGE has no project, and
   `SystemScope.SERVER` is the internal worker scope, so global-read content has no expressible
   audience. Deferred: the case is reachable but currently empty. Until it lands, this
   migration's implementation must **fail loudly** on a GLOBAL_KNOWLEDGE home scope rather than
@@ -183,6 +183,30 @@ All three are rejected on the same ground: they invest in substrates that should
   problem. Relay already combines both, a durable log plus
   `NotificationRelayPublicationSignals`; the only `NOTIFY` channel today is
   `plowshare_projection_changes`, for the projection cache.
+
+## Records this one must be read with
+
+Two were missed when this record was written, and both change how it should be executed.
+
+- **`0008-relay-external-work-and-a2a-mapping.md`** already decided that the outgoing family moves
+  onto Relay, in eight slices, with status "architecture direction agreed; implementation planned".
+  None shipped — `server/outgoing/` contains no Relay reference. This record was written without
+  knowledge of 0008, so two independent records now govern the same family's migration. **They must
+  be reconciled before either is executed**, and 0008's slices are the earlier and more specific
+  plan.
+- **`0040-relay-is-the-boards-substrate-rebuilt.md`** records the lineage this record assumed away.
+  The Board substrate is Relay v0 and Relay is v1, built fresh in parallel rather than by
+  retrofitting the Board; board and messaging were to be rebuilt on v1 and never were. So the
+  messaging work named below is **finishing a replacement**, not migrating a foreign system.
+
+Two corrections to this record's own framing follow from 0040:
+
+- **Messaging is not a performance case.** Its ordering is already Relay's mechanism — a topic-row
+  `FOR UPDATE` then an insert, with per-topic cursors — and it has no recipient fan-out. Moving it
+  is consolidation. The 3,996 ms fan-out was specific to information events and is now removed.
+- **Messaging still lives in `server/board/`**, on `board_messages` and `board_message_*` tables,
+  not in a separately extracted module. The rule below still holds; the size of the move is larger
+  than this record implied.
 
 ## Scope note
 
