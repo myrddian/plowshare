@@ -66,18 +66,81 @@ one, the content belongs in the payload and the interpretation belongs in the co
 topic-name-to-payload-kind agreement constraints exist only to police the kinds, and they become
 unnecessary as the kinds go.
 
-### This record's own author did it too
+### This record's own author did it too, and it has been undone
 
 The information-event cutover (V188) added `INFORMATION_CHANGED`: a sixth enum value, a codec case,
 two CHECK constraints, and a widening of the `kind` allowlist across five SDK bindings. It should
-have published the general message and let the consumer interpret it. Removing it is a follow-up
-worth taking, and it would also delete that SDK change — and with it the version-skew risk that an
-un-updated client rejects an information log page, which was the only client-visible consequence of
-that work.
+have published the general message and let the consumer interpret it.
+
+It has since been removed. The notice is now `RelayPayload.Text` carrying an
+`InformationEventCodec` envelope, following `RelayToolCodec`'s established pattern; V189 restores
+the five-family CHECK constraints and rewrites stored rows. The SDK surface went back to five kinds
+— a net removal — which also deleted the version-skew risk that an un-updated client would reject an
+information log page.
+
+The removal is also what surfaced the redaction bypass recorded above, because the typed payload had
+been hiding `detail` from `relay.log` by accident. So the drift did not merely cost a core change:
+it concealed a real exposure behind a type, and the exposure only became visible when the type went.
 
 Recording it here rather than quietly is the point: the drift is easy to repeat, because adding a
 type feels like modelling the domain properly, and the cost only shows up as the next family's
 core change.
+
+## Relay is mechanism, not policy
+
+Relay carries a contract. It does not interpret content and it does not enforce a consumer's rules.
+"Built on top" means layers above it, not features inside it:
+
+```
+information.events.api      the surface callers use, internal or external; enforces its boundary
+information.events.system   the subsystem's own records, logic and checks
+Relay                       the mechanism by which the events get sent
+```
+
+A family's API is not its Relay topic. The topic is how messages travel; the API is what a caller
+is entitled to see, and only the owning system can decide that. Relay has exactly one policy —
+scope-level read on a topic — and that is the only policy it should ever have.
+
+### The rule that follows
+
+**Publish only what the topic's entire audience may see. Anything restricted more narrowly stays
+server-side, and the owning API joins it under its own check.**
+
+Relay's read surface is `relay.log`, gated at the scope: `ScopedRelayInspection.require` →
+`members.mayUse`, which is any role present. So whatever is handed to Relay is visible to the
+topic's whole audience by construction. A field restricted by a finer rule than that audience
+cannot be protected by the broker, because protecting it is not something a content-agnostic
+substrate can do — and asking it to would put policy back in the mechanism.
+
+The corollary: **a consumer verifies its own publishers.** Relay records
+`relay_publications.publisher`; deciding whether a publisher is authoritative for a family is that
+family's business. Reserving a consumer's topic name inside the broker, or having the broker check a
+signature over a consumer's payload, is the same mistake from the other direction.
+
+### Both halves were learned from live defects
+
+- **A redaction bypass.** `information.events` withholds an event's `detail` from every account but
+  the home resource's owner. The notice was published with `detail` inside it, so a project member
+  who did not own the resource could read it through `relay.log`. The audience was always entitled
+  to the notices — just not to that field on resources they do not own. The fix was not to teach
+  `relay.log` about ownership: `detail` no longer enters a publication at all, and the owner reads
+  it from `information_revision_events` under the owning API's check.
+- **Accidental opacity is not a guarantee.** While the notice had its own payload type, `relay.log`
+  reported the family's *name* only, so `detail` was hidden — and a comment on `RelayLog` asserted
+  the redaction "must not be bypassed by inspecting the log". That protection was a side effect of
+  a payload type that should not have existed. Removing the type removed the accident and revealed
+  the real exposure. Confidentiality must never rest on the shape of a carrier.
+
+Two further consequences worth keeping:
+
+- Keeping restricted fields out of the broker also keeps **deletion honest**. A publication is
+  immutable and outlives the record it describes by the topic's retention, so a field published
+  there survives the deletion of its source. `detail` living only in `information_revision_events`,
+  which cascades from the revision, means deleting a revision deletes its detail.
+- A consumer should **skip** a publication it did not issue and let its cursor advance, rather than
+  refuse the page: a single foreign row must not be able to wedge a subscriber's feed for a whole
+  retention window. A publication the consumer *did* issue that will not decode is different — that
+  is corruption of its own writing and should fail loudly.
 
 ## Clarifications this record exists to pin down
 
