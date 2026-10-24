@@ -9,8 +9,24 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class InformationFixtures {
   private InformationFixtures() {}
 
+  /**
+   * Composition for a test that asserts on catalogue rows. Every mutation still announces itself;
+   * the announcements go to a {@link RecordedInformationEvents} this test does not read. A test
+   * that cares what was announced passes its own recorder to the overload below, and a test that
+   * cares who receives an announcement needs a real broker, not either of these.
+   */
   public static InformationCatalogue catalogue(
       JdbcTemplate jdbc, UnitOfWork work, InformationAccess access, Clock clock) {
+    return catalogue(jdbc, work, access, clock, new RecordedInformationEvents());
+  }
+
+  /** The same composition with the event publisher supplied. */
+  public static InformationCatalogue catalogue(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      InformationAccess access,
+      Clock clock,
+      InformationEvents events) {
     var readable = new AtomicReference<InformationReadAccess>();
     var logs =
         new InformationJobs(
@@ -19,7 +35,7 @@ public final class InformationFixtures {
             (context, revision) -> readable.get().requireReadable(context, revision));
     var catalogue =
         new InformationCatalogue(
-            new JdbcInformationCatalogueRepository(jdbc, clock), work, access, logs);
+            new JdbcInformationCatalogueRepository(jdbc, clock, events), work, access, logs);
     readable.set(catalogue);
     return catalogue;
   }

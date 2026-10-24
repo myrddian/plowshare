@@ -574,7 +574,9 @@ class DocumentNavigationPersistenceTest {
     jdbc.update("DELETE FROM documents WHERE id=?", head(a));
     jdbc.update(
         "DELETE FROM project_members WHERE handle='alice' AND project_id=?", project("restricted"));
-    var catalogue = new JdbcInformationCatalogueRepository(jdbc, java.time.Clock.systemUTC());
+    var catalogue =
+        new JdbcInformationCatalogueRepository(
+            jdbc, java.time.Clock.systemUTC(), new RecordedInformationEvents());
     assertFalse(catalogue.readable(alice, head(a)));
     jdbc.update("UPDATE project_members SET role='CONTRIBUTOR' WHERE handle='alice'");
     assertThrows(

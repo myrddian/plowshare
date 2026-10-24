@@ -1263,40 +1263,6 @@ class DocumentPoliciesTest {
   }
 
   @Test
-  void event_delivery_resumes_after_failure_without_losing_committed_invalidation() {
-    var catalogue = catalogue();
-    var revision = admitted(catalogue, "alice", "events", "A retained statement.").revision();
-    jdbc.update("UPDATE information_event_dispatch SET cursor=0,token=NULL,lease_until=NULL");
-    var attempts = new java.util.ArrayList<Object>();
-    var first =
-        new InformationEventPublisher(
-            new JdbcInformationEventRepository(jdbc, transactions),
-            (account, body) -> {
-              attempts.add(body);
-              throw new IllegalStateException("socket stopped");
-            },
-            CLOCK);
-    assertThrows(IllegalStateException.class, first::drainOne);
-    assertEquals(
-        0L, jdbc.queryForObject("SELECT cursor FROM information_event_dispatch", Long.class));
-    jdbc.update("UPDATE information_event_dispatch SET lease_until=now()-interval '1 second'");
-    var delivered = new java.util.ArrayList<Object>();
-    var restarted =
-        new InformationEventPublisher(
-            new JdbcInformationEventRepository(jdbc, transactions),
-            (account, body) -> {
-              assertEquals("alice", account);
-              delivered.add(body);
-            },
-            java.time.Clock.systemUTC());
-    assertTrue(restarted.drainOne());
-    assertEquals(attempts, delivered);
-    assertFalse(restarted.drainOne());
-    assertTrue(
-        jdbc.queryForObject("SELECT cursor FROM information_event_dispatch", Long.class) > 0);
-  }
-
-  @Test
   void failed_acquisition_is_durable_and_post_gate_retry_reuses_original_response_bytes() {
     var catalogue = catalogue();
     var alice = access.resolve("alice", null);

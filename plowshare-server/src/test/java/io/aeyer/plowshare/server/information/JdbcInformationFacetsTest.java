@@ -71,7 +71,8 @@ class JdbcInformationFacetsTest {
             .withFacets(InformationInputs.facets(Map.of("tags", List.of("chosen"))));
     UUID pin = UUID.randomUUID();
     var facets =
-        new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC())
+        new JdbcInformationCatalogueRepository(
+                jdbc, Clock.systemUTC(), new RecordedInformationEvents())
             .facets(context, "source", List.of(pin));
 
     verifySingleStatement();
@@ -147,7 +148,8 @@ class JdbcInformationFacetsTest {
     returns(rows);
 
     var facets =
-        new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC())
+        new JdbcInformationCatalogueRepository(
+                jdbc, Clock.systemUTC(), new RecordedInformationEvents())
             .facets(
                 new InformationContext("facet-account", InformationContext.Selection.personal())
                     .withView(true),
@@ -179,7 +181,8 @@ class JdbcInformationFacetsTest {
         assertThrows(
             DataAccessResourceFailureException.class,
             () ->
-                new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC())
+                new JdbcInformationCatalogueRepository(
+                        jdbc, Clock.systemUTC(), new RecordedInformationEvents())
                     .facets(
                         new InformationContext(
                             "facet-account", InformationContext.Selection.personal()),

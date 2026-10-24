@@ -141,8 +141,40 @@ public class InformationConfig {
   }
 
   @Bean
+  public InformationEventRecords informationEventRecords(JdbcTemplate jdbc) {
+    return new JdbcInformationEventRecords(jdbc);
+  }
+
+  /**
+   * Information events on Relay (decision 0037). {@link
+   * io.aeyer.plowshare.server.events.AccountPushes} is optional because a headless server has no
+   * sockets to wake; the durable publication and every subscriber's position are unaffected by its
+   * absence, since a push is only a latency hint.
+   */
+  @Bean
+  public InformationEvents informationEvents(
+      InformationEventRecords records,
+      io.aeyer.plowshare.server.relay.Relay relay,
+      io.aeyer.plowshare.server.relay.RelayConsumption consumption,
+      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects,
+      UnitOfWork work,
+      ObjectProvider<io.aeyer.plowshare.server.events.AccountPushes> pushes) {
+    return new RelayInformationEvents(
+        records,
+        relay,
+        consumption,
+        projects,
+        work,
+        pushes.getIfAvailable(() -> io.aeyer.plowshare.server.events.AccountPushes.NONE),
+        java.time.Instant::now);
+  }
+
+  @Bean
   public InformationCatalogueRepository informationCatalogueRepository(
-      JdbcTemplate jdbc, AllowanceRepository allowances, ProjectionCaches caches) {
+      JdbcTemplate jdbc,
+      AllowanceRepository allowances,
+      ProjectionCaches caches,
+      InformationEvents events) {
     return new JdbcInformationCatalogueRepository(
         jdbc,
         Clock.systemUTC(),
@@ -151,7 +183,8 @@ public class InformationConfig {
         caches.create(
             "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create("catalogue-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
-        caches.create("catalogue-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
+        caches.create("catalogue-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        events);
   }
 
   @Bean
@@ -176,16 +209,6 @@ public class InformationConfig {
       ObjectProvider<InformationInvalidations> pushes) {
     return new InformationInvalidationPublisher(
         signals, () -> pushes.getIfAvailable(() -> InformationInvalidations.NONE).invalidate());
-  }
-
-  @Bean(destroyMethod = "close")
-  public InformationEventPublisher informationEventPublisher(
-      InformationEventRepository events,
-      ObjectProvider<io.aeyer.plowshare.server.events.AccountPushes> pushes) {
-    return new InformationEventPublisher(
-        events,
-        pushes.getIfAvailable(() -> io.aeyer.plowshare.server.events.AccountPushes.NONE),
-        Clock.systemUTC());
   }
 
   @Bean(destroyMethod = "close")
@@ -420,8 +443,7 @@ public class InformationConfig {
   public InformationQueueLifecycle informationQueueStart(
       InformationLifecycle lifecycle,
       InformationAcquisitions acquisitions,
-      InformationEventPublisher events,
       InformationInvalidationPublisher invalidations) {
-    return new InformationQueueLifecycle(lifecycle, acquisitions, events, invalidations);
+    return new InformationQueueLifecycle(lifecycle, acquisitions, invalidations);
   }
 }

@@ -62,7 +62,12 @@ export interface RelayTopic {
   readonly name: string;
   readonly generation?: string | null;
   readonly kind:
-    'EMPTY' | 'TEXT' | 'SCHEDULE_DUE' | 'LIFECYCLE' | 'WAKE_REQUESTED';
+    | 'EMPTY'
+    | 'TEXT'
+    | 'SCHEDULE_DUE'
+    | 'LIFECYCLE'
+    | 'WAKE_REQUESTED'
+    | 'INFORMATION_CHANGED';
   readonly retentionSeconds: string;
   readonly maxRecords: string | null;
   readonly through: string;
@@ -87,7 +92,12 @@ export interface RelayEvent {
   readonly causation?: RelayCausation | null;
   readonly payload: {
     readonly kind:
-      'EMPTY' | 'TEXT' | 'SCHEDULE_DUE' | 'LIFECYCLE' | 'WAKE_REQUESTED';
+      | 'EMPTY'
+      | 'TEXT'
+      | 'SCHEDULE_DUE'
+      | 'LIFECYCLE'
+      | 'WAKE_REQUESTED'
+      | 'INFORMATION_CHANGED';
     readonly text: string | null;
     readonly schedule: string | null;
     readonly emits: string | null;
@@ -427,6 +437,7 @@ export function validateRelayReply(type: string, value: unknown): void {
         'SCHEDULE_DUE',
         'LIFECYCLE',
         'WAKE_REQUESTED',
+        'INFORMATION_CHANGED',
       ].includes(String(fields['kind']))
     )
       fail();
@@ -612,9 +623,14 @@ export function validateRelayEvent(value: unknown, kind: unknown): bigint {
     return fail();
   const fields = value as Record<string, unknown>;
   if (
-    !['EMPTY', 'TEXT', 'SCHEDULE_DUE', 'LIFECYCLE', 'WAKE_REQUESTED'].includes(
-      String(kind),
-    )
+    ![
+      'EMPTY',
+      'TEXT',
+      'SCHEDULE_DUE',
+      'LIFECYCLE',
+      'WAKE_REQUESTED',
+      'INFORMATION_CHANGED',
+    ].includes(String(kind))
   )
     return fail();
   identity(fields['eventId']);

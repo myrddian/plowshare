@@ -52,7 +52,9 @@ class RootDocumentPolicyMigrationTest {
             "SELECT needs_review FROM information_resource_policies WHERE resource_id=?",
             Boolean.class,
             mixed));
-    var records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    var records =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
     var human =
         new InformationContext("outside", InformationContext.Selection.globalRead()).withView(true);
     var app =

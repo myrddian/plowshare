@@ -16,7 +16,6 @@ final class InformationQueueLifecycle
     implements SmartLifecycle, ApplicationListener<ApplicationReadyEvent> {
   private final InformationLifecycle lifecycle;
   private final InformationAcquisitions acquisitions;
-  private final InformationEventPublisher events;
   private final InformationInvalidationPublisher invalidations;
   private volatile boolean running;
   private boolean closed;
@@ -25,11 +24,9 @@ final class InformationQueueLifecycle
   InformationQueueLifecycle(
       InformationLifecycle lifecycle,
       InformationAcquisitions acquisitions,
-      InformationEventPublisher events,
       InformationInvalidationPublisher invalidations) {
     this.lifecycle = Objects.requireNonNull(lifecycle);
     this.acquisitions = Objects.requireNonNull(acquisitions);
-    this.events = Objects.requireNonNull(events);
     this.invalidations = Objects.requireNonNull(invalidations);
   }
 
@@ -52,7 +49,6 @@ final class InformationQueueLifecycle
     try {
       lifecycle.start();
       acquisitions.start();
-      events.start();
       invalidations.start();
     } catch (RuntimeException failure) {
       stop();
@@ -73,18 +69,18 @@ final class InformationQueueLifecycle
     }
     try {
       invalidations.close();
-      // Each close first rejects new scheduling and drains its current pass. Drain all three in
-      // parallel: summing three independent 15-second deadlines would exceed Spring's phase budget.
-      // Callbacks run outside the state lock, so reentrant stop is an idempotent no-op. Unpublished
-      // outbox events and unfinished leases remain durable for the next server generation.
+      // Each close first rejects new scheduling and drains its current pass. Drain both in
+      // parallel: summing independent 15-second deadlines would exceed Spring's phase budget.
+      // Callbacks run outside the state lock, so reentrant stop is an idempotent no-op. Unfinished
+      // leases remain durable for the next server generation. Information events need no drain of
+      // their own: they are published inside the mutation's transaction onto Relay, so there is no
+      // outbox pass left here that a shutdown could cut short.
       Executor stops = command -> Thread.ofVirtual().name("information-stop").start(command);
       CompletableFuture.allOf(
               CompletableFuture.runAsync(acquisitions::close, stops)
                   .thenCompose(ignored -> acquisitions.shutdownCompletion()),
               CompletableFuture.runAsync(lifecycle::close, stops)
-                  .thenCompose(ignored -> lifecycle.shutdownCompletion()),
-              CompletableFuture.runAsync(events::close, stops)
-                  .thenCompose(ignored -> events.shutdownCompletion()))
+                  .thenCompose(ignored -> lifecycle.shutdownCompletion()))
           .join();
       running = false;
       stopped.complete(null);

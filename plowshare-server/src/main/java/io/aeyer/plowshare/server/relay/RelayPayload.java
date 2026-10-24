@@ -11,7 +11,8 @@ public sealed interface RelayPayload {
     TEXT,
     SCHEDULE_DUE,
     LIFECYCLE,
-    WAKE_REQUESTED
+    WAKE_REQUESTED,
+    INFORMATION_CHANGED
   }
 
   record Empty() implements RelayPayload {
@@ -85,6 +86,49 @@ public sealed interface RelayPayload {
   enum WakeKind {
     MESSAGE,
     BOARD
+  }
+
+  /**
+   * One information event (decision 0037). The catalogue retains the revision itself; this carries
+   * only what a subscriber needs in order to invalidate what it holds and render the change.
+   *
+   * <p>{@code owner} is the home resource's author and exists for one reason: {@code detail} was
+   * only ever shown to that account, and the publication is read back by every subscriber on the
+   * topic. Carrying the owner in the payload lets the read path reapply that redaction in memory,
+   * so no reader gains detail it could not see before and no per-event query is needed to decide
+   * it. {@code detail} and {@code documentSubtype} are absent rather than empty when unset.
+   *
+   * <p>The event's position in the topic is its sequence and its {@code occurredAt} is its recorded
+   * time, so neither is duplicated here.
+   */
+  record InformationChanged(
+      String revision,
+      long generation,
+      String stage,
+      String action,
+      String detail,
+      String documentType,
+      String documentSubtype,
+      String owner)
+      implements RelayPayload {
+    public InformationChanged {
+      revision = java.util.UUID.fromString(scheduledIdentity(revision)).toString();
+      if (generation < 1) throw new IllegalArgumentException("event generation must be positive");
+      stage = scheduledIdentity(stage);
+      action = scheduledIdentity(action);
+      documentType = scheduledIdentity(documentType);
+      if (documentSubtype != null) documentSubtype = scheduledIdentity(documentSubtype);
+      owner = scheduledIdentity(owner);
+      // Detail is free-form diagnostic text a stage wrote, so it is bounded by the broker's text
+      // rule rather than the identity rule, and an empty one is carried as absent.
+      if (detail != null && detail.isBlank()) detail = null;
+      if (detail != null) detail = io.aeyer.plowshare.protocol.RelayPort.text(detail);
+    }
+
+    @Override
+    public Kind kind() {
+      return Kind.INFORMATION_CHANGED;
+    }
   }
 
   /** Preserves the existing event runtime's 1,024-character schedule/event identity contract. */

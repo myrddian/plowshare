@@ -59,6 +59,23 @@ public interface RelayConsumption {
       String account, Request request, RelayConsumerRepository.Lease lease, long position);
 
   /**
+   * Acknowledges an exact expired boundary on the caller's own subscription, under a lease this
+   * caller holds. The same three conditions as {@link #advance} apply, for the same reasons: this
+   * writes consumer state, so it is authorized by read authority, a valid subscription and
+   * ownership of the row, never by project write access.
+   *
+   * <p>Without it a subscription cannot pass retention loss: {@link #advance} refuses to move a
+   * position over an unacknowledged gap, so a reader that was away longer than the topic's
+   * retention would re-read the same page indefinitely.
+   *
+   * @throws io.aeyer.plowshare.server.faults.CallerFault if the account may not read the topic, the
+   *     subscription is no longer valid, the lease is not this caller's live lease on it, or the
+   *     boundary is not the subscription's current expired boundary
+   */
+  Relay.Subscription acknowledgeGap(
+      String account, Request request, RelayConsumerRepository.Lease lease, long expiredThrough);
+
+  /**
    * Takes or extends the caller's own lease on the subscription for exclusive consumption. A lease
    * held live by another owner is refused rather than stolen; an expired one may be taken over,
    * which is how a crashed consumer's subscription recovers. {@code duration} is bounded by the

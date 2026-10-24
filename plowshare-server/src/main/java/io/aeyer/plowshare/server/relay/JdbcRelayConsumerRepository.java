@@ -174,6 +174,19 @@ public final class JdbcRelayConsumerRepository implements RelayConsumerRepositor
   }
 
   @Override
+  public Relay.Subscription acknowledgeGap(Lease lease, long expiredThrough) {
+    Objects.requireNonNull(lease);
+    return transactions.inTransaction(
+        () -> {
+          requireLive(lease);
+          var acknowledged =
+              subscriptions.acknowledgeGap(lease.subscription(), expiredThrough, now());
+          requireLive(lease);
+          return acknowledged;
+        });
+  }
+
+  @Override
   public void requireOwned(Lease lease) {
     if (!org.springframework.transaction.support.TransactionSynchronizationManager
         .isActualTransactionActive())

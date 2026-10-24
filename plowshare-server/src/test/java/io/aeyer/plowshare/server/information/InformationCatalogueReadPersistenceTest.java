@@ -64,7 +64,9 @@ class InformationCatalogueReadPersistenceTest {
     jdbc.update("INSERT INTO projects(name) VALUES('one')");
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'reader','VIEWER' FROM projects WHERE name='one'");
-    repository = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+    repository =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
   }
 
@@ -272,7 +274,8 @@ class InformationCatalogueReadPersistenceTest {
         Clock.systemUTC(),
         new JdbcAllowanceRepository(counted),
         caches.create("metadata-fixture", domains),
-        caches.create("extraction-fixture", domains));
+        caches.create("extraction-fixture", domains),
+        new RecordedInformationEvents());
   }
 
   @Test

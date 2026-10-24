@@ -13,6 +13,13 @@ import java.util.Optional;
  * Seen positions track availability, not successful handling; reading never advances a position.
  */
 public interface Relay {
+  /**
+   * The one topic name carrying {@link RelayPayload.Kind#INFORMATION_CHANGED}, in every project
+   * scope that homes information (decision 0037). Declared here because the broker's topic
+   * invariant and the publishing family must agree on the same literal.
+   */
+  String INFORMATION_CHANGED = "information.changed";
+
   /** Creates a topic or changes its policy; an existing payload family cannot be changed. */
   Topic configureTopic(TopicKey key, RelayPayload.Kind kind, Policy policy);
 
@@ -57,6 +64,17 @@ public interface Relay {
    * Repeating it for the same owner is idempotent and leaves the committed offset untouched.
    */
   Optional<Subscription> subscribeAsReader(SubscriptionKey key, Start start, String reader);
+
+  /**
+   * The accounts holding read-tier consumer groups on this topic, at most 1,000, in a stable order.
+   *
+   * <p>This is the audience of a topic as Relay already records it, resolved in one set-based read
+   * rather than by asking a permission predicate per candidate account. It reports who has a
+   * durable position, not who may read: a subscription's read authority was established when it was
+   * established and is re-checked on consumption, so this answers "who is listening" and is only
+   * safe for a wake hint, never for deciding disclosure.
+   */
+  List<String> readers(TopicKey key);
 
   /** Reads 1..1,000 retained publications after the seen position, reporting any expired gap. */
   Read read(SubscriptionKey key, int limit);
@@ -178,6 +196,9 @@ public interface Relay {
             "Native wake families require their private system topics");
       if (key.name().equals("schedule.due") != (kind == RelayPayload.Kind.SCHEDULE_DUE))
         throw new IllegalArgumentException("schedule.due requires its registered payload family");
+      if (key.name().equals(INFORMATION_CHANGED) != (kind == RelayPayload.Kind.INFORMATION_CHANGED))
+        throw new IllegalArgumentException(
+            "information.changed requires its registered payload family");
     }
   }
 

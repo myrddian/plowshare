@@ -159,7 +159,8 @@ class ManualProjectionDatabaseTest {
         ProjectionCache.direct(),
         ProjectionCache.direct(),
         caches.create("manual-revisions", domains),
-        caches.create("manual-revision-facets", domains));
+        caches.create("manual-revision-facets", domains),
+        new RecordedInformationEvents());
   }
 
   private JdbcInformationNavigationRepository navigation(

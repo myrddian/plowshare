@@ -111,6 +111,23 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
   }
 
   @Override
+  public Relay.Subscription acknowledgeGap(
+      String account, Request request, RelayConsumerRepository.Lease lease, long expiredThrough) {
+    Objects.requireNonNull(lease, "lease");
+    var key = established(account, request);
+    if (!lease.subscription().equals(key) || !lease.account().equals(account))
+      throw new CallerFault("Relay lease belongs to another subscription or account");
+    try {
+      return consumers.acknowledgeGap(lease, expiredThrough);
+    } catch (IllegalStateException refused) {
+      // A lapsed or foreign lease and a boundary that has since moved are both refusals: neither
+      // is an opening to mark loss acknowledged on a subscription this caller does not own now.
+      throw new CallerFault(
+          "Relay consumer lease is not live, or the expired boundary has changed");
+    }
+  }
+
+  @Override
   public RelayConsumerRepository.Lease lease(String account, Request request, Duration duration) {
     var key = established(account, request);
     return consumers

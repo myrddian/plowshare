@@ -93,6 +93,11 @@ public final class DurableRelay implements Relay {
   }
 
   @Override
+  public java.util.List<String> readers(TopicKey key) {
+    return repository.readers(Objects.requireNonNull(key, "key"));
+  }
+
+  @Override
   public Read read(SubscriptionKey key, int limit) {
     RelayValues.limit(limit, 1000);
     return repository.read(Objects.requireNonNull(key, "key"), limit);
