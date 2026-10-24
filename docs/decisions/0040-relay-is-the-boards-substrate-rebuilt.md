@@ -275,12 +275,17 @@ and retyped it), so one topic's page is an index range scan: 0.086 ms and 11 buf
 topics.
 
 **Retention is where cardinality bites, and it is not the topic count that drives it.**
-`topicsToPrune` joins every `relay_topics` row to its oldest unexpired publication and applies the
-retention test *after* the join, ordering by `published_at`. The planner takes a parallel hash join
-and discards most of what it built. At 600k topics over 3M publications: **1,558 ms, 61,359
-buffers, roughly 500 MB of temp traffic per cycle, to return 100 candidates.** Forcing the
-index-probe plan is worse. So the sweep's cost tracks the **whole publication log**, not the number
-of topics, and it runs on a fixed interval regardless.
+`topicsToPrune` asks which topics have an expirable prefix by joining each `relay_topics` row to
+its oldest unexpired publication, and the defect is that **due-ness is derived across two tables,
+so no index can answer it**. The join itself is an exact primary-key probe on
+`(scope_key, topic, position)` — one row per topic, not a cartesian product. So the cost is
+**O(live topics) plus a sort, on every poll, forever**.
+
+At 600k topics over 3M publications the planner switches to a parallel hash join and the poll
+measures **1,558 ms, 61,359 buffers, roughly 500 MB of temp traffic, to return 100 candidates** —
+but that is a plan change at scale rather than the shape of the query, and an earlier version of
+this record wrongly generalised it to "cost tracks the whole publication log". Forcing the
+index-probe plan on the current query is worse still (803,212 buffers).
 
 **The gating number is retention, not topic count.** Oldest-first ordering gives each eligible
 topic a lag proportional to the eligible set, so overshoot stays within the retention window only
@@ -336,10 +341,29 @@ for any work-tier per-principal design.
 
 - The remaining work is **finishing a replacement**, not migrating a foreign system onto a new one.
   Board and messaging run the previous generation of the same substrate.
-- **Messaging's ordering is already sound and already Relay's mechanism** — `Board.post` takes
-  `FOR UPDATE` on the topic row and then inserts, with per-topic cursors. There is no measured
-  pathology there and no recipient fan-out. Moving it is consolidation; it is not a performance
-  fix, and it should not be argued as one.
+- **Messaging's ordering is weaker than Relay's, not equivalent to it.** An earlier version of this
+  record claimed `Board.post` takes `FOR UPDATE` on the topic row and reads per-topic cursors.
+  That is false, and the error flattered the current design. Verified instead:
+  `BoardStore.lockTopic` is called only from `Board.java`'s public-board paths, never on the
+  messaging send path; `board_messages.seq` is `BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE`
+  (`V74:72`) — a **global** sequence, structurally the construct 0037 condemns in
+  `information_events.sequence`; and messaging reads **no cursor at all**, taking work by
+  `arrived_at` through `firings.oldestWaiting`. What it does have is a **per-mailbox** advisory
+  lock: `lockMailbox` → `pg_advisory_xact_lock(hashtextextended(?,0))`
+  (`JdbcBoardMessagingRepository:112`), which is at least scoped per mailbox rather than
+  installation-wide.
+
+  So **moving messaging onto Relay would improve its ordering rather than preserve it**, because
+  Relay's per-topic row lock is precisely what the messaging path lacks. It is still not primarily
+  a performance case — nothing has been measured failing — but it must not be argued as "already
+  sound".
+
+- **Messaging's real invariants are unique partial indexes, and they are stronger than a lease.**
+  `board_message_one_handling_request` on `board_message_routes(recipient) WHERE started_at IS NOT
+  NULL AND handled_at IS NULL`, and `firings_one_running_per_target` on `firings(target) WHERE
+  status='started' AND finished_at IS NULL`. These are unconditional invariants with no time
+  dimension; a Relay consumer lease is a timed claim resolved by expiry. Any migration must keep
+  them rather than substitute a lease for them.
 - **The blocker is the audience, not the log.** Messaging addresses a single principal. Relay's
   `ProjectScope` is too coarse — any member who may use the project can inspect the topic log — and
   the substrate has no conversation- or instance-keyed scope kind either. `V126` already met this
