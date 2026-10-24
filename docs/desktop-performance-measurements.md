@@ -318,3 +318,170 @@ numbers:
 
 Measure the thing the user described, from where they described it. Each
 layer measured here is fast; that is informative but it is not the answer.
+
+## Post-deploy investigation, 24 October 2026
+
+Deployed server at schema 185 on `192.168.1.16` (four cores). Client timings from the
+`PLOWSHARE_DESKTOP_TELEMETRY` CSV; server timings from `pg_stat_activity` sampling and direct
+`psql` against the live database.
+
+**The host reset partway through this investigation.** Everything in *Still open* below was
+measured in one window before that reset and has not been re-measured. Nothing there should be
+acted on until it has been.
+
+### The client is not the problem
+
+Twenty-one rows of client telemetry, columns `issuedAt,surface,action,depth,serverMs,replyMs,renderMs,ok`:
+
+| surface/action | depth | serverMs | IPC | render |
+|---|---|---|---|---|
+| `library/information` | 0 | 11,703.7 | 4.0 | 4.3 |
+| `library/information` | 0 | 18,515.2 | 4.6 | 4.8 |
+| `library/information` | 0 | 20,801.9 | 3.7 | 4.3 |
+| `main/select` | 6 | 4,496.5 | 5.2 | 2.7 |
+| `main/select` | 3 | 3,453.8 | 2.3 | 9.8 |
+| `main/history` | 1 | 1,800.9 | 4.1 | 9.4 |
+| `main/scope` | 7 | 1,634.2 | 4.5 | 6.0 |
+| `main/context` | 3 | 1,396.6 | 2.2 | 11.4 |
+
+IPC is 2–5 ms and render 3–21 ms across every row, including the 20-second ones. `depth 0` on all
+three library calls means nothing else was in flight from that renderer, so the dispatch limits and
+queueing are not involved either. All of it is server time.
+
+### What it is: `information_log_readable` rebuilt the whole graph per row
+
+`information_log_readable(target, account)` (V83) decides whether a log, or anything it descends
+from, carries quarantined or unreadable information. Its `edges` CTE was **not parameterised by
+`target`**: every call built the parent graph of the entire installation — all of `conversations`
+plus `orchestrations`, four ways — and only then walked it from one id. It is applied as a **row
+filter** in thirteen places (`EntryStore`, `DigestStore`, `JdbcPassageRepository`,
+`OrchestrationStore`, `JdbcInboxStore`, `CitationStore`, `MemoryStore`).
+
+Measured against the live installation (12,845 conversations, 8 orchestrations, 3,497 job inputs):
+
+| | |
+|---|---|
+| 20 calls on one target, original | 92.076 ms (**4.6 ms/call**) |
+| 20 calls, ancestry walked via the primary keys | 1.896 ms (**0.095 ms/call**) |
+| one page of 50 through the filter | 2,674 ms |
+| `count(*) FROM conversations WHERE <predicate>` | **59,113 ms** |
+| the same, hoisted blocked-set form | 4,908 ms |
+| admitted sets | **2,942 = 2,942**, both directions |
+
+4.6 ms of fixed cost per row is what makes a 50-row page cost 2.7 s, and
+`OrchestrationStore` applies the predicate **beneath an `ORDER BY` / `LIMIT`**, so it is paid for
+every candidate row before the limit discards any. That query was one of the three biggest CPU
+consumers the sampler caught.
+
+V186 fixes the shape, not the logic: `edges` becomes an inline subquery joined once against the
+recursive term, so `e.child = a.id` is pushed into each branch and reaches it through
+`conversations_pkey`, `orchestrations_pkey` and `orchestrations_conductor_conversation_key`. No
+caller changes; all thirteen sites keep the same function and verdict.
+
+### Hypotheses tested and discarded
+
+Recorded because each one looked right and cost time, and because two of them were published
+before being checked.
+
+1. **V185 widened the candidate set.** Wrong. Only 50 resources are ACCOUNT_KNOWLEDGE-homed, so
+   the alias adds at most 50 candidates, and `knowledge_readable_selection` measures 22–40 ms.
+2. **A semantic search fell back to lexical after a failed query embedding.** Wrong.
+   `ConversationSearch` logs a warning whenever that fallback fires; **zero** in two hours.
+3. **`includeGlobal: true` opened the selection to every GLOBAL_READ resource.** Wrong. With the
+   flag true: 22 ms and the same 65 rows as with it false.
+4. **The embedding pipeline was stalled and starving the database.** Wrong, and the reasoning was
+   doubly bad: `chunks.embedding` is the *legacy* column and is correctly NULL under the dual-slot
+   scheme — the live columns `code_embedding`/`prose_embedding` were populated for 37,092 of 37,097
+   chunks with **zero** staged rows unpromoted. The supporting claim "0 successful embeddings in
+   the last hour" came from grepping for success lines the server never writes.
+5. **The embedding worker held a database connection across its HTTP call.** Wrong. 17 idle, 6
+   active of `max_connections` 100, nothing idle-in-transaction.
+
+A sixth instrument produced a false negative rather than a false positive: a `pg_stat_activity`
+sampler built with `char(45)` (not a Postgres function) errored on every iteration with its stderr
+discarded, so two minutes of silence looked like "nothing was slow". **Verify an instrument returns
+rows before trusting it to return none.**
+
+### Capacity was not the cause
+
+The host was raised from four cores to eight and re-measured while browsing documents. Load 3.95
+of 8 — half the box idle — and the client timings did not improve:
+
+| surface/action | depth | serverMs | IPC | render |
+|---|---|---|---|---|
+| `library/information` | 0 | 14,120.5 | 3.1 | 6.3 |
+| `library/information` | 0 | 14,630.7 | 3.1 | 4.2 |
+| `library/library-document` | 0 | 13,269.4 | 17.2 | 22.5 |
+| `library/library-view` | 1 | 10,893.9 | 6.0 | 13.1 |
+| `main/context` | 0 | 1,462.2 | 3.4 | 10.0 |
+
+So the four-core saturation recorded below was a consequence, not the cause. These are wall-clock
+costs of individual statements.
+
+### The global bottleneck: event recipients, computed inside a global lock
+
+`JdbcInformationCatalogueRepository.event()` takes a **single installation-wide** advisory lock and
+then, still holding it, computes the recipient fan-out:
+
+```java
+pg_advisory_xact_lock(hashtextextended('information-event-order',0))
+INSERT INTO information_event_recipients … FROM admins a
+WHERE information_readable(?,a.handle,'global_read',NULL,false)
+   OR information_readable(?,a.handle,'personal',NULL,true)
+   OR EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id
+              WHERE m.handle=a.handle AND information_readable(?,a.handle,'project',p.name,true))
+```
+
+`pg_advisory_xact_lock` is held until the transaction ends, so the fan-out is inside the critical
+section by construction. Measured on the live installation with **13** admins:
+
+| | |
+|---|---|
+| recipients for **one** event | **3,996 ms** |
+| the fan-out INSERT, caught live | 1.6 s |
+| sessions waiting on the advisory lock, caught live | 1.3 s, `wait_event_type = Lock` |
+
+Every information event therefore serializes the whole installation for seconds, and the processing
+pipeline emits events continuously. This is the best current explanation for "the whole system is
+slow", and it is independent of which query the user happens to be running.
+
+It is two AGENTS.md violations at once: repeated permission resolution within one operation, and
+that resolution performed inside a lock. The predicate is asked *per admin, per project* when the
+answer depends on the revision's home scope — one scope resolution could replace 13 × (2 + N)
+evaluations, the same hoist as V184 and V186.
+
+### Still open — the four-core figures below are pre-reset and superseded
+
+- **Host capacity.** Load average 3.98 / 4.04 / 3.66 on **four** cores, sustained. The nine top
+  consumers were all Postgres backends totalling ~270% CPU; the Java server used 5%. The box also
+  runs two CI runners, two dind daemons, searxng, and two A2A containers.
+  `max_parallel_workers_per_gather = 2` lets one heavy scan become three CPU-burning processes, so
+  a few such queries saturate the host. Whether this is cause or consequence of the bad queries is
+  not established.
+- **Two more per-row predicates, both caught live at 8–10 s**, neither diagnosed:
+  the `tagGroups` scheduler, which evaluates `information_visible_tags(...)` and a correlated
+  `EXISTS` on `information_steps` **twice per row**; and the step scheduler, which calls
+  `information_system_processing_valid(r.id)` per row under several correlated `NOT EXISTS`.
+  Both ran continuously in an idle window.
+- **`information_event_recipients` fan-out** evaluates `information_readable(...)` once per admin
+  per event — the same anti-pattern on the write path. Caught at 1.8 s.
+- **Staging tables are append-only and duplicate every live vector.** A staging row *is* the record
+  that the work was done (`ready()` treats its existence as proof), so there is no reaper:
+  `retrieval_passages_embedding_staging` 527 MB and `chunks_embedding_staging` 315 MB of a 3,531 MB
+  database — 24%. Not a malfunction, but unbounded. A safe reaper may only delete rows where
+  `ready()`'s first disjunct already answers true on its own.
+- **Embedding provider**: 7 failed requests per hour to `192.168.1.122:1234` ("unexpected end of
+  stream", one "Connect timed out"), against a host answering in 96 ms. `OpenAiTransport` allows
+  two attempts with a 10 s connect-and-write budget each and has no circuit breaker, so a dead
+  provider costs the full budget on every attempt however long it has been failing.
+
+### Method note
+
+Every rewrite here is pinned by comparing admitted **sets in both directions**, not by timing. An
+earlier rewrite of a neighbouring predicate was 16× faster and admitted 2,698 revisions it should
+have refused, because it dropped one conjunct; `EXPLAIN` cannot catch that and neither can a
+faster-is-better test. The pins are additionally mutation-tested: each of the four edge branches is
+neutralised in turn and both the set-equality pin and the per-edge pin must fail. The first version
+of the set-equality pin caught only one of the four, because the fixture had no blocked ancestor
+reachable through the orchestration edges — a pin that compares sets is only as strong as the
+fixture's capacity to disagree.
