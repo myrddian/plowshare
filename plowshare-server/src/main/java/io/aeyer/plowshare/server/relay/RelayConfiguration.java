@@ -59,6 +59,13 @@ public class RelayConfiguration {
   }
 
   @Bean
+  @DependsOnDatabaseInitialization
+  public RelayPayloadStore relayPayloadStore(
+      JdbcTemplate jdbc, UnitOfWork transactions, RelayProperties properties) {
+    return new JdbcRelayPayloadStore(jdbc, transactions, properties.getPayloadStagingWindow());
+  }
+
+  @Bean
   public Relay relay(
       RelayRepository repository,
       UnitOfWork transactions,
