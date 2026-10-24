@@ -117,6 +117,50 @@ The corollary: **a consumer verifies its own publishers.** Relay records
 family's business. Reserving a consumer's topic name inside the broker, or having the broker check a
 signature over a consumer's payload, is the same mistake from the other direction.
 
+### A topic name is private to its owning system
+
+A Relay topic name is an implementation detail of the system that owns it, not an identifier any
+other party holds. It is not part of a contract, and nothing outside the owning system should know
+it, construct it, or be able to name it.
+
+`information.changed` was the counter-example. Declared as a shared literal inside `Relay.java`, it
+was addressable by anything that could publish to a project topic, and an operator could have
+configured it as an external ingress port — `RelayPortProperties.permits` is pure data with no
+code-owned reservation of any topic name. The name had become a contract nobody meant to offer.
+
+So a family derives its topic name from the scope it is publishing for, inside its own package. The
+derivation is deterministic, because publisher and consumer must agree independently, and opaque,
+because the name carries no meaning anyone else is entitled to.
+
+What this does and does not buy, stated plainly so it is not over-trusted:
+
+- It stops the topic being **addressable**. Nothing can hardcode it, configure a port for it, or
+  publish to it by name, because nothing else can compute it.
+- It does **not** make the topic confidential. `ScopedRelayInspection.topics` lists a scope's
+  topics, so a member can still discover the name. Opacity is an abstraction boundary, not a
+  secret.
+- So it is not sufficient on its own. The mechanism that actually stops a forged notice being acted
+  on is the consumer verifying the publisher before decoding — the corollary above. Derivation keeps
+  the name out of everyone's contract; publisher verification keeps a forgery uninterpreted. Both,
+  not either.
+
+The same reasoning applies to anything else a family might be tempted to expose through Relay's
+shared surface: if another system can name it, it is a contract, and a contract in the mechanism is
+policy by another route.
+
+### Interfaces first, applied to a substrate
+
+This is the general rule — interfaces first — read against a shared mechanism. A family's interface
+is its own API. Relay is the transport beneath it, and every detail of how a family uses Relay
+(its topic names, its payload encoding, its publisher identity, what it chooses to put in a
+publication) belongs behind that family's interface rather than in Relay's surface.
+
+Each failure recorded here is the same omission: a detail that should have been private became
+shared. A payload kind in the broker's enum, a topic name in the broker's domain record, an
+owner-only field in a publication the broker serves to the whole audience. None of them were
+decisions anyone defended on the merits; they were details that leaked upward because no interface
+was holding them down.
+
 ### Both halves were learned from live defects
 
 - **A redaction bypass.** `information.events` withholds an event's `detail` from every account but
