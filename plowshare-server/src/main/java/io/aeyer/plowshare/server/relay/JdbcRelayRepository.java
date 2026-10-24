@@ -111,13 +111,22 @@ public final class JdbcRelayRepository implements RelayRepository {
     // CONFLICT DO NOTHING would make a publisher wait on another's uncommitted insert of the same
     // digest, serialising publishers that share nothing but identical content. Committed ahead,
     // the insert is a no-op for every later publisher and the topic lock covers only position
-    // allocation. The price is that an append that then fails or rolls back leaves an
-    // unreferenced payload. That is correct, not an error: the staging window protects it while a
-    // retry (which derives the same digest) references it, and the sweep reclaims it otherwise.
+    // allocation. The price is orphans: a payload is written before the topic is read, so an
+    // append that then fails leaves an unreferenced row. That covers a failed or rolled-back
+    // insert, and also an append to an unknown topic or one of a different payload family, which
+    // used to fail with no side effect. That is correct, not an error: the staging window
+    // protects the row while a retry (which derives the same digest) references it, and the sweep
+    // reclaims it otherwise. Because the text allowance is checked before the family, a draft that
+    // is both oversize and the wrong family now reports the text-limit error.
     //
-    // An identical repeat of a retained event stores nothing. The unlocked probe can only be
-    // stale in one direction (a concurrent first append), which costs one redundant idempotent
-    // store; the retained check under the topic lock below stays the authority.
+    // An identical repeat of a retained event stores nothing. The probe below is advisory and
+    // unlocked; the locked read under the topic lock stays the authority for idempotency and
+    // conflicts. It can be stale in two directions, both benign. If the event was first appended
+    // concurrently, the probe says absent: one redundant idempotent store, then the locked read
+    // returns the original. If the event was pruned after the probe said present, nothing was
+    // stored and the append is new: the fallback below validates and stores it inside the
+    // transaction. No lock cycle arises because a competing publisher commits its store before
+    // it takes any topic lock.
     // The text allowance is checked here, before the bytes are written, so a refused payload
     // never reaches the store. A lowered allowance still recovers an identical retained event
     // because the probe returns before this check.
@@ -149,7 +158,7 @@ public final class JdbcRelayRepository implements RelayRepository {
           }
           // The probe saw a retained event that pruning removed before the topic lock was taken, so
           // nothing was stored. This is a genuinely new append: validate and store it here. It is
-          // the only path that stores under the lock, and only after a race with expiry.
+          // the only path that stores under the lock, and only after a race with pruning.
           String digestToWrite = payloadDigest;
           if (digestToWrite == null) {
             textLimit.validateNew(draft.payload());

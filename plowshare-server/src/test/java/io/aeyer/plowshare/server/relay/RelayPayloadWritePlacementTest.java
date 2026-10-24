@@ -35,7 +35,10 @@ class RelayPayloadWritePlacementTest {
   private final List<String> stored = new ArrayList<>();
   private JdbcTemplate jdbc;
   private JdbcRelayRepository repository;
-  private boolean alreadyRetained;
+  // The unlocked probe and the locked in-transaction read are independent, so a test can make
+  // them disagree.
+  private boolean probeFindsEvent;
+  private boolean lockedReadFindsEvent;
 
   /** Records each store call, and the order it happens in relative to transactions. */
   private final RelayPayloadStore store =
@@ -82,8 +85,8 @@ class RelayPayloadWritePlacementTest {
         (sql, mapper) -> {
           if (sql.contains("FROM relay_topics")) return List.of(mapper.mapRow(topicRow(), 0));
           if (sql.startsWith("SELECT 1 FROM relay_publications"))
-            return alreadyRetained ? List.of(mapper.mapRow(mock(ResultSet.class), 0)) : List.of();
-          if (sql.contains("FROM relay_publications") && alreadyRetained)
+            return probeFindsEvent ? List.of(mapper.mapRow(mock(ResultSet.class), 0)) : List.of();
+          if (sql.contains("FROM relay_publications") && lockedReadFindsEvent)
             return List.of(mapper.mapRow(publicationRow(), 0));
           return List.of();
         });
@@ -164,11 +167,23 @@ class RelayPayloadWritePlacementTest {
 
   @Test
   void anIdempotentRepublishStoresNothing() {
-    alreadyRetained = true;
+    probeFindsEvent = true;
+    lockedReadFindsEvent = true;
     var original = repository.append(TOPIC, draft(), T0);
     assertEquals(4L, original.position());
     assertEquals(List.of(), stored);
     assertEquals(List.of("begin"), events);
+  }
+
+  @Test
+  void aProbeThatSawAPrunedEventStoresInsideTheTransaction() {
+    probeFindsEvent = true;
+    lockedReadFindsEvent = false;
+    repository.append(TOPIC, draft(), T0);
+    // Nothing was stored ahead of the transaction; the fallback stores once, under the lock.
+    assertEquals(List.of("begin", "store"), events);
+    assertEquals(1, stored.size());
+    assertTrue(insertArguments().contains(stored.getFirst()));
   }
 
   @Test
