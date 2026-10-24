@@ -1,7 +1,8 @@
 # All events and messaging publish through Relay
 
-Status: proposed. Requires explicit authorization before any code changes, because it moves durable
-delivery paths.
+Status: accepted following explicit authorization to begin with information events. The remaining
+families (`event.fire`, `message.*`) are accepted as direction and need their own authority-unit
+decision before they move.
 
 ## Need and boundary
 
