@@ -123,7 +123,14 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
    * Examines matured candidates, oldest first, one transaction each. Reachability is the only
    * authority: the delete itself carries the guard, so a publication or admission that references
    * the digest, including one committed after the candidate was selected, keeps its row. The
-   * foreign keys are the backstop; the guard keeps a referenced candidate from raising one.
+   * foreign keys are the backstop, and they do fire in one window the guard cannot close: a
+   * reference that commits after the guard's {@code NOT EXISTS} has been evaluated but before the
+   * delete acquires its row lock. The delete waits on the lock the referencing insert's own
+   * foreign-key check holds, proceeds when it is released, and the {@code NO ACTION} check then
+   * finds the committed row and raises. The payload is still never lost -- the transaction for that
+   * digest rolls back -- but the exception ends the pass, leaving its remaining candidates for the
+   * next one. {@code RelayMaintenance} logs and retries on the following interval. This is verified
+   * in {@code RelayPayloadStoreDatabaseTest}.
    *
    * <p>A candidate that survives is rescheduled, otherwise it would match the candidate query on
    * every pass. {@code ejection_at} only defers the next examination and never authorizes a
