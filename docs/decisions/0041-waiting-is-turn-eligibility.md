@@ -130,10 +130,43 @@ The consequence worth stating plainly: **delegation needs no cycle check**, beca
 wait on a child you just created, in a tree capped at depth 2. A substrate-level waiter would have
 charged delegation for a defence its own structure already provides.
 
-What this does not settle: whether the lifecycle notice alone carries enough for a conductor's turn
-to be resumed usefully, or whether the resumption must read the record to compose the utterance. The
-latter is likely and is not a problem — it is the same shape as a firing carrying a reference the
-turn then reads — but it has not been verified against `Delivery` and `ParentVoice`.
+### A reference-only notice is what this path already wants
+
+Checked against `Delivery` and `ParentVoice`, and the delivery path composes from a fresh read
+rather than from anything carried in:
+
+```java
+Optional<OrchestrationRecord> current = undelivered.get();   // Delivery.java:475
+if (current.isEmpty()) return;
+OrchestrationRecord fresh = current.get();
+String utterance = text.apply(fresh);                         // :480
+```
+
+`deliver` takes a `Supplier<Optional<OrchestrationRecord>>` and a
+`Function<OrchestrationRecord, String>`; `ParentVoice.speak(parentOrchestration, utterance)` then
+receives an already-composed string. The report's own text lives in `orchestration_messages.text`
+(V48) and is read at delivery, never carried to the delivery point. So a `Lifecycle` notice naming
+the run is not a compromise here — it is the input this code is written for.
+
+Two consequences fall out:
+
+**The re-read is already the idempotency guard.** An empty `undelivered` returns, the delivered mark
+is re-read inside the guard so "an item asked about twice is delivered once", and the mark is
+written only after a speak succeeds, so a restart re-delivers whatever did not complete. That is
+at-least-once consumption with an idempotent consumer, which is exactly what a Relay subscription
+provides.
+
+**But the in-flight guard is in-process, not a database claim.** `Delivery.java:116` is
+`ConcurrentHashMap.newKeySet()`, and the class documents it as deliberate (Decision 3). Today it
+dedupes concurrent attempts inside one JVM, with `isSpeaking` and the undelivered re-read behind it.
+Under Relay it stops being a backstop: two consumers of the same notice — a second consumer group,
+or one group across two servers — could both pass `undelivered.get()` and both speak, and nothing
+durable would stop them.
+
+So the conversion carries one hard requirement: **delegation's notices are consumed under a single
+leased consumer group**, or `inFlight` becomes a durable claim first. Relay's leases can give the
+first; the second is a change to `Delivery` and should not be smuggled in as part of a transport
+move.
 
 ## What was written and not landed
 
