@@ -138,8 +138,10 @@ public final class JdbcProcRepository implements ProcRepository {
   /**
    * Fix the authorized page before reading per-conversation aggregates. Without this
    * materialization PostgreSQL can enrich every retained conversation before sorting and limiting,
-   * turning a small audit page into repeated full-table scans. Counts still cover the entire
-   * authorized selection.
+   * turning a small audit page into repeated full-table scans. Call facts are then loaded once for
+   * that page and reused by totals, activity and repetition groups. The direct conversation index
+   * keeps this selection independent of retained calls in unrelated conversations. Counts cover the
+   * entire authorized selection.
    */
   static String conversationPageSql(boolean active) {
     String filter = WHERE + (active ? " AND " + ACTIVE : "");
@@ -150,6 +152,23 @@ public final class JdbcProcRepository implements ProcRepository {
         + filter
         + " AND (CAST(:after AS text) IS NULL OR c.id>:after) ORDER BY c.id LIMIT :limit)"
         + """
+          , page_calls AS MATERIALIZED (
+            SELECT call.conversation_id,call.attempt_count,call.ended_at,call.attribution_status,
+              call.account_handle,call.agent_name,call.operation,call.pool,call.wire_model
+            FROM inference_calls call JOIN page selected ON selected.id=call.conversation_id
+          ), call_totals AS MATERIALIZED (
+            SELECT conversation_id,count(*) AS calls,sum(attempt_count) AS attempts,
+              count(*) FILTER(WHERE ended_at IS NULL) AS active_calls,
+              CASE WHEN bool_and(attribution_status='SYSTEM') THEN 'SYSTEM'
+                WHEN bool_and(attribution_status='ATTRIBUTED') AND count(DISTINCT account_handle)=1 THEN max(account_handle)
+                ELSE 'MIXED_OR_UNKNOWN' END AS principal
+            FROM page_calls GROUP BY conversation_id
+          ), call_repetitions AS MATERIALIZED (
+            SELECT conversation_id,max(n) AS repeated FROM (
+              SELECT conversation_id,agent_name,operation,pool,wire_model,count(*) AS n
+              FROM page_calls GROUP BY conversation_id,agent_name,operation,pool,wire_model
+            ) repetition GROUP BY conversation_id
+          )
           SELECT c.id,c.audit_root AS root,c.parent_id,c.origin,c.audit_lifecycle AS lifecycle,c.audit_project AS project,c.owner_handle,
             acting.application,acting.actor,acting.subject AS acting_subject,c.agent,c.opened_by_call,source.resource,source.revision,c.relay_causation->>'rootId' AS causation_root,
             c.relay_causation->>'parentId' AS causation_parent,
@@ -159,8 +178,7 @@ public final class JdbcProcRepository implements ProcRepository {
               WHEN COALESCE(ps.running,0)>0 THEN 'PROCESSING'
               WHEN COALESCE(ps.pending,0)>0 THEN 'QUEUED'
               WHEN COALESCE(ps.blocked,0)>0 THEN 'BLOCKED'
-              WHEN EXISTS(SELECT 1 FROM inference_calls ic WHERE ic.conversation_id=c.id AND ic.ended_at IS NULL)
-                THEN 'RECORDED_ACTIVE'
+              WHEN COALESCE(ic.active_calls,0)>0 THEN 'RECORDED_ACTIVE'
               WHEN j.id IS NOT NULL AND j.ended_at IS NULL THEN 'UNKNOWN'
               WHEN c.last_turn_at IS NOT NULL OR j.ended_at IS NOT NULL THEN 'COMPLETED' ELSE 'IDLE' END AS state,
             CASE WHEN c.id IN (:live) THEN 'local runtime snapshot'
@@ -171,7 +189,7 @@ public final class JdbcProcRepository implements ProcRepository {
             j.id AS latest_job,j.ending,
             (SELECT count(*) FROM conversations child WHERE child.parent_id=c.id) AS children,
             COALESCE(ic.calls,0) AS calls,COALESCE(ic.attempts,0) AS attempts,
-            COALESCE(ic.active_calls,0) AS active_calls,COALESCE(ic.repeated,0) AS repeated,
+            COALESCE(ic.active_calls,0) AS active_calls,COALESCE(repetition.repeated,0) AS repeated,
             COALESCE(ic.principal,'UNKNOWN') AS principal
           """
         + " FROM page c "
@@ -188,14 +206,8 @@ public final class JdbcProcRepository implements ProcRepository {
             count(*) FILTER(WHERE s.state='blocked') AS blocked
             FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation
             WHERE r.processing_log=c.id AND r.availability='active' AND NOT r.excluded) ps ON true
-          LEFT JOIN LATERAL(SELECT count(*) AS calls,sum(attempt_count) AS attempts,
-            count(*) FILTER(WHERE ended_at IS NULL) AS active_calls,
-            (SELECT max(n) FROM(SELECT count(*) n FROM inference_calls r WHERE r.conversation_id=c.id
-              GROUP BY agent_name,operation,pool,wire_model) repetition) AS repeated,
-            CASE WHEN bool_and(attribution_status='SYSTEM') THEN 'SYSTEM'
-              WHEN bool_and(attribution_status='ATTRIBUTED') AND count(DISTINCT account_handle)=1 THEN max(account_handle)
-              ELSE 'MIXED_OR_UNKNOWN' END AS principal
-            FROM inference_calls WHERE conversation_id=c.id) ic ON true
+          LEFT JOIN call_totals ic ON ic.conversation_id=c.id
+          LEFT JOIN call_repetitions repetition ON repetition.conversation_id=c.id
           ORDER BY c.id
           """;
   }
