@@ -212,11 +212,13 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
   public void collected(Collection record) {
     jdbc.update(
         "INSERT INTO contained_collections"
-            + "(child,scope,container,project,revision,workspace,cause) VALUES(?,?,?,?,?,?,?)"
+            + "(child,scope,container,root,project,revision,workspace,cause)"
+            + " VALUES(?,?,?,?,?,?,?,?)"
             + " ON CONFLICT (child) DO NOTHING",
         record.child(),
         record.scope() == null ? null : record.scope().value(),
         record.container() == null ? null : record.container().value(),
+        record.root(),
         record.project(),
         record.revision(),
         record.workspace().toString(),
@@ -229,7 +231,7 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
   }
 
   private static final String COLLECTION_COLUMNS =
-      "child,scope,container,project,revision,workspace,cause,source_removed";
+      "child,scope,container,root,project,revision,workspace,cause,source_removed";
 
   @Override
   public List<Collection> uncollectedSources() {
@@ -260,15 +262,21 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
    * scope IS NOT NULL} test was removed, because the same constraint makes {@code
    * cause='DESTROYED'} imply it — it guarded nothing, and its comment credited it with work these
    * two columns already do.
+   *
+   * <p>{@code root} restricts the edge to the one destruction being replayed. Without it the walk
+   * also returned rows a separate earlier destruction wrote under the same container, so a retry
+   * answered with a longer list than the destruction it was replaying.
    */
   @Override
-  public List<Collection> collectedUnder(ScopeId container) {
+  public List<Collection> collectedUnder(ScopeId container, UUID root) {
     return jdbc.query(
         "SELECT "
             + COLLECTION_COLUMNS
-            + " FROM contained_collections WHERE container=? AND cause='DESTROYED' ORDER BY child",
+            + " FROM contained_collections WHERE container=? AND root=? AND cause='DESTROYED'"
+            + " ORDER BY child",
         JdbcContainedApplicationRepository::collection,
-        container.value());
+        container.value(),
+        root);
   }
 
   private static Collection collection(java.sql.ResultSet row, int index)
@@ -277,6 +285,7 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
         row.getObject("child", UUID.class),
         scope(row, "scope"),
         scope(row, "container"),
+        row.getObject("root", UUID.class),
         row.getString("project"),
         row.getObject("revision", UUID.class),
         java.nio.file.Path.of(row.getString("workspace")),
@@ -333,6 +342,29 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
             + " WHERE s.id=? FOR UPDATE OF p",
         (row, index) -> row.getLong(1),
         container.value());
+  }
+
+  /**
+   * Every project row in the subtree, locked. The recursive term walks {@code
+   * authority_scopes.container} exactly as {@link #subtree} does, so the rows locked are the rows
+   * that destruction is about to read and delete, and a creation anywhere inside the subtree
+   * contends on its own container's row with this.
+   *
+   * <p>{@code ORDER BY p.id} with {@code FOR UPDATE OF p} is deliberate: two destructions over
+   * overlapping subtrees take the shared rows in the same order and so cannot deadlock. The join to
+   * {@code authority_scopes} is a read and not a second lock, as in {@link #lockContainer}.
+   */
+  @Override
+  public void lockSubtree(ScopeId scope) {
+    jdbc.query(
+        "WITH RECURSIVE tree AS ("
+            + "  SELECT s.id FROM authority_scopes s WHERE s.id=?"
+            + "  UNION ALL"
+            + "  SELECT s.id FROM authority_scopes s JOIN tree t ON s.container=t.id)"
+            + " SELECT p.id FROM projects p JOIN authority_scopes s ON s.project_id=p.id"
+            + " JOIN tree t ON t.id=s.id ORDER BY p.id FOR UPDATE OF p",
+        (row, index) -> row.getLong(1),
+        scope.value());
   }
 
   private static final String UNAVAILABLE = "The contained Application record is unavailable";

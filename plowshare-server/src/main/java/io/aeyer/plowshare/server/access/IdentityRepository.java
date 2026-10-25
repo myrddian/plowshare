@@ -10,6 +10,20 @@ import java.util.Optional;
  * Read-only identity compatibility boundary. No lookup grants membership, audience or execution.
  */
 public interface IdentityRepository {
+  /**
+   * The one refusal text for an identity or scope that does not resolve, owned by this contract so
+   * that every implementation and every sibling repository that must answer identically says the
+   * same thing.
+   *
+   * <p>It is deliberately uninformative, and that is the security property: a caller learns that
+   * the mapping is unavailable <em>or</em> restricted and cannot tell which, so a refusal is not an
+   * existence oracle for another tenant's identities. A second copy of this string could drift from
+   * this one, and a drifted copy would distinguish the two cases by its wording alone — which is
+   * why {@code JdbcContainedPrincipalRepository} shares this definition rather than holding its
+   * own.
+   */
+  String UNRESOLVED = "Identity or scope mapping is unavailable or restricted";
+
   enum AccountKind {
     USER,
     SERVICE,

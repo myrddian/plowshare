@@ -41,9 +41,12 @@ public interface ContainedApplications {
    *     documents an absent ceiling as <em>unlimited</em>, so a contained child created without one
    *     would be unbounded. Zero is a child that cannot make a call, which is a permitted and
    *     useful state.
-   * @param requestedDestination accepted for request-shape compatibility with ADR 0005 and
-   *     deliberately ignored. A parent typically holds no FileStore {@code MANAGER} over its own
-   *     retained source, so proxying a destination could not yield a legal one.
+   * @param requestedDestination must be absent. The field exists for request-shape compatibility
+   *     with ADR 0005 — every SDK sends the key — but a named destination is <em>refused</em>
+   *     rather than accepted and dropped: this path allocates the child's source area itself under
+   *     {@link ContainmentConfig#root()}, and a parent typically holds no FileStore {@code MANAGER}
+   *     over its own retained source, so proxying a destination could not yield a legal one either.
+   *     A field accepted and discarded reads to a caller as supported.
    * @param writableAreas runtime writable areas the child asks for; in this slice a child's
    *     writable area is allocated under its own server-owned root, so any entry here names a
    *     FileStore outside the parent's fence and is refused

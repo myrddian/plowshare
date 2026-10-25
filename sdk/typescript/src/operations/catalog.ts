@@ -197,9 +197,11 @@ export interface ExtendedPayloads
   // A container's own typed operations over the Applications confined inside it (ADR 0042). No
   // field names an authority: the creating Application's admission and the allowance it is
   // spending both come from its own retained conversation, server side, because a request that
-  // supplied either would be authorizing itself. `destination` is accepted for request-shape
-  // compatibility with application.deploy and ignored, because the server allocates a child's
-  // source area under its configured containment root. `ceiling` is required and may be zero --
+  // supplied either would be authorizing itself. `destination` stays in the shape for
+  // request-shape compatibility with application.deploy, so every SDK sends the key, but its only
+  // accepted value is null: the server allocates a child's source area under its configured
+  // containment root, and a named destination is refused rather than accepted and dropped.
+  // `ceiling` is required and may be zero --
   // an absent ceiling means unlimited, which a confined child is never.
   'application.child.create': {
     readonly conversation: string;

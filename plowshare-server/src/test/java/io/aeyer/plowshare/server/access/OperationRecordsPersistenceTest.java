@@ -318,6 +318,60 @@ class OperationRecordsPersistenceTest {
             .conversationsIn(elsewhere.scope()).stream().map(e -> e.id()).toList());
   }
 
+  /**
+   * A listing is a listing: one unusable row does not refuse the rest. {@code conversationsIn}
+   * documents that and then threw {@code IllegalArgumentException} out of its extractor for a
+   * sealed admission with no retained support — the whole read failed, for every conversation in
+   * the scope, because of one row. Real PostgreSQL because the assertion is what the extractor does
+   * with an actual multiplied result set.
+   */
+  @Test
+  void aConversationWhoseAdmissionRetainsNoSupportIsSkippedRatherThanFailingTheListing() {
+    var conversations = new ConversationStore(jdbc);
+    var wide = admit();
+    var log =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "parent",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(3),
+            "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            log.id(), "parent", wide, null, log.budget().snapshot().id(), "0".repeat(64)));
+    // Support is immutable by trigger, so the state is built the only way it can arise: an
+    // admission sealed with nothing retained against it. Its columns are copied from the live one,
+    // so the scope filter selects it and the mapper really does meet it.
+    var stranger =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "stranger",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(1),
+            "alice");
+    UUID unsupported = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO operation_admissions(id,executor,executor_handle,scope,project_name,"
+            + "source_account,sealed) SELECT ?,executor,executor_handle,scope,project_name,"
+            + "source_account,true FROM operation_admissions WHERE id=?",
+        unsupported,
+        wide.id());
+    jdbc.update(
+        "INSERT INTO operation_conversations(conversation,agent,operation,allowance_id,capabilities)"
+            + " VALUES(?,?,?,?,?)",
+        stranger.id(),
+        "stranger",
+        unsupported,
+        stranger.budget().snapshot().id().value(),
+        "1".repeat(64));
+
+    var read = new JdbcOperationRecords(jdbc).conversationsIn(wide.scope());
+    assertEquals(List.of(log.id()), read.stream().map(e -> e.id()).toList());
+    assertEquals(wide.actions(), read.getFirst().admission().actions());
+  }
+
   @Test
   void aRetainedContinuationCanDelegateWithItsOriginalConversationAndAllowance() {
     ConversationStore conversations = new ConversationStore(jdbc);

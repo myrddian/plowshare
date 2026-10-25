@@ -53,7 +53,11 @@ if(!foreignCredentialRefused)throw new Exception("Foreign credential receipt acc
         ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{foreign}}","{{child}}"],"sources":2}""", true),
         ("application.child.destroy", $$"""{"child":"{{foreign}}","collected":["{{foreign}}"],"sources":1}""", false),
         ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{foreign}}"],"sources":1}""", false),
-        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":2}""", false) })
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":2}""", false),
+        // A non-numeric count is a refusal, not an InvalidOperationException escaping the gate.
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":"1"}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":null}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":true}""", false) })
     {
         using var answer = JsonDocument.Parse(reply);
         bool admitted = true;

@@ -17,9 +17,10 @@ import org.springframework.stereotype.Component;
  *
  * <p>No field of the request names an authority. The creating Application's admission and the
  * allowance it is spending both come from its own retained conversation record on the server side,
- * because a request that supplied either would be authorizing itself. {@code destination} is
- * accepted and ignored: the server allocates a child's source area under its configured containment
- * root.
+ * because a request that supplied either would be authorizing itself. {@code destination} is part
+ * of the operation's shape and must be null: the server allocates a child's source area under its
+ * configured containment root, so a named destination is refused here rather than validated into a
+ * value nothing reads.
  */
 @Component
 public final class ContainedApplicationFrames implements FrameArea {
@@ -88,10 +89,16 @@ public final class ContainedApplicationFrames implements FrameArea {
         Set.of("conversation", "requestId", "ceiling", "destination", "writableAreas", "files"));
     if (!(payload.get("writableAreas") instanceof List<?> areas))
       throw new CallerFault("Specify explicit writableAreas");
-    var destination =
-        payload.get("destination") == null
-            ? null
-            : FileStoreRequests.reference(payload.get("destination"));
+    // Refused rather than parsed and dropped. The server allocates a child's source area under its
+    // configured containment root, so no destination a container could name means anything here --
+    // and this boundary's contract is that a raw map never travels past it, which a field validated
+    // into a value nothing reads would make untrue. The key itself stays required, because it is
+    // part of the operation's shape and every SDK sends it; only a value is refused, exactly as a
+    // non-empty writableAreas is.
+    if (payload.get("destination") != null)
+      throw new CallerFault(
+          "A contained Application's source area is allocated by the server inside its"
+              + " containment; a destination cannot be named");
     if (!(payload.get("files") instanceof List<?> files) || files.isEmpty() || files.size() > 128)
       throw new CallerFault("Use a bounded Application file list");
     List<io.aeyer.plowshare.protocol.ApplicationDeployment.File> converted = new ArrayList<>();
@@ -118,7 +125,7 @@ public final class ContainedApplicationFrames implements FrameArea {
                       "the creating Application's conversation"),
                   uuid(payload, "requestId"),
                   calls(payload, "ceiling"),
-                  destination,
+                  null,
                   writableAreas,
                   converted)));
     } catch (IllegalArgumentException invalid) {

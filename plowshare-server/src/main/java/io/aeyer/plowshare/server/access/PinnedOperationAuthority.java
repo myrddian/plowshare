@@ -375,10 +375,30 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     var executor = identities.account(admission.executor());
     if (executor.kind() == IdentityRepository.AccountKind.BUILTIN
         || !executor.id().equals(admission.account())) throw denied();
-    var containment = identities.contained(admission.scope());
+    // The dispatch is the admission's own retained home, not a read. This method runs on every
+    // authority recheck for every operation in the server, and the containment read is empty for
+    // every ordinary admission, so asking the database first made containment a platform-wide
+    // cost. The reserved prefix is a sound discriminator in exactly one direction, which is the
+    // direction needed: ProjectStore.ordinary reserves it case-insensitively, so an ordinary
+    // project cannot bear it and an ordinary admission therefore cannot take the contained branch.
+    // The converse is not assumed -- a contained scope whose admission carries an ordinary home is
+    // not admitted by skipping the read, because the ordinary branch below then proves the name
+    // resolves to THIS admission's scope id, and a contained scope is not what an ordinary
+    // project's name resolves to. Both gates still agree on the containment edge: the row the
+    // contained branch reads is the row the ancestry walk is handed.
+    Optional<AuthorityScope.Contained> containment =
+        io.aeyer.plowshare.protocol.ContainedProjects.name(admission.home().project())
+            ? identities.contained(admission.scope())
+            : Optional.empty();
     String project;
     AuthorityScope scope;
     if (containment.isEmpty()) {
+      // A reserved home with no stored containment row reaches here, and must not be admitted by
+      // the ordinary proof: project(String) refuses to resolve a contained name, so the refusal
+      // below is a resolution failure rather than a fall-through. It is stated rather than left to
+      // that refusal, because this branch must not depend on another method's behaviour to deny.
+      if (io.aeyer.plowshare.protocol.ContainedProjects.name(admission.home().project()))
+        throw denied();
       // Unchanged, and this is still the path every pre-existing admission takes. One read
       // resolves the scope AND proves the two retained columns still agree: the admission's
       // project name must still map to the admission's scope id. Resolving by scope id instead

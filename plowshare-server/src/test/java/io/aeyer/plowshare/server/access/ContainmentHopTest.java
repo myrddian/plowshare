@@ -403,6 +403,43 @@ class ContainmentHopTest {
   }
 
   /**
+   * The ordinary path pays nothing for containment. {@code require} runs on every authority recheck
+   * for every operation in the server, so an unconditional containment read there is a
+   * platform-wide cost that is always empty for an ordinary admission. The dispatch is the
+   * admission's own reserved home prefix, which {@code ProjectStore.ordinary} reserves
+   * case-insensitively, so an ordinary admission cannot carry one.
+   */
+  @Test
+  void anOrdinaryRecheckTakesNoContainmentRead() {
+    var parent = parent();
+    clearInvocations(identities);
+    assertDoesNotThrow(() -> policy.require(parent));
+    verify(identities, never()).contained(any());
+    // And the agreement proof the ordinary path rests on still runs: the admission's project name
+    // must still map to the admission's scope.
+    verify(identities, atLeastOnce()).project("one");
+  }
+
+  /**
+   * The other side of the same reorder: a contained admission is still resolved through the stored
+   * containment row, and a row that is gone is a refusal rather than a fall-through to the ordinary
+   * project read. Both gates must keep agreeing on the containment edge.
+   */
+  @Test
+  void aContainedAdmissionWhoseContainmentRowIsGoneIsRefused() {
+    var parent = parent();
+    var contained = policy.contain(parent, child, Set.of(AuthorityAction.READ));
+    when(records.parent(contained.id())).thenReturn(Optional.of(parent.id()));
+    when(records.find(parent.id())).thenReturn(Optional.of(parent));
+    assertDoesNotThrow(() -> policy.require(contained));
+    when(identities.contained(child.id())).thenReturn(Optional.empty());
+    assertThrows(CallerFault.class, () -> policy.require(contained));
+    // The contained path is still the one that read it, and the ordinary project read is never
+    // reached with a child's reserved name.
+    verify(identities, never()).project(childName);
+  }
+
+  /**
    * An unconfigured server does not merely stop creating children: it stops accepting the ones that
    * exist. Absence is never an unlimited default on either side of the hop.
    */

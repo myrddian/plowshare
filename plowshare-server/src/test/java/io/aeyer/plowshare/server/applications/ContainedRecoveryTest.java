@@ -251,6 +251,7 @@ class ContainedRecoveryTest {
                     child,
                     new ScopeId(UUID.randomUUID()),
                     parentScope.id(),
+                    child,
                     "contained:" + collected,
                     UUID.randomUUID(),
                     workspace,
@@ -282,6 +283,7 @@ class ContainedRecoveryTest {
                     child,
                     new ScopeId(UUID.randomUUID()),
                     parentScope.id(),
+                    child,
                     "contained:not-a-uuid",
                     UUID.randomUUID(),
                     outside,
@@ -361,16 +363,52 @@ class ContainedRecoveryTest {
     assertEquals(0, swept.collected());
     assertEquals(1, swept.retained());
     assertEquals(Set.of(young), staged());
-    // An older directory under the same grace is collected, so the grace is an age and not a stop.
-    Files.setLastModifiedTime(
-        root.resolve(young),
-        java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(7200)));
+    // An older stage under the same grace is collected, so the grace is an age and not a stop. The
+    // whole tree is aged, because the age of a stage is its newest write anywhere -- see
+    // theGraceIsMeasuredFromTheStagedRevisionAndNotTheWorkspaceDirectory.
+    var old = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(7200));
+    try (var tree = Files.walk(root.resolve(young))) {
+      for (Path path : tree.toList()) Files.setLastModifiedTime(path, old);
+    }
     assertEquals(1, patient.sweep().collected());
     // And the floor is in the configuration, so a zero cannot be configured into production.
     assertEquals(
         Duration.ofMinutes(1), new ContainmentConfig(root.toString(), 2, 4, "PT0S").sweepGrace());
     assertEquals(
         Duration.ofMinutes(30), new ContainmentConfig(root.toString(), 2, 4, null).sweepGrace());
+  }
+
+  /**
+   * The grace is an age since the last write, and the last write of a stage lands inside its staged
+   * revision. A workspace directory's own mtime stops changing the moment {@code revisions/} is
+   * created, so measuring it ran the grace from the start of staging rather than from the most
+   * recent byte -- shortening the one protection the multi-process window has.
+   */
+  @Test
+  void theGraceIsMeasuredFromTheStagedRevisionAndNotTheWorkspaceDirectory() throws Exception {
+    String inflight = UUID.randomUUID().toString();
+    Path workspace = root.resolve(inflight);
+    Path staged = Files.createDirectories(workspace.resolve("revisions").resolve("r"));
+    Files.writeString(staged.resolve("plowshare.json"), "{}");
+    when(records.committed("contained:" + inflight)).thenReturn(false);
+    // What an in-flight create across processes actually looks like: the workspace directory was
+    // made when staging began and has not been touched since, while bytes are still landing
+    // underneath it.
+    var old = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(7200));
+    Files.setLastModifiedTime(workspace.resolve("revisions"), old);
+    Files.setLastModifiedTime(workspace, old);
+    var patient = new ContainedSourceCollector(records, work, config, staging, Duration.ofHours(1));
+    var swept = patient.sweep();
+    assertEquals(0, swept.collected(), "a stage still being written is not abandoned");
+    assertEquals(1, swept.retained());
+    assertEquals(Set.of(inflight), staged());
+    // And a stage whose every entry is older than the grace is still collected, so this is an age
+    // and not an exemption for anything that has a revisions directory.
+    try (var tree = Files.walk(workspace)) {
+      for (Path path : tree.toList()) Files.setLastModifiedTime(path, old);
+    }
+    assertEquals(1, patient.sweep().collected());
+    assertEquals(Set.of(), staged());
   }
 
   /**
@@ -414,12 +452,29 @@ class ContainedRecoveryTest {
   void aSweepReportsThatItCouldNotLookRatherThanThatItFoundNothing() throws Exception {
     // A clean root: looked, found nothing.
     assertEquals(ContainedSourceCollector.Outcome.COMPLETE, collector.sweep().outcome());
-    // A root that is not there at all: could not look. The counts are the same; the outcome is not.
+    // A root that is not there at all: nothing has been staged on this server yet. Distinguished
+    // from the unreadable root below, because only one of the two needs an operator.
     Files.delete(root);
-    var blind = collector.sweep();
-    assertEquals(0, blind.collected());
-    assertEquals(0, blind.retained());
-    assertEquals(ContainedSourceCollector.Outcome.PARTIAL, blind.outcome());
+    var fresh = collector.sweep();
+    assertEquals(0, fresh.collected());
+    assertEquals(0, fresh.retained());
+    assertEquals(ContainedSourceCollector.Outcome.ABSENT, fresh.outcome());
+    // A root that is there and cannot be read: could not look. The counts are the same as a clean
+    // root's; the outcome is not.
+    Files.createDirectories(root);
+    Assumptions.assumeTrue(
+        FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+        "An unreadable root needs POSIX attributes");
+    var original = Files.getPosixFilePermissions(root);
+    Files.setPosixFilePermissions(root, EnumSet.noneOf(PosixFilePermission.class));
+    try {
+      var blind = collector.sweep();
+      assertEquals(0, blind.collected());
+      assertEquals(0, blind.retained());
+      assertEquals(ContainedSourceCollector.Outcome.PARTIAL, blind.outcome());
+    } finally {
+      Files.setPosixFilePermissions(root, original);
+    }
   }
 
   /**
@@ -478,8 +533,24 @@ class ContainedRecoveryTest {
               Duration.ZERO));
       // A clean root is quiet: nothing collected and nothing wrong.
       assertEquals(List.of(), captured.list);
+      // So is a root that does not exist yet. A fresh installation configures containment before
+      // anything is created, and a warning every interval about an unused capability is the noise
+      // that teaches an operator to ignore this logger.
       Files.delete(root);
       sweeps.sweep();
+      assertEquals(List.of(), captured.list, "a root that was never created is not a fault");
+      // A root that is there and cannot be read is the one that speaks up.
+      Files.createDirectories(root);
+      Assumptions.assumeTrue(
+          FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+          "An unreadable root needs POSIX attributes");
+      var original = Files.getPosixFilePermissions(root);
+      Files.setPosixFilePermissions(root, EnumSet.noneOf(PosixFilePermission.class));
+      try {
+        sweeps.sweep();
+      } finally {
+        Files.setPosixFilePermissions(root, original);
+      }
       assertEquals(1, captured.list.size(), "a blind sweep is never silent");
       assertEquals(ch.qos.logback.classic.Level.WARN, captured.list.getFirst().getLevel());
       // Counts, never paths: a containment root is deployment configuration.

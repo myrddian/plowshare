@@ -70,13 +70,17 @@ its parent was admitted is not in the parent's declared `calls:` list, so
 containment adds a resolution path for such a target without weakening that bound
 for ordinary delegation.
 
-Visibility is one way. The parent reads the child's execution trajectory,
-deliverables and resources through typed server contracts. The child cannot read
-outward. An external Application or SDK reaches a child only by addressing the
+Visibility is one way, and in this slice it is narrower than the direction
+allows. The parent reads the child's execution **trajectory** through a typed
+server contract; the child cannot read outward. Deliverable and resource reads
+are *not* in this slice: no operation exists through which a parent reads a
+child's deliverables or its resources, so nothing about them is implemented,
+exercised or refused — they are absent, which is a different fact from being
+denied. An external Application or SDK reaches a child only by addressing the
 parent, and the parent proxies only permissions it holds, so authority narrows at
 each hop. The operations this record adds are the parent's own typed ones:
-create, configure, read trajectory, read resources and destroy. Every other
-attempt to address a child is refused.
+create, configure ceiling, list children, read trajectory and destroy. Every
+other attempt to address a child is refused.
 
 Three distinct inventories carry the confinement proof, and none stands in for
 another. The first lists the surfaces a child manifest can declare, each reduced
@@ -246,18 +250,44 @@ it is not a wire change for existing scopes.
 ## Verification
 
 Confinement is the product, so verification shows escape attempts failing as well
-as the happy path working. A child naming its parent, a sibling, an uncontained
-project or the Global tier is refused at resolution. A child reading knowledge
-receives nothing from outside its subtree, including through audience-driven rows
-it never named and through dependency closure. A child manifest declaring a
+as the happy path working. This list is split on purpose: a verification section
+that reads as proof while some of its items cannot fire is the defect this record
+has already been corrected for, so each claim says whether this slice exercises
+it.
+
+**Exercised in this slice.** A child naming its parent, a sibling, an uncontained
+project or the Global tier is refused at resolution. A child manifest declaring a
 provider, Relay port, audience, swarm type, schedule or FileStore destination
-beyond the parent's hold is reduced or refused. An external principal addressing
-a child directly is refused, and addressing the parent succeeds only where the
-parent holds the proxied permission. Narrowing holds at depth, and the depth and
-breadth bounds refuse. Destroying a parent destroys descendants and revoking its
-authority stops descendant work. An interrupted create leaves no orphan project,
-revision directory or principal, and collection is observable. Siblings cannot
-observe one another's resources, trajectories or deliverables.
+beyond the parent's hold is reduced or refused, and a caller-named source
+destination is refused rather than accepted and dropped. An external principal
+addressing a child directly is refused, and addressing the parent succeeds only
+where the parent holds the proxied permission. Narrowing holds at depth, and the
+depth and breadth bounds refuse. Destroying a parent destroys its descendants. An
+interrupted create leaves no orphan project, revision directory or principal.
+Collection is observable *in its durable half*: a destruction writes a collection
+record per child and reports what it removed, a sweep reports whether it looked
+at its whole root, and an interrupted source removal is finished and marked by a
+later sweep.
+
+**Vacuous pending execution.** This slice does not execute a contained
+Application, and four claims depend on something running or on an operation that
+does not exist yet. They are retained as the contract the next slice must meet,
+not as results:
+
+- *A child reading knowledge receives nothing from outside its subtree.* The
+  readable set for a contained scope is empty, so every such read returns nothing
+  for want of anything to return. The fence is asserted; it has not yet been
+  asserted against a child that could otherwise have read something.
+- *Siblings cannot observe one another's resources, trajectories or deliverables.*
+  There is no sibling-addressable resource or deliverable operation to attempt, so
+  only the trajectory half of this is a refusal that can be made. The rest is
+  absence.
+- *Revoking a parent's authority stops descendant work.* Asserted on the stored
+  ceiling a descendant's next check would read, not on a descendant that is
+  running: nothing in this slice runs one.
+- *Collection is observable* against a running child. The records and the sweep
+  accounting above are real; what no test can yet show is a collection observed
+  while the collected child was executing.
 
 Tests follow the database test policy in [AGENTS.md](../../AGENTS.md): mocked
 repository interfaces and in-memory fakes by default. Real PostgreSQL behind
@@ -546,7 +576,7 @@ scope and is verified to, with the verification named.
 | `plowshare-server/.../archive/ProjectStore.java:1337`, `all` | the project catalogue | **Refused.** `ProjectCatalogue.all()` is read by background reconciliation and by `relay/ApplicationRelayWorkerBindings.java:38`, which offers *every row it returns* for Relay worker enrollment. A child would have been offered on every pass, with nobody having named it. |
 | `plowshare-server/.../archive/ProjectStore.java:1256`, `allForSession` | the client-session project listing | **Fenced by construction, and deliberately not given a prefix exclusion.** It returns `allFor(handle)` — fenced above — plus one further query whose only predicate is `name LIKE ?` with the pattern `ClientProjects.prefix(session, handle) + "%"`. That prefix is `client:` followed by the hex SHA-256 of `handle\0session` and a colon; it is computed, never caller-supplied, and cannot be steered. So the second query can only ever return `client:` names and a `contained:` name is unreachable by it. The justification is recorded here rather than left to be re-derived, because the safety is a property of how the pattern is built and not of anything visible at this line. **A caller-controlled pattern reaching this query would reopen it.** |
 | `plowshare-server/.../archive/ProjectStore.java:1317`, `ordinary` | project create, rename, publish, administer | **Refused** (reserved in Task 2; now reads the shared predicate). |
-| `plowshare-server/.../access/ProjectAuthorization.java:340`→`:462` | every named-project operation that reaches the project loop, `conversation.search` among them | **Fenced by kind, with named exceptions.** `members.requireRole(project, account, permission)` resolves no role for a contained project, and it is what the loop at `:456`–`:462` calls for every project in a non-empty set. Verified end to end against a real child row for the strongest external principal there is — a server administrator — and for the container's own MANAGER. **This is not a universal, and the difference matters:** five branches return before that loop and resolve no project at all — `:343` `WORKER_OPERATIONS`, `:353` `proc.*`, `:358` `information.policy.*`, `:402` `ACCOUNT_OWNED` (`schedule.pause` resolves its own schedule-provenance projects; **`schedule.forget` resolves nothing**, because it is keyed on a schedule id rather than a project) and `:424` service `GENERAL_INFORMATION_READ`. None is a hole today, but each is closed by an **upstream refusal rather than by this chokepoint**, which is the weaker of the two and is why they are named here: a reader who takes the chokepoint as universal would stop looking at exactly the paths it does not cover. For the schedule pair, the upstream refusals are Task 5's refusal of a child declaring a schedule, `FileScheduleDefinitions:214` `manage` (no source can be registered for a child) and `JdbcScheduleStore:39` (nothing fires for one), so no schedule id can resolve to a child. For the other four, the surfaces reach no project-keyed state a child has: the worker frames delegate to their typed route service, `proc.*` are metadata filters whose repository rechecks custody per read, `information.policy.*` resolves a durable reference target, and service `GENERAL_INFORMATION_READ` resolves through `knowledge_scope_readable`, which admits no `CONTAINED` scope (its own row below). **The task that makes a contained child execute must re-audit these five**, because an upstream refusal that was true while nothing executed a child is not guaranteed to stay true. |
+| `plowshare-server/.../access/ProjectAuthorization.java:340`→`:462` | every named-project operation that reaches the project loop, `conversation.search` among them | **Fenced by kind, with named exceptions.** `members.requireRole(project, account, permission)` resolves no role for a contained project, and it is what the loop at `:456`–`:462` calls for every project in a non-empty set. Verified end to end against a real child row for the strongest external principal there is — a server administrator — and for the container's own MANAGER. **This is not a universal, and the difference matters:** five branches return before that loop and resolve no project at all — `:344` `WORKER_OPERATIONS`, `:349` `proc.*`, `:357` `information.policy.*`, `:400` `ACCOUNT_OWNED` (`schedule.pause` resolves its own schedule-provenance projects; **`schedule.forget` resolves nothing**, because it is keyed on a schedule id rather than a project) and `:424` service `GENERAL_INFORMATION_READ`. None is a hole today, but each is closed by an **upstream refusal rather than by this chokepoint**, which is the weaker of the two and is why they are named here: a reader who takes the chokepoint as universal would stop looking at exactly the paths it does not cover. For the schedule pair, the upstream refusals are Task 5's refusal of a child declaring a schedule, `FileScheduleDefinitions:214` `manage` (no source can be registered for a child) and `JdbcScheduleStore:39` (nothing fires for one), so no schedule id can resolve to a child. For the other four, the surfaces reach no project-keyed state a child has: the worker frames delegate to their typed route service, `proc.*` are metadata filters whose repository rechecks custody per read, `information.policy.*` resolves a durable reference target, and service `GENERAL_INFORMATION_READ` resolves through `knowledge_scope_readable`, which admits no `CONTAINED` scope (its own row below). **The task that makes a contained child execute must re-audit these five**, because an upstream refusal that was true while nothing executed a child is not guaranteed to stay true. |
 | `plowshare-server/.../archive/JdbcProjectMembers.java:136`, `role` | the role every call site asks for | **Fenced by kind.** `authority_project_role` requires a live grant whose scope is `PROJECT` or `PERSONAL`; `service_project_role` requires its owner's. Both answer null for a `CONTAINED` scope. `mayWork:200`, `mayManage:204`, `mayUse:422`, `access:239` and `isMember:50` are all built on it and are each asserted. |
 | `plowshare-server/.../archive/JdbcProjectMembers.java:215`, `mayAdminister` | `project.access`, `project.member.*` | **Fenced by kind.** `authority_project_management_grant` admits either a live grant on the target scope — excluded — or `ORDINARY_PROJECT_CONTROL` coverage against `target.kind='PROJECT'`, which `CONTAINED` is not. |
 | `plowshare-server/.../archive/JdbcProjectMembers.java:164`, `readableProjects` | batched candidate admission | **Fenced by kind.** Its SQL `ELSE` branch is `authority_project_role`; the `personal:`/`client:` `LIKE` arms are not reached. |
@@ -633,7 +663,7 @@ parsed differently.
 | Relay audience | `server/ports.json` `bindings[].groups` | **Reduced.** Refused unless every group is one the container declares on that same topic. |
 | Named swarm type | `swarm/<name>.{md,json}` | **Reduced.** Refused unless the container declares a swarm type of that name. |
 | Schedule | `schedules/*.json` | **Refused** outright for a child in this slice. ADR 0020 gives a schedule operational authority over the server's own scheduler, and nothing here mediates that for a child; a container holding a schedule of its own does not change the answer. |
-| FileStore destination | the creation request's `destination` | **Ignored.** The server allocates the child's source area under `plowshare.containment.root`; a container typically holds no FileStore `MANAGER` over its own retained source, so proxying could not yield a legal destination. |
+| FileStore destination | the creation request's `destination` | **Refused** while non-null. The server allocates the child's source area under `plowshare.containment.root`; a container typically holds no FileStore `MANAGER` over its own retained source, so proxying could not yield a legal destination. The field stays in the operation's shape for compatibility with `application.deploy`, so every SDK sends the key, but a *named* destination is refused at the frame and again in the service rather than validated into a value nothing reads — a field accepted and dropped reads to a caller as supported. |
 | FileStore writable area | the creation request's `writableAreas` | **Refused** while non-empty. A child's writable area is allocated inside its own containment, so any requested area names a store outside its container's fence. |
 | Service account attribution and spending pool | the child's own allowance | **Allocated, never shared.** The child allocates its own allowance under a ceiling its container sets at creation and may later raise or reduce — to zero — within its own remaining allowance. The creation bound and the reconfiguration bound are one rule applied at two call sites against the same pool, because a bound enforced only at creation would be decorative: create low, raise high. An absent ceiling is not representable, because `AllowanceSnapshot` documents absent as unlimited. Child spend is attributed to the child, so ADR 0025's immutable attribution and its rule that delegation cannot change the accounting account are untouched, and no parent/child shared counter is introduced. |
 | Manifest `name` | `plowshare.json` `name` | **Rewritten** to the server-allocated opaque project name. `name` is identity and not authority, and the server owns the name a child cannot know in advance; every surface that *is* authority is in the rows above and is refused or reduced, never rewritten. |
@@ -714,8 +744,11 @@ destruction there was nothing left to read, and the staged-source removal that
 follows the transaction was silent. The claim now stands because two things were
 added rather than because it was softened.
 
-**A collection record, V199's `contained_collections`.** One row per collected
-source area, written inside the destroying transaction before the rows go. It is
+**A collection record, V199's `contained_collections`, with V200's `scope` and
+V201's `root`.** One row per collected source area, written inside the destroying
+transaction before the rows go; the two added columns are what make a retry's
+answer identical to the original's, and are explained under delivery uncertainty
+below. It is
 deliberately the one table in this relation with *no foreign key at all*:
 everything it describes is being deleted as it is written, so a constraint into
 any of it would delete the history along with the thing it is history of. It is
@@ -819,9 +852,14 @@ a `finally` so a refusal cannot exempt a project forever; the sweep skips a
 claimed project whatever its record or age says. That is **exact, and exact only
 within one process**: a durable claim would be a claim nothing will ever release
 if its process dies, which is a permanent leak dressed as safety. Across
-processes the bound is `plowshare.containment.sweep-grace`, a minimum directory
-age below which an unaccounted stage is assumed to belong to a creation still
-running. The grace defaults long and is floored at one minute, because the two
+processes the bound is `plowshare.containment.sweep-grace`, a minimum age below
+which an unaccounted stage is assumed to belong to a creation still running. The
+age measured is the **newest write anywhere in the stage**, not the workspace
+directory's own mtime: a directory's mtime changes with its entries, so the
+workspace's stops moving as soon as `revisions/` exists while the creation goes on
+writing underneath it, and measuring that ran the grace from the start of staging
+instead of from the last byte — shortening the only protection the window below
+has. The grace defaults long and is floored at one minute, because the two
 failure directions are not symmetric: too long leaks for one more sweep, too
 short deletes live work.
 
@@ -845,11 +883,16 @@ if that process dies; that is new lifecycle machinery and is deliberately not in
 this slice.
 
 A sweep reports **what it looked at**, not only what it did. Its result carries
-whether the whole root was enumerated, whether it could not be, or whether no root
-is configured, because the counts alone cannot tell "looked, found nothing" from
-"could not look" — both answer zero — and the scheduler logs a sweep that could
-not look. Collection is this record's observability claim, so the component
-carrying it cannot be the one that hides its own failure.
+whether the whole root was enumerated, whether it could not be, whether the
+configured root does not exist yet, or whether no root is configured at all,
+because the counts alone cannot tell "looked, found nothing" from "could not
+look" — both answer zero — and the scheduler logs a sweep that could not look.
+Collection is this record's observability claim, so the component carrying it
+cannot be the one that hides its own failure. A root that does not exist yet is
+distinguished from one that could not be read, and is **not** logged: the root's
+entries are made by creation, so its absence is the steady state of a server that
+has never created a contained Application, and warning about that every interval
+is what teaches an operator to ignore the one warning that matters.
 
 `ContainmentConfig` therefore now holds one value that defaults when absent
 (`sweep-grace`) beside two that fail at startup when absent (the depth and
@@ -892,12 +935,21 @@ the three answers are **distinguished**:
   refusal a live child would get. The row retains the container as a plain value
   precisely so this stays answerable after the scope it names has been cascaded
   away.
-- **A record that matches** — success, replaying the *same* answer. V200 records
-  the destroyed child's own `scope`, which is what links a parent's collection row
+- **A record that matches** — success, replaying the *same* answer. Two columns
+  are what make "the same" true rather than nearly true, and this claim is the
+  reason a request-UUID receipt was not added, so neither is optional. V200
+  records the destroyed child's own `scope`, which links a parent's collection row
   to its descendants': without it a retry could only answer about the one record
-  it named, which is a *different* answer from the original and worse than a
-  refusal. The subtree is rebuilt by descending the recorded containment edges,
-  deepest first, bounded by the configured depth.
+  it named, a *different* answer from the original and worse than a refusal. V201
+  records the `root` — the child a single `destroy` named, written on every record
+  that destruction wrote. A containment edge says which rows are *beneath* a
+  scope, not which destruction collected them, so a rebuild walking the edges
+  alone also picked up a descendant destroyed earlier in its own separate
+  destruction, and answered a retry with a longer `collected` list and a larger
+  `sources` count than the destruction being replayed had produced. The subtree is
+  therefore rebuilt by descending the recorded containment edges, restricted at
+  every edge to the records of that one destruction, deepest first, bounded by the
+  configured depth.
 
 A retry also finishes an interrupted source removal, so calling twice is not
 merely safe but useful: the second call collects the bytes the first could not.

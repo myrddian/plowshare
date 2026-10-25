@@ -130,8 +130,14 @@ public class JdbcOperationRecords implements OperationRecords {
    *
    * <p>{@code ORDER BY c.conversation} is the oldest-first order the contract promises: a
    * conversation id is {@code cnv_} plus a time-ordered identifier, so lexical order is creation
-   * order. A row with no sealed admission is skipped rather than failing the read: this is a
-   * listing, and one unusable row must not refuse the rest.
+   * order.
+   *
+   * <p>A conversation whose admission is not usable evidence is skipped rather than failing the
+   * read: this is a listing, and one unusable row must not refuse the rest. That covers both an
+   * absent or unsealed admission, which the join excludes, and a sealed admission with no retained
+   * supporting authority, which no {@link OperationAuthority.Admission} can be constructed from.
+   * Skipping is never a widening — a conversation left out of this listing is one whose authority
+   * nothing here will act on.
    */
   @Override
   public List<OperationAuthority.Conversation> conversationsIn(AuthorityIds.ScopeId scope) {
@@ -152,8 +158,11 @@ public class JdbcOperationRecords implements OperationRecords {
                     parent = rows.getString("parent_conversation"),
                     capabilities = rows.getString("capabilities");
                 var header = AdmissionHeader.read(rows);
-                var budget =
-                    migratedAllowance(rows.getObject("allowance_id", UUID.class), conversation);
+                // Read here and resolved after the support rows, because both live on the row the
+                // cursor is on now and the support loop moves it. Resolving the allowance before
+                // this conversation is known to be usable would also fail the whole listing for a
+                // row that is about to be skipped.
+                UUID allowance = rows.getObject("allowance_id", UUID.class);
                 // Consumes this conversation's contiguous support rows. The cursor is left on the
                 // next conversation's first row, which is what the returned flag reports; the
                 // ResultSet is forward-only, so position is never read back from it.
@@ -171,13 +180,20 @@ public class JdbcOperationRecords implements OperationRecords {
                             AuthorityAction.valueOf(action),
                             rows.getObject("grant_id", UUID.class)));
                 } while (rows.next());
+                // Skipped, as this method's contract says: an admission with nothing retained
+                // against it is not usable evidence, and an Admission cannot be constructed from
+                // it. Throwing here failed the read for every conversation in the scope because of
+                // one row, which is precisely what a listing must not do. Support is immutable by
+                // trigger, so this state is not reachable by widening or revocation; it is the
+                // row's own shape, and it is left out rather than reported as authority.
+                if (support.isEmpty()) continue;
                 found.add(
                     new OperationAuthority.Conversation(
                         conversation,
                         agent,
                         header.admission(List.copyOf(support)),
                         parent,
-                        budget,
+                        migratedAllowance(allowance, conversation),
                         capabilities));
               }
               return List.copyOf(found);

@@ -40,21 +40,26 @@ class ContainedApplicationFramesTest {
 
   static Map<String, Object> valid(String type) {
     return switch (type) {
-      case FrameTypes.APPLICATION_CHILD_CREATE ->
-          new HashMap<>(
-              Map.of(
-                  "conversation",
-                  "c",
-                  "requestId",
-                  REQUEST,
-                  "ceiling",
-                  3,
-                  "destination",
-                  Map.of("store", "applications", "path", "x"),
-                  "writableAreas",
-                  List.of(),
-                  "files",
-                  List.of(Map.of("path", "plowshare.json", "text", "{}"))));
+      case FrameTypes.APPLICATION_CHILD_CREATE -> {
+        // The field is part of the operation's shape and so is always sent; the only value a
+        // container may send is the one that names nothing, because the server allocates the
+        // child's source area itself.
+        var create =
+            new HashMap<String, Object>(
+                Map.of(
+                    "conversation",
+                    "c",
+                    "requestId",
+                    REQUEST,
+                    "ceiling",
+                    3,
+                    "writableAreas",
+                    List.of(),
+                    "files",
+                    List.of(Map.of("path", "plowshare.json", "text", "{}"))));
+        create.put("destination", null);
+        yield create;
+      }
       case FrameTypes.APPLICATION_CHILD_CEILING ->
           new HashMap<>(Map.of("conversation", "c", "child", CHILD, "calls", 1));
       case FrameTypes.APPLICATION_CHILD_DESTROY, FrameTypes.APPLICATION_CHILD_TRAJECTORY ->
@@ -143,6 +148,33 @@ class ContainedApplicationFramesTest {
         CallerFault.class,
         () -> frames.get(FrameTypes.APPLICATION_CHILD_CEILING).handle(negative, asking));
     verifyNoInteractions(children);
+  }
+
+  /**
+   * A caller-supplied destination is refused, not accepted and discarded. The server allocates a
+   * child's source area under its own containment root, so there is no destination a caller could
+   * name that would mean anything — and a boundary whose contract is that a raw map never travels
+   * past it must not validate a field into a value nothing reads.
+   */
+  @Test
+  void aCreateNamingItsOwnDestinationIsRefused() {
+    var create = frames.get(FrameTypes.APPLICATION_CHILD_CREATE);
+    var named = valid(FrameTypes.APPLICATION_CHILD_CREATE);
+    named.put("destination", Map.of("store", "applications", "path", "x"));
+    assertThrows(CallerFault.class, () -> create.handle(named, asking));
+    // An explicit null is the field being declined, which stays acceptable: the operation's shape
+    // keeps the nullable field for request-shape compatibility with application.deploy, so every
+    // SDK sends the key.
+    var declined = valid(FrameTypes.APPLICATION_CHILD_CREATE);
+    when(children.create(eq("owner"), any()))
+        .thenReturn(
+            new ContainedApplications.Child(
+                UUID.fromString(CHILD),
+                UUID.fromString(REQUEST),
+                "contained:" + CHILD,
+                UUID.fromString(REQUEST)));
+    assertDoesNotThrow(() -> create.handle(declined, asking));
+    verify(children, times(1)).create(eq("owner"), any(ContainedApplications.Create.class));
   }
 
   @Test

@@ -194,7 +194,7 @@ public class JdbcIdentityRepository implements IdentityRepository {
   }
 
   private static CallerFault absent() {
-    return new CallerFault("Identity or scope mapping is unavailable or restricted");
+    return new CallerFault(IdentityRepository.UNRESOLVED);
   }
 
   /** No legacy project home is published for a contained scope by this slice. */

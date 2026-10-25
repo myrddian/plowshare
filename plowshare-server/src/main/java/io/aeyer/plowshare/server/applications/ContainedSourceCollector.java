@@ -50,6 +50,15 @@ public final class ContainedSourceCollector {
      * difference between a quiet system and a blind one, which is the whole point of the field.
      */
     PARTIAL,
+    /**
+     * The configured root does not exist yet, so there is nothing staged to look at. Not a fault
+     * and not a blind sweep: creation makes the root's entries, so a server that has never created
+     * a contained Application has no root directory, and on a fresh installation that is the steady
+     * state. Reporting it as {@link #PARTIAL} made the scheduler warn every interval about a system
+     * that is merely unused, which is the noise that teaches an operator to ignore the one warning
+     * that matters.
+     */
+    ABSENT,
     /** No containment root is configured, so there is nothing to look at. Not a fault. */
     UNCONFIGURED
   }
@@ -163,6 +172,9 @@ public final class ContainedSourceCollector {
                 UUID.randomUUID(),
                 null,
                 null,
+                // No destruction rooted this: a swept stage had no committed record, so it is on
+                // no destruction's chain and no replay can answer for it.
+                null,
                 project,
                 null,
                 entry,
@@ -176,6 +188,12 @@ public final class ContainedSourceCollector {
             });
         collected++;
       }
+    } catch (NoSuchFileException absent) {
+      // Told apart from "could not look" on purpose. The root's entries are made by creation, so
+      // its absence says nothing has been staged on this server yet -- the steady state of a fresh
+      // installation, not a filesystem an operator must go and inspect. Anything else that cannot
+      // be read is still PARTIAL below.
+      outcome = Outcome.ABSENT;
     } catch (IOException | java.nio.file.DirectoryIteratorException unreadable) {
       // A sweep is best effort by necessity and reports what it did rather than failing a caller
       // that asked for cleanup. What it could not read this time it reads on the next sweep, and
@@ -190,18 +208,45 @@ public final class ContainedSourceCollector {
   /**
    * Whether a stage is too young to be assumed abandoned.
    *
-   * <p>The in-process claim is exact but local, so this is the cross-process bound: a directory
-   * modified more recently than the configured grace is assumed to belong to a creation that is
-   * still running. The grace errs long on purpose, and {@link ContainmentConfig} floors it, because
-   * the two failure directions are not symmetric — too long leaks for one more sweep, too short
-   * deletes live work. An unreadable timestamp is treated as young, for the same reason.
+   * <p>The in-process claim is exact but local, so this is the cross-process bound: a stage written
+   * to more recently than the configured grace is assumed to belong to a creation that is still
+   * running. The grace errs long on purpose, and {@link ContainmentConfig} floors it, because the
+   * two failure directions are not symmetric — too long leaks for one more sweep, too short deletes
+   * live work. An unreadable timestamp is treated as young, for the same reason.
+   *
+   * <p><strong>The age is the newest write anywhere in the stage, not the workspace directory's
+   * own.</strong> A directory's mtime changes when its entries change, so the workspace's stops
+   * moving the moment {@code revisions/} is created — and a creation then writes everything else
+   * underneath that, for however long the bytes take. Measuring the workspace therefore ran the
+   * grace from the start of staging rather than from the last write, which shortens exactly the
+   * protection the multi-process window depends on. The tree a stage may hold is bounded by the
+   * package limits ({@code validateFiles}: 128 files, 16 directory levels), so walking it is a
+   * bounded read; the depth bound here is that limit with room for {@code revisions/<revision>}
+   * above it, and an entry count bound so a hand-planted tree cannot make a sweep walk forever.
    */
   private boolean young(Path entry) {
     if (grace.isZero() || grace.isNegative()) return false;
+    var floor = java.time.Instant.now().minus(grace);
+    try (var tree = Files.walk(entry, STAGE_DEPTH)) {
+      // Short-circuits on the first recent entry. Files.walk does not follow links.
+      return tree.limit(STAGE_ENTRIES).anyMatch(path -> written(path, floor));
+    } catch (IOException | RuntimeException unreadable) {
+      return true;
+    }
+  }
+
+  /** Depth of a staged tree: the package's 16 directory levels under {@code revisions/<id>}. */
+  private static final int STAGE_DEPTH = 24;
+
+  /**
+   * Entries one stage may be read for. The package limits allow 128 files and their directories.
+   */
+  private static final long STAGE_ENTRIES = 4096;
+
+  /** Whether one entry was written after the floor. An unreadable timestamp counts as recent. */
+  private static boolean written(Path path, java.time.Instant floor) {
     try {
-      return Files.getLastModifiedTime(entry, LinkOption.NOFOLLOW_LINKS)
-          .toInstant()
-          .isAfter(java.time.Instant.now().minus(grace));
+      return Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant().isAfter(floor);
     } catch (IOException unreadable) {
       return true;
     }

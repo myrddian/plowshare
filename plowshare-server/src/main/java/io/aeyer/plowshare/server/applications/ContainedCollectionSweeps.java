@@ -71,6 +71,11 @@ public final class ContainedCollectionSweeps implements ApplicationListener<Appl
       // would leave an operator unable to tell a system with nothing to collect from one that has
       // stopped collecting. This component carries ADR 0042's observability claim; it cannot be
       // the thing that hides its own failure.
+      // ABSENT is deliberately not among them. A configured root that does not exist yet is a
+      // server that has not created a contained Application, which is the steady state of a fresh
+      // installation: warning about it every interval would be this component crying wolf at
+      // nothing, and an operator who learns to ignore the warning loses the blind-sweep signal it
+      // exists to carry.
       if (swept.outcome() == ContainedSourceCollector.Outcome.PARTIAL)
         LOG.warn(
             "Contained source sweep did not enumerate its whole root; collected {}, retained {}."

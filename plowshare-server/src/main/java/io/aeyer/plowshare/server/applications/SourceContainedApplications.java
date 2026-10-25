@@ -125,6 +125,13 @@ public final class SourceContainedApplications implements ContainedApplications 
       throw new CallerFault(
           "A contained Application's writable area is allocated inside its own containment; a"
               + " requested FileStore area is outside its container's fence");
+    // The same rule for the same reason, and refused here rather than ignored: this path allocates
+    // the destination itself under ContainmentConfig.root(), so a request that names one is asking
+    // for something no caller can be given. A field accepted and discarded reads as supported.
+    if (request.requestedDestination() != null)
+      throw new CallerFault(
+          "A contained Application's source area is allocated by the server inside its"
+              + " containment; a destination cannot be named");
     Path containerRoot = containerRoot(parent.admission().home().project());
     if (!ContainedDeclarations.nesting(containerRoot))
       throw new CallerFault("This Application does not declare nesting");
@@ -277,31 +284,23 @@ public final class SourceContainedApplications implements ContainedApplications 
     var retained = live.get();
     if (!parent.admission().scope().equals(retained.container()))
       throw new CallerFault("This Application does not contain that Application");
-    // Never empty: find() just resolved this child, and the subtree read selects it at depth 0.
-    var subtree = records.subtree(retained.scope());
-    work.inTransaction(
-        () -> {
-          for (var held : subtree) {
-            // Zeroed before the rows go, so a descendant mid-execution cannot claim another call
-            // between this unit committing and its own next check. The allowance row itself is the
-            // allowance owner's and is not deleted here.
-            allowances.ceiling(held.allowance(), 0);
-            principals.revoke(
-                new AuthorityScope.Contained(held.scope(), held.projectId(), held.container()));
-            records.collected(
-                new ContainedApplicationRepository.Collection(
-                    held.id(),
-                    held.scope(),
-                    held.container(),
-                    held.project(),
-                    held.revision(),
-                    workspace(held.project()),
-                    ContainedApplicationRepository.Cause.DESTROYED,
-                    false));
-            records.destroy(held.id());
-          }
-          return null;
-        });
+    // Locked and read inside the durable unit, as creation locks before it inserts. Read outside
+    // it, a nested create committing between the read and the deletes left the cascade to meet the
+    // RESTRICT on authority_scopes.container, and that arrived as a DataIntegrityViolationException
+    // -- an INTERNAL_ERROR for a conflict creation answers with a plain refusal. The lock is the
+    // whole subtree and not the one container because the creations that can add a row inside this
+    // cascade are made by descendants, each of which locks its OWN container's project row.
+    var subtree =
+        work.inTransaction(
+            () -> {
+              records.lockSubtree(retained.scope());
+              // Never empty: find() just resolved this child, and the subtree read selects it at
+              // depth 0. Re-read under the lock, so a creation that committed while this request
+              // was proving authority is destroyed with the rest rather than left behind it.
+              var held = records.subtree(retained.scope());
+              destroy(held, child);
+              return held;
+            });
     int sources = 0;
     for (var held : subtree) {
       Path workspace = workspace(held.project());
@@ -315,6 +314,52 @@ public final class SourceContainedApplications implements ContainedApplications 
     }
     return new Destroyed(
         child, subtree.stream().map(ContainedApplicationRepository.Retained::id).toList(), sources);
+  }
+
+  /**
+   * The durable half of a destruction, deepest first, inside the caller's unit of work.
+   *
+   * <p>A {@link DataIntegrityViolationException} here is the race the lock narrows but cannot
+   * remove: a creation already past its own container lock commits a row referencing a scope this
+   * cascade is deleting, and {@code authority_scopes.container}'s {@code ON DELETE RESTRICT}
+   * refuses the delete. That is the same class of conflict {@code
+   * JdbcContainedApplicationRepository .create} answers with a {@link CallerFault}, and it is
+   * answered the same way here so one loser is not a refusal and the other a server fault. Nothing
+   * is lost either way: the unit rolls back, so every row and every byte is still as it was, and
+   * the caller may simply ask again.
+   *
+   * @param subtree the records to remove, deepest first
+   * @param root the child this destruction was asked for, written on every record it writes
+   */
+  private void destroy(List<ContainedApplicationRepository.Retained> subtree, UUID root) {
+    try {
+      for (var held : subtree) {
+        // Zeroed before the rows go, so a descendant mid-execution cannot claim another call
+        // between this unit committing and its own next check. The allowance row itself is the
+        // allowance owner's and is not deleted here.
+        allowances.ceiling(held.allowance(), 0);
+        principals.revoke(
+            new AuthorityScope.Contained(held.scope(), held.projectId(), held.container()));
+        records.collected(
+            new ContainedApplicationRepository.Collection(
+                held.id(),
+                held.scope(),
+                held.container(),
+                // Every record of this one destruction carries the named child as its root, which
+                // is what lets a replay answer for this destruction and no other.
+                root,
+                held.project(),
+                held.revision(),
+                workspace(held.project()),
+                ContainedApplicationRepository.Cause.DESTROYED,
+                false));
+        records.destroy(held.id());
+      }
+    } catch (org.springframework.dao.DataIntegrityViolationException conflict) {
+      throw new CallerFault(
+          "This contained Application acquired a nested Application concurrently; nothing was"
+              + " destroyed, so repeat the request");
+    }
   }
 
   /**
@@ -334,7 +379,11 @@ public final class SourceContainedApplications implements ContainedApplications 
    * plain value precisely so this stays answerable after the scope it names is gone. A record that
    * matches is a success, and it replays the <em>same</em> answer: the subtree is rebuilt by
    * descending the recorded containment edges from the child's own scope, deepest first, bounded by
-   * the configured depth.
+   * the configured depth, and restricted at every edge to the records <em>that</em> destruction
+   * wrote. The restriction is what makes "the same answer" true rather than nearly true: a
+   * descendant destroyed earlier in its own separate destruction sits on the same edge, and
+   * including it would answer a retry with a longer {@code collected} list and a larger {@code
+   * sources} count than the destruction being replayed ever produced.
    *
    * <p>It also finishes an interrupted source removal, so calling twice is not merely safe but
    * useful: the second call collects the bytes the first could not and marks the record.
@@ -348,7 +397,12 @@ public final class SourceContainedApplications implements ContainedApplications 
         || !parent.admission().scope().equals(record.container()))
       throw new CallerFault("This Application does not contain that Application");
     var rebuilt = new ArrayList<ContainedApplicationRepository.Collection>();
-    descend(record, rebuilt, 0);
+    // Scoped to the destruction this record belongs to, which for a replayable row is the row's own
+    // child. The containment edges alone say which records are beneath a scope, not which
+    // destruction wrote them, so an unscoped walk also picked up a descendant destroyed earlier in
+    // its own separate destruction -- a longer list and a different source count than the answer
+    // being replayed.
+    descend(record, rebuilt, 0, record.root());
     // Deepest first, as the original answered. The rebuild appends a node before its children, so
     // reversing it yields children before parents at every level.
     Collections.reverse(rebuilt);
@@ -368,11 +422,13 @@ public final class SourceContainedApplications implements ContainedApplications 
   private void descend(
       ContainedApplicationRepository.Collection node,
       List<ContainedApplicationRepository.Collection> into,
-      int depth) {
+      int depth,
+      UUID root) {
     if (depth > config.bounds().maxDepth())
       throw new CallerFault("This containment chain exceeds the configured depth");
     into.add(node);
-    for (var beneath : records.collectedUnder(node.scope())) descend(beneath, into, depth + 1);
+    for (var beneath : records.collectedUnder(node.scope(), root))
+      descend(beneath, into, depth + 1, root);
   }
 
   /** Collects a recorded source area if it is still there, and marks it once it is gone. */

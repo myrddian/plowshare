@@ -274,6 +274,7 @@ class ContainedConcurrencyTest {
             deeper.id(),
             deeper.scope(),
             deeper.container(),
+            deeper.id(),
             deeper.project(),
             deeper.revision(),
             Path.of("/srv/containment").resolve(deeper.project().substring("contained:".length())),
@@ -345,12 +346,30 @@ class ContainedConcurrencyTest {
     deployParent();
     var inner = child(parentScope);
     var deeper = child(inner.scope());
+    // A third child on the same containment edge, destroyed EARLIER in its own separate
+    // destruction. The edge cannot tell the two destructions apart; the root can, and must, or a
+    // replay of the destruction below answers with this record too.
+    var earlier = child(inner.scope());
+    records.collected(
+        new ContainedApplicationRepository.Collection(
+            earlier.id(),
+            earlier.scope(),
+            earlier.container(),
+            earlier.id(),
+            earlier.project(),
+            earlier.revision(),
+            Path.of("/srv/containment").resolve(earlier.project().substring("contained:".length())),
+            ContainedApplicationRepository.Cause.DESTROYED,
+            false));
+    records.destroy(earlier.id());
     for (var held : List.of(deeper, inner))
       records.collected(
           new ContainedApplicationRepository.Collection(
               held.id(),
               held.scope(),
               held.container(),
+              // One destruction, rooted at the child it named: inner.
+              inner.id(),
               held.project(),
               held.revision(),
               Path.of("/srv/containment").resolve(held.project().substring("contained:".length())),
@@ -366,17 +385,22 @@ class ContainedConcurrencyTest {
     var named = records.collection(inner.id()).orElseThrow();
     assertEquals(parentScope, named.container());
     assertEquals(inner.scope(), named.scope());
+    assertEquals(inner.id(), named.root());
     assertEquals(
         List.of(deeper.id()),
-        records.collectedUnder(named.scope()).stream()
+        records.collectedUnder(named.scope(), named.root()).stream()
             .map(ContainedApplicationRepository.Collection::child)
-            .toList());
-    assertEquals(List.of(), records.collectedUnder(deeper.scope()));
+            .toList(),
+        "a replay answers for one destruction, not for every row beneath the edge");
+    // The earlier destruction is still history, and still answers for itself.
+    assertEquals(earlier.id(), records.collection(earlier.id()).orElseThrow().root());
+    assertEquals(List.of(), records.collectedUnder(deeper.scope(), named.root()));
     // A SWEPT row names no scope and is therefore on no chain, which the shape constraint enforces
     // and the walk relies on.
     records.collected(
         new ContainedApplicationRepository.Collection(
             UUID.randomUUID(),
+            null,
             null,
             null,
             "contained:" + UUID.randomUUID(),
@@ -394,13 +418,50 @@ class ContainedConcurrencyTest {
         Exception.class,
         () ->
             jdbc.update(
-                "INSERT INTO contained_collections(child,container,project,revision,workspace,cause)"
-                    + " VALUES(?,?,?,?,?, 'DESTROYED')",
+                "INSERT INTO contained_collections(child,container,root,project,revision,workspace,"
+                    + "cause) VALUES(?,?,?,?,?,?, 'DESTROYED')",
+                UUID.randomUUID(),
+                parentScope.value(),
+                UUID.randomUUID(),
+                "contained:" + UUID.randomUUID(),
+                UUID.randomUUID(),
+                "/srv/containment/x"));
+    // The same constraint governs the destruction root: a DESTROYED row with no root would be a
+    // row the rebuild could never attribute, and V201 refuses it rather than leaving it off chain.
+    assertThrows(
+        Exception.class,
+        () ->
+            jdbc.update(
+                "INSERT INTO contained_collections(child,scope,container,project,revision,"
+                    + "workspace,cause) VALUES(?,?,?,?,?,?, 'DESTROYED')",
+                UUID.randomUUID(),
                 UUID.randomUUID(),
                 parentScope.value(),
                 "contained:" + UUID.randomUUID(),
                 UUID.randomUUID(),
                 "/srv/containment/x"));
+  }
+
+  /**
+   * The subtree lock destruction now takes before it reads. Real PostgreSQL because the assertion
+   * is that the statement is valid SQL over the real recursive relation and over the real {@code
+   * FOR UPDATE OF} target — a mocked repository asserts nothing about either, and destruction
+   * depends on this statement running.
+   */
+  @Test
+  void theSubtreeLockStatementRunsOverTheWholeSubtree() {
+    deployParent();
+    var inner = child(parentScope);
+    var deeper = child(inner.scope());
+    assertDoesNotThrow(() -> records.lockSubtree(inner.scope()));
+    // The rows it locks are the rows destruction then reads and deletes.
+    assertEquals(
+        List.of(deeper.id(), inner.id()),
+        records.subtree(inner.scope()).stream()
+            .map(ContainedApplicationRepository.Retained::id)
+            .toList());
+    // A scope with no contained rows beneath it is not an error: an ordinary project locks itself.
+    assertDoesNotThrow(() -> records.lockSubtree(parentScope));
   }
 
   private long rows(String table) {

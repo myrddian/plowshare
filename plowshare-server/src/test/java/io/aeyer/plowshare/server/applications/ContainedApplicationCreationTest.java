@@ -270,20 +270,30 @@ class ContainedApplicationCreationTest {
         IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 2, null, null));
   }
 
+  /**
+   * The server allocates the destination, so a requested one is refused rather than accepted and
+   * dropped — a field quietly ignored reads to a caller as supported. Nothing is staged by the
+   * refusal, and the allocation on the admitted path is the server's own.
+   */
   @Test
-  void creationAllocatesTheDestinationAndIgnoresAnyRequestedOne() throws Exception {
+  void creationRefusesARequestedDestinationAndAllocatesItsOwn() throws Exception {
     var requested = new FileStoreReference("elsewhere", "parent/own/source");
-    var child =
-        service.create(
-            "@service/parent",
-            new ContainedApplications.Create(
-                "c-1", UUID.randomUUID(), 5, requested, List.of(), files()));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            service.create(
+                "@service/parent",
+                new ContainedApplications.Create(
+                    "c-1", UUID.randomUUID(), 5, requested, List.of(), files())));
+    verify(records, never()).create(any());
+    // Nothing resolved or honoured the requested store: there is no FileStore collaborator at all.
+    assertFalse(Files.exists(directory.resolve("elsewhere")));
+    // And the admitted path allocates under the configured containment root.
+    var child = service.create("@service/parent", request());
     var creation = creation();
     assertTrue(creation.workspace().startsWith(root));
     assertFalse(creation.workspace().toString().contains("elsewhere"));
     assertTrue(Files.isDirectory(staged(child)));
-    // Nothing resolved or honoured the requested store: there is no FileStore collaborator at all.
-    assertFalse(Files.exists(directory.resolve("elsewhere")));
   }
 
   @Test

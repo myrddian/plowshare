@@ -570,6 +570,75 @@ class ContainedDestructionTest {
   }
 
   /**
+   * The subtree a destruction acts on is read under the same lock creation takes, inside the unit
+   * of work. Read outside it, a nested create committing in that window left the cascade to meet an
+   * FK RESTRICT — a server fault for a conflict creation answers with a plain refusal.
+   */
+  @Test
+  void destructionLocksTheSubtreeAndReadsItInsideTheUnitOfWork() {
+    var inside = new ArrayList<Boolean>();
+    when(records.subtree(child.scope()))
+        .thenAnswer(
+            call -> {
+              inside.add(work.inside);
+              return List.of(grandchild, child);
+            });
+    service.destroy("@service/parent", "c-1", child.id());
+    assertEquals(List.of(true), inside, "the subtree is read inside the durable unit");
+    var order = inOrder(records);
+    order.verify(records).lockSubtree(child.scope());
+    order.verify(records).subtree(child.scope());
+  }
+
+  /**
+   * And the genuine race refuses. A nested create that wins the lock leaves a row referencing a
+   * scope this cascade is deleting, which {@code authority_scopes.container}'s RESTRICT turns into
+   * a {@code DataIntegrityViolationException}. Creation already answers that class of conflict with
+   * a {@code CallerFault}; destruction answering it with a 500 was the inconsistency.
+   */
+  @Test
+  void aConcurrentNestedCreateMakesDestructionRefuseRatherThanFail() {
+    doThrow(
+            new org.springframework.dao.DataIntegrityViolationException(
+                "update or delete on table \"authority_scopes\" violates foreign key constraint"))
+        .when(records)
+        .destroy(child.id());
+    var refused =
+        assertThrows(
+            CallerFault.class, () -> service.destroy("@service/parent", "c-1", child.id()));
+    assertTrue(refused.getMessage().contains("concurrently"), refused.getMessage());
+    // The unit rolled back and the bytes are untouched, so nothing is half-destroyed.
+    assertTrue(work.rolledBack);
+    assertTrue(Files.isDirectory(workspace(child)));
+    assertTrue(Files.isDirectory(workspace(grandchild)));
+    verify(records, never()).sourceCollected(any());
+  }
+
+  /**
+   * A replay answers for the destruction that wrote the records and no other. A grandchild
+   * destroyed earlier in its own separate destruction leaves a collection row on the same
+   * containment edge, and including it would make a retry report a longer {@code collected} list
+   * and a different {@code sources} than the original answer — the exact idempotency claim this
+   * contract was accepted on instead of a second request-UUID receipt.
+   */
+  @Test
+  void aReplayAnswersOnlyTheRecordsThatDestructionWrote() throws Exception {
+    destroyed(child, grandchild);
+    // An earlier, separate destruction of a third child under the same scope. Its root is itself,
+    // so it belongs to no later destruction's answer.
+    var earlier = retained(child.scope(), 13);
+    when(records.collectedUnder(child.scope(), earlier.id()))
+        .thenReturn(List.of(collection(earlier, child.scope(), earlier.id(), true)));
+    var replay = service.destroy("@service/parent", "c-1", child.id());
+    assertEquals(List.of(grandchild.id(), child.id()), replay.collected());
+    assertEquals(2, replay.sources());
+    // The walk was scoped to this destruction's own root at every edge it descended.
+    verify(records).collectedUnder(child.scope(), child.id());
+    verify(records).collectedUnder(grandchild.scope(), child.id());
+    verify(records, never()).collectedUnder(any(), eq(earlier.id()));
+  }
+
+  /**
    * "Already destroyed, and it was yours" is distinguished from "not yours". The collection record
    * retains the container as a plain value precisely so this question is still answerable after the
    * scope it names has been cascaded away.
@@ -626,17 +695,25 @@ class ContainedDestructionTest {
     when(records.find(any())).thenReturn(Optional.empty());
     when(records.collection(named.id()))
         .thenReturn(Optional.of(collection(named, named.container(), true)));
-    when(records.collectedUnder(named.scope()))
-        .thenReturn(List.of(collection(beneath, named.scope(), true)));
-    when(records.collectedUnder(beneath.scope())).thenReturn(List.of());
+    // Rows written by the destruction the named child rooted, which is the scope a replay walks.
+    when(records.collectedUnder(named.scope(), named.id()))
+        .thenReturn(List.of(collection(beneath, named.scope(), named.id(), true)));
+    when(records.collectedUnder(beneath.scope(), named.id())).thenReturn(List.of());
+  }
+
+  /** A record of the destruction the child itself rooted: the normal case for a replayable row. */
+  ContainedApplicationRepository.Collection collection(
+      ContainedApplicationRepository.Retained held, ScopeId container, boolean removed) {
+    return collection(held, container, held.id(), removed);
   }
 
   ContainedApplicationRepository.Collection collection(
-      ContainedApplicationRepository.Retained held, ScopeId container, boolean removed) {
+      ContainedApplicationRepository.Retained held, ScopeId container, UUID root, boolean removed) {
     return new ContainedApplicationRepository.Collection(
         held.id(),
         held.scope(),
         container,
+        root,
         held.project(),
         held.revision(),
         workspace(held),

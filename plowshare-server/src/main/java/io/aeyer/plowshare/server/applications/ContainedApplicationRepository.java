@@ -150,6 +150,13 @@ public interface ContainedApplicationRepository {
    *     stage, which had no scope to record
    * @param container the scope that held this child, or {@code null} for a {@code SWEPT} stage,
    *     which by definition had no committed record to name one
+   * @param root the child a single {@code destroy} named, shared by every record that destruction
+   *     wrote, or {@code null} for a {@code SWEPT} stage. This is what makes a replay answer the
+   *     <em>same</em> answer: the containment edges alone say which rows are beneath a scope, not
+   *     which destruction collected them, so a rebuild that walked only the edges would also pick
+   *     up a descendant destroyed earlier in its own separate destruction and report a longer list
+   *     than the original. The root of the destruction a caller is replaying is that destruction's
+   *     own named child, so for a replayable row this equals {@code child}.
    * @param revision the child's single revision, or {@code null} for a {@code SWEPT} stage
    * @param workspace the source area this record accounts for. Its removal is marked separately by
    *     {@link #sourceCollected}, because the filesystem cannot join the transaction: an unmarked
@@ -160,6 +167,7 @@ public interface ContainedApplicationRepository {
       UUID child,
       ScopeId scope,
       ScopeId container,
+      UUID root,
       String project,
       UUID revision,
       Path workspace,
@@ -172,12 +180,16 @@ public interface ContainedApplicationRepository {
         throw new IllegalArgumentException("A collection accounts for a contained project");
       if (workspace == null || !workspace.isAbsolute())
         throw new IllegalArgumentException("A collection names an absolute server path");
-      if (cause == Cause.DESTROYED && (container == null || revision == null || scope == null))
+      if (cause == Cause.DESTROYED
+          && (container == null || revision == null || scope == null || root == null))
         throw new IllegalArgumentException(
-            "A destroyed child names its own scope, its container and its revision");
-      if (cause == Cause.SWEPT && (container != null || revision != null || scope != null))
+            "A destroyed child names its own scope, its container, its destruction and its"
+                + " revision");
+      if (cause == Cause.SWEPT
+          && (container != null || revision != null || scope != null || root != null))
         throw new IllegalArgumentException(
-            "A swept stage had no committed record, so it names no scope, container or revision");
+            "A swept stage had no committed record, so it names no scope, container, destruction"
+                + " or revision");
     }
   }
 
@@ -230,11 +242,20 @@ public interface ContainedApplicationRepository {
   Optional<Collection> collection(UUID child);
 
   /**
-   * The collection records of the children one scope directly held, so a destroyed subtree can be
-   * rebuilt by descending the recorded containment edges. {@code DESTROYED} rows only; a swept
-   * stage has no scope and so is on no chain.
+   * The collection records of the children one scope directly held <em>in one destruction</em>, so
+   * a destroyed subtree can be rebuilt by descending the recorded containment edges. {@code
+   * DESTROYED} rows only; a swept stage has no scope and so is on no chain.
+   *
+   * <p>{@code root} is what keeps a replay honest. A container may destroy one grandchild today and
+   * its parent tomorrow, and both rows then sit on the same containment edge: a rebuild selecting
+   * every destroyed row beneath a scope would answer the second destruction with the first one's
+   * records too, reporting a longer {@code collected} list and a larger {@code sources} count than
+   * the destruction being replayed actually produced.
+   *
+   * @param container the scope whose directly held children to return
+   * @param root the destruction to answer for — the child a single {@code destroy} named
    */
-  List<Collection> collectedUnder(ScopeId container);
+  List<Collection> collectedUnder(ScopeId container, UUID root);
 
   /**
    * Whether a contained record exists for this project name. A staged area with none is garbage.
@@ -259,4 +280,24 @@ public interface ContainedApplicationRepository {
    * lands and both would commit, which is the orphan this fence exists to prevent.
    */
   void lockContainer(ScopeId container);
+
+  /**
+   * Takes the project row lock of every scope in this subtree, in the caller's transaction.
+   *
+   * <p>Destruction's counterpart to {@link #lockContainer}, and it must be the whole subtree rather
+   * than the one container: the rows a cascade can collide with are created by <em>descendants</em>
+   * creating their own children, and such a creation locks its own container's project row, not the
+   * destroyed child's. Locking the subtree therefore serialises destruction against every creation
+   * that could add a row inside it. After this returns, {@link #subtree} read in the same
+   * transaction is stable for the rest of it.
+   *
+   * <p>A creation that was already past the lock still commits, and then its row references a scope
+   * this cascade removes: {@code authority_scopes.container} is {@code ON DELETE RESTRICT}, so that
+   * loser is refused by the schema rather than orphaned. Which side loses is not determined here;
+   * that both sides fail cleanly is.
+   *
+   * <p>Ordered inside the statement so that two destructions over overlapping subtrees take the
+   * same rows in the same order and cannot deadlock each other.
+   */
+  void lockSubtree(ScopeId scope);
 }

@@ -81,7 +81,10 @@ internal static class Codec
             var askedChild=IdentityText(request,"child");
             if(askedChild is null || !string.Equals(askedChild,IdentityText(result,"child"),StringComparison.OrdinalIgnoreCase)) throw Invalid();
             if(operation=="application.child.destroy") {
-                if(!result.TryGetProperty("collected",out var collected) || collected.ValueKind!=JsonValueKind.Array || !result.TryGetProperty("sources",out var sources) || !sources.TryGetInt64(out var removed)
+                // "sources" must be a JSON number: TryGetInt64 throws InvalidOperationException on any
+                // other kind, which would escape this gate as something other than a refusal. Guarding
+                // the kind keeps a non-numeric count a plain refusal, as the other SDKs treat it.
+                if(!result.TryGetProperty("collected",out var collected) || collected.ValueKind!=JsonValueKind.Array || !result.TryGetProperty("sources",out var sources) || sources.ValueKind!=JsonValueKind.Number || !sources.TryGetInt64(out var removed)
                     || removed>collected.GetArrayLength() || !collected.EnumerateArray().Any(entry=>entry.ValueKind==JsonValueKind.String && string.Equals(entry.GetString(),askedChild,StringComparison.OrdinalIgnoreCase))) throw Invalid();
             }
             return;
