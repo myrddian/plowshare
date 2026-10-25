@@ -374,7 +374,7 @@ class RelayPayloadStoreDatabaseTest {
    * NOT NULL} and the {@code DROP COLUMN} all run with rows in front of them.
    */
   @Test
-  void v193BackfillsRowsLeftWithoutADigestByARollingDeploy() {
+  void v194BackfillsRowsLeftWithoutADigestByARollingDeploy() {
     jdbc.execute("DROP DATABASE IF EXISTS " + STAGED_DATABASE);
     jdbc.execute("CREATE DATABASE " + STAGED_DATABASE);
     var staged =
