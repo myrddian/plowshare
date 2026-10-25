@@ -105,13 +105,8 @@ class RelayPayloadStoreTest {
   }
 
   @Test
-  void loadMissingDigestThrows() {
-    assertThrows(IllegalStateException.class, () -> store.load("a".repeat(64)));
-  }
-
-  @Test
   void loadRejectsMalformedDigestBeforeQuerying() {
-    assertThrows(IllegalArgumentException.class, () -> store.load("not-a-digest"));
+    assertThrows(IllegalArgumentException.class, () -> store.load(List.of("not-a-digest")));
     verifyNoInteractions(jdbc);
   }
 

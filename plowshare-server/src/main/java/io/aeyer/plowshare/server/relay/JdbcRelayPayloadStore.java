@@ -79,8 +79,20 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
     // lock and a locked read -- so for a row whose earlier references were pruned, an unmodified
     // ejection_at leaves it a matured sweep candidate for that whole window, with no lock held. A
     // sweep in that window sees no reference, deletes, and the caller's insert then fails its
-    // foreign key. DO UPDATE both moves the date out and takes the row lock, so a concurrent sweep
-    // blocks on this row instead of reclaiming it.
+    // foreign key. DO UPDATE moves the date out, so any candidate query that runs after this
+    // commits no longer selects the row, and it takes the row lock.
+    //
+    // That narrows the window; it does not close it. The lock only delays a reclamation, it does
+    // not prevent one: the sweep's DELETE predicate does not mention ejection_at, so a delete that
+    // has already selected this digest and then waits on this lock follows the update chain under
+    // READ COMMITTED, re-evaluates digest=? and both NOT EXISTS subqueries, still finds no
+    // reference -- the caller's publication insert comes later, after the topic lock -- and
+    // deletes. What protects the row is the re-armed date, seen by every later candidate query. The
+    // residual window is therefore the sub-statement span of one sweep candidate (candidate
+    // selection, qual evaluation and the row lock; microseconds, with no lock waits) rather than
+    // the unbounded span of topic-lock acquisition, the locked retained read and position
+    // allocation. In it the append's insert fails its foreign key and the publish is rejected; a
+    // retry stores the bytes again.
     //
     // The WHERE keeps the only property DO NOTHING had: a hot digest already deferred past this
     // ejection writes no row version, because the predicate is false and the update is skipped.
@@ -102,13 +114,6 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
         json,
         Timestamp.from(ejection));
     return digest;
-  }
-
-  @Override
-  public RelayStoredPayload load(String digest) {
-    RelayStoredPayload found = load(List.of(digest)).get(digest);
-    if (found == null) throw new IllegalStateException("Relay payload not found");
-    return found;
   }
 
   @Override

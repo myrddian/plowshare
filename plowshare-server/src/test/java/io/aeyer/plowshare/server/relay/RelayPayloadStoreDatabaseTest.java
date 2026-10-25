@@ -36,11 +36,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * The payload store's PostgreSQL-only behaviour. Every assertion here needs an actual server: the
  * V191-V193 migration sequence running over populated tables, the digest the migration computes
- * from PostgreSQL's own JSONB rendering, the foreign key refusing a referenced delete, {@code ON
- * CONFLICT (digest) DO NOTHING} deduplicating concurrent inserts, row locking between a sweep and
- * an append, cascading project deletion, and the horizon query's interval arithmetic. None of it is
- * reachable through a mocked {@code JdbcTemplate}, which is what let a column renamed by V120
- * survive in the horizon query until it was read by eye.
+ * from PostgreSQL's own JSONB rendering, the foreign key refusing a referenced delete, the
+ * conditional {@code ON CONFLICT (digest) DO UPDATE} deduplicating concurrent inserts, row locking
+ * between a sweep and an append, cascading project deletion, and the horizon query's interval
+ * arithmetic. None of it is reachable through a mocked {@code JdbcTemplate}, which is what let a
+ * column renamed by V120 survive in the horizon query until it was read by eye.
  *
  * <p>The image must be the pgvector build: the first migration creates the {@code vector}
  * extension, which stock PostgreSQL does not ship.
@@ -339,7 +339,8 @@ class RelayPayloadStoreDatabaseTest {
     for (String digest : distinct)
       assertEquals(
           new RelayPayload.Text("alpha"),
-          RelayPayloadCodec.read(RelayPayload.Kind.TEXT, 1, payloads.load(digest).json()),
+          RelayPayloadCodec.read(
+              RelayPayload.Kind.TEXT, 1, payloads.load(List.of(digest)).get(digest).json()),
           "both digests must resolve through a read");
 
     // Reclaiming the unreferenced runtime row leaves the referenced backfilled row and its
@@ -557,7 +558,7 @@ class RelayPayloadStoreDatabaseTest {
       assertEquals(
           1L,
           one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", digest),
-          "ON CONFLICT (digest) DO NOTHING must leave exactly one row");
+          "ON CONFLICT (digest) must leave exactly one row");
       assertEquals(
           1L,
           one(jdbc, "SELECT count(*) FROM relay_payloads"),

@@ -1,7 +1,8 @@
 # Relay content-addressed payload store
 
 Date: 2026-10-25
-Status: design, awaiting approval
+Status: implemented on this branch (V191-V193). Corrected against the code after
+implementation; where the text records a decision that was reversed, it says so.
 
 ## Why this exists
 
@@ -13,6 +14,16 @@ position, in `JdbcRelayDeliveryRepository.admit`, because the copy is what allow
 retention to delete a prefix of the log while work already admitted keeps its
 input. One event near the ceiling, admitted by *n* subscribers, is 50 MiB × (1 +
 *n*) on disk.
+
+That amplification is a **work-tier** cost only. Only the work tier
+admits: `ReadTierRelayConsumption.consume` calls `relay.read(key, limit)` directly,
+which creates no admission row and no payload copy. "Per admitting subscriber" is
+literally accurate, but read as a sizing figure it can suggest every subscriber
+copies the payload; read-tier subscribers are free in exactly the dimension this
+store exists to fix. **The read path must not be changed to resemble the work path.**
+Giving a read-tier subscriber an admission, to unify the two or to make reads
+"durable", would reintroduce a per-subscriber reference and the lifecycle that goes
+with it for a tier that has none by design.
 
 The copy is correct and load-bearing. What is wrong is that the bytes are the
 unit being copied. Nothing in the fan-out needs a *distinct* payload per
@@ -125,7 +136,11 @@ The payload `CHECK` is the one `V135` placed on both `relay_publications` and
 `relay_admissions`, moved here so it continues to be enforced in exactly one
 place per stored byte. SHA-256 as 64 lower-case hex characters is existing
 precedent in this schema: `relay_executions.handler_hash` and
-`relay_deliveries.handler_hash` use the same form.
+`relay_deliveries.handler_hash` use the same *column shape*. The digest *function* is
+not a new one: `RelayPort.hash` in `plowshare-protocol` is already SHA-256 over the
+UTF-8 bytes of a string as lowercase hex, `V189` treats it as the convention
+(`'information:' || sha256(actor)` "matches `RelayPort.hash`"), and the store reuses
+it rather than defining a second digest.
 
 `relay_publications.payload` and `relay_admissions.payload` are replaced by
 `payload_digest TEXT NOT NULL REFERENCES relay_payloads(digest)`. The foreign key
@@ -142,7 +157,10 @@ admission's from its own `payload_kind` column. Storing the family beside the
 bytes would let one digest assert a family that a differently-familied reference
 contradicts, and would need a new invariant — that two families can never produce
 identical bytes — which holds today only as an accident of `RelayPayloadCodec`'s
-disjoint field sets across the current six families.
+disjoint field sets across the current five families (`EMPTY`, `TEXT`,
+`SCHEDULE_DUE`, `LIFECYCLE`, `WAKE_REQUESTED`). An earlier draft counted six; `V189`
+removed `INFORMATION_CHANGED` when information events moved onto the general
+message, and `RelayPayload.Kind` is the authority.
 
 The second reason is the architectural one, and it is the stronger: Relay is a
 substrate. The payload store's job is to hold bytes and reclaim them, and
@@ -202,11 +220,48 @@ VALUES (?, ?::jsonb, octet_length((?::jsonb)::text), ?)
 ON CONFLICT (digest) DO NOTHING
 ```
 
-`DO NOTHING` rather than `DO UPDATE`. A repeat publish of a hot digest needs no
-row version written — the referencing publication row it is about to insert is
-what protects the payload from the next sweep, and the sweep's own survivor
-extension maintains the horizon. `DO UPDATE` would add a dead tuple per repeat on
-the hottest row in the table for no correctness gain. *(My call.)*
+**This clause was first specified as `DO NOTHING`, and that decision was wrong.** The
+earlier text read: "`DO NOTHING` rather than `DO UPDATE`. A repeat publish of a hot
+digest needs no row version written — the referencing publication row it is about to
+insert is what protects the payload from the next sweep ... *(My call.)*" The
+justification does not hold for a *repeat* append. `DO NOTHING` neither re-arms
+`ejection_at` nor takes a row lock, so a repeat append of an already-matured digest —
+one whose earlier references were pruned — left it a live, unlocked sweep candidate
+across the whole commit-ahead window. The referencing insert is not yet there to
+protect it: it comes after the payload commits, after the topic lock, the locked
+retained read and position allocation. A sweep in that window found no reference and
+deleted the row, and the appender's publication insert then failed its foreign key,
+**rejecting the publish**.
+
+The shipped clause is conditional:
+
+```sql
+INSERT INTO relay_payloads(digest, payload, byte_length, ejection_at)
+VALUES (?, ?::jsonb, octet_length((?::jsonb)::text), ?)
+ON CONFLICT (digest) DO UPDATE
+  SET ejection_at = GREATEST(relay_payloads.ejection_at, excluded.ejection_at)
+  WHERE relay_payloads.ejection_at < excluded.ejection_at
+```
+
+It re-arms the staging window and takes the row lock when the stored date is behind
+the new one, and it still writes no row version for a hot digest whose date is
+already at or beyond `now() + window`: the predicate is false and the update is
+skipped. That case needs neither re-arming nor a lock, because a row that far out is
+not a sweep candidate until after the window, by which time the caller's reference is
+committed or its append has failed. The original objection to `DO UPDATE` — a dead
+tuple per repeat on the hottest row in the table — is answered by the predicate, not
+ignored.
+
+**The window is narrowed, not closed.** The row lock only *delays* a reclamation; it
+does not prevent one. The sweep's `DELETE` does not mention `ejection_at`, so a
+delete that has already selected the digest and then waits on the store's lock
+follows the update chain under READ COMMITTED, re-evaluates `digest = ?` and both
+`NOT EXISTS` subqueries, still finds no reference, and deletes. What protects the
+row is the re-armed date seen by every *later* candidate query. The exposure shrinks
+from unbounded (topic-lock acquisition, the locked retained read, position
+allocation) to sub-statement: candidate selection, qual evaluation and the row lock,
+microseconds with no lock waits. In that residual window the append is rejected and a
+retry re-stores the bytes. It is recorded again under "What remains unproven".
 
 Admission writes the same digest it read from the publication. It stores no bytes
 at all; the *n*-way amplification disappears here rather than being compressed.
@@ -237,6 +292,20 @@ consequences follow and must be built deliberately:
 - **Append's failure handling grows a case.** A payload committed for an append
   that then fails is not an error to report; the retry re-derives the same digest
   and the `ON CONFLICT` makes the second insert a no-op.
+
+### Payload bytes are immutable
+
+Every production write to `relay_payloads` is one of three: the conditional insert
+above, the guarded `DELETE` in the sweep, or an `UPDATE` of `ejection_at` alone.
+Nothing ever updates payload bytes, and that is load-bearing. Every publication and
+admission that references a digest reads the same bytes, so a writer that mutated a
+row in place would silently rewrite history for every referencing row at once.
+
+The corollary is uncomfortable and stated plainly: a corrupted `relay_payloads` row is
+**permanent for every row sharing that digest**. The conflict clause never repairs
+bytes — it does not touch them — and the product has no detection path for it: the
+digest is not re-verified on read, and nothing compares stored bytes with the digest
+that names them.
 
 ### Digest definition
 
@@ -293,6 +362,13 @@ The governing invariant, which belongs in a comment on the table:
 > remove something referenced.
 
 #### Why the deferral is capped
+
+`relay_payloads` is **not cascade-reachable from `relay_topics`**: the references
+point from publications and admissions *to* the payload, so no `ON DELETE CASCADE`
+runs the other way. Deleting a topic, subscription or project removes the references
+and leaves the payload row exactly as it was. That is the design — reclamation is the
+sweep's job — and it is also why a test that truncates `relay_topics` must name
+`relay_payloads` explicitly, or every payload outlives it.
 
 References also disappear through paths the sweep never observes. `ON DELETE
 CASCADE` reaches publications from `relay_topics` and admissions from
@@ -355,8 +431,7 @@ configuration:
 
 ```java
 public interface RelayPayloadStore {
-  String store(RelayPayload payload, Instant now);          // digest; idempotent
-  RelayStoredPayload load(String digest);
+  String store(RelayPayload payload, Instant now);          // digest; idempotent, re-arms
   Map<String, RelayStoredPayload> load(Collection<String> digests);
   int sweep(Instant now, int limit);
 }
@@ -368,7 +443,11 @@ with `RelayPayloadCodec.read(kind, version, json)` using the family from their o
 row, exactly as they decode a `ResultSet` column today. JSON text therefore never
 crosses into a domain contract, and the store never needs to know a family.
 
-The batch `load` exists so the join-not-loop requirement has somewhere to live.
+`load(Collection)` is the store's read half. The three readers do not call it: they
+resolve payloads in the SQL join, which is what the join-not-loop requirement
+demands, so it has no production caller and exists for tests and for any caller that holds digests directly. A single-digest `load` was specified earlier and removed
+as dead: nothing used it, and a caller wanting one digest passes a one-element
+collection.
 The sweep is a bounded pass registered in `RelayMaintenance.sweep()`, which
 already composes bounded passes on the one-minute `cleanupInterval`; it needs no
 scheduling of its own.
@@ -398,39 +477,61 @@ per statement, not per row, and is harmless.
 
 ## Migration
 
-One new Flyway migration:
+Three Flyway migrations shipped. The design specified one and the plan proposed two;
+reality is:
 
-1. Create `relay_payloads`.
-2. Backfill distinct payloads from both source tables, using
-   `encode(sha256(convert_to(payload::text,'UTF8')),'hex')`.
-3. Add `payload_digest` to both tables, populate from the same expression, set
-   `NOT NULL`, add the foreign keys and indexes.
-4. Drop `payload` from `relay_publications` and `relay_admissions`, and with it
-   the `V135` payload `CHECK`s those tables carry.
+- `V191__relay_payload_store.sql` — creates `relay_payloads` and its `ejection_at`
+  index. Nothing reads it yet.
+- `V192__relay_payload_digest.sql` — **expand.** Adds a nullable `payload_digest`
+  foreign key to both tables, backfills the table and the digests from the rows
+  already present, and adds the two reference indexes. The `payload` column stays, and
+  a server that predates the digest keeps working against this schema unchanged.
+- `V193__relay_payload_column_drop.sql` — **contract.** Takes `ACCESS EXCLUSIVE` on
+  both tables, repeats the backfill for anything written without a digest, sets
+  `payload_digest` `NOT NULL` and drops `payload` with the `V135` payload `CHECK`s it
+  carried.
 
-Steps 2–4 rewrite both of the largest tables in the schema, holding `ACCESS
-EXCLUSIVE` while doing so, over rows that may individually be 50 MiB.
+Expand, cutover, contract was necessary because the Java reader cutover and the
+column drop cannot be one step. Code that selects `payload` fails against a schema
+that has dropped it, and code that reads `payload_digest` fails against one that has
+not yet added it, so during any rolling deployment some server is on the other side
+of whichever single migration is chosen. Splitting the schema change lets the
+additive step (`V192`) be live before the readers change, and the destructive step
+(`V193`) follow the cutover. The split only buys that when `V192` has actually been
+deployed ahead of the release that carries the reader change; on this branch the
+reader cutover and `V193` landed in one commit, so that sequencing is a deployment
+property, not something the commit structure enforces.
 
-**One migration is correct, and a dual-write release is not merely unnecessary
-but contrary to accepted policy.**
-[Decision 0037](../../decisions/0037-events-and-messaging-on-relay.md) settles
-this: "No installation is being migrated, so there is nothing for a compatibility
-layer to serve", and it considered and rejected a dual-write release for exactly
-the continuity this one would buy. It also sets the bar for the one case that
-would justify retaining data — a functional need, such as topic expiration losing
-input a consumer still requires — and states that backward compatibility is never
-that justification.
+### Why a data-preserving migration is still right
 
-No such functional need arises here. The backfill derives digests from the rows
-already present, so the clean break loses nothing: existing publications and
-admissions keep their payloads, by reference, across the migration. The
-`ACCESS EXCLUSIVE` stall is therefore bounded by whatever a development
-installation holds, not by a production corpus.
+The earlier draft justified a single migration with
+[decision 0037](../../decisions/0037-events-and-messaging-on-relay.md): no
+installation is being migrated, so existing rows are "instance history" and a clean
+break loses nothing that matters. **That reason was wrong for these tables, though
+the conclusion stands.** `V189` is later than 0037, concerns exactly these two tables,
+and *refuses* to drop their rows: a topic's publications are a live retention window
+that subscribers hold durable positions into, and dropping them would turn a carrier
+change into unacknowledged retention loss. That is 0037's own functional-need
+exception — the case it says does justify retaining data. An admission is likewise
+input already handed to a subscriber.
 
-If that ever stops being true, the dual-write path is the documented fallback:
-nullable `payload_digest`, dual write, a bounded background backfiller, then a
-second migration to enforce `NOT NULL` and drop `payload`. It should not be built
-pre-emptively, and adopting it would need its own decision against 0037.
+The conclusion survives because nothing is deleted. The backfill derives digests from
+the rows already present, so every payload is preserved by reference across the
+migration. The reason is "rows must be preserved, and are", not "rows do not matter".
+`V189` is also the direct precedent for rewriting payloads in place on these tables,
+and `V192` and `V193` say so.
+
+The cost the single-migration framing hid is real: `V193` holds `ACCESS EXCLUSIVE` on
+the two largest tables while it backfills, sets `NOT NULL` and drops, over rows that
+may each be 50 MiB. The lock is taken first deliberately, so a server that predates
+the digest cannot commit a null-digest row between the backfill and `SET NOT NULL`.
+When `V192` has already been applied, the backfill in `V193` has only
+rows written without a digest to repair; the `NOT NULL` check and the column drop
+still run under the lock.
+
+A dual-write release with a bounded background backfiller remains the documented
+fallback if a corpus ever makes that stall unacceptable. It was not built
+pre-emptively, and adopting it would need its own decision.
 
 ## Configuration
 
@@ -465,8 +566,9 @@ about actual PostgreSQL behaviour rather than service logic:
 
 - the migration, including backfill correctness and digest agreement
 - foreign-key refusal of a referenced delete
-- `ON CONFLICT (digest) DO NOTHING` dedup under concurrent identical appends, and
-  whichever contention behaviour decision 2 selects
+- `ON CONFLICT (digest) DO UPDATE ... WHERE` dedup under concurrent identical
+  appends, and a repeat append of an already-matured digest being re-armed rather
+  than swept (the case `DO NOTHING` failed)
 - a sweep concurrent with an append of the same digest
 - retention deleting a publication prefix while admissions keep their payload
   reachable
@@ -475,6 +577,36 @@ about actual PostgreSQL behaviour rather than service logic:
 
 Run the smallest relevant set with `--tests`, and state the database-specific
 reason when enabling the flag.
+
+## What remains unproven
+
+Stated exactly, so the next reader does not take absence of a failure for a proof.
+
+- **Page boundaries are not observed under a straddle.** No test places a row on
+  either side of a `WHERE page_bytes <= ?` boundary — neither the log inspection
+  page's nor `Relay.Read`'s. Equality of page boundaries before and after the change
+  rests on the per-row input equality (`byte_length` equals the old
+  `octet_length(payload::text)` for the same stored JSONB) and on the numeric/bigint
+  argument for the window sum, not on an observed straddle. Both SQL strings do
+  execute under real PostgreSQL elsewhere in the suite, so the risk of unparsed or
+  misnamed SQL is excluded; the risk of an off-by-one at the boundary is not.
+- **`byte_length` is not tied to the bytes by the schema.** No constraint relates it to
+  `octet_length(payload::text)`. The store computes it correctly, and every shipped
+  migration does, but a future writer that set it wrongly would shift page
+  boundaries and the projection-cache bypass threshold silently.
+- **`V193`'s `LOCK TABLE` executes but its blocking effect is not asserted.** The
+  migration runs under the test, so the statement is valid; no test shows a
+  concurrent writer actually waiting on it.
+- **A residual sub-statement window remains in the sweep/append race.** The conditional
+  `DO UPDATE` narrows it and does not close it (see "Writing"): a sweep that has
+  already selected a digest and is waiting on the store's row lock can still delete
+  it, because its `DELETE` does not consult `ejection_at` and the append's reference
+  does not yet exist. The append is then rejected on its foreign key and a retry
+  succeeds. A database test covers the repeat-append case by holding the topic lock open
+  between the store and the insert, which exercises the multi-statement window; no
+  test can show a microsecond window to be empty.
+- **Corruption of a stored payload is undetected and permanent** for every row sharing
+  its digest (see "Payload bytes are immutable").
 
 ## Left to the builder
 

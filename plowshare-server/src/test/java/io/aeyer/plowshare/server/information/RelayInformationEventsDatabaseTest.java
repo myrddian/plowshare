@@ -119,8 +119,9 @@ class RelayInformationEventsDatabaseTest {
 
   @BeforeEach
   void fresh() {
+    // relay_payloads is not reachable by a cascade from relay_topics, so it is named.
     AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE relay_topics,information_resources,projects,admins CASCADE");
+        jdbc, "TRUNCATE relay_topics,relay_payloads,information_resources,projects,admins CASCADE");
     jdbc.update(
         """
         INSERT INTO admins(handle,password_hash,server_admin)

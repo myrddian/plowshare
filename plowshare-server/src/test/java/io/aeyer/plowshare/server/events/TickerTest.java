@@ -101,7 +101,8 @@ class TickerTest {
   void wire() {
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
         jdbc,
-        "TRUNCATE TABLE relay_topics, user_inbox, firings, triggers, schedules, admins CASCADE");
+        "TRUNCATE TABLE relay_topics, relay_payloads, user_inbox, firings, triggers, schedules, admins"
+            + " CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES ('enzo', 'h', TRUE)");
     schedules = new JdbcScheduleStore(jdbc);

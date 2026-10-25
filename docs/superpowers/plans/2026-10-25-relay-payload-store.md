@@ -171,6 +171,8 @@ digest input's. `sweep` is the spec's two queries: select matured candidates ord
 adds the referencing columns, have `sweep` take the candidate query only and return 0;
 Task 3 completes it.
 
+> **Superseded during Task 5:** the `DO NOTHING` clause above was reversed. A repeat append of an already-matured digest was left sweepable across the commit-ahead window, and the sweep's delete made the appender's publication insert fail its foreign key. The shipped clause is a conditional `DO UPDATE` that re-arms `ejection_at`; the design's "Writing" section records why. The text above is kept as the record of intent.
+
 Register the bean in `RelayConfiguration` beside the other relay repositories.
 
 - [ ] **Step 5: Run the tests to verify they pass**

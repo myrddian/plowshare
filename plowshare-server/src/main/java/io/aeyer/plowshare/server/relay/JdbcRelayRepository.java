@@ -113,11 +113,12 @@ public final class JdbcRelayRepository implements RelayRepository {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
-    // The payload is committed before the topic transaction opens, on purpose. Inside it, ON
-    // CONFLICT DO NOTHING would make a publisher wait on another's uncommitted insert of the same
-    // digest, serialising publishers that share nothing but identical content. Committed ahead,
-    // the insert is a no-op for every later publisher and the topic lock covers only position
-    // allocation. The price is orphans: a payload is written before the topic is read, so an
+    // The payload is committed before the topic transaction opens, on purpose. Inside it, the
+    // store's ON CONFLICT (digest) would make a publisher wait on another's uncommitted insert of
+    // the same digest, serialising publishers that share nothing but identical content. Committed
+    // ahead, the insert for every later publisher is a conflict that writes a row version only
+    // when it must push the staging date out, and the topic lock covers only position allocation.
+    // The price is orphans: a payload is written before the topic is read, so an
     // append that then fails leaves an unreferenced row. That covers a failed or rolled-back
     // insert, and also an append to an unknown topic or one of a different payload family, which
     // used to fail with no side effect. That is correct, not an error: the sweep reclaims the row
@@ -125,12 +126,23 @@ public final class JdbcRelayRepository implements RelayRepository {
     //
     // What protects the row until this append's own insert references it is the staging window the
     // store writes, and it is written on a repeat as well as on a fresh insert: the conflict clause
-    // re-arms ejection_at and locks the row. That matters here specifically, because the window
-    // between the committed store and the insert below spans the topic lock, the locked retained
-    // read and position allocation. A repeat that left an already matured ejection_at alone would
-    // leave the row reclaimable, with no lock held, for that whole window, and the insert below
-    // would then fail its foreign key. Because the text allowance is checked before the family, a
-    // draft that is both oversize and the wrong family now reports the text-limit error.
+    // re-arms ejection_at and takes the row lock. That matters here specifically, because the
+    // window between the committed store and the insert below spans the topic lock, the locked
+    // retained read and position allocation. A repeat that left an already matured ejection_at
+    // alone would leave the row a sweep candidate, with no lock held, for that whole window, and
+    // the insert below would then fail its foreign key.
+    //
+    // The window is narrowed, not closed. The row lock only delays a sweep's reclamation: the
+    // sweep's DELETE predicate does not mention ejection_at, so a delete that already selected the
+    // digest and then waits on the store's lock re-evaluates its reference checks afterwards,
+    // finds none yet, and deletes. The re-armed date protects the row from every later candidate
+    // query, which shrinks the exposure from unbounded (topic-lock acquisition, the locked read,
+    // position allocation) to the sub-statement span of a single sweep candidate. If a sweep lands
+    // in that span the insert below fails its foreign key, this append is rejected, and a retry
+    // stores the bytes again.
+    //
+    // Because the text allowance is checked before the family, a draft that is both oversize and
+    // the wrong family now reports the text-limit error.
     //
     // An identical repeat of a retained event stores nothing. The probe below is advisory and
     // unlocked; the locked read under the topic lock stays the authority for idempotency and
@@ -138,8 +150,11 @@ public final class JdbcRelayRepository implements RelayRepository {
     // concurrently, the probe says absent: one redundant idempotent store, then the locked read
     // returns the original. If the event was pruned after the probe said present, nothing was
     // stored and the append is new: the fallback below validates and stores it inside the
-    // transaction. No lock cycle arises because a competing publisher commits its store before
-    // it takes any topic lock.
+    // transaction. No lock cycle arises on the common path because a competing publisher commits
+    // its store before it takes any topic lock. The fallback stores under the topic lock and so
+    // holds a row-exclusive lock on the payload row until commit; it is safe for a different
+    // reason: locks are always acquired topic first, then payload, and the sweep takes no topic
+    // lock at all, so nothing can wait on a topic lock while holding a payload lock.
     // The text allowance is checked here, before the bytes are written, so a refused payload
     // never reaches the store. A lowered allowance still recovers an identical retained event
     // because the probe returns before this check.

@@ -16,9 +16,6 @@ public interface RelayPayloadStore {
    */
   String store(RelayPayload payload, Instant now);
 
-  /** Returns the stored payload, or throws when no row has this digest. */
-  RelayStoredPayload load(String digest);
-
   /**
    * Returns the stored payloads for the digests in one query, keyed by digest. Digests without a
    * row are absent from the result; callers decide whether that is an error.

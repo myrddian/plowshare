@@ -68,7 +68,7 @@ class JdbcRelayRepositoryTest {
     // relay_payloads must go with the topics. Nothing references relay_topics from it, so a
     // cascade from relay_topics alone leaves every stored payload behind, and the store is
     // content-addressed: a later append of identical content resolves to the surviving digest and
-    // ON CONFLICT DO NOTHING leaves that row's bytes as they are. The payload-shape test below
+    // the conflict clause never rewrites a stored row's bytes. The payload-shape test below
     // deliberately corrupts a stored row, and without this the corruption reaches every later
     // test that appends the same content.
     jdbc.execute("TRUNCATE relay_topics,relay_payloads CASCADE");

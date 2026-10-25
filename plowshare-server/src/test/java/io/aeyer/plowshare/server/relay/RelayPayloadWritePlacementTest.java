@@ -52,11 +52,6 @@ class RelayPayloadWritePlacementTest {
         }
 
         @Override
-        public RelayStoredPayload load(String digest) {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
         public Map<String, RelayStoredPayload> load(Collection<String> digests) {
           throw new UnsupportedOperationException();
         }

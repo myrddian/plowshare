@@ -56,11 +56,6 @@ class RelayPayloadReadPathTest {
         }
 
         @Override
-        public RelayStoredPayload load(String digest) {
-          return fail("a reader fetched a payload per record instead of joining");
-        }
-
-        @Override
         public Map<String, RelayStoredPayload> load(Collection<String> digests) {
           return fail("a reader fetched payloads outside its own query");
         }
