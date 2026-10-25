@@ -116,7 +116,16 @@ class ConcurrentResourceOrderingTest {
 
   @Test
   void the_desktop_read_hot_path_is_finite() {
-    for (String type : new String[] {"board.topics", "swarm.status", "admin.status"}) {
+    for (String type :
+        new String[] {
+          "board.topics",
+          "swarm.status",
+          "admin.status",
+          "document.list",
+          "document.detail",
+          "inbox.list",
+          "orchestration.list"
+        }) {
       var policy = DispatchPolicy.decode(typed("id", type), "alice", "connection");
       assertEquals(DispatchPolicy.Kind.FINITE, policy.kind(), type);
       assertTrue(policy.resources().isEmpty(), type);
@@ -125,6 +134,54 @@ class ConcurrentResourceOrderingTest {
     assertEquals(
         DispatchPolicy.Kind.BARRIER,
         DispatchPolicy.decode(typed("id", "unaudited.operation"), "alice", "connection").kind());
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({
+    "orchestration.list,document.detail",
+    "orchestration.list,document.list",
+    "orchestration.list,information.read",
+    "inbox.list,document.detail",
+    "inbox.list,document.list",
+    "inbox.list,information.read"
+  })
+  void a_library_read_uses_the_free_permit_while_an_activity_read_is_still_running(
+      String background, String foreground) throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    var telemetry = new DispatchTelemetry();
+    var release = new CompletableFuture<Void>();
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 4, telemetry)) {
+      var activityEntered = new CompletableFuture<Void>();
+      var libraryEntered = new CompletableFuture<Void>();
+      var connection =
+          dispatcher.connect(
+              "library",
+              (frame, delivered) -> {
+                if (frame.equals("activity")) {
+                  activityEntered.complete(null);
+                  return release.thenRun(delivered);
+                }
+                libraryEntered.complete(null);
+                delivered.run();
+                return CompletableFuture.completedFuture(null);
+              },
+              () -> fail("Unexpected transport failure"),
+              8);
+      try {
+        connection.offer("activity", typed("poll", background), "alice");
+        activityEntered.get(5, TimeUnit.SECONDS);
+        connection.offer("library", typed("read", foreground), "alice");
+        // A connection-wide barrier would wait for release, despite a free execution permit.
+        libraryEntered.get(5, TimeUnit.SECONDS);
+        assertFalse(release.isDone());
+      } finally {
+        release.complete(null);
+      }
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+      assertEquals(0, telemetry.snapshot().resourceKeys());
+    }
   }
 
   @Test

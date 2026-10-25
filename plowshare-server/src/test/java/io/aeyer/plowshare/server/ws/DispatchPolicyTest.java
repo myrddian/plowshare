@@ -24,6 +24,30 @@ class DispatchPolicyTest {
   }
 
   @Test
+  void library_read_classification_preserves_acting_context_order_and_mutation_barriers() {
+    var context = java.util.UUID.randomUUID();
+    for (String type :
+        java.util.List.of("document.list", "document.detail", "inbox.list", "orchestration.list")) {
+      var acting =
+          DispatchPolicy.decode(
+              new Envelope(
+                  "read",
+                  type,
+                  Envelope.CURRENT_VERSION,
+                  Map.of(),
+                  new io.aeyer.plowshare.protocol.ActingContext.Selection(context)),
+              "alice",
+              "socket");
+      assertEquals(DispatchPolicy.Kind.RESOURCE, acting.kind(), type);
+      assertEquals(
+          java.util.List.of(new DispatchPolicy.Resource("acting", "socket", context.toString())),
+          acting.resources());
+    }
+    for (String type : java.util.List.of("document.ask", "inbox.read", "orchestration.answer"))
+      assertEquals(DispatchPolicy.Kind.BARRIER, policy(type, Map.of(), "alice").kind(), type);
+  }
+
+  @Test
   void actual_result_identity_and_shared_project_schedule_identity_cross_accounts() {
     assertEquals(
         policy("web.search", Map.of("query", "  HeLLo   world ", "max", 20), "alice"),

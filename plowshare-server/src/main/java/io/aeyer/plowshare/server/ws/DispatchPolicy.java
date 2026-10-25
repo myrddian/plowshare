@@ -31,6 +31,13 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
    * one connection, not the data, so PostgreSQL transactions, locks and version fences remain the
    * cross-process authority. A FINITE read still waits behind a running barrier on its connection.
    *
+   * <p>The Library reads and account activity listings have also been audited end to end: document
+   * metadata/hierarchy/text and inbox/run listings perform current authorized reads without
+   * changing selection, acknowledging notices, acquiring leases or starting work. Desktop polls
+   * several run states and an unread count together. Treating each as a barrier serialized those
+   * reads and made the next document open wait for the whole poll. Marking them finite preserves
+   * admission bounds and barriers for actual mutations; it never supplies domain authority.
+   *
    * <p>The {@link #barrier()} fall-through in {@link #decode} is deliberately unchanged. An
    * unaudited operation keeps the conservative ordered barrier until the slice 04 audit has
    * classified its full effects and authority lifecycle; the remaining operations await that audit.
@@ -40,6 +47,10 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "board.topics",
           "swarm.status",
           "admin.status",
+          "document.list",
+          "document.detail",
+          "inbox.list",
+          "orchestration.list",
           "information.list",
           "information.facets",
           "information.read",

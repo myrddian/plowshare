@@ -67,6 +67,62 @@ and made 11,776 `account_active` calls; the batched query admitted the same 65 i
 database execution in that snapshot. These are individual query measurements,
 not end-to-end Desktop timings or proof of a deployed release.
 
+## Interactive plans and activity polling must not stall Library reads
+
+The V195 function-count tests did not cover SQL-function inlining/JIT compilation
+or contention with Desktop activity polling. The remaining Library delay had
+both causes, rather than a slow document body query alone:
+
+- `DocumentStore.page` and `count` inline `knowledge_readable_selection` into
+  prepared callers. On the inspected installation, their generic plans cost
+  about 748,000 units and compiled 335–361 JIT functions. Compilation took
+  1.39–1.71 seconds; the same reads with session-local diagnostic JIT disabled
+  executed in 21–85 ms. Fixed-binding plans took 20–45 ms without compilation.
+- `JdbcInboxStore.unread` and `OrchestrationStore.byCaller` inline
+  `information_unreadable_logs`. Even an empty run-state result compiled
+  253–254 functions: 1.32–1.55 seconds compiling versus 5–8 ms executing without
+  compilation. Both custom and generic plans exhibited this cost.
+- The dispatch policy introduced in `e91181ef` conservatively left
+  `document.list`, `document.detail`, `inbox.list` and `orchestration.list` as
+  connection-wide barriers. Desktop polls recent runs, three live states and
+  unread notices together. Reproducing that sequence on one segmented connection
+  made the following document detail/text reads take 9.28–9.46 seconds, where
+  isolated detail reads took 123–143 ms. The document request waited behind the
+  activity sequence. Activity timing, pooled-connection prepared-plan history and
+  custom/generic selection explain the apparent intermittent document latency.
+
+V178's selection routine arrived in `876ae2ce`; V195's log relation arrived in
+`e51c6587`. V196 retains both routines' bodies and adds function-local `jit=off`.
+The local setting prevents SQL-function expansion into callers and prevents the
+internal plan from incurring the same compilation cost. It restores the caller's
+JIT setting on return. Other statements retain their JIT policy. These remain
+STABLE, invoker-rights, statement-local reads with current grant, dependency,
+privacy, ancestry and retained-ceiling checks; no allow decision is cached.
+
+The four audited handlers now use bounded finite dispatch: document metadata and
+hierarchy, corpus page/count, account inbox reads and account run listings only
+read authorized data. They do not acknowledge notices, acquire leases, change
+selection or start work. Acting-context serialization, actual mutation barriers,
+unknown-operation barriers and execution/admission limits remain enforced.
+
+`InteractiveLibraryPlanDatabaseTest` exercises actual PostgreSQL custom/generic
+prepared plans, checks that authority remains behind a function scan rather than
+an expanded compiler-heavy graph, and reuses the same prepared selection after
+grant revocation. It explains the owning inbox repository's captured SQL and
+checks that function-local settings do not change the caller's JIT setting.
+Existing verdict-equivalence, expiry, closure-limit and ancestry tests still
+apply. Concurrent dispatch tests hold an inbox/run read open while a Library read
+uses the other permit, and retain write/acting-context ordering tests.
+
+Release acceptance uses the same Desktop binary and retained document/catalogue:
+ten document opens and repeated list refreshes, including activity-poll overlap.
+The target is a median below one second and no sampled operation above two
+seconds on that corpus. Record the first post-restart sample separately and keep
+SQL execution, queueing and Desktop dispatch/render timings distinct. These
+targets are live verification criteria, not timing assertions on shared CI hosts.
+Private bindings, SQL activity text and content are excluded from diagnostics;
+the evidence contains operation labels, numeric plan work and durations only.
+
 ## Desktop refresh follows invalidation
 
 Committed DOCUMENTS/AUTHORITY notifications and listener recovery emit the

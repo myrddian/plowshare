@@ -32,6 +32,10 @@ final class EventReadPolicy {
 
   private static final Set<String> INDEPENDENT =
       Set.of(
+          "document.list",
+          "document.detail",
+          "inbox.list",
+          "orchestration.list",
           "information.list",
           "information.facets",
           "information.read",
