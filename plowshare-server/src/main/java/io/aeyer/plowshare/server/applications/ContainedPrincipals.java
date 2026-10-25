@@ -40,6 +40,15 @@ public interface ContainedPrincipals {
    * Removes the scope's principal if present. Removal of the scope itself already collects it by
    * cascade; this is for retiring a principal while the scope remains. Revoking nothing is not an
    * error.
+   *
+   * <p>It takes the same fully described {@link AuthorityScope.Contained} {@link #issue} takes, and
+   * for the same reason: the caller's claim about which project and container a scope belongs to is
+   * checked against the authority record rather than trusted. The earlier shape took a bare scope
+   * id and checked neither, which was harmless only while nothing called it. It has a caller now --
+   * destruction -- and a bare id is the one argument an attacker-influenced value could be: a
+   * caller that resolved the wrong record, or was handed an id from a request, would have retired
+   * another Application's principal silently, since removing nothing is not an error and removing
+   * the wrong thing would have looked identical.
    */
-  void revoke(ScopeId scope);
+  void revoke(AuthorityScope.Contained scope);
 }

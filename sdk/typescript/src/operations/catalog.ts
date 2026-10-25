@@ -214,6 +214,13 @@ export interface ExtendedPayloads
     readonly child: string;
     readonly calls: number;
   };
+  // Destruction, which for a contained Application is the normal path. `child` is the only
+  // target and is proved against the caller's own admitted scope before anything is removed, so a
+  // sibling, a container or an unrelated Application is refused rather than collected.
+  'application.child.destroy': {
+    readonly conversation: string;
+    readonly child: string;
+  };
   // One-way visibility. Neither payload names a container: the scope read is the scope the
   // caller's own retained conversation is admitted as, so there is no field through which a
   // sibling, a parent or an unrelated Application could be asked about. `child` on the trajectory
@@ -487,6 +494,7 @@ export const CLI_OPERATIONS = {
   'application activate': 'application.activate',
   'application child create': 'application.child.create',
   'application child ceiling': 'application.child.ceiling',
+  'application child destroy': 'application.child.destroy',
   'application child list': 'application.child.list',
   'application child trajectory': 'application.child.trajectory',
   'filestore list': 'filestore.list',

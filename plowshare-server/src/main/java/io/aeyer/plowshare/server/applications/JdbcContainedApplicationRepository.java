@@ -171,6 +171,125 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
         != 1) throw new CallerFault("No such live contained Application");
   }
 
+  /**
+   * The subtree, deepest first. The recursive term walks {@code authority_scopes.container} exactly
+   * as {@link #liveDescendants} does, and the depth it accumulates is what the ordering uses: a
+   * container's rows must be deleted after every descendant's, because {@code
+   * authority_scopes.container} is {@code ON DELETE RESTRICT}. Live and destroyed alike, because a
+   * row that is still present is still a row that must go before its container's.
+   */
+  @Override
+  public List<Retained> subtree(ScopeId scope) {
+    return jdbc.query(
+        "WITH RECURSIVE tree AS ("
+            + "  SELECT s.id,0 AS depth FROM authority_scopes s WHERE s.id=?"
+            + "  UNION ALL"
+            + "  SELECT s.id,t.depth+1 FROM authority_scopes s JOIN tree t ON s.container=t.id)"
+            + " SELECT "
+            + COLUMNS
+            + " FROM contained_applications c JOIN projects p ON p.id=c.project_id"
+            + " JOIN tree t ON t.id=c.scope_id ORDER BY t.depth DESC,c.id",
+        JdbcContainedApplicationRepository::read,
+        scope.value());
+  }
+
+  /**
+   * Deletes the child's project, and the two-hop cascade removes the scope, the principal and this
+   * record with it. {@code p.name LIKE 'contained:%'} is in the statement itself, so this cannot
+   * reach an ordinary Application's project — and therefore cannot reach its retained revisions —
+   * whatever identifier it is given.
+   */
+  @Override
+  public void destroy(UUID id) {
+    if (jdbc.update(
+            "DELETE FROM projects p USING contained_applications c"
+                + " WHERE c.project_id=p.id AND c.id=? AND p.name LIKE 'contained:%'",
+            id)
+        != 1) throw new CallerFault("No such contained Application");
+  }
+
+  @Override
+  public void collected(Collection record) {
+    jdbc.update(
+        "INSERT INTO contained_collections"
+            + "(child,container,project,revision,workspace,cause) VALUES(?,?,?,?,?,?)"
+            + " ON CONFLICT (child) DO NOTHING",
+        record.child(),
+        record.container() == null ? null : record.container().value(),
+        record.project(),
+        record.revision(),
+        record.workspace().toString(),
+        record.cause().name());
+  }
+
+  @Override
+  public void sourceCollected(UUID child) {
+    jdbc.update("UPDATE contained_collections SET source_removed=TRUE WHERE child=?", child);
+  }
+
+  @Override
+  public List<Collection> uncollectedSources() {
+    return jdbc.query(
+        "SELECT child,container,project,revision,workspace,cause FROM contained_collections"
+            + " WHERE NOT source_removed ORDER BY collected_at",
+        (row, index) ->
+            new Collection(
+                row.getObject("child", UUID.class),
+                row.getObject("container", UUID.class) == null
+                    ? null
+                    : new ScopeId(row.getObject("container", UUID.class)),
+                row.getString("project"),
+                row.getObject("revision", UUID.class),
+                java.nio.file.Path.of(row.getString("workspace")),
+                Cause.valueOf(row.getString("cause"))));
+  }
+
+  @Override
+  public boolean committed(String project) {
+    Integer count =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM contained_applications c JOIN projects p ON p.id=c.project_id"
+                + " WHERE p.name=?",
+            Integer.class,
+            project);
+    return count != null && count > 0;
+  }
+
+  /**
+   * Live contained Applications anywhere beneath this project's authority scope. The project is
+   * resolved by name rather than by scope id because its caller is activation, which knows the
+   * project row it has just locked; an ordinary project with no children answers zero.
+   */
+  @Override
+  public int liveChildrenOfProject(String project) {
+    Integer count =
+        jdbc.queryForObject(
+            "WITH RECURSIVE subtree AS ("
+                + "  SELECT s.id FROM authority_scopes s JOIN projects p ON p.id=s.project_id"
+                + "    WHERE p.name=?"
+                + "  UNION ALL"
+                + "  SELECT s.id FROM authority_scopes s JOIN subtree t ON s.container=t.id)"
+                + " SELECT count(*) FROM contained_applications c"
+                + " JOIN subtree t ON t.id=c.scope_id WHERE c.live",
+            Integer.class,
+            project);
+    return count == null ? 0 : count;
+  }
+
+  /**
+   * The container's own project row, locked. {@code FOR UPDATE OF p} names the projects row
+   * explicitly so the join to {@code authority_scopes} is a read and not a second lock, and this is
+   * the same row {@code JdbcApplicationDeploymentStore.commit} locks before it asks the fence.
+   */
+  @Override
+  public void lockContainer(ScopeId container) {
+    jdbc.query(
+        "SELECT p.id FROM projects p JOIN authority_scopes s ON s.project_id=p.id"
+            + " WHERE s.id=? FOR UPDATE OF p",
+        (row, index) -> row.getLong(1),
+        container.value());
+  }
+
   private static final String UNAVAILABLE = "The contained Application record is unavailable";
 
   private static Retained read(java.sql.ResultSet row, int index) throws java.sql.SQLException {

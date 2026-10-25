@@ -36,6 +36,8 @@ public final class ContainedApplicationFrames implements FrameArea {
         this::create,
         FrameTypes.APPLICATION_CHILD_CEILING,
         this::ceiling,
+        FrameTypes.APPLICATION_CHILD_DESTROY,
+        this::destroy,
         FrameTypes.APPLICATION_CHILD_LIST,
         this::list,
         FrameTypes.APPLICATION_CHILD_TRAJECTORY,
@@ -138,6 +140,37 @@ public final class ContainedApplicationFrames implements FrameArea {
         uuid(payload, "child"),
         calls(payload, "calls"));
     return Outcome.ok(Map.of("child", uuid(payload, "child").toString()));
+  }
+
+  /**
+   * Destroys a child and its descendants. {@code child} is the only target and is proved against
+   * the caller's own admitted scope before anything is removed, exactly as a ceiling change is.
+   *
+   * <p>The answer carries what was collected, deepest first, and how many source areas were removed
+   * before it was given. {@code sources} may be fewer than {@code collected}: the filesystem cannot
+   * join the transaction, so an interrupted removal leaves recorded work the server's own collector
+   * finishes. Fewer is recoverable, never lost, and reporting it is what makes collection
+   * observable to the container rather than merely claimed.
+   */
+  private Outcome destroy(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation", "child"));
+    var destroyed =
+        children.destroy(
+            asking.requireHandle(FrameTypes.APPLICATION_CHILD_DESTROY),
+            Payloads.required(
+                payload,
+                "conversation",
+                FrameTypes.APPLICATION_CHILD_DESTROY,
+                "the container's conversation"),
+            uuid(payload, "child"));
+    return Outcome.ok(
+        Map.of(
+            "child",
+            destroyed.child().toString(),
+            "collected",
+            destroyed.collected().stream().map(UUID::toString).toList(),
+            "sources",
+            destroyed.sources()));
   }
 
   /** A call count is an explicit non-negative integer; null would mean unlimited. */

@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.applications;
 
-import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.access.AuthorityScope;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.UUID;
@@ -51,8 +50,20 @@ public class JdbcContainedPrincipalRepository implements ContainedPrincipals {
         .orElseThrow(() -> new CallerFault(UNRESOLVED));
   }
 
+  /**
+   * Deletes only against a stored {@code CONTAINED} row matching this scope's project <em>and</em>
+   * container, which is {@link #issue}'s predicate verbatim. The asymmetry this closes mattered
+   * because removing nothing is not an error: a caller holding a mis-described scope would have
+   * removed another Application's principal and seen the same silent success.
+   */
   @Override
-  public void revoke(ScopeId scope) {
-    jdbc.update("DELETE FROM contained_principals WHERE scope_id=?", scope.value());
+  public void revoke(AuthorityScope.Contained scope) {
+    jdbc.update(
+        "DELETE FROM contained_principals p USING authority_scopes s"
+            + " WHERE s.id=p.scope_id AND p.scope_id=? AND s.kind='CONTAINED'"
+            + " AND s.project_id=? AND s.container=?",
+        scope.id().value(),
+        scope.projectId(),
+        scope.container().value());
   }
 }

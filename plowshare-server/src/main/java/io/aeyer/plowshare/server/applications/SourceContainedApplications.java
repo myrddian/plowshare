@@ -147,6 +147,11 @@ public final class SourceContainedApplications implements ContainedApplications 
       var allowance = new AllowanceId(UUID.randomUUID());
       return work.inTransaction(
           () -> {
+            // The container's own project row lock, which is the row a parent revision change
+            // locks. Taken before the insert so that creation and activation contend on one lock:
+            // without it, activation could count zero live children a moment before this row
+            // lands and both would commit, leaving the orphan the fence exists to prevent.
+            records.lockContainer(parent.admission().scope());
             var retained =
                 records.create(
                     new ContainedApplicationRepository.Creation(
@@ -211,6 +216,87 @@ public final class SourceContainedApplications implements ContainedApplications 
           records.ceiling(child, calls);
           return null;
         });
+  }
+
+  /**
+   * Destroys a child and its descendants, deepest first, then collects their source areas.
+   *
+   * <p><strong>The order is the contract.</strong> Authority first, and proved exactly as {@link
+   * #ceiling} proves it. Then one durable unit that, per record from the deepest outwards, zeroes
+   * the allowance, revokes the principal, writes the collection record and deletes the rows. Then,
+   * and only then, the bytes.
+   *
+   * <p>Why the bytes come last: the filesystem cannot join the transaction, so one of the two
+   * orders must be chosen and they fail differently. Removing first and rolling back leaves a live
+   * record pointing at source that no longer exists — an Application that cannot run and that no
+   * sweep can repair, because its record says it is live. Committing first and being interrupted
+   * leaves a directory with an unmarked collection record, which {@link ContainedSourceCollector}
+   * finishes on the next sweep. Only one of those is recoverable.
+   *
+   * <p>Deepest first is not a preference either. {@code authority_scopes.container} is {@code ON
+   * DELETE RESTRICT}, so a container's rows cannot go while a descendant references them: a
+   * parent-first delete is refused by the schema rather than silently orphaning anything.
+   */
+  @Override
+  public Destroyed destroy(String account, String conversation, UUID child) {
+    var retained =
+        records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
+    var parent = parent(account, conversation);
+    if (!parent.admission().scope().equals(retained.container()))
+      throw new CallerFault("This Application does not contain that Application");
+    var subtree = records.subtree(retained.scope());
+    if (subtree.isEmpty())
+      throw new CallerFault("This contained Application has already been collected");
+    work.inTransaction(
+        () -> {
+          for (var held : subtree) {
+            // Zeroed before the rows go, so a descendant mid-execution cannot claim another call
+            // between this unit committing and its own next check. The allowance row itself is the
+            // allowance owner's and is not deleted here.
+            allowances.ceiling(held.allowance(), 0);
+            principals.revoke(
+                new AuthorityScope.Contained(held.scope(), held.projectId(), held.container()));
+            records.collected(
+                new ContainedApplicationRepository.Collection(
+                    held.id(),
+                    held.container(),
+                    held.project(),
+                    held.revision(),
+                    workspace(held.project()),
+                    ContainedApplicationRepository.Cause.DESTROYED));
+            records.destroy(held.id());
+          }
+          return null;
+        });
+    int sources = 0;
+    for (var held : subtree) {
+      Path workspace = workspace(held.project());
+      collect(workspace);
+      // Marked only once the bytes are actually gone. An unmarked row is the sweep's work list, so
+      // claiming a removal that did not happen would lose exactly the recovery this buys.
+      if (Files.notExists(workspace, LinkOption.NOFOLLOW_LINKS)) {
+        records.sourceCollected(held.id());
+        sources++;
+      }
+    }
+    return new Destroyed(
+        child, subtree.stream().map(ContainedApplicationRepository.Retained::id).toList(), sources);
+  }
+
+  /**
+   * A child's source area, derived from its opaque project name under the configured root. Derived
+   * rather than read back from the record so that destruction cannot be pointed at a path a stored
+   * row claims: the only directory this can ever name is one under {@link ContainmentConfig#root()}
+   * whose name is the project's own UUID suffix.
+   */
+  private Path workspace(String project) {
+    if (!project.startsWith(PREFIX))
+      throw new CallerFault("A contained project carries the reserved prefix");
+    String suffix = project.substring(PREFIX.length());
+    Path workspace = config.root().resolve(suffix).normalize();
+    if (!workspace.getParent().equals(config.root()) || suffix.contains("/"))
+      throw new CallerFault("A contained source area lies directly under the containment root");
+    return workspace;
   }
 
   /**

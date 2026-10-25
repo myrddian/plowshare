@@ -20,8 +20,32 @@ public class ApplicationDeploymentConfig {
       ServerProjects projects,
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
       ApplicationIdentities identities,
-      io.aeyer.plowshare.server.acting.ActingRepository acting) {
-    return new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities, acting);
+      io.aeyer.plowshare.server.acting.ActingRepository acting,
+      ContainmentFence containment) {
+    return new JdbcApplicationDeploymentStore(
+        jdbc, work, projects, schedules, identities, acting, containment);
+  }
+
+  /**
+   * The live-child fence activation asks under the project row lock. It holds the containment read
+   * and nothing else, which is what makes a refusal the only thing it can do.
+   */
+  @Bean
+  public ContainmentFence containmentFence(ContainedApplicationRepository records) {
+    return new SourceContainmentFence(records);
+  }
+
+  /**
+   * The staged-source collector. It is constructed with the containment configuration a server
+   * actually has: without one it has no root and sweeps nothing, rather than guessing a path.
+   */
+  @Bean
+  public ContainedSourceCollector containedSourceCollector(
+      ContainedApplicationRepository records,
+      UnitOfWork work,
+      ObjectProvider<ContainmentConfig> containment) {
+    return new ContainedSourceCollector(
+        records, work, containment.getIfAvailable(ContainmentConfig::absent));
   }
 
   @Bean

@@ -84,6 +84,13 @@ public final class FrameTypes {
   public static final String APPLICATION_CHILD_CEILING = "application.child.ceiling";
 
   /**
+   * Destruction, which for a contained Application is the normal path rather than an exception. It
+   * answers with what it collected — the named child and its descendants — because a destruction
+   * that reported nothing would be indistinguishable from one that removed nothing.
+   */
+  public static final String APPLICATION_CHILD_DESTROY = "application.child.destroy";
+
+  /**
    * One-way visibility. Neither names a container: the scope read is the scope the caller's own
    * retained conversation is admitted as, so there is no field through which a sibling, a parent or
    * an unrelated Application could be asked about.

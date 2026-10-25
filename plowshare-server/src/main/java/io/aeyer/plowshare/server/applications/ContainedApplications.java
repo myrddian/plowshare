@@ -165,4 +165,52 @@ public interface ContainedApplications {
    * <em>within</em> the container's remaining allowance rather than refused as a class.
    */
   void ceiling(String account, String conversation, UUID child, Integer calls);
+
+  /**
+   * What a destruction collected, as its container reads the answer back.
+   *
+   * <p>A boundary DTO, so every component is a plain wire value and no {@link ScopeId} travels. It
+   * exists because collection has to be <em>observable</em>: a destruction that silently removed a
+   * subtree would be indistinguishable from one that removed nothing, and from one that removed the
+   * wrong thing.
+   *
+   * @param child the Application the caller named
+   * @param collected every record removed — the named child and its descendants — deepest first,
+   *     which is the order the schema requires and therefore the order this reports
+   * @param sources how many of those source areas were removed from disk before this answer. It may
+   *     be fewer than {@code collected}: the filesystem cannot join the transaction, so a committed
+   *     destruction whose removal is interrupted leaves an unmarked collection record that {@link
+   *     ContainedSourceCollector} finishes. Fewer is a recoverable state, never a lost one.
+   */
+  record Destroyed(UUID child, List<UUID> collected, int sources) {
+    public Destroyed {
+      Objects.requireNonNull(child);
+      collected = List.copyOf(collected);
+      if (!collected.contains(child))
+        throw new IllegalArgumentException("A destruction accounts for the Application it names");
+      if (sources < 0 || sources > collected.size())
+        throw new IllegalArgumentException("A destruction collects at most one source per record");
+    }
+  }
+
+  /**
+   * Destroys one contained Application and every descendant beneath it.
+   *
+   * <p>Authorized exactly as {@link #ceiling} authorizes a reconfiguration, and for the same
+   * reasons: the conversation's retained admission is the container's authority, live authority is
+   * rechecked rather than trusted, and that admission must be acting as the scope this child is
+   * recorded under — so a container destroys its own children and nothing else. A caller naming a
+   * sibling, its own container or an unrelated Application is refused before anything is removed.
+   *
+   * <p>Descendants go with it, deepest first, which is both the schema's requirement and the
+   * design's: a surviving descendant of a destroyed container is the orphan this capability names
+   * as failure. Each descendant's allowance is zeroed before its rows go, so work in flight cannot
+   * claim another call on the way out.
+   *
+   * <p>A destroyed child is <strong>not</strong> promoted to a retained release. ADR 0005's release
+   * history records what may be activated and a destroyed child may not be activated at all; what
+   * is written instead is a collection record, which is history and carries no digest, file count
+   * or destination.
+   */
+  Destroyed destroy(String account, String conversation, UUID child);
 }

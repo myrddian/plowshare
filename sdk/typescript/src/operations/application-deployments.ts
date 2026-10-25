@@ -170,6 +170,23 @@ export const containedChildCheck = record({
   revision: deploymentUuid,
 });
 export const containedCeilingCheck = record({ child: deploymentUuid });
+/**
+ * What a destruction collected: the named child and its descendants, deepest first. `sources` is
+ * how many of those source areas were removed from disk before the answer was given, and it may be
+ * fewer than `collected` -- the filesystem cannot join the server's transaction, so an interrupted
+ * removal leaves recorded work the server's own collector finishes. Fewer is recoverable, not lost.
+ */
+export interface ContainedApplicationDestruction {
+  readonly child: string;
+  readonly collected: readonly string[];
+  readonly sources: number;
+}
+export const containedDestructionCheck = record({
+  child: deploymentUuid,
+  collected: list(deploymentUuid),
+  sources: (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+});
 /** What a container holds, as its own listing returns it: live direct children, oldest first. */
 export interface ContainedApplicationChildren {
   readonly children: readonly ContainedApplicationChild[];

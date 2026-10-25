@@ -120,4 +120,110 @@ public interface ContainedApplicationRepository {
 
   /** Records an authorized ceiling change; the allowance itself is the allowance owner's row. */
   void ceiling(UUID id, Integer calls);
+
+  /** Why a source area was collected. {@code SWEPT} is recovery; {@code DESTROYED} is the act. */
+  enum Cause {
+    DESTROYED,
+    SWEPT
+  }
+
+  /**
+   * One durable record that a contained source area was collected.
+   *
+   * <p>This is what makes collection observable, and it is the one row in this relation that
+   * deliberately holds <strong>no foreign key at all</strong>. Everything it describes is being
+   * deleted as it is written — the scope, the project and the {@link Retained} record all go in the
+   * same cascade — so a constraint into any of them would delete the history along with the thing
+   * it is history of.
+   *
+   * <p>It is also not a release. There is no digest, no file count and no destination here: ADR
+   * 0005's retained release history records what may be activated, and a destroyed child may not be
+   * activated at all. Promotion is a separate explicit act and is not this row.
+   *
+   * @param container the scope that held this child, or {@code null} for a {@code SWEPT} stage,
+   *     which by definition had no committed record to name one
+   * @param revision the child's single revision, or {@code null} for a {@code SWEPT} stage
+   * @param workspace the source area this record accounts for. Its removal is marked separately by
+   *     {@link #sourceCollected}, because the filesystem cannot join the transaction: an unmarked
+   *     row is therefore exactly the work an interrupted removal left behind.
+   */
+  record Collection(
+      UUID child, ScopeId container, String project, UUID revision, Path workspace, Cause cause) {
+    public Collection {
+      Objects.requireNonNull(child);
+      Objects.requireNonNull(cause);
+      if (project == null || !project.startsWith("contained:"))
+        throw new IllegalArgumentException("A collection accounts for a contained project");
+      if (workspace == null || !workspace.isAbsolute())
+        throw new IllegalArgumentException("A collection names an absolute server path");
+      if (cause == Cause.DESTROYED && (container == null || revision == null))
+        throw new IllegalArgumentException("A destroyed child names its container and revision");
+      if (cause == Cause.SWEPT && (container != null || revision != null))
+        throw new IllegalArgumentException(
+            "A swept stage had no committed record, so it names neither container nor revision");
+    }
+  }
+
+  /**
+   * Every contained record in this scope's subtree, <strong>deepest first</strong>, including the
+   * scope's own record.
+   *
+   * <p>The order is the contract and not a convenience. {@code authority_scopes.container} is
+   * {@code ON DELETE RESTRICT} (V195), so a container's rows cannot be removed while a descendant
+   * still references them: destroying in any other order is refused by the schema. Live and
+   * destroyed alike are returned, because a record that is still present is still a row that must
+   * go before its container's.
+   */
+  List<Retained> subtree(ScopeId scope);
+
+  /**
+   * Removes one contained Application's rows by deleting its project.
+   *
+   * <p>One statement, and the two-hop cascade does the rest: {@code authority_scopes.project_id} is
+   * {@code ON DELETE CASCADE} (V155), and {@code contained_principals.scope_id} and {@code
+   * contained_applications.scope_id} cascade from the scope (V197, V198). So the project, the
+   * contained scope, the principal and this record either all go or none do, with no second code
+   * path to forget one of them.
+   *
+   * <p>The delete is constrained to the reserved {@code contained:} prefix in SQL, so this method
+   * cannot reach an ordinary Application's project — and therefore cannot reach its retained
+   * revisions — whatever it is passed. Callers destroy deepest first; see {@link #subtree}.
+   */
+  void destroy(UUID id);
+
+  /** Writes the collection record. Inside the destroying transaction, before the rows go. */
+  void collected(Collection record);
+
+  /** Marks a collection's source area as removed from disk. Idempotent; absence is not an error. */
+  void sourceCollected(UUID child);
+
+  /**
+   * Collections whose source area has not been marked removed: the sweep's precise work list. A row
+   * reaches this list only when a destruction committed and the removal that follows it did not.
+   */
+  List<Collection> uncollectedSources();
+
+  /**
+   * Whether a contained record exists for this project name. A staged area with none is garbage.
+   */
+  boolean committed(String project);
+
+  /**
+   * Live contained Applications anywhere beneath the authority scope of this <em>project name</em>.
+   *
+   * <p>Keyed on the project name rather than on a scope because its one caller is activation, which
+   * knows the project it has just locked and must not resolve a scope to ask this. An ordinary
+   * project with no children answers zero, which is every pre-existing project.
+   */
+  int liveChildrenOfProject(String project);
+
+  /**
+   * Takes the container's own project row lock, in the caller's transaction.
+   *
+   * <p>This is the same row activation locks, which is the whole point: creation and a parent
+   * revision change contend on one lock, so they cannot interleave between activation's live-child
+   * count and creation's insert. Without it the count could be taken a moment before a child row
+   * lands and both would commit, which is the orphan this fence exists to prevent.
+   */
+  void lockContainer(ScopeId container);
 }

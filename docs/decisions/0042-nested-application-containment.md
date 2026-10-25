@@ -557,3 +557,79 @@ generated SDKs the moment child read and destroy arrived. The conversion belongs
 at the boundary and is done once, where the record is built; `ScopeId` itself is
 unchanged, because annotating it would alter every other DTO that happens to
 carry one.
+
+## What makes collection observable
+
+This record claimed collection was observable before anything made it so, which
+was a claim no operator could check: a destroyed child's rows are removed by the
+two-hop cascade — `projects` to `authority_scopes` (V155) to
+`contained_applications` and `contained_principals` (V197, V198) — so after a
+destruction there was nothing left to read, and the staged-source removal that
+follows the transaction was silent. The claim now stands because two things were
+added rather than because it was softened.
+
+**A collection record, V199's `contained_collections`.** One row per collected
+source area, written inside the destroying transaction before the rows go. It is
+deliberately the one table in this relation with *no foreign key at all*:
+everything it describes is being deleted as it is written, so a constraint into
+any of it would delete the history along with the thing it is history of. It is
+not a release — no digest, no file count, no destination — because
+[ADR 0005](0005-application-deployment.md)'s `application_releases` records what
+may be activated and a destroyed child may not be activated at all. **A destroyed
+child is never promoted to a retained release**; promotion is a separate explicit
+act and is not represented in this schema.
+
+**`source_removed` as a separate column, not an implied consequence.** The
+filesystem cannot join the transaction, so the order has to be chosen and the two
+orders fail differently. Removing the bytes first and rolling back leaves a live
+record pointing at source that no longer exists — an Application that cannot run
+and that no sweep can repair, because its own record says it is live. Committing
+first and being interrupted leaves a directory with an *unmarked* collection row.
+Only the second is recoverable, so destruction commits first and marks the removal
+only once the bytes are actually gone. An unmarked row is therefore precisely the
+work an interrupted removal left behind.
+
+`ContainedSourceCollector.sweep()` reads that as its first input and the
+containment root's own directory listing as its second: a directory with no
+committed containment record is a creation that was interrupted between staging
+and committing, and only a committed record makes a stage live. Each sweep reports
+what it collected and what it retained.
+
+**This inverts ADR 0005 deliberately.** That record states that filesystem
+staging cannot participate in PostgreSQL rollback, that a rejected or crashed
+stage can remain on disk, and that the server does not garbage-collect it. That is
+correct there, because a top-level staged revision may be a retained release a
+human still wants. Here destruction is the *normal* path, so a stage with no
+committed child is garbage rather than evidence.
+
+**The collector cannot reach an ordinary Application's retained revisions.** That
+is structural and not a check: the only directory it ever enumerates is a direct
+child of the configured containment root, a server-owned directory that exists for
+contained source and nothing else, and it holds no collaborator through which a
+release, a deployment head or a FileStore destination could be reached. The
+destroying `DELETE` carries the reserved `contained:` prefix in the statement
+itself, so it cannot match an ordinary project whatever identifier it is given.
+
+## A parent revision change refuses while a child is live
+
+Letting children survive the change and destroying them silently during an
+ordinary update were both rejected above, because each produces the orphan this
+design names as failure. The refusal is asked by `ContainmentFence` from inside
+`JdbcApplicationDeploymentStore.commit`, immediately after the project row lock
+that already serializes activation — and creation takes that same container
+project row lock, so the two contend on one row. Without the shared lock the
+revision change would count zero live children a moment before a child row landed
+and both would commit, which is the window the fence exists to close. The fence
+holds the containment read and nothing else, so a refusal is the only thing it can
+do: there is no collaborator there through which a destruction could be reached.
+
+## Contained principal revocation is symmetric with issuance
+
+`ContainedPrincipals.revoke` took a bare scope id and checked neither project nor
+container while `issue` checked both. That was harmless only while nothing called
+it. Destruction is its caller, so the asymmetry was closed rather than documented:
+`revoke` now takes the same fully described `AuthorityScope.Contained` and its
+statement checks kind, project and container against the authority record. The
+asymmetry mattered because removing nothing is not an error — a caller holding a
+mis-described scope would have retired another Application's principal and seen
+the same silent success.

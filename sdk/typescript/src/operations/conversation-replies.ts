@@ -26,12 +26,14 @@ import {
   deploymentReceiptCheck,
   containedChildCheck,
   containedCeilingCheck,
+  containedDestructionCheck,
   containedChildrenCheck,
   containedTrajectoryCheck,
   deploymentStatusCheck,
   type ApplicationDeploymentReceipt,
   type ContainedApplicationChild,
   type ContainedApplicationCeiling,
+  type ContainedApplicationDestruction,
   type ContainedApplicationChildren,
   type ContainedApplicationTrajectory,
   type ApplicationDeploymentStatus,
@@ -458,6 +460,7 @@ export interface ConversationReplies {
   'application.deployment.receipt': ApplicationDeploymentReceipt;
   'application.child.create': ContainedApplicationChild;
   'application.child.ceiling': ContainedApplicationCeiling;
+  'application.child.destroy': ContainedApplicationDestruction;
   'application.child.list': ContainedApplicationChildren;
   'application.child.trajectory': ContainedApplicationTrajectory;
   'filestore.list': FileStoreCatalog;
@@ -939,6 +942,7 @@ const readers = {
   'application.deployment.receipt': deploymentReceiptCheck,
   'application.child.create': containedChildCheck,
   'application.child.ceiling': containedCeilingCheck,
+  'application.child.destroy': containedDestructionCheck,
   'application.child.list': containedChildrenCheck,
   'application.child.trajectory': containedTrajectoryCheck,
   'filestore.list': fileStoreCatalogCheck,

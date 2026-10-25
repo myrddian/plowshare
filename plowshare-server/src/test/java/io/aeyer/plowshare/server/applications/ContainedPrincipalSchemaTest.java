@@ -112,12 +112,33 @@ class ContainedPrincipalSchemaTest {
   @Test
   void revokeRemovesThePrincipalButLeavesTheScope() {
     repository.issue(scope());
-    repository.revoke(new ScopeId(childScope));
+    repository.revoke(scope());
     assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM contained_principals", Long.class));
     assertEquals(
         1L,
         jdbc.queryForObject(
             "SELECT count(*) FROM authority_scopes WHERE id=?", Long.class, childScope));
+  }
+
+  /**
+   * Revocation checks project and container against the stored row, exactly as issuing does. The
+   * predicate is SQL over another table, so this needs the real engine: a mis-described scope must
+   * remove <em>nothing</em>, and before this symmetry it removed the principal anyway — silently,
+   * because removing nothing is not an error and so the two outcomes looked identical.
+   */
+  @Test
+  void revokeRefusesAScopeThatIsNotStoredAsDescribed() {
+    repository.issue(scope());
+    repository.revoke(
+        new AuthorityScope.Contained(
+            new ScopeId(childScope), childProject, new ScopeId(UUID.randomUUID())));
+    assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM contained_principals", Long.class));
+    repository.revoke(
+        new AuthorityScope.Contained(
+            new ScopeId(childScope), childProject + 1, new ScopeId(parentScope)));
+    assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM contained_principals", Long.class));
+    repository.revoke(scope());
+    assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM contained_principals", Long.class));
   }
 
   @Test

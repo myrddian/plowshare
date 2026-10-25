@@ -82,11 +82,25 @@ class ContainedPrincipalsTest {
             eq(scope.container().value()));
   }
 
+  /**
+   * Revocation presents the same fully described scope issuing presents, and the statement checks
+   * all three columns against the authority record. A bare scope id checked neither, which was
+   * reachable the moment destruction called it.
+   */
   @Test
-  void revokingTheScopeRemovesThePrincipal() {
+  void revokingTheScopeRemovesThePrincipalOnlyWhereTheRecordAgrees() {
     var scope = scope();
-    principals.revoke(scope.id());
-    verify(jdbc).update("DELETE FROM contained_principals WHERE scope_id=?", scope.id().value());
+    principals.revoke(scope);
+    var sql = ArgumentCaptor.forClass(String.class);
+    verify(jdbc)
+        .update(
+            sql.capture(),
+            eq(scope.id().value()),
+            eq(scope.projectId()),
+            eq(scope.container().value()));
+    assertTrue(sql.getValue().contains("s.kind='CONTAINED'"), sql.getValue());
+    assertTrue(sql.getValue().contains("s.project_id=?"), sql.getValue());
+    assertTrue(sql.getValue().contains("s.container=?"), sql.getValue());
   }
 
   @Test
