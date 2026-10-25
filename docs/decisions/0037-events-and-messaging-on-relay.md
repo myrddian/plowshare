@@ -23,6 +23,7 @@ the table below carries both states, because the gap is the point of the record.
 | `information.events` | **now yes** | `information_events` (one global `BIGSERIAL`), `information_event_recipients`, an installation-wide advisory fence, and its own cursor | moved in V188, carried on the general message in V189; `information_events` is `DROP`ped (`V188:96`), so the clean break this record demanded actually happened |
 | `event.fire` | **now yes** | `EventFireHandler` → `Intake` → `TriggerStore`, `FiringStore`, `Dispatcher`. No relay reference. | publishes through `RelayEventPublication`, consumed by the existing firing inbox; authority unit is the installation, scope `SystemScope.SERVER` |
 | `message.*` / outgoing | no | `outgoing_work`, `outgoing_peers`, `message_external_tasks`. The `outgoing` package has no relay reference. | unchanged — `server/outgoing/` still holds zero Relay references — and now known to be *blocked*, not merely unstarted |
+| **delegation** | **partial** | not inventoried — named in the need statement above and then omitted | inbound external root starts, pinned destinations, idempotency and receipts (V121), the effect-depth bound and nested causation (V127), and lifecycle notices out (V124) are all on Relay, shipped 2026-10-06. The delegation mechanics are not: `startNested` is reached only from the agent tool, the report that wakes a parent travels `Delivery` → `ParentVoice` in process, and `orchestration.child.completed` is published with no consumer. See 0041's table |
 
 Each of the three that are not on Relay re-implements some part of what Relay already owns, and
 each re-implements it differently. That is the cost this record is about: not one slow query, but
@@ -251,9 +252,18 @@ delegations* are meant to be wrappers over it", and then the four-family table a
 omit delegation entirely. That omission is why a sender-side wait was specified against messaging:
 with delegation absent from the inventory, the synchronous construct looked like something messaging
 had to grow, rather than something delegation already owns. Delegation is the fifth family, and it
-is further along than this record's ordering implies — `orchestration.start` is already a Relay work
-receiver, with `relay_deliveries`' pinned destinations and `relay_executions`' idempotency and
-receipts (V121).
+is further along than this record's ordering implies: inbound external root starts, pinned
+destinations, idempotency and receipts (V121), the Relay effect-depth bound, nested causation (V127)
+and the lifecycle outbox (V124) all shipped on 2026-10-06 in "Bound lifecycle feedback across
+Relay-started work".
+
+What it is *not* is finished, and the unfinished part is easy to mistake for finished.
+`orchestration.child.completed` is published as a `Lifecycle` notice carrying its parent, and
+nothing consumes it: the report that actually wakes a parent still travels `Delivery` →
+`ParentVoice.speak` in process, and `startNested` is reached only from the agent tool. So Relay
+carries delegation's notices as an observation feed beside the in-process delivery that does the
+work — two paths for one fact. Completing it is a consumer and the eligibility owner, not a
+publisher.
 
 **The ordering no longer holds, and messaging is blocked rather than merely last.** This record says
 the sequence "information events, then `event.fire`, then messaging" stands. Two of those are done,
