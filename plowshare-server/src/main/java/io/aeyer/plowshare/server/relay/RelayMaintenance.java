@@ -81,6 +81,7 @@ public final class RelayMaintenance
     // examined. Only payloads whose ejection_at has matured are examined, and each examination
     // re-checks reachability.
     if (payloads != null) deleted += payloads.sweep(now, properties.getPayloadSweepBatch());
+    else LOG.warn("Relay payload store is not registered; unreferenced payloads are not reclaimed");
     return deleted;
   }
 

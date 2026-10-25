@@ -113,7 +113,13 @@ public final class JdbcRelayRepository implements RelayRepository {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
-    // The payload is committed before the topic transaction opens, on purpose. Inside it, the
+    // The payload is stored before the topic transaction opens, on purpose, and commits ahead of it
+    // only when this thread has no transaction already open: the store issues a bare statement and
+    // the unit of work below joins an enclosing transaction (REQUIRED). A caller that appends
+    // inside
+    // its own transaction, such as RelayInformationEvents.publish, therefore keeps the payload row
+    // locked until that outer transaction ends, and the ahead-of-the-append benefit does not apply.
+    // Inside the topic transaction, the
     // store's ON CONFLICT (digest) would make a publisher wait on another's uncommitted insert of
     // the same digest, serialising publishers that share nothing but identical content. Committed
     // ahead, the insert for every later publisher is a conflict that writes a row version only

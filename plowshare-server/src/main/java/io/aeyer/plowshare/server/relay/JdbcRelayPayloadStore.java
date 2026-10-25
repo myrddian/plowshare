@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -26,11 +28,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * whitespace. The two may differ; an equivalent payload hashed from a different rendering would
  * only miss a dedup, never read or delete the wrong bytes.
  *
- * <p>{@link #store} is a single idempotent statement and does not open a transaction, so a caller
- * outside one commits it immediately. A repeat of an existing digest re-arms its staging window and
- * locks the row; a repeat of a digest already deferred past that window writes no row version.
+ * <p>{@link #store} is a single idempotent statement and does not open a transaction of its own, so
+ * it commits immediately only when the calling thread has none open. A caller already inside a
+ * transaction (for example {@code RelayInformationEvents.publish}, which publishes in its caller's
+ * transaction) holds the row lock until that outer transaction ends. A repeat of an existing digest
+ * re-arms its staging window and locks the row; a repeat of a digest already deferred past that
+ * window writes no row version.
  */
 public final class JdbcRelayPayloadStore implements RelayPayloadStore {
+  private static final Logger LOG = LoggerFactory.getLogger(JdbcRelayPayloadStore.class);
   private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
   private static final int MAX_DIGESTS = 1000;
   private final JdbcTemplate jdbc;
@@ -169,6 +175,14 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
             String.class,
             Timestamp.from(at),
             limit);
+    // A full candidate list means the pass could not see every matured row, so a saturated pass is
+    // otherwise indistinguishable from an idle one. Ordering is by ejection_at, so a backlog of
+    // overdue referenced rows can hide newly orphaned ones behind it.
+    if (candidates.size() == limit)
+      LOG.warn(
+          "Relay payload sweep batch of {} was saturated; the payload corpus may exceed sweep"
+              + " capacity (payloadSweepBatch * payloadDeferralCeiling / cleanupInterval)",
+          limit);
     int removed = 0;
     for (String digest : candidates) {
       try {
@@ -281,9 +295,12 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
     Instant capped = now.plus(deferralCeiling);
     if (furthest.isAfter(capped)) furthest = capped;
     // Truncate DOWN, the opposite of store(). There the staging window is a minimum protection and
-    // so rounds up; here the horizon is a maximum deferral. A date that is too early costs one
-    // wasted examination, while one that is too late leaves unreachable bytes a whole bucket
-    // longer.
+    // so rounds up; here the horizon is a maximum deferral, subject to the strictly-future floor
+    // below, which can place the examination up to an hour after a nearer horizon. The floor cannot
+    // breach the deferral ceiling: the ceiling is validated to be at least one hour in both the
+    // properties setter and this class's constructor, and the floor is at most one hour out. A
+    // date that is too early costs one wasted examination, while one that is too late leaves
+    // unreachable bytes a whole bucket longer.
     Instant bucket = furthest.truncatedTo(ChronoUnit.HOURS);
     // The result must be strictly in the future. A publication whose retention has elapsed but not
     // yet been pruned still references the payload, and a past date would keep it in the candidate

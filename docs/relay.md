@@ -601,7 +601,7 @@ they require the explicit full-database test mode.
 ## Schema
 
 The diagram below is the current Relay schema, from migrations `V117` through
-`V188`. `PK, FK` marks a column belonging to both the primary key and a
+`V193`. `PK, FK` marks a column belonging to both the primary key and a
 composite foreign key. Columns carrying only `CHECK` bounds are listed without
 them; the migrations remain the authority for every constraint.
 
@@ -613,7 +613,7 @@ erDiagram
         TEXT scope_key PK "project:<id> or system"
         TEXT name PK "lower-case segments, <=1024"
         BIGINT project_id FK "NULL for system topics"
-        TEXT payload_kind "EMPTY TEXT SCHEDULE_DUE LIFECYCLE WAKE_REQUESTED INFORMATION_CHANGED"
+        TEXT payload_kind "EMPTY TEXT SCHEDULE_DUE LIFECYCLE WAKE_REQUESTED"
         BIGINT retention_seconds
         BIGINT max_records "nullable"
         BIGINT last_position "allocated under row lock"
@@ -633,8 +633,18 @@ erDiagram
         TEXT correlation_id
         TEXT causation_id
         INTEGER schema_version
-        JSONB payload "text <=50 MiB; see the TEXT allowance"
+        TEXT payload_digest FK "NOT NULL; names the relay_payloads row holding the bytes"
         JSONB relay_causation "rootId parentId depth"
+    }
+
+    relay_payloads ||--o{ relay_publications : "referenced by digest"
+    relay_payloads ||--o{ relay_admissions : "referenced by digest"
+    relay_payloads {
+        TEXT digest PK "SHA-256 of the serialized payload, lower-case hex"
+        JSONB payload "object; text <=50 MiB, encoded <=300 MiB"
+        BIGINT byte_length "octet_length of the stored JSONB text"
+        TIMESTAMPTZ ejection_at "next sweep examination, never a deletion authority"
+        TIMESTAMPTZ created_at
     }
 
     relay_topics ||--o{ relay_subscriptions : "named cursors"
@@ -667,7 +677,7 @@ erDiagram
         TEXT event_id
         TEXT publisher
         TEXT payload_kind
-        JSONB payload "same ceiling; a copy per subscriber"
+        TEXT payload_digest FK "NOT NULL; the digest of the admitted publication"
         TEXT routing_path
         TEXT routing_source
         TEXT routing_hash
@@ -845,19 +855,55 @@ A scope is a text key, not a project id: `project:<id>` for a project topic and
 `system` for a server-wide one, with the nullable `relay_topics.project_id`
 cascading real project deletion while system topics survive it.
 
-Both tables bound `payload` identically: an object whose `text` member is at most
-50 MiB of raw UTF-8, inside a separately bounded encoded envelope. That ceiling is
-the portable storage contract, not the admission policy — new TEXT appends are
-checked against `plowshare.relay.max-text-bytes` (5 MiB by default), so lowering
-the allowance never blocks reading or admitting what is already retained.
+Payload bytes live in `relay_payloads`, keyed by the SHA-256 digest of the
+serialized payload; a publication or an admission holds only `payload_digest`, a
+`NOT NULL` foreign key to it. `relay_payloads` carries the payload bounds once per
+stored byte: an object whose `text` member is at most 50 MiB of raw UTF-8, inside a
+separately bounded encoded envelope of at most 300 MiB. That ceiling is the portable
+storage contract, not the admission policy — new TEXT appends are checked against
+`plowshare.relay.max-text-bytes` (5 MiB by default), so lowering the allowance never
+blocks reading or admitting what is already retained.
 
-Because admission copies the payload per subscriber, one publication near the
-ceiling is stored once in `relay_publications` and again for every subscriber that
-admits it. The copy is what lets retention delete a prefix of the log while
-admitted work keeps its input, so the cost is the point rather than an oversight;
-it is also the reason the deployment allowance defaults well below the ceiling.
-Topics carrying large TEXT want few subscribers, or a reference payload whose
-bytes live elsewhere.
+Content addressing stores one copy per distinct payload, however many subscribers
+admit it and however often identical content is republished. A payload near the
+ceiling is therefore not multiplied by fan-out: the remaining per-subscriber cost is
+one digest reference in `relay_admissions`. Retention can still delete a prefix of
+the log while admitted work keeps its input, because the admission's reference keeps
+the payload row reachable. There is no reason to limit subscribers on a topic that
+carries large TEXT, or to hold the bytes elsewhere behind a reference payload, to
+avoid copying.
+
+A payload row is reclaimed by a sweep on the retention schedule, and only when no
+publication and no admission references it. `ejection_at` schedules the next
+examination and never authorizes a deletion. The sweep is governed by three
+settings, which are not independent:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `plowshare.relay.payload-staging-window` | 1 hour (5 minutes to 7 days) | Minimum protection for a stored but not yet referenced payload; it must exceed the longest append and the expected clock skew between nodes |
+| `plowshare.relay.payload-deferral-ceiling` | 24 hours (1 hour to 30 days) | Longest a sweep defers the next examination of a referenced payload |
+| `plowshare.relay.payload-sweep-batch` | 100 (to 1000) | Candidates examined per pass |
+
+Every referenced payload is re-examined at least once per deferral ceiling, so the
+sweep must cover the whole corpus in that time. The corpus fits only while
+`distinct payloads <= payload-sweep-batch * payload-deferral-ceiling / cleanup-interval`,
+which is about 144,000 for the defaults (100 per pass, one pass a minute, 24 hours),
+and lowering the ceiling lowers that capacity in proportion. Beyond it, candidates are
+taken oldest `ejection_at` first, so newly orphaned payloads can queue behind overdue
+referenced ones and unreferenced bytes accumulate. A pass that fills its whole batch
+logs a warning naming the batch size; treat it as a sign to raise the batch or the
+ceiling. (This is how the sweep is designed to behave; no test exercises a saturated
+corpus.)
+
+**Deploy ordering.** `V193` drops the old `payload` columns, so it must not be
+applied while any instance that predates the payload-store release is still serving:
+such an instance selects a column that no longer exists, so its reads of that column fail.
+`V193` locks both tables and backfills any row written without a digest, which covers
+an old instance *appending* while the migration runs; it does nothing about an old
+instance *reading* after it. Drain old instances before the release that carries
+`V193`. `V192` rewrites every row of `relay_publications` and `relay_admissions` in a
+single transaction, so `prune` and `admit` block until it finishes; schedule it for a
+quiet period on a large installation.
 
 `relay_subscriptions` holds each subscriber's independent position. It has no
 foreign key to a publication on purpose, so an offset outlives the records

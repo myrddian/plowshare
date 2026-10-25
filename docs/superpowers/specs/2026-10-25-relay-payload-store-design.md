@@ -285,7 +285,7 @@ at all; the *n*-way amplification disappears here rather than being compressed.
 `ejection_at` on insert is `now()` plus the configured staging window, truncated
 to the hour.
 
-**The insert commits ahead of the append, in its own transaction.** *(Decided.)*
+**The insert is issued ahead of the append's topic transaction, and commits ahead of it only when the appending thread has no transaction open.** *(Decided.)*
 
 `JdbcRelayRepository` joins the caller's domain transaction, so an append can sit
 inside a long-lived one. Were the payload insert to share it, `ON CONFLICT
@@ -295,7 +295,29 @@ publishers in unrelated topics and scopes, contending today on nothing,
 serialising on identical content. Dedup makes that collision *more* likely, since
 identical content is the case it exists to exploit.
 
-Committing the payload first removes that, and makes the staging path a 50 MiB
+Storing the payload first removes that when the appender has no transaction open.
+`store` issues a bare statement with no transaction of its own, and
+`UnitOfWork.inTransaction` is a `TransactionTemplate` with default
+`PROPAGATION_REQUIRED`, so under an enclosing transaction both join it and the payload
+commits only when the outer transaction does. That is the case for
+`RelayInformationEvents.publish`, which publishes inside its caller's transaction by
+design. Known limitation of the current propagation, deliberately not changed here
+because that is a design decision of its own:
+
+- Two concurrent transactional publishers whose payloads encode to identical bytes
+  serialise on the unique index until the *outer* transaction ends, which is the
+  blocking this decision set out to remove.
+- A transaction that publishes several events locks several payload rows in append
+  order, so two such transactions sharing two digests in opposite orders can deadlock
+  on the unique index. Content addressing makes that collision possible where it was
+  not before.
+- Nothing is mis-stored or lost in either case. How likely identical digests are across
+  concurrent transactions is not established: the information notice's event ID carries
+  a fresh UUID, but the payload is built from the revision, generation, stage, action and
+  document fields, so two notices for the same revision, stage and action encode
+  identically.
+
+Where the appender has no transaction open, committing the payload first makes the staging path a 50 MiB
 payload will eventually want reachable rather than hypothetical. Three
 consequences follow and must be built deliberately:
 
@@ -305,6 +327,13 @@ consequences follow and must be built deliberately:
 - **A rolled-back or failed append leaves an orphan payload.** This is correct and
   self-correcting: the sweep reclaims it once the window matures. It is never a
   wrong read, because nothing references it.
+- **Append has two store call sites and one probe.** `JdbcRelayRepository.isRetained` is an
+  unlocked existence probe run on every publish; an identical repeat of a retained event
+  stores nothing. The first `store` runs before the topic lock. The second, inside the
+  topic transaction, is reached only when the probe saw an event that pruning removed
+  before the lock was taken; it is the only path that stores under a lock, and the
+  reason the lock-ordering claim (topic first, then payload; the sweep takes no topic
+  lock) exists.
 - **Append's failure handling grows a case.** A payload committed for an append
   that then fails is not an error to report; the retry re-derives the same digest
   and the `ON CONFLICT` finds the existing row, so the second store adds no row
@@ -529,6 +558,11 @@ applied to servers that still need what it removes:
   `LOCK TABLE` and null-digest backfill cover only the narrow case of an old
   instance *appending* during the migration; they do nothing about an old instance
   *reading* after it. The commit structure does not prevent this problem.
+- `V192`'s cost: it is an unqualified `UPDATE` of both of the largest tables, rewriting
+  every row in one Flyway transaction and holding row locks on all of them, so concurrent
+  `prune` and `admit` block until it completes. The dual-write fallback described under
+  "Why a data-preserving migration is still right" is offered only for `V193`'s stall;
+  whether it would also remove this one was not analysed.
 
 ### Why a data-preserving migration is still right
 
@@ -565,9 +599,12 @@ pre-emptively, and adopting it would need its own decision.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `plowshare.relay.payload-staging-window` | 1 hour | How long unreferenced bytes may sit before becoming sweepable |
+| `plowshare.relay.payload-staging-window` | 1 hour (minimum 5 minutes) | How long unreferenced bytes may sit before becoming sweepable |
 | `plowshare.relay.payload-deferral-ceiling` | 24 hours | Maximum examination deferral for a referenced payload |
 | `plowshare.relay.payload-sweep-batch` | 100 | Candidates examined per pass |
+
+The last two, with `plowshare.relay.cleanup-interval` (default 1 minute), are bound by
+the capacity relation below and are not independent knobs.
 
 The staging window must exceed the longest possible gap between a payload insert
 and its referencing insert. Because the payload commits ahead of the append, that
@@ -576,6 +613,30 @@ about to be referenced. One hour is generous against any plausible append, which
 is the intent: the only cost of generosity is that an orphan from a failed append
 lingers that long, and the only cost of stinginess is reclaiming bytes a publish
 still needs.
+
+**The window must exceed the longest append and the expected inter-node clock skew.**
+`store` rounds the ejection up to the hour, so protection is between W and W + 1 hour,
+and exactly W at an hour boundary. The appender's `now` is the server clock via
+`DurableRelay.publish`, while the sweep's is the maintenance node's clock, so a sweep
+can delete inside the window only if skew is at least W. At the default that is more
+than an hour plus rounding, which is not a real exposure; at a small W it is governed
+entirely by W. The setter's floor is therefore 5 minutes: a one-second floor made a
+failed publish (a foreign-key violation on the publication insert) configurable.
+
+**Sweep capacity.** Every referenced payload is re-examined at least once per
+`payloadDeferralCeiling`, so the sweep must examine the whole corpus in that time.
+Throughput is `payloadSweepBatch / cleanupInterval`, and the corpus fits only while
+
+    totalPayloads <= payloadSweepBatch * payloadDeferralCeiling / cleanupInterval
+
+For the defaults that is 100 * 1440 = 144,000 examinations per node-day. Lowering the
+ceiling reduces capacity proportionally (at the 1 hour minimum it is 1/24 of that).
+Past it the candidate query, `ORDER BY ejection_at LIMIT ?`, serves the backlog of
+overdue referenced rows first, so newly orphaned payloads sort behind it and are not
+reached, and unreferenced bytes accumulate, which is the growth this design exists to
+remove. A saturated pass used to look identical to an idle one, because `sweep` returns
+only removals; it now logs a WARN when the candidate list comes back full. That makes
+saturation visible; it does not raise capacity.
 
 ## Verification
 
@@ -610,14 +671,13 @@ reason when enabling the flag.
 
 Stated exactly, so the next reader does not take absence of a failure for a proof.
 
-- **Page boundaries are not observed under a straddle.** No test places a row on
-  either side of a `WHERE page_bytes <= ?` boundary — neither the log inspection
-  page's nor `Relay.Read`'s. Equality of page boundaries before and after the change
-  rests on the per-row input equality (`byte_length` equals the old
-  `octet_length(payload::text)` for the same stored JSONB) and on the numeric/bigint
-  argument for the window sum, not on an observed straddle. Both SQL strings do
-  execute under real PostgreSQL elsewhere in the suite, so the risk of unparsed or
-  misnamed SQL is excluded; the risk of an off-by-one at the boundary is not.
+- **`Relay.Read`'s 319 MiB budget is not observed under a straddle.** Reaching it takes
+  seven maximal payloads, and no test builds that. The log inspection page's boundary is
+  covered: `theBoundedPageBoundaryMovesByExactlyTheStoredPayloadBytes` binary-searches the
+  `boundedProjection` bound and shows it moves 64 bytes for 64 bytes of payload, and
+  `page_bytes` is inside that sized projection, so the bigint-to-numeric type change is
+  measured there. `storedByteLengthIsTheSameNumberThePagesUsedToComputeInline` asserts
+  `byte_length = octet_length(payload::text)` over real rows.
 - **`byte_length` is not tied to the bytes by the schema.** No constraint relates it to
   `octet_length(payload::text)`. The store computes it correctly, and every shipped
   migration does, but a future writer that set it wrongly would shift page
@@ -644,6 +704,11 @@ trusting them.
 - A hot digest whose `ejection_at` is already at or beyond `now() + window` cannot be
   a sweep candidate until after the window. This assumes the candidate query's
   `ejection_at <= ?` filter and the hour bucketing of dates.
+- A blocked `DELETE` re-evaluates its predicate after the lock wait (PostgreSQL's
+  READ COMMITTED behavior of following the update chain). The re-arm in
+  `aCandidateReArmedAfterSelectionSurvivesThePassThatSelectedIt` lands before the delete
+  statement begins, so a re-arm landing during the wait is unexercised. It is no longer
+  load-bearing: the date in the predicate makes correctness independent of it.
 - `relay_payloads` is not reachable by cascade from `relay_topics`. This is checkable
   from the schema: the foreign keys point from publications and admissions to the
   payload, never the other way.

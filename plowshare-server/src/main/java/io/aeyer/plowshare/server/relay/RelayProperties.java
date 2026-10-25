@@ -194,9 +194,13 @@ public final class RelayProperties {
   /** Must exceed the longest gap between a payload insert and the insert that references it. */
   public void setPayloadStagingWindow(Duration payloadStagingWindow) {
     Objects.requireNonNull(payloadStagingWindow, "payloadStagingWindow");
-    if (payloadStagingWindow.compareTo(Duration.ofSeconds(1)) < 0
+    // The window must exceed the longest append: it covers the topic FOR UPDATE wait, the locked
+    // retained read and position allocation between the payload store and the publication insert.
+    // store() rounds the ejection up to the hour, so protection is only guaranteed to be W; a
+    // one-second floor would make a failed publish (a foreign-key violation) configurable.
+    if (payloadStagingWindow.compareTo(Duration.ofMinutes(5)) < 0
         || payloadStagingWindow.compareTo(Duration.ofDays(7)) > 0)
-      throw new IllegalArgumentException("payload staging window must be 1 second through 7 days");
+      throw new IllegalArgumentException("payload staging window must be 5 minutes through 7 days");
     this.payloadStagingWindow = payloadStagingWindow;
   }
 

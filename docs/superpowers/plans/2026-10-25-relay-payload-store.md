@@ -215,7 +215,7 @@ still read `payload`, so this task changes what is written, not what is read.
 - [ ] **Step 1: Write the failing tests**
 
 ```java
-@Test void appendCommitsThePayloadBeforeTheTopicTransaction()   // store called outside the append's UnitOfWork
+@Test void appendCallsStoreBeforeTheRepositoryOpensItsOwnUnitOfWork()   // store called outside the append's UnitOfWork
 @Test void appendWritesTheDigestReturnedByTheStore()
 @Test void admissionCopiesTheDigestAndStoresNoBytes()
 @Test void aFailedAppendLeavesTheCommittedPayloadWithoutReportingIt()

@@ -109,6 +109,8 @@ class RelayPayloadWritePlacementTest {
     return row;
   }
 
+  private static final String READ_DIGEST = "ab".repeat(32);
+
   private static ResultSet publicationRow() throws SQLException {
     var row = mock(ResultSet.class);
     when(row.getLong("position")).thenReturn(4L);
@@ -146,8 +148,13 @@ class RelayPayloadWritePlacementTest {
         .orElseGet(() -> fail("no publication insert"));
   }
 
+  /**
+   * All a fake {@code UnitOfWork} can observe is call order: {@code store} runs before the
+   * repository opens its own unit of work. It does not show a separate commit, which happens only
+   * when the calling thread has no transaction open.
+   */
   @Test
-  void appendCommitsThePayloadBeforeTheTopicTransaction() {
+  void appendCallsStoreBeforeTheRepositoryOpensItsOwnUnitOfWork() {
     repository.append(TOPIC, draft(), T0);
     assertEquals(List.of("store", "begin"), events);
   }
@@ -226,8 +233,11 @@ class RelayPayloadWritePlacementTest {
             when(row.getLong("seen_through")).thenReturn(0L);
             return List.of(mapper.mapRow(row, 0));
           }
-          if (sql.contains("FROM relay_publications"))
-            return List.of(mapper.mapRow(publicationRow(), 0));
+          if (sql.contains("FROM relay_publications")) {
+            var row = publicationRow();
+            when(row.getString("payload_digest")).thenReturn(READ_DIGEST);
+            return List.of(mapper.mapRow(row, 0));
+          }
           return List.of();
         });
     deliveries.admit(
@@ -236,13 +246,19 @@ class RelayPayloadWritePlacementTest {
         T0);
     assertEquals(List.of(), stored);
     var sql = ArgumentCaptor.forClass(String.class);
-    verify(jdbc, atLeastOnce()).update(sql.capture(), any(Object[].class));
-    String insert =
-        sql.getAllValues().stream()
-            .filter(s -> s.contains("INSERT INTO relay_admissions"))
-            .findFirst()
-            .orElseGet(() -> fail("no admission insert"));
+    var args = ArgumentCaptor.forClass(Object[].class);
+    verify(jdbc, atLeastOnce()).update(sql.capture(), args.capture());
+    int at = -1;
+    for (int i = 0; i < sql.getAllValues().size(); i++)
+      if (sql.getAllValues().get(i).contains("INSERT INTO relay_admissions")) at = i;
+    assertTrue(at >= 0, "no admission insert");
+    String insert = sql.getAllValues().get(at);
     assertTrue(insert.contains("payload_digest"));
-    assertTrue(insert.contains("FROM relay_publications"), "the digest is copied, not recomputed");
+    assertTrue(
+        !insert.contains("FROM relay_publications"),
+        "the digest is bound from the publication read, not looked up again");
+    assertTrue(
+        java.util.Arrays.asList(args.getAllValues().get(at)).contains(READ_DIGEST),
+        "the digest read with the publication is the one bound");
   }
 }

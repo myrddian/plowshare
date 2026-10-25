@@ -170,6 +170,11 @@ class RelayPayloadStoreTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> properties.setPayloadStagingWindow(Duration.ofSeconds(-1)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> properties.setPayloadStagingWindow(Duration.ofMinutes(5).minusSeconds(1)));
+    properties.setPayloadStagingWindow(Duration.ofMinutes(5));
+    assertEquals(Duration.ofMinutes(5), properties.getPayloadStagingWindow());
   }
 
   @Test

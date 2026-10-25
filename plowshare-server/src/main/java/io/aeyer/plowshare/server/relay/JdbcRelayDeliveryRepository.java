@@ -120,16 +120,21 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
           if (key.position() != Math.addExact(seen, 1) || key.position() > retained.lastPosition())
             throw new IllegalArgumentException(
                 "Relay admission must select the next retained publication");
-          Relay.Publication publication =
+          // The digest is read with the publication so the admission copies it from this snapshot
+          // rather than looking it up again; both sit under the topic lock taken above.
+          var retainedSource =
               jdbc
                   .query(
                       """
           SELECT p.event_id,p.publisher,p.occurred_at,p.published_at,p.correlation_id,p.causation_id,
-              p.relay_causation::text,p.schema_version,q.payload::text
+              p.relay_causation::text,p.schema_version,p.payload_digest,q.payload::text
           FROM relay_publications p JOIN relay_payloads q ON q.digest=p.payload_digest
           WHERE p.scope_key=? AND p.topic=? AND p.position=?
           """,
-                      (row, index) -> publication(row, topic, key.position(), retained.kind()),
+                      (row, index) ->
+                          new RetainedPublication(
+                              publication(row, topic, key.position(), retained.kind()),
+                              row.getString("payload_digest")),
                       RelayScopeCodec.write(topic),
                       topic.name(),
                       key.position())
@@ -137,6 +142,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   .findFirst()
                   .orElseThrow(
                       () -> new IllegalStateException("Relay publication is not retained"));
+          Relay.Publication publication = retainedSource.publication();
           var source = decision.routing();
           changed(
               jdbc.update(
@@ -145,7 +151,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
               occurred_at,published_at,correlation_id,causation_id,relay_causation,payload_kind,schema_version,
               payload_digest,routing_path,routing_source,routing_hash,branch_count,admitted_at)
           VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,1,
-              (SELECT payload_digest FROM relay_publications WHERE scope_key=? AND topic=? AND position=?),
+              ?,
               ?,?,?,?,?)
           """,
                   RelayScopeCodec.write(topic),
@@ -160,9 +166,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   publication.event().causationId(),
                   RelayCausationCodec.write(publication.event().causation()),
                   retained.kind().name(),
-                  RelayScopeCodec.write(topic),
-                  topic.name(),
-                  key.position(),
+                  retainedSource.payloadDigest(),
                   source.path(),
                   source.source(),
                   source.sha256(),
@@ -619,6 +623,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
             RelayPayloadCodec.read(kind, row.getInt("schema_version"), row.getString("payload")),
             RelayCausationCodec.read(row.getString("relay_causation"))));
   }
+
+  /** A retained publication with the digest of its payload row, read in one statement. */
+  private record RetainedPublication(Relay.Publication publication, String payloadDigest) {}
 
   private static RelayDeliveries.Branch branch(ResultSet row) throws SQLException {
     String path = row.getString("handler_path");
