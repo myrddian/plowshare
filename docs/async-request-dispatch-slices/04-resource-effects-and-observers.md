@@ -8,6 +8,10 @@ handlers by operation name alone.
 
 ## Purpose and operation audit
 
+The [dispatcher read audit](../dispatcher-read-audit.md) records the current
+independent-read inventory, conversation inspection keys, retained effectful
+barriers and regression coverage. Both event schedulers share that read inventory.
+
 Remove unnecessary barriers while retaining real conflicts, paid-operation
 attribution, lease ownership and current authority. For each changed operation,
 record typed inputs, complete call path, effects, key identity, transaction

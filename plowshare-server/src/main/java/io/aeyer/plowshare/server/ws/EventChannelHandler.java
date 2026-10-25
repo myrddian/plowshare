@@ -954,24 +954,21 @@ public final class EventChannelHandler extends TextWebSocketHandler
     if (socketAuthorization != null && !socketAuthorization.current(socket)) return;
     String session = named(socket);
     Map<String, Object> correlation = correlationOf(frame);
+    var asking =
+        new Asking(
+            session,
+            (String) socket.getAttributes().get(HANDLE),
+            socket.getId(),
+            delivery.transport instanceof PacketEventTransport
+                ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
+                : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
+            () -> {
+              if (!socket.isOpen())
+                throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+            });
     Outcome outcome;
     try {
-      outcome =
-          router()
-              .route(
-                  frame,
-                  new Asking(
-                      session,
-                      (String) socket.getAttributes().get(HANDLE),
-                      socket.getId(),
-                      delivery.transport instanceof PacketEventTransport
-                          ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
-                          : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
-                      () -> {
-                        if (!socket.isOpen())
-                          throw new io.aeyer.plowshare.server.faults.CallerFault(
-                              "Query connection ended");
-                      }));
+      outcome = router().route(frame, asking);
     } catch (RuntimeException unexpected) {
       // A SAFETY NET, NOT A SECOND MAPPING. FrameRouter already turns
       // everything a handler throws into an Outcome, so nothing is
@@ -987,7 +984,25 @@ public final class EventChannelHandler extends TextWebSocketHandler
       outcome = Outcome.failed(fault.code(), fault.detail());
     }
     String type = text(correlation.get("type"));
-    delivery.answer(text(correlation.get("id")), type == null ? FrameTypes.REFUSED : type, outcome);
+    // Independent reads can complete after a membership change, including while waiting for the
+    // physical writer. Retain the same disclosure fence as negotiated concurrent dispatch without
+    // changing the synchronous handler contract for older clients. This is a fresh boundary check,
+    // not another scheduling admission or permission lookup used to construct a resource key.
+    Outcome answer = outcome;
+    delivery.answer(
+        text(correlation.get("id")),
+        type == null ? FrameTypes.REFUSED : type,
+        answer,
+        () -> {},
+        type != null && DispatchPolicy.independentRead(type)
+            ? () -> {
+              if (!delivery.running
+                  || !socket.isOpen()
+                  || socketAuthorization != null && !socketAuthorization.current(socket))
+                throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+              router().requireDisclosure(frame, asking, answer);
+            }
+            : delivery.validity);
     if (usageSubscriptions != null
         && outcome.payload() instanceof io.aeyer.plowshare.protocol.Usage.Initial initial)
       usageSubscriptions.ready(socket.getId(), initial.subscription());

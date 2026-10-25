@@ -17,6 +17,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class EventReadDispatchTest {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.MethodSource(
+      "io.aeyer.plowshare.server.ws.DispatcherReadAuditTest#reads")
+  void audited_app_reads_also_overlap_without_dispatch_negotiation(String type) throws Exception {
+    var fixture = new Fixture(new EventReadCapacity(2, 2));
+    var slow = fixture.offer("slow", type, true);
+    fixture.requests.start("audit");
+    try {
+      slow.entered.get(5, TimeUnit.SECONDS);
+      var fast = fixture.offer("fast", "information.read", false);
+      fast.finished.get(5, TimeUnit.SECONDS);
+      assertFalse(slow.finished.isDone());
+    } finally {
+      slow.release.complete(null);
+      fixture.closeAndAwait();
+    }
+  }
+
   @Test
   void fast_relay_read_finishes_while_a_prior_facet_read_is_still_running() throws Exception {
     var fixture = new Fixture(new EventReadCapacity(2, 2));
@@ -34,13 +52,19 @@ class EventReadDispatchTest {
   @Test
   void mutation_unknown_and_malformed_barriers_wait_reads_and_block_subsequent_reads()
       throws Exception {
-    for (String barrierType : List.of("information.tags", "future.read", "malformed")) {
+    for (String barrierType :
+        List.of(
+            "information.tags",
+            "project.member.remove",
+            "application.file.save",
+            "future.read",
+            "malformed")) {
       var fixture = new Fixture(new EventReadCapacity(2, 2));
-      var before = fixture.offer("before", "information.facets", true);
+      var before = fixture.offer("before", "proc.calls", true);
       fixture.requests.start("barrier");
       before.entered.get(5, TimeUnit.SECONDS);
       var barrier = fixture.offer("barrier", barrierType, true);
-      var after = fixture.offer("after", "relay.log", false);
+      var after = fixture.offer("after", "usage.calls", false);
       assertFalse(barrier.entered.isDone());
       before.release.complete(null);
       barrier.entered.get(5, TimeUnit.SECONDS);
