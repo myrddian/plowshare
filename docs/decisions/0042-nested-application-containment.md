@@ -633,3 +633,78 @@ statement checks kind, project and container against the authority record. The
 asymmetry mattered because removing nothing is not an error — a caller holding a
 mis-described scope would have retired another Application's principal and seen
 the same silent success.
+
+## When collection runs, and why a timer is acceptable here
+
+Making collection observable was not enough: nothing invoked it, so an
+interrupted create's directory stayed on disk until someone ran a sweep by hand,
+which is the anti-goal "children that accumulate" wearing a different hat.
+`ContainedCollectionSweeps` now triggers it two ways, because they answer
+different crashes. **Startup reconciliation** answers the crash that happened
+while the server was down — no request will ever arrive to clean that directory
+up. **A repeating sweep** answers the crash that happens while it is up — a
+destruction that committed and whose source removal did not finish leaves an
+unmarked collection record that only a sweep acts on. It follows
+`ApprovalContinuationRecovery`'s shape (a readiness-gated
+`ApplicationReadyEvent` listener that also carries the `@Scheduled` method, on
+the scheduler `SchedulingConfig` owns) rather than inventing a mechanism.
+
+[ADR 0005](0005-application-deployment.md)'s retention sweep refused a timer for
+three reasons, and each is answered rather than ignored. *A sweep deletes bytes
+with nobody watching* — the only bytes this can delete are directories under the
+operator's own containment root that no committed record accounts for, already
+unreachable garbage rather than a misconfigured export directory, and an
+unconfigured server has no root and sweeps nothing. *A boot timer fires in every
+Spring test* — answered structurally, not by argument: the bean is conditional on
+`plowshare.containment.root`, so a context that has not configured nesting does
+not contain it. *Several servers on one database means several racing sweeps* —
+real, and why every step is idempotent: removal is `deleteIfExists`, the mark is
+an idempotent `UPDATE`, the collection insert is `ON CONFLICT DO NOTHING`.
+Concurrent sweeps duplicate work; they cannot corrupt it.
+
+**A sweep must never collect a stage a live create is still writing.** That would
+be worse than the leak, because the caller would hold a receipt for an
+Application whose files are gone. The window is real: creation stages before any
+durable row exists, which is what refusal totality rests on, so for that interval
+there is a directory no committed record accounts for — exactly the shape the
+sweep collects. Two guards, in order of exactness. `ContainedStaging` holds a
+claim from before the first byte until the unit of work has finished, released in
+a `finally` so a refusal cannot exempt a project forever; the sweep skips a
+claimed project whatever its record or age says. That is **exact, and exact only
+within one process**: a durable claim would be a claim nothing will ever release
+if its process dies, which is a permanent leak dressed as safety. Across
+processes the bound is `plowshare.containment.sweep-grace`, a minimum directory
+age below which an unaccounted stage is assumed to belong to a creation still
+running. The grace defaults long and is floored at one minute, because the two
+failure directions are not symmetric: too long leaks for one more sweep, too
+short deletes live work. **The residual gap** is a second server sweeping inside
+another server's grace window; closing it needs a durable staging claim with an
+owner and a lease, which is new lifecycle machinery and is not in this slice.
+
+## Destruction under delivery uncertainty
+
+ADR 0005 requires delivery uncertainty to be resolved by inspection and never by
+automatic replay, and `create` carries a request-UUID receipt for exactly that.
+`destroy` resolves it the other way, through **demonstrated idempotency against
+the collection record it already writes**. A second request UUID keyed on the
+same event would have been a second source of truth for it; the collection row
+already holds everything a receipt would have to: that the destruction happened,
+whose child it was, and which records went with it.
+
+A retry whose child has no live record therefore reads its collection record, and
+the three answers are **distinguished**:
+
+- **No record of any kind** — "No such contained Application".
+- **A record whose `container` is not this caller's scope** — the same containment
+  refusal a live child would get. The row retains the container as a plain value
+  precisely so this stays answerable after the scope it names has been cascaded
+  away.
+- **A record that matches** — success, replaying the *same* answer. V200 records
+  the destroyed child's own `scope`, which is what links a parent's collection row
+  to its descendants': without it a retry could only answer about the one record
+  it named, which is a *different* answer from the original and worse than a
+  refusal. The subtree is rebuilt by descending the recorded containment edges,
+  deepest first, bounded by the configured depth.
+
+A retry also finishes an interrupted source removal, so calling twice is not
+merely safe but useful: the second call collects the bytes the first could not.

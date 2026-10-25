@@ -36,6 +36,15 @@ public class ApplicationDeploymentConfig {
   }
 
   /**
+   * The live staging claims a sweep must not collect through. One instance, shared by the creating
+   * service and the collector: two would be two sets and the guard would not hold.
+   */
+  @Bean
+  public ContainedStaging containedStaging() {
+    return new InProcessContainedStaging();
+  }
+
+  /**
    * The staged-source collector. It is constructed with the containment configuration a server
    * actually has: without one it has no root and sweeps nothing, rather than guessing a path.
    */
@@ -43,9 +52,28 @@ public class ApplicationDeploymentConfig {
   public ContainedSourceCollector containedSourceCollector(
       ContainedApplicationRepository records,
       UnitOfWork work,
+      ContainedStaging staging,
       ObjectProvider<ContainmentConfig> containment) {
-    return new ContainedSourceCollector(
-        records, work, containment.getIfAvailable(ContainmentConfig::absent));
+    var config = containment.getIfAvailable(ContainmentConfig::absent);
+    return new ContainedSourceCollector(records, work, config, staging, config.sweepGrace());
+  }
+
+  /**
+   * The collector's production trigger: startup reconciliation plus a repeating sweep.
+   *
+   * <p>Conditional on the same property {@code ContainmentConfig} is conditional on, and on the
+   * property rather than on that bean because a property condition does not depend on
+   * configuration-class ordering. That is not merely tidy — it is what keeps a boot timer out of
+   * every Spring test context in this tree, which is the objection {@code Retention} raised against
+   * scheduling a byte-deleting sweep at all. A server that has not configured nesting does not
+   * contain this bean, so there is nothing to fire.
+   */
+  @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      prefix = "plowshare.containment",
+      name = "root")
+  public ContainedCollectionSweeps containedCollectionSweeps(ContainedSourceCollector collector) {
+    return new ContainedCollectionSweeps(collector);
   }
 
   @Bean
@@ -113,6 +141,7 @@ public class ApplicationDeploymentConfig {
       ContainedPrincipals principals,
       io.aeyer.plowshare.server.allowances.AllowanceRepository allowances,
       UnitOfWork work,
+      ContainedStaging staging,
       ObjectProvider<ContainmentConfig> containment) {
     return new SourceContainedApplications(
         records,
@@ -122,6 +151,7 @@ public class ApplicationDeploymentConfig {
         principals,
         allowances,
         work,
-        containment.getIfAvailable(ContainmentConfig::absent));
+        containment.getIfAvailable(ContainmentConfig::absent),
+        staging);
   }
 }

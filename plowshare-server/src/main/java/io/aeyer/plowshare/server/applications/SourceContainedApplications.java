@@ -79,6 +79,7 @@ public final class SourceContainedApplications implements ContainedApplications 
   private final AllowanceRepository allowances;
   private final UnitOfWork work;
   private final ContainmentConfig config;
+  private final ContainedStaging staging;
 
   public SourceContainedApplications(
       ContainedApplicationRepository records,
@@ -88,7 +89,8 @@ public final class SourceContainedApplications implements ContainedApplications 
       ContainedPrincipals principals,
       AllowanceRepository allowances,
       UnitOfWork work,
-      ContainmentConfig config) {
+      ContainmentConfig config,
+      ContainedStaging staging) {
     this.records = Objects.requireNonNull(records);
     this.projects = Objects.requireNonNull(projects);
     this.validator = Objects.requireNonNull(validator);
@@ -97,6 +99,7 @@ public final class SourceContainedApplications implements ContainedApplications 
     this.allowances = Objects.requireNonNull(allowances);
     this.work = Objects.requireNonNull(work);
     this.config = Objects.requireNonNull(config);
+    this.staging = Objects.requireNonNull(staging);
   }
 
   @Override
@@ -134,6 +137,11 @@ public final class SourceContainedApplications implements ContainedApplications 
     UUID revision = UUID.randomUUID();
     Path workspace = config.root().resolve(project.substring(PREFIX.length()));
     Path staged = workspace.resolve("revisions").resolve(revision.toString());
+    // Claimed before the first byte and released in the finally below. A staged area has no
+    // durable row until this unit of work commits -- that ordering is refusal totality -- so
+    // without the claim a concurrent sweep would see an unaccounted directory and collect the
+    // source of a creation that is about to succeed.
+    staging.claim(project);
     try {
       stage(staged, request.files(), project);
       // Both sides of the comparison are read through the same reader, from the container's own
@@ -183,6 +191,8 @@ public final class SourceContainedApplications implements ContainedApplications 
       throw failed instanceof RuntimeException refused
           ? refused
           : new CallerFault("Contained Application source could not be staged");
+    } finally {
+      staging.release(project);
     }
   }
 
@@ -239,9 +249,10 @@ public final class SourceContainedApplications implements ContainedApplications 
    */
   @Override
   public Destroyed destroy(String account, String conversation, UUID child) {
-    var retained =
-        records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
+    var live = records.find(child);
     var parent = parent(account, conversation);
+    if (live.isEmpty()) return replay(parent, child);
+    var retained = live.get();
     if (!parent.admission().scope().equals(retained.container()))
       throw new CallerFault("This Application does not contain that Application");
     var subtree = records.subtree(retained.scope());
@@ -259,11 +270,13 @@ public final class SourceContainedApplications implements ContainedApplications 
             records.collected(
                 new ContainedApplicationRepository.Collection(
                     held.id(),
+                    held.scope(),
                     held.container(),
                     held.project(),
                     held.revision(),
                     workspace(held.project()),
-                    ContainedApplicationRepository.Cause.DESTROYED));
+                    ContainedApplicationRepository.Cause.DESTROYED,
+                    false));
             records.destroy(held.id());
           }
           return null;
@@ -281,6 +294,75 @@ public final class SourceContainedApplications implements ContainedApplications 
     }
     return new Destroyed(
         child, subtree.stream().map(ContainedApplicationRepository.Retained::id).toList(), sources);
+  }
+
+  /**
+   * The answer to a {@code destroy} whose child has no live record: a retry after an uncertain
+   * delivery, resolved against the collection records the destruction itself wrote.
+   *
+   * <p>ADR 0005's rule for this family is that delivery uncertainty is resolved by inspection and
+   * never by automatic replay, and {@code create} carries a request-UUID receipt for exactly that.
+   * Destruction resolves it the other way, because it already writes durable evidence with
+   * everything a receipt would have to hold: that the destruction happened, whose child it was, and
+   * which records went with it. A second request UUID keyed on the same facts would be a second
+   * source of truth for one event.
+   *
+   * <p><strong>Three answers, and they are distinguished.</strong> No record of any kind is "no
+   * such contained Application". A record whose {@code container} is not this caller's scope is the
+   * same containment refusal a live child would get — the collection row retains the container as a
+   * plain value precisely so this stays answerable after the scope it names is gone. A record that
+   * matches is a success, and it replays the <em>same</em> answer: the subtree is rebuilt by
+   * descending the recorded containment edges from the child's own scope, deepest first, bounded by
+   * the configured depth.
+   *
+   * <p>It also finishes an interrupted source removal, so calling twice is not merely safe but
+   * useful: the second call collects the bytes the first could not and marks the record.
+   */
+  private Destroyed replay(OperationAuthority.Conversation parent, UUID child) {
+    var record =
+        records
+            .collection(child)
+            .orElseThrow(() -> new CallerFault("No such contained Application"));
+    if (record.cause() != ContainedApplicationRepository.Cause.DESTROYED
+        || !parent.admission().scope().equals(record.container()))
+      throw new CallerFault("This Application does not contain that Application");
+    var rebuilt = new ArrayList<ContainedApplicationRepository.Collection>();
+    descend(record, rebuilt, 0);
+    // Deepest first, as the original answered. The rebuild appends a node before its children, so
+    // reversing it yields children before parents at every level.
+    Collections.reverse(rebuilt);
+    int sources = 0;
+    for (var held : rebuilt) if (finish(held)) sources++;
+    return new Destroyed(
+        child,
+        rebuilt.stream().map(ContainedApplicationRepository.Collection::child).toList(),
+        sources);
+  }
+
+  /**
+   * Walks the recorded containment edges downwards, bounded by the configured depth for the reason
+   * {@link #requireAncestor} is bounded: a walk that would loop on bad data refuses instead of
+   * looping, and the fence cannot be the thing that proves the walk terminates.
+   */
+  private void descend(
+      ContainedApplicationRepository.Collection node,
+      List<ContainedApplicationRepository.Collection> into,
+      int depth) {
+    if (depth > config.bounds().maxDepth())
+      throw new CallerFault("This containment chain exceeds the configured depth");
+    into.add(node);
+    for (var beneath : records.collectedUnder(node.scope())) descend(beneath, into, depth + 1);
+  }
+
+  /** Collects a recorded source area if it is still there, and marks it once it is gone. */
+  private boolean finish(ContainedApplicationRepository.Collection record) {
+    Path workspace = workspace(record.project());
+    collect(workspace);
+    if (Files.notExists(workspace, LinkOption.NOFOLLOW_LINKS)) {
+      if (!record.sourceRemoved()) records.sourceCollected(record.child());
+      return true;
+    }
+    return false;
   }
 
   /**

@@ -168,7 +168,8 @@ class ContainedDestructionTest {
             principals,
             allowances,
             work,
-            new ContainmentConfig(root.toString(), 3, 4));
+            new ContainmentConfig(root.toString(), 3, 4, null),
+            new InProcessContainedStaging());
   }
 
   /** A retained child whose staged source really exists under the containment root. */
@@ -447,6 +448,105 @@ class ContainedDestructionTest {
     } finally {
       Files.setPosixFilePermissions(held, original);
     }
+  }
+
+  /**
+   * Fix round 1, Finding B. ADR 0005's rule for this family is that delivery uncertainty is
+   * resolved by inspection and never by automatic replay, and {@code create} carries a request-UUID
+   * receipt for exactly that. {@code destroy} resolves it the other way, against durable evidence
+   * it already writes: a retry for a child this caller destroyed succeeds and replays the same
+   * answer, because the collection record says the destruction happened and whose child it was.
+   *
+   * <p>The answer is reconstructed and not invented: the subtree is rebuilt by walking collection
+   * rows down from the named child's recorded scope, so {@code collected} is the same list in the
+   * same deepest-first order the original gave.
+   */
+  @Test
+  void aRetriedDestroyAfterALostResponseSucceedsFromItsCollectionRecord() {
+    destroyed(child, grandchild);
+    var replay = service.destroy("@service/parent", "c-1", child.id());
+    assertEquals(List.of(grandchild.id(), child.id()), replay.collected());
+    assertEquals(child.id(), replay.child());
+    assertEquals(2, replay.sources());
+    // Nothing was destroyed a second time, and no principal was revoked again.
+    verify(records, never()).destroy(any());
+    verify(records, never()).collected(any());
+    verifyNoInteractions(principals);
+  }
+
+  /**
+   * "Already destroyed, and it was yours" is distinguished from "not yours". The collection record
+   * retains the container as a plain value precisely so this question is still answerable after the
+   * scope it names has been cascaded away.
+   */
+  @Test
+  void aRetriedDestroyRefusesAChildThatWasNotYours() {
+    destroyed(child, grandchild);
+    var stranger = new ScopeId(UUID.randomUUID());
+    when(records.collection(child.id())).thenReturn(Optional.of(collection(child, stranger, true)));
+    assertEquals(
+        "This Application does not contain that Application",
+        assertThrows(CallerFault.class, () -> service.destroy("@service/parent", "c-1", child.id()))
+            .getMessage());
+    verify(records, never()).destroy(any());
+  }
+
+  /** And from "never existed", which has no record of any kind. */
+  @Test
+  void aRetriedDestroyRefusesAChildThatNeverExisted() {
+    when(records.find(any())).thenReturn(Optional.empty());
+    when(records.collection(any())).thenReturn(Optional.empty());
+    assertEquals(
+        "No such contained Application",
+        assertThrows(
+                CallerFault.class,
+                () -> service.destroy("@service/parent", "c-1", UUID.randomUUID()))
+            .getMessage());
+    // Authority is still proved before the collection history is read, so a refusal learns nothing.
+    verify(authority).require(parentAdmission);
+  }
+
+  /**
+   * A retry is also how an interrupted removal finishes, so calling twice is not merely safe but
+   * useful: the second call collects the bytes the first could not and marks the record.
+   */
+  @Test
+  void aRetriedDestroyFinishesAnInterruptedSourceRemoval() {
+    destroyed(child, grandchild);
+    when(records.collection(child.id()))
+        .thenReturn(Optional.of(collection(child, parentScope.id(), false)));
+    assertTrue(Files.isDirectory(workspace(child)));
+    var replay = service.destroy("@service/parent", "c-1", child.id());
+    assertFalse(Files.exists(workspace(child)));
+    assertEquals(2, replay.sources());
+    verify(records).sourceCollected(child.id());
+  }
+
+  /**
+   * Puts the records in the state a committed destruction leaves: no live row, a collection row.
+   */
+  void destroyed(
+      ContainedApplicationRepository.Retained named,
+      ContainedApplicationRepository.Retained beneath) {
+    when(records.find(any())).thenReturn(Optional.empty());
+    when(records.collection(named.id()))
+        .thenReturn(Optional.of(collection(named, named.container(), true)));
+    when(records.collectedUnder(named.scope()))
+        .thenReturn(List.of(collection(beneath, named.scope(), true)));
+    when(records.collectedUnder(beneath.scope())).thenReturn(List.of());
+  }
+
+  ContainedApplicationRepository.Collection collection(
+      ContainedApplicationRepository.Retained held, ScopeId container, boolean removed) {
+    return new ContainedApplicationRepository.Collection(
+        held.id(),
+        held.scope(),
+        container,
+        held.project(),
+        held.revision(),
+        workspace(held),
+        ContainedApplicationRepository.Cause.DESTROYED,
+        removed);
   }
 
   /** Zeroing precedes deletion, so a descendant in flight cannot claim another call. */

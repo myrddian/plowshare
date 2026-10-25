@@ -272,11 +272,13 @@ class ContainedConcurrencyTest {
     records.collected(
         new ContainedApplicationRepository.Collection(
             deeper.id(),
+            deeper.scope(),
             deeper.container(),
             deeper.project(),
             deeper.revision(),
             Path.of("/srv/containment").resolve(deeper.project().substring("contained:".length())),
-            ContainedApplicationRepository.Cause.DESTROYED));
+            ContainedApplicationRepository.Cause.DESTROYED,
+            false));
 
     // Deepest first is what the subtree read answers, and it is what the schema requires.
     assertEquals(
@@ -314,6 +316,7 @@ class ContainedConcurrencyTest {
             .toList());
     records.sourceCollected(deeper.id());
     assertEquals(List.of(), records.uncollectedSources());
+    assertTrue(records.collection(deeper.id()).orElseThrow().sourceRemoved());
 
     // ADR 0005's retained release history is untouched, and so is the ordinary project it belongs
     // to and the authority scope over it.
@@ -328,6 +331,76 @@ class ContainedConcurrencyTest {
         1L,
         jdbc.queryForObject(
             "SELECT count(*) FROM authority_scopes WHERE project_id=?", Long.class, parentProject));
+  }
+
+  /**
+   * V200's {@code scope} column is what makes a collection record a receipt, and the walk it
+   * enables is SQL: the destroyed subtree is rebuilt by descending {@code container} to {@code
+   * scope} over rows whose referents no longer exist. The partial unique index on {@code scope} and
+   * the replaced shape constraint are engine behaviour, so the migration applying over V199 and
+   * refusing a half-described row are assertions only PostgreSQL can make.
+   */
+  @Test
+  void aCollectionRecordRebuildsTheDestroyedSubtreeAfterItsScopesAreGone() {
+    deployParent();
+    var inner = child(parentScope);
+    var deeper = child(inner.scope());
+    for (var held : List.of(deeper, inner))
+      records.collected(
+          new ContainedApplicationRepository.Collection(
+              held.id(),
+              held.scope(),
+              held.container(),
+              held.project(),
+              held.revision(),
+              Path.of("/srv/containment").resolve(held.project().substring("contained:".length())),
+              ContainedApplicationRepository.Cause.DESTROYED,
+              false));
+    records.destroy(deeper.id());
+    records.destroy(inner.id());
+    // Both scopes are gone, and the history still answers the three questions a retry asks.
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM authority_scopes WHERE kind='CONTAINED'", Long.class));
+    var named = records.collection(inner.id()).orElseThrow();
+    assertEquals(parentScope, named.container());
+    assertEquals(inner.scope(), named.scope());
+    assertEquals(
+        List.of(deeper.id()),
+        records.collectedUnder(named.scope()).stream()
+            .map(ContainedApplicationRepository.Collection::child)
+            .toList());
+    assertEquals(List.of(), records.collectedUnder(deeper.scope()));
+    // A SWEPT row names no scope and is therefore on no chain, which the shape constraint enforces
+    // and the walk relies on.
+    records.collected(
+        new ContainedApplicationRepository.Collection(
+            UUID.randomUUID(),
+            null,
+            null,
+            "contained:" + UUID.randomUUID(),
+            null,
+            Path.of("/srv/containment/elsewhere"),
+            ContainedApplicationRepository.Cause.SWEPT,
+            false));
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM contained_collections WHERE cause='SWEPT' AND scope IS NOT NULL",
+            Long.class));
+    // And the engine refuses a DESTROYED row with no scope, so the rebuild cannot meet one.
+    assertThrows(
+        Exception.class,
+        () ->
+            jdbc.update(
+                "INSERT INTO contained_collections(child,container,project,revision,workspace,cause)"
+                    + " VALUES(?,?,?,?,?, 'DESTROYED')",
+                UUID.randomUUID(),
+                parentScope.value(),
+                "contained:" + UUID.randomUUID(),
+                UUID.randomUUID(),
+                "/srv/containment/x"));
   }
 
   private long rows(String table) {

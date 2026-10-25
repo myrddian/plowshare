@@ -193,12 +193,20 @@ class ContainedApplicationCreationTest {
                       .filter(item -> actions.contains(item.action()))
                       .toList());
             });
-    service = service(new ContainmentConfig(root.toString(), 2, 4));
+    service = service(new ContainmentConfig(root.toString(), 2, 4, null));
   }
 
   SourceContainedApplications service(ContainmentConfig config) {
     return new SourceContainedApplications(
-        records, projects, validator, authority, principals, allowances, work, config);
+        records,
+        projects,
+        validator,
+        authority,
+        principals,
+        allowances,
+        work,
+        config,
+        new InProcessContainedStaging());
   }
 
   static void manifest(Path workspace, String text) throws Exception {
@@ -251,12 +259,15 @@ class ContainedApplicationCreationTest {
     assertThrows(CallerFault.class, () -> unconfigured.create("@service/parent", request()));
     verify(records, never()).create(any());
     // A present-but-incomplete configuration is a startup failure, never a silent default.
-    assertThrows(IllegalStateException.class, () -> new ContainmentConfig(null, 2, 4));
-    assertThrows(IllegalStateException.class, () -> new ContainmentConfig("relative/path", 2, 4));
-    assertThrows(IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 0, 4));
-    assertThrows(IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 2, 0));
+    assertThrows(IllegalStateException.class, () -> new ContainmentConfig(null, 2, 4, null));
     assertThrows(
-        IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 2, null));
+        IllegalStateException.class, () -> new ContainmentConfig("relative/path", 2, 4, null));
+    assertThrows(
+        IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 0, 4, null));
+    assertThrows(
+        IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 2, 0, null));
+    assertThrows(
+        IllegalStateException.class, () -> new ContainmentConfig(root.toString(), 2, null, null));
   }
 
   @Test

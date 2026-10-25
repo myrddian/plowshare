@@ -149,7 +149,8 @@ class ContainedManifestRefusalTest {
             principals,
             allowances,
             work,
-            new ContainmentConfig(root.toString(), 2, 4));
+            new ContainmentConfig(root.toString(), 2, 4, null),
+            new InProcessContainedStaging());
   }
 
   /** A child package whose extra files are added to the minimum valid Application. */

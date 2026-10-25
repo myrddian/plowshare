@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.nio.file.*;
+import java.time.Duration;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -65,6 +66,7 @@ class ContainedRecoveryTest {
   Path root;
   Path parentWorkspace;
   ContainmentConfig config;
+  InProcessContainedStaging staging = new InProcessContainedStaging();
   SourceContainedApplications service;
   ContainedSourceCollector collector;
 
@@ -90,11 +92,13 @@ class ContainedRecoveryTest {
     when(records.liveDescendants(parentScope.id())).thenReturn(0);
     when(records.receipt(any(), any())).thenReturn(Optional.empty());
     when(records.uncollectedSources()).thenReturn(List.of());
-    config = new ContainmentConfig(root.toString(), 2, 4);
+    config = new ContainmentConfig(root.toString(), 2, 4, null);
     service =
         new SourceContainedApplications(
-            records, projects, validator, authority, principals, allowances, work, config);
-    collector = new ContainedSourceCollector(records, work, config);
+            records, projects, validator, authority, principals, allowances, work, config, staging);
+    // Duration.ZERO grace in the tests that are not about the grace, so every other assertion is
+    // about what the sweep decides rather than about a clock.
+    collector = new ContainedSourceCollector(records, work, config, staging, Duration.ZERO);
   }
 
   List<File> files() {
@@ -244,11 +248,13 @@ class ContainedRecoveryTest {
             List.of(
                 new ContainedApplicationRepository.Collection(
                     child,
+                    new ScopeId(UUID.randomUUID()),
                     parentScope.id(),
                     "contained:" + collected,
                     UUID.randomUUID(),
                     workspace,
-                    ContainedApplicationRepository.Cause.DESTROYED)));
+                    ContainedApplicationRepository.Cause.DESTROYED,
+                    false)));
     var swept = collector.sweep();
     assertFalse(Files.exists(workspace));
     assertEquals(1, swept.collected());
@@ -273,11 +279,13 @@ class ContainedRecoveryTest {
             List.of(
                 new ContainedApplicationRepository.Collection(
                     child,
+                    new ScopeId(UUID.randomUUID()),
                     parentScope.id(),
                     "contained:not-a-uuid",
                     UUID.randomUUID(),
                     outside,
-                    ContainedApplicationRepository.Cause.DESTROYED)));
+                    ContainedApplicationRepository.Cause.DESTROYED,
+                    false)));
     var swept = collector.sweep();
     assertEquals(0, swept.collected());
     assertTrue(Files.exists(outside.resolve("keep.txt")));
@@ -314,10 +322,93 @@ class ContainedRecoveryTest {
           io.aeyer.plowshare.server.archive.ApplicationDeploymentStore.class, field.getType());
   }
 
+  /**
+   * Fix round 1, Finding A. A sweep that collected a stage a live create is still writing would be
+   * worse than the leak it exists to close, so the claim is exact and not a guess: {@code create}
+   * holds a staging claim on the project from before the first byte until its unit of work has
+   * finished, and the sweep skips a claimed project whatever its record or its age says.
+   */
+  @Test
+  void sweepDoesNotCollectAStageAnInFlightCreateIsStillWriting() throws Exception {
+    String inflight = UUID.randomUUID().toString();
+    Files.createDirectories(root.resolve(inflight).resolve("revisions").resolve("r"));
+    when(records.committed("contained:" + inflight)).thenReturn(false);
+    staging.claim("contained:" + inflight);
+    var swept = collector.sweep();
+    assertEquals(0, swept.collected());
+    assertEquals(1, swept.retained());
+    assertEquals(Set.of(inflight), staged());
+    // Released, and the same sweep now collects it: the claim is a window, not an exemption.
+    staging.release("contained:" + inflight);
+    assertEquals(1, collector.sweep().collected());
+    assertEquals(Set.of(), staged());
+  }
+
+  /**
+   * The claim is exact only inside one process. Across processes the bound is the directory's own
+   * age: a configured grace below which a stage is assumed to belong to a create that is still
+   * running. The grace errs long on purpose -- too long leaks for one more interval, too short
+   * collects live work -- and {@code ContainmentConfig} floors it for the same reason.
+   */
+  @Test
+  void sweepDoesNotCollectADirectoryYoungerThanTheGrace() throws Exception {
+    String young = UUID.randomUUID().toString();
+    Files.createDirectories(root.resolve(young).resolve("revisions").resolve("r"));
+    when(records.committed("contained:" + young)).thenReturn(false);
+    var patient = new ContainedSourceCollector(records, work, config, staging, Duration.ofHours(1));
+    var swept = patient.sweep();
+    assertEquals(0, swept.collected());
+    assertEquals(1, swept.retained());
+    assertEquals(Set.of(young), staged());
+    // An older directory under the same grace is collected, so the grace is an age and not a stop.
+    Files.setLastModifiedTime(
+        root.resolve(young),
+        java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(7200)));
+    assertEquals(1, patient.sweep().collected());
+    // And the floor is in the configuration, so a zero cannot be configured into production.
+    assertEquals(
+        Duration.ofMinutes(1), new ContainmentConfig(root.toString(), 2, 4, "PT0S").sweepGrace());
+    assertEquals(
+        Duration.ofMinutes(30), new ContainmentConfig(root.toString(), 2, 4, null).sweepGrace());
+  }
+
+  /**
+   * A creation holds its claim across the whole staging-and-commit window, including a refusal: the
+   * claim is released in a {@code finally}, so a refused create cannot leave a project permanently
+   * exempt from collection.
+   */
+  @Test
+  void creationHoldsAndReleasesItsStagingClaim() {
+    when(records.create(any())).thenThrow(new CallerFault("the server stopped here"));
+    assertThrows(CallerFault.class, () -> service.create("@service/parent", request()));
+    assertEquals(Set.of(), staging.claimed());
+  }
+
+  /**
+   * Finding A's other half: the sweep now has production callers. Startup reconciliation answers
+   * the crash that happened while the server was down, and the repeating sweep answers the crash
+   * that happens while it is up. Both run through one object, so there is one place that holds the
+   * readiness gate -- nothing sweeps before the context is ready.
+   */
+  @Test
+  void startupAndTheRepeatingSweepBothCollect() {
+    var sweeps = new ContainedCollectionSweeps(collector);
+    sweeps.sweep();
+    verifyNoInteractions(records);
+    sweeps.onApplicationEvent(
+        new org.springframework.boot.context.event.ApplicationReadyEvent(
+            new org.springframework.boot.SpringApplication(), new String[0], null, Duration.ZERO));
+    verify(records, times(1)).uncollectedSources();
+    sweeps.sweep();
+    verify(records, times(2)).uncollectedSources();
+  }
+
   /** An unconfigured server has no containment root, so the sweep refuses to guess one. */
   @Test
   void sweepDoesNothingWhenNestingIsNotConfigured() {
-    var unconfigured = new ContainedSourceCollector(records, work, ContainmentConfig.absent());
+    var unconfigured =
+        new ContainedSourceCollector(
+            records, work, ContainmentConfig.absent(), staging, Duration.ZERO);
     var swept = unconfigured.sweep();
     assertEquals(0, swept.collected());
     assertEquals(0, swept.retained());

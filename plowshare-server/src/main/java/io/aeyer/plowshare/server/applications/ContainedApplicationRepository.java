@@ -140,15 +140,31 @@ public interface ContainedApplicationRepository {
    * 0005's retained release history records what may be activated, and a destroyed child may not be
    * activated at all. Promotion is a separate explicit act and is not this row.
    *
+   * <p>It is also the receipt {@code destroy} resolves delivery uncertainty against, and {@code
+   * scope} is recorded for that. Without the destroyed child's own scope there is no link from a
+   * parent's collection row to its descendants' rows, so a retried destruction could only answer
+   * about the one record it named — a <em>different</em> answer from the original, which is worse
+   * than refusing. With it, the destroyed subtree is rebuilt exactly.
+   *
+   * @param scope the destroyed child's own contained scope, or {@code null} for a {@code SWEPT}
+   *     stage, which had no scope to record
    * @param container the scope that held this child, or {@code null} for a {@code SWEPT} stage,
    *     which by definition had no committed record to name one
    * @param revision the child's single revision, or {@code null} for a {@code SWEPT} stage
    * @param workspace the source area this record accounts for. Its removal is marked separately by
    *     {@link #sourceCollected}, because the filesystem cannot join the transaction: an unmarked
    *     row is therefore exactly the work an interrupted removal left behind.
+   * @param sourceRemoved whether those bytes are known to be gone
    */
   record Collection(
-      UUID child, ScopeId container, String project, UUID revision, Path workspace, Cause cause) {
+      UUID child,
+      ScopeId scope,
+      ScopeId container,
+      String project,
+      UUID revision,
+      Path workspace,
+      Cause cause,
+      boolean sourceRemoved) {
     public Collection {
       Objects.requireNonNull(child);
       Objects.requireNonNull(cause);
@@ -156,11 +172,12 @@ public interface ContainedApplicationRepository {
         throw new IllegalArgumentException("A collection accounts for a contained project");
       if (workspace == null || !workspace.isAbsolute())
         throw new IllegalArgumentException("A collection names an absolute server path");
-      if (cause == Cause.DESTROYED && (container == null || revision == null))
-        throw new IllegalArgumentException("A destroyed child names its container and revision");
-      if (cause == Cause.SWEPT && (container != null || revision != null))
+      if (cause == Cause.DESTROYED && (container == null || revision == null || scope == null))
         throw new IllegalArgumentException(
-            "A swept stage had no committed record, so it names neither container nor revision");
+            "A destroyed child names its own scope, its container and its revision");
+      if (cause == Cause.SWEPT && (container != null || revision != null || scope != null))
+        throw new IllegalArgumentException(
+            "A swept stage had no committed record, so it names no scope, container or revision");
     }
   }
 
@@ -202,6 +219,22 @@ public interface ContainedApplicationRepository {
    * reaches this list only when a destruction committed and the removal that follows it did not.
    */
   List<Collection> uncollectedSources();
+
+  /**
+   * The collection record of one child, if it was ever collected.
+   *
+   * <p>This is what makes a retried {@code destroy} answerable. It survives the cascade that
+   * removed the child's {@link Retained} row, so it can still say that the destruction happened,
+   * whose child it was and what its source area was.
+   */
+  Optional<Collection> collection(UUID child);
+
+  /**
+   * The collection records of the children one scope directly held, so a destroyed subtree can be
+   * rebuilt by descending the recorded containment edges. {@code DESTROYED} rows only; a swept
+   * stage has no scope and so is on no chain.
+   */
+  List<Collection> collectedUnder(ScopeId container);
 
   /**
    * Whether a contained record exists for this project name. A staged area with none is garbage.

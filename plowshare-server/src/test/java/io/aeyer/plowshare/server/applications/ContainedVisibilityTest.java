@@ -116,7 +116,8 @@ class ContainedVisibilityTest {
                 return body.get();
               }
             },
-            new ContainmentConfig(root.toString(), 3, 4));
+            new ContainmentConfig(root.toString(), 3, 4, null),
+            new InProcessContainedStaging());
   }
 
   @Test

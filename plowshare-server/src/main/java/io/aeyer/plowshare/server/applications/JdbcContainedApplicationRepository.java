@@ -212,9 +212,10 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
   public void collected(Collection record) {
     jdbc.update(
         "INSERT INTO contained_collections"
-            + "(child,container,project,revision,workspace,cause) VALUES(?,?,?,?,?,?)"
+            + "(child,scope,container,project,revision,workspace,cause) VALUES(?,?,?,?,?,?,?)"
             + " ON CONFLICT (child) DO NOTHING",
         record.child(),
+        record.scope() == null ? null : record.scope().value(),
         record.container() == null ? null : record.container().value(),
         record.project(),
         record.revision(),
@@ -227,21 +228,60 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
     jdbc.update("UPDATE contained_collections SET source_removed=TRUE WHERE child=?", child);
   }
 
+  private static final String COLLECTION_COLUMNS =
+      "child,scope,container,project,revision,workspace,cause,source_removed";
+
   @Override
   public List<Collection> uncollectedSources() {
     return jdbc.query(
-        "SELECT child,container,project,revision,workspace,cause FROM contained_collections"
-            + " WHERE NOT source_removed ORDER BY collected_at",
-        (row, index) ->
-            new Collection(
-                row.getObject("child", UUID.class),
-                row.getObject("container", UUID.class) == null
-                    ? null
-                    : new ScopeId(row.getObject("container", UUID.class)),
-                row.getString("project"),
-                row.getObject("revision", UUID.class),
-                java.nio.file.Path.of(row.getString("workspace")),
-                Cause.valueOf(row.getString("cause"))));
+        "SELECT "
+            + COLLECTION_COLUMNS
+            + " FROM contained_collections WHERE NOT source_removed ORDER BY collected_at",
+        JdbcContainedApplicationRepository::collection);
+  }
+
+  @Override
+  public Optional<Collection> collection(UUID child) {
+    return jdbc
+        .query(
+            "SELECT " + COLLECTION_COLUMNS + " FROM contained_collections WHERE child=?",
+            JdbcContainedApplicationRepository::collection,
+            child)
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * One recorded containment edge downwards. {@code scope IS NOT NULL} keeps a swept stage off the
+   * chain: it never had a scope, because it never had a committed record.
+   */
+  @Override
+  public List<Collection> collectedUnder(ScopeId container) {
+    return jdbc.query(
+        "SELECT "
+            + COLLECTION_COLUMNS
+            + " FROM contained_collections WHERE container=? AND scope IS NOT NULL"
+            + " AND cause='DESTROYED' ORDER BY child",
+        JdbcContainedApplicationRepository::collection,
+        container.value());
+  }
+
+  private static Collection collection(java.sql.ResultSet row, int index)
+      throws java.sql.SQLException {
+    return new Collection(
+        row.getObject("child", UUID.class),
+        scope(row, "scope"),
+        scope(row, "container"),
+        row.getString("project"),
+        row.getObject("revision", UUID.class),
+        java.nio.file.Path.of(row.getString("workspace")),
+        Cause.valueOf(row.getString("cause")),
+        row.getBoolean("source_removed"));
+  }
+
+  private static ScopeId scope(java.sql.ResultSet row, String column) throws java.sql.SQLException {
+    UUID value = row.getObject(column, UUID.class);
+    return value == null ? null : new ScopeId(value);
   }
 
   @Override

@@ -36,16 +36,32 @@ import org.springframework.context.annotation.Configuration;
 public final class ContainmentConfig {
   private static final ContainmentConfig ABSENT = new ContainmentConfig();
 
+  /**
+   * The conservative default, used when {@code sweep-grace} is absent, and the floor every
+   * configured value is clamped to.
+   *
+   * <p>Absence defaults <em>long</em> and the floor exists for the same reason: the two failure
+   * directions are not symmetric. Too long a grace leaks an interrupted stage for one more sweep;
+   * too short a grace collects the source of a creation that is still writing it. Only the second
+   * loses data, so a zero is not something an operator may configure into production.
+   */
+  static final java.time.Duration DEFAULT_SWEEP_GRACE = java.time.Duration.ofMinutes(30);
+
+  static final java.time.Duration MINIMUM_SWEEP_GRACE = java.time.Duration.ofMinutes(1);
+
   private final Path root;
   private final ContainmentBounds bounds;
+  private final java.time.Duration sweepGrace;
 
   private ContainmentConfig() {
     this.root = null;
     this.bounds = ContainmentBounds.absent();
+    this.sweepGrace = DEFAULT_SWEEP_GRACE;
   }
 
   @ConstructorBinding
-  public ContainmentConfig(String root, Integer maxDepth, Integer maxLiveDescendants) {
+  public ContainmentConfig(
+      String root, Integer maxDepth, Integer maxLiveDescendants, String sweepGrace) {
     if (root == null || root.isBlank())
       throw new IllegalStateException(
           "Configure plowshare.containment.root with the server-owned directory contained"
@@ -61,6 +77,18 @@ public final class ContainmentConfig {
               + " omission");
     this.root = resolved;
     this.bounds = new ContainmentBounds(maxDepth, maxLiveDescendants);
+    // Absent is the conservative default rather than an operator mistake, unlike the bounds above:
+    // a bound that is absent would be unlimited, whereas a grace that is absent is simply long.
+    java.time.Duration requested;
+    try {
+      requested = sweepGrace == null ? DEFAULT_SWEEP_GRACE : java.time.Duration.parse(sweepGrace);
+    } catch (java.time.format.DateTimeParseException malformed) {
+      throw new IllegalStateException(
+          "plowshare.containment.sweep-grace must be an ISO-8601 duration, not " + sweepGrace);
+    }
+    if (requested.isNegative()) requested = DEFAULT_SWEEP_GRACE;
+    this.sweepGrace =
+        requested.compareTo(MINIMUM_SWEEP_GRACE) < 0 ? MINIMUM_SWEEP_GRACE : requested;
   }
 
   /** The configuration a server without containment holds; every creation refuses under it. */
@@ -84,6 +112,15 @@ public final class ContainmentConfig {
 
   public ContainmentBounds bounds() {
     return bounds;
+  }
+
+  /**
+   * How old a staged directory must be before a sweep will collect it when no committed record
+   * accounts for it. This is the cross-process half of the in-flight-creation guard; {@link
+   * ContainedStaging} is the exact in-process half.
+   */
+  public java.time.Duration sweepGrace() {
+    return sweepGrace;
   }
 
   /** The bounds the authority substrate enforces, injected rather than passed by any caller. */

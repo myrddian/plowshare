@@ -51,12 +51,20 @@ public final class ContainedSourceCollector {
   private final ContainedApplicationRepository records;
   private final UnitOfWork work;
   private final ContainmentConfig config;
+  private final ContainedStaging staging;
+  private final java.time.Duration grace;
 
   public ContainedSourceCollector(
-      ContainedApplicationRepository records, UnitOfWork work, ContainmentConfig config) {
+      ContainedApplicationRepository records,
+      UnitOfWork work,
+      ContainmentConfig config,
+      ContainedStaging staging,
+      java.time.Duration grace) {
     this.records = Objects.requireNonNull(records);
     this.work = Objects.requireNonNull(work);
     this.config = Objects.requireNonNull(config);
+    this.staging = Objects.requireNonNull(staging);
+    this.grace = Objects.requireNonNull(grace);
   }
 
   /** Finishes interrupted removals, then collects unaccounted stages. Never partially reports. */
@@ -67,7 +75,10 @@ public final class ContainedSourceCollector {
       // Confined to the root even though the record names the path: a stored row is data, and the
       // one directory this will remove for it is the one its project name resolves to here.
       Path workspace = within(pending.project());
-      if (workspace == null) continue;
+      // A claimed project cannot be one of these -- a collection row means the destruction already
+      // committed -- but the guard is unconditional so no path through this object can delete a
+      // directory a creation holds.
+      if (workspace == null || staging.staging(pending.project())) continue;
       if (remove(workspace)) {
         records.sourceCollected(pending.child());
         collected++;
@@ -86,6 +97,15 @@ public final class ContainedSourceCollector {
           retained++;
           continue;
         }
+        // A creation stages before any durable row exists, which is what refusal totality rests
+        // on, so between the first byte and the commit there is a directory this sweep would
+        // otherwise claim. Collecting it would delete the source of a creation about to succeed,
+        // and the caller would hold a receipt for an Application whose files are gone -- worse
+        // than the leak this exists to close. Two guards, in order of exactness.
+        if (staging.staging(project) || young(entry)) {
+          retained++;
+          continue;
+        }
         if (!remove(entry)) continue;
         // Written after the bytes are gone and already marked, because for this input there was no
         // earlier record to mark: a sweep's own collection is never left half-recorded.
@@ -93,10 +113,12 @@ public final class ContainedSourceCollector {
             new ContainedApplicationRepository.Collection(
                 UUID.randomUUID(),
                 null,
+                null,
                 project,
                 null,
                 entry,
-                ContainedApplicationRepository.Cause.SWEPT);
+                ContainedApplicationRepository.Cause.SWEPT,
+                false);
         work.inTransaction(
             () -> {
               records.collected(record);
@@ -111,6 +133,26 @@ public final class ContainedSourceCollector {
       // nothing treats a surviving directory as live.
     }
     return new Sweep(collected, retained);
+  }
+
+  /**
+   * Whether a stage is too young to be assumed abandoned.
+   *
+   * <p>The in-process claim is exact but local, so this is the cross-process bound: a directory
+   * modified more recently than the configured grace is assumed to belong to a creation that is
+   * still running. The grace errs long on purpose, and {@link ContainmentConfig} floors it, because
+   * the two failure directions are not symmetric — too long leaks for one more sweep, too short
+   * deletes live work. An unreadable timestamp is treated as young, for the same reason.
+   */
+  private boolean young(Path entry) {
+    if (grace.isZero() || grace.isNegative()) return false;
+    try {
+      return Files.getLastModifiedTime(entry, LinkOption.NOFOLLOW_LINKS)
+          .toInstant()
+          .isAfter(java.time.Instant.now().minus(grace));
+    } catch (IOException unreadable) {
+      return true;
+    }
   }
 
   /** The source area a contained project name resolves to, or null if it is not under the root. */
