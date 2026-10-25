@@ -370,6 +370,20 @@ chain to its container's live grants belongs to the task that makes a contained
 scope resolvable, and must change the home/scope agreement check and the ancestry
 walk together, since a hop changes both by design.
 
+**A known limitation of this slice: the effective depth limit is 1, whatever is
+configured.** `contain` bounds depth by walking the container chain, and the walk
+reads each enclosing scope through `IdentityRepository.scope(ScopeId)`, which
+refuses a `CONTAINED` row. So the walk can only ever observe an uncontained
+parent and compute depth 1, and a configured `maxDepth` above 1 is unreachable.
+The direction is the safe one — stricter than configured, never looser — and the
+walk itself is implemented and tested at depth 2 against a mocked repository, so
+the bound is correct the moment a contained scope becomes resolvable. But this
+record claims authority narrows transitively *at depth*, and the first intended
+consumer of the capability is recursive, so the claim is not yet exercised by
+anything that runs. Lifting it is the same work as making a contained admission
+live: it needs the scope read, the home/scope agreement check and the ancestry
+walk taught containment together.
+
 V196 freezes `authority_scopes.container` after insert, so containment ancestry
 cannot be repointed and the relation is acyclic by construction: an insert can
 only name an existing container, so the only way to close a cycle is to move an

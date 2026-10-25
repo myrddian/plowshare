@@ -64,6 +64,40 @@ class ContainedScopeTest {
     assertEquals(parent.id(), child.container());
   }
 
+  /**
+   * The containment row is resolved, not trusted. A caller-supplied {@code Contained} value is an
+   * assertion about stored ancestry, and a sibling subtree's project carries the same reserved
+   * prefix, so the predicate must bind all four facts at once: the row exists, it is CONTAINED, its
+   * container is the one the caller named, and it maps to the project the caller named. The SQL
+   * text and its bound parameters are the assertion here, as with the issuance lock above;
+   * PostgreSQL's own constraints are asserted in {@code ContainedScopeSchemaTest}.
+   */
+  @Test
+  void aContainedHomeResolvesTheStoredContainmentRow() {
+    var jdbc = mock(JdbcTemplate.class);
+    // No row matches, which is what a value naming a foreign project or container produces.
+    when(jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+        .thenReturn(List.of());
+    var container = scope();
+    var child = new AuthorityScope.Contained(scope(), 42L, container);
+
+    var refusal =
+        assertThrows(
+            CallerFault.class,
+            () -> new JdbcIdentityRepository(jdbc).containedHome(child, container));
+    assertTrue(refusal.getMessage().contains("unavailable or restricted"), refusal.getMessage());
+
+    var sql = ArgumentCaptor.forClass(String.class);
+    var args = ArgumentCaptor.forClass(Object[].class);
+    verify(jdbc).queryForList(sql.capture(), eq(String.class), args.capture());
+    assertTrue(sql.getValue().contains("authority_scopes"), sql.getValue());
+    assertTrue(sql.getValue().contains("s.kind='CONTAINED'"), sql.getValue());
+    assertTrue(sql.getValue().contains("s.container=?"), sql.getValue());
+    assertTrue(sql.getValue().contains("s.project_id=?"), sql.getValue());
+    assertTrue(sql.getValue().contains("p.name LIKE 'contained:%'"), sql.getValue());
+    assertEquals(List.of(child.id().value(), container.value(), 42L), List.of(args.getValue()));
+  }
+
   @Test
   void grantIssuanceExcludesContainedScopes() {
     var jdbc = mock(JdbcTemplate.class);

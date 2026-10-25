@@ -75,13 +75,26 @@ public interface IdentityRepository {
    * from a project name — so a contained admission knows its own home while nothing can travel from
    * that name back to the scope.
    *
-   * <p>The reserved {@code contained:} name prefix is required of the project, bound in SQL. A
-   * {@link AuthorityScope.Contained} value is constructible in memory with any project key, so
-   * without this check a caller could present one pointing at an ordinary project and be answered
-   * with that project's home. Refused rather than answered, as in the migration's own shape
-   * constraint. Resolving a home grants nothing either way.
+   * <p><strong>The containment row is resolved, never trusted.</strong> A {@link
+   * AuthorityScope.Contained} value is freely constructible with any id, project key and container,
+   * and no repository path returns one, so every field of {@code scope} arrives caller-supplied:
+   * comparing its {@code container()} against a caller's own parent scope only asks the caller to
+   * agree with itself. So this resolves the stored row and binds four facts in the predicate — the
+   * row for {@code scope.id()} exists, its kind is {@code CONTAINED}, its container is {@code
+   * container}, and it maps to {@code scope.projectId()} — and refuses unless all four hold.
+   *
+   * <p>That is what makes reaching beside yourself a resolution failure rather than a denied
+   * permission. Every child subtree's project carries the same reserved {@code contained:} prefix,
+   * so the prefix predicate alone closes the *ordinary-project* substitution only: it stops a value
+   * pointing at an ordinary project being answered with that project's home, and it cannot tell one
+   * contained project from another. Only the container and project columns of the stored row
+   * distinguish this parent's child from a sibling subtree's. Resolving a home grants nothing
+   * either way.
+   *
+   * @param scope the child as the caller asserts it, every field of which is verified
+   * @param container the scope that must be recorded as this child's container
    */
-  Home containedHome(AuthorityScope.Contained scope);
+  Home containedHome(AuthorityScope.Contained scope, ScopeId container);
 
   AuthorityScope.Personal personal(AccountId account);
 

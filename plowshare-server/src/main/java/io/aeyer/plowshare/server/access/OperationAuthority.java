@@ -104,15 +104,18 @@ public interface OperationAuthority {
    * of what the parent retains. There is therefore no sequence of calls that yields an admission
    * holding an action its parent does not hold: every hop only ever drops.
    *
-   * <p>{@code child} must name this parent's scope as its container. A child reaching above or
-   * beside itself — at a grandparent, a sibling or an uncontained scope — is a resolution failure
-   * refused here before any authority is resolved, not a permission later denied. Chain depth is
-   * bounded by injected server configuration rather than by any argument of this call, and an
-   * absent or non-positive bound refuses rather than defaulting to unlimited.
+   * <p>{@code child} must be recorded as contained by this parent's scope. It is a caller-supplied
+   * value and not evidence — the record is freely constructible and no repository path returns one
+   * — so the stored containment row is resolved rather than its fields believed. A child reaching
+   * above or beside itself, at a grandparent, a sibling subtree or an uncontained scope, therefore
+   * fails to resolve: a resolution failure refused before any authority is resolved, not a
+   * permission later denied. Chain depth is bounded by injected server configuration rather than by
+   * any argument of this call, and an absent or non-positive bound refuses rather than defaulting
+   * to unlimited.
    *
-   * <p>Resolving the child's own home is the one outward-facing act of the hop; it is why {@link
-   * IdentityRepository#containedHome} exists and why {@link
-   * IdentityRepository#home(AuthorityScope)} keeps refusing a contained scope.
+   * <p>Resolving the child's own home is the one outward-facing act of the hop, and it is the same
+   * read that resolves the child; it is why {@link IdentityRepository#containedHome} exists and why
+   * {@link IdentityRepository#home(AuthorityScope)} keeps refusing a contained scope.
    */
   Admission contain(Admission parent, AuthorityScope.Contained child, Set<AuthorityAction> actions);
 

@@ -99,16 +99,21 @@ public class JdbcIdentityRepository implements IdentityRepository {
   }
 
   @Override
-  public Home containedHome(AuthorityScope.Contained scope) {
+  public Home containedHome(AuthorityScope.Contained scope, ScopeId container) {
     Objects.requireNonNull(scope);
-    // The reserved prefix is bound in the predicate rather than compared afterwards, so a scope
-    // pointing at an ordinary project selects no row and is refused with the containment refusal
-    // instead of being answered with that project's name. One read, the same shape as home().
+    Objects.requireNonNull(container);
+    // One read that resolves the stored containment row instead of trusting the caller's value.
+    // All four facts are bound in the predicate, so a value naming a sibling subtree's project, or
+    // another container's child, or an ordinary project, selects no row and is refused. The prefix
+    // alone would close only the ordinary-project case: every child's project carries it, so the
+    // container and project_id columns are what separate this parent's child from a sibling's.
     return Home.of(
         one(
             jdbc.queryForList(
-                "SELECT name FROM projects WHERE id=? AND name LIKE 'contained:%'",
-                String.class, scope.projectId())));
+                "SELECT p.name FROM authority_scopes s JOIN projects p ON p.id=s.project_id"
+                    + " WHERE s.id=? AND s.kind='CONTAINED' AND s.container=? AND s.project_id=?"
+                    + " AND p.name LIKE 'contained:%'",
+                String.class, scope.id().value(), container.value(), scope.projectId())));
   }
 
   @Override

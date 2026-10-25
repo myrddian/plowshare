@@ -257,6 +257,13 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     if (actions.isEmpty()
         || !parent.actions().containsAll(actions)
         || !DERIVABLE.containsAll(actions)) throw denied();
+    // The hop changes home, and resolving the child's home is also what resolves the child. The
+    // container comparison above is a free pre-check on a value the caller populated; this is the
+    // read that proves the stored row says the same thing. It therefore precedes any authority
+    // resolution, so a child naming a sibling subtree fails to resolve rather than being denied a
+    // permission. A contained admission fenced to its parent's project would be fenced to the one
+    // project the child must not reach, so it carries its own.
+    var home = identities.containedHome(child, parent.scope());
     require(parent);
     var contained =
         new Admission(
@@ -264,9 +271,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
             parent.executor(),
             parent.account(),
             child.id(),
-            // The hop changes home. A contained admission fenced to its parent's project would be
-            // fenced to the one project the child must not reach, so it carries its own.
-            identities.containedHome(child),
+            home,
             parent.source(),
             parent.support().stream().filter(item -> actions.contains(item.action())).toList(),
             // Global knowledge is outside every containment subtree and is never carried across.

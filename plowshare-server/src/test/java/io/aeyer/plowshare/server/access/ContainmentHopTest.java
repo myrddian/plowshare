@@ -67,7 +67,7 @@ class ContainmentHopTest {
     when(identities.project("one")).thenReturn(target);
     when(identities.home(target)).thenReturn(Home.of("one"));
     when(identities.scope(target.id())).thenReturn(target);
-    when(identities.containedHome(child)).thenReturn(childHome);
+    when(identities.containedHome(child, target.id())).thenReturn(childHome);
     // Faithful to JdbcIdentityRepository: a contained scope is never resolvable from a project
     // name, so the live-authority path cannot reach one. Nothing in this test mocks that away.
     when(identities.project(childName))
@@ -158,7 +158,7 @@ class ContainmentHopTest {
       assertThrows(
           CallerFault.class, () -> policy.contain(parent, foreign, Set.of(AuthorityAction.READ)));
     verify(records, never()).retainChild(any(), any());
-    verify(identities, never()).containedHome(any());
+    verify(identities, never()).containedHome(any(), any());
   }
 
   @Test
@@ -213,7 +213,7 @@ class ContainmentHopTest {
     var grandchild =
         new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 4, enclosing.id());
     when(identities.scope(enclosing.id())).thenReturn(enclosing);
-    when(identities.containedHome(grandchild))
+    when(identities.containedHome(grandchild, enclosing.id()))
         .thenReturn(Home.of("contained:" + UUID.randomUUID()));
 
     clearInvocations(identities);
@@ -248,7 +248,56 @@ class ContainmentHopTest {
           CallerFault.class,
           () -> policy(absent).contain(parent, child, Set.of(AuthorityAction.READ)));
     verify(records, never()).retainChild(any(), any());
-    verify(identities, never()).containedHome(any());
+    verify(identities, never()).containedHome(any(), any());
+  }
+
+  /**
+   * Lateral reach. A {@code Contained} value is freely constructible and no repository path returns
+   * one, so every field of the argument arrives caller-supplied: comparing {@code
+   * child.container()} with the parent's scope only asks the caller to agree with itself. A sibling
+   * subtree's project carries the same reserved prefix, so a name-only check cannot tell the two
+   * apart either. The stored containment row is what decides, and the hop refuses when it does not
+   * resolve — reaching beside yourself is a resolution failure, not a permission the parent happens
+   * to lack.
+   */
+  @Test
+  void containRefusesAChildWhoseStoredRowDoesNotResolve() {
+    var parent = parent();
+    // Same container field, a sibling subtree's project key. The row for this id, under this
+    // container, mapping to this project does not exist, so the repository refuses.
+    var sibling = new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 9, target.id());
+    when(identities.containedHome(sibling, target.id()))
+        .thenThrow(new CallerFault("Identity or scope mapping is unavailable or restricted"));
+    assertThrows(
+        CallerFault.class, () -> policy.contain(parent, sibling, Set.of(AuthorityAction.READ)));
+    verify(records, never()).retainChild(any(), any());
+    // The resolution is not optional and not replaceable by the caller's own assertion: the hop
+    // asks for it on every call, with the parent's scope as the container it must match.
+    verify(identities).containedHome(sibling, target.id());
+  }
+
+  /**
+   * The second inertness gate, asserted on its own. A contained admission is refused twice over:
+   * {@code requireOwn} cannot resolve its home back to its scope, and {@code require}'s ancestry
+   * walk demands an ancestor with an identical scope and home, which a hop changes by design. The
+   * first gate is what fires today, so this opens it by hand — stubbing a contained scope as
+   * resolvable from its project name — to prove the second still refuses underneath. A later task
+   * that teaches one without the other does not get a live child admission by accident.
+   */
+  @Test
+  void theAncestryWalkRefusesAHopEvenWhenTheScopeResolves() {
+    var parent = parent();
+    var contained = policy.contain(parent, child, Set.of(AuthorityAction.READ));
+    // doReturn, because when(...) would invoke the refusing stub this is replacing.
+    doReturn(child).when(identities).project(childName);
+    when(members.role(childName, "alice")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+    when(authority.allowsUsing(recipient, child, AuthorityAction.READ, grant)).thenReturn(true);
+    when(records.parent(contained.id())).thenReturn(Optional.of(parent.id()));
+    when(records.find(parent.id())).thenReturn(Optional.of(parent));
+    assertThrows(CallerFault.class, () -> policy.require(contained));
+    // Gate one really is open in this arrangement: the same admission with its parent's scope and
+    // home, which is what derive produces, passes the identical walk.
+    assertDoesNotThrow(() -> policy.require(parent));
   }
 
   /**
