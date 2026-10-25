@@ -58,6 +58,31 @@ public interface IdentityRepository {
    */
   Home home(AuthorityScope scope);
 
+  /**
+   * The project home a contained scope's <em>own</em> confined execution is recorded under.
+   *
+   * <p>This is a sibling of {@link #home(AuthorityScope)}, not a relaxation of it. That method's
+   * refusal of a contained scope stands and is load-bearing: every existing caller holds a general
+   * {@link AuthorityScope}, so answering there would have handed a child project a usable home
+   * through every {@code Home}-keyed path in the server at once. This method's parameter type is
+   * {@link AuthorityScope.Contained}, so no such caller can reach it without first matching on
+   * containment — which is the explicit decision containment is supposed to force.
+   *
+   * <p>It exists because a containment hop changes home: a child has its own writable knowledge and
+   * memory home inside its containment, and a contained admission whose home named its parent's
+   * project would be fenced to the one project the child must not reach. The direction that stays
+   * closed is the reverse one — {@link #project(String)} still refuses to resolve a contained scope
+   * from a project name — so a contained admission knows its own home while nothing can travel from
+   * that name back to the scope.
+   *
+   * <p>The reserved {@code contained:} name prefix is required of the project, bound in SQL. A
+   * {@link AuthorityScope.Contained} value is constructible in memory with any project key, so
+   * without this check a caller could present one pointing at an ordinary project and be answered
+   * with that project's home. Refused rather than answered, as in the migration's own shape
+   * constraint. Resolving a home grants nothing either way.
+   */
+  Home containedHome(AuthorityScope.Contained scope);
+
   AuthorityScope.Personal personal(AccountId account);
 
   AuthorityScope.AccountKnowledge knowledge(AccountId account);

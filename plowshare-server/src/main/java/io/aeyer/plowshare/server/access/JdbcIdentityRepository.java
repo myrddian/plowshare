@@ -99,6 +99,19 @@ public class JdbcIdentityRepository implements IdentityRepository {
   }
 
   @Override
+  public Home containedHome(AuthorityScope.Contained scope) {
+    Objects.requireNonNull(scope);
+    // The reserved prefix is bound in the predicate rather than compared afterwards, so a scope
+    // pointing at an ordinary project selects no row and is refused with the containment refusal
+    // instead of being answered with that project's name. One read, the same shape as home().
+    return Home.of(
+        one(
+            jdbc.queryForList(
+                "SELECT name FROM projects WHERE id=? AND name LIKE 'contained:%'",
+                String.class, scope.projectId())));
+  }
+
+  @Override
   public AuthorityScope.Personal personal(AccountId account) {
     Objects.requireNonNull(account);
     return (AuthorityScope.Personal)

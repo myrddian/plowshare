@@ -12,6 +12,18 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class PinnedOperationAuthority implements OperationAuthority {
+  /**
+   * The actions an admission may be narrowed to, whether the narrowing holds scope fixed ({@code
+   * derive}) or crosses a containment hop ({@code contain}). The management and administration
+   * actions are deliberately absent: a narrowed authority runs work, it does not re-grant it.
+   */
+  private static final Set<AuthorityAction> DERIVABLE =
+      Set.of(
+          AuthorityAction.READ,
+          AuthorityAction.WRITE,
+          AuthorityAction.CONVERSATION_CREATE,
+          AuthorityAction.RUN_MODEL);
+
   private final IdentityRepository identities;
   private final ScopedGrantRepository grants;
   private final ScopedAuthority authority;
@@ -19,6 +31,9 @@ public final class PinnedOperationAuthority implements OperationAuthority {
   private final OperationRecords records;
   private final ResourceScopeRepository resources;
   private final io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge;
+
+  /** Server configuration, never a caller's argument; absent until an operator configures it. */
+  private final ContainmentBounds bounds;
 
   public PinnedOperationAuthority(
       IdentityRepository identities,
@@ -37,7 +52,6 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         io.aeyer.plowshare.server.information.AccountKnowledgePermissions.DENY);
   }
 
-  @org.springframework.beans.factory.annotation.Autowired
   public PinnedOperationAuthority(
       IdentityRepository identities,
       ScopedGrantRepository grants,
@@ -46,6 +60,54 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       OperationRecords records,
       ResourceScopeRepository resources,
       io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        knowledge,
+        ContainmentBounds.absent());
+  }
+
+  /**
+   * The bounds bean is optional rather than required, so a deployment that has not opted into
+   * containment still starts; it then holds {@link ContainmentBounds#absent()} and refuses every
+   * containment hop. Absence must not be a startup failure for a capability the server does not
+   * use, and it must not become an unlimited default either.
+   */
+  @org.springframework.beans.factory.annotation.Autowired
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
+      org.springframework.beans.factory.ObjectProvider<ContainmentBounds> bounds) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        knowledge,
+        bounds.getIfAvailable(ContainmentBounds::absent));
+  }
+
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
+      ContainmentBounds bounds) {
+    this.bounds = Objects.requireNonNull(bounds);
     this.knowledge = Objects.requireNonNull(knowledge);
     this.identities = Objects.requireNonNull(identities);
     this.grants = Objects.requireNonNull(grants);
@@ -123,12 +185,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         List.of(
             new AccessRequest.Resource(
                 ResourceScopeRepository.Kind.CONVERSATION, conversation.id())));
-    if (!Set.of(
-            AuthorityAction.READ,
-            AuthorityAction.WRITE,
-            AuthorityAction.CONVERSATION_CREATE,
-            AuthorityAction.RUN_MODEL)
-        .containsAll(conversation.admission().actions())) throw denied();
+    if (!DERIVABLE.containsAll(conversation.admission().actions())) throw denied();
     if (conversation.parent() != null) {
       if (records.parent(conversation.admission().id()).isEmpty()) throw denied();
       requireTargets(
@@ -147,12 +204,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     require(parent);
     if (actions.isEmpty()
         || !parent.actions().containsAll(actions)
-        || !Set.of(
-                AuthorityAction.READ,
-                AuthorityAction.WRITE,
-                AuthorityAction.CONVERSATION_CREATE,
-                AuthorityAction.RUN_MODEL)
-            .containsAll(actions)) throw denied();
+        || !DERIVABLE.containsAll(actions)) throw denied();
     var child =
         new Admission(
             UUID.randomUUID(),
@@ -166,6 +218,83 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     records.retainChild(child, parent.id());
     require(child);
     return child;
+  }
+
+  /**
+   * One containment hop. The order below is the contract: the structural questions — is containment
+   * configured at all, does this child name this parent, is the chain short enough — are resolution
+   * failures and are answered before any identity, role or grant is read, so reaching above or
+   * beside oneself never becomes a permission question. Only then are the actions narrowed, and
+   * only then is the parent's own live authority rechecked.
+   *
+   * <p>Nothing here can enlarge. The support rows are filtered from the parent's own list, so each
+   * carries the parent's grant id and no grant is issued or resolved for the child; the account,
+   * executor and source are copied; {@code globalRead} is dropped; and the action set is checked
+   * against the parent's retained actions before anything is built. Applied repeatedly, each hop
+   * takes a subset of a subset.
+   *
+   * <p><strong>The child admission is retained but is not yet live, and this method does not
+   * pretend otherwise.</strong> Unlike {@code derive}, it does not finish with {@code
+   * require(child)}, because it could not succeed: {@code requireOwn} proves an admission's
+   * retained home and scope still agree by resolving the home's project name back to a scope, and
+   * {@link IdentityRepository#project} refuses to resolve a contained scope from a project name. So
+   * a contained admission is inert — every live-authority surface declines it — which is the
+   * intended posture of this slice and is asserted in {@code ContainmentHopTest}. The ancestry edge
+   * is retained regardless, because evidence of a hop is worth having and evidence is not
+   * permission. Teaching {@code require} to walk the container chain to its container's live grants
+   * is the work of the task that makes a contained scope resolvable; it must change the home/scope
+   * agreement check and the ancestry walk together, since a hop changes both by design.
+   */
+  @Override
+  public Admission contain(
+      Admission parent, AuthorityScope.Contained child, Set<AuthorityAction> requested) {
+    Objects.requireNonNull(parent);
+    Objects.requireNonNull(child);
+    var actions = Set.copyOf(requested);
+    if (!bounds.configured()) throw denied();
+    if (!child.container().equals(parent.scope())) throw denied();
+    requireDepth(parent, child);
+    if (actions.isEmpty()
+        || !parent.actions().containsAll(actions)
+        || !DERIVABLE.containsAll(actions)) throw denied();
+    require(parent);
+    var contained =
+        new Admission(
+            UUID.randomUUID(),
+            parent.executor(),
+            parent.account(),
+            child.id(),
+            // The hop changes home. A contained admission fenced to its parent's project would be
+            // fenced to the one project the child must not reach, so it carries its own.
+            identities.containedHome(child),
+            parent.source(),
+            parent.support().stream().filter(item -> actions.contains(item.action())).toList(),
+            // Global knowledge is outside every containment subtree and is never carried across.
+            false);
+    records.retainChild(contained, parent.id());
+    return contained;
+  }
+
+  /**
+   * Refuses a hop whose resulting container chain would exceed the configured depth. Depth is the
+   * length of that chain: the child sits one hop below its parent, so the parent's own chain is
+   * walked and the child counted on top of it.
+   *
+   * <p>The walk also refuses a chain that revisits a scope. A cycle is unconstructible — a scope
+   * cannot contain itself, a container must already exist when a contained scope is inserted, and
+   * V196 forbids repointing an existing one — but a walk that would loop forever if the data were
+   * wrong is not a walk worth trusting, so it refuses instead of looping.
+   */
+  private void requireDepth(Admission parent, AuthorityScope.Contained child) {
+    int depth = 1;
+    var seen = new HashSet<AuthorityIds.ScopeId>();
+    seen.add(child.id());
+    var enclosing = identities.scope(parent.scope());
+    while (enclosing instanceof AuthorityScope.Contained contained) {
+      if (++depth > bounds.maxDepth() || !seen.add(contained.id())) throw denied();
+      enclosing = identities.scope(contained.container());
+    }
+    if (depth > bounds.maxDepth()) throw denied();
   }
 
   @Override

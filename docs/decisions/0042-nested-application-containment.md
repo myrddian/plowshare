@@ -351,6 +351,38 @@ through every `Home`-keyed path in the server — the silent default this record
 rejects. Whether a contained scope has an outwardly visible home, and to whom,
 is decided where containment is resolved.
 
+That question has since been decided, at the containment hop, which is where
+containment is resolved. `IdentityRepository.containedHome(AuthorityScope.Contained)`
+answers the home of a contained scope's own confined execution, and
+`OperationAuthority.contain` is its only caller. The refusal at
+`home(AuthorityScope)` is unchanged and remains load-bearing: every existing
+caller holds a general `AuthorityScope`, so answering there would have handed a
+child project a usable home through every `Home`-keyed path at once, whereas a
+method whose parameter type is `Contained` cannot be reached without first
+matching on containment. The reverse direction stays closed —
+`project(String)` still refuses to resolve a contained scope from a project name
+— so a contained admission knows its own home while nothing travels from that
+name back to the scope. The consequence is that a contained admission is inert:
+`require` proves an admission's retained home and scope still agree by resolving
+the home's project name back to a scope, which a contained scope refuses, so no
+live-authority surface accepts one. Teaching `require` to walk the container
+chain to its container's live grants belongs to the task that makes a contained
+scope resolvable, and must change the home/scope agreement check and the ancestry
+walk together, since a hop changes both by design.
+
+V196 freezes `authority_scopes.container` after insert, so containment ancestry
+cannot be repointed and the relation is acyclic by construction: an insert can
+only name an existing container, so the only way to close a cycle is to move an
+existing node. V155's `authority_scope_locked` already refused a direct UPDATE of
+a scope row; what was open, and is verified to have been open, is the one UPDATE
+route that lock deliberately permits — `pg_trigger_depth()>=2`, the nested-trigger
+path that exists for the mapping upsert recorded above. Nothing takes that route
+today, so V196 closes a route reachable in principle rather than a live hole, and
+it makes the invariant local to containment instead of a side effect of a lock
+about scope identity. It matters because the depth bound walks the container
+chain: a cycle would make that walk loop rather than refuse, and a fence that
+depends on the walk terminating cannot also be what proves it terminates.
+
 Two further refusals were added in the same change although the compiler did not
 force them, and they are recorded here only so the inventory is not read as the
 complete set of containment decisions:

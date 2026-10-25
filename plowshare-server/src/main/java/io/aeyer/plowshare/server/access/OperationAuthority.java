@@ -93,6 +93,30 @@ public interface OperationAuthority {
   Admission derive(Admission parent, Set<AuthorityAction> actions);
 
   /**
+   * Narrows a retained parent across one containment hop into a confined child.
+   *
+   * <p>{@link #derive} narrows actions while holding scope, account and home fixed, so it cannot
+   * express this hop. {@code contain} is its sibling and the only way a contained admission comes
+   * into being. It issues no authority: the child's support is exactly the parent's own grant rows
+   * for the narrowed actions, so a child's authority is a projection of its parent's. The account,
+   * executor and grant source never change, Global knowledge READ is dropped unconditionally
+   * because it sits outside every containment subtree, and the requested actions must be a subset
+   * of what the parent retains. There is therefore no sequence of calls that yields an admission
+   * holding an action its parent does not hold: every hop only ever drops.
+   *
+   * <p>{@code child} must name this parent's scope as its container. A child reaching above or
+   * beside itself — at a grandparent, a sibling or an uncontained scope — is a resolution failure
+   * refused here before any authority is resolved, not a permission later denied. Chain depth is
+   * bounded by injected server configuration rather than by any argument of this call, and an
+   * absent or non-positive bound refuses rather than defaulting to unlimited.
+   *
+   * <p>Resolving the child's own home is the one outward-facing act of the hop; it is why {@link
+   * IdentityRepository#containedHome} exists and why {@link
+   * IdentityRepository#home(AuthorityScope)} keeps refusing a contained scope.
+   */
+  Admission contain(Admission parent, AuthorityScope.Contained child, Set<AuthorityAction> actions);
+
+  /**
    * The explicit authority scope a legacy project home names.
    *
    * <p>A {@link Home} is the two-tier <em>memory retrieval</em> partition: a named project, or

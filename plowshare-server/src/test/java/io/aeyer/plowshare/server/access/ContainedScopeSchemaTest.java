@@ -311,6 +311,87 @@ class ContainedScopeSchemaTest {
         jdbc.queryForObject("SELECT kind FROM authority_scopes WHERE id=?", String.class, child));
   }
 
+  private UUID container(UUID scope) {
+    return jdbc.queryForObject(
+        "SELECT container FROM authority_scopes WHERE id=?", UUID.class, scope);
+  }
+
+  /**
+   * V196. Containment ancestry is fixed at insert. V155's lock already refuses a direct UPDATE of a
+   * scope row, so this asserts the refusal a caller actually meets and that it names containment —
+   * the nested-trigger route the lock deliberately permits is covered separately below.
+   */
+  @Test
+  void aContainedScopeContainerCannotBeRepointed() {
+    var child = containedScope();
+    var sibling = UUID.randomUUID();
+    assertEquals(1, insert(sibling, "CONTAINED", contained(), parentScope));
+    var refusal =
+        assertThrows(
+            DataAccessException.class,
+            () ->
+                jdbc.update("UPDATE authority_scopes SET container=? WHERE id=?", sibling, child));
+    assertTrue(refusal.getMessage().contains("containment is immutable"), refusal.getMessage());
+    // Dropping the container is the same move spelled with a NULL.
+    assertThrows(
+        DataAccessException.class,
+        () -> jdbc.update("UPDATE authority_scopes SET container=NULL WHERE id=?", child));
+    assertEquals(parentScope, container(child));
+  }
+
+  /**
+   * The route V196 actually adds. V155's lock permits an UPDATE of a scope row from inside a nested
+   * trigger — {@code pg_trigger_depth()>=2}, which today is the project-to-scope mapping upsert —
+   * and that route must not be able to carry a container change either. A fixture trigger is the
+   * only way to reach it, since the shipped mapping excludes contained projects entirely.
+   */
+  @Test
+  void containmentCannotBeRepointedEvenFromANestedTrigger() {
+    var outer = containedScope();
+    var sibling = UUID.randomUUID();
+    assertEquals(1, insert(sibling, "CONTAINED", contained(), parentScope));
+    jdbc.execute(
+        "CREATE FUNCTION fixture_repoint() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN"
+            + " UPDATE authority_scopes SET container='"
+            + sibling
+            + "' WHERE id='"
+            + outer
+            + "'; RETURN NEW; END $$");
+    jdbc.execute(
+        "CREATE TRIGGER fixture_repoint AFTER UPDATE ON projects"
+            + " FOR EACH ROW EXECUTE FUNCTION fixture_repoint()");
+    try {
+      var refusal =
+          assertThrows(
+              DataAccessException.class,
+              () -> jdbc.update("UPDATE projects SET name='renamed' WHERE id=?", ordinaryProject));
+      assertTrue(refusal.getMessage().contains("containment is immutable"), refusal.getMessage());
+    } finally {
+      jdbc.execute("DROP TRIGGER fixture_repoint ON projects");
+      jdbc.execute("DROP FUNCTION fixture_repoint()");
+    }
+    assertEquals(parentScope, container(outer));
+  }
+
+  /**
+   * The consequence that matters. A cycle is not merely wrong data: the authority path walks the
+   * container chain to bound containment depth, so a cycle would make that walk loop rather than
+   * refuse. An insert can only name a container that already exists, so the only way to close
+   * A-contains-B-contains-A is to repoint A; with that refused, no chain can revisit a scope at any
+   * depth and the relation is a forest by construction.
+   */
+  @Test
+  void aContainmentCycleCannotBeBuilt() {
+    var outer = containedScope();
+    var inner = UUID.randomUUID();
+    assertEquals(1, insert(inner, "CONTAINED", contained(), outer));
+    assertThrows(
+        DataAccessException.class,
+        () -> jdbc.update("UPDATE authority_scopes SET container=? WHERE id=?", inner, outer));
+    assertEquals(parentScope, container(outer));
+    assertEquals(outer, container(inner));
+  }
+
   @Test
   void existingKindsAndRowsAreUnchanged() {
     assertEquals(
