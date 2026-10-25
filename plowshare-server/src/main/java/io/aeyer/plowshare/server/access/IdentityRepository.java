@@ -96,6 +96,25 @@ public interface IdentityRepository {
    */
   Home containedHome(AuthorityScope.Contained scope, ScopeId container);
 
+  /**
+   * The stored containment row for a scope id, or empty when that scope is not contained.
+   *
+   * <p>This is the read that makes a contained admission <em>checkable</em> rather than merely
+   * constructible. {@link #scope(ScopeId)} cannot answer it: that method's result is a general
+   * {@link AuthorityScope}, so answering a contained row there would hand a child scope to every
+   * caller that resolves a scope id, which is the silent widening containment forbids. This
+   * method's return type says "contained or nothing", so a caller that asks has already decided
+   * what containment means for it, and a caller that does not ask is unaffected.
+   *
+   * <p>Empty is an ordinary answer and the only answer for every pre-existing scope, so the
+   * non-contained path through the live-authority check is unchanged by this method existing.
+   *
+   * <p>Resolving a containment row grants nothing. In particular this does not say that the caller
+   * may act in that scope, only that the scope is recorded as contained and by whom — which is what
+   * the ancestry walk and the home/scope agreement check each need in order to refuse.
+   */
+  Optional<AuthorityScope.Contained> contained(ScopeId scope);
+
   AuthorityScope.Personal personal(AccountId account);
 
   AuthorityScope.AccountKnowledge knowledge(AccountId account);

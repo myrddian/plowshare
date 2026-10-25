@@ -30,6 +30,8 @@ var operationNames = []string{
 	"agent.list",
 	"agent.run",
 	"application.activate",
+	"application.child.ceiling",
+	"application.child.create",
 	"application.create",
 	"application.deploy",
 	"application.deployment.receipt",

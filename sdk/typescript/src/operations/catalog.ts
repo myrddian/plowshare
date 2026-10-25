@@ -194,6 +194,25 @@ export interface ExtendedPayloads
     readonly expectedRevision: string;
     readonly revision: string;
   };
+  // A container's own typed operations over the Applications confined inside it (ADR 0042). No
+  // field names an authority: the creating Application's admission and the allowance it is
+  // spending both come from its own retained conversation, server side, because a request that
+  // supplied either would be authorizing itself. `destination` is accepted for request-shape
+  // compatibility with application.deploy and ignored, because the server allocates a child's
+  // source area under its configured containment root. `ceiling` is required and may be zero --
+  // an absent ceiling means unlimited, which a confined child is never.
+  'application.child.create': {
+    readonly conversation: string;
+    readonly requestId: string;
+    readonly ceiling: number;
+    readonly destination: FileStoreReference | null;
+    readonly writableAreas: readonly FileStoreReference[];
+    readonly files: readonly ApplicationSourceFile[];
+  };
+  'application.child.ceiling': {
+    readonly child: string;
+    readonly calls: number;
+  };
   'filestore.list': Record<string, never>;
   'application.deployment.status': { readonly project: string };
   'application.deployment.receipt': {
@@ -455,6 +474,8 @@ export const CLI_OPERATIONS = {
   'application token receipt': 'application.token.receipt',
   'application deploy': 'application.deploy',
   'application activate': 'application.activate',
+  'application child create': 'application.child.create',
+  'application child ceiling': 'application.child.ceiling',
   'filestore list': 'filestore.list',
   'application deployment status': 'application.deployment.status',
   'application deployment receipt': 'application.deployment.receipt',

@@ -68,6 +68,9 @@ class ContainmentHopTest {
     when(identities.home(target)).thenReturn(Home.of("one"));
     when(identities.scope(target.id())).thenReturn(target);
     when(identities.containedHome(child, target.id())).thenReturn(childHome);
+    // The child's stored containment row, which is what both live-authority gates resolve. Every
+    // non-contained scope answers empty, which is why no pre-existing admission changes behaviour.
+    when(identities.contained(child.id())).thenReturn(Optional.of(child));
     // Faithful to JdbcIdentityRepository: a contained scope is never resolvable from a project
     // name, so the live-authority path cannot reach one. Nothing in this test mocks that away.
     when(identities.project(childName))
@@ -193,26 +196,34 @@ class ContainmentHopTest {
   }
 
   /**
-   * A contained parent sits one hop down, so its child sits two. The bound refuses the hop before
-   * any authority is resolved at all, which is what the two {@code identities.account} assertions
-   * distinguish: with room for the second hop the same call reaches the parent's live authority.
+   * A contained parent sits one hop down, so its child sits two. The bound refuses that hop before
+   * any identity, role or grant is read, and with room for it the same call succeeds — which is the
+   * transitive narrowing ADR 0042 claims and which nothing could exercise while a contained
+   * admission was inert. Depth is walked through the containment relation, not through the general
+   * scope read that refuses a contained row, so a configured depth above 1 is reachable.
    */
   @Test
   void containRefusesBeyondTheConfiguredDepth() {
-    var support = parent().support();
+    var top = parent();
     var enclosing = new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 3, target.id());
+    Home enclosingHome = Home.of("contained:" + UUID.randomUUID());
     var deep =
         new OperationAuthority.Admission(
             UUID.randomUUID(),
             "alice",
             account,
             enclosing.id(),
-            Home.of("one"),
+            enclosingHome,
             recipient,
-            support);
+            top.support());
+    // A real depth-1 admission carries the ancestry edge its own hop retained; a contained
+    // admission with no parent edge is refused, which its own test asserts separately.
+    when(records.parent(deep.id())).thenReturn(Optional.of(top.id()));
+    when(records.find(top.id())).thenReturn(Optional.of(top));
     var grandchild =
         new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 4, enclosing.id());
-    when(identities.scope(enclosing.id())).thenReturn(enclosing);
+    when(identities.contained(enclosing.id())).thenReturn(Optional.of(enclosing));
+    when(identities.containedHome(enclosing, target.id())).thenReturn(enclosingHome);
     when(identities.containedHome(grandchild, enclosing.id()))
         .thenReturn(Home.of("contained:" + UUID.randomUUID()));
 
@@ -223,15 +234,15 @@ class ContainmentHopTest {
             policy(new ContainmentBounds(1, 4))
                 .contain(deep, grandchild, Set.of(AuthorityAction.READ)));
     verify(identities, never()).account(anyString());
-
-    clearInvocations(identities);
-    assertThrows(
-        CallerFault.class,
-        () ->
-            policy(new ContainmentBounds(2, 4))
-                .contain(deep, grandchild, Set.of(AuthorityAction.READ)));
-    verify(identities).account("alice");
     verify(records, never()).retainChild(any(), any());
+
+    var second =
+        policy(new ContainmentBounds(2, 4)).contain(deep, grandchild, Set.of(AuthorityAction.READ));
+    assertEquals(Set.of(AuthorityAction.READ), second.actions());
+    // Still a subset of what the outermost container holds: every hop only ever drops.
+    assertTrue(top.actions().containsAll(second.actions()));
+    assertFalse(second.globalRead());
+    verify(records).retainChild(second, deep.id());
   }
 
   /** An absent or non-positive configured bound refuses. It is never an unlimited default. */
@@ -277,38 +288,79 @@ class ContainmentHopTest {
   }
 
   /**
-   * The second inertness gate, asserted on its own. A contained admission is refused twice over:
-   * {@code requireOwn} cannot resolve its home back to its scope, and {@code require}'s ancestry
-   * walk demands an ancestor with an identical scope and home, which a hop changes by design. The
-   * first gate is what fires today, so this opens it by hand — stubbing a contained scope as
-   * resolvable from its project name — to prove the second still refuses underneath. A later task
-   * that teaches one without the other does not get a live child admission by accident.
+   * GATE TWO, asserted on its own. The ancestry walk demands an ancestor with an identical scope
+   * and home, which a hop changes by design; for a contained admission that equality is replaced by
+   * the containment edge itself and by nothing else. Task 3 asserted here that the walk refused a
+   * hop even when the scope resolved, because the two gates had to be opened together or not at
+   * all; this is the same assertion from the other side, now that both are open.
    */
   @Test
-  void theAncestryWalkRefusesAHopEvenWhenTheScopeResolves() {
+  void theAncestryWalkAcceptsAHopOnlyFromItsRecordedContainer() {
     var parent = parent();
     var contained = policy.contain(parent, child, Set.of(AuthorityAction.READ));
-    // doReturn, because when(...) would invoke the refusing stub this is replacing.
-    doReturn(child).when(identities).project(childName);
-    when(members.role(childName, "alice")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
-    when(authority.allowsUsing(recipient, child, AuthorityAction.READ, grant)).thenReturn(true);
     when(records.parent(contained.id())).thenReturn(Optional.of(parent.id()));
     when(records.find(parent.id())).thenReturn(Optional.of(parent));
+    // Nothing else was stubbed for this: the child's live authority resolves entirely through its
+    // container's project, role and grant, which is what "a projection of its parent's" means.
+    assertDoesNotThrow(() -> policy.require(contained));
+    // An ancestor that is not this child's recorded container is refused exactly as a mismatched
+    // derive is, so the relaxation reaches the hop and no further.
+    var stranger =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            "alice",
+            account,
+            new ScopeId(UUID.randomUUID()),
+            Home.of("one"),
+            recipient,
+            parent.support());
+    when(records.find(parent.id())).thenReturn(Optional.of(stranger));
     assertThrows(CallerFault.class, () -> policy.require(contained));
-    // Gate one really is open in this arrangement: the same admission with its parent's scope and
-    // home, which is what derive produces, passes the identical walk.
-    assertDoesNotThrow(() -> policy.require(parent));
   }
 
   /**
-   * The inertness this slice ships deliberately. A contained admission's home is its own child
-   * project, and no contained scope is resolvable from a project name, so {@code require} cannot
-   * accept one and the hop never claims it can. Making a contained admission live is the work of
-   * the task that makes a contained scope resolvable; until then, nothing can exercise one.
+   * GATE ONE, asserted on its own. The replaced check proved an admission's retained home and scope
+   * still agree by resolving the home's project name back to a scope. {@code project(String)} still
+   * refuses to resolve a contained scope from a project name, so for a contained admission the same
+   * proof runs the other way: the stored child row must still resolve to the exact home the
+   * admission retained. A renamed, dropped or recreated child project makes the two disagree.
    */
   @Test
-  void aContainedAdmissionIsNotLiveUntilTheAuthorityPathLearnsContainment() {
-    var contained = policy.contain(parent(), child, Set.of(AuthorityAction.READ));
+  void aContainedAdmissionDiesWhenItsStoredHomeNoLongerMatches() {
+    var parent = parent();
+    var contained = policy.contain(parent, child, Set.of(AuthorityAction.READ));
+    when(records.parent(contained.id())).thenReturn(Optional.of(parent.id()));
+    when(records.find(parent.id())).thenReturn(Optional.of(parent));
+    assertDoesNotThrow(() -> policy.require(contained));
+    doReturn(Home.of("contained:" + UUID.randomUUID()))
+        .when(identities)
+        .containedHome(child, target.id());
     assertThrows(CallerFault.class, () -> policy.require(contained));
+  }
+
+  /**
+   * A contained admission comes into being only through a hop, so an ancestry edge is not optional
+   * for one. With no retained parent there is nothing proving a container ever narrowed to it, and
+   * the freely constructible {@code Contained} record must not be accepted for want of a parent.
+   */
+  @Test
+  void aContainedAdmissionWithNoRetainedParentIsRefused() {
+    var contained = policy.contain(parent(), child, Set.of(AuthorityAction.READ));
+    assertTrue(records.parent(contained.id()).isEmpty());
+    assertThrows(CallerFault.class, () -> policy.require(contained));
+  }
+
+  /**
+   * An unconfigured server does not merely stop creating children: it stops accepting the ones that
+   * exist. Absence is never an unlimited default on either side of the hop.
+   */
+  @Test
+  void aContainedAdmissionIsRefusedWhenContainmentIsUnconfigured() {
+    var parent = parent();
+    var contained = policy.contain(parent, child, Set.of(AuthorityAction.READ));
+    when(records.parent(contained.id())).thenReturn(Optional.of(parent.id()));
+    when(records.find(parent.id())).thenReturn(Optional.of(parent));
+    assertThrows(CallerFault.class, () -> policy(ContainmentBounds.absent()).require(contained));
+    assertDoesNotThrow(() -> policy.require(contained));
   }
 }

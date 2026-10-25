@@ -72,4 +72,34 @@ public class ApplicationDeploymentConfig {
     return new SourceApplicationDeployments(
         store, members, projects, fileStores, validator, identities);
   }
+
+  /**
+   * The child path takes neither {@code ProjectMembers} nor {@code FileStores}, which is how it
+   * holds no server-administrator check and no destination FileStore {@code MANAGER} check: there
+   * is no collaborator here through which either could be made. {@code ContainmentConfig} is
+   * optional for the same reason its bounds are — a server that has not configured nesting is a
+   * normal server, and it then refuses every creation rather than defaulting a root.
+   */
+  @Bean
+  public ContainedApplications containedApplications(
+      ContainedApplicationRepository records,
+      ProjectWorkspaces projects,
+      ApplicationPackageValidator validator,
+      io.aeyer.plowshare.server.access.OperationAuthority authority,
+      io.aeyer.plowshare.server.access.IdentityRepository identities,
+      ContainedPrincipals principals,
+      io.aeyer.plowshare.server.allowances.AllowanceRepository allowances,
+      UnitOfWork work,
+      ObjectProvider<ContainmentConfig> containment) {
+    return new SourceContainedApplications(
+        records,
+        projects,
+        validator,
+        authority,
+        identities,
+        principals,
+        allowances,
+        work,
+        containment.getIfAvailable(ContainmentConfig::absent));
+  }
 }

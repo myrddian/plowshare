@@ -820,6 +820,18 @@ export const SHAPES: Record<
     ['project', 'requestId', 'expectedRevision', 'revision'],
     [],
   ],
+  'application.child.create': [
+    [
+      'conversation',
+      'requestId',
+      'ceiling',
+      'destination',
+      'writableAreas',
+      'files',
+    ],
+    [],
+  ],
+  'application.child.ceiling': [['child', 'calls'], []],
   'filestore.list': [[], []],
   'application.deployment.status': [['project'], []],
   'application.deployment.receipt': [['project', 'requestId'], []],

@@ -24,8 +24,12 @@ import {
 } from './server-filestores.ts';
 import {
   deploymentReceiptCheck,
+  containedChildCheck,
+  containedCeilingCheck,
   deploymentStatusCheck,
   type ApplicationDeploymentReceipt,
+  type ContainedApplicationChild,
+  type ContainedApplicationCeiling,
   type ApplicationDeploymentStatus,
 } from './application-deployments.ts';
 import {
@@ -448,6 +452,8 @@ export interface ConversationReplies {
   'application.deploy': ApplicationDeploymentReceipt;
   'application.activate': ApplicationDeploymentReceipt;
   'application.deployment.receipt': ApplicationDeploymentReceipt;
+  'application.child.create': ContainedApplicationChild;
+  'application.child.ceiling': ContainedApplicationCeiling;
   'filestore.list': FileStoreCatalog;
   'application.deployment.status': ApplicationDeploymentStatus;
   'application.create': ProjectView;
@@ -925,6 +931,8 @@ const readers = {
   'application.deploy': deploymentReceiptCheck,
   'application.activate': deploymentReceiptCheck,
   'application.deployment.receipt': deploymentReceiptCheck,
+  'application.child.create': containedChildCheck,
+  'application.child.ceiling': containedCeilingCheck,
   'filestore.list': fileStoreCatalogCheck,
   'application.deployment.status': deploymentStatusCheck,
   'application.create': project,

@@ -370,19 +370,21 @@ chain to its container's live grants belongs to the task that makes a contained
 scope resolvable, and must change the home/scope agreement check and the ancestry
 walk together, since a hop changes both by design.
 
-**A known limitation of this slice: the effective depth limit is 1, whatever is
-configured.** `contain` bounds depth by walking the container chain, and the walk
-reads each enclosing scope through `IdentityRepository.scope(ScopeId)`, which
-refuses a `CONTAINED` row. So the walk can only ever observe an uncontained
-parent and compute depth 1, and a configured `maxDepth` above 1 is unreachable.
-The direction is the safe one — stricter than configured, never looser — and the
-walk itself is implemented and tested at depth 2 against a mocked repository, so
-the bound is correct the moment a contained scope becomes resolvable. But this
-record claims authority narrows transitively *at depth*, and the first intended
-consumer of the capability is recursive, so the claim is not yet exercised by
-anything that runs. Lifting it is the same work as making a contained admission
-live: it needs the scope read, the home/scope agreement check and the ancestry
-walk taught containment together.
+**That limitation is lifted, by the change that made a contained admission
+live.** It was recorded here as: the effective depth limit is 1 whatever is
+configured, because `contain` bounds depth by walking the container chain and the
+walk read each enclosing scope through `IdentityRepository.scope(ScopeId)`, which
+refuses a `CONTAINED` row — so the walk could only observe an uncontained parent
+and compute depth 1. The three pieces this record said had to move together have
+moved together. `IdentityRepository.contained(ScopeId)` answers "contained, or
+nothing": its return type is `Optional<AuthorityScope.Contained>`, so a caller
+that asks has already decided what containment means for it, every pre-existing
+scope answers empty, and `scope(ScopeId)` and `project(String)` both keep
+refusing a contained row — nothing travels from a child's project name back to
+its scope. The depth walk follows that read instead, so a configured depth above
+1 is reachable and is exercised at depth 2 by a hop that succeeds rather than by
+one that refuses for the wrong reason. The home/scope agreement check and the
+ancestry walk are the two gates below.
 
 V196 freezes `authority_scopes.container` after insert, so containment ancestry
 cannot be repointed and the relation is acyclic by construction: an insert can
@@ -415,3 +417,79 @@ Relay is untouched. [ADR 0037](0037-events-and-messaging-on-relay.md) already ma
 contained scope follows that; actually fencing Relay belongs to Task 8, and
 [ADR 0039](0039-relay-audiences-beyond-a-project.md) defers whether Relay keys
 topics on `authority_scopes.id` to a later slice, so no Relay scope kind is added.
+
+## The declared-surface inventory
+
+This is the first of the three inventories above, and Task 5 owns it: the
+surfaces a child's own source can declare, each reduced to its container's hold
+or refused, and never honoured as written. Both sides of every comparison are
+read by one reader, `ContainedDeclarations.read`, through the runtime's existing
+owning parsers — `ApplicationServerSettings.read` for `server/tools.json` and
+`server/ports.json`, and the package's own paths for the directory-shaped
+surfaces — so a child's declaration cannot be admitted because the two sides were
+parsed differently.
+
+| Surface | Declared as | Decision |
+| --- | --- | --- |
+| Tool provider | `server/tools.json` `providers[].provider` | **Reduced.** Refused unless the container declares the same provider. |
+| Relay topic port | `server/ports.json` `bindings[].topic` | **Reduced.** Refused unless the container declares the same topic. |
+| Relay audience | `server/ports.json` `bindings[].groups` | **Reduced.** Refused unless every group is one the container declares on that same topic. |
+| Named swarm type | `swarm/<name>.{md,json}` | **Reduced.** Refused unless the container declares a swarm type of that name. |
+| Schedule | `schedules/*.json` | **Refused** outright for a child in this slice. ADR 0020 gives a schedule operational authority over the server's own scheduler, and nothing here mediates that for a child; a container holding a schedule of its own does not change the answer. |
+| FileStore destination | the creation request's `destination` | **Ignored.** The server allocates the child's source area under `plowshare.containment.root`; a container typically holds no FileStore `MANAGER` over its own retained source, so proxying could not yield a legal destination. |
+| FileStore writable area | the creation request's `writableAreas` | **Refused** while non-empty. A child's writable area is allocated inside its own containment, so any requested area names a store outside its container's fence. |
+| Service account attribution and spending pool | the child's own allowance | **Allocated, never shared.** The child allocates its own allowance under a ceiling its container sets at creation and may reduce to zero; an absent ceiling is not representable, because `AllowanceSnapshot` documents absent as unlimited. Child spend is attributed to the child, so ADR 0025's immutable attribution and its rule that delegation cannot change the accounting account are untouched, and no parent/child shared counter is introduced. |
+| Manifest `name` | `plowshare.json` `name` | **Rewritten** to the server-allocated opaque project name. `name` is identity and not authority, and the server owns the name a child cannot know in advance; every surface that *is* authority is in the rows above and is refused or reduced, never rewritten. |
+| Nesting itself | `plowshare.json` `nesting: true` | **Required of the container.** Only a literal `true` counts, so no existing Application acquires the capability by upgrade, and a missing, null, string or object value is "not declared". |
+
+Tool *bindings* (`server/tools.json` `bindings`) and tool grants are not in this
+table and are not yet compared: a child declaring one is accepted today, and the
+binding it declares reaches only its own project. That is the honest state and it
+is a gap, recorded here so that Task 8's addressability audit inherits it rather
+than discovering it.
+
+## The two live-authority gates
+
+A contained admission was inert, and making it live needed two gates opened
+together; opening either alone leaves the other refusing and looks like a defect
+in `contain`. Neither is widened for anything but a contained admission, and the
+non-contained path through both is unchanged.
+
+**Gate one, `requireOwn`'s home/scope agreement check.** It resolved the
+admission's project name back to a scope and required it to equal the retained
+scope id, which kills a stale admission whose project was renamed, or dropped and
+recreated under the same name. `project(String)` refuses a contained scope, so
+for a contained admission the same proof now runs the other way: the stored child
+row must still resolve, through `containedHome`, to the exact home the admission
+retained. A renamed, dropped or recreated child project still makes the two
+disagree, so nothing the replaced check bought is lost. It then checks the
+retained grants against the *nearest enclosing uncontained scope* rather than
+against the contained scope, because a child's authority is a projection of its
+container's: `contain` copies the container's own grant rows and issues none, and
+a grant against a contained scope is excluded from issuance and from coverage by
+design. It still refuses an unconfigured bound, a contained admission claiming
+Global knowledge READ, a chain longer than the configured depth, and a container
+whose role ceiling or live grant no longer covers the retained action.
+
+**Gate two, `require`'s ancestry walk.** It demanded an ancestor with an
+identical scope *and* home, both of which a hop changes by design. For a
+contained admission that equality is replaced by the containment edge itself: the
+child's own stored row must name this ancestor's scope as its container. Executor,
+account, grant source, support containment and the `globalRead` rule are all
+unchanged. It still refuses an ancestor that is not the recorded container — a
+grandparent, a sibling subtree or an unrelated scope — and it now *also* refuses a
+contained admission with no retained parent edge at all, since a contained
+admission comes into being only through a hop and a freely constructible record
+must not be accepted for want of a parent.
+
+**On the misclassification risk recorded for the contained principal.** A
+contained principal's identifier is a bare UUID, so
+`ServiceCredentials.principal` is false for it and any path classifying a caller
+by the `@service/` prefix routes it into the *user* branch — `RequestProjects`,
+`ProjectAuthorization` and `ApplicationProjectMembers`. The creating path's
+guarantee is that the identifier never becomes a handle: a hop keeps the parent's
+executor and account unchanged, the principal is passed only to
+`ContainedPrincipals.issue`, and the creating service resolves no account from any
+string at all. The USER branch's fail-closed behaviour — `authority_project_role`
+finds no `admins` and no `project_members` row for a UUID — remains the second
+line and not the first.

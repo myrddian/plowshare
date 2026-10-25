@@ -117,6 +117,26 @@ public class JdbcIdentityRepository implements IdentityRepository {
   }
 
   @Override
+  public Optional<AuthorityScope.Contained> contained(ScopeId scope) {
+    Objects.requireNonNull(scope);
+    // One read, and only CONTAINED rows select: a PROJECT, PERSONAL, knowledge, administration or
+    // RESTRICTED scope answers empty rather than being reshaped into a containment relation. The
+    // columns are the relation itself, so nothing here is reconstructed from a name.
+    return jdbc
+        .query(
+            "SELECT s.id,s.project_id,s.container FROM authority_scopes s"
+                + " WHERE s.id=? AND s.kind='CONTAINED' AND s.container IS NOT NULL",
+            (row, n) ->
+                new AuthorityScope.Contained(
+                    new ScopeId(row.getObject("id", UUID.class)),
+                    row.getLong("project_id"),
+                    new ScopeId(row.getObject("container", UUID.class))),
+            scope.value())
+        .stream()
+        .findFirst();
+  }
+
+  @Override
   public AuthorityScope.Personal personal(AccountId account) {
     Objects.requireNonNull(account);
     return (AuthorityScope.Personal)

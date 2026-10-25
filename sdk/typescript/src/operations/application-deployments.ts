@@ -144,6 +144,35 @@ export const deploymentReceiptCheck = record({
   project: named,
   release: releaseCheck,
 });
+/**
+ * A contained Application as its container addresses it afterwards. `scope` is the authority
+ * scope's own identifier, carried as the wrapped record the server serialises, so that a child is
+ * addressed by its scope and never by a readable containment path.
+ */
+export interface ContainedApplicationScope {
+  readonly value: string;
+}
+export interface ContainedApplicationChild {
+  readonly id: string;
+  readonly scope: ContainedApplicationScope;
+  readonly project: string;
+  readonly revision: string;
+}
+export interface ContainedApplicationCeiling {
+  readonly child: string;
+}
+/** The reserved classification prefix, constant at any depth; ancestry is never in the name. */
+export const containedProject = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.startsWith('contained:') &&
+  deploymentUuid(value.slice('contained:'.length));
+export const containedChildCheck = record({
+  id: deploymentUuid,
+  scope: record({ value: deploymentUuid }),
+  project: containedProject,
+  revision: deploymentUuid,
+});
+export const containedCeilingCheck = record({ child: deploymentUuid });
 export const deploymentStatusCheck = record({
   project: named,
   activeRevision: nullable(deploymentUuid),

@@ -77,6 +77,11 @@ public final class FrameTypes {
   public static final String APPLICATION_DEPLOYMENT_STATUS = "application.deployment.status";
   public static final String FILESTORE_LIST = "filestore.list";
   public static final String APPLICATION_DEPLOYMENT_RECEIPT = "application.deployment.receipt";
+
+  /** A container's own typed operations over the Applications confined inside it (ADR 0042). */
+  public static final String APPLICATION_CHILD_CREATE = "application.child.create";
+
+  public static final String APPLICATION_CHILD_CEILING = "application.child.ceiling";
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";
