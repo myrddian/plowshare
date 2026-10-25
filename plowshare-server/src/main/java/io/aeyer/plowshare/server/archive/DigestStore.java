@@ -20,7 +20,7 @@ public final class DigestStore {
 
   private String sourceSafe(String alias) {
     return informationProtected
-        ? "information_log_readable(" + alias + "conversation_id,NULL) AND "
+        ? alias + "conversation_id NOT IN (SELECT log FROM information_unreadable_logs(NULL)) AND "
         : "";
   }
 
@@ -83,7 +83,9 @@ public final class DigestStore {
                         + "FROM conversations c JOIN entries e ON e.conversation_id=c.id "
                         + "JOIN turns t ON t.conversation_id=e.conversation_id AND t.ordinal=e.turn_ordinal "
                         + "WHERE "
-                        + (informationProtected ? "information_log_readable(c.id,NULL) AND " : "")
+                        + (informationProtected
+                            ? "c.id NOT IN (SELECT log FROM information_unreadable_logs(NULL)) AND "
+                            : "")
                         + "c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) "
                         + "AND c.origin NOT IN ('curator','memory') "
                         + (onlyConversation == null ? "" : "AND c.id=? ")

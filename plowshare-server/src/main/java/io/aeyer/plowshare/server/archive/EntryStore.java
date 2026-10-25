@@ -1185,7 +1185,11 @@ public final class EntryStore {
       bound.add(before, informationAccount);
     }
     return jdbc.query(
-        sql.replace(marker, informationScoped ? " AND information_log_readable(c.id,?)" : ""),
+        sql.replace(
+            marker,
+            informationScoped
+                ? " AND c.id NOT IN (SELECT log FROM information_unreadable_logs(?))"
+                : ""),
         mapper,
         bound.toArray());
   }
@@ -2791,7 +2795,8 @@ public final class EntryStore {
             jdbc.queryForList(
                 protectInformationLearning
                     ? CONVERSATIONS_AWAITING_THE_LEARNER.replace(
-                        ") queued", ") queued WHERE information_log_readable(conversation_id,NULL)")
+                        ") queued",
+                        ") queued WHERE conversation_id NOT IN (SELECT log FROM information_unreadable_logs(NULL))")
                     : CONVERSATIONS_AWAITING_THE_LEARNER,
                 String.class,
                 most));

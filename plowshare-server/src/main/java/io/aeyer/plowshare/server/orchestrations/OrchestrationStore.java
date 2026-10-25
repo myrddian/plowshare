@@ -1294,7 +1294,7 @@ public class OrchestrationStore {
     List<Object> params = new ArrayList<>();
     params.add(handle);
     if (informationProtected) {
-      sql.append(" AND information_log_readable(id,?)");
+      sql.append(" AND id NOT IN (SELECT log FROM information_unreadable_logs(?))");
       params.add(handle);
     }
     if (project != null) {
