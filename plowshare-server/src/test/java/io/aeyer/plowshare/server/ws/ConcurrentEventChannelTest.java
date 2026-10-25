@@ -207,19 +207,33 @@ class ConcurrentEventChannelTest {
     }
   }
 
-  @Test
-  void queued_protected_reply_rechecks_membership_at_write_without_replaying_handler()
-      throws Exception {
+  @ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({
+    "false,true,relay.topics",
+    "true,true,relay.topics",
+    "true,false,relay.topics",
+    "false,true,usage.calls",
+    "true,true,usage.calls",
+    "true,false,usage.calls",
+    "false,true,provider.connection.list",
+    "true,true,provider.connection.list",
+    "true,false,provider.connection.list"
+  })
+  void queued_protected_reply_rechecks_membership_at_write_without_replaying_handler(
+      boolean segmented, boolean negotiated, String type) throws Exception {
     var entered = new CompletableFuture<Void>();
     var result = new CompletableFuture<Outcome>();
+    var executions = new java.util.concurrent.atomic.AtomicInteger();
     FrameHandler read =
         new FrameHandler() {
           public Outcome handle(Map<String, Object> payload, Asking asking) {
-            throw new AssertionError();
+            // Older segmented clients use synchronous routing on the independent-read worker.
+            return handleAsync(payload, asking).toCompletableFuture().join();
           }
 
           public java.util.concurrent.CompletionStage<Outcome> handleAsync(
               Map<String, Object> payload, Asking asking) {
+            executions.incrementAndGet();
             entered.complete(null);
             return result;
           }
@@ -235,28 +249,33 @@ class ConcurrentEventChannelTest {
             })
         .when(authority)
         .require(anyString(), any(), anyString());
-    var router = new FrameRouter(Map.of("relay.topics", read));
+    var router = new FrameRouter(Map.of(type, read));
     router.useAuthorization(authority);
     var writing = new CompletableFuture<Void>();
     var release = new CompletableFuture<Void>();
-    try (var fixture = new Fixture(false, router)) {
-      fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
-      fixture.reply();
+    try (var fixture = new Fixture(segmented, router)) {
+      if (negotiated) {
+        fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
+        fixture.reply();
+      }
+      // Admit the request before blocking output: segmented input must return transport credits
+      // through the physical writer too. The held handler keeps its protected result pending.
+      fixture.send("protected", type, Map.of("project", "research"));
+      entered.get(5, TimeUnit.SECONDS);
       fixture.beforeWrite =
           () -> {
             writing.complete(null);
-            release.join();
+            release.orTimeout(5, TimeUnit.SECONDS).join();
           };
       fixture.handler.push(
           "alice", new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated());
       writing.get(5, TimeUnit.SECONDS);
-      fixture.send("protected", "relay.topics", Map.of("project", "research"));
-      entered.get(5, TimeUnit.SECONDS);
       result.complete(Outcome.ok(Map.of("secret", "protected content")));
       revoked.set(true);
       release.complete(null);
       verify(fixture.socket, timeout(5000)).close(any(CloseStatus.class));
       assertTrue(fixture.received.stream().noneMatch(frame -> frame.contains("protected content")));
+      assertEquals(1, executions.get());
     } finally {
       release.complete(null);
       result.complete(Outcome.ok());
