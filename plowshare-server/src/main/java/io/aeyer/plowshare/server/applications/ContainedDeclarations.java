@@ -47,16 +47,26 @@ final class ContainedDeclarations {
    *     port maps to the empty set, which is still a held topic
    * @param swarms named swarm types
    * @param schedules schedule definitions, which a child may not declare at all in this slice
+   * @param bindings tool bindings, each as {@code provider/name}: what tool a project exposes, from
+   *     which provider. A binding is distinct from a provider declaration — a package may bind a
+   *     tool of a provider it does not itself declare — so it is its own subset test.
+   * @param workers the Relay worker accounts declared in {@code server/relay-workers.json}. An
+   *     account is the identity that services the project's work, so a child naming one its
+   *     container does not would have its tools serviced by an identity no container mediated.
    */
   record Hold(
       Set<String> providers,
       Map<String, Set<String>> ports,
       Set<String> swarms,
-      Set<String> schedules) {
+      Set<String> schedules,
+      Set<String> bindings,
+      Set<String> workers) {
     Hold {
       providers = Set.copyOf(providers);
       swarms = Set.copyOf(swarms);
       schedules = Set.copyOf(schedules);
+      bindings = Set.copyOf(bindings);
+      workers = Set.copyOf(workers);
       var copied = new LinkedHashMap<String, Set<String>>();
       ports.forEach((topic, groups) -> copied.put(topic, Set.copyOf(groups)));
       ports = Map.copyOf(copied);
@@ -92,6 +102,10 @@ final class ContainedDeclarations {
     var settings = ApplicationServerSettings.read(project, root);
     Set<String> providers = new LinkedHashSet<>();
     for (var provider : settings.providers()) providers.add(provider.provider());
+    Set<String> bindings = new LinkedHashSet<>();
+    for (var tool : settings.tools()) bindings.add(tool.provider() + "/" + tool.name());
+    Set<String> workers = new LinkedHashSet<>();
+    settings.worker().ifPresent(worker -> workers.add(worker.account()));
     Map<String, Set<String>> ports = new LinkedHashMap<>();
     for (var binding : settings.ports())
       ports
@@ -114,7 +128,7 @@ final class ContainedDeclarations {
     } catch (IOException unavailable) {
       throw new CallerFault("Application declarations could not be read");
     }
-    return new Hold(providers, ports, swarms, schedules);
+    return new Hold(providers, ports, swarms, schedules, bindings, workers);
   }
 
   /**
@@ -145,6 +159,25 @@ final class ContainedDeclarations {
                   + " hold: "
                   + group);
     }
+    // Tool bindings and tool grants. Recorded by Task 5 as accepted-and-uncompared, which was
+    // honest but is a gap: a binding is what makes a tool callable, and its provider need not
+    // appear in the package's own providers[] list, so the provider subset test above does not
+    // cover it. A binding identical to one the container already binds stays admissible, which
+    // keeps this a subset test rather than a ban on the surface.
+    for (String binding : child.bindings())
+      if (!container.bindings().contains(binding))
+        throw new CallerFault(
+            "A contained Application cannot declare a tool binding its container does not hold: "
+                + binding);
+    // The Relay worker account is the identity that services a project's work. A child naming one
+    // its container does not declare would have its work serviced by an identity no container
+    // mediated, which is the escape the containment relation exists to prevent.
+    for (String worker : child.workers())
+      if (!container.workers().contains(worker))
+        throw new CallerFault(
+            "A contained Application cannot declare a Relay worker account its container does not"
+                + " hold: "
+                + worker);
     for (String swarm : child.swarms())
       if (!container.swarms().contains(swarm))
         throw new CallerFault(

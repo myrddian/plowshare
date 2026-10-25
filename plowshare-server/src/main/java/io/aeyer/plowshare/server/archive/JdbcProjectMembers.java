@@ -77,6 +77,14 @@ public class JdbcProjectMembers implements ProjectMembers {
       throw new ArchiveRefusedException("Client projects cannot be shared with accounts");
     if (project.startsWith("personal:"))
       throw new ArchiveRefusedException("Personal space membership is fixed to its owner");
+    // ADR 0042, list (c): a contained project has no membership of its own. A project_members row
+    // against one mints nothing -- V195 makes authority_membership_changed resolve no scope for a
+    // CONTAINED one -- so the row would be authority-free clutter that nonetheless makes a child
+    // look like a shared project to every membership listing. Refused rather than tolerated.
+    if (io.aeyer.plowshare.protocol.ContainedProjects.name(project))
+      throw new ArchiveRefusedException(
+          "A contained Application's project is reached only through its container and cannot take"
+              + " members");
   }
 
   public void add(String project, String handle) {

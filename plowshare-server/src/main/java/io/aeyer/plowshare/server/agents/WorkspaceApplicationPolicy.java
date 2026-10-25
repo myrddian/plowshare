@@ -46,6 +46,11 @@ public final class WorkspaceApplicationPolicy implements ApplicationPolicy {
     if (project == null
         || project.startsWith("personal:")
         || ClientProjects.privateProject(project)) return EXTERNAL;
+    // ADR 0042, list (c): INVALID and deliberately not EXTERNAL. EXTERNAL passes a caller's
+    // project membership straight through, so any role a child project ever acquired would become
+    // file authority over its container's staged source; INVALID denies every account. A child's
+    // own execution is not configured from here, and nothing in this slice executes one.
+    if (io.aeyer.plowshare.protocol.ContainedProjects.name(project)) return INVALID;
     boolean required = registrations.required(project);
     java.util.Optional<io.aeyer.plowshare.server.archive.ProjectRecord> recorded;
     try {

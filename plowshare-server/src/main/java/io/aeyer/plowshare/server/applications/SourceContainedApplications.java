@@ -69,7 +69,7 @@ public final class SourceContainedApplications implements ContainedApplications 
           AuthorityAction.CONVERSATION_CREATE,
           AuthorityAction.RUN_MODEL);
 
-  private static final String PREFIX = "contained:";
+  private static final String PREFIX = io.aeyer.plowshare.protocol.ContainedProjects.PREFIX;
 
   private final ContainedApplicationRepository records;
   private final ProjectWorkspaces projects;

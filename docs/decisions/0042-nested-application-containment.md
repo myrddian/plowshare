@@ -372,9 +372,10 @@ and `sdk`. Three further matches are the prefix *definitions* rather than
 exclusions and are listed separately for that reason:
 `archive/ClientProjects.java:15` and `personal/PersonalSpaces.java:67` and `:74`.
 A contained project is excluded from the authority mapping by name, so several of
-these would hand back a project with no scope rather than refuse; which of the
-fourteen should refuse, which should filter and which are already correct is
-Task 8's decision, not this record's.
+these would hand back a project with no scope rather than refuse. Which of the
+fourteen refuses, which filters and which was already correct is answered one by
+one in the addressability inventory below, which also adds five SQL sites this
+grep missed and two listings that excluded only `client:`.
 
 The refusal at `home(AuthorityScope)` is the consequential one. A contained scope
 carries an ordinary `projects.id`, so answering `value.projectId()` there would
@@ -465,11 +466,143 @@ complete set of containment decisions:
   the hop, so a grant issued directly against a contained scope would be
   authority no container mediated.
 
-Relay is untouched. [ADR 0037](0037-events-and-messaging-on-relay.md) already maps
+Relay is now fenced. [ADR 0037](0037-events-and-messaging-on-relay.md) maps
 `ADMINISTRATION` and `RESTRICTED` to a loud failure with no fallback topic and a
-contained scope follows that; actually fencing Relay belongs to Task 8, and
+contained scope follows that, named explicitly in the audience map rather than
+left to its `default`; no Relay scope kind is added, because
 [ADR 0039](0039-relay-audiences-beyond-a-project.md) defers whether Relay keys
-topics on `authority_scopes.id` to a later slice, so no Relay scope kind is added.
+topics on `authority_scopes.id` to a later slice. The entry is in the
+addressability inventory below.
+
+## The addressability inventory
+
+This is the third of the three inventories above, and it is the confinement
+proof: **every place the server makes a project addressable without anyone
+naming it, each entry fenced or refused.** It cannot be derived from the
+compiler, because the substrate's authority decisions are `instanceof` and
+`LIKE` tests that exclude a new kind silently rather than forcing a choice, so
+it is an explicit audit. It consumes the exhaustiveness inventory above as one
+input and the fourteen per-call-site prefix checks as another, and is not
+limited to either.
+
+### How the audit was conducted
+
+So that a reader can judge whether it is exhaustive rather than merely long:
+
+1. **The prefix checks.** `grep -rnE "(personal:|client:|contained:|Personal:)"`
+   over `plowshare-server/src/main`, `plowshare-protocol/src/main` and `sdk`,
+   filtered to the `startsWith`, `regionMatches` and SQL `LIKE` forms. This
+   reproduced the fourteen sites recorded above and found **five more in SQL that
+   the earlier grep had missed**, all in migrations rather than Java:
+   `V110:28`/`V111:50` (`information_project_readable`), `V111:37`/`V156:320`
+   (`service_project_role`), `V156:296` (`authority_project_role`),
+   `V156:327` and `V178:45`. Each was traced to its *latest* definition — several
+   had been superseded — and each resolves through a scope-kind test that
+   `CONTAINED` fails. They are entered below as fenced by kind, with the
+   supersession named, because "already excluded" is only true of the live
+   definition.
+2. **The listings.** Every method on `ProjectStore` returning more than one
+   project (`grep -n "FROM projects"`), then the callers of each
+   (`grep -rn "\.allFor(\|projects\.all()"`). This is what found the two worst
+   entries: `project.list` and the Relay worker enrollment pass.
+3. **The spec's own starting points**, followed to the code that implements each:
+   `project.list`, the kind/`routingIdentity` surface, messaging
+   `from_project`/`to_project`, Relay project-scoped subscribers
+   ([ADR 0038](0038-relay-read-tier-subscribers-project-scoped.md)) and audiences
+   ([ADR 0039](0039-relay-audiences-beyond-a-project.md)), startup schedule
+   reconciliation, conversation search, and the union/git provisioning that
+   ordinary project creation performs.
+4. **The one chokepoint.** `ProjectAuthorization.require` resolves a project name
+   to a role for every named-project operation in the server — 287 operations at
+   the SDK contract's count. Rather than audit each, the audit establishes that
+   the chokepoint cannot be bypassed for a contained project and that the role it
+   resolves is always absent, and proves both against a real row. That is what
+   makes `conversation.search` and the other 286 one entry rather than 287.
+5. **What a child's project row actually contains**, read from
+   `JdbcContainedApplicationRepository.create`, because every listing predicate
+   filters on columns and a child satisfying `workspace IS NOT NULL` is why the
+   listings were reachable at all.
+
+The audit's unit is the *decision site*, not the call site: where many call sites
+resolve through one predicate, the predicate is the entry and the call sites are
+named in it.
+
+### The inventory
+
+Line numbers are as of this change. "Refused" means a check added or widened
+here; "fenced by kind" means an existing predicate already excludes a contained
+scope and is verified to, with the verification named.
+
+| Site | Surface | Decision |
+| --- | --- | --- |
+| `plowshare-server/.../archive/ProjectStore.java:1294`, `allFor` | `project.list` and `GET /v1/projects` | **Refused.** The worst entry. A child's project row carries a `workspace` — its container-owned staging area — so the predicate's `workspace IS NOT NULL` admitted it and only `client:` was excluded: a server administrator's listing would have named every child on the installation. Excluded by the reserved prefix. |
+| `plowshare-server/.../archive/ProjectStore.java:1337`, `all` | the project catalogue | **Refused.** `ProjectCatalogue.all()` is read by background reconciliation and by `relay/ApplicationRelayWorkerBindings.java:38`, which offers *every row it returns* for Relay worker enrollment. A child would have been offered on every pass, with nobody having named it. |
+| `plowshare-server/.../archive/ProjectStore.java:1317`, `ordinary` | project create, rename, publish, administer | **Refused** (reserved in Task 2; now reads the shared predicate). |
+| `plowshare-server/.../access/ProjectAuthorization.java:340`→`:462` | every named-project operation, `conversation.search` among them | **Fenced by kind.** The single chokepoint: `members.requireRole(project, account, permission)` is reached for every non-empty project set on every path, and resolves no role for a contained project. Verified end to end against a real child row for the strongest external principal there is — a server administrator — and for the container's own MANAGER. |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:136`, `role` | the role every call site asks for | **Fenced by kind.** `authority_project_role` requires a live grant whose scope is `PROJECT` or `PERSONAL`; `service_project_role` requires its owner's. Both answer null for a `CONTAINED` scope. `mayWork:200`, `mayManage:204`, `mayUse:422`, `access:239` and `isMember:50` are all built on it and are each asserted. |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:215`, `mayAdminister` | `project.access`, `project.member.*` | **Fenced by kind.** `authority_project_management_grant` admits either a live grant on the target scope — excluded — or `ORDINARY_PROJECT_CONTROL` coverage against `target.kind='PROJECT'`, which `CONTAINED` is not. |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:164`, `readableProjects` | batched candidate admission | **Fenced by kind.** Its SQL `ELSE` branch is `authority_project_role`; the `personal:`/`client:` `LIKE` arms are not reached. |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:84`, `ordinary` | `project.member.add` / `remove` | **Refused.** A membership row against a child mints nothing — V195 makes `authority_membership_changed` resolve no scope for a `CONTAINED` one — so the row would be authority-free, but it would still make a child look like a shared project to every membership listing. |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:64`, `members` | member hydration | **Deliberately unchanged, and recorded.** It has no prefix test and no authority test; its callers authorize first. It discloses nothing for a child because the write side above refuses, so no row can exist. A check here would be dead code; the honest statement is that this read is fenced by the write refusal and by nothing else. |
+| `V195` `authority_membership_changed` | a grant minted inside the database | **Refused** (Task 2). Re-verified here against a real `project_members` insert made underneath the repository refusal, with the parent as the control. |
+| `V195` `authority_map_project`, `authority_scope_shape` | the auto-mapping to an addressable `PROJECT` scope | **Refused** (Task 2). Re-verified: a child project acquires no scope, and `authority_scope_shape`'s `PROJECT` branch excludes the prefix. |
+| `V195` `authority_live_grants`, `authority_grant_insert` | grant admission and liveness | **Refused** (Task 2). Covered by `ContainedScopeSchemaTest`. The `authority_live_grants` exclusion is a backstop with no reachable route, because `authority_grant_insert` refuses first; that test reaches it only by disabling the insert trigger, and it is recorded as defence in depth rather than as a live fence. |
+| `V172:9` `knowledge_scope_readable`, `V172:19` `information_project_readable` | information and knowledge read admission | **Fenced by kind** (`s.kind IN ('PROJECT','PERSONAL')`). This is also the known limitation named below: a child cannot read its own home back. The superseded definitions at `V110:21`, `V111:41` and `V156:324`, whose `a.server_admin AND name NOT LIKE 'client:%'` arms *would* have admitted a child, are dead. |
+| `V178:45` | batched knowledge read authority | **Fenced by kind** (`s.kind IN ('PROJECT','PERSONAL')` guards the whole branch; the `LIKE` arms sit inside it). |
+| `plowshare-server/.../board/ProjectMessageRouting.java:85` | messaging `from_project` and `to_project` | **Refused**, in both directions. Messaging is a narrowing of the existing Relay and Application scoping and not a forwarding surface. **The ordering is a finding, not a style choice:** `require` returns early when source equals destination, so with the check after that return a child addressing *its own* project was admitted with no policy consulted at all. A contained project is not a messaging endpoint in this slice, its own included, because nothing executes a child yet. The check also precedes the route policy, so the refusal names containment rather than an absent route. |
+| `plowshare-server/.../board/ProjectMessageRouting.java:65`, `identify` | the `routingIdentity` surface | **Fenced upstream.** It maps a project to its personal-space address or answers the name unchanged; it decides nothing, and every caller of it has already passed `require`. |
+| `plowshare-server/.../information/JdbcInformationEventRecords.java:160` | the Relay audience for an information event | **Refused loudly, no fallback topic.** A contained scope does carry a project key, so answering it would have published a child's events to a topic whose audience is the child's project. Named explicitly beside `PROJECT`, `PERSONAL` and `ACCOUNT_KNOWLEDGE` rather than left to the `default`, so the decision is visible where the next kind is added. Per ADR 0039 no Relay scope kind is added. |
+| ADR 0038's project-scoped Relay subscribers | consumption, which takes a lease | **Fenced by kind.** Consumption gates on `members.mayWork`, which is the `role` entry above. |
+| `plowshare-server/.../union/UnionStore.java:86` `find`, `:98` `enabled`, `:105` | the server-side working tree and the bare Git hub | **Fenced by `project_type`.** A child's row is `MANAGED`; every union read requires `STANDARD`. So a child is not a union *candidate* — it is not that one is created and then disabled — and `unionRecovery`, which iterates `unions.enabled()` at startup, never sees it. `union.status` answers `eligible: false`. Ordinary project creation provisions no union either; a union is created by `union.enable` or by Personal account creation, both of which go through the membership fence. Asserted directly: **creating a child provisions no working tree and no git hub.** |
+| `plowshare-server/.../union/UnionFrames.java:334`, `union` | `union.*` frames | **Fenced upstream** by the two above: `claimed` requires the session to root the project, and `union(project)` refuses a project `UnionStore.find` does not return. |
+| `plowshare-server/.../events/FileScheduleDefinitions.java:89`, `requireRead` | `schedule.list`, `schedule.read`, `schedule.files` | **Refused.** ADR 0020 gives a schedule operational authority over the server's own scheduler and nothing here mediates that for a child. Task 5 refuses a child *declaring* one; this refuses the surface that would name a child's project as a schedule source, so the two halves agree. |
+| `plowshare-server/.../ws/ScheduleListHandler.java:42`, `project` | the frame-boundary schedule selection | **Refused**, the same decision made before any projection is read. |
+| `plowshare-server/.../events/FileScheduleDefinitions.java:214`, `manage`, and `:233`, `reconcile` | schedule source enrollment and the reconciliation pass | **Fenced by kind.** `enroll` requires `mayManage`, so no source can be registered for a child; `reconcile`, which `poll()` runs over every source, requires `mayWork` of the source's owner and rejects the source's files otherwise. |
+| `plowshare-server/.../events/JdbcScheduleStore.java:39`, `EMITTER_AUTHORIZED` | `due`, `claim`, `rollForward`, `claimPublication` — what the scheduler fires | **Refused.** The rule admitted a server administrator's file-managed schedule on any project that is not `client:` or `personal:`, and a child's project satisfied that. Unreachable today because enrollment refuses, but this is the server's own scheduler deciding to do work for a project nobody named, and a fence that depends on a separate refusal upstream is exactly what this record argues is not a proof. Asserted against real rows, with the parent's schedule as the control. |
+| `plowshare-server/.../auth/ServiceAccounts.java:143`, `validateScopes` | service token project scopes | **Refused.** A token scope is an external principal's standing reach into a project; a child is reached only through its container, which must hold the permission it mediates. |
+| `plowshare-server/.../applications/SourceApplicationDeployments.java:68`, `require` | `application.deploy`, `activate`, `status`, `receipt` | **Refused.** A child's source area is allocated and owned by its container under `plowshare.containment.root`; admitting a deployment would give an administrator a second writer for it and make the child an ordinary Application. |
+| `plowshare-protocol/.../ApplicationDeployment.java:122`, `identity` | the deployment DTO boundary | **Refused.** So a request naming a child cannot be constructed at all, and the refusal does not depend on reaching the server-side check. |
+| `plowshare-protocol/.../ApplicationIdentity.java:105`, `project` | Application identity and credential issuance | **Refused.** An Application identity is an externally addressable principal for a project. |
+| `plowshare-protocol/.../HostedToolScopes.java:313`, `project` | durable hosted tool scopes | **Refused.** A durable host is reachable by its route for as long as it exists, independently of who created it — an address nobody has to name again. |
+| `plowshare-server/.../agents/WorkspaceApplicationPolicy.java:53`, `read` | the agent file-configuration boundary | **Refused as `INVALID`, deliberately not `EXTERNAL`.** `EXTERNAL` passes a caller's project membership straight through, so any role a child project ever acquired would become file authority over its container's staged source; `INVALID` denies every account. A child is refused before any workspace or registration lookup, which also keeps a child's `MANAGED` row out of `registrations.require`. |
+| `plowshare-server/.../applications/ContainedDeclarations.java:167`, tool bindings | `server/tools.json` `bindings` | **Reduced.** Task 5 recorded these as accepted-and-uncompared; that gap is closed. A binding is what makes a tool callable and its provider need not appear in the package's own `providers[]`, so the provider subset test did not cover it. A binding identical to one the container holds stays admissible, which keeps this a subset test. |
+| `plowshare-server/.../applications/ContainedDeclarations.java:175`, Relay worker account | `server/relay-workers.json` | **Reduced.** The worker account is the identity that services a project's work; a child naming one its container does not declare would have its work serviced by an identity no container mediated. Enrollment separately refuses it, because `ApplicationRelayWorkerBindings` checks `members.mayWork` and a child project is now not in the catalogue at all. |
+| `plowshare-protocol/.../ContainedProjects.java` | the prefix itself | **One definition**, case-insensitive, replacing the two copies at `ProjectStore.ordinary` and `SourceContainedApplications.PREFIX`. The SQL exclusions are case-sensitive `LIKE` and the Java test is not; that asymmetry is the safety belt rather than a discrepancy, because creation refuses `Contained:x` outright while SQL would have mapped it to an ordinary scope. |
+
+Thirty-three entries: **twenty-one refused or reduced, twelve fenced by an
+existing predicate and verified** (counting the prefix definition itself as a
+refusal and the one deliberately unchanged read as fenced). The two that mattered
+most were not in either list this audit inherited: `project.list` and the Relay worker enrollment pass,
+both reachable because a child project carries a workspace path and both
+excluded only `client:`.
+
+### What is refused rather than fenced, and why that is safe
+
+Three surfaces are refused because they cannot be fenced in this slice:
+
+- **A schedule, in both directions.** A schedule has operational authority over
+  the server's own scheduler (ADR 0020) and nothing mediates that for a child.
+  Refusing is safe because a child holds no schedule to lose: Task 5 refuses the
+  declaration, so there is no behaviour a reader could expect and not get.
+- **Messaging, including a child's own project.** Admitting the self-addressed
+  case would create an endpoint nobody mediates, and nothing executes a child
+  yet, so there is no running child to deprive of it. The task that makes a child
+  execute must revisit this entry, and the ordering of the check is the thing to
+  preserve.
+- **The agent file boundary.** `INVALID` denies every account rather than
+  describing the child's real boundary, which would need the child's own
+  execution to be configured — which this slice does not do.
+
+### Known limitations this inventory does not close
+
+`knowledge_scope_readable` admits no `CONTAINED` scope, so a child cannot read
+its own home back and a container cannot read its child's home; both are
+deferred authority-predicate work and are not addressability holes — they fail
+closed. Nothing in this slice executes a contained child, so every entry above is
+proved at resolution, admission and listing rather than against a running child.
+Whether Relay keys topics on `authority_scopes.id`, which is what would give a
+contained scope a real audience, is ADR 0039's deferred question.
+
 
 ## The declared-surface inventory
 
@@ -495,11 +628,13 @@ parsed differently.
 | Manifest `name` | `plowshare.json` `name` | **Rewritten** to the server-allocated opaque project name. `name` is identity and not authority, and the server owns the name a child cannot know in advance; every surface that *is* authority is in the rows above and is refused or reduced, never rewritten. |
 | Nesting itself | `plowshare.json` `nesting: true` | **Required of the container.** Only a literal `true` counts, so no existing Application acquires the capability by upgrade, and a missing, null, string or object value is "not declared". |
 
-Tool *bindings* (`server/tools.json` `bindings`) and tool grants are not in this
-table and are not yet compared: a child declaring one is accepted today, and the
-binding it declares reaches only its own project. That is the honest state and it
-is a gap, recorded here so that Task 8's addressability audit inherits it rather
-than discovering it.
+Tool *bindings* (`server/tools.json` `bindings`) and the Relay worker account
+(`server/relay-workers.json`) were recorded here as accepted-and-uncompared, which
+was the honest state and a gap. **That gap is closed**, in the addressability
+inventory above rather than in this table, because a binding's reach is an
+addressability question and not only a declaration one: both are now subset tests
+against the container's own declarations, refusing anything the container does not
+itself hold and admitting an identical declaration unchanged.
 
 ## The two live-authority gates
 

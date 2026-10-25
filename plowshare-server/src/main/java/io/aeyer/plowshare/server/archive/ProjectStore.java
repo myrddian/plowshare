@@ -1286,6 +1286,12 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
                     "SELECT "
                         + COLUMNS
                         + " FROM projects WHERE workspace IS NOT NULL"
+                        // ADR 0042, list (c): project.list. A child project carries a workspace
+                        // -- its container-owned staging area -- so without this a server
+                        // administrator's listing would name every child on the installation,
+                        // which is the plainest case of a project addressable without anyone
+                        // naming it. Excluded by the reserved prefix, as client: already is.
+                        + " AND name NOT LIKE 'contained:%'"
                         + " AND name NOT LIKE 'client:%' AND (personal_owner IS NULL OR personal_owner = ?)"
                         + " AND (personal_owner = ? OR EXISTS (SELECT 1 FROM admins a WHERE a.handle = ? AND a.enabled AND a.server_admin AND NOT a.bootstrap)"
                         + " OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = projects.id AND m.handle = ?)) ORDER BY name",
@@ -1308,7 +1314,7 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
     // containment on: a project named 'contained:...' receives no authority scope from
     // authority_map_project and is an eligible host for a CONTAINED one, so letting a caller
     // create or rename one here would hand it a project with no scope at all.
-    if (name != null && name.regionMatches(true, 0, "contained:", 0, "contained:".length())) {
+    if (io.aeyer.plowshare.protocol.ContainedProjects.name(name)) {
       throw new ArchiveRefusedException(
           "Contained projects are created and destroyed by their container and cannot be made or"
               + " changed as ordinary projects");
@@ -1323,7 +1329,12 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
                 jdbc.query(
                     "SELECT "
                         + COLUMNS
+                        // ADR 0042, list (c): this is the catalogue background reconciliation
+                        // reads, and ApplicationRelayWorkerBindings.current() enrolls a Relay
+                        // worker for every row it returns. A child project would have been
+                        // offered for enrollment on every pass with nobody having named it.
                         + " FROM projects WHERE workspace IS NOT NULL"
+                        + " AND name NOT LIKE 'contained:%'"
                         + " ORDER BY name",
                     ROW_MAPPER)));
   }

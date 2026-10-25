@@ -61,7 +61,11 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
         || project.length() > 512
         || project.codePoints().anyMatch(Character::isISOControl)
         || project.startsWith("personal:")
-        || ClientProjects.privateProject(project))
+        || ClientProjects.privateProject(project)
+        // ADR 0042, list (c): a child's source area is allocated and owned by its container under
+        // plowshare.containment.root. Admitting a deployment here would give an administrator a
+        // second writer for that area and make the child an ordinary Application in its own right.
+        || io.aeyer.plowshare.protocol.ContainedProjects.name(project))
       throw new CallerFault("Choose an ordinary Application project name");
   }
 

@@ -151,6 +151,13 @@ public final class JdbcInformationEventRecords implements InformationEventRecord
       // V185: an account's knowledge scope and its personal project are the same place, so the
       // knowledge scope's audience is that project's.
       case "ACCOUNT_KNOWLEDGE" -> personalProject;
+      // ADR 0042, list (c), named rather than left to the default below. A contained scope does
+      // carry a project key, so answering it here would have published a child's events to a
+      // topic whose audience is the child's project -- an addressable Relay topic nobody named.
+      // ADR 0037 maps ADMINISTRATION and RESTRICTED to a loud failure with no fallback topic and
+      // a contained scope follows; ADR 0039 defers whether Relay keys topics on
+      // authority_scopes.id to a later slice, so no Relay scope kind is added here.
+      case "CONTAINED" -> null;
       default -> null;
     };
   }
