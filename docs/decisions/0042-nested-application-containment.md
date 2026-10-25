@@ -248,17 +248,45 @@ list as one input.
 | --- | --- |
 | `plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcIdentityRepository.java:84`, the `switch (scope)` in `home(AuthorityScope)`; the added branch is line 94 | **Refused.** `CallerFault`: a contained scope has no addressable project home. |
 
-One forced site. That it is one, and not many, is itself the finding: the
-substrate's other authority decisions are written as `instanceof` tests over the
-kinds they admit, so they exclude a new kind by construction and the compiler has
-nothing to report. `PinnedOperationAuthority.admit` admits only `Project` and
-`Personal`, `LiveScopedAuthority.covers` widens `ORDINARY_PROJECT_CONTROL` only
-for `Project`, and `LiveActingAuthorization` and `AccountRequestProjects` likewise
-require a named kind. A contained scope is therefore inadmissible, uncoverable and
-unactable-upon in this slice without any further change, which is the intended
-first-slice posture. The corollary is that sealed-interface exhaustiveness is a
-weaker locator here than the design assumes, and Task 8's inventory cannot be
-derived from this list alone.
+The compiler forced exactly one site. That it forced one, and not many, qualifies
+this record's claim that sealed-interface exhaustiveness makes confinement
+structural. The substrate's other authority decisions are written as `instanceof`
+tests over the kinds they admit, not as exhaustive switches:
+`PinnedOperationAuthority.admit` admits only `Project` and `Personal`,
+`LiveScopedAuthority.covers` widens `ORDINARY_PROJECT_CONTROL` only for
+`Project`, and `LiveActingAuthorization` and `AccountRequestProjects` likewise
+require a named kind. Such a test excludes a new kind silently rather than forcing
+a decision about it. The exclusion is usually fail-safe, and here it is: a
+contained scope is inadmissible, uncoverable and unactable-upon in this slice
+without further change. But a silent fail-safe exclusion is not a proof, because
+nothing distinguishes a site that excluded containment deliberately from one that
+excluded it by accident, and nothing will force the question if such a site is
+later widened.
+
+Task 8's confinement proof must therefore come from an explicit audit of the
+server's addressability surfaces, not from compiler output. This list is one
+input to that audit and no more.
+
+The most significant surface found so far, recorded here so Task 8 inherits it:
+V155's `authority_map_project` is an upsert keyed on the UNIQUE
+`authority_scopes.project_id`, driven by `authority_project_inserted`, an `AFTER
+INSERT OR UPDATE` trigger on `projects`. It classifies any ordinary-looking
+project as `PROJECT`, so without intervention a child project would acquire a
+fully addressable project scope that no caller named, and — because the upsert
+carries `DO UPDATE SET kind=EXCLUDED.kind` and `authority_scope_locked` permits a
+nested-trigger update that leaves `project_id` unchanged — any later update of
+that project row would convert an existing contained scope back into an ordinary
+one. That is not an escape hatch but retroactive, silent loss of containment, and
+it is the clearest example of the server making a project addressable without
+anyone naming it. V195 closes it: a contained project carries a reserved
+`contained:` name prefix and is excluded from the mapping by name, exactly as
+`personal:%` and `client:%` already are, and `authority_scope_shape` gains a
+`CONTAINED` branch requiring such a project and an existing container while its
+`PROJECT` branch excludes the prefix. The prefix is a fixed-length classification
+marker, constant at any depth; containment ancestry stays in the `container`
+column, so no readable name grows with depth and
+[ADR 0021](0021-tool-and-relay-topic-name-capacity.md)'s capacity bound is
+untouched.
 
 The refusal at `home(AuthorityScope)` is the consequential one. A contained scope
 carries an ordinary `projects.id`, so answering `value.projectId()` there would
