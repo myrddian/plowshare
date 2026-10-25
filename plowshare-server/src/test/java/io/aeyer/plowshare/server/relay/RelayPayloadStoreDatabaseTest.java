@@ -36,7 +36,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * The payload store's PostgreSQL-only behaviour. Every assertion here needs an actual server: the
- * V191-V193 migration sequence running over populated tables, the digest the migration computes
+ * V192-V194 migration sequence running over populated tables, the digest the migration computes
  * from PostgreSQL's own JSONB rendering, the foreign key refusing a referenced delete, the
  * conditional {@code ON CONFLICT (digest) DO UPDATE} deduplicating concurrent inserts, row locking
  * between a sweep and an append, cascading project deletion, and the horizon query's interval
@@ -129,8 +129,8 @@ class RelayPayloadStoreDatabaseTest {
 
   /**
    * Builds a second database, migrates it to V119 where both tables still carry their own {@code
-   * payload} column, populates it, and migrates it to head. That runs V191, V192's {@code INSERT
-   * ... SELECT DISTINCT ON (digest)} and both of its {@code UPDATE}s, then all of V193 -- the lock,
+   * payload} column, populates it, and migrates it to head. That runs V192, V193's {@code INSERT
+   * ... SELECT DISTINCT ON (digest)} and both of its {@code UPDATE}s, then all of V194 -- the lock,
    * the repeat backfill, {@code SET NOT NULL} and {@code DROP COLUMN} -- over rows that exist.
    */
   private static synchronized JdbcTemplate backfilled() {
@@ -251,7 +251,7 @@ class RelayPayloadStoreDatabaseTest {
             """),
         "the backfill leaves no unreferenced payload behind");
 
-    // V193's structural half. The dropped column takes V135's CHECK with it, and the reference
+    // V194's structural half. The dropped column takes V135's CHECK with it, and the reference
     // becomes the row's only way to hold a payload.
     for (String table : List.of("relay_publications", "relay_admissions")) {
       assertEquals(
@@ -367,10 +367,10 @@ class RelayPayloadStoreDatabaseTest {
   }
 
   /**
-   * V193's own backfill. A single forward migration never reaches it with work to do, because V192
+   * V194's own backfill. A single forward migration never reaches it with work to do, because V193
    * sets every digest first; the only way a null survives is a server that predates the digest
-   * appending during a rolling deploy. This stops at V192, writes exactly that row, and then
-   * migrates to head so V193's {@code INSERT ... DISTINCT ON}, both {@code UPDATE}s, the {@code SET
+   * appending during a rolling deploy. This stops at V193, writes exactly that row, and then
+   * migrates to head so V194's {@code INSERT ... DISTINCT ON}, both {@code UPDATE}s, the {@code SET
    * NOT NULL} and the {@code DROP COLUMN} all run with rows in front of them.
    */
   @Test
@@ -387,7 +387,7 @@ class RelayPayloadStoreDatabaseTest {
                 + STAGED_DATABASE,
             POSTGRES.getUsername(),
             POSTGRES.getPassword());
-    Flyway.configure().dataSource(staged).target("192").load().migrate();
+    Flyway.configure().dataSource(staged).target("193").load().migrate();
     var template = new JdbcTemplate(staged);
     long owner =
         Objects.requireNonNull(
@@ -404,7 +404,7 @@ class RelayPayloadStoreDatabaseTest {
         "INSERT INTO relay_subscriptions(scope_key,topic,subscriber,seen_through,seen_at) VALUES(?,'release.observed','notices',0,?)",
         scope,
         at);
-    // Two publications of identical content, so V193's DISTINCT ON has a duplicate to collapse,
+    // Two publications of identical content, so V194's DISTINCT ON has a duplicate to collapse,
     // and one admission, so both of its UPDATEs have a row. Every payload_digest is left null.
     for (int position = 1; position <= 2; position++)
       template.update(
@@ -462,7 +462,7 @@ class RelayPayloadStoreDatabaseTest {
             """
             SELECT count(*) FROM relay_admissions a JOIN relay_payloads q ON q.digest=a.payload_digest
             """),
-        "V193's admission UPDATE resolved its row too");
+        "V194's admission UPDATE resolved its row too");
     for (String table : List.of("relay_publications", "relay_admissions"))
       assertEquals(
           0L,

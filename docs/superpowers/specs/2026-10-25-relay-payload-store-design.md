@@ -1,7 +1,7 @@
 # Relay content-addressed payload store
 
 Date: 2026-10-25
-Status: implemented on this branch (V191-V193). Corrected against the code after
+Status: implemented on this branch (V192-V194). Corrected against the code after
 implementation; where the text records a decision that was reversed, it says so.
 
 ## Why this exists
@@ -348,7 +348,7 @@ above, the guarded `DELETE` in the sweep, or an `UPDATE` of `ejection_at` alone.
 Nothing ever updates payload bytes, and that is load-bearing. Every publication and
 admission that references a digest reads the same bytes, so a writer that mutated a
 row in place would silently rewrite history for every referencing row at once. (This
-covers runtime writers only; the `V192` and `V193` backfills insert rows.)
+covers runtime writers only; the `V193` and `V194` backfills insert rows.)
 
 The corollary is uncomfortable and stated plainly: a corrupted `relay_payloads` row is
 **permanent for every row sharing that digest**. The conflict clause never repairs
@@ -532,13 +532,13 @@ per statement, not per row, and is harmless.
 Three Flyway migrations shipped. The design specified one and the plan proposed two;
 reality is:
 
-- `V191__relay_payload_store.sql` — creates `relay_payloads` and its `ejection_at`
+- `V192__relay_payload_store.sql` — creates `relay_payloads` and its `ejection_at`
   index. Nothing reads it yet.
-- `V192__relay_payload_digest.sql` — **expand.** Adds a nullable `payload_digest`
+- `V193__relay_payload_digest.sql` — **expand.** Adds a nullable `payload_digest`
   foreign key to both tables, backfills the table and the digests from the rows
   already present, and adds the two reference indexes. The `payload` column stays, and
   a server that predates the digest keeps working against this schema unchanged.
-- `V193__relay_payload_column_drop.sql` — **contract.** Takes `ACCESS EXCLUSIVE` on
+- `V194__relay_payload_column_drop.sql` — **contract.** Takes `ACCESS EXCLUSIVE` on
   both tables, repeats the backfill for anything written without a digest, sets
   `payload_digest` `NOT NULL` and drops `payload` with the `V135` payload `CHECK`s it
   carried.
@@ -546,25 +546,25 @@ reality is:
 Expand, cutover, contract is the shape because the destructive step must not be
 applied to servers that still need what it removes:
 
-- `V191` and `V192` are **additive**. They can be applied while instances predating
+- `V192` and `V193` are **additive**. They can be applied while instances predating
   the digest are still serving: the old column survives, the new one is nullable, and
   old code neither knows nor needs to know about either.
-- The reader cutover and `V193` are the **contract** step and share one commit
-  (`bfa205b9`) on purpose. Within a commit there is no window: after `V193` the code
+- The reader cutover and `V194` are the **contract** step and share one commit
+  (`bfa205b9`) on purpose. Within a commit there is no window: after `V194` the code
   and the schema have to agree, so they change together.
-- The residual risk is **deploy ordering, which no migration can enforce.** `V193`
+- The residual risk is **deploy ordering, which no migration can enforce.** `V194`
   must not be applied while any instance predating the cutover is still serving,
   because such an instance selects a column that no longer exists. This is an
-  operational constraint on deployment: `V191` and `V192` must be live, and old
-  instances drained, before the release carrying the cutover and `V193`. `V193`'s
+  operational constraint on deployment: `V192` and `V193` must be live, and old
+  instances drained, before the release carrying the cutover and `V194`. `V194`'s
   `LOCK TABLE` and null-digest backfill cover only the narrow case of an old
   instance *appending* during the migration; they do nothing about an old instance
   *reading* after it. The commit structure does not prevent this problem.
-- `V192`'s cost: it is an unqualified `UPDATE` of both of the largest tables, rewriting
+- `V193`'s cost: it is an unqualified `UPDATE` of both of the largest tables, rewriting
   every row in one Flyway transaction and holding row locks on all of them, so concurrent
   `prune` and `admit` block until it completes. (Reasoned from the
   migration's shape, not run.) The dual-write fallback described under
-  "Why a data-preserving migration is still right" is offered only for `V193`'s stall;
+  "Why a data-preserving migration is still right" is offered only for `V194`'s stall;
   whether it would also remove this one was not analysed.
 
 ### Why a data-preserving migration is still right
@@ -584,13 +584,13 @@ The conclusion survives because nothing is deleted. The backfill derives digests
 the rows already present, so every payload is preserved by reference across the
 migration. The reason is "rows must be preserved, and are", not "rows do not matter".
 `V189` is also the direct precedent for rewriting payloads in place on these tables,
-and `V192` and `V193` say so.
+and `V193` and `V194` say so.
 
-The cost the single-migration framing hid is real: `V193` holds `ACCESS EXCLUSIVE` on
+The cost the single-migration framing hid is real: `V194` holds `ACCESS EXCLUSIVE` on
 the two largest tables while it backfills, sets `NOT NULL` and drops, over rows that
 may each be 50 MiB. The lock is taken first deliberately, so a server that predates
 the digest cannot commit a null-digest row between the backfill and `SET NOT NULL`.
-When `V192` has already been applied, the backfill in `V193` has only
+When `V193` has already been applied, the backfill in `V194` has only
 rows written without a digest to repair; the `NOT NULL` check and the column drop
 still run under the lock.
 
@@ -685,12 +685,12 @@ Stated exactly, so the next reader does not take absence of a failure for a proo
   `octet_length(payload::text)`. The store computes it correctly, and every shipped
   migration does, but a future writer that set it wrongly would shift page
   boundaries and the projection-cache bypass threshold silently.
-- **`V193`'s `LOCK TABLE` executes but its blocking effect is not asserted.** The
+- **`V194`'s `LOCK TABLE` executes but its blocking effect is not asserted.** The
   migration runs under the test, so the statement is valid; no test shows a
   concurrent writer actually waiting on it.
 - **Corruption of a stored payload is undetected and permanent** for every row sharing
   its digest (see "Payload bytes are immutable").
-- **Deploy ordering is not enforced by anything.** `V193` must not be applied while any
+- **Deploy ordering is not enforced by anything.** `V194` must not be applied while any
   instance predating the reader cutover is still serving (see "Migration"). No
   migration, lock or test can enforce that.
 

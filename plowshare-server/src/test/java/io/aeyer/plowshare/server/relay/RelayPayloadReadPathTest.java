@@ -454,7 +454,7 @@ class RelayPayloadReadPathTest {
 
   @Test
   void aJsonbRenderingDigestAndAnApplicationDigestBothResolve() {
-    // V192 backfilled a digest over PostgreSQL's JSONB rendering while store() hashes the
+    // V193 backfilled a digest over PostgreSQL's JSONB rendering while store() hashes the
     // application's serialization, so equivalent content can be held under two digests. Both must
     // resolve; whether the two renderings actually diverge is the full-db tier's proof.
     var jdbcStore =

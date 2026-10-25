@@ -554,7 +554,7 @@ class JdbcRelayRepositoryTest {
             jdbc.update(
                 "UPDATE relay_topics SET max_records=0 WHERE project_id=?", topic.projectId()));
     repository.append(topic, draft("one"), T0);
-    // V193 dropped the publication's own payload column, so the shape constraint and the bytes
+    // V194 dropped the publication's own payload column, so the shape constraint and the bytes
     // both live in relay_payloads now, reached through payload_digest. Corrupting the stored row
     // is what a reader sees through its join. Content addressing means this reaches any other
     // publication holding identical content, which is inherent and not a change in this test's

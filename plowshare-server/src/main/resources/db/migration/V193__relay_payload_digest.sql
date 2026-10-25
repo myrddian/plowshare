@@ -1,4 +1,4 @@
--- Publications and admissions reference their payload by digest in relay_payloads (V191) instead
+-- Publications and admissions reference their payload by digest in relay_payloads (V192) instead
 -- of each carrying a copy. This migration only adds the reference and populates it; the payload
 -- column stays, nullable semantics unchanged, until readers have moved to the digest. New rows are
 -- written with both, so every reader keeps working while the cutover is staged.

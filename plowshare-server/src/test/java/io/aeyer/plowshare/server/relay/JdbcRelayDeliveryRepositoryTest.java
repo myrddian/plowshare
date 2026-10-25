@@ -153,7 +153,7 @@ class JdbcRelayDeliveryRepositoryTest {
         ((RelayPayload.Text)
                 deliveries.admission(key).orElseThrow().publication().event().payload())
             .text());
-    // Bypass Java validation to prove the SQL constraint enforces raw UTF-8 bytes. V193 dropped
+    // Bypass Java validation to prove the SQL constraint enforces raw UTF-8 bytes. V194 dropped
     // V135's per-table payload CHECKs along with the column they guarded; the same 50 MiB ceiling
     // is now enforced once, on the stored row the publication and its admission both reach by
     // digest. Asserting it there is asserting it for both tables, which is why this no longer

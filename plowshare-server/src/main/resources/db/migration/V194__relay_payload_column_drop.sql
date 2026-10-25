@@ -1,15 +1,15 @@
--- The readers now take their payload bytes from relay_payloads (V191) through the payload_digest
--- reference V192 added, so the copies these two tables carried have no remaining reader. This
+-- The readers now take their payload bytes from relay_payloads (V192) through the payload_digest
+-- reference V193 added, so the copies these two tables carried have no remaining reader. This
 -- migration finishes the reference and removes the copies. It ships in the same commit as the
 -- reader change: a server reading the old column against this schema would fail at runtime, and a
 -- server writing the old column against it would fail on the insert, so the two cannot be
 -- separated.
 --
--- The backfill below repeats V192's for anything written without a digest. V192 left the column
+-- The backfill below repeats V193's for anything written without a digest. V193 left the column
 -- nullable precisely so a server that predates the digest could keep appending during a rolling
 -- deploy; such a row is the only way a null survives to here. Its bytes may not yet have a
 -- relay_payloads row either, so the payload is stored before the reference is set, in the same
--- order and with the same digest function V192 used: SHA-256 over the UTF-8 text of PostgreSQL's
+-- order and with the same digest function V193 used: SHA-256 over the UTF-8 text of PostgreSQL's
 -- JSONB rendering, lowercase hex. ejection_at is now(), so the first sweep examines these rows and
 -- finds every one of them referenced.
 --
@@ -53,7 +53,7 @@ ALTER TABLE relay_admissions
 
 -- Dropping the column takes the V135 payload CHECK on each table with it. That is the intent: the
 -- same bounds -- a 300 MiB encoded envelope and 50 MiB of TEXT content -- are enforced once per
--- stored byte by the CHECK V191 placed on relay_payloads, which this migration leaves untouched.
+-- stored byte by the CHECK V192 placed on relay_payloads, which this migration leaves untouched.
 ALTER TABLE relay_publications
     DROP COLUMN payload;
 ALTER TABLE relay_admissions

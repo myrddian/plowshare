@@ -615,7 +615,7 @@ they require the explicit full-database test mode.
 ## Schema
 
 The diagram below is the current Relay schema, from migrations `V117` through
-`V193`. `PK, FK` marks a column belonging to both the primary key and a
+`V194`. `PK, FK` marks a column belonging to both the primary key and a
 composite foreign key. Columns carrying only `CHECK` bounds are listed without
 them; the migrations remain the authority for every constraint.
 
@@ -909,13 +909,13 @@ logs a warning naming the batch size; treat it as a sign to raise the batch or t
 ceiling. (This is how the sweep is designed to behave; no test exercises a saturated
 corpus.)
 
-**Deploy ordering.** `V193` drops the old `payload` columns, so it must not be
+**Deploy ordering.** `V194` drops the old `payload` columns, so it must not be
 applied while any instance that predates the payload-store release is still serving:
 such an instance selects a column that no longer exists, so its reads of that column fail.
-`V193` locks both tables and backfills any row written without a digest, which covers
+`V194` locks both tables and backfills any row written without a digest, which covers
 an old instance *appending* while the migration runs; it does nothing about an old
 instance *reading* after it. Drain old instances before the release that carries
-`V193`. `V192` rewrites every row of `relay_publications` and `relay_admissions` in a
+`V194`. `V193` rewrites every row of `relay_publications` and `relay_admissions` in a
 single transaction, so `prune` and `admit` block until it finishes; schedule it for a
 quiet period on a large installation.
 

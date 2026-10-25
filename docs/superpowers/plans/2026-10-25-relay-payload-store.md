@@ -48,7 +48,7 @@ two of its statements. **Both corrections are assumed by the tasks below.**
 ## Proposed refinement for review
 
 The spec says **one** Flyway migration performing create → backfill → enforce → drop.
-This plan uses **two migrations within the one release** (`V191` additive, `V193` the
+This plan uses **two migrations within the one release** (`V192` additive, `V194` the
 drop), because the Java cutover cannot land in the same commit as a column drop without
 a window where the deployed code selects a column the schema no longer has. Expand,
 cut over, contract — each task independently testable, no transient broken build.
@@ -59,7 +59,7 @@ the spec's single migration, Tasks 2 and 4 merge into one larger, atomic task.
 
 ## Global Constraints
 
-- New Flyway migrations only; never edit a shipped migration. Next free number is `V191`.
+- New Flyway migrations only; never edit a shipped migration. Next free number is `V192`.
 - Only repositories and database configuration may touch `JdbcTemplate`. No SQL in
   services, tools or adapters.
 - Raw JSON stays at the persistence boundary. `RelayPayloadCodec` is package-private and
@@ -104,7 +104,7 @@ test placed in the task named.
 Additive only. Nothing references `relay_payloads` yet, so the application is unaffected.
 
 **Files:**
-- Create: `plowshare-server/src/main/resources/db/migration/V191__relay_payload_store.sql`
+- Create: `plowshare-server/src/main/resources/db/migration/V192__relay_payload_store.sql`
 - Create: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/RelayPayloadStore.java`
 - Create: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/RelayStoredPayload.java`
 - Create: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayPayloadStore.java`
@@ -147,7 +147,7 @@ Additive only. Nothing references `relay_payloads` yet, so the application is un
 Run: `./gradlew :plowshare-server:test --tests 'io.aeyer.plowshare.server.relay.RelayPayloadStoreTest'`
 Expected: FAIL — `RelayPayloadStore` does not exist.
 
-- [ ] **Step 3: Write `V191__relay_payload_store.sql`**
+- [ ] **Step 3: Write `V192__relay_payload_store.sql`**
 
 Creates `relay_payloads` exactly as the spec's DDL block gives it: `digest` TEXT primary
 key checked against `^[0-9a-f]{64}$`, `payload` JSONB carrying `V135`'s two byte bounds,
@@ -184,7 +184,7 @@ Expected: PASS
 
 ```bash
 ./gradlew format formatCheck
-git add plowshare-server/src/main/resources/db/migration/V191__relay_payload_store.sql \
+git add plowshare-server/src/main/resources/db/migration/V192__relay_payload_store.sql \
         plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/RelayPayloadStore.java \
         plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/RelayStoredPayload.java \
         plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayPayloadStore.java \
@@ -202,7 +202,7 @@ git commit -m "Add the Relay content-addressed payload store"
 still read `payload`, so this task changes what is written, not what is read.
 
 **Files:**
-- Create: `plowshare-server/src/main/resources/db/migration/V192__relay_payload_digest.sql`
+- Create: `plowshare-server/src/main/resources/db/migration/V193__relay_payload_digest.sql`
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayRepository.java` (`append`)
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayDeliveryRepository.java` (`admit`)
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/relay/RelayPayloadWritePlacementTest.java`
@@ -228,7 +228,7 @@ The last two are Review Focus item 5.
 Run: `./gradlew :plowshare-server:test --tests 'io.aeyer.plowshare.server.relay.RelayPayloadWritePlacementTest'`
 Expected: FAIL — `append` does not call the store.
 
-- [ ] **Step 3: Write `V192__relay_payload_digest.sql`**
+- [ ] **Step 3: Write `V193__relay_payload_digest.sql`**
 
 Adds `payload_digest TEXT` to `relay_publications` and `relay_admissions`, each
 `REFERENCES relay_payloads(digest)`; backfills both from
@@ -326,7 +326,7 @@ The atomic cutover: all three readers stop selecting `payload` in the same commi
 column is dropped.
 
 **Files:**
-- Create: `plowshare-server/src/main/resources/db/migration/V193__relay_payload_column_drop.sql`
+- Create: `plowshare-server/src/main/resources/db/migration/V194__relay_payload_column_drop.sql`
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayRepository.java` (`PUBLICATION_COLUMNS:25-26`, the bounded page at `:276-281`)
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayLogRepository.java` (`EVENT_COLUMNS`, its bounded page, `boundedProjection`, `snapshotWeight`)
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/JdbcRelayDeliveryRepository.java` (the admission read)
@@ -362,7 +362,7 @@ Both bounded pages and `boundedProjection` take their running sum from the joine
 headroom and the same thresholds. Decoding stays with each reader, using the family from
 its own row — the store never learns a family.
 
-- [ ] **Step 4: Write `V193__relay_payload_column_drop.sql`**
+- [ ] **Step 4: Write `V194__relay_payload_column_drop.sql`**
 
 Backfills any `payload_digest` still null, sets both columns `NOT NULL`, drops `payload`
 from `relay_publications` and `relay_admissions`, and with it the `V135` payload `CHECK`s
