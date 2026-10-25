@@ -22,7 +22,8 @@ class RelayScheduledPublicationTest {
   private final ScheduledPublication.Boundary guard = mock(ScheduledPublication.Boundary.class);
   private final ScheduleRecord selected =
       new ScheduleRecord("morning", "0 0 * * * *", "UTC", "daily", false, AT, "operator");
-  private final Relay.TopicKey topic = new Relay.TopicKey(Relay.SystemScope.SERVER, "schedule.due");
+  private final Relay.TopicKey topic =
+      new Relay.TopicKey(Relay.SystemScope.SERVER, EventTopics.scheduled(Relay.SystemScope.SERVER));
   private final Relay.SubscriptionKey subscriber =
       new Relay.SubscriptionKey(topic, "builtin.scheduling");
   private boolean inTransaction;

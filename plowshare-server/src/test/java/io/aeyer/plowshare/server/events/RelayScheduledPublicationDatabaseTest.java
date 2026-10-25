@@ -115,8 +115,15 @@ class RelayScheduledPublicationDatabaseTest {
         });
   }
 
+  /** A project's schedule topic, derived the way the publisher derives it rather than spelled. */
+  private static Relay.TopicKey scheduled(long project) {
+    var scope = new Relay.ProjectScope(project);
+    return new Relay.TopicKey(scope, EventTopics.scheduled(scope));
+  }
+
   private static Relay.TopicKey system() {
-    return new Relay.TopicKey(Relay.SystemScope.SERVER, "schedule.due");
+    return new Relay.TopicKey(
+        Relay.SystemScope.SERVER, EventTopics.scheduled(Relay.SystemScope.SERVER));
   }
 
   @Test
@@ -157,7 +164,7 @@ class RelayScheduledPublicationDatabaseTest {
       assertTrue(b.get(15, TimeUnit.SECONDS));
     }
     assertEquals(1, relay.topic(system()).lastPosition());
-    assertEquals(1, relay.topic(new Relay.TopicKey(project, "schedule.due")).lastPosition());
+    assertEquals(1, relay.topic(scheduled(project)).lastPosition());
     assertEquals(1, firings.list("listener", "queued", 0, 10).size());
     assertEquals(1, firings.list("listener", "superseded", 0, 10).size());
   }
@@ -314,7 +321,7 @@ class RelayScheduledPublicationDatabaseTest {
         "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES(?,'managed','managed','{}'::jsonb,'active')",
         source);
     assertTrue(publisher(relay, intake).publish(selected, AT.plusSeconds(3600), AT));
-    var topic = new Relay.TopicKey(project, "schedule.due");
+    var topic = scheduled(project);
     assertEquals(1, relay.topic(topic).lastPosition());
     assertThrows(IllegalStateException.class, () -> relay.topic(system()));
     var next = schedules.find("managed").orElseThrow();

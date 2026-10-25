@@ -516,7 +516,7 @@ class JdbcRelayRepositoryTest {
 
   @Test
   void registered_schedule_and_empty_families_round_trip_through_their_topics() {
-    var schedule = new Relay.TopicKey(topic.projectId(), "schedule.due");
+    var schedule = new Relay.TopicKey(topic.projectId(), "occurrence.sample");
     var subscriber = new Relay.SubscriptionKey(schedule, "schedule-notices");
     repository.configureTopic(
         schedule, RelayPayload.Kind.SCHEDULE_DUE, Relay.Policy.systemDefault());

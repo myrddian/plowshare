@@ -86,6 +86,67 @@ Recording it here rather than quietly is the point: the drift is easy to repeat,
 type feels like modelling the domain properly, and the cost only shows up as the next family's
 core change.
 
+## The pattern, which is not specific to Relay
+
+The Board/Relay story above is one instance of something that has happened at every layer of this
+system. Each subsystem was built **before** the substrate that should carry it existed, the
+substrate arrived days or weeks later, the migration was intended, and it happened only sometimes.
+Dates from the private history, which is the only place they are visible — the public repository is
+squashed snapshots:
+
+| built | substrate that should carry it | moved? |
+|---|---|---|
+| delegation — `orchestrations`, `orchestration_messages` (`adbfb506`, 2026-09-14) | messaging (2026-10-03) | no |
+| the Board — `V74` (it *is* Relay v0) | Relay v1 (`184f1932`, 2026-10-05) | no |
+| messaging — `BoardMessaging` (`6a74107e`, 2026-10-03), built on the Board | Relay v1 | no |
+| information events — `information_events` (`63391fad`, 2026-10-02) | Relay v1 | **yes** |
+| `event.fire` | Relay v1 | in progress |
+| schedules | Relay v1 | yes |
+
+So six families, three migrated. None of the six was a mistake when written: in every case the
+substrate did not exist yet, and building against it was impossible. Information events predate
+Relay by three days; delegation predates messaging by nineteen.
+
+### Why this is an abstraction failure rather than six oversights
+
+The intent was recorded each time, and each time the move was meant to be cheap because the API
+would not change — delegation in particular was to move onto messaging **keeping its API the
+same**. That is the test of whether an abstraction is in the right place: a substrate can be
+swapped underneath a contract without the callers noticing.
+
+It was not cheap, because the boundary was not where the work had to move through:
+
+- `information_events` could not move without a payload kind, a codec case and a CHECK migration,
+  because Relay had no opaque carrier anyone had noticed — so the family's details had to enter the
+  broker. Removing that kind afterwards was a larger change than the original migration.
+- messaging cannot move while `BoardMessaging` *is* the Board transport in the same object; its
+  javadoc says so — "private messaging is a board transport: same messages, firings, leases and
+  turn scheduler". The agent-facing contract is one method wide (`Sender.send`), and that seam is
+  fine; the implementation behind it is not separable.
+- delegation cannot move onto messaging while `orchestration_messages` is where its messages live,
+  even though messaging's `Request` already carries `replyTo`, `replyExpected`, `finalReply` and
+  `callId` — the primitives a sync caller needs.
+
+The cost is visible in operation, not only in design. The orchestrations listing was measured at
+about eight seconds on the live installation, running `information_log_readable` as a row filter —
+a consequence of delegation owning its own message store, with its own listing and its own per-row
+permission check.
+
+### What actually prevents the next instance
+
+Not vigilance, and not this record. Two structural pins, both already in the tree:
+
+- the payload families stay at five general kinds, asserted by a test that names them, so a family
+  adding its own type fails a build rather than requiring someone to remember the rule;
+- a derived topic name appears in no source file outside the subsystem that derives it, so a name
+  cannot quietly become a shared contract.
+
+The general principle those two instantiate: **a detail that should be private must be prevented
+from becoming shared by something that fails, not by something that is documented.** Every failure
+recorded here was a detail leaking upward — a payload kind into the broker's enum, a topic name
+into its domain record, an owner-only field into a publication served to a whole audience. Each
+looked locally reasonable. None was defended on the merits once noticed.
+
 ## Relay is mechanism, not policy
 
 Relay carries a contract. It does not interpret content and it does not enforce a consumer's rules.
@@ -214,12 +275,17 @@ and retyped it), so one topic's page is an index range scan: 0.086 ms and 11 buf
 topics.
 
 **Retention is where cardinality bites, and it is not the topic count that drives it.**
-`topicsToPrune` joins every `relay_topics` row to its oldest unexpired publication and applies the
-retention test *after* the join, ordering by `published_at`. The planner takes a parallel hash join
-and discards most of what it built. At 600k topics over 3M publications: **1,558 ms, 61,359
-buffers, roughly 500 MB of temp traffic per cycle, to return 100 candidates.** Forcing the
-index-probe plan is worse. So the sweep's cost tracks the **whole publication log**, not the number
-of topics, and it runs on a fixed interval regardless.
+`topicsToPrune` asks which topics have an expirable prefix by joining each `relay_topics` row to
+its oldest unexpired publication, and the defect is that **due-ness is derived across two tables,
+so no index can answer it**. The join itself is an exact primary-key probe on
+`(scope_key, topic, position)` — one row per topic, not a cartesian product. So the cost is
+**O(live topics) plus a sort, on every poll, forever**.
+
+At 600k topics over 3M publications the planner switches to a parallel hash join and the poll
+measures **1,558 ms, 61,359 buffers, roughly 500 MB of temp traffic, to return 100 candidates** —
+but that is a plan change at scale rather than the shape of the query, and an earlier version of
+this record wrongly generalised it to "cost tracks the whole publication log". Forcing the
+index-probe plan on the current query is worse still (803,212 buffers).
 
 **The gating number is retention, not topic count.** Oldest-first ordering gives each eligible
 topic a lag proportional to the eligible set, so overshoot stays within the retention window only
@@ -275,10 +341,29 @@ for any work-tier per-principal design.
 
 - The remaining work is **finishing a replacement**, not migrating a foreign system onto a new one.
   Board and messaging run the previous generation of the same substrate.
-- **Messaging's ordering is already sound and already Relay's mechanism** — `Board.post` takes
-  `FOR UPDATE` on the topic row and then inserts, with per-topic cursors. There is no measured
-  pathology there and no recipient fan-out. Moving it is consolidation; it is not a performance
-  fix, and it should not be argued as one.
+- **Messaging's ordering is weaker than Relay's, not equivalent to it.** An earlier version of this
+  record claimed `Board.post` takes `FOR UPDATE` on the topic row and reads per-topic cursors.
+  That is false, and the error flattered the current design. Verified instead:
+  `BoardStore.lockTopic` is called only from `Board.java`'s public-board paths, never on the
+  messaging send path; `board_messages.seq` is `BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE`
+  (`V74:72`) — a **global** sequence, structurally the construct 0037 condemns in
+  `information_events.sequence`; and messaging reads **no cursor at all**, taking work by
+  `arrived_at` through `firings.oldestWaiting`. What it does have is a **per-mailbox** advisory
+  lock: `lockMailbox` → `pg_advisory_xact_lock(hashtextextended(?,0))`
+  (`JdbcBoardMessagingRepository:112`), which is at least scoped per mailbox rather than
+  installation-wide.
+
+  So **moving messaging onto Relay would improve its ordering rather than preserve it**, because
+  Relay's per-topic row lock is precisely what the messaging path lacks. It is still not primarily
+  a performance case — nothing has been measured failing — but it must not be argued as "already
+  sound".
+
+- **Messaging's real invariants are unique partial indexes, and they are stronger than a lease.**
+  `board_message_one_handling_request` on `board_message_routes(recipient) WHERE started_at IS NOT
+  NULL AND handled_at IS NULL`, and `firings_one_running_per_target` on `firings(target) WHERE
+  status='started' AND finished_at IS NULL`. These are unconditional invariants with no time
+  dimension; a Relay consumer lease is a timed claim resolved by expiry. Any migration must keep
+  them rather than substitute a lease for them.
 - **The blocker is the audience, not the log.** Messaging addresses a single principal. Relay's
   `ProjectScope` is too coarse — any member who may use the project can inspect the topic log — and
   the substrate has no conversation- or instance-keyed scope kind either. `V126` already met this

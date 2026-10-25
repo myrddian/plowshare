@@ -53,7 +53,7 @@ class ApplicationToolRegistryTest {
     Files.writeString(
         root.resolve("server/ports.json"),
         """
-        {"version":1,"bindings":[{"topic":"schedule.due","account":"provider","direction":"EGRESS","groups":["collector"]}]}
+        {"version":1,"bindings":[{"topic":"occurrence.sample","account":"provider","direction":"EGRESS","groups":["collector"]}]}
         """);
     Files.writeString(
         root.resolve("plowshare.json"),
@@ -298,12 +298,16 @@ class ApplicationToolRegistryTest {
         registry.permits(
             "provider",
             "fixture",
-            "schedule.due",
+            "occurrence.sample",
             RelayPortProperties.Direction.EGRESS,
             "collector"));
     assertFalse(
         registry.permits(
-            "provider", "fixture", "schedule.due", RelayPortProperties.Direction.EGRESS, "other"));
+            "provider",
+            "fixture",
+            "occurrence.sample",
+            RelayPortProperties.Direction.EGRESS,
+            "other"));
     assertFalse(
         registry.permits(
             "intruder",

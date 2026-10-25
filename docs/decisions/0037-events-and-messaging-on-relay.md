@@ -1,8 +1,9 @@
 # All events and messaging publish through Relay
 
-Status: accepted following explicit authorization to begin with information events. The remaining
-families (`event.fire`, `message.*`) are accepted as direction and need their own authority-unit
-decision before they move.
+Status: accepted. Information events and `event.fire` have moved; `message.*` / outgoing has not,
+and is now blocked on a reason this record did not know about. Delegation is named in this record's
+own need statement but was never inventoried; see the reconciliation with
+`0041-waiting-is-turn-eligibility.md` at the end.
 
 ## Need and boundary
 
@@ -13,14 +14,15 @@ wrappers over it — one mechanism for all of this work, because it *is* all the
 durable record in order, decide who receives it, hand it over once, acknowledge it, recover what
 was missed.
 
-That is implemented for exactly one of four families.
+When this record was written that was implemented for exactly one of four families. Three now are;
+the table below carries both states, because the gap is the point of the record.
 
-| family | on Relay | what it uses instead |
-|---|---|---|
-| schedules (`ScheduledPublication`) | **yes** | `RelayScheduledPublication` is the only implementation and `EventsConfig` wires it unconditionally — no flag, no second path |
-| `event.fire` | no | `EventFireHandler` → `Intake` → `TriggerStore`, `FiringStore`, `Dispatcher`. No relay reference. |
-| `information.events` | no | `information_events` (one global `BIGSERIAL`), `information_event_recipients`, an installation-wide advisory fence, and its own cursor |
-| `message.*` / outgoing | no | `outgoing_work`, `outgoing_peers`, `message_external_tasks`. The `outgoing` package has no relay reference. |
+| family | on Relay | state as written | now |
+|---|---|---|---|
+| schedules (`ScheduledPublication`) | **yes** | `RelayScheduledPublication` is the only implementation and `EventsConfig` wires it unconditionally — no flag, no second path | unchanged; topic name derived by its owner (V190, V191) |
+| `information.events` | **now yes** | `information_events` (one global `BIGSERIAL`), `information_event_recipients`, an installation-wide advisory fence, and its own cursor | moved in V188, carried on the general message in V189; `information_events` is `DROP`ped (`V188:96`), so the clean break this record demanded actually happened |
+| `event.fire` | **now yes** | `EventFireHandler` → `Intake` → `TriggerStore`, `FiringStore`, `Dispatcher`. No relay reference. | publishes through `RelayEventPublication`, consumed by the existing firing inbox; authority unit is the installation, scope `SystemScope.SERVER` |
+| `message.*` / outgoing | no | `outgoing_work`, `outgoing_peers`, `message_external_tasks`. The `outgoing` package has no relay reference. | unchanged — `server/outgoing/` still holds zero Relay references — and now known to be *blocked*, not merely unstarted |
 
 Each of the three that are not on Relay re-implements some part of what Relay already owns, and
 each re-implements it differently. That is the cost this record is about: not one slow query, but
@@ -121,12 +123,13 @@ Recorded separately because their surfaces differ:
 
 ### Order of work
 
-1. `information.events` — it holds an installation-wide lock and is measured at 3,996 ms per event.
-   Publisher, consumer and table removal are one change; see the consequences above.
-2. `event.fire` — `Intake` keeps triggers and firings directly; no ordering fence, so this is
-   reshaping rather than unblocking.
+1. ~~`information.events`~~ — **done** (V188, V189). It held an installation-wide lock and was
+   measured at 3,996 ms per event. Publisher, consumer and table removal were one change.
+2. ~~`event.fire`~~ — **done**. `Intake` kept triggers and firings directly; no ordering fence, so
+   this was reshaping rather than unblocking.
 3. `message.*` / outgoing — largest surface, and external peers make its delivery contract the most
-   exposed.
+   exposed. **Now known to be blocked**: see the 0041 reconciliation below. Delegation goes before
+   it.
 
 The reason for the order is the measured cost, not risk appetite. A system that takes fourteen
 seconds to open a document does not scale, and no amount of preserved behaviour from the mechanism
@@ -228,12 +231,53 @@ Two further notes for whoever picks this up:
 
 Two corrections to this record's own framing follow from 0040:
 
-- **Messaging is not a performance case.** Its ordering is already Relay's mechanism — a topic-row
-  `FOR UPDATE` then an insert, with per-topic cursors — and it has no recipient fan-out. Moving it
-  is consolidation. The 3,996 ms fan-out was specific to information events and is now removed.
+- **Messaging's ordering is weaker than Relay's.** An earlier version of this note claimed it was
+  "already Relay's mechanism — a topic-row `FOR UPDATE` then an insert, with per-topic cursors".
+  That was false. The messaging send path takes no topic lock, `board_messages.seq` is a global
+  `GENERATED ALWAYS AS IDENTITY` sequence, and messaging reads no cursor at all; it serialises on a
+  per-mailbox advisory lock. See 0040. Moving it onto Relay would therefore **improve** its
+  ordering. It still has no recipient fan-out, and nothing has been measured failing, so it is not
+  urgent in the way information events were — but it must not be described as already sound.
 - **Messaging still lives in `server/board/`**, on `board_messages` and `board_message_*` tables,
   not in a separately extracted module. The rule below still holds; the size of the move is larger
   than this record implied.
+
+### Reconciling 0041 and this record
+
+`0041-waiting-is-turn-eligibility.md` changes two things here.
+
+**Delegation was never inventoried.** This record's own need statement says "Events, messages *and
+delegations* are meant to be wrappers over it", and then the four-family table and the order of work
+omit delegation entirely. That omission is why a sender-side wait was specified against messaging:
+with delegation absent from the inventory, the synchronous construct looked like something messaging
+had to grow, rather than something delegation already owns. Delegation is the fifth family, and it
+is further along than this record's ordering implies — `orchestration.start` is already a Relay work
+receiver, with `relay_deliveries`' pinned destinations and `relay_executions`' idempotency and
+receipts (V121).
+
+**The ordering no longer holds, and messaging is blocked rather than merely last.** This record says
+the sequence "information events, then `event.fire`, then messaging" stands. Two of those are done,
+and the third cannot proceed on this record's own terms: a message body is account-private mailbox
+content, and publishing it at project scope would expose it through `relay.log`
+(`RelayPortEvents.java:64` renders a `Text` payload's text). That is not a sequencing preference but
+an authority problem, and it is the kind of thing this record's rule about publishing only what a
+topic's whole audience may see already forbids.
+
+Delegation does not share it. `orchestration.status`, `.record` and `.receipt` are already in a
+project-scoped read set (`ProjectAuthorization.java:115-119`), so delegation moves a **notice** and
+not a body — `RelayPayload.Lifecycle`, with the text left in `orchestration_messages`. Verified
+against the consuming code: `Delivery` composes its utterance from a freshly re-read record
+(`Delivery.java:475-480`) and `ParentVoice.speak` receives an already-composed string, so a
+reference-only notice is the input that path is written for.
+
+So the revised order for what remains is **delegation, then `message.*` / outgoing**, with
+messaging's move gated on an audience for account-private content that does not exist yet — the same
+shape of gap as `0039-relay-audiences-beyond-a-project.md`, against a different authority unit.
+
+One requirement carries over from 0041 and belongs in any delegation slice: `Delivery`'s in-flight
+guard is an in-process `ConcurrentHashMap` keyset (`Delivery.java:116`), not a database claim, so
+delegation's notices must be consumed under a single leased consumer group or that guard must become
+durable first.
 
 ## Scope note
 

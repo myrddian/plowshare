@@ -33,7 +33,7 @@ class ProjectRelayRoutingTest {
     when(files.read(ACCESS, "topics.json"))
         .thenReturn(
             Optional.of(
-                "{\"version\":1,\"topics\":{\"schedule.due\":{\"retentionDays\":4},\"release.observed\":{\"retentionDays\":30,\"maxRecords\":100}}}"));
+                "{\"version\":1,\"topics\":{\"occurrence.sample\":{\"retentionDays\":4},\"release.observed\":{\"retentionDays\":30,\"maxRecords\":100}}}"));
     try (var program = new GraalRelayRouteProgram()) {
       var config = new ProjectRelayRouting(files, program, relay, deliveries).load(ACCESS);
       assertEquals(1, config.relays().size());
@@ -87,7 +87,7 @@ class ProjectRelayRoutingTest {
           RuntimeException.class,
           () ->
               RelayRouteCodec.policies(
-                  "{\"version\":1,\"topics\":{\"schedule.due\":" + bad + "}}"));
+                  "{\"version\":1,\"topics\":{\"occurrence.sample\":" + bad + "}}"));
     assertThrows(
         RuntimeException.class,
         () ->

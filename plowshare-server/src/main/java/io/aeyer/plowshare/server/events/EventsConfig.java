@@ -166,6 +166,28 @@ public class EventsConfig {
         });
   }
 
+  /**
+   * The only {@link EventPublication}, wired unconditionally: there is no second path by which a
+   * hand-raised event can reach the firing inbox, which is what decision 0037 asks of a family that
+   * moves onto Relay. {@code FiredArrival} resolves to the {@link Intake} bean above, so the
+   * subscriber is the existing arrival path rather than a new one.
+   */
+  @Bean
+  public EventPublication eventPublication(
+      Relay relay, FiredArrival arrivals, UnitOfWork transactions) {
+    return new RelayEventPublication(
+        relay,
+        arrivals,
+        transactions,
+        () -> {
+          if (org.springframework.transaction.support.TransactionSynchronizationManager
+              .isActualTransactionActive())
+            throw new IllegalStateException(
+                "a fired event must be published outside a database transaction");
+        },
+        Instant::now);
+  }
+
   @Bean
   public Ticker ticker(
       ScheduleStore schedules,

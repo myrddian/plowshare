@@ -77,7 +77,7 @@ class ApplicationScheduleControlFrameTest {
             schedules,
             mock(TriggerStore.class),
             mock(FiringStore.class),
-            mock(Intake.class),
+            mock(io.aeyer.plowshare.server.events.EventPublication.class),
             mock(Callers.class),
             mock(ScheduleReader.class));
     frames.useScheduleDefinitions(

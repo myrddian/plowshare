@@ -17,8 +17,8 @@ import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.archive.ArchiveException;
+import io.aeyer.plowshare.server.events.EventPublication;
 import io.aeyer.plowshare.server.events.FiringStore;
-import io.aeyer.plowshare.server.events.Intake;
 import io.aeyer.plowshare.server.events.ScheduleProposal;
 import io.aeyer.plowshare.server.events.ScheduleReader;
 import io.aeyer.plowshare.server.events.ScheduleRecord;
@@ -37,7 +37,7 @@ class EventFramesTest {
   private ScheduleStore schedules;
   private TriggerStore triggers;
   private FiringStore firings;
-  private Intake intake;
+  private EventPublication publication;
   private Callers callers;
   private ScheduleReader reader;
   private FrameRouter router;
@@ -54,7 +54,7 @@ class EventFramesTest {
     schedules = mock(ScheduleStore.class);
     triggers = mock(TriggerStore.class);
     firings = mock(FiringStore.class);
-    intake = mock(Intake.class);
+    publication = mock(EventPublication.class);
     callers = mock(Callers.class);
     reader = mock(ScheduleReader.class);
     router =
@@ -62,7 +62,7 @@ class EventFramesTest {
             .frameRouter(
                 List.of(
                     new EventFrames(
-                        schedules, triggers, firings, intake, callers, reader, () -> FIXED)));
+                        schedules, triggers, firings, publication, callers, reader, () -> FIXED)));
   }
 
   private Outcome route(String type, String payload, Asking asking) {
@@ -266,9 +266,11 @@ class EventFramesTest {
   }
 
   @Test
-  void firing_an_event_goes_through_the_same_intake_as_a_tick() {
-    when(intake.emit(
-            eq("daily"), eq(new io.aeyer.plowshare.server.events.EventPayload.Text("manual"))))
+  void firing_an_event_publishes_it_for_the_signed_in_account() {
+    when(publication.fire(
+            eq("daily"),
+            eq(new io.aeyer.plowshare.server.events.EventPayload.Text("manual")),
+            eq("enzo")))
         .thenReturn(List.of());
     Outcome outcome =
         route(
@@ -276,7 +278,9 @@ class EventFramesTest {
             "{\"event\":\"daily\",\"data\":{\"text\":\"manual\"}}",
             SIGNED_IN);
     assertEquals(Code.OK, outcome.code());
-    verify(intake).emit("daily", new io.aeyer.plowshare.server.events.EventPayload.Text("manual"));
+    // The account is passed on, not merely required: it is what attributes the publication.
+    verify(publication)
+        .fire("daily", new io.aeyer.plowshare.server.events.EventPayload.Text("manual"), "enzo");
   }
 
   @Test
@@ -287,7 +291,7 @@ class EventFramesTest {
             "{\"event\":\"daily\",\"data\":{\"privilege\":\"admin\"}}",
             SIGNED_IN);
     assertEquals(Code.BAD_REQUEST, outcome.code());
-    org.mockito.Mockito.verifyNoInteractions(intake, firings);
+    org.mockito.Mockito.verifyNoInteractions(publication, firings);
   }
 
   @Test
@@ -298,7 +302,7 @@ class EventFramesTest {
             "{\"event\":\"daily\",\"data\":{\"text\":\"manual\"}}",
             new Asking("session-1"));
     assertEquals(Code.BAD_REQUEST, outcome.code());
-    verify(intake, never()).emit(any(), any());
+    verify(publication, never()).fire(any(), any(), any());
   }
 
   @Test
@@ -455,7 +459,7 @@ class EventFramesTest {
             io.aeyer.plowshare.server.events.ScheduleDefinitions>
         provider = mockProvider(definitions);
     var frames =
-        new EventFrames(schedules, triggers, firings, intake, callers, reader, () -> FIXED);
+        new EventFrames(schedules, triggers, firings, publication, callers, reader, () -> FIXED);
     frames.useScheduleDefinitions(provider);
     when(definitions.pause("application-schedule", true, "enzo")).thenReturn(true);
     var outcome =
@@ -476,7 +480,7 @@ class EventFramesTest {
             io.aeyer.plowshare.server.events.ScheduleDefinitions>
         provider = mockProvider(definitions);
     var frames =
-        new EventFrames(schedules, triggers, firings, intake, callers, reader, () -> FIXED);
+        new EventFrames(schedules, triggers, firings, publication, callers, reader, () -> FIXED);
     frames.useScheduleDefinitions(provider);
     doThrow(new io.aeyer.plowshare.server.faults.CallerFault("revoked"))
         .when(definitions)

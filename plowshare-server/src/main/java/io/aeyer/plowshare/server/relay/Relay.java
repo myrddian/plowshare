@@ -169,6 +169,14 @@ public interface Relay {
       Objects.requireNonNull(policy, "policy");
       if (expiredThrough < 0 || lastPosition < expiredThrough)
         throw new IllegalArgumentException("invalid topic positions");
+      // The wake topics stay named here, and they are the only ones that should be. They are
+      // Relay's OWN topics: RelayInternalWorkers publishes them and native consumers read them, so
+      // the broker naming them is a system naming its own internals, not a broker policing a
+      // consumer's vocabulary. The agreement that bound the name 'schedule.due' to SCHEDULE_DUE was
+      // the other thing, and is gone: a topic name is private to the system that owns it (decision
+      // 0040), the schedules family now derives its own inside server/events, and the name the
+      // broker was checking no longer exists for it to check. SCHEDULE_DUE remains a payload kind;
+      // only the name moved.
       boolean nativeWake =
           key.scope() == SystemScope.SERVER
               && java.util.Set.of("message.wake.requested", "board.wake.requested")
@@ -176,8 +184,6 @@ public interface Relay {
       if (nativeWake != (kind == RelayPayload.Kind.WAKE_REQUESTED))
         throw new IllegalArgumentException(
             "Native wake families require their private system topics");
-      if (key.name().equals("schedule.due") != (kind == RelayPayload.Kind.SCHEDULE_DUE))
-        throw new IllegalArgumentException("schedule.due requires its registered payload family");
     }
   }
 
