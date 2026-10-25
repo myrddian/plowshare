@@ -901,3 +901,19 @@ the three answers are **distinguished**:
 
 A retry also finishes an interrupted source removal, so calling twice is not
 merely safe but useful: the second call collects the bytes the first could not.
+
+## Which SDKs expose the five operations
+
+`application.child.create`, `.ceiling`, `.destroy`, `.list` and `.trajectory` are
+exposed in the TypeScript/Node, Python, Go and .NET SDKs. The **Java SDK is
+curated** (it exposes a subset of the shared operations) and does **not** expose
+them: it has no child methods on its Application client and no public raw
+request path. That matches its existing omission of the `application.file.*`
+operations; extending a curated client is a product decision this slice did not
+scope. A Java consumer that needs these operations has no supported route to them
+today.
+
+Request-side semantic validation (UUIDs, explicit call counts, the source package)
+is performed by the TypeScript/Node request gate before sending. Reply
+correlation, which refuses a `ceiling` or `destroy` answer about a different child
+than the one asked of, is implemented in TypeScript, Python, Go and .NET.

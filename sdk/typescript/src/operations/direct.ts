@@ -711,6 +711,28 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
   )
     return { kind: 'invalid-response', outcome };
   if (
+    (asked.type === 'application.child.ceiling' ||
+      asked.type === 'application.child.destroy') &&
+    String(body?.['child']).toLowerCase() !== asked.payload.child.toLowerCase()
+  )
+    return { kind: 'invalid-response', outcome };
+  if (asked.type === 'application.child.destroy') {
+    // A destruction accounts for the Application it names, and cannot have removed more source
+    // areas than it removed records.
+    const collected = body?.['collected'],
+      sources = body?.['sources'];
+    if (
+      !Array.isArray(collected) ||
+      typeof sources !== 'number' ||
+      sources > collected.length ||
+      !collected.some(
+        (entry) =>
+          String(entry).toLowerCase() === asked.payload.child.toLowerCase(),
+      )
+    )
+      return { kind: 'invalid-response', outcome };
+  }
+  if (
     (asked.type === 'application.deployment.status' ||
       asked.type === 'application.identity.status') &&
     body?.['project'] !== asked.payload.project

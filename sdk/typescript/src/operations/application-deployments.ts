@@ -89,6 +89,51 @@ export function applicationFilesProblem(value: unknown): string | undefined {
         return 'Application package has a file/directory collision';
   return undefined;
 }
+/** Largest call count the server accepts: it is bound as a Java int. */
+const MAX_CALLS = 2147483647;
+const callCount = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= 0 &&
+  value <= MAX_CALLS;
+/**
+ * The request checks the server applies to a contained-Application frame, run before anything is
+ * sent. Every child operation addresses a container by its own retained `conversation` and a child
+ * by UUID; none names a project, which is why these never reach the generic Application file
+ * checks. A call count is explicit: absent would mean unlimited, which a confined child never is.
+ */
+export function containedProblem(
+  type: string,
+  body: Record<string, unknown>,
+): string | undefined {
+  const container = body['conversation'];
+  if (
+    typeof container !== 'string' ||
+    !container.trim() ||
+    (type === 'application.child.create' && container.length > 1024)
+  )
+    return 'Name the container conversation the operation acts within';
+  if (type === 'application.child.list') return undefined;
+  if (type !== 'application.child.create') {
+    if (!deploymentUuid(body['child'])) return 'child must be a UUID';
+    if (type === 'application.child.ceiling' && !callCount(body['calls']))
+      return 'calls must be an explicit non-negative call count; zero disables calls';
+    return undefined;
+  }
+  if (!deploymentUuid(body['requestId']))
+    return 'Retain a UUID requestId for create recovery';
+  if (!callCount(body['ceiling']))
+    return 'ceiling must be an explicit non-negative call count; zero disables calls';
+  const destination = body['destination'],
+    areas = body['writableAreas'];
+  if (
+    (destination !== null && !fileStoreReference(destination)) ||
+    !isList(areas) ||
+    !areas.every(fileStoreReference)
+  )
+    return 'Use a FileStore destination or null, and a list of writableAreas';
+  return applicationFilesProblem(body['files']);
+}
 export function deploymentProblem(
   type: string,
   body: Record<string, unknown>,

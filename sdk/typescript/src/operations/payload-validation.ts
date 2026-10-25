@@ -5,7 +5,10 @@ import { navigationPayloadProblem } from './navigation-validation.ts';
 import { hostedProblem, isHostedOperation } from './hosted-tool-scopes.ts';
 import { providerCredentialProblem } from './provider-credentials.ts';
 import { identityProblem } from './application-identities.ts';
-import { deploymentProblem } from './application-deployments.ts';
+import {
+  containedProblem,
+  deploymentProblem,
+} from './application-deployments.ts';
 import { swarmName } from './swarm-types.ts';
 import { isList, isObject, displayText } from '../binding/values.ts';
 import type { Operation } from './direct.ts';
@@ -1058,6 +1061,8 @@ export function commandProblem(
     ].includes(type)
   )
     return deploymentProblem(type, body);
+  if (type.startsWith('application.child.'))
+    return containedProblem(type, body);
   if (
     [
       'application.identity.status',

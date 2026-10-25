@@ -82,6 +82,29 @@ func TestDeploymentReceiptCoordinates(t *testing.T) {
 	}
 }
 
+func TestContainedRepliesAreAboutTheChildAsked(t *testing.T) {
+	const child, foreign = "11111111-1111-1111-1111-111111111111", "33333333-3333-3333-3333-333333333333"
+	asked := []byte(`{"conversation":"c","child":"` + child + `"}`)
+	for operation, cases := range map[string]map[string]bool{
+		"application.child.ceiling": {
+			`{"child":"` + child + `"}`:   true,
+			`{"child":"` + foreign + `"}`: false,
+		},
+		"application.child.destroy": {
+			`{"child":"` + child + `","collected":["` + foreign + `","` + child + `"],"sources":2}`: true,
+			`{"child":"` + foreign + `","collected":["` + foreign + `"],"sources":1}`:               false,
+			`{"child":"` + child + `","collected":["` + foreign + `"],"sources":1}`:                 false,
+			`{"child":"` + child + `","collected":["` + child + `"],"sources":2}`:                   false,
+		},
+	} {
+		for reply, want := range cases {
+			if got := deploymentMatches(operation, asked, []byte(reply)); got != want {
+				t.Fatalf("%s %s: got %v want %v", operation, reply, got, want)
+			}
+		}
+	}
+}
+
 func TestRelayPublishRawUtf8Limit(t *testing.T) {
 	const maximum = 50 * 1024 * 1024
 	for _, text := range []string{strings.Repeat("x", maximum), strings.Repeat("é", maximum/2)} {
