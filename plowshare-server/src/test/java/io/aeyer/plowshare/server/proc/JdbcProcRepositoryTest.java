@@ -326,6 +326,43 @@ class JdbcProcRepositoryTest {
     return found;
   }
 
+  private void assertConversationCallWorkIsShared() throws Exception {
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 51)
+            .addValue("live", List.of(""));
+    var explained =
+        new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+            .queryForObject(
+                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.conversationPageSql(false),
+                args,
+                String.class);
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE page_calls"));
+    checkCallScans(plan);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM pg_indexes WHERE indexname='inference_calls_direct_conversation' AND indexdef LIKE '%(conversation_id)%'",
+            Integer.class));
+  }
+
+  private void checkCallScans(com.fasterxml.jackson.databind.JsonNode plan) {
+    if ("inference_calls".equals(plan.path("Relation Name").asText())
+        && "Seq Scan".equals(plan.path("Node Type").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "A page must not rescan all retained calls per conversation");
+    for (var childPlan : plan) checkCallScans(childPlan);
+  }
+
   private void assertQueueWorkIsShared() {
     var args =
         new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
@@ -476,7 +513,7 @@ class JdbcProcRepositoryTest {
   }
 
   @Test
-  void attemptBatchKeepsItsIndependentCapAndOrderForEveryAuthorizedCall() {
+  void attemptBatchKeepsItsIndependentCapAndOrderForEveryAuthorizedCall() throws Exception {
     UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
@@ -508,6 +545,17 @@ class JdbcProcRepositoryTest {
         """);
     var page = repository.calls("alice", query("mine", root, null, 100));
     assertEquals(2, page.calls().size());
+    var conversations = repository.conversations("alice", query("mine", root, null, 100), live());
+    var childSummary =
+        conversations.conversations().stream()
+            .filter(row -> row.id().equals(child))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(2, childSummary.calls());
+    assertEquals(202, childSummary.attempts());
+    assertEquals(2, childSummary.repeatedCalls());
+    assertEquals("SYSTEM", childSummary.principal());
+    assertConversationCallWorkIsShared();
     for (var call : page.calls()) {
       assertEquals(101, call.attempts());
       assertEquals(100, call.observations().size());

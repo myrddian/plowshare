@@ -66,6 +66,11 @@ selection totals survive an empty cursor page. Narrow metadata projections avoid
 extracted document bodies through the counter pipeline. JIT is disabled only within the PROC
 read transaction and a five-second transaction timeout bounds SQL work.
 
+Conversation pages load selected inference-call facts once and reuse them for totals, activity
+and repetition groups. A direct `conversation_id` index supports individual/delegated conversations;
+the older root-conversation index serves a different predicate. Unrelated retained calls must not
+be scanned again for each displayed conversation.
+
 Worker discovery uses the same statement-local eligibility set. Targeted claims retain their
 locking, generation, authority and allowance checks. There is no cross-request worker grant cache.
 
