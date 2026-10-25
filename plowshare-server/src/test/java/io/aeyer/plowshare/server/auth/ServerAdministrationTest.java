@@ -74,7 +74,11 @@ class ServerAdministrationTest {
     context.registerBean(AdminStore.class);
     context.registerBean(PasswordHasher.class);
     context.registerBean(TokenStore.class, this::server);
-    context.register(ServerAdministration.class, SocketAuthorization.class);
+    context.register(
+        ServerAdministration.class,
+        SocketAuthorization.class,
+        StoredSessionAuthority.class,
+        io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class);
     context.register(JdbcAccountAdministrationRepository.class);
     context.registerBean(
         io.aeyer.plowshare.server.archive.UnitOfWork.class,

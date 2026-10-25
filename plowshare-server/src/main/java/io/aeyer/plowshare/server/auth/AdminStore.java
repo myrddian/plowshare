@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.auth;
 
 import io.aeyer.plowshare.server.access.BuiltInIdentities;
+import io.aeyer.plowshare.server.auth.SessionAuthority.Session;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,7 +12,7 @@ import org.springframework.stereotype.Repository;
  * compatibility.
  */
 @Repository
-public class AdminStore implements SessionAuthority {
+public class AdminStore {
 
   private final JdbcTemplate jdbc;
   private org.springframework.context.ApplicationEventPublisher events;
@@ -176,7 +177,7 @@ public class AdminStore implements SessionAuthority {
         .isEmpty();
   }
 
-  @Override
+  /** Fresh distinct session facts, shared only within the caller's sweep. */
   public java.util.Set<Session> currentSessions(java.util.Collection<Session> sessions) {
     var requested = java.util.Set.copyOf(sessions);
     var handles = requested.stream().map(Session::handle).distinct().sorted().toList();

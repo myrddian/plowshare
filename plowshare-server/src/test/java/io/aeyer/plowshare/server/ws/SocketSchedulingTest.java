@@ -62,6 +62,7 @@ class SocketSchedulingTest {
         .withUserConfiguration(
             SchedulingConfig.class,
             SocketAuthorization.class,
+            io.aeyer.plowshare.server.auth.StoredSessionAuthority.class,
             DedicatedTimers.class,
             io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class)
         .withBean(AdminStore.class, () -> accounts)

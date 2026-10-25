@@ -59,7 +59,9 @@ class ServiceAccountsTest {
         AdminStore.class,
         io.aeyer.plowshare.server.archive.JdbcProjectMembers.class,
         ServiceAccounts.class,
-        SocketAuthorization.class);
+        SocketAuthorization.class,
+        StoredSessionAuthority.class,
+        io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class);
     context.register(JdbcServiceAccountRepository.class);
     context.registerBean(
         io.aeyer.plowshare.server.archive.UnitOfWork.class,
@@ -217,14 +219,32 @@ class ServiceAccountsTest {
     var context = information.forRun(principal, Home.of("automation"));
     assertFalse(context.selection().includeGlobal());
     information.requireSelection(context);
+    // Ordinary discovery now permits public Global READ alongside the token's one scoped
+    // project. Retained execution above keeps its home-only ceiling; Personal and foreign
+    // projects remain unavailable. These are different policy boundaries, not ambient elevation.
     assertThrows(CallerFault.class, () -> information.resolve(principal, null));
+    assertEquals(
+        "automation",
+        information
+            .resolve(
+                principal,
+                io.aeyer.plowshare.server.information.InformationContext.Selection.project(
+                    "automation"))
+            .selection()
+            .project());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            information.resolve(
+                principal,
+                io.aeyer.plowshare.server.information.InformationContext.Selection.personal()));
     assertThrows(
         CallerFault.class,
         () ->
             information.resolve(
                 principal,
                 io.aeyer.plowshare.server.information.InformationContext.Selection.project(
-                    "automation")));
+                    "other")));
     var policy =
         new ProjectAuthorization(
             new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),

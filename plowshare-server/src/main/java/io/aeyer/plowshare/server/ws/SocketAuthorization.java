@@ -18,6 +18,11 @@ public class SocketAuthorization {
           WebSocketSession, io.aeyer.plowshare.server.reads.ReadAdmission.Lease>
       leases = new ConcurrentHashMap<>();
 
+  /** Standalone legacy fixtures use the same narrow adapter as production composition. */
+  public SocketAuthorization(io.aeyer.plowshare.server.auth.AdminStore accounts) {
+    this(new io.aeyer.plowshare.server.auth.StoredSessionAuthority(accounts));
+  }
+
   public SocketAuthorization(SessionAuthority accounts) {
     this(accounts, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
   }

@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.cache.ProjectionCaches;
 import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.llm.accounting.CachedUsageReportRepository;
-import io.aeyer.plowshare.server.llm.accounting.JdbcUsageReportRepository;
 import io.aeyer.plowshare.server.llm.accounting.UsageReportRepository;
 import java.util.Set;
 import org.springframework.context.annotation.Bean;
@@ -17,7 +16,8 @@ public class ReportReadConfiguration {
   @Bean
   @Primary
   UsageReportRepository cachedUsageReports(
-      JdbcUsageReportRepository source,
+      @org.springframework.beans.factory.annotation.Qualifier("jdbcUsageReportRepository")
+          UsageReportRepository source,
       ProjectionCaches caches,
       ReadAdmission admission,
       ObjectMapper json) {
