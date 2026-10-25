@@ -18,13 +18,25 @@ Two things follow, and both were got wrong before they were got right.
 position does not stop a turn being scheduled. Nothing in Relay parks a consumer, and nothing in
 Relay should.
 
-**A wait is not inherited.** It is a fact about one conversation at one moment — eligible, or not,
-right now. `relay_causation` (V127) models inheritance: a root, a parent, a depth. Eligibility has
-no lineage, so causation is the wrong *kind* of fact for it, independently of any mechanism. This
-is why an attempt to bound a wait chain with `relay_valid_causation`'s depth found nothing to read:
-`relay_inherit_job` fixes a mailbox's conversation as a root at `depth 0` from its first job and
-propagates that root back onto the conversation, so no depth is ever carried across a send. The
-mechanical reason is real; the category error came first.
+**A wait is not expressed as lineage.** Eligibility is a fact about one conversation at one moment —
+eligible, or not, right now. `relay_causation` (V127) models inheritance: a root, a parent, a depth.
+A wait chain is not an effect chain, so causation is the wrong instrument for bounding one.
+
+This is narrower than an earlier version of this record claimed, and the correction matters because
+the two families differ:
+
+- **Messaging has no inherited chain to read.** `relay_inherit_job` fixes a mailbox's conversation
+  as a root at `depth 0` from its first job and propagates that root back onto the conversation, so
+  no depth is carried across a send. An attempt to bound a messaging wait chain with
+  `relay_valid_causation`'s depth therefore found nothing to read.
+- **Delegation does inherit, deliberately.** V127's `relay_inherit_orchestration` copies a parent's
+  causation to its child, and Relay-started orchestration work consumes one configured effect depth
+  (`RelayEffectBound.next`). Both shipped in "Bound lifecycle feedback across Relay-started work"
+  (merged 2026-10-06). Delegation still does not use causation to bound its *waits*: it has its own
+  `depth` column with `plowshare.orchestrations.max-depth`, and the wait itself is `state='waiting'`.
+
+So the claim is that eligibility is not a lineage property — not that no delegation lineage exists.
+The earlier phrasing generalised from the messaging path to the platform.
 
 ## The gap
 
@@ -103,20 +115,38 @@ which is exactly `RelayPayload.Lifecycle`, "a bounded change notice with referen
 records, never command/result text". The request and report text stay in the orchestration record,
 read through its existing authority.
 
-Much of the inbound leg already exists, which is why this is a conversion rather than a build:
+### What is already on Relay, and what is not
 
-| already built | where |
-|---|---|
-| `orchestration.start` as a Relay work receiver | `WorkRelayReceiver.java`, `RelayConfiguration.java:430` |
-| pinned work destinations | `relay_deliveries.work_agent`/`work_project`/`work_definition`, `relay_work_destination` CHECK (V121) |
-| idempotent starts and receipts | `relay_executions` (V121), `RelayExecutions.begin`/`accepted`, receipt namespaces `job` and `orchestration` |
-| orchestration lifecycle notices | `orchestration.changed` (`OrchestrationsConfig.java:98`), `orchestration.recorded` (`RecordKeeper.java:48`) |
-| the orchestration family in the source log | `relay_inherit_source`'s `topic LIKE 'orchestration.%'` branch (V127) |
+More of delegation is on Relay than this record first said, and the parts that are were shipped by
+"Bound lifecycle feedback across Relay-started work" (merged 2026-10-06) together with V121, V124
+and V127. The parts that are not are the delegation mechanics themselves.
 
-So the conversion is:
+| delegation path | on Relay | mechanism |
+|---|---|---|
+| inbound start from an external publication | **yes** | `WorkRelayReceiver` / `@Bean relayOrchestrationReceiver` (`RelayConfiguration.java:430`). It starts a **root** — `depth 0`, `Speaker.relay(...)` — never a child |
+| pinned work destinations | **yes** | `relay_deliveries.work_agent`/`work_project`/`work_definition` with the `relay_work_destination` CHECK (V121) |
+| idempotent starts and receipts | **yes** | `relay_executions` (V121), `RelayExecutions.begin`/`accepted`, receipt namespaces `job` and `orchestration` |
+| effect-depth bound on Relay-started chains | **yes** | `RelayEffectBound.next(history, publication, maximum)` in `WorkRelayReceiver.dispatch` |
+| causation into nested work | **yes** | V127 `relay_inherit_orchestration` copies parent → child; `relay_inherit_conversation` carries the conductor conversation |
+| lifecycle notices outbound | **yes** | V124's transactional outbox writes `relay_source_events`; `JdbcRelaySourceRepository.publishNext` publishes them as `RelayPayload.Lifecycle`, driven by `RelayInternalWorkers`. Includes `orchestration.child.completed`, carrying the parent in `related` |
+| internal child dispatch (conductor → child) | **no** | `startNested` has one caller, `CallerOrchestrations.java:136` — the agent tool. Relay never starts a child, and `depth > 0` never originates from it |
+| the report that wakes the parent | **no** | `Delivery` → `ParentVoice.speak`, in process. `orchestration.child.completed` has **no consumer in code** — the only other reference is a documentation row in `docs/relay.md` |
+| the wait / turn eligibility | **no**, and by design | `orchestrations.state='waiting'` + `waiting_for`. This record argues it must not become Relay's |
+
+The shape that leaves is worth naming: **Relay already carries delegation's notices as an
+observation feed, running in parallel with the in-process delivery that does the work.** Two paths
+for the same fact, one of them unconsumed. That is a harder thing to see than an unported family,
+because from the outside it looks finished.
+
+So the remaining conversion is:
 
 - **`orchestration_start(name, request, context, wait)` is unchanged.** Agents see the same tool.
-- **Starts and reports travel Relay** as `Lifecycle` publications naming the run, not its text.
+- **The missing piece is a consumer, not a publisher.** `orchestration.child.completed` is already
+  published as a `Lifecycle` notice carrying the parent in `related`; nothing reads it, and the
+  report travels in process instead. Consuming it is what makes Relay the delivery path rather than
+  a parallel observation feed, and it removes the second path rather than adding a third.
+- **Internal child dispatch is the other half**, since `startNested` is reached only from the tool
+  and `depth > 0` never originates from Relay today.
 - **The wait stays delegation's policy**, expressed through the one eligibility owner rather than a
   bespoke row state only `route` consults. `state='waiting'` is the right *decision* in the wrong
   *place*; it does not become a Relay concept.
