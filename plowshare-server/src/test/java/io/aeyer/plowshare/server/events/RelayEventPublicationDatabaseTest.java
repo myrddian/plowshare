@@ -10,10 +10,12 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.DurableRelay;
 import io.aeyer.plowshare.server.relay.JdbcRelayLogRepository;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
 import io.aeyer.plowshare.server.relay.ScopedRelayInspection;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -92,7 +94,14 @@ class RelayEventPublicationDatabaseTest {
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('viewer','fixture',false)");
     triggers = new JdbcTriggerStore(jdbc);
     firings = new JdbcFiringStore(jdbc);
-    relay = new DurableRelay(new JdbcRelayRepository(jdbc, work), () -> AT);
+    relay =
+        new DurableRelay(
+            new JdbcRelayRepository(
+                jdbc,
+                work,
+                new JdbcRelayPayloadStore(
+                    jdbc, work, Duration.ofHours(1), Duration.ofHours(24), Duration.ofDays(30))),
+            () -> AT);
     intake = new Intake(triggers, firings, mock(Dispatcher.class), () -> AT);
     publication =
         new RelayEventPublication(

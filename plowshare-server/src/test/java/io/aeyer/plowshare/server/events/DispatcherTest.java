@@ -8,7 +8,9 @@ import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.RecordingLogStages;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.DurableRelay;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -185,7 +187,17 @@ class DispatcherTest {
     intake = new Intake(triggers, firings, dispatcher, clock);
     publication =
         new RelayEventPublication(
-            new DurableRelay(new JdbcRelayRepository(jdbc, work), clock),
+            new DurableRelay(
+                new JdbcRelayRepository(
+                    jdbc,
+                    work,
+                    new JdbcRelayPayloadStore(
+                        jdbc,
+                        work,
+                        Duration.ofHours(1),
+                        Duration.ofHours(24),
+                        Duration.ofDays(30))),
+                clock),
             intake,
             work,
             () -> {
@@ -218,7 +230,17 @@ class DispatcherTest {
    */
   private List<FiringRecord> fireThrough(Intake inbox, String event, EventPayload data) {
     return new RelayEventPublication(
-            new DurableRelay(new JdbcRelayRepository(jdbc, work), clock),
+            new DurableRelay(
+                new JdbcRelayRepository(
+                    jdbc,
+                    work,
+                    new JdbcRelayPayloadStore(
+                        jdbc,
+                        work,
+                        Duration.ofHours(1),
+                        Duration.ofHours(24),
+                        Duration.ofDays(30))),
+                clock),
             inbox,
             work,
             () -> {},
