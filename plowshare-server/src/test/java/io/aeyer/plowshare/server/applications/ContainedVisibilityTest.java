@@ -238,6 +238,11 @@ class ContainedVisibilityTest {
     verify(authority).conversationsIn(grandchildScope);
   }
 
+  // The two knowledge tests below pin PRE-EXISTING boundary machinery -- KnowledgeReadScope,
+  // Admission's Global-READ invariant and InformationSql.boundary -- and would pass with every
+  // line of this task's own code deleted. They belong here because the fence they pin is the
+  // fence this task's operations read through, not because they cover those operations: the
+  // coverage of list and trajectory is the eight tests above.
   @Test
   void aChildKnowledgeReadReturnsNothingFromOutsideItsSubtree() {
     var first = child(firstScope, parentScope);
@@ -293,15 +298,12 @@ class ContainedVisibilityTest {
         "The closure predicate is bound to the child's own home with Global read off");
   }
 
-  @Test
-  void aChildWritesKnowledgeInsideItsOwnHome() {
-    var first = child(firstScope, parentScope);
-    var ceiling = KnowledgeReadScope.homeOnly(Home.of(first.project()));
-    // Its own home is writable and readable; the ceiling narrows what it may reach, not what it
-    // may hold. Requiring its own home is exactly what a write inside it does.
-    assertDoesNotThrow(() -> ceiling.requireHome(Home.of(first.project())));
-    assertEquals(List.of(Home.of(first.project())), ceiling.memoryHomes());
-  }
+  // There is deliberately no aChildWritesKnowledgeInsideItsOwnHome here. The version that stood
+  // in this place reduced to homeOnly(h).requireHome(h), which cannot fail, so it named the
+  // user's decision that a contained Application has its own writable knowledge home without
+  // exercising it. A ceiling value cannot express where a write lands; the row's resolved home
+  // can, and does, in
+  // ContainedKnowledgeBoundaryDatabaseTest.aChildWritesKnowledgeInsideItsOwnHome.
 
   /** Still no collaborator through which either read could resolve a scope. */
   @Test

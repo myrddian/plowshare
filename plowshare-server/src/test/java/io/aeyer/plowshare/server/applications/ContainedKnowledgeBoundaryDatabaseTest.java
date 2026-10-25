@@ -113,8 +113,19 @@ class ContainedKnowledgeBoundaryDatabaseTest {
    * Exactly {@code InformationSql.boundary}'s call, with the ceiling already hoisted into the two
    * non-revision arguments. The scope array is built in SQL for the same reason the repository
    * builds it in SQL: the predicate takes {@code uuid[]} and the driver has no binding for one.
+   *
+   * <p><strong>The array is supplied by hand, and for a contained scope that is
+   * counterfactual.</strong> {@link #aContainedHomeResolvesAnEmptyReadableSet()} shows production
+   * cannot build an array holding a contained scope at all, because {@code
+   * knowledge_scope_readable} admits no {@code CONTAINED} kind. So every assertion below that
+   * passes {@code childScope} asks what the closure predicate <em>would</em> decide if that scope
+   * were ever readable — which is the right question for pinning closure semantics, and is not
+   * evidence that any caller can obtain that answer today. The widening that would make it
+   * producible is ADR 0042's recorded gap and is not this slice's. Reality is therefore stricter
+   * than these tests, never looser, which is why the fence conclusions hold regardless.
    */
-  private boolean admitted(UUID revision, boolean globalRead, UUID... readable) {
+  private boolean admittedUnderHandSuppliedCeiling(
+      UUID revision, boolean globalRead, UUID... readable) {
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT knowledge_document_admitted(?,?,"
@@ -132,17 +143,19 @@ class ContainedKnowledgeBoundaryDatabaseTest {
   }
 
   /**
-   * Where the array the predicate takes comes from, and what a contained home resolves to.
+   * Where the array the predicate takes comes from, and what a contained home resolves to:
+   * <b>nothing at all</b>, which is the opposite of what a reader might expect and is why this test
+   * is named for the empty set rather than for the child's own scope.
    *
-   * <p>Nothing. {@code knowledge_scope_readable} admits {@code ACCOUNT_KNOWLEDGE}, the {@code
+   * <p>{@code knowledge_scope_readable} admits {@code ACCOUNT_KNOWLEDGE}, the {@code
    * GLOBAL_KNOWLEDGE} builtin, {@code PROJECT} and {@code PERSONAL}, and a contained scope is none
    * of those — the SQL-side closure this slice already shipped. So a reader under a contained home
-   * resolves an <b>empty</b> readable set: neither its container's scope nor the Global tier, which
-   * is the fence, and not its own scope either, which is a gap the executing path will have to
-   * answer and is recorded as one rather than widened here.
+   * resolves an empty readable set: neither its container's scope nor the Global tier, which is the
+   * fence, and <em>not its own scope either</em>, which is ADR 0042's recorded gap and is what
+   * makes every hand-supplied {@code childScope} array in this class counterfactual.
    */
   @Test
-  void aChildHomeResolvesOnlyToItsOwnScope() {
+  void aContainedHomeResolvesAnEmptyReadableSet() {
     assertEquals(List.of(), readableScopes(childProject));
     assertFalse(readableScopes(childProject).contains(parentScope));
     assertFalse(readableScopes(childProject).contains(globalScope));
@@ -156,13 +169,18 @@ class ContainedKnowledgeBoundaryDatabaseTest {
     UUID own = retained(childProject);
     UUID above = retained("parent");
 
-    assertTrue(admitted(own, false, childScope), "its own home is what the ceiling names");
-    assertFalse(admitted(above, false, childScope), "its container's home is not");
-    assertFalse(admitted(own, false, globalScope), "and the Global tier is not its home either");
+    assertTrue(
+        admittedUnderHandSuppliedCeiling(own, false, childScope),
+        "its own home is what the ceiling names");
+    assertFalse(
+        admittedUnderHandSuppliedCeiling(above, false, childScope), "its container's home is not");
+    assertFalse(
+        admittedUnderHandSuppliedCeiling(own, false, globalScope),
+        "and the Global tier is not its home either");
     // The container, reading under its own ceiling, sees its own home and not the child's. A
     // parent reaches a child through application.child.* and never by widening its read home.
-    assertTrue(admitted(above, false, parentScope));
-    assertFalse(admitted(own, false, parentScope));
+    assertTrue(admittedUnderHandSuppliedCeiling(above, false, parentScope));
+    assertFalse(admittedUnderHandSuppliedCeiling(own, false, parentScope));
   }
 
   /**
@@ -179,18 +197,27 @@ class ContainedKnowledgeBoundaryDatabaseTest {
     input(derivedFromOutside, outside);
 
     assertTrue(
-        admitted(derivedFromInside, false, childScope),
-        "a closure wholly inside the subtree is admitted");
+        admittedUnderHandSuppliedCeiling(derivedFromInside, false, childScope),
+        "a closure wholly inside the subtree would be admitted, were the subtree readable");
     assertFalse(
-        admitted(derivedFromOutside, false, childScope),
+        admittedUnderHandSuppliedCeiling(derivedFromOutside, false, childScope),
         "a closure that leaves the subtree refuses the derived revision entirely");
     // Global read is the only other route into the predicate, and a contained ceiling never
     // carries it: with it on, the same closure is still refused unless every input is generally
     // readable, and with it off there is no route at all.
-    assertFalse(admitted(derivedFromOutside, true, childScope));
+    assertFalse(admittedUnderHandSuppliedCeiling(derivedFromOutside, true, childScope));
   }
 
-  /** Its own home is writable, and what it writes there it can read back. */
+  /**
+   * A child's write lands in its own home, under its own contained scope, and is not refused.
+   *
+   * <p>This is the whole of the decision that a contained Application has its own writable
+   * knowledge home: V157's identity trigger resolves {@code home_scope_id} to the contained scope,
+   * so the row is the child's and is in no other home. It deliberately stops there. The child
+   * <em>cannot</em> read that row back — {@link #aContainedHomeResolvesAnEmptyReadableSet()} is why
+   * — and the trailing assertion says only what the closure predicate would decide if the subtree
+   * were readable, which no caller can ask today.
+   */
   @Test
   void aChildWritesKnowledgeInsideItsOwnHome() {
     UUID written = retained(childProject);
@@ -200,8 +227,10 @@ class ContainedKnowledgeBoundaryDatabaseTest {
             "SELECT q.home_scope_id FROM information_resources q"
                 + " JOIN information_revisions r ON r.resource_id=q.id WHERE r.id=?",
             UUID.class,
-            written));
-    assertTrue(admitted(written, false, childScope));
+            written),
+        "the write is in the child's own home and in no other");
+    // Counterfactual, as the helper's name says: production cannot build this array.
+    assertTrue(admittedUnderHandSuppliedCeiling(written, false, childScope));
   }
 
   private void input(UUID derived, UUID from) {
