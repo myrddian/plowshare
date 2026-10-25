@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.access.AuthorityScope;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
@@ -124,16 +125,16 @@ class ContainedPrincipalSchemaTest {
     var wrongContainer =
         new AuthorityScope.Contained(
             new ScopeId(childScope), childProject, new ScopeId(UUID.randomUUID()));
-    assertThrows(IllegalArgumentException.class, () -> repository.issue(wrongContainer));
+    assertThrows(CallerFault.class, () -> repository.issue(wrongContainer));
     var wrongProject =
         new AuthorityScope.Contained(
             new ScopeId(childScope), childProject + 999, new ScopeId(parentScope));
-    assertThrows(IllegalArgumentException.class, () -> repository.issue(wrongProject));
+    assertThrows(CallerFault.class, () -> repository.issue(wrongProject));
     // An ordinary PROJECT scope is not contained and gets no principal.
     var ordinary =
         new AuthorityScope.Contained(
             new ScopeId(parentScope), childProject, new ScopeId(UUID.randomUUID()));
-    assertThrows(IllegalArgumentException.class, () -> repository.issue(ordinary));
+    assertThrows(CallerFault.class, () -> repository.issue(ordinary));
     assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM contained_principals", Long.class));
   }
 }

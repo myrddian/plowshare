@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.applications;
 
 import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.access.AuthorityScope;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,6 +13,13 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class JdbcContainedPrincipalRepository implements ContainedPrincipals {
+  /**
+   * The containment refusal for a contained scope that does not resolve; identical to the one
+   * {@code JdbcIdentityRepository.containedHome} gives, so a caller layer translates one fault for
+   * both.
+   */
+  static final String UNRESOLVED = "Identity or scope mapping is unavailable or restricted";
+
   private final JdbcTemplate jdbc;
 
   public JdbcContainedPrincipalRepository(JdbcTemplate jdbc) {
@@ -40,10 +48,7 @@ public class JdbcContainedPrincipalRepository implements ContainedPrincipals {
             scope.container().value())
         .stream()
         .findFirst()
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    "Scope is not a persisted contained scope with that project and container"));
+        .orElseThrow(() -> new CallerFault(UNRESOLVED));
   }
 
   @Override
