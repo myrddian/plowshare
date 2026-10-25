@@ -387,7 +387,8 @@ class LogAndWorkerAuthorityDatabaseTest {
     input("bad", "other", retained("other", "two"), "project", "two", false);
     var inbox = new JdbcInboxStore(jdbc);
     inbox.useInformationInputs(mock(InformationJobs.class));
-    var now = Instant.now().plusSeconds(1);
+    // PostgreSQL stores microseconds; Linux clocks can supply finer precision than macOS clocks.
+    var now = Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     var good = inbox.deliver("reader", null, "good", "done", "answer", now);
     var bad = inbox.deliver("reader", null, "bad", "done", "hidden", now.plusSeconds(1));
     var plain = inbox.notice("reader", "sync.conflict", "notice", now.plusSeconds(2));
