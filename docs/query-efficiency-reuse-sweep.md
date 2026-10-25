@@ -20,13 +20,52 @@ The functions preserve account activity, exact Personal ownership, project roles
 service-token issuance and current owner authority, Global inclusion, grant
 lineage and expiry, root audience, dependency cycles and the fail-closed closure
 limit. Pinned revision and live reference-head semantics remain distinct.
-Retained scope ceilings constrain selection as before. Mutation authority and
-worker claim functions remain separate.
+Retained scope ceilings constrain selection as before. Mutation authority remains
+separate. V195 extends statement-local reuse to log disclosure and bulk worker
+eligibility as described below; lease checkpoints still resolve current authority.
 
 The authority database tests compare the new relation with existing policy for
 those cases. They also count PostgreSQL function work across 48 selected roots and
 a corpus skewed with 32 unrelated Personal roots. These assertions establish
 bounded repeated authority work, not a production latency target.
+
+## Logs and workers share authority within each statement
+
+V195 batches retained log input selections against one `knowledge_read_authority`
+relation. Targeted `information_log_readable` calls walk only their own ancestry,
+deduplicate exact retained selections and share dependency facts across inputs.
+Collection reads use the uncorrelated `information_unreadable_logs(account)`
+relation before ordering, pagination and counts, rather than invoking a permission
+function per result row. Quarantined or unreadable seeds propagate through the
+inverse of all four ancestry edges. Ownership, each retained scope and Global
+inclusion flag, privacy, live grant lineage and the per-root dependency limit
+remain disclosure fences. Missing accounts and missing dependency facts fail
+closed; logs carrying no protected inputs retain their existing behavior.
+
+Bulk processing claims and both metadata sweeps use
+`information_system_processing_revisions()`. It resolves intrinsic SYSTEM lineage
+and the four required actions once, then checks each revision's registered home
+and transitive input validity. Creator access is provenance, not processing
+authority. Claim ordering, row locks, `SKIP LOCKED`, generation, explicit-stage
+authorization and lease predicates remain in their owning repository statements.
+Targeted claims and post-lock checkpoints retain their scalar current-authority
+checks: these are deliberate freshness boundaries, not a cross-request cache.
+
+`LogAndWorkerAuthorityDatabaseTest` compares admitted log sets with the shipped
+V186 predicate and processing eligibility with the unchanged scalar SYSTEM
+predicate. Transaction-local PostgreSQL function counters verify that adding
+inputs, log rows and worker candidates does not multiply account/grant checks.
+The existing processing persistence suite exercises concurrent claims and lease
+withdrawal. These checks establish SQL behavior and work bounds; deployed latency
+still requires measurement after release.
+
+On 25 October 2026, standalone query bodies were compared in a bounded read-only
+snapshot of the running database, without installing the migration. For the same
+65 retained input selections, the scalar predicates admitted all 65 in 1,473.9 ms
+and made 11,776 `account_active` calls; the batched query admitted the same 65 in
+17.8 ms and added 44 calls. The bulk SYSTEM eligibility relation took 13.3 ms of
+database execution in that snapshot. These are individual query measurements,
+not end-to-end Desktop timings or proof of a deployed release.
 
 ## Desktop refresh follows invalidation
 

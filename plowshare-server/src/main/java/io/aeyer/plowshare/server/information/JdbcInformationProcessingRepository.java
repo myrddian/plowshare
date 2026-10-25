@@ -158,7 +158,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                   + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
                   + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                   + " AND "
-                  + SYSTEM_OPERATION_VALID
+                  // A scan shares SYSTEM lineage across candidates. A targeted claim has only
+                  // one revision; its existing predicate avoids scanning unrelated inputs.
+                  + (revision == null
+                      ? "r.id IN (SELECT revision FROM information_system_processing_revisions())"
+                      : SYSTEM_OPERATION_VALID)
                   + " AND "
                   + PROCESSING_AUTHORIZED
                   + " AND (s.state='pending' OR (s.state='running' AND s.lease_until<?))"

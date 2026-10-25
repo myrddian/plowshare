@@ -18,7 +18,7 @@ public final class InformationQueueSql {
         AND (SELECT count(*) FROM information_steps prior WHERE prior.revision_id=r.id
           AND prior.generation=r.generation AND prior.stage IN ('extract','derive') AND prior.state IN ('ready','skipped'))=2
         AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')
-        AND information_system_processing_valid(r.id)
+        AND r.id IN (SELECT revision FROM information_system_processing_revisions())
         """;
   }
 
@@ -36,6 +36,6 @@ public final class InformationQueueSql {
         + "))"
         + " AND s.state IN ('skipped','ready')"
         + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-        + " AND information_system_processing_valid(r.id)";
+        + " AND r.id IN (SELECT revision FROM information_system_processing_revisions())";
   }
 }

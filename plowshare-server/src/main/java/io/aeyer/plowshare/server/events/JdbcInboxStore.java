@@ -56,9 +56,11 @@ public class JdbcInboxStore implements InboxStore {
   }
 
   private String informationVisible() {
+    // The bound account makes this an uncorrelated set, evaluated once before paging/counting.
+    // Passing the row's handle would rebuild authority for each notice in the same inbox.
     return information == null
         ? ""
-        : " AND (conversation IS NULL OR information_log_readable(conversation,handle))";
+        : " AND (conversation IS NULL OR conversation NOT IN (SELECT log FROM information_unreadable_logs(?)))";
   }
 
   public InboxItem deliver(
@@ -225,9 +227,9 @@ public class JdbcInboxStore implements InboxStore {
             + (ordinaryOnly ? " AND kind<>'approval'" : "")
             + " ORDER BY arrived_at DESC, id DESC OFFSET ? LIMIT ?",
         JdbcInboxStore::row,
-        handle,
-        offset,
-        limit);
+        information == null
+            ? new Object[] {handle, offset, limit}
+            : new Object[] {handle, handle, offset, limit});
   }
 
   public int markRead(String handle, List<String> ids, Instant at) {
@@ -242,7 +244,9 @@ public class JdbcInboxStore implements InboxStore {
         ps -> {
           ps.setTimestamp(1, Timestamp.from(at));
           ps.setString(2, handle);
-          ps.setArray(3, ps.getConnection().createArrayOf("text", ids.toArray()));
+          int next = 3;
+          if (information != null) ps.setString(next++, handle);
+          ps.setArray(next, ps.getConnection().createArrayOf("text", ids.toArray()));
         });
   }
 
@@ -251,7 +255,7 @@ public class JdbcInboxStore implements InboxStore {
         jdbc.queryForObject(
             "SELECT count(*) FROM user_inbox WHERE handle = ?" + UNREAD + informationVisible(),
             Integer.class,
-            handle);
+            information == null ? new Object[] {handle} : new Object[] {handle, handle});
     return n == null ? 0 : n;
   }
 
@@ -262,10 +266,11 @@ public class JdbcInboxStore implements InboxStore {
                 + SINCE_LAST_TURN
                 + (information == null
                     ? ""
-                    : " AND (i.conversation IS NULL OR information_log_readable(i.conversation,i.handle))"),
+                    : " AND (i.conversation IS NULL OR i.conversation NOT IN (SELECT log FROM information_unreadable_logs(?)))"),
             Integer.class,
-            handle,
-            conversation);
+            information == null
+                ? new Object[] {handle, conversation}
+                : new Object[] {handle, conversation, handle});
     return n == null ? 0 : n;
   }
 
@@ -276,10 +281,11 @@ public class JdbcInboxStore implements InboxStore {
                 + SINCE_LAST_TURN
                 + (information == null
                     ? ""
-                    : " AND (i.conversation IS NULL OR information_log_readable(i.conversation,i.handle))"),
+                    : " AND (i.conversation IS NULL OR i.conversation NOT IN (SELECT log FROM information_unreadable_logs(?)))"),
             OffsetDateTime.class,
-            handle,
-            conversation);
+            information == null
+                ? new Object[] {handle, conversation}
+                : new Object[] {handle, conversation, handle});
     return Optional.ofNullable(at).map(OffsetDateTime::toInstant);
   }
 
