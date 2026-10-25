@@ -155,6 +155,8 @@ public final class JdbcRelayRepository implements RelayRepository {
     // holds a row-exclusive lock on the payload row until commit; it is safe for a different
     // reason: locks are always acquired topic first, then payload, and the sweep takes no topic
     // lock at all, so nothing can wait on a topic lock while holding a payload lock.
+    // (This ordering is established by reading the acquisition paths; no test would fail if it
+    // stopped holding.)
     // The text allowance is checked here, before the bytes are written, so a refused payload
     // never reaches the store. A lowered allowance still recovers an identical retained event
     // because the probe returns before this check.

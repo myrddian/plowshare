@@ -18,7 +18,8 @@ input. One event near the ceiling, admitted by *n* subscribers, is 50 MiB × (1 
 That amplification is a **work-tier** cost only. Only the work tier
 admits: `ReadTierRelayConsumption.consume` calls `relay.read(key, limit)` directly,
 which creates no admission row and no payload copy. "Per admitting subscriber" is
-literally accurate, but read as a sizing figure it can suggest every subscriber
+literally accurate (this point is established by reading the code, not by a test that
+would fail if it stopped being true), but read as a sizing figure it can suggest every subscriber
 copies the payload; read-tier subscribers are free in exactly the dimension this
 store exists to fix. **The read path must not be changed to resemble the work path.**
 Giving a read-tier subscriber an admission, to unify the two or to make reads
@@ -491,16 +492,23 @@ reality is:
   `payload_digest` `NOT NULL` and drops `payload` with the `V135` payload `CHECK`s it
   carried.
 
-Expand, cutover, contract was necessary because the Java reader cutover and the
-column drop cannot be one step. Code that selects `payload` fails against a schema
-that has dropped it, and code that reads `payload_digest` fails against one that has
-not yet added it, so during any rolling deployment some server is on the other side
-of whichever single migration is chosen. Splitting the schema change lets the
-additive step (`V192`) be live before the readers change, and the destructive step
-(`V193`) follow the cutover. The split only buys that when `V192` has actually been
-deployed ahead of the release that carries the reader change; on this branch the
-reader cutover and `V193` landed in one commit, so that sequencing is a deployment
-property, not something the commit structure enforces.
+Expand, cutover, contract is the shape because the destructive step must not be
+applied to servers that still need what it removes:
+
+- `V191` and `V192` are **additive**. They can be applied while instances predating
+  the digest are still serving: the old column survives, the new one is nullable, and
+  old code neither knows nor needs to know about either.
+- The reader cutover and `V193` are the **contract** step and share one commit
+  (`bfa205b9`) on purpose. Within a commit there is no window: after `V193` the code
+  and the schema have to agree, so they change together.
+- The residual risk is **deploy ordering, which no migration can enforce.** `V193`
+  must not be applied while any instance predating the cutover is still serving,
+  because such an instance selects a column that no longer exists. This is an
+  operational constraint on deployment: `V191` and `V192` must be live, and old
+  instances drained, before the release carrying the cutover and `V193`. `V193`'s
+  `LOCK TABLE` and null-digest backfill cover only the narrow case of an old
+  instance *appending* during the migration; they do nothing about an old instance
+  *reading* after it. The commit structure does not prevent this problem.
 
 ### Why a data-preserving migration is still right
 
