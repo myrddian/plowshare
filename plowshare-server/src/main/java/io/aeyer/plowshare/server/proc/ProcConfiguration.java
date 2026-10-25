@@ -13,8 +13,24 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Configuration
 public class ProcConfiguration {
   @Bean
-  public ProcRepository procRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
-    return new JdbcProcRepository(jdbc, transactions);
+  public ProcRepository procRepository(
+      JdbcTemplate jdbc,
+      PlatformTransactionManager transactions,
+      io.aeyer.plowshare.server.cache.ProjectionCaches caches,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission,
+      com.fasterxml.jackson.databind.ObjectMapper json) {
+    return new CachedProcRepository(
+        new JdbcProcRepository(jdbc, transactions),
+        caches.create(
+            "proc-queues-v1",
+            java.util.Set.of(
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.OBSERVATIONS,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.DOCUMENTS,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.SEARCH,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.TRANSCRIPTS,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.AUTHORITY)),
+        admission,
+        json);
   }
 
   @Bean

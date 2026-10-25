@@ -306,8 +306,12 @@ class InformationToolTest {
         json.convertValue(
             Map.of("generation", 1, "stage", "extract", "state", "ready"),
             io.aeyer.plowshare.protocol.Information.Step.class);
-    var revision = revision(List.of(step));
-    when(catalogue.status(context, REVISION)).thenReturn(revision);
+    when(catalogue.extractionStates(context, List.of(REVISION)))
+        .thenReturn(
+            Map.of(
+                REVISION,
+                new io.aeyer.plowshare.server.information.InformationCatalogueRepository
+                    .ExtractionState(REVISION, 1, "fixture.md", step)));
     var tool = reader();
     var result =
         json.readTree(
@@ -319,7 +323,8 @@ class InformationToolTest {
     assertTrue(result.path("complete").asBoolean());
     assertEquals(1, result.path("ready").asInt());
     assertEquals(List.of(REVISION), read);
-    verify(catalogue).requireReadable(context, REVISION);
+    verify(catalogue).extractionStates(context, List.of(REVISION));
+    verify(catalogue, never()).status(any(), any());
   }
 
   @Test

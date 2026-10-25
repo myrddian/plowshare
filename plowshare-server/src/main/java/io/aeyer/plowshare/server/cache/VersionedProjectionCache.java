@@ -147,6 +147,12 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       cache.invalidate(key);
     } catch (CompletionException failed) {
       Throwable cause = failed.getCause();
+      // A cache capacity bound must also bound database demand. Bypassing it with a direct read
+      // creates one new SQL load per rejected waiter. This is not a transport admission refusal:
+      // an enclosing mutation may already have completed, so its client must not auto-replay it.
+      if (cause instanceof SnapshotCache.CacheException failure
+          && failure.failure() == SnapshotCache.Failure.CAPACITY)
+        throw new io.aeyer.plowshare.server.reads.ReadUnavailableException();
       if (cause instanceof SnapshotCache.CacheException failure
           && (failure.failure() == SnapshotCache.Failure.REENTRANT_LOAD
               || failure.failure() == SnapshotCache.Failure.INCONSISTENT_REQUEST)) throw failure;

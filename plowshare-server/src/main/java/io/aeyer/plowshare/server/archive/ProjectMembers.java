@@ -38,6 +38,18 @@ public interface ProjectMembers {
 
   Optional<ProjectRole> role(String project, String handle);
 
+  /**
+   * Effective roles for one operation; implementations may batch facts without retaining grants.
+   */
+  default java.util.Map<String, ProjectRole> roles(Collection<String> projects, String account) {
+    var selection =
+        new ReadSelection(account, projects == null ? null : new java.util.ArrayList<>(projects));
+    var result = new java.util.LinkedHashMap<String, ProjectRole>();
+    for (String project : selection.projects())
+      role(project, account).ifPresent(value -> result.put(project, value));
+    return java.util.Map.copyOf(result);
+  }
+
   boolean mayWork(String project, String handle);
 
   boolean mayManage(String project, String handle);

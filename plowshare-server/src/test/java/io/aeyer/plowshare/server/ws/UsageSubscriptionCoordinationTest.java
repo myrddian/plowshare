@@ -13,6 +13,40 @@ import org.junit.jupiter.api.Test;
 
 class UsageSubscriptionCoordinationTest {
   @Test
+  void subscriptionCapacityIsSharedAcrossSocketsAndReleasedOnEveryRemoval() {
+    var reports = mock(UsageReports.class);
+    var query = new Usage.Resolved("usage.models", mock(Usage.Filter.class));
+    var report = mock(Usage.Report.class);
+    when(report.filters()).thenReturn(query);
+    when(report.health()).thenReturn(mock(Usage.Health.class));
+    when(report.groups()).thenReturn(List.of());
+    when(reports.report("alice", query)).thenReturn(report);
+    var limits =
+        new io.aeyer.plowshare.server.reads.ReadCapacityProperties(4, 2, 2, 1, 8, 2, 16, 8, 4, 2);
+    var admission = new io.aeyer.plowshare.server.reads.BoundedReadAdmission(limits);
+    var subscriptions = new UsageSubscriptions(reports, admission);
+    subscriptions.connect("one", "alice", (id, body) -> {});
+    subscriptions.connect("two", "alice", (id, body) -> {});
+    subscriptions.connect("three", "alice", (id, body) -> {});
+    var first = subscriptions.subscribe(new Asking("session", "alice", "one"), query);
+    var second = subscriptions.subscribe(new Asking("session", "alice", "two"), query);
+    assertThrows(
+        io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
+        () -> subscriptions.subscribe(new Asking("session", "alice", "three"), query));
+    verify(reports, times(2)).report("alice", query);
+    subscriptions.unsubscribe(new Asking("session", "alice", "one"), first.subscription());
+    subscriptions.subscribe(new Asking("session", "alice", "three"), query);
+    assertEquals(
+        2, admission.active(io.aeyer.plowshare.server.reads.ReadAdmission.Work.SUBSCRIPTION));
+    subscriptions.disconnect("two");
+    assertEquals(
+        1, admission.active(io.aeyer.plowshare.server.reads.ReadAdmission.Work.SUBSCRIPTION));
+    subscriptions.close();
+    assertEquals(
+        0, admission.active(io.aeyer.plowshare.server.reads.ReadAdmission.Work.SUBSCRIPTION));
+  }
+
+  @Test
   void blocked_report_does_not_hold_registry_monitor_and_disconnect_fences_finalization()
       throws Exception {
     var reports = mock(UsageReports.class);

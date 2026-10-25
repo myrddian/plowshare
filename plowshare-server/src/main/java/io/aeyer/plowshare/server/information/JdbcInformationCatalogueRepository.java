@@ -26,6 +26,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final ProjectionCache<List<Information.Revision>> listCache;
   private final ProjectionCache<Information.Facets> facetsCache;
   private final InformationEvents events;
+  private final ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   /**
@@ -71,6 +72,29 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       ProjectionCache<List<Information.Revision>> listCache,
       ProjectionCache<Information.Facets> facetsCache,
       InformationEvents events) {
+    this(
+        jdbc,
+        clock,
+        allowances,
+        metadataCache,
+        textCache,
+        listCache,
+        facetsCache,
+        ProjectionCache.direct(),
+        events);
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache,
+      ProjectionCache<List<Information.Revision>> listCache,
+      ProjectionCache<Information.Facets> facetsCache,
+      ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache,
+      InformationEvents events) {
+    this.readinessCache = Objects.requireNonNull(readinessCache);
     this.events = Objects.requireNonNull(events);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
@@ -163,6 +187,101 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             Integer.class,
             args.toArray())
         .isEmpty();
+  }
+
+  @Override
+  public java.util.Map<UUID, ExtractionState> extractionStates(
+      InformationContext context, List<UUID> revisions) {
+    if (revisions == null || revisions.size() > 100)
+      throw new io.aeyer.plowshare.server.faults.CallerFault("Readiness has at most 100 revisions");
+    var ids = List.copyOf(revisions).stream().distinct().sorted().toList();
+    if (ids.isEmpty()) return java.util.Map.of();
+    if (!readinessCache.enabled()) return loadExtractionStates(context, ids, null);
+    long available = readinessCache.maxWeight() - contextWeight(context) - 1024L * ids.size();
+    long bound = Math.max(0, available / (4L * ids.size()));
+    return readinessCache.read(
+        new SnapshotCache.Key(
+            "readiness",
+            ProjectionCache.fingerprint(InformationJson.json(context), InformationJson.json(ids))),
+        bound > 0,
+        () -> loadExtractionStates(context, ids, bound),
+        () -> loadExtractionStates(context, ids, null),
+        value ->
+            contextWeight(context)
+                + 4L * InformationJson.json(value).length()
+                + 1024L * value.size());
+  }
+
+  private java.util.Map<UUID, ExtractionState> loadExtractionStates(
+      InformationContext context, List<UUID> ids, Long maximumBytes) {
+    var boundary = context.readBoundary();
+    var args =
+        new ArrayList<Object>(
+            java.util.Arrays.asList(
+                context.account(),
+                context.selection().scope().name().toLowerCase(Locale.ROOT),
+                context.selection().project(),
+                context.selection().includeGlobal(),
+                boundary == null ? null : boundary.home().project(),
+                boundary == null ? null : boundary.globalRead(),
+                "{"
+                    + ids.stream()
+                        .map(UUID::toString)
+                        .collect(java.util.stream.Collectors.joining(","))
+                    + "}"));
+    String bytes = "(octet_length(coalesce(r.source_uri,''))+octet_length(coalesce(s.error,'')))";
+    String fits = maximumBytes == null ? "true" : bytes + "<=?";
+    if (maximumBytes != null) {
+      args.add(maximumBytes);
+      args.add(maximumBytes);
+    }
+    var content = InformationSql.content(context, "r");
+    args.addAll(content.arguments());
+    var rows =
+        jdbc.query(
+            "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) "
+                + "SELECT r.id,r.generation,CASE WHEN "
+                + fits
+                + " THEN r.source_uri END AS source_uri,s.stage,s.state,s.attempt,"
+                + "CASE WHEN "
+                + fits
+                + " THEN s.error END AS error,s.started_at,s.finished_at,"
+                + bytes
+                + " AS projection_bytes "
+                + "FROM admitted JOIN information_revisions r ON r.id=admitted.revision "
+                + "LEFT JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='extract' WHERE "
+                + content.sql(),
+            (row, index) -> {
+              if (maximumBytes != null && row.getLong("projection_bytes") > maximumBytes)
+                throw new ProjectionCache.Bypass();
+              return new ExtractionState(
+                  row.getObject("id", UUID.class),
+                  row.getLong("generation"),
+                  row.getString("source_uri"),
+                  row.getString("stage") == null
+                      ? null
+                      : new Information.Step(
+                          row.getString("stage"),
+                          row.getString("state"),
+                          row.getInt("attempt"),
+                          row.getString("error"),
+                          row.getLong("generation"),
+                          null,
+                          row.getObject("started_at", java.time.OffsetDateTime.class) == null
+                              ? null
+                              : row.getObject("started_at", java.time.OffsetDateTime.class)
+                                  .toInstant(),
+                          row.getObject("finished_at", java.time.OffsetDateTime.class) == null
+                              ? null
+                              : row.getObject("finished_at", java.time.OffsetDateTime.class)
+                                  .toInstant(),
+                          null));
+            },
+            args.toArray());
+    return rows.stream()
+        .collect(
+            java.util.stream.Collectors.toUnmodifiableMap(
+                ExtractionState::revision, value -> value));
   }
 
   public Optional<AuthorizedMetadata> authorizedMetadata(

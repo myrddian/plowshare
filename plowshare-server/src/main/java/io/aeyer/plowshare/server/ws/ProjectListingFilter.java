@@ -29,14 +29,26 @@ public final class ProjectListingFilter {
     return filter(operation, outcome, account, null);
   }
 
-  /** Explicit project listings have already enforced live membership at their owning service. */
+  /**
+   * Batched current policy at completion/disclosure; a loaded listing is not a permission lease.
+   */
   public io.aeyer.plowshare.protocol.frames.Outcome filter(
       String operation,
       io.aeyer.plowshare.protocol.frames.Outcome outcome,
       String account,
       String selectedProject) {
     Object payload = outcome.payload();
-    if (payload instanceof List<?> rows && operation.equals("trigger.list")) {
+    if (payload instanceof List<?> rows && operation.equals("project.list")) {
+      var projects =
+          rows.stream().map(io.aeyer.plowshare.server.api.ProjectView.class::cast).toList();
+      var roles =
+          authorization.projectRoles(projects.stream().map(row -> row.name()).toList(), account);
+      payload =
+          projects.stream()
+              .filter(row -> roles.containsKey(row.name()))
+              .map(row -> row.withRole(roles.get(row.name()).name()))
+              .toList();
+    } else if (payload instanceof List<?> rows && operation.equals("trigger.list")) {
       payload =
           rows.stream()
               .map(io.aeyer.plowshare.server.events.TriggerRecord.class::cast)
@@ -64,10 +76,13 @@ public final class ProjectListingFilter {
                   })
               .toList();
     } else if (payload instanceof io.aeyer.plowshare.protocol.Orchestration.Listed listed) {
+      var readable =
+          authorization.readableProjects(
+              listed.orchestrations().stream().map(row -> row.project()).toList(), account);
       payload =
           new io.aeyer.plowshare.protocol.Orchestration.Listed(
               listed.orchestrations().stream()
-                  .filter(row -> authorization.readable(row.project(), account))
+                  .filter(row -> row.project() == null || readable.contains(row.project()))
                   .toList());
     } else if (payload instanceof io.aeyer.plowshare.server.ws.ApprovalFrames.Listed listed) {
       payload =
@@ -83,14 +98,22 @@ public final class ProjectListingFilter {
                   .toList());
     } else if (payload
         instanceof io.aeyer.plowshare.server.ws.BoardInspectionFrames.Topics listed) {
+      var readable =
+          authorization.readableProjects(
+              listed.topics().stream().map(row -> row.topic().project()).toList(), account);
       payload =
           new io.aeyer.plowshare.server.ws.BoardInspectionFrames.Topics(
               listed.topics().stream()
-                  .filter(row -> authorization.readable(row.topic().project(), account))
+                  .filter(
+                      row ->
+                          row.topic().project() == null || readable.contains(row.topic().project()))
                   .toList(),
               listed.more(),
               listed.offset());
     } else if (payload instanceof io.aeyer.plowshare.server.ws.BoardInspectionFrames.Swarm listed) {
+      var readable =
+          authorization.readableProjects(
+              listed.topics().stream().map(row -> row.topic().project()).toList(), account);
       payload =
           new io.aeyer.plowshare.server.ws.BoardInspectionFrames.Swarm(
               listed.pools(),
@@ -104,7 +127,9 @@ public final class ProjectListingFilter {
                               account))
                   .toList(),
               listed.topics().stream()
-                  .filter(row -> authorization.readable(row.topic().project(), account))
+                  .filter(
+                      row ->
+                          row.topic().project() == null || readable.contains(row.topic().project()))
                   .toList(),
               listed.seats().stream()
                   .filter(

@@ -151,15 +151,19 @@ public class ProjectController {
               name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE,
               required = false)
           String handle) {
+    if (handle == null) return ResponseEntity.ok(List.of());
+    var candidates = projects.allFor(handle);
+    var roles = members.roles(candidates.stream().map(ProjectRecord::name).toList(), handle);
+    var details = projects.listingDetails(roles.keySet());
     return ResponseEntity.ok(
-        projects.allFor(handle).stream()
-            .filter(project -> members.mayUse(project.name(), handle))
+        candidates.stream()
+            .filter(
+                project -> roles.containsKey(project.name()) && details.containsKey(project.name()))
             .map(
                 project ->
-                    listView(project)
+                    listView(project, details.get(project.name()))
                         .application(members.application(project.name()))
-                        .withRole(
-                            members.role(project.name(), handle).map(Enum::name).orElse(null)))
+                        .withRole(roles.get(project.name()).name()))
             .toList());
   }
 
@@ -359,12 +363,9 @@ public class ProjectController {
    * rootedElsewhere} lookup they never asked for would be one query per write for an answer nothing
    * reads.
    */
-  private ProjectView listView(ProjectRecord project) {
+  private ProjectView listView(ProjectRecord project, ProjectStore.ListingDetails details) {
     ProjectView view =
-        ProjectView.of(
-            project,
-            projects.effectiveExclusions(project),
-            projects.rootedElsewhere(project.name()).orElse(null));
-    return projects.personalOwner(project.name()).map(view::personal).orElse(view);
+        ProjectView.of(project, projects.effectiveExclusions(project), details.machine());
+    return details.personalOwner() == null ? view : view.personal(details.personalOwner());
   }
 }

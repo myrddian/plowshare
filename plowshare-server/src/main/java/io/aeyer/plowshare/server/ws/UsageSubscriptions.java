@@ -33,6 +33,11 @@ public class UsageSubscriptions {
     Signature signature;
     long revision;
     boolean ready;
+    io.aeyer.plowshare.server.reads.ReadAdmission.Lease budget;
+
+    void release() {
+      if (budget != null) budget.close();
+    }
 
     Subscription(String id, Usage.Resolved query, Signature signature) {
       this.id = id;
@@ -42,11 +47,19 @@ public class UsageSubscriptions {
   }
 
   private final UsageReports queries;
+  private final io.aeyer.plowshare.server.reads.ReadAdmission admission;
   private final ConcurrentMap<String, Connection> connections = new ConcurrentHashMap<>();
   private ScheduledExecutorService timer;
 
   public UsageSubscriptions(UsageReports queries) {
-    this.queries = queries;
+    this(queries, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public UsageSubscriptions(
+      UsageReports queries, io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    this.queries = Objects.requireNonNull(queries);
+    this.admission = Objects.requireNonNull(admission);
   }
 
   @PostConstruct
@@ -62,8 +75,12 @@ public class UsageSubscriptions {
         id, new Connection(account, sink, new ConcurrentHashMap<>(), new ReentrantLock()));
   }
 
-  public synchronized void disconnect(String id) {
-    connections.remove(id);
+  public void disconnect(String id) {
+    Connection removed;
+    synchronized (this) {
+      removed = connections.remove(id);
+    }
+    if (removed != null) removed.active.values().forEach(Subscription::release);
   }
 
   public synchronized void ready(String id, String subscription) {
@@ -85,11 +102,20 @@ public class UsageSubscriptions {
     String id = UUID.randomUUID().toString();
     var reserved = new Subscription(id, query, null);
     Connection c;
-    synchronized (this) {
-      c = connection(asking);
-      if (c.active.size() >= 8)
-        throw new CallerFault("a socket can hold at most eight usage subscriptions");
-      c.active.put(id, reserved);
+    reserved.budget =
+        admission.admit(
+            asking.requireHandle("usage.subscribe"),
+            io.aeyer.plowshare.server.reads.ReadAdmission.Work.SUBSCRIPTION);
+    try {
+      synchronized (this) {
+        c = connection(asking);
+        if (c.active.size() >= 8)
+          throw new CallerFault("a socket can hold at most eight usage subscriptions");
+        c.active.put(id, reserved);
+      }
+    } catch (RuntimeException | Error failed) {
+      reserved.release();
+      throw failed;
     }
     try {
       // Report IO is outside the service-wide monitor. The pending reservation counts toward
@@ -103,17 +129,20 @@ public class UsageSubscriptions {
       return new Usage.Initial(id, 0, query, report);
     } catch (RuntimeException | Error failure) {
       c.active.remove(id, reserved);
+      reserved.release();
       throw failure;
     }
   }
 
   public void unsubscribe(Asking asking, String id) {
     Connection c;
+    Subscription removed;
     synchronized (this) {
       c = connection(asking);
       // An absent ID is idempotent. No lookup in another connection is performed.
-      c.active.remove(id);
+      removed = c.active.remove(id);
     }
+    if (removed != null) removed.release();
     // Serialize the queue-only sink with publish so its tombstone cannot be overtaken by a
     // stale in-flight report. No report IO or external callback runs under the registry monitor.
     c.emitting.lock();
@@ -167,6 +196,7 @@ public class UsageSubscriptions {
             synchronized (this) {
               Connection current = connections.get(entry.getKey());
               if (current != entry.getValue() || current.active.remove(sub.id) != sub) continue;
+              sub.release();
               closed =
                   new Envelope(
                       null,
@@ -242,6 +272,9 @@ public class UsageSubscriptions {
   @PreDestroy
   public synchronized void close() {
     if (timer != null) timer.shutdownNow();
+    connections
+        .values()
+        .forEach(connection -> connection.active.values().forEach(Subscription::release));
     connections.clear();
   }
 }

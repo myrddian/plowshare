@@ -184,6 +184,7 @@ public class InformationConfig {
             "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create("catalogue-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create("catalogue-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create("readiness-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         events);
   }
 

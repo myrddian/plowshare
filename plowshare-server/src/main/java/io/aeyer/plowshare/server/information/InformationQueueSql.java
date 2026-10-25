@@ -8,6 +8,16 @@ package io.aeyer.plowshare.server.information;
 public final class InformationQueueSql {
   private InformationQueueSql() {}
 
+  /**
+   * One statement-local set of SYSTEM processing facts. Callers include this CTE once before using
+   * the eligibility predicates. Materialization prevents the planner from rescanning all eligible
+   * revisions for every candidate; it does not cache authority between statements or claims.
+   */
+  public static String processingAuthority() {
+    return "processing_authority AS MATERIALIZED ("
+        + "SELECT revision FROM information_system_processing_revisions())";
+  }
+
   public static String tagging() {
     return """
         r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded
@@ -18,7 +28,7 @@ public final class InformationQueueSql {
         AND (SELECT count(*) FROM information_steps prior WHERE prior.revision_id=r.id
           AND prior.generation=r.generation AND prior.stage IN ('extract','derive') AND prior.state IN ('ready','skipped'))=2
         AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')
-        AND r.id IN (SELECT revision FROM information_system_processing_revisions())
+        AND r.id IN (SELECT revision FROM processing_authority)
         """;
   }
 
@@ -36,6 +46,6 @@ public final class InformationQueueSql {
         + "))"
         + " AND s.state IN ('skipped','ready')"
         + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-        + " AND r.id IN (SELECT revision FROM information_system_processing_revisions())";
+        + " AND r.id IN (SELECT revision FROM processing_authority)";
   }
 }

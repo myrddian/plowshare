@@ -179,6 +179,26 @@ class ProjectStoreTest {
    * not from anything the first store kept.
    */
   @Test
+  void listingFactsBatchRootingPersonalOwnershipAndMembersWithoutMutableRows() {
+    store.define("listing", repo, List.of());
+    jdbc.update("UPDATE projects SET machine='fixture-machine' WHERE name='listing'");
+    String actor = "listing-" + java.util.UUID.randomUUID();
+    jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'fixture')", actor);
+    io.aeyer.plowshare.server.testing.AuthorityFixtures.personalIdentity(jdbc, actor);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,?,'VIEWER' FROM projects WHERE name='listing'",
+        actor);
+    String personal = io.aeyer.plowshare.server.personal.PersonalSpaces.name(actor);
+    var facts = store.listingDetails(List.of("listing", personal, "missing", "listing"));
+    assertEquals("fixture-machine", facts.get("listing").machine());
+    assertEquals(List.of(actor), facts.get("listing").members());
+    assertEquals(actor, facts.get(personal).personalOwner());
+    assertFalse(facts.containsKey("missing"));
+    assertThrows(UnsupportedOperationException.class, () -> facts.clear());
+    assertThrows(UnsupportedOperationException.class, () -> facts.get("listing").members().clear());
+  }
+
+  @Test
   void a_project_names_a_workspace_and_survives_a_restart() {
     store.define("payments", repo, List.of());
 

@@ -63,28 +63,26 @@ public final class ProjectListHandler implements FrameHandler {
 
   @Override
   public Outcome handle(Map<String, Object> payload, Asking asking) {
+    var candidates = projects.allForSession(asking.handle(), asking.sessionId());
+    var roles =
+        members.roles(candidates.stream().map(ProjectRecord::name).toList(), asking.handle());
+    var details = projects.listingDetails(roles.keySet());
     return Outcome.ok(
-        projects.allForSession(asking.handle(), asking.sessionId()).stream()
-            .filter(project -> members.mayUse(project.name(), asking.handle()))
+        candidates.stream()
+            .filter(
+                project -> roles.containsKey(project.name()) && details.containsKey(project.name()))
             .map(
                 project ->
-                    view(project)
+                    view(project, details.get(project.name()))
                         .application(members.application(project.name()))
-                        .withRole(
-                            members
-                                .role(project.name(), asking.handle())
-                                .map(Enum::name)
-                                .orElse(null)))
+                        .withRole(roles.get(project.name()).name()))
             .toList());
   }
 
-  private ProjectView view(ProjectRecord project) {
+  private ProjectView view(ProjectRecord project, ProjectStore.ListingDetails details) {
     ProjectView view =
         ProjectView.of(
-            project,
-            projects.effectiveExclusions(project),
-            projects.rootedElsewhere(project.name()).orElse(null),
-            members.members(project.name()));
-    return projects.personalOwner(project.name()).map(view::personal).orElse(view);
+            project, projects.effectiveExclusions(project), details.machine(), details.members());
+    return details.personalOwner() == null ? view : view.personal(details.personalOwner());
   }
 }

@@ -593,6 +593,59 @@ class LogAndWorkerAuthorityDatabaseTest {
   }
 
   @Test
+  void readinessFactsBatchAuthorityAndPreserveTargetedReadSemantics() {
+    var repository =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), mock(InformationEvents.class));
+    var context =
+        new InformationContext("reader", InformationContext.Selection.project("one"))
+            .withView(true);
+    var own = retained("reader", "one");
+    var foreign = retained("other", "two");
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state) VALUES(?,1,'extract','pending')",
+        own.revision());
+    var ids = new ArrayList<UUID>();
+    ids.add(own.revision());
+    ids.add(foreign.revision());
+    assertExtractionParity(repository, context, ids);
+    jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", own.revision());
+    assertExtractionParity(repository, context, ids);
+    jdbc.update("UPDATE information_revisions SET excluded=false WHERE id=?", own.revision());
+    work.inTransaction(
+        () -> {
+          jdbc.execute("SET LOCAL track_functions='all'");
+          long small =
+              activeCalls(() -> assertEquals(1, repository.extractionStates(context, ids).size()));
+          for (int index = 0; index < 48; index++) ids.add(retained("reader", "one").revision());
+          long large =
+              activeCalls(() -> assertEquals(49, repository.extractionStates(context, ids).size()));
+          assertTrue(small > 0);
+          assertEquals(
+              small,
+              large,
+              "A readiness set must resolve actor authority once, not once per source");
+          return null;
+        });
+    jdbc.update(
+        "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?)",
+        own.revision(),
+        foreign.revision());
+    assertExtractionParity(repository, context, ids);
+    assertFalse(repository.extractionStates(context, ids).containsKey(own.revision()));
+    jdbc.update("DELETE FROM project_members WHERE handle='reader'");
+    assertExtractionParity(repository, context, ids);
+    assertTrue(repository.extractionStates(context, ids).isEmpty());
+  }
+
+  private void assertExtractionParity(
+      JdbcInformationCatalogueRepository repository, InformationContext context, List<UUID> ids) {
+    var expected = new LinkedHashSet<UUID>();
+    for (UUID id : ids) if (repository.readable(context, id)) expected.add(id);
+    assertEquals(expected, repository.extractionStates(context, ids).keySet());
+  }
+
+  @Test
   void metadataSweepsShareAuthorityAcrossEligibleRows() {
     for (String stage : List.of("autoTag", "tagGroups")) {
       var first = retained("reader", "one");

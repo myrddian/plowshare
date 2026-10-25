@@ -1607,6 +1607,7 @@ class AuthFilterTest {
     AuthConfig.class,
     AuthController.class,
     io.aeyer.plowshare.server.ws.SocketAuthorization.class,
+    io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class,
     Probes.class
   })
   @ImportAutoConfiguration({
