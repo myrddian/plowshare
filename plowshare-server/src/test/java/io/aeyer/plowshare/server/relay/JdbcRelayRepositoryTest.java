@@ -65,7 +65,13 @@ class JdbcRelayRepositoryTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE relay_topics CASCADE");
+    // relay_payloads must go with the topics. Nothing references relay_topics from it, so a
+    // cascade from relay_topics alone leaves every stored payload behind, and the store is
+    // content-addressed: a later append of identical content resolves to the surviving digest and
+    // the conflict clause never rewrites a stored row's bytes. The payload-shape test below
+    // deliberately corrupts a stored row, and without this the corruption reaches every later
+    // test that appends the same content.
+    jdbc.execute("TRUNCATE relay_topics,relay_payloads CASCADE");
     jdbc.update("DELETE FROM projects WHERE name IN ('relay-fixture', 'relay-other')");
     Long project =
         jdbc.queryForObject(
@@ -74,7 +80,16 @@ class JdbcRelayRepositoryTest {
     topic = new Relay.TopicKey(Objects.requireNonNull(project), "release.observed");
     a = new Relay.SubscriptionKey(topic, "route-a");
     b = new Relay.SubscriptionKey(topic, "route-b");
-    repository = new JdbcRelayRepository(jdbc, transactions);
+    repository =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     repository.configureTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
   }
 
@@ -539,14 +554,25 @@ class JdbcRelayRepositoryTest {
             jdbc.update(
                 "UPDATE relay_topics SET max_records=0 WHERE project_id=?", topic.projectId()));
     repository.append(topic, draft("one"), T0);
+    // V194 dropped the publication's own payload column, so the shape constraint and the bytes
+    // both live in relay_payloads now, reached through payload_digest. Corrupting the stored row
+    // is what a reader sees through its join. Content addressing means this reaches any other
+    // publication holding identical content, which is inherent and not a change in this test's
+    // intent: the old statement likewise corrupted every publication in the scope.
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "UPDATE relay_publications SET payload='[]'::jsonb WHERE scope_key=?",
+                """
+                UPDATE relay_payloads SET payload='[]'::jsonb WHERE digest IN
+                  (SELECT payload_digest FROM relay_publications WHERE scope_key=?)
+                """,
                 RelayScopeCodec.write(topic)));
     jdbc.update(
-        "UPDATE relay_publications SET payload='{\"unknown\":1}'::jsonb WHERE scope_key=?",
+        """
+        UPDATE relay_payloads SET payload='{"unknown":1}'::jsonb WHERE digest IN
+          (SELECT payload_digest FROM relay_publications WHERE scope_key=?)
+        """,
         RelayScopeCodec.write(topic));
     repository.subscribe(a, Relay.Start.OLDEST_RETAINED, T0);
     assertThrows(IllegalArgumentException.class, () -> repository.read(a, 100));

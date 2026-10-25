@@ -54,8 +54,23 @@ public class RelayConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayRepository relayRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayPayloadStore payloads,
+      RelayProperties properties) {
+    return new JdbcRelayRepository(jdbc, transactions, payloads, properties.textLimit());
+  }
+
+  @Bean
+  @DependsOnDatabaseInitialization
+  public RelayPayloadStore relayPayloadStore(
       JdbcTemplate jdbc, UnitOfWork transactions, RelayProperties properties) {
-    return new JdbcRelayRepository(jdbc, transactions, properties.textLimit());
+    return new JdbcRelayPayloadStore(
+        jdbc,
+        transactions,
+        properties.getPayloadStagingWindow(),
+        properties.getPayloadDeferralCeiling(),
+        properties.getSettledRetention());
   }
 
   @Bean
@@ -485,7 +500,8 @@ public class RelayConfiguration {
       RelayProperties properties,
       RelayOperationRepository operations,
       RelayNativeRepository nativeInboxes,
-      RelayApprovalInboxRepository approvals) {
+      RelayApprovalInboxRepository approvals,
+      RelayPayloadStore payloads) {
     var maintenance =
         new RelayMaintenance(
             repository,
@@ -496,6 +512,7 @@ public class RelayConfiguration {
             operations,
             nativeInboxes);
     maintenance.useApprovalInbox(approvals);
+    maintenance.usePayloads(payloads);
     return maintenance;
   }
 }

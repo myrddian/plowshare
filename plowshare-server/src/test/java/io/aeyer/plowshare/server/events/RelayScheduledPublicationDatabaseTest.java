@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.DurableRelay;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
@@ -70,13 +71,23 @@ class RelayScheduledPublicationDatabaseTest {
   @BeforeEach
   void fresh() {
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE relay_topics, firings, triggers, schedules, projects, admins CASCADE");
+        jdbc,
+        "TRUNCATE relay_topics, relay_payloads, firings, triggers, schedules, projects, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('operator','fixture',true)");
     schedules = new JdbcScheduleStore(jdbc);
     triggers = new JdbcTriggerStore(jdbc);
     firings = new JdbcFiringStore(jdbc);
-    repository = new JdbcRelayRepository(jdbc, work);
+    repository =
+        new JdbcRelayRepository(
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(repository, () -> AT);
     dispatcher = mock(Dispatcher.class);
     intake = new Intake(triggers, firings, dispatcher, () -> AT);

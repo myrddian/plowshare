@@ -90,7 +90,16 @@ class JdbcRelayOperationRepositoryTest {
     access = new RelayProjectFiles.Access("operator", "relay-operator-fixture", projectId);
     topic = new Relay.TopicKey(projectId, "release.observed");
     subscription = new Relay.SubscriptionKey(topic, "relay.notices.release");
-    broker = new JdbcRelayRepository(jdbc, transactions);
+    broker =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     consumers = new JdbcRelayConsumerRepository(jdbc, transactions, deliveries, broker);
     operations = new JdbcRelayOperationRepository(jdbc, transactions, broker, deliveries);

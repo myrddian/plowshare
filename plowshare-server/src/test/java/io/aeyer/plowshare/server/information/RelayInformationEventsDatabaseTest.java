@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.relay.DurableRelay;
 import io.aeyer.plowshare.server.relay.JdbcRelayConsumerRepository;
 import io.aeyer.plowshare.server.relay.JdbcRelayDeliveryRepository;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
 import io.aeyer.plowshare.server.relay.JdbcRelaySubscriptionAuthority;
 import io.aeyer.plowshare.server.relay.ReadTierRelayConsumption;
@@ -118,8 +119,9 @@ class RelayInformationEventsDatabaseTest {
 
   @BeforeEach
   void fresh() {
+    // relay_payloads is not reachable by a cascade from relay_topics, so it is named.
     AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE relay_topics,information_resources,projects,admins CASCADE");
+        jdbc, "TRUNCATE relay_topics,relay_payloads,information_resources,projects,admins CASCADE");
     jdbc.update(
         """
         INSERT INTO admins(handle,password_hash,server_admin)
@@ -157,7 +159,16 @@ class RelayInformationEventsDatabaseTest {
 
     now = T0;
     hinted.clear();
-    broker = new JdbcRelayRepository(jdbc, work);
+    broker =
+        new JdbcRelayRepository(
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(broker, () -> now);
     var consumers =
         new JdbcRelayConsumerRepository(

@@ -183,7 +183,16 @@ class HostedScopePersistenceTest {
             EXECUTOR, "worker-session", "socket", new Register(ID, UUID.randomUUID(), 1));
     f.catalogue(b, f.clock.instant());
     long project = f.projects.id(PROJECT);
-    var broker = new JdbcRelayRepository(jdbc, transactions);
+    var broker =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     var relay = new DurableRelay(broker, () -> f.clock.instant());
     var spyRelay = spy(relay);
     doAnswer(

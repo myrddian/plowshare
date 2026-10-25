@@ -22,20 +22,33 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcRelayRepository implements RelayRepository {
   private static final String TOPIC_COLUMNS =
       "scope_key, name, payload_kind, retention_seconds, max_records, last_position, expired_through, generation";
+  // The payload bytes live once in relay_payloads; a publication names them by digest. Every read
+  // of a publication joins the store in its own query, so a page of records costs one query and
+  // the running byte sum below can use the length PostgreSQL already recorded.
   private static final String PUBLICATION_COLUMNS =
-      "position, event_id, publisher, occurred_at, published_at, correlation_id, causation_id, relay_causation::text, schema_version, payload::text";
+      "p.position, p.event_id, p.publisher, p.occurred_at, p.published_at, p.correlation_id,"
+          + " p.causation_id, p.relay_causation::text, p.schema_version, q.payload::text";
+  private static final String PUBLICATION_SOURCE =
+      " FROM relay_publications p JOIN relay_payloads q ON q.digest=p.payload_digest";
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
+  private final RelayPayloadStore payloads;
   private final RelayTextLimit textLimit;
 
-  public JdbcRelayRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
-    this(jdbc, transactions, RelayTextLimit.DEFAULT);
+  public JdbcRelayRepository(
+      JdbcTemplate jdbc, UnitOfWork transactions, RelayPayloadStore payloads) {
+    this(jdbc, transactions, payloads, RelayTextLimit.DEFAULT);
   }
 
-  public JdbcRelayRepository(JdbcTemplate jdbc, UnitOfWork transactions, RelayTextLimit textLimit) {
+  public JdbcRelayRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayPayloadStore payloads,
+      RelayTextLimit textLimit) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
+    this.payloads = Objects.requireNonNull(payloads, "payloads");
     this.textLimit = Objects.requireNonNull(textLimit, "textLimit");
   }
 
@@ -100,6 +113,62 @@ public final class JdbcRelayRepository implements RelayRepository {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
+    // The payload is stored before the topic transaction opens, on purpose, and commits ahead of it
+    // only when this thread has no transaction already open: the store issues a bare statement and
+    // the unit of work below joins an enclosing transaction (REQUIRED). A caller that appends
+    // inside
+    // its own transaction, such as RelayInformationEvents.publish, therefore keeps the payload row
+    // locked until that outer transaction ends, and the ahead-of-the-append benefit does not apply.
+    // Inside the topic transaction, the
+    // store's ON CONFLICT (digest) would make a publisher wait on another's uncommitted insert of
+    // the same digest, serialising publishers that share nothing but identical content. Committed
+    // ahead, the insert for every later publisher is a conflict that writes a row version only
+    // when it must push the staging date out, and the topic lock covers only position allocation.
+    // The price is orphans: a payload is written before the topic is read, so an
+    // append that then fails leaves an unreferenced row. That covers a failed or rolled-back
+    // insert, and also an append to an unknown topic or one of a different payload family, which
+    // used to fail with no side effect. That is correct, not an error: the sweep reclaims the row
+    // once it matures and nothing references it.
+    //
+    // What protects the row until this append's own insert references it is the staging window the
+    // store writes, and it is written on a repeat as well as on a fresh insert: the conflict clause
+    // re-arms ejection_at and takes the row lock. That matters here specifically, because the
+    // window between the committed store and the insert below spans the topic lock, the locked
+    // retained read and position allocation. A repeat that left an already matured ejection_at
+    // alone would leave the row a sweep candidate, with no lock held, for that whole window, and
+    // the insert below would then fail its foreign key.
+    //
+    // The sweep cannot reclaim a row this store has re-armed. Its delete requires ejection_at to
+    // still be matured as well as the row to be unreferenced, so a digest that a pass selected as a
+    // candidate before this repeat re-armed it fails the predicate when the pass reaches it. The
+    // row lock alone would not have sufficed: it only delays a delete that already selected the
+    // digest, which on resuming re-evaluates its reference checks, finds none yet, and deletes.
+    //
+    // Because the text allowance is checked before the family, a draft that is both oversize and
+    // the wrong family now reports the text-limit error.
+    //
+    // An identical repeat of a retained event stores nothing. The probe below is advisory and
+    // unlocked; the locked read under the topic lock stays the authority for idempotency and
+    // conflicts. It can be stale in two directions, both benign. If the event was first appended
+    // concurrently, the probe says absent: one redundant idempotent store, then the locked read
+    // returns the original. If the event was pruned after the probe said present, nothing was
+    // stored and the append is new: the fallback below validates and stores it inside the
+    // transaction. No lock cycle arises on the common path because a competing publisher commits
+    // its store before it takes any topic lock. The fallback stores under the topic lock and so
+    // holds a row-level lock on the payload row until commit; it is safe for a different
+    // reason: locks are always acquired topic first, then payload, and the sweep takes no topic
+    // lock at all, so nothing can wait on a topic lock while holding a payload lock.
+    // (This ordering is established by reading the acquisition paths; no test would fail if it
+    // stopped holding.)
+    // The text allowance is checked here, before the bytes are written, so a refused payload
+    // never reaches the store. A lowered allowance still recovers an identical retained event
+    // because the probe returns before this check.
+    String digest = null;
+    if (!isRetained(key, draft.eventId())) {
+      textLimit.validateNew(draft.payload());
+      digest = payloads.store(draft.payload(), admittedAt);
+    }
+    String payloadDigest = digest;
     return transactions.inTransaction(
         () -> {
           Relay.Topic topic = topic(key, true);
@@ -109,7 +178,8 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.query(
                   "SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND event_id=?",
+                      + PUBLICATION_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.event_id=?",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -120,10 +190,14 @@ public final class JdbcRelayRepository implements RelayRepository {
               throw new IllegalArgumentException("Relay event ID conflicts with retained content");
             return original;
           }
-          // Check only a new append under the topic lock: a lowered deployment allowance must
-          // still recover an identical retained UUID and must never advance a refused position.
-          textLimit.validateNew(draft.payload());
-          String payload = RelayPayloadCodec.write(draft.payload());
+          // The probe saw a retained event that pruning removed before the topic lock was taken, so
+          // nothing was stored. This is a genuinely new append: validate and store it here. It is
+          // the only path that stores under the lock, and only after a race with pruning.
+          String digestToWrite = payloadDigest;
+          if (digestToWrite == null) {
+            textLimit.validateNew(draft.payload());
+            digestToWrite = payloads.store(draft.payload(), admittedAt);
+          }
           long position = Math.addExact(topic.lastPosition(), 1);
           changed(
               jdbc.update(
@@ -135,8 +209,9 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.update(
                   """
           INSERT INTO relay_publications(scope_key,topic,position,event_id,publisher,occurred_at,
-              published_at,correlation_id,causation_id,relay_causation,schema_version,payload)
-          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?::jsonb)
+              published_at,correlation_id,causation_id,relay_causation,schema_version,
+              payload_digest)
+          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?)
           """,
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -148,9 +223,20 @@ public final class JdbcRelayRepository implements RelayRepository {
                   draft.correlationId(),
                   draft.causationId(),
                   RelayCausationCodec.write(draft.causation()),
-                  payload));
+                  digestToWrite));
           return new Relay.Publication(key, position, admittedAt, draft);
         });
+  }
+
+  /** Unlocked existence probe for an event ID; see {@link #append} for why it may be stale. */
+  private boolean isRetained(Relay.TopicKey key, String eventId) {
+    return !jdbc.query(
+            "SELECT 1 FROM relay_publications WHERE scope_key=? AND topic=? AND event_id=?",
+            (row, index) -> Boolean.TRUE,
+            RelayScopeCodec.write(key),
+            key.name(),
+            eventId)
+        .isEmpty();
   }
 
   @Override
@@ -245,7 +331,8 @@ public final class JdbcRelayRepository implements RelayRepository {
               .query(
                   "SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND event_id=?",
+                      + PUBLICATION_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.event_id=?",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -273,11 +360,28 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.query(
                   // Bound database materialization before decoding large payloads. Adding per-row
                   // metadata headroom preserves a contiguous prefix; a short page never skips work.
-                  "SELECT * FROM (SELECT candidates.*, SUM(octet_length(payload::text) + 4096)"
+                  // byte_length is the stored payload's octet_length(payload::text), which is
+                  // exactly what this window used to compute from the publication's own copy, so
+                  // the page boundary is unchanged. The window stays outside the LIMIT: a window
+                  // function is evaluated before LIMIT, so summing inside the candidate query
+                  // would budget against every matching row rather than the page. page_bytes is
+                  // now numeric rather than bigint, because byte_length is bigint where
+                  // octet_length returned integer; only the comparison against the budget below
+                  // depends on it, and an integral numeric compares the same.
+                  //
+                  // This page keeps SELECT *, so payload_bytes reaches the result set, which the
+                  // row mapper ignores. That is safe only because this is a plain query. The
+                  // inspection log's page names its outer columns instead, because
+                  // JdbcRelayLogRepository.boundedProjection sizes the projected record with
+                  // to_jsonb, where an extra column would shift the projection-cache bound.
+                  // Anything that later wraps this page that way must do the same.
+                  "SELECT * FROM (SELECT candidates.*, SUM(payload_bytes + 4096)"
                       + " OVER (ORDER BY position) AS page_bytes FROM (SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND position>?"
-                      + " ORDER BY position LIMIT ?) candidates) bounded"
+                      + ", q.byte_length AS payload_bytes"
+                      + PUBLICATION_SOURCE
+                      + " WHERE p.scope_key=? AND p.topic=? AND p.position>?"
+                      + " ORDER BY p.position LIMIT ?) candidates) bounded"
                       + " WHERE page_bytes <= ? ORDER BY position",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key.topic()),

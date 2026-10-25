@@ -89,7 +89,7 @@ class RelayApprovalInboxDatabaseTest {
   @BeforeEach
   void fresh() {
     jdbc.execute(
-        "TRUNCATE projects,admins,run_approvals,user_inbox,relay_topics,relay_source_events CASCADE");
+        "TRUNCATE projects,admins,run_approvals,user_inbox,relay_topics,relay_payloads,relay_source_events CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES('owner','fixture'),('other','fixture')");
     project =
@@ -125,7 +125,16 @@ class RelayApprovalInboxDatabaseTest {
             });
     notifications = new ApprovalDelivery(approvals, people, inbox::settle);
     notifications.useRelayDelivery(true);
-    broker = new JdbcRelayRepository(jdbc, transactions);
+    broker =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(broker, () -> NOW);
     consumers =
         new JdbcRelayConsumerRepository(

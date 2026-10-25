@@ -71,7 +71,11 @@ class JdbcRelayDeliveryRepositoryTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE relay_topics CASCADE");
+    // relay_payloads holds the payload bytes publications and admissions reference. Nothing
+    // references relay_topics from it, so a cascade from relay_topics alone leaves every stored
+    // payload behind, and the store is content-addressed: a later append of identical content
+    // resolves to the surviving digest and leaves its bytes as they are.
+    jdbc.execute("TRUNCATE relay_topics,relay_payloads CASCADE");
     jdbc.update("DELETE FROM projects WHERE name='relay-delivery-fixture'");
     Long project =
         jdbc.queryForObject(
@@ -80,7 +84,16 @@ class JdbcRelayDeliveryRepositoryTest {
     topic = new Relay.TopicKey(Objects.requireNonNull(project), "release.observed");
     subscription = new Relay.SubscriptionKey(topic, "release-review");
     first = new RelayDeliveries.AdmissionKey(subscription, 1);
-    log = new JdbcRelayRepository(jdbc, transactions);
+    log =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     log.configureTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     log.subscribe(subscription, Relay.Start.OLDEST_RETAINED, T0);
@@ -140,35 +153,43 @@ class JdbcRelayDeliveryRepositoryTest {
         ((RelayPayload.Text)
                 deliveries.admission(key).orElseThrow().publication().event().payload())
             .text());
-    // Bypass Java validation to prove both new SQL constraints enforce raw UTF-8 bytes.
-    for (String table : List.of("relay_publications", "relay_admissions")) {
-      // Generate the exact portable ceiling inside PostgreSQL, avoiding a large JDBC/test buffer.
-      jdbc.update(
-          "UPDATE "
-              + table
-              + " SET payload=jsonb_build_object('text',repeat('x',52428800)) WHERE event_id='large'");
-      assertEquals(
-          52428800,
-          jdbc.queryForObject(
-              "SELECT octet_length(payload->>'text') FROM " + table + " WHERE event_id='large'",
-              Integer.class));
-      assertThrows(
-          DataIntegrityViolationException.class,
-          () ->
-              jdbc.update(
-                  "UPDATE "
-                      + table
-                      + " SET payload=jsonb_build_object('text',repeat('x',52428801)) WHERE event_id='large'"));
-      jdbc.update(
-          "UPDATE "
-              + table
-              + " SET payload=jsonb_build_object('text',?::text) WHERE event_id='large'",
-          text);
-      assertEquals(
-          text,
-          jdbc.queryForObject(
-              "SELECT payload->>'text' FROM " + table + " WHERE event_id='large'", String.class));
-    }
+    // Bypass Java validation to prove the SQL constraint enforces raw UTF-8 bytes. V194 dropped
+    // V135's per-table payload CHECKs along with the column they guarded; the same 50 MiB ceiling
+    // is now enforced once, on the stored row the publication and its admission both reach by
+    // digest. Asserting it there is asserting it for both tables, which is why this no longer
+    // loops over them.
+    String digest =
+        jdbc.queryForObject(
+            "SELECT payload_digest FROM relay_publications WHERE event_id='large'", String.class);
+    assertEquals(
+        digest,
+        jdbc.queryForObject(
+            "SELECT payload_digest FROM relay_admissions WHERE event_id='large'", String.class),
+        "the publication and its admission must name the same stored payload");
+    // Generate the exact portable ceiling inside PostgreSQL, avoiding a large JDBC/test buffer.
+    jdbc.update(
+        "UPDATE relay_payloads SET payload=jsonb_build_object('text',repeat('x',52428800)) WHERE digest=?",
+        digest);
+    assertEquals(
+        52428800,
+        jdbc.queryForObject(
+            "SELECT octet_length(payload->>'text') FROM relay_payloads WHERE digest=?",
+            Integer.class,
+            digest));
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "UPDATE relay_payloads SET payload=jsonb_build_object('text',repeat('x',52428801)) WHERE digest=?",
+                digest));
+    jdbc.update(
+        "UPDATE relay_payloads SET payload=jsonb_build_object('text',?::text) WHERE digest=?",
+        text,
+        digest);
+    assertEquals(
+        text,
+        jdbc.queryForObject(
+            "SELECT payload->>'text' FROM relay_payloads WHERE digest=?", String.class, digest));
   }
 
   @Test
@@ -177,6 +198,12 @@ class JdbcRelayDeliveryRepositoryTest {
         new JdbcRelayRepository(
             jdbc,
             transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)),
             new RelayTextLimit(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES));
     var draft =
         new Relay.Draft(

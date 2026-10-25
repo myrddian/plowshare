@@ -101,7 +101,8 @@ class TickerTest {
   void wire() {
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
         jdbc,
-        "TRUNCATE TABLE relay_topics, user_inbox, firings, triggers, schedules, admins CASCADE");
+        "TRUNCATE TABLE relay_topics, relay_payloads, user_inbox, firings, triggers, schedules, admins"
+            + " CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES ('enzo', 'h', TRUE)");
     schedules = new JdbcScheduleStore(jdbc);
@@ -132,7 +133,16 @@ class TickerTest {
     return new RelayScheduledPublication(
         store,
         new io.aeyer.plowshare.server.relay.DurableRelay(
-            new io.aeyer.plowshare.server.relay.JdbcRelayRepository(jdbc, transactions), clock),
+            new io.aeyer.plowshare.server.relay.JdbcRelayRepository(
+                jdbc,
+                transactions,
+                new io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore(
+                    jdbc,
+                    transactions,
+                    java.time.Duration.ofHours(1),
+                    java.time.Duration.ofHours(24),
+                    java.time.Duration.ofDays(30))),
+            clock),
         intake,
         transactions,
         () -> {

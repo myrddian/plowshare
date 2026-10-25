@@ -104,7 +104,18 @@ class JdbcRelayPortRepositoryTest {
                 "INSERT INTO projects(name,workspace) VALUES('relay-port-fixture','fixture') RETURNING id",
                 Long.class));
     topic = new Relay.TopicKey(id, "checks.requests");
-    relay = new DurableRelay(new JdbcRelayRepository(jdbc, transactions), Instant::now);
+    relay =
+        new DurableRelay(
+            new JdbcRelayRepository(
+                jdbc,
+                transactions,
+                new JdbcRelayPayloadStore(
+                    jdbc,
+                    transactions,
+                    java.time.Duration.ofHours(1),
+                    java.time.Duration.ofHours(24),
+                    java.time.Duration.ofDays(30))),
+            Instant::now);
     ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
     relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
   }
@@ -217,7 +228,15 @@ class JdbcRelayPortRepositoryTest {
     relay =
         new DurableRelay(
             new JdbcRelayRepository(
-                jdbc, transactions, new RelayTextLimit(RelayPort.MAX_TEXT_BYTES)),
+                jdbc,
+                transactions,
+                new JdbcRelayPayloadStore(
+                    jdbc,
+                    transactions,
+                    java.time.Duration.ofHours(1),
+                    java.time.Duration.ofHours(24),
+                    java.time.Duration.ofDays(30)),
+                new RelayTextLimit(RelayPort.MAX_TEXT_BYTES)),
             Instant::now);
     ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
     String text = "x".repeat(RelayPort.MAX_TEXT_BYTES);
@@ -505,7 +524,16 @@ class JdbcRelayPortRepositoryTest {
     var original = ports.consume(topic, "reviewer", request);
     relay.configureTopic(topic, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofDays(4), 1L));
     publish("second");
-    new JdbcRelayRepository(jdbc, transactions).prune(topic, Instant.now(), 100);
+    new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                transactions,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)))
+        .prune(topic, Instant.now(), 100);
     var gap = ports.consume(topic, "reviewer", request);
     assertEquals(RelayPort.Status.GAP, gap.status());
     assertEquals("1", gap.expiredThrough());

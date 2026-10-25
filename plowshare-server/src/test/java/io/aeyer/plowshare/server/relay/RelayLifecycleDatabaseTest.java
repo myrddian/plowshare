@@ -68,7 +68,7 @@ class RelayLifecycleDatabaseTest {
   @BeforeEach
   void fresh() {
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE relay_source_events,relay_topics,projects,admins CASCADE");
+        jdbc, "TRUNCATE relay_source_events,relay_topics,relay_payloads,projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('operator','fixture',true)");
     project =
@@ -85,7 +85,16 @@ class RelayLifecycleDatabaseTest {
         VALUES('brd_fixture','fixture','brd_fixture',0,'fixture','fixture','operator','person','operator','open',100,0,1,clock_timestamp())
         """);
     jdbc.update("DELETE FROM relay_source_events");
-    repository = new JdbcRelayRepository(jdbc, work);
+    repository =
+        new JdbcRelayRepository(
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(repository, Instant::now);
     consumers =
         new JdbcRelayConsumerRepository(
@@ -193,7 +202,17 @@ class RelayLifecycleDatabaseTest {
         new JdbcRelaySourceRepository(
             jdbc,
             work,
-            new DurableRelay(new JdbcRelayRepository(jdbc, work), Instant::now),
+            new DurableRelay(
+                new JdbcRelayRepository(
+                    jdbc,
+                    work,
+                    new JdbcRelayPayloadStore(
+                        jdbc,
+                        work,
+                        java.time.Duration.ofHours(1),
+                        java.time.Duration.ofHours(24),
+                        java.time.Duration.ofDays(30))),
+                Instant::now),
             nativeInboxes);
     publishAll();
     var group = new Relay.SubscriptionKey(topic("job.ended"), "test.causation");
@@ -408,7 +427,9 @@ class RelayLifecycleDatabaseTest {
     assertTrue(nativeInboxes.claim(binding, lease, ordinary.id(), at.plusSeconds(2)));
     assertFalse(
         jdbc.queryForObject(
-                "SELECT string_agg(payload::text,'') FROM relay_publications", String.class)
+                "SELECT string_agg(q.payload::text,'') FROM relay_publications p"
+                    + " JOIN relay_payloads q ON q.digest=p.payload_digest",
+                String.class)
             .contains("private command"));
   }
 
@@ -561,7 +582,9 @@ class RelayLifecycleDatabaseTest {
     assertEquals(2, relay.topic(topic("orchestration.ended")).lastPosition());
     assertFalse(
         jdbc.queryForObject(
-                "SELECT string_agg(payload::text,'') FROM relay_publications", String.class)
+                "SELECT string_agg(q.payload::text,'') FROM relay_publications p"
+                    + " JOIN relay_payloads q ON q.digest=p.payload_digest",
+                String.class)
             .contains("private"));
     var group = new Relay.SubscriptionKey(topic("approval.resolved"), "test.lifecycle");
     relay.subscribe(group, Relay.Start.OLDEST_RETAINED);
@@ -629,7 +652,9 @@ class RelayLifecycleDatabaseTest {
       assertEquals(1, relay.topic(topic(name)).lastPosition());
     assertFalse(
         jdbc.queryForObject(
-                "SELECT string_agg(payload::text,'') FROM relay_publications", String.class)
+                "SELECT string_agg(q.payload::text,'') FROM relay_publications p"
+                    + " JOIN relay_payloads q ON q.digest=p.payload_digest",
+                String.class)
             .contains("private content"));
   }
 

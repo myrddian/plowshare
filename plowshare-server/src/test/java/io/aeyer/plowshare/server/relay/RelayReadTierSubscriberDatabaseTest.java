@@ -112,7 +112,8 @@ class RelayReadTierSubscriberDatabaseTest {
 
   @BeforeEach
   void fresh() {
-    AuthorityFixtures.truncate(jdbc, "TRUNCATE relay_topics,projects,admins CASCADE");
+    AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE relay_topics,relay_payloads,projects,admins CASCADE");
     jdbc.update(
         """
         INSERT INTO admins(handle,password_hash,server_admin)
@@ -135,7 +136,16 @@ class RelayReadTierSubscriberDatabaseTest {
           member.getValue());
 
     now = T0;
-    broker = new JdbcRelayRepository(jdbc, work);
+    broker =
+        new JdbcRelayRepository(
+            jdbc,
+            work,
+            new JdbcRelayPayloadStore(
+                jdbc,
+                work,
+                java.time.Duration.ofHours(1),
+                java.time.Duration.ofHours(24),
+                java.time.Duration.ofDays(30)));
     relay = new DurableRelay(broker, () -> now);
     consumers =
         new JdbcRelayConsumerRepository(

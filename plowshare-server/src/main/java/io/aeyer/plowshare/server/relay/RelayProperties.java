@@ -128,6 +128,9 @@ public final class RelayProperties {
   private int publicationBatchSize = 1000;
   private int deliveryBatchSize = 1000;
   private Duration settledRetention = Duration.ofDays(30);
+  private Duration payloadStagingWindow = Duration.ofHours(1);
+  private Duration payloadDeferralCeiling = Duration.ofHours(24);
+  private int payloadSweepBatch = 100;
 
   public int getDeliveryBatchSize() {
     return deliveryBatchSize;
@@ -182,5 +185,43 @@ public final class RelayProperties {
   public void setPublicationBatchSize(int publicationBatchSize) {
     RelayValues.limit(publicationBatchSize, 1000);
     this.publicationBatchSize = publicationBatchSize;
+  }
+
+  public Duration getPayloadStagingWindow() {
+    return payloadStagingWindow;
+  }
+
+  /** Must exceed the longest gap between a payload insert and the insert that references it. */
+  public void setPayloadStagingWindow(Duration payloadStagingWindow) {
+    Objects.requireNonNull(payloadStagingWindow, "payloadStagingWindow");
+    // The window must exceed the longest append: it covers the topic FOR UPDATE wait, the locked
+    // retained read and position allocation between the payload store and the publication insert.
+    // store() rounds the ejection up to the hour, so protection is only guaranteed to be W; a
+    // one-second floor would make a failed publish (a foreign-key violation) configurable.
+    if (payloadStagingWindow.compareTo(Duration.ofMinutes(5)) < 0
+        || payloadStagingWindow.compareTo(Duration.ofDays(7)) > 0)
+      throw new IllegalArgumentException("payload staging window must be 5 minutes through 7 days");
+    this.payloadStagingWindow = payloadStagingWindow;
+  }
+
+  public Duration getPayloadDeferralCeiling() {
+    return payloadDeferralCeiling;
+  }
+
+  public void setPayloadDeferralCeiling(Duration payloadDeferralCeiling) {
+    Objects.requireNonNull(payloadDeferralCeiling, "payloadDeferralCeiling");
+    if (payloadDeferralCeiling.compareTo(Duration.ofHours(1)) < 0
+        || payloadDeferralCeiling.compareTo(Duration.ofDays(30)) > 0)
+      throw new IllegalArgumentException("payload deferral ceiling must be 1 hour through 30 days");
+    this.payloadDeferralCeiling = payloadDeferralCeiling;
+  }
+
+  public int getPayloadSweepBatch() {
+    return payloadSweepBatch;
+  }
+
+  public void setPayloadSweepBatch(int payloadSweepBatch) {
+    RelayValues.limit(payloadSweepBatch, 1000);
+    this.payloadSweepBatch = payloadSweepBatch;
   }
 }
