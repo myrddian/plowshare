@@ -54,7 +54,15 @@ class RelayPayloadStoreTest {
     assertEquals(first, second);
     var sql = ArgumentCaptor.forClass(String.class);
     verify(jdbc, times(2)).update(sql.capture(), any(Object[].class));
-    assertTrue(sql.getValue().contains("ON CONFLICT (digest) DO NOTHING"));
+    // A repeat must re-arm ejection_at and lock the row, or the caller's reference can be swept
+    // away before it is inserted; the predicate is what keeps a well-deferred hot digest from
+    // writing a row version. Only the statement's shape is visible here -- the behaviour is
+    // asserted in RelayPayloadStoreDatabaseTest against a real server.
+    assertTrue(sql.getValue().contains("ON CONFLICT (digest) DO UPDATE"));
+    assertTrue(
+        sql.getValue()
+            .contains("SET ejection_at=GREATEST(relay_payloads.ejection_at,excluded.ejection_at)"));
+    assertTrue(sql.getValue().contains("WHERE relay_payloads.ejection_at<excluded.ejection_at"));
     assertNotEquals(first, store.store(new RelayPayload.Text("different"), NOW));
   }
 

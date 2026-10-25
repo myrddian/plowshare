@@ -68,7 +68,7 @@ class RelayLifecycleDatabaseTest {
   @BeforeEach
   void fresh() {
     io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE relay_source_events,relay_topics,projects,admins CASCADE");
+        jdbc, "TRUNCATE relay_source_events,relay_topics,relay_payloads,projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('operator','fixture',true)");
     project =

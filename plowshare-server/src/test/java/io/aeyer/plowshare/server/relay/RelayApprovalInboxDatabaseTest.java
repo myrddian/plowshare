@@ -89,7 +89,7 @@ class RelayApprovalInboxDatabaseTest {
   @BeforeEach
   void fresh() {
     jdbc.execute(
-        "TRUNCATE projects,admins,run_approvals,user_inbox,relay_topics,relay_source_events CASCADE");
+        "TRUNCATE projects,admins,run_approvals,user_inbox,relay_topics,relay_payloads,relay_source_events CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES('owner','fixture'),('other','fixture')");
     project =

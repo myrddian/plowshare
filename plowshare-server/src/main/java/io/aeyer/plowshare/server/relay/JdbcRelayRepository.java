@@ -120,10 +120,17 @@ public final class JdbcRelayRepository implements RelayRepository {
     // allocation. The price is orphans: a payload is written before the topic is read, so an
     // append that then fails leaves an unreferenced row. That covers a failed or rolled-back
     // insert, and also an append to an unknown topic or one of a different payload family, which
-    // used to fail with no side effect. That is correct, not an error: the staging window
-    // protects the row while a retry (which derives the same digest) references it, and the sweep
-    // reclaims it otherwise. Because the text allowance is checked before the family, a draft that
-    // is both oversize and the wrong family now reports the text-limit error.
+    // used to fail with no side effect. That is correct, not an error: the sweep reclaims the row
+    // once it matures and nothing references it.
+    //
+    // What protects the row until this append's own insert references it is the staging window the
+    // store writes, and it is written on a repeat as well as on a fresh insert: the conflict clause
+    // re-arms ejection_at and locks the row. That matters here specifically, because the window
+    // between the committed store and the insert below spans the topic lock, the locked retained
+    // read and position allocation. A repeat that left an already matured ejection_at alone would
+    // leave the row reclaimable, with no lock held, for that whole window, and the insert below
+    // would then fail its foreign key. Because the text allowance is checked before the family, a
+    // draft that is both oversize and the wrong family now reports the text-limit error.
     //
     // An identical repeat of a retained event stores nothing. The probe below is advisory and
     // unlocked; the locked read under the topic lock stays the authority for idempotency and

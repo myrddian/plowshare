@@ -112,7 +112,8 @@ class RelayReadTierSubscriberDatabaseTest {
 
   @BeforeEach
   void fresh() {
-    AuthorityFixtures.truncate(jdbc, "TRUNCATE relay_topics,projects,admins CASCADE");
+    AuthorityFixtures.truncate(
+        jdbc, "TRUNCATE relay_topics,relay_payloads,projects,admins CASCADE");
     jdbc.update(
         """
         INSERT INTO admins(handle,password_hash,server_admin)

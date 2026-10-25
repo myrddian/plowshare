@@ -576,80 +576,76 @@ class RelayPayloadStoreDatabaseTest {
   }
 
   /**
-   * Review Focus 2. A matured candidate is selected, then an append of the same digest commits
-   * while the sweep is between its guard and its delete. The invariant is that the bytes survive:
-   * either the guard sees the committed reference and defers, or the foreign key refuses the delete
-   * and the sweep's transaction rolls back. A committed publication can never be left without its
-   * payload.
+   * Review Focus 2. Two orderings of the same race.
+   *
+   * <p>Order one is the ordinary case: the reference is already committed when the guard runs, so
+   * the guard sees it and defers.
+   *
+   * <p>Order two is the window the guard cannot close, and it is reached with an admission rather
+   * than an append. An admission takes its {@code payload_digest} from the publication and never
+   * calls {@link RelayPayloadStore#store}, so unlike a repeat append it neither re-arms the staging
+   * window nor holds the store's row lock -- which is what leaves the payload a live candidate
+   * while the reference is in flight. The insert's own foreign-key check holds a {@code KEY SHARE}
+   * lock on the payload row, so the sweep's delete waits on it and the reference is committed by
+   * the time the lock is released; the {@code NO ACTION} check then raises. The sweep must absorb
+   * that per candidate: report no removal, keep the row, and still defer it, because the aborted
+   * transaction rolled back the deferral the survivor path would have written and a row left
+   * matured is re-selected on every pass.
    */
   @Test
-  void aSweepConcurrentWithAnAppendOfTheSameDigestKeepsThePayload() {
-    var topic = configure("payload.sweep.race", Duration.ofHours(1));
+  void aSweepConcurrentWithAReferenceCommittedInItsWindowKeepsAndDefersThePayload() {
+    var topic = configure("payload.sweep.race", Duration.ofSeconds(1));
+    var subscription = new Relay.SubscriptionKey(topic, "notices");
     var payload = new RelayPayload.Text("contended bytes");
-    String digest = store.store(payload, NOW);
-    mature(digest);
+    var admittedAt = Instant.parse("2026-10-11T03:00:00Z");
+    broker.append(topic, new Relay.Draft("first", "source", NOW, null, null, payload), NOW);
+    broker.subscribe(subscription, Relay.Start.OLDEST_RETAINED, NOW);
+    String digest = publicationDigest(topic, 1);
 
     // Order one: the reference commits first. The guard's NOT EXISTS sees it and defers.
-    broker.append(topic, new Relay.Draft("first", "source", NOW, null, null, payload), NOW);
+    mature(digest);
     assertEquals(0, store.sweep(NOW, 10));
     assertEquals(1L, one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", digest));
+    assertTrue(ejection(digest).isAfter(NOW));
 
-    // Order two: a second append of the same digest is committed while the sweep is blocked on the
-    // payload row. The insert's foreign-key check holds a KEY SHARE lock on it, so the sweep's
-    // DELETE waits; the reference is committed by the time that lock is released.
+    // Order two: nothing references the digest when the guard runs, and an admission naming it
+    // commits while the sweep's delete is blocked on the payload row.
     jdbc.update("DELETE FROM relay_publications WHERE scope_key=?", RelayScopeCodec.write(topic));
-    jdbc.update(
-        "UPDATE relay_topics SET last_position=0 WHERE scope_key=?", RelayScopeCodec.write(topic));
     mature(digest);
     var held = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var pool = Executors.newFixedThreadPool(2);
     try {
-      var appending =
+      var admitting =
           pool.submit(
               () ->
                   transactions.inTransaction(
                       () -> {
-                        broker.append(
-                            topic,
-                            new Relay.Draft("second", "source", NOW, null, null, payload),
-                            NOW);
+                        admitDirectly(topic, digest, admittedAt);
                         held.countDown();
                         await(release);
                         return Boolean.TRUE;
                       }));
       await(held);
       var sweeping = pool.submit(() -> store.sweep(NOW, 10));
-      // Give the sweep time to reach its DELETE and block on the referencing insert's lock.
+      // Let the sweep reach its DELETE and block on the referencing insert's lock.
       Thread.sleep(500);
       release.countDown();
-      assertEquals(Boolean.TRUE, get(appending));
-      // Which of the two legal outcomes occurs depends on whether the reference committed before
-      // or after the guard was evaluated, so both are accepted. With this ordering the observed
-      // outcome is the second: the foreign key refuses the delete. Any other failure is a defect,
-      // so nothing broader than that refusal is tolerated here.
-      DataIntegrityViolationException refused = null;
-      try {
-        assertEquals(0, get(sweeping), "a sweep must never report removing a referenced payload");
-      } catch (DataIntegrityViolationException thrown) {
-        refused = thrown;
-      }
+      assertEquals(Boolean.TRUE, get(admitting));
+      assertEquals(
+          0,
+          get(sweeping),
+          "the foreign-key refusal must be absorbed per candidate, not end the pass");
       assertEquals(
           1L,
           one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", digest),
-          "the payload must survive however the race resolved"
-              + (refused == null ? "" : " (the foreign key refused the delete: " + refused + ")"));
+          "the payload must survive the race");
+      // The deferral proves the survivor was rescheduled rather than merely skipped, and the exact
+      // date proves it came from the horizon query: one admission, no deliveries.
       assertEquals(
-          1L,
-          one(
-              jdbc,
-              "SELECT count(*) FROM relay_publications WHERE scope_key=? AND payload_digest=?",
-              RelayScopeCodec.write(topic),
-              digest));
-      assertEquals(
-          new RelayPayload.Text("contended bytes"),
-          broker.retained(topic, "second").orElseThrow().event().payload(),
-          "the committed publication must still read its bytes");
+          admittedAt.plus(SETTLED),
+          ejection(digest),
+          "a refused candidate must be deferred to its horizon, or it is re-selected every pass");
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("test interrupted", interrupted);
@@ -657,6 +653,119 @@ class RelayPayloadStoreDatabaseTest {
       release.countDown();
       pool.shutdownNow();
     }
+  }
+
+  /**
+   * Inserts an admission naming a digest without going through {@link RelayDeliveries#admit}, which
+   * needs the publication this race has already removed. The columns are the ones the repository
+   * writes; only the publication lookup is replaced by the digest under test.
+   */
+  private void admitDirectly(Relay.TopicKey topic, String digest, Instant admittedAt) {
+    var routing = RelayDeliveries.SourcePin.of("notices/routes.js", "export const manifest = {};");
+    jdbc.update(
+        """
+        INSERT INTO relay_admissions(scope_key,topic,subscriber,publication_position,event_id,publisher,
+          occurred_at,published_at,payload_kind,schema_version,payload_digest,routing_path,
+          routing_source,routing_hash,branch_count,admitted_at)
+        VALUES(?,?,'notices',1,'first','source',?,?,'TEXT',1,?,?,?,?,0,?)
+        """,
+        RelayScopeCodec.write(topic),
+        topic.name(),
+        Timestamp.from(NOW),
+        Timestamp.from(NOW),
+        digest,
+        routing.path(),
+        routing.source(),
+        routing.sha256(),
+        Timestamp.from(admittedAt));
+  }
+
+  /**
+   * The other direction of the same race, and the one the conflict clause closes. A digest whose
+   * earlier references were pruned sits matured; a repeat append of that same content stores it
+   * again and then has to get through the topic lock, the locked retained read and position
+   * allocation before its own publication row exists. Nothing in that window references the
+   * payload, so unless the repeat store re-arms {@code ejection_at} and locks the row, a sweep in
+   * the window reclaims it and the appender's insert fails its foreign key.
+   *
+   * <p>The window is held open by taking the topic lock from another transaction, which blocks the
+   * append after its store has committed and before its insert. This test discriminates: with the
+   * conflict clause reduced to {@code DO NOTHING} the sweep reclaims the row and both the sweep
+   * count and the append fail.
+   */
+  @Test
+  void aRepeatAppendOfAMaturedDigestRacingASweepKeepsItsPayload() {
+    var topic = configure("payload.repeat.race", Duration.ofHours(1));
+    var payload = new RelayPayload.Text("repeated bytes");
+    broker.append(topic, new Relay.Draft("first", "source", NOW, null, null, payload), NOW);
+    String digest = publicationDigest(topic, 1);
+    // Retention has removed the only reference, and the row has matured.
+    jdbc.update("DELETE FROM relay_publications WHERE scope_key=?", RelayScopeCodec.write(topic));
+    jdbc.update(
+        "UPDATE relay_topics SET last_position=0 WHERE scope_key=?", RelayScopeCodec.write(topic));
+    mature(digest);
+    assertFalse(ejection(digest).isAfter(NOW), "the fixture must start as a sweep candidate");
+
+    var release = new CountDownLatch(1);
+    var holding = new CountDownLatch(1);
+    var pool = Executors.newFixedThreadPool(2);
+    try {
+      var lock =
+          pool.submit(
+              () ->
+                  transactions.inTransaction(
+                      () -> {
+                        jdbc.queryForList(
+                            "SELECT 1 FROM relay_topics WHERE scope_key=? AND name=? FOR UPDATE",
+                            Integer.class,
+                            RelayScopeCodec.write(topic),
+                            topic.name());
+                        holding.countDown();
+                        await(release);
+                        return Boolean.TRUE;
+                      }));
+      await(holding);
+      var appending =
+          pool.submit(
+              () ->
+                  broker
+                      .append(
+                          topic, new Relay.Draft("second", "source", NOW, null, null, payload), NOW)
+                      .position());
+      // The append is blocked on the topic lock, which it reaches only after its store committed.
+      awaitBlocked();
+      assertEquals(
+          0,
+          store.sweep(NOW, 10),
+          "the repeat store must have re-armed the staging window, leaving no candidate");
+      assertTrue(
+          ejection(digest).isAfter(NOW), "the repeat store must have moved the ejection date out");
+      release.countDown();
+      assertEquals(Boolean.TRUE, get(lock));
+      assertEquals(1L, get(appending), "the repeat append must not fail its foreign key");
+      assertEquals(
+          payload,
+          broker.retained(topic, "second").orElseThrow().event().payload(),
+          "the repeat publication must still read its bytes");
+    } finally {
+      release.countDown();
+      pool.shutdownNow();
+    }
+  }
+
+  /** Waits until some backend is waiting on a lock, which is the append reaching the topic lock. */
+  private void awaitBlocked() {
+    for (int attempt = 0; attempt < 100; attempt++) {
+      if (one(jdbc, "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock'") > 0)
+        return;
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("test interrupted", interrupted);
+      }
+    }
+    throw new IllegalStateException("the append never reached the topic lock");
   }
 
   @Test
@@ -877,6 +986,17 @@ class RelayPayloadStoreDatabaseTest {
             jdbc,
             "SELECT count(*) FROM relay_payloads WHERE byte_length <> octet_length(payload::text)"),
         "byte_length must equal the expression the pages used to compute per row");
+    assertEquals(
+        3L,
+        one(
+            jdbc,
+            """
+            SELECT count(*) FROM relay_publications p
+              JOIN relay_payloads q ON q.digest=p.payload_digest
+            WHERE p.scope_key=?
+            """,
+            RelayScopeCodec.write(topic)),
+        "the join below must actually see all three rows; a zero count would pass vacuously");
     assertEquals(
         0L,
         one(

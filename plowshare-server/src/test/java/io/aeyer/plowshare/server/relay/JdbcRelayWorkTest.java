@@ -57,7 +57,11 @@ class JdbcRelayWorkTest {
 
   @BeforeEach
   void fresh() {
-    jdbc.execute("TRUNCATE relay_topics CASCADE");
+    // relay_payloads holds the payload bytes publications and admissions reference. Nothing
+    // references relay_topics from it, so a cascade from relay_topics alone leaves every stored
+    // payload behind, and the store is content-addressed: a later append of identical content
+    // resolves to the surviving digest and leaves its bytes as they are.
+    jdbc.execute("TRUNCATE relay_topics,relay_payloads CASCADE");
     jdbc.update(
         "DELETE FROM conversations WHERE project_id IN (SELECT id FROM projects WHERE name='relay-work-fixture')");
     jdbc.update("DELETE FROM projects WHERE name='relay-work-fixture'");

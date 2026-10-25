@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -26,8 +27,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * only miss a dedup, never read or delete the wrong bytes.
  *
  * <p>{@link #store} is a single idempotent statement and does not open a transaction, so a caller
- * outside one commits it immediately. {@code ON CONFLICT DO NOTHING} writes no row version for a
- * repeat of a hot digest.
+ * outside one commits it immediately. A repeat of an existing digest re-arms its staging window and
+ * locks the row; a repeat of a digest already deferred past that window writes no row version.
  */
 public final class JdbcRelayPayloadStore implements RelayPayloadStore {
   private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
@@ -73,11 +74,28 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
     Instant earliest = RelayValues.time(now).plus(stagingWindow);
     Instant ejection = earliest.truncatedTo(ChronoUnit.HOURS);
     if (ejection.isBefore(earliest)) ejection = ejection.plus(Duration.ofHours(1));
+    // A repeat of an existing digest must re-arm the staging window, not leave it as it is. The
+    // caller's own reference does not yet exist -- it is inserted after this commits, after a topic
+    // lock and a locked read -- so for a row whose earlier references were pruned, an unmodified
+    // ejection_at leaves it a matured sweep candidate for that whole window, with no lock held. A
+    // sweep in that window sees no reference, deletes, and the caller's insert then fails its
+    // foreign key. DO UPDATE both moves the date out and takes the row lock, so a concurrent sweep
+    // blocks on this row instead of reclaiming it.
+    //
+    // The WHERE keeps the only property DO NOTHING had: a hot digest already deferred past this
+    // ejection writes no row version, because the predicate is false and the update is skipped.
+    // That case takes no row lock either, and does not need one: its ejection_at is already at or
+    // beyond now + stagingWindow, so no sweep can select it as a candidate until after the window,
+    // by which time this caller's reference is long committed or its append has failed.
+    // GREATEST is then redundant with the predicate and is kept so the statement never moves a
+    // date backwards on its own terms.
     jdbc.update(
         """
         INSERT INTO relay_payloads(digest,payload,byte_length,ejection_at)
         VALUES (?,?::jsonb,octet_length((?::jsonb)::text),?)
-        ON CONFLICT (digest) DO NOTHING
+        ON CONFLICT (digest) DO UPDATE
+          SET ejection_at=GREATEST(relay_payloads.ejection_at,excluded.ejection_at)
+          WHERE relay_payloads.ejection_at<excluded.ejection_at
         """,
         digest,
         json,
@@ -127,10 +145,16 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
    * reference that commits after the guard's {@code NOT EXISTS} has been evaluated but before the
    * delete acquires its row lock. The delete waits on the lock the referencing insert's own
    * foreign-key check holds, proceeds when it is released, and the {@code NO ACTION} check then
-   * finds the committed row and raises. The payload is still never lost -- the transaction for that
-   * digest rolls back -- but the exception ends the pass, leaving its remaining candidates for the
-   * next one. {@code RelayMaintenance} logs and retries on the following interval. This is verified
-   * in {@code RelayPayloadStoreDatabaseTest}.
+   * finds the committed row and raises.
+   *
+   * <p>That violation is handled per candidate rather than allowed to end the pass. The statement
+   * is a single {@code DELETE FROM relay_payloads}, and the only foreign keys that can fire on it
+   * are the two reference columns the guard already reads, so the violation carries exactly the
+   * guard's own meaning: a reference exists, keep the row. It is therefore treated as a survivor.
+   * The aborted transaction also rolled back the deferral the survivor path would have written, so
+   * the row is deferred in a second transaction afterwards -- without that it stays matured and is
+   * re-selected on every pass, which is the permanent sweep work {@link #nextExamination}'s
+   * strictly-future rule exists to prevent.
    *
    * <p>A candidate that survives is rescheduled, otherwise it would match the candidate query on
    * every pass. {@code ejection_at} only defers the next examination and never authorizes a
@@ -150,8 +174,15 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
             Timestamp.from(at),
             limit);
     int removed = 0;
-    for (String digest : candidates)
-      removed += transactions.inTransaction(() -> reclaimOrDefer(digest, at));
+    for (String digest : candidates) {
+      try {
+        removed += transactions.inTransaction(() -> reclaimOrDefer(digest, at));
+      } catch (DataIntegrityViolationException referenced) {
+        // A reference committed inside the guard-to-lock window; see this method's contract. The
+        // row survives, and its deferral is written outside the aborted transaction.
+        transactions.inTransaction(() -> defer(digest, at));
+      }
+    }
     return removed;
   }
 
@@ -166,6 +197,14 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
             """,
             digest);
     if (deleted > 0) return deleted;
+    return defer(digest, now);
+  }
+
+  /**
+   * Moves a surviving candidate's next examination out. Returns zero removals so it can stand in
+   * for {@link #reclaimOrDefer} on the path where the delete was refused by a foreign key.
+   */
+  private int defer(String digest, Instant now) {
     jdbc.update(
         "UPDATE relay_payloads SET ejection_at=? WHERE digest=?",
         Timestamp.from(nextExamination(digest, now)),
