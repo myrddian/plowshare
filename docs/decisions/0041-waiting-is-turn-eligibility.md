@@ -185,6 +185,19 @@ The `WAIT_CHAIN_LIMIT = 32` it borrowed from `relay_valid_causation` should not 
 principled bound for a wait chain. It is a loop guard that happens to share a number with an
 unrelated concept.
 
+## Records this one must be read with
+
+- **`0037-events-and-messaging-on-relay.md`** is the general rule for moving a delivery family onto
+  Relay, and its order of work is amended there by this record: delegation precedes
+  `message.*` / outgoing, because messaging is blocked on an audience for account-private content
+  and delegation is not. 0037 names delegation in its need statement and omits it from its
+  inventory; that omission is why a synchronous construct was specified against messaging in the
+  first place.
+- **`0040-relay-is-the-boards-substrate-rebuilt.md`** supplies the rule this record applies: Relay
+  is the mechanism, not the policy. A waiter in Relay would have been policy in the substrate.
+- **`0039-relay-audiences-beyond-a-project.md`** is the same shape of gap as messaging's blocker —
+  content with no expressible audience — against a different authority unit.
+
 ## Corrections recorded
 
 Two framings were wrong on the way here, and both were corrected by the same observation — that
