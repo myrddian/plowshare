@@ -146,15 +146,12 @@ export const deploymentReceiptCheck = record({
 });
 /**
  * A contained Application as its container addresses it afterwards. `scope` is the authority
- * scope's own identifier, carried as the wrapped record the server serialises, so that a child is
- * addressed by its scope and never by a readable containment path.
+ * scope's identifier as a plain UUID: a child is addressed by its scope and never by a readable
+ * containment path, and the server's internal scope value object does not travel out here.
  */
-export interface ContainedApplicationScope {
-  readonly value: string;
-}
 export interface ContainedApplicationChild {
   readonly id: string;
-  readonly scope: ContainedApplicationScope;
+  readonly scope: string;
   readonly project: string;
   readonly revision: string;
 }
@@ -168,7 +165,7 @@ export const containedProject = (value: unknown): value is string =>
   deploymentUuid(value.slice('contained:'.length));
 export const containedChildCheck = record({
   id: deploymentUuid,
-  scope: record({ value: deploymentUuid }),
+  scope: deploymentUuid,
   project: containedProject,
   revision: deploymentUuid,
 });

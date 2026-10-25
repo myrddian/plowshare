@@ -29,12 +29,15 @@ import java.util.*;
  *
  * <p><strong>What is replaced.</strong> There is no server-administrator check and no destination
  * FileStore {@code MANAGER} check, and there is no collaborator here through which either could be
- * made: this class holds neither {@code ProjectMembers} nor {@code FileStores}. The authority is
- * the creating Application's own retained admission, narrowed across one containment hop by {@link
- * OperationAuthority#contain}, and the destination is allocated by the server under {@link
- * ContainmentConfig#root()}. A parent typically holds no FileStore {@code MANAGER} over its own
- * retained source, so proxying a destination could not have produced a legal one. The
- * administrator-gated top-level path keeps both of its checks untouched.
+ * made: this class holds neither {@code ProjectMembers} nor {@code FileStores}. It holds no {@code
+ * IdentityRepository} either, which is the structural form of a narrower point: nothing on this
+ * path resolves a scope through the general scope read, so nothing on it can be defeated by that
+ * read's refusal of a {@code CONTAINED} row. The authority is the creating Application's own
+ * retained admission, narrowed across one containment hop by {@link OperationAuthority#contain},
+ * and the destination is allocated by the server under {@link ContainmentConfig#root()}. A parent
+ * typically holds no FileStore {@code MANAGER} over its own retained source, so proxying a
+ * destination could not have produced a legal one. The administrator-gated top-level path keeps
+ * both of its checks untouched.
  *
  * <p><strong>Where the authority comes from, and why a conversation names it.</strong> {@code
  * create} is asked from inside the creating Application's own live conversation, and that
@@ -72,7 +75,6 @@ public final class SourceContainedApplications implements ContainedApplications 
   private final ProjectWorkspaces projects;
   private final ApplicationPackageValidator validator;
   private final OperationAuthority authority;
-  private final IdentityRepository identities;
   private final ContainedPrincipals principals;
   private final AllowanceRepository allowances;
   private final UnitOfWork work;
@@ -83,7 +85,6 @@ public final class SourceContainedApplications implements ContainedApplications 
       ProjectWorkspaces projects,
       ApplicationPackageValidator validator,
       OperationAuthority authority,
-      IdentityRepository identities,
       ContainedPrincipals principals,
       AllowanceRepository allowances,
       UnitOfWork work,
@@ -92,7 +93,6 @@ public final class SourceContainedApplications implements ContainedApplications 
     this.projects = Objects.requireNonNull(projects);
     this.validator = Objects.requireNonNull(validator);
     this.authority = Objects.requireNonNull(authority);
-    this.identities = Objects.requireNonNull(identities);
     this.principals = Objects.requireNonNull(principals);
     this.allowances = Objects.requireNonNull(allowances);
     this.work = Objects.requireNonNull(work);
@@ -182,18 +182,29 @@ public final class SourceContainedApplications implements ContainedApplications 
   }
 
   @Override
-  public void ceiling(String account, UUID child, Integer calls) {
+  public void ceiling(String account, String conversation, UUID child, Integer calls) {
     if (calls == null || calls < 0)
       throw new CallerFault(
           "A contained ceiling is explicit; an absent ceiling would mean unlimited, and zero is"
               + " how a container disables its child's calls");
     var retained =
         records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
-    // The container's own authority, resolved server-side from the containment row rather than
-    // asserted by the caller. This is not an administrative act and asks for no administrative
-    // authority: it is WRITE over the container the child is recorded under.
-    var container = identities.scope(retained.container());
-    authority.admit(account, container, Set.of(AuthorityAction.WRITE));
+    // The container's own authority, proved exactly as creation proves it and with no general
+    // scope read in sight. Resolving the container through IdentityRepository.scope was the whole
+    // defect: that read refuses a CONTAINED row, so this operation -- the reduce-to-zero this
+    // slice requires included -- failed closed for every child whose container is itself
+    // contained. The conversation's retained admission already answers both questions, and the
+    // two-gate change made it answer them at depth: who is asking, and whether that caller is
+    // acting as the scope this child is recorded under.
+    var parent = parent(account, conversation);
+    if (!parent.admission().scope().equals(retained.container()))
+      throw new CallerFault("This Application does not contain that Application");
+    // The identical bound creation applies, on the identical pool. Two call sites, one rule: a
+    // raise beyond the container's own remaining allowance is refused here exactly as it is at
+    // creation, so creating low and raising high is not a route around it. A raise within that
+    // remaining allowance is admitted, which is less restrictive than refusing every increase and
+    // is what the container could have asked for at creation anyway.
+    requireCeiling(parent.budget(), calls);
     work.inTransaction(
         () -> {
           allowances.ceiling(retained.allowance(), calls);
@@ -332,8 +343,10 @@ public final class SourceContainedApplications implements ContainedApplications 
     }
   }
 
+  /** The boundary conversion: the internal {@code ScopeId} is unwrapped here and nowhere later. */
   private static Child child(ContainedApplicationRepository.Retained retained) {
-    return new Child(retained.id(), retained.scope(), retained.project(), retained.revision());
+    return new Child(
+        retained.id(), retained.scope().value(), retained.project(), retained.revision());
   }
 
   /**

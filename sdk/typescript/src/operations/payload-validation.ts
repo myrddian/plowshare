@@ -831,7 +831,7 @@ export const SHAPES: Record<
     ],
     [],
   ],
-  'application.child.ceiling': [['child', 'calls'], []],
+  'application.child.ceiling': [['conversation', 'child', 'calls'], []],
   'filestore.list': [[], []],
   'application.deployment.status': [['project'], []],
   'application.deployment.receipt': [['project', 'requestId'], []],

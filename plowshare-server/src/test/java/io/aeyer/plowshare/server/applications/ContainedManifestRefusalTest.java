@@ -37,7 +37,6 @@ class ContainedManifestRefusalTest {
   ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
   ApplicationPackageValidator validator = mock(ApplicationPackageValidator.class);
   OperationAuthority authority = mock(OperationAuthority.class);
-  IdentityRepository identities = mock(IdentityRepository.class);
   ContainedPrincipals principals = mock(ContainedPrincipals.class);
   ContainedApplicationCreationTest.Allowances allowances =
       new ContainedApplicationCreationTest.Allowances();
@@ -101,12 +100,6 @@ class ContainedManifestRefusalTest {
             Optional.of(
                 new OperationAuthority.Conversation(
                     "c-1", "worker", parentAdmission, null, parentBudget, "0".repeat(64))));
-    when(identities.scope(parentScope.id())).thenReturn(parentScope);
-    when(identities.containedHome(any(), any()))
-        .thenAnswer(
-            call ->
-                Home.of(
-                    "contained:" + ((AuthorityScope.Contained) call.getArgument(0)).id().value()));
     when(records.liveDescendants(parentScope.id())).thenReturn(0);
     when(records.receipt(any(), any())).thenReturn(Optional.empty());
     when(records.create(any()))
@@ -153,7 +146,6 @@ class ContainedManifestRefusalTest {
             projects,
             validator,
             authority,
-            identities,
             principals,
             allowances,
             work,

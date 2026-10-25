@@ -351,6 +351,58 @@ class ContainmentHopTest {
   }
 
   /**
+   * Finding C. The ancestry walk and {@code mediating} at two hops, which is the thing the depth
+   * walk has just un-limited: a grandchild's live authority resolves by walking its container chain
+   * to the nearest enclosing <em>uncontained</em> scope and asking there, and its ancestry walk
+   * climbs two recorded containment edges to the top-level admission. Nothing in this test stubs a
+   * role or a grant for either contained scope, because neither holds any: a child's authority is a
+   * projection of its container's and the projection is what is checked.
+   */
+  @Test
+  void aDepthTwoAdmissionResolvesThroughTwoContainmentHops() {
+    var top = parent();
+    var enclosing = new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 3, target.id());
+    Home enclosingHome = Home.of("contained:" + UUID.randomUUID());
+    var middle =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            "alice",
+            account,
+            enclosing.id(),
+            enclosingHome,
+            recipient,
+            top.support());
+    var grandchild =
+        new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 4, enclosing.id());
+    Home grandchildHome = Home.of("contained:" + UUID.randomUUID());
+    when(identities.contained(enclosing.id())).thenReturn(Optional.of(enclosing));
+    when(identities.contained(grandchild.id())).thenReturn(Optional.of(grandchild));
+    when(identities.containedHome(enclosing, target.id())).thenReturn(enclosingHome);
+    when(identities.containedHome(grandchild, enclosing.id())).thenReturn(grandchildHome);
+    when(records.parent(middle.id())).thenReturn(Optional.of(top.id()));
+    when(records.find(top.id())).thenReturn(Optional.of(top));
+
+    var deep = policy.contain(middle, grandchild, Set.of(AuthorityAction.READ));
+    when(records.parent(deep.id())).thenReturn(Optional.of(middle.id()));
+    when(records.find(middle.id())).thenReturn(Optional.of(middle));
+    assertDoesNotThrow(() -> policy.require(deep));
+    // mediating walked past the contained middle to the uncontained container, which is the only
+    // scope any grant is resolved against; the contained scopes are asked for nothing.
+    verify(identities, atLeastOnce()).scope(target.id());
+    verify(identities, never()).scope(enclosing.id());
+    verify(identities, never()).scope(grandchild.id());
+    verify(authority, never()).allowsUsing(any(), eq(grandchild), any(), any());
+    verify(authority, never()).allowsUsing(any(), eq(enclosing), any(), any());
+
+    // The same walk refuses when a hop's recorded container is not the ancestor it climbs to:
+    // two hops are two chances to refuse, not a relaxation that compounds.
+    when(records.find(middle.id())).thenReturn(Optional.of(top));
+    assertThrows(CallerFault.class, () -> policy.require(deep));
+    // And the configured depth still bounds the chain the walk will follow at all.
+    assertThrows(CallerFault.class, () -> policy(new ContainmentBounds(1, 4)).require(deep));
+  }
+
+  /**
    * An unconfigured server does not merely stop creating children: it stops accepting the ones that
    * exist. Absence is never an unlimited default on either side of the hop.
    */

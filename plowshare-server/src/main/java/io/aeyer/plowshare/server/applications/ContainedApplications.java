@@ -71,8 +71,17 @@ public interface ContainedApplications {
     }
   }
 
-  /** The child as its container addresses it afterwards: read, reconfigure, destroy. */
-  record Child(UUID id, ScopeId scope, String project, UUID revision) {
+  /**
+   * The child as its container addresses it afterwards: read, reconfigure, destroy.
+   *
+   * <p>A boundary DTO, so every component is a plain wire value. {@code scope} is the authority
+   * scope's identifier and deliberately <em>not</em> {@link ScopeId}: that is an internal value
+   * object with no {@code @JsonValue}, so carrying one here would have published {@code {"value":
+   * "..."}} as the public contract shape and let an internal type travel outward through five
+   * generated SDKs. Internal callers wrap it back into a {@link ScopeId} where they need the typed
+   * form; the conversion belongs at the boundary and the boundary is this record.
+   */
+  record Child(UUID id, UUID scope, String project, UUID revision) {
     public Child {
       Objects.requireNonNull(id);
       Objects.requireNonNull(scope);
@@ -86,8 +95,17 @@ public interface ContainedApplications {
   Child create(String account, Create request);
 
   /**
-   * Lowers or raises a child's own ceiling under the creating Application's authority. Zero
-   * disables the child's calls; {@code null} is refused, because absent means unlimited.
+   * Lowers or raises a child's own ceiling under its container's authority. Zero disables the
+   * child's calls; {@code null} is refused, because absent means unlimited.
+   *
+   * <p>It takes a conversation for the same two reasons {@link #create} does, and they are the
+   * reasons the two paths must not differ. The conversation's retained admission is the container's
+   * authority, and it must be acting as the scope this child is recorded under — so a container
+   * reconfigures its own children and nothing else. The conversation's budget is the pool the new
+   * ceiling is bounded against, under exactly the bound creation applies: without it a container
+   * could create a child with a legal ceiling and raise it past its own remaining allowance a
+   * moment later, which would make the creation bound decorative. A raise is therefore permitted
+   * <em>within</em> the container's remaining allowance rather than refused as a class.
    */
-  void ceiling(String account, UUID child, Integer calls);
+  void ceiling(String account, String conversation, UUID child, Integer calls);
 }

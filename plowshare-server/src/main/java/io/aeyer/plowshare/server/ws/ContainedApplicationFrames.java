@@ -85,9 +85,14 @@ public final class ContainedApplicationFrames implements FrameArea {
   }
 
   private Outcome ceiling(Map<String, Object> payload, Asking asking) {
-    fields(payload, Set.of("child", "calls"));
+    fields(payload, Set.of("conversation", "child", "calls"));
     children.ceiling(
         asking.requireHandle(FrameTypes.APPLICATION_CHILD_CEILING),
+        Payloads.required(
+            payload,
+            "conversation",
+            FrameTypes.APPLICATION_CHILD_CEILING,
+            "the container's conversation"),
         uuid(payload, "child"),
         calls(payload, "calls"));
     return Outcome.ok(Map.of("child", uuid(payload, "child").toString()));

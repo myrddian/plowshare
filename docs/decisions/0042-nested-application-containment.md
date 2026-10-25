@@ -370,8 +370,8 @@ chain to its container's live grants belongs to the task that makes a contained
 scope resolvable, and must change the home/scope agreement check and the ancestry
 walk together, since a hop changes both by design.
 
-**That limitation is lifted, by the change that made a contained admission
-live.** It was recorded here as: the effective depth limit is 1 whatever is
+**That limitation is lifted for resolution and for every operation this slice
+ships, and what remains limited is named below.** It was recorded here as: the effective depth limit is 1 whatever is
 configured, because `contain` bounds depth by walking the container chain and the
 walk read each enclosing scope through `IdentityRepository.scope(ScopeId)`, which
 refuses a `CONTAINED` row — so the walk could only observe an uncontained parent
@@ -385,6 +385,27 @@ its scope. The depth walk follows that read instead, so a configured depth above
 1 is reachable and is exercised at depth 2 by a hop that succeeds rather than by
 one that refuses for the wrong reason. The home/scope agreement check and the
 ancestry walk are the two gates below.
+
+Lifting it in `contain` was not by itself enough, and the gap is worth recording
+because it was invisible from the resolution side. `application.child.ceiling`
+resolved its container with `IdentityRepository.scope(ScopeId)` — the same read
+the depth walk had to stop using — so reconfiguring a child, including the
+reduce-to-zero this slice requires, failed closed for every child whose container
+was itself contained. It failed closed rather than open, so it was never a hole,
+but a produced operation that does not work at depth makes a flat claim that the
+limitation is lifted untrue. It now takes its container's authority from that
+container's own live conversation, exactly as creation does, and resolves no scope
+at all; `SourceContainedApplications` holds no `IdentityRepository`, which is the
+structural form of that and is asserted.
+
+What is still limited: the walks are bounded by the configured `maxDepth` and
+refuse beyond it, which is the intended fence rather than a limitation; and
+nothing in this slice *executes* a contained child, so narrowing at depth is
+exercised by resolution, admission and reconfiguration but not yet by a running
+child. Depth is proved here by `contain` succeeding at depth 2, by `require`
+walking two containment edges to the nearest enclosing uncontained scope, and by
+a ceiling change against a contained container — not by inference from the
+one-hop case.
 
 V196 freezes `authority_scopes.container` after insert, so containment ancestry
 cannot be repointed and the relation is acyclic by construction: an insert can
@@ -438,7 +459,7 @@ parsed differently.
 | Schedule | `schedules/*.json` | **Refused** outright for a child in this slice. ADR 0020 gives a schedule operational authority over the server's own scheduler, and nothing here mediates that for a child; a container holding a schedule of its own does not change the answer. |
 | FileStore destination | the creation request's `destination` | **Ignored.** The server allocates the child's source area under `plowshare.containment.root`; a container typically holds no FileStore `MANAGER` over its own retained source, so proxying could not yield a legal destination. |
 | FileStore writable area | the creation request's `writableAreas` | **Refused** while non-empty. A child's writable area is allocated inside its own containment, so any requested area names a store outside its container's fence. |
-| Service account attribution and spending pool | the child's own allowance | **Allocated, never shared.** The child allocates its own allowance under a ceiling its container sets at creation and may reduce to zero; an absent ceiling is not representable, because `AllowanceSnapshot` documents absent as unlimited. Child spend is attributed to the child, so ADR 0025's immutable attribution and its rule that delegation cannot change the accounting account are untouched, and no parent/child shared counter is introduced. |
+| Service account attribution and spending pool | the child's own allowance | **Allocated, never shared.** The child allocates its own allowance under a ceiling its container sets at creation and may later raise or reduce — to zero — within its own remaining allowance. The creation bound and the reconfiguration bound are one rule applied at two call sites against the same pool, because a bound enforced only at creation would be decorative: create low, raise high. An absent ceiling is not representable, because `AllowanceSnapshot` documents absent as unlimited. Child spend is attributed to the child, so ADR 0025's immutable attribution and its rule that delegation cannot change the accounting account are untouched, and no parent/child shared counter is introduced. |
 | Manifest `name` | `plowshare.json` `name` | **Rewritten** to the server-allocated opaque project name. `name` is identity and not authority, and the server owns the name a child cannot know in advance; every surface that *is* authority is in the rows above and is refused or reduced, never rewritten. |
 | Nesting itself | `plowshare.json` `nesting: true` | **Required of the container.** Only a literal `true` counts, so no existing Application acquires the capability by upgrade, and a missing, null, string or object value is "not declared". |
 
@@ -493,3 +514,14 @@ executor and account unchanged, the principal is passed only to
 string at all. The USER branch's fail-closed behaviour — `authority_project_role`
 finds no `admins` and no `project_members` row for a UUID — remains the second
 line and not the first.
+
+## The child contract carries no internal value objects
+
+`Child` is a boundary DTO and every component is a plain wire value, `scope`
+included. `AuthorityIds.ScopeId` is an internal value object with no
+`@JsonValue`, so a `Child` carrying one published `{"value": "..."}` as the
+public contract shape, and would have carried that shape outward through five
+generated SDKs the moment child read and destroy arrived. The conversion belongs
+at the boundary and is done once, where the record is built; `ScopeId` itself is
+unchanged, because annotating it would alter every other DTO that happens to
+carry one.

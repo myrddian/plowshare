@@ -210,6 +210,7 @@ export interface ExtendedPayloads
     readonly files: readonly ApplicationSourceFile[];
   };
   'application.child.ceiling': {
+    readonly conversation: string;
     readonly child: string;
     readonly calls: number;
   };

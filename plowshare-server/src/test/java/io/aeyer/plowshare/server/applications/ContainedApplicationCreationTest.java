@@ -2,7 +2,6 @@ package io.aeyer.plowshare.server.applications;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.ApplicationDeployment.File;
@@ -42,7 +41,6 @@ class ContainedApplicationCreationTest {
   ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
   ApplicationPackageValidator validator = mock(ApplicationPackageValidator.class);
   OperationAuthority authority = mock(OperationAuthority.class);
-  IdentityRepository identities = mock(IdentityRepository.class);
   ContainedPrincipals principals = mock(ContainedPrincipals.class);
   Allowances allowances = new Allowances();
   Work work = new Work();
@@ -155,12 +153,6 @@ class ContainedApplicationCreationTest {
             Optional.of(
                 new OperationAuthority.Conversation(
                     "c-1", "worker", parentAdmission, null, parentBudget, "0".repeat(64))));
-    when(identities.scope(parentScope.id())).thenReturn(parentScope);
-    when(identities.containedHome(any(), any()))
-        .thenAnswer(
-            call ->
-                Home.of(
-                    "contained:" + ((AuthorityScope.Contained) call.getArgument(0)).id().value()));
     when(records.liveDescendants(parentScope.id())).thenReturn(0);
     when(records.receipt(any(), any())).thenReturn(Optional.empty());
     when(records.create(any()))
@@ -206,7 +198,7 @@ class ContainedApplicationCreationTest {
 
   SourceContainedApplications service(ContainmentConfig config) {
     return new SourceContainedApplications(
-        records, projects, validator, authority, identities, principals, allowances, work, config);
+        records, projects, validator, authority, principals, allowances, work, config);
   }
 
   static void manifest(Path workspace, String text) throws Exception {
@@ -435,16 +427,150 @@ class ContainedApplicationCreationTest {
     var child = service.create("@service/parent", request());
     var retained = retained(creation().requestId());
     when(records.find(child.id())).thenReturn(Optional.of(retained));
-    when(identities.home(parentScope)).thenReturn(Home.of("parent"));
-    when(authority.admit(eq("@service/parent"), eq(parentScope), any()))
-        .thenReturn(parentAdmission);
-    service.ceiling("@service/parent", child.id(), 0);
+    service.ceiling("@service/parent", "c-1", child.id(), 0);
     assertEquals(0, allowances.find(retained.allowance()).orElseThrow().ceiling());
     verify(records).ceiling(child.id(), 0);
-    // Reduction is the parent's own authority over the container, not an administrative act.
-    verify(authority).admit(eq("@service/parent"), eq(parentScope), any());
+    // Reduction is the container's own authority, proved the same way creation proves it: the
+    // caller's live conversation, whose retained admission must be acting as this child's
+    // recorded container. No administrative authority is asked for and none would help.
+    verify(authority, times(2)).require(parentAdmission);
     // Absent stays unrepresentable: zero disables calls, null would mean unlimited.
-    assertThrows(CallerFault.class, () -> service.ceiling("@service/parent", child.id(), null));
+    assertThrows(
+        CallerFault.class, () -> service.ceiling("@service/parent", "c-1", child.id(), null));
+  }
+
+  /**
+   * Finding A1. {@code create} refuses a child ceiling above the container's remaining allowance;
+   * if {@code ceiling} did not apply the same bound, a container could create a child legally and
+   * raise it past its own remaining allowance a moment later, which would make the creation bound
+   * decorative. The bound is the same call on the same pool, so the two paths cannot diverge.
+   */
+  @Test
+  void aCeilingRaiseAboveTheContainerRemainingAllowanceIsRefused() {
+    var child = service.create("@service/parent", request());
+    var retained = retained(creation().requestId());
+    when(records.find(child.id())).thenReturn(Optional.of(retained));
+    // The container holds 100 with 10 spent, so 90 remain and 91 is more authority than it has.
+    assertEquals(
+        "A contained ceiling cannot exceed the creating Application's remaining allowance",
+        assertThrows(
+                CallerFault.class, () -> service.ceiling("@service/parent", "c-1", child.id(), 91))
+            .getMessage());
+    verify(records, never()).ceiling(any(), any());
+    assertEquals(5, allowances.find(creation().allowance()).orElseThrow().ceiling());
+  }
+
+  /**
+   * Finding A1, the other direction. A raise is not refused as a class: a container may raise a
+   * child within its own remaining allowance, which is both less restrictive than refusing every
+   * increase and consistent with what creation already permits.
+   */
+  @Test
+  void aCeilingRaiseWithinTheContainerRemainingAllowanceIsAdmitted() {
+    var child = service.create("@service/parent", request());
+    var retained = retained(creation().requestId());
+    when(records.find(child.id())).thenReturn(Optional.of(retained));
+    service.ceiling("@service/parent", "c-1", child.id(), 90);
+    assertEquals(90, allowances.find(retained.allowance()).orElseThrow().ceiling());
+    verify(records).ceiling(child.id(), 90);
+    // The container's own pool is neither debited nor resized by raising its child's ceiling.
+    assertEquals(100, allowances.find(parentBudget).orElseThrow().ceiling());
+    assertEquals(10, allowances.find(parentBudget).orElseThrow().spent());
+  }
+
+  /**
+   * Finding A2. A child whose container is itself contained must still be reconfigurable, which
+   * includes the reduce-to-zero this slice requires. Resolving the container through the general
+   * scope read could not do it: that read refuses a {@code CONTAINED} row, so this failed closed
+   * for every child at depth two or deeper. The container's authority is its own live conversation,
+   * which the two-gate change made resolvable at depth, and the collaborator test below records
+   * that the general scope read is no longer reachable from this class at all.
+   */
+  @Test
+  void aCeilingChangeWorksWhenTheContainerIsItselfContained() {
+    var containerScope = new ScopeId(UUID.randomUUID());
+    var containerBudget = new AllowanceId(UUID.randomUUID());
+    allowances.retain(new AllowanceSnapshot(containerBudget, 40, 15));
+    var contained =
+        new OperationAuthority.Admission(
+            UUID.randomUUID(),
+            "@service/parent",
+            account,
+            containerScope,
+            Home.of("contained:" + UUID.randomUUID()),
+            recipient,
+            parentAdmission.support());
+    when(authority.conversation("c-2"))
+        .thenReturn(
+            Optional.of(
+                new OperationAuthority.Conversation(
+                    "c-2", "worker", contained, null, containerBudget, "0".repeat(64))));
+    var grandchild =
+        new ContainedApplicationRepository.Retained(
+            UUID.randomUUID(),
+            new ScopeId(UUID.randomUUID()),
+            101,
+            "contained:" + UUID.randomUUID(),
+            containerScope,
+            UUID.randomUUID(),
+            "a".repeat(64),
+            UUID.randomUUID(),
+            new AllowanceId(UUID.randomUUID()),
+            9,
+            true);
+    allowances.retain(new AllowanceSnapshot(grandchild.allowance(), 9, 0));
+    when(records.find(grandchild.id())).thenReturn(Optional.of(grandchild));
+
+    service.ceiling("@service/parent", "c-2", grandchild.id(), 0);
+    assertEquals(0, allowances.find(grandchild.allowance()).orElseThrow().ceiling());
+    verify(records).ceiling(grandchild.id(), 0);
+    // The contained container's own remaining allowance bounds a raise at depth too: 40 - 15.
+    service.ceiling("@service/parent", "c-2", grandchild.id(), 25);
+    assertThrows(
+        CallerFault.class, () -> service.ceiling("@service/parent", "c-2", grandchild.id(), 26));
+  }
+
+  /**
+   * A container may only reconfigure the children it is recorded as containing. The conversation
+   * proves who is asking; this proves what it is asking about.
+   */
+  @Test
+  void aCeilingChangeForAnotherContainerChildIsRefused() {
+    var child = service.create("@service/parent", request());
+    var elsewhere = retained(creation().requestId());
+    var foreign =
+        new ContainedApplicationRepository.Retained(
+            elsewhere.id(),
+            elsewhere.scope(),
+            elsewhere.projectId(),
+            elsewhere.project(),
+            new ScopeId(UUID.randomUUID()),
+            elsewhere.requestId(),
+            elsewhere.fingerprint(),
+            elsewhere.revision(),
+            elsewhere.allowance(),
+            elsewhere.ceiling(),
+            true);
+    when(records.find(child.id())).thenReturn(Optional.of(foreign));
+    assertThrows(CallerFault.class, () -> service.ceiling("@service/parent", "c-1", child.id(), 0));
+    verify(records, never()).ceiling(any(), any());
+  }
+
+  /**
+   * Finding B. {@code Child} is a boundary DTO, so it carries the scope as a plain identifier.
+   * {@code AuthorityIds.ScopeId} is an internal value object with no {@code @JsonValue}, so a
+   * {@code Child} holding one would have published {@code {"value": ...}} as the public contract
+   * shape — an internal type travelling outward, which is what the boundary-DTO rule forbids.
+   */
+  @Test
+  void theChildScopeIsAPlainIdentifierAndNotAWrappedValueObject() {
+    var child = service.create("@service/parent", request());
+    UUID scope = child.scope();
+    assertNotNull(scope);
+    for (var component : ContainedApplications.Child.class.getRecordComponents())
+      assertTrue(
+          component.getType() == UUID.class || component.getType() == String.class,
+          component.getName() + " is " + component.getType());
   }
 
   @Test
@@ -459,10 +585,7 @@ class ContainedApplicationCreationTest {
     assertTrue(allowances.claim(allowance, 0).isEmpty());
     var retained = retained(creation().requestId());
     when(records.find(child.id())).thenReturn(Optional.of(retained));
-    when(identities.home(parentScope)).thenReturn(Home.of("parent"));
-    when(authority.admit(eq("@service/parent"), eq(parentScope), any()))
-        .thenReturn(parentAdmission);
-    service.ceiling("@service/parent", child.id(), 0);
+    service.ceiling("@service/parent", "c-1", child.id(), 0);
     assertTrue(allowances.claim(allowance, 0).isEmpty());
   }
 
@@ -501,9 +624,28 @@ class ContainedApplicationCreationTest {
     // handle anywhere, so the user branch it would otherwise fall into is never reached.
     assertFalse(
         io.aeyer.plowshare.server.auth.ServiceCredentials.principal(principal.id().toString()));
-    verify(identities, never()).account(anyString());
-    verify(identities, never()).project(anyString());
     verify(projects, never()).find(principal.id().toString());
+  }
+
+  /**
+   * The collaborator set, asserted rather than described, because three separate guarantees rest on
+   * what this class cannot reach: no {@code ProjectMembers}, so no server-administrator check and
+   * no project-membership role lookup; no {@code FileStores}, so no destination FileStore {@code
+   * MANAGER} check and no caller-supplied destination; and no {@code IdentityRepository}, so
+   * nothing here resolves an account from a string or a scope through the general scope read that
+   * refuses a contained row. A later change that reintroduces one of these has to delete this test
+   * to do it.
+   */
+  @Test
+  void theCreatingPathHoldsNoMembershipFileStoreOrIdentityCollaborator() {
+    var held =
+        java.util.Arrays.stream(SourceContainedApplications.class.getConstructors())
+            .flatMap(one -> java.util.Arrays.stream(one.getParameterTypes()))
+            .map(Class::getSimpleName)
+            .collect(java.util.stream.Collectors.toSet());
+    assertFalse(held.contains("ProjectMembers"), held.toString());
+    assertFalse(held.contains("FileStores"), held.toString());
+    assertFalse(held.contains("IdentityRepository"), held.toString());
   }
 
   int children() {
