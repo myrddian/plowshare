@@ -243,7 +243,10 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
           "SELECT id FROM projects WHERE id=? FOR UPDATE", Long.class, projects.getFirst());
     var scopes =
         jdbc.queryForList(
-            "SELECT id FROM authority_scopes WHERE id=? AND kind<>'RESTRICTED' FOR UPDATE",
+            // A contained scope joins RESTRICTED in being invisible to issuance: a child's access
+            // derives from its container and narrows across the hop, so a grant issued directly
+            // against it would be authority that no container mediated.
+            "SELECT id FROM authority_scopes WHERE id=? AND kind<>'RESTRICTED' AND kind<>'CONTAINED' FOR UPDATE",
             UUID.class,
             scope.value());
     if (scopes.size() != 1) throw new CallerFault("Scope is unavailable or restricted");

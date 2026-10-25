@@ -86,6 +86,12 @@ public class JdbcIdentityRepository implements IdentityRepository {
           case AuthorityScope.Personal value -> value.projectId();
           case AuthorityScope.AccountKnowledge ignored -> 0L;
           case AuthorityScope.Administration ignored -> 0L;
+          // Refused, not defaulted. A contained scope does carry a project key, so answering
+          // value.projectId() here would compile, return a name, and silently make a child project
+          // addressable through every Home-keyed path in the server -- which is the one thing
+          // containment forbids. Whether a contained scope has an outwardly visible home, and who
+          // may see it, is decided where containment is resolved, not by a convenience read here.
+          case AuthorityScope.Contained ignored -> throw contained();
         };
     if (project == 0L) throw absent();
     return Home.of(
@@ -136,6 +142,10 @@ public class JdbcIdentityRepository implements IdentityRepository {
       case "ADMINISTRATION" ->
           new AuthorityScope.Administration(
               id, new AccountId(row.getObject("account_id", UUID.class)));
+      // Named explicitly so the refusal is a decision rather than a fall-through. This slice adds
+      // the kind to the schema and to the sealed interface; nothing yet creates a contained row, so
+      // nothing may read one back into a resolved scope either.
+      case "CONTAINED" -> throw contained();
       default -> throw absent();
     };
   }
@@ -147,6 +157,11 @@ public class JdbcIdentityRepository implements IdentityRepository {
 
   private static CallerFault absent() {
     return new CallerFault("Identity or scope mapping is unavailable or restricted");
+  }
+
+  /** No legacy project home is published for a contained scope by this slice. */
+  private static CallerFault contained() {
+    return new CallerFault("A contained scope has no addressable project home");
   }
 
   @Override

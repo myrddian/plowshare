@@ -234,6 +234,54 @@ constraint, concurrent create and destroy, and transaction rollback.
 
 ## Exhaustiveness inventory
 
-This section is intentionally empty. Task 2 records here every site the sealed
-`AuthorityScope` interface forced to decide what containment means, each marked
-fenced or refused.
+This is the second of the three inventories above: every site the sealed
+`AuthorityScope` interface *forced* to decide what containment means when
+`AuthorityScope.Contained` was admitted as its fifth permitted implementation.
+The list is exactly the set of exhaustiveness errors `javac` raised across
+`plowshare-server`'s main and test sources, so it is produced by the compiler
+rather than by inspection. It is neither the list of surfaces a child manifest
+declares, which Task 5 owns, nor the list of places the server makes a project
+addressable without anyone naming it, which Task 8 owns and which consumes this
+list as one input.
+
+| Site | Decision |
+| --- | --- |
+| `plowshare-server/src/main/java/io/aeyer/plowshare/server/access/JdbcIdentityRepository.java:84`, the `switch (scope)` in `home(AuthorityScope)`; the added branch is line 94 | **Refused.** `CallerFault`: a contained scope has no addressable project home. |
+
+One forced site. That it is one, and not many, is itself the finding: the
+substrate's other authority decisions are written as `instanceof` tests over the
+kinds they admit, so they exclude a new kind by construction and the compiler has
+nothing to report. `PinnedOperationAuthority.admit` admits only `Project` and
+`Personal`, `LiveScopedAuthority.covers` widens `ORDINARY_PROJECT_CONTROL` only
+for `Project`, and `LiveActingAuthorization` and `AccountRequestProjects` likewise
+require a named kind. A contained scope is therefore inadmissible, uncoverable and
+unactable-upon in this slice without any further change, which is the intended
+first-slice posture. The corollary is that sealed-interface exhaustiveness is a
+weaker locator here than the design assumes, and Task 8's inventory cannot be
+derived from this list alone.
+
+The refusal at `home(AuthorityScope)` is the consequential one. A contained scope
+carries an ordinary `projects.id`, so answering `value.projectId()` there would
+have compiled, returned a project name, and made a child project addressable
+through every `Home`-keyed path in the server — the silent default this record
+rejects. Whether a contained scope has an outwardly visible home, and to whom,
+is decided where containment is resolved.
+
+Two further refusals were added in the same change although the compiler did not
+force them, and they are recorded here only so the inventory is not read as the
+complete set of containment decisions:
+
+- `JdbcIdentityRepository.read(ResultSet)` names `CONTAINED` explicitly and
+  refuses, rather than letting a contained row fall into the generic `default`.
+  Nothing creates such a row yet, so nothing may read one back into a resolved
+  scope.
+- `JdbcScopedGrantRepository`'s issuance lock excludes `CONTAINED` beside
+  `RESTRICTED`. A child's access derives from its container and narrows across
+  the hop, so a grant issued directly against a contained scope would be
+  authority no container mediated.
+
+Relay is untouched. [ADR 0037](0037-events-and-messaging-on-relay.md) already maps
+`ADMINISTRATION` and `RESTRICTED` to a loud failure with no fallback topic and a
+contained scope follows that; actually fencing Relay belongs to Task 8, and
+[ADR 0039](0039-relay-audiences-beyond-a-project.md) defers whether Relay keys
+topics on `authority_scopes.id` to a later slice, so no Relay scope kind is added.
