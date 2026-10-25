@@ -17,6 +17,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 import org.flywaydb.core.Flyway;
@@ -752,6 +753,54 @@ class RelayPayloadStoreDatabaseTest {
       release.countDown();
       pool.shutdownNow();
     }
+  }
+
+  /**
+   * The regression guard for the sweep's date predicate. {@code sweep} selects every candidate in
+   * one query and then reclaims them one transaction at a time, so a digest selected early can wait
+   * behind earlier candidates. A repeat {@code store} that re-arms it in that interval changes
+   * nothing the reference checks look at, so a delete that named only the digest and the two {@code
+   * NOT EXISTS} checks would reclaim it under the appender. The interval is made deterministic by a
+   * unit of work that, as the first candidate's transaction opens, stores the second candidate's
+   * payload again. With {@code p.ejection_at<=?} removed from the delete this test fails: the
+   * second payload is reclaimed and the pass reports two removals.
+   */
+  @Test
+  void aCandidateReArmedAfterSelectionSurvivesThePassThatSelectedIt() {
+    var first = new RelayPayload.Text("first candidate");
+    var second = new RelayPayload.Text("second candidate");
+    String firstDigest = store.store(first, NOW);
+    String secondDigest = store.store(second, NOW);
+    jdbc.update(
+        "UPDATE relay_payloads SET ejection_at=? WHERE digest=?",
+        Timestamp.from(NOW.minusSeconds(20)),
+        firstDigest);
+    jdbc.update(
+        "UPDATE relay_payloads SET ejection_at=? WHERE digest=?",
+        Timestamp.from(NOW.minusSeconds(10)),
+        secondDigest);
+    var armed = new AtomicBoolean();
+    UnitOfWork reArming =
+        new UnitOfWork() {
+          @Override
+          public <T> T inTransaction(Supplier<T> work) {
+            if (armed.compareAndSet(false, true)) store.store(second, NOW);
+            return transactions.inTransaction(work);
+          }
+        };
+    var sweeping = payloadStore(jdbc, reArming, OPEN_CEILING);
+
+    assertEquals(
+        1, sweeping.sweep(NOW, 10), "only the first candidate is unreferenced and still matured");
+    assertEquals(
+        0L,
+        one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", firstDigest),
+        "the untouched candidate is reclaimed");
+    assertEquals(
+        1L,
+        one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", secondDigest),
+        "a candidate re-armed after selection must survive the pass that selected it");
+    assertTrue(ejection(secondDigest).isAfter(NOW), "and it stays deferred");
   }
 
   /** Waits until some backend is waiting on a lock, which is the append reaching the topic lock. */

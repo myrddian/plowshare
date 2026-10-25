@@ -46,7 +46,7 @@ class RelayPayloadSweepTest {
 
   /** The delete matches nothing, as it does while a publication or admission references it. */
   private void referencedWith(Instant furthestRemoval, boolean unsettledAdmission) {
-    when(jdbc.update(anyString(), eq(DIGEST))).thenReturn(0);
+    when(jdbc.update(anyString(), eq(DIGEST), any(Timestamp.class))).thenReturn(0);
     when(jdbc.query(anyString(), anyMapper(), any(Object[].class)))
         .thenAnswer(
             call -> {
@@ -60,13 +60,15 @@ class RelayPayloadSweepTest {
 
   private Instant rescheduledTo() {
     var ejection = ArgumentCaptor.forClass(Timestamp.class);
-    verify(jdbc).update(contains("SET ejection_at"), ejection.capture(), eq(DIGEST));
+    verify(jdbc)
+        .update(
+            contains("SET ejection_at=GREATEST(ejection_at,?)"), ejection.capture(), eq(DIGEST));
     return ejection.getValue().toInstant();
   }
 
   @Test
   void deletesAnUnreferencedMaturedPayload() {
-    when(jdbc.update(anyString(), eq(DIGEST))).thenReturn(1);
+    when(jdbc.update(anyString(), eq(DIGEST), any(Timestamp.class))).thenReturn(1);
     assertEquals(1, store.sweep(NOW, 10));
     verify(jdbc, never()).query(anyString(), anyMapper(), any(Object[].class));
     verify(jdbc, never()).update(contains("SET ejection_at"), any(), any());

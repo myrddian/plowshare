@@ -10,9 +10,11 @@ import java.util.Map;
  */
 public interface RelayPayloadStore {
   /**
-   * Encodes and stores the payload and returns its digest. Idempotent: storing identical content
-   * again changes nothing. The row is created unreferenced and protected from {@link #sweep} only
-   * by its staging window, so the caller must reference it promptly.
+   * Encodes and stores the payload and returns its digest. The content is stored once: storing
+   * identical content again adds no row and leaves the bytes as they are, but re-arms the staging
+   * window when the stored date is earlier than the new one. The row is created unreferenced and
+   * protected from {@link #sweep} only by its staging window, so the caller must reference it
+   * promptly.
    */
   String store(RelayPayload payload, Instant now);
 

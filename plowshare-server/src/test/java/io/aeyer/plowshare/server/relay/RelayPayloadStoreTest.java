@@ -135,14 +135,15 @@ class RelayPayloadStoreTest {
   void sweepSelectsMaturedCandidatesWithTheBatchLimitAndDeletesEach() {
     when(jdbc.queryForList(anyString(), eq(String.class), any(), eq(2)))
         .thenReturn(List.of("a".repeat(64), "b".repeat(64)));
-    when(jdbc.update(anyString(), any(Object.class))).thenReturn(1);
+    when(jdbc.update(anyString(), any(Object.class), any(Object.class))).thenReturn(1);
     assertEquals(2, store.sweep(NOW, 2));
     var sql = ArgumentCaptor.forClass(String.class);
     verify(jdbc).queryForList(sql.capture(), eq(String.class), any(), eq(2));
     assertTrue(sql.getValue().contains("ejection_at<=?"));
     assertTrue(sql.getValue().contains("ORDER BY ejection_at"));
     var delete = ArgumentCaptor.forClass(String.class);
-    verify(jdbc, times(2)).update(delete.capture(), any(Object.class));
+    verify(jdbc, times(2)).update(delete.capture(), any(Object.class), any(Object.class));
+    assertTrue(delete.getValue().contains("p.ejection_at<=?"));
     // Reachability is checked by the delete itself, against both referencing tables.
     assertTrue(
         delete

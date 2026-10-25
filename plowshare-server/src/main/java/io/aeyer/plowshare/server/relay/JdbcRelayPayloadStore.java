@@ -79,28 +79,19 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
     // lock and a locked read -- so for a row whose earlier references were pruned, an unmodified
     // ejection_at leaves it a matured sweep candidate for that whole window, with no lock held. A
     // sweep in that window sees no reference, deletes, and the caller's insert then fails its
-    // foreign key. DO UPDATE moves the date out, so any candidate query that runs after this
-    // commits no longer selects the row, and it takes the row lock.
+    // foreign key. DO UPDATE moves the date out, and the sweep's delete requires the date to still
+    // be matured, so a row re-armed here cannot be reclaimed by a pass that had already selected it
+    // as a candidate. The sweep's reachability guard alone would not have sufficed: the lock this
+    // statement takes only delays a delete that already selected the digest, and when that delete
+    // resumes, under READ COMMITTED it follows the update chain and re-evaluates its predicate. If
+    // the predicate named only the digest and the two NOT EXISTS subqueries it would still find no
+    // reference -- the caller's publication insert comes later, after the topic lock -- and delete.
+    // The date in the predicate is what makes the re-arm effective against an in-flight pass.
     //
-    // That narrows the window; it does not close it. The lock only delays a reclamation, it does
-    // not prevent one: the sweep's DELETE predicate does not mention ejection_at, so a delete that
-    // has already selected this digest and then waits on this lock follows the update chain under
-    // READ COMMITTED, re-evaluates digest=? and both NOT EXISTS subqueries, still finds no
-    // reference -- the caller's publication insert comes later, after the topic lock -- and
-    // deletes. What protects the row is the re-armed date, seen by every later candidate query. The
-    // residual window is therefore the sub-statement span of one sweep candidate (candidate
-    // selection, qual evaluation and the row lock; microseconds, with no lock waits) rather than
-    // the unbounded span of topic-lock acquisition, the locked retained read and position
-    // allocation. In it the append's insert fails its foreign key and the publish is rejected; a
-    // retry stores the bytes again.
-    //
-    // The WHERE keeps the only property DO NOTHING had: a hot digest already deferred past this
-    // ejection writes no row version, because the predicate is false and the update is skipped.
-    // That case takes no row lock either, and does not need one: its ejection_at is already at or
-    // beyond now + stagingWindow, so no sweep can select it as a candidate until after the window,
-    // by which time this caller's reference is long committed or its append has failed.
-    // GREATEST is then redundant with the predicate and is kept so the statement never moves a
-    // date backwards on its own terms.
+    // The conflict clause is conditional so that a hot digest already deferred past this ejection
+    // writes no new row version: the predicate is false and the update is skipped. GREATEST is
+    // redundant with that predicate and is kept so the statement never moves a date backwards on
+    // its own terms.
     jdbc.update(
         """
         INSERT INTO relay_payloads(digest,payload,byte_length,ejection_at)
@@ -191,16 +182,27 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
     return removed;
   }
 
-  /** Deletes the payload when unreachable, otherwise moves its next examination out. */
+  /**
+   * Deletes the payload when it is both still matured and unreachable, otherwise moves its next
+   * examination out. The date is a necessary condition here, never a sufficient one: reachability
+   * is still required, so adding it only makes the delete more conservative. It matters because
+   * {@link #sweep} selects every candidate in one query and then works through them one transaction
+   * at a time, so a digest can wait many candidates before its turn. Without the date, a repeat
+   * {@code store} that re-arms the row in that interval changes nothing the delete looks at, and
+   * the row is reclaimed under the appender whose reference does not yet exist. With it, a row
+   * re-armed after selection fails the predicate, deletes nothing and falls through to {@link
+   * #defer}.
+   */
   private int reclaimOrDefer(String digest, Instant now) {
     int deleted =
         jdbc.update(
             """
-            DELETE FROM relay_payloads p WHERE p.digest=?
+            DELETE FROM relay_payloads p WHERE p.digest=? AND p.ejection_at<=?
               AND NOT EXISTS (SELECT 1 FROM relay_publications r WHERE r.payload_digest=p.digest)
               AND NOT EXISTS (SELECT 1 FROM relay_admissions a WHERE a.payload_digest=p.digest)
             """,
-            digest);
+            digest,
+            Timestamp.from(now));
     if (deleted > 0) return deleted;
     return defer(digest, now);
   }
@@ -208,10 +210,15 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
   /**
    * Moves a surviving candidate's next examination out. Returns zero removals so it can stand in
    * for {@link #reclaimOrDefer} on the path where the delete was refused by a foreign key.
+   *
+   * <p>Deferral only ever moves a date later. A row re-armed after selection reaches here with no
+   * references yet, and {@link #nextExamination} then falls back to a staging window truncated
+   * down, which can be earlier than the date the re-arm wrote; {@code GREATEST} keeps the later of
+   * the two so no path pulls an examination forward.
    */
   private int defer(String digest, Instant now) {
     jdbc.update(
-        "UPDATE relay_payloads SET ejection_at=? WHERE digest=?",
+        "UPDATE relay_payloads SET ejection_at=GREATEST(ejection_at,?) WHERE digest=?",
         Timestamp.from(nextExamination(digest, now)),
         digest);
     return 0;

@@ -132,14 +132,11 @@ public final class JdbcRelayRepository implements RelayRepository {
     // alone would leave the row a sweep candidate, with no lock held, for that whole window, and
     // the insert below would then fail its foreign key.
     //
-    // The window is narrowed, not closed. The row lock only delays a sweep's reclamation: the
-    // sweep's DELETE predicate does not mention ejection_at, so a delete that already selected the
-    // digest and then waits on the store's lock re-evaluates its reference checks afterwards,
-    // finds none yet, and deletes. The re-armed date protects the row from every later candidate
-    // query, which shrinks the exposure from unbounded (topic-lock acquisition, the locked read,
-    // position allocation) to the sub-statement span of a single sweep candidate. If a sweep lands
-    // in that span the insert below fails its foreign key, this append is rejected, and a retry
-    // stores the bytes again.
+    // The sweep cannot reclaim a row this store has re-armed. Its delete requires ejection_at to
+    // still be matured as well as the row to be unreferenced, so a digest that a pass selected as a
+    // candidate before this repeat re-armed it fails the predicate when the pass reaches it. The
+    // row lock alone would not have sufficed: it only delays a delete that already selected the
+    // digest, which on resuming re-evaluates its reference checks, finds none yet, and deletes.
     //
     // Because the text allowance is checked before the family, a draft that is both oversize and
     // the wrong family now reports the text-limit error.
@@ -152,7 +149,7 @@ public final class JdbcRelayRepository implements RelayRepository {
     // stored and the append is new: the fallback below validates and stores it inside the
     // transaction. No lock cycle arises on the common path because a competing publisher commits
     // its store before it takes any topic lock. The fallback stores under the topic lock and so
-    // holds a row-exclusive lock on the payload row until commit; it is safe for a different
+    // holds a row-level lock on the payload row until commit; it is safe for a different
     // reason: locks are always acquired topic first, then payload, and the sweep takes no topic
     // lock at all, so nothing can wait on a topic lock while holding a payload lock.
     // (This ordering is established by reading the acquisition paths; no test would fail if it

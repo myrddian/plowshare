@@ -226,9 +226,8 @@ earlier text read: "`DO NOTHING` rather than `DO UPDATE`. A repeat publish of a 
 digest needs no row version written — the referencing publication row it is about to
 insert is what protects the payload from the next sweep ... *(My call.)*" The
 justification does not hold for a *repeat* append. `DO NOTHING` neither re-arms
-`ejection_at` nor takes a row lock, so a repeat append of an already-matured digest —
-one whose earlier references were pruned — left it a live, unlocked sweep candidate
-across the whole commit-ahead window. The referencing insert is not yet there to
+`ejection_at`, so a repeat append of an already-matured digest —
+one whose earlier references were pruned — left it a live sweep candidate across the whole commit-ahead window. The referencing insert is not yet there to
 protect it: it comes after the payload commits, after the topic lock, the locked
 retained read and position allocation. A sweep in that window found no reference and
 deleted the row, and the appender's publication insert then failed its foreign key,
@@ -244,25 +243,41 @@ ON CONFLICT (digest) DO UPDATE
   WHERE relay_payloads.ejection_at < excluded.ejection_at
 ```
 
-It re-arms the staging window and takes the row lock when the stored date is behind
-the new one, and it still writes no row version for a hot digest whose date is
-already at or beyond `now() + window`: the predicate is false and the update is
-skipped. That case needs neither re-arming nor a lock, because a row that far out is
-not a sweep candidate until after the window, by which time the caller's reference is
-committed or its append has failed. The original objection to `DO UPDATE` — a dead
-tuple per repeat on the hottest row in the table — is answered by the predicate, not
-ignored.
+It re-arms the staging window when the stored date is behind the new one, and it
+still writes no new row version for a hot digest whose date is already at or beyond
+`now() + window`: the predicate is false and the update is skipped. That case needs no
+re-arming, because a row that far out is not a sweep candidate until after the window,
+by which time the caller's reference is committed or its append has failed. *(That
+last step is reasoned from the candidate query's `ejection_at <= ?` and the
+hour-bucketed dates, not from a test that would fail if it stopped holding.)* The
+original objection to `DO UPDATE` — a dead tuple per repeat on the hottest row in the
+table — is answered by the predicate, not ignored.
 
-**The window is narrowed, not closed.** The row lock only *delays* a reclamation; it
-does not prevent one. The sweep's `DELETE` does not mention `ejection_at`, so a
-delete that has already selected the digest and then waits on the store's lock
-follows the update chain under READ COMMITTED, re-evaluates `digest = ?` and both
-`NOT EXISTS` subqueries, still finds no reference, and deletes. What protects the
-row is the re-armed date seen by every *later* candidate query. The exposure shrinks
-from unbounded (topic-lock acquisition, the locked retained read, position
-allocation) to sub-statement: candidate selection, qual evaluation and the row lock,
-microseconds with no lock waits. In that residual window the append is rejected and a
-retry re-stores the bytes. It is recorded again under "What remains unproven".
+**The sweep's `DELETE` requires the date as well, and that is what makes the re-arm
+effective.** The row lock a `DO UPDATE` takes would not have been enough on its own.
+A lock only *delays* a delete that has already selected the digest; when that delete
+resumes, under READ COMMITTED it follows the update chain and re-evaluates its
+predicate. Were the predicate only `digest = ?` and the two `NOT EXISTS` subqueries,
+it would still find no reference — the appender's publication insert comes later,
+after the topic lock — and delete. Worse, the sweep selects its whole candidate list in
+one query and then reclaims one candidate per transaction, so a digest can wait behind
+up to `payload-sweep-batch` earlier candidates, not a statement's worth of time. So the
+delete also carries `p.ejection_at <= ?`, bound to the same instant the candidate
+query used. A row re-armed after selection fails that predicate, deletes nothing and
+falls through to the deferral. A re-armed row therefore cannot be reclaimed by the
+pass that selected it, and the append-side hazard is closed rather than narrowed. The
+date is a *necessary* condition for deletion and never a *sufficient* one —
+reachability is still required — so this is strictly more conservative than the
+predicate it replaces and does not contradict the invariant below. A database test
+(`aCandidateReArmedAfterSelectionSurvivesThePassThatSelectedIt`) holds a second
+candidate to be re-armed while the first is processed and fails if the date is
+removed from the predicate.
+
+Deferral likewise only ever moves a date later: it writes
+`GREATEST(ejection_at, next)`. A re-armed row reaches the deferral unreferenced, where
+the horizon falls back to a staging window truncated *down*, which can be up to an
+hour earlier than the date the re-arm wrote; without `GREATEST` the deferral would pull
+the examination forward.
 
 Admission writes the same digest it read from the publication. It stores no bytes
 at all; the *n*-way amplification disappears here rather than being compressed.
@@ -292,15 +307,17 @@ consequences follow and must be built deliberately:
   wrong read, because nothing references it.
 - **Append's failure handling grows a case.** A payload committed for an append
   that then fails is not an error to report; the retry re-derives the same digest
-  and the `ON CONFLICT` makes the second insert a no-op.
+  and the `ON CONFLICT` finds the existing row, so the second store adds no row
+  (it re-arms the staging window when the stored date is earlier).
 
 ### Payload bytes are immutable
 
-Every production write to `relay_payloads` is one of three: the conditional insert
+At runtime, every production write to `relay_payloads` is one of three: the conditional insert
 above, the guarded `DELETE` in the sweep, or an `UPDATE` of `ejection_at` alone.
 Nothing ever updates payload bytes, and that is load-bearing. Every publication and
 admission that references a digest reads the same bytes, so a writer that mutated a
-row in place would silently rewrite history for every referencing row at once.
+row in place would silently rewrite history for every referencing row at once. (This
+covers runtime writers only; the `V192` and `V193` backfills insert rows.)
 
 The corollary is uncomfortable and stated plainly: a corrupted `relay_payloads` row is
 **permanent for every row sharing that digest**. The conflict clause never repairs
@@ -336,7 +353,7 @@ LIMIT ?
 and for each candidate, under its own transaction:
 
 ```sql
-DELETE FROM relay_payloads p WHERE p.digest = ?
+DELETE FROM relay_payloads p WHERE p.digest = ? AND p.ejection_at <= ?
   AND NOT EXISTS (SELECT 1 FROM relay_publications WHERE payload_digest = p.digest)
   AND NOT EXISTS (SELECT 1 FROM relay_admissions   WHERE payload_digest = p.digest)
 ```
@@ -361,6 +378,9 @@ The governing invariant, which belongs in a comment on the table:
 > Reachability is the only authority. A date that is too early costs one wasted
 > check; a date that is too late leaves bytes for one more window. Neither can
 > remove something referenced.
+
+The date appears in the `DELETE` as a necessary condition only: it can stop a
+deletion (see "Writing"), never permit one.
 
 #### Why the deferral is capped
 
@@ -605,16 +625,28 @@ Stated exactly, so the next reader does not take absence of a failure for a proo
 - **`V193`'s `LOCK TABLE` executes but its blocking effect is not asserted.** The
   migration runs under the test, so the statement is valid; no test shows a
   concurrent writer actually waiting on it.
-- **A residual sub-statement window remains in the sweep/append race.** The conditional
-  `DO UPDATE` narrows it and does not close it (see "Writing"): a sweep that has
-  already selected a digest and is waiting on the store's row lock can still delete
-  it, because its `DELETE` does not consult `ejection_at` and the append's reference
-  does not yet exist. The append is then rejected on its foreign key and a retry
-  succeeds. A database test covers the repeat-append case by holding the topic lock open
-  between the store and the insert, which exercises the multi-statement window; no
-  test can show a microsecond window to be empty.
 - **Corruption of a stored payload is undetected and permanent** for every row sharing
   its digest (see "Payload bytes are immutable").
+- **Deploy ordering is not enforced by anything.** `V193` must not be applied while any
+  instance predating the reader cutover is still serving (see "Migration"). No
+  migration, lock or test can enforce that.
+
+### Claims established by reading, not by a test
+
+These are believed and reasoned from the code or the schema. None has a test that
+would fail if it stopped being true, so check them against the code rather than
+trusting them.
+
+- Only the work tier admits; `ReadTierRelayConsumption.consume` calls
+  `relay.read(key, limit)` directly and creates no admission row or payload copy.
+- Locks are always taken topic first, then payload, and the sweep takes no topic lock,
+  so the append's fallback store under the topic lock cannot form a lock cycle.
+- A hot digest whose `ejection_at` is already at or beyond `now() + window` cannot be
+  a sweep candidate until after the window. This assumes the candidate query's
+  `ejection_at <= ?` filter and the hour bucketing of dates.
+- `relay_payloads` is not reachable by cascade from `relay_topics`. This is checkable
+  from the schema: the foreign keys point from publications and admissions to the
+  payload, never the other way.
 
 ## Left to the builder
 
