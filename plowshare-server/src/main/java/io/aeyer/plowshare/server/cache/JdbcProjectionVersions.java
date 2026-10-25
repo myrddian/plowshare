@@ -48,6 +48,19 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
       ) AS valid_until
       """;
 
+  private static String expiryWindow(Set<Domain> domains) {
+    if (!domains.contains(Domain.OBSERVATIONS)) return EXPIRY_WINDOW;
+    return EXPIRY_WINDOW
+        .replace(
+            "(SELECT expires_at FROM service_tokens WHERE expires_at<=moment.at ORDER BY expires_at DESC LIMIT 1)",
+            "(SELECT expires_at FROM service_tokens WHERE expires_at<=moment.at ORDER BY expires_at DESC LIMIT 1),"
+                + "(SELECT lease_until FROM information_steps WHERE state='running' AND lease_until IS NOT NULL AND lease_until<=moment.at ORDER BY lease_until DESC LIMIT 1)")
+        .replace(
+            "(SELECT expires_at FROM service_tokens WHERE expires_at>moment.at ORDER BY expires_at LIMIT 1)",
+            "(SELECT expires_at FROM service_tokens WHERE expires_at>moment.at ORDER BY expires_at LIMIT 1),"
+                + "(SELECT lease_until FROM information_steps WHERE state='running' AND lease_until IS NOT NULL AND lease_until>moment.at ORDER BY lease_until LIMIT 1)");
+  }
+
   private final JdbcTemplate caller;
   private final JdbcTemplate authoritative;
   private final int maxPending;
@@ -91,7 +104,7 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
             authoritative.queryForObject(
                 "WITH moment AS MATERIALIZED (SELECT clock_timestamp() AS at) SELECT "
                     + "ARRAY(SELECT xid::text FROM pg_snapshot_xip(pg_current_snapshot()) xid LIMIT ?) AS pending,"
-                    + EXPIRY_WINDOW
+                    + expiryWindow(selected)
                     + " FROM moment",
                 (row, index) -> {
                   java.sql.Array array = row.getArray("pending");
@@ -191,7 +204,7 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
   private Counters captureCounters(Set<Domain> domains) {
     return Objects.requireNonNull(
         authoritative.queryForObject(
-            "SELECT database_id,documents,search,schedules,relay,transcripts,authority FROM snapshot_cache_capture_counters()",
+            "SELECT database_id,documents,search,schedules,relay,transcripts,authority,observations FROM snapshot_cache_capture_counters()",
             (row, index) -> {
               var values = new EnumMap<Domain, Long>(Domain.class);
               for (Domain domain : domains)

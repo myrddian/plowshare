@@ -444,6 +444,22 @@ class ProjectAuthorizationTest {
   }
 
   @Test
+  void queuedProjectListingRechecksCurrentRolesBeforeDisclosure() {
+    var loaded =
+        new io.aeyer.plowshare.server.api.ProjectView(
+                "integration", "/fixture", List.of(), List.of(), null, List.of("viewer"))
+            .withRole("MANAGER");
+    var outcome = io.aeyer.plowshare.protocol.frames.Outcome.ok(List.of(loaded));
+    var filter = new io.aeyer.plowshare.server.ws.ProjectListingFilter(access);
+    var visible = (List<?>) filter.filter("project.list", outcome, "viewer").payload();
+    assertEquals(
+        ProjectRole.VIEWER,
+        ((io.aeyer.plowshare.server.api.ProjectView) visible.getFirst()).role());
+    members.remove("integration", "viewer", "manager");
+    assertEquals(List.of(), filter.filter("project.list", outcome, "viewer").payload());
+  }
+
+  @Test
   void router_refuses_viewer_work_before_invoking_a_handler() {
     var executions = new java.util.concurrent.atomic.AtomicInteger();
     var router =

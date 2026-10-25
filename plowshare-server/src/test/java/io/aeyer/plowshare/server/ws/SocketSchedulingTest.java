@@ -35,6 +35,13 @@ class SocketSchedulingTest {
     AdminStore accounts = mock(AdminStore.class);
     AtomicBoolean revoked = new AtomicBoolean();
     when(accounts.sessionCurrent("member", 1L)).thenAnswer(call -> !revoked.get());
+    when(accounts.currentSessions(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call ->
+                revoked.get()
+                    ? java.util.Set.of()
+                    : java.util.Set.of(
+                        new io.aeyer.plowshare.server.auth.SessionAuthority.Session("member", 1L)));
 
     WebSocketSession socket = mock(WebSocketSession.class);
     when(socket.getAttributes())
@@ -53,7 +60,10 @@ class SocketSchedulingTest {
     AtomicReference<ScheduledThreadPoolExecutor> executor = new AtomicReference<>();
     new ApplicationContextRunner()
         .withUserConfiguration(
-            SchedulingConfig.class, SocketAuthorization.class, DedicatedTimers.class)
+            SchedulingConfig.class,
+            SocketAuthorization.class,
+            DedicatedTimers.class,
+            io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class)
         .withBean(AdminStore.class, () -> accounts)
         .run(
             context -> {

@@ -267,19 +267,25 @@ class VersionedProjectionCacheTest {
   }
 
   @Test
-  void cacheCapacityRecoveryAndDisabledEligibilityUseOnlyTheUncachedProjection() {
+  void cacheCapacityRefusesWithoutStartingAnotherSqlLoadAndRecoveryCanStillReadDirectly() {
     try (var fixture = new Fixture()) {
       doReturn(failed(SnapshotCache.Failure.CAPACITY))
           .when(fixture.backing)
           .readInline(any(), any());
+      var refused =
+          assertThrows(
+              io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
+              () ->
+                  fixture.cache.read(
+                      KEY,
+                      true,
+                      () -> fail("Backing rejected before loader"),
+                      () -> fail("Capacity exhaustion must not multiply uncached SQL loads"),
+                      ignored -> 100));
       assertEquals(
-          new Value("capacity"),
-          fixture.cache.read(
-              KEY,
-              true,
-              () -> fail("Backing rejected before loader"),
-              () -> new Value("capacity"),
-              ignored -> 100));
+          io.aeyer.plowshare.protocol.frames.Code.ARCHIVE_UNAVAILABLE,
+          io.aeyer.plowshare.server.faults.Faults.of(refused).code(),
+          "Never promise that an enclosing mutation has not started or invite automatic replay");
       fixture.signals.state(2, false);
       assertEquals(
           new Value("recovering"),

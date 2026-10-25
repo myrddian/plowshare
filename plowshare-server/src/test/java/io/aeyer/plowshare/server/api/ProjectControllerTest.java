@@ -68,6 +68,16 @@ class ProjectControllerTest {
   void setUp() {
     projects = mock(ProjectStore.class);
     presences = new PresenceRegistry();
+    when(projects.listingDetails(any()))
+        .thenAnswer(
+            call -> {
+              java.util.Collection<String> names = call.getArgument(0);
+              return names.stream()
+                  .collect(
+                      java.util.stream.Collectors.toUnmodifiableMap(
+                          value -> value,
+                          value -> new ProjectStore.ListingDetails(null, null, List.of())));
+            });
     mvc =
         MockMvcBuilders.standaloneSetup(
                 new ProjectController(
@@ -109,7 +119,9 @@ class ProjectControllerTest {
         .thenReturn(List.of(Path.of("/w/alpha/secret"), Path.of("/cfg/application.yml")));
     when(projects.effectiveExclusions(beta)).thenReturn(List.of(Path.of("/cfg/application.yml")));
 
-    mvc.perform(get("/v1/projects"))
+    mvc.perform(
+            get("/v1/projects")
+                .requestAttr(io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE, "fixture"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.length()").value(2))
         .andExpect(jsonPath("$[0].name").value("alpha"))
@@ -144,7 +156,9 @@ class ProjectControllerTest {
                 "the archive could not be reached to list the projects",
                 new IllegalStateException("Connection to localhost:5432 refused")));
 
-    mvc.perform(get("/v1/projects"))
+    mvc.perform(
+            get("/v1/projects")
+                .requestAttr(io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE, "fixture"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error").value("archive_unavailable"))
         .andExpect(jsonPath("$.detail").value(containsString("list the projects")));

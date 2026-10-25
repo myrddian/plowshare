@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.information;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import io.aeyer.plowshare.server.faults.NotFoundFault;
 import java.nio.file.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -35,7 +34,7 @@ class InformationReadinessTest {
     return List.of(new InformationReadiness.Source(REVISION, null));
   }
 
-  private io.aeyer.plowshare.protocol.Information.Revision status(String state) {
+  private Map<UUID, InformationCatalogueRepository.ExtractionState> status(String state) {
     return snapshot(
         1,
         List.of(
@@ -45,50 +44,42 @@ class InformationReadinessTest {
                 "summarise", "pending", 0, null, 1, null, null, null, null)));
   }
 
-  private io.aeyer.plowshare.protocol.Information.Revision snapshot(
+  private Map<UUID, InformationCatalogueRepository.ExtractionState> snapshot(
       long generation, List<io.aeyer.plowshare.protocol.Information.Step> steps) {
-    return new io.aeyer.plowshare.protocol.Information.Revision(
+    var extraction =
+        steps.stream()
+            .filter(step -> step.stage().equals("extract") && step.generation() == generation)
+            .findFirst()
+            .orElse(null);
+    return Map.of(
         REVISION,
-        REVISION,
-        1,
-        "fixture",
-        "text/plain",
-        "document",
-        "text",
-        null,
-        null,
-        null,
-        10L,
-        java.time.Instant.EPOCH,
-        "active",
-        false,
-        generation,
-        null,
-        12,
-        0,
-        "fixture",
-        "source",
-        "alice",
-        List.of(),
-        List.of(),
-        false,
-        null,
-        null,
-        Map.of(),
-        "automatic",
-        null,
-        true,
-        steps,
-        null,
-        List.of(),
-        List.of(),
-        null,
-        null);
+        new InformationCatalogueRepository.ExtractionState(REVISION, generation, null, extraction));
   }
 
   @SuppressWarnings("unchecked")
   private Map<String, Object> first(Map<String, Object> fence) {
     return ((List<Map<String, Object>>) fence.get("outcomes")).getFirst();
+  }
+
+  @Test
+  void aHundredSourcesUseOneNarrowFactReadWithoutHydratingFullStatus() {
+    var ids =
+        java.util.stream.IntStream.range(0, 100).mapToObj(ignored -> UUID.randomUUID()).toList();
+    var facts = new LinkedHashMap<UUID, InformationCatalogueRepository.ExtractionState>();
+    for (UUID id : ids)
+      facts.put(
+          id,
+          new InformationCatalogueRepository.ExtractionState(
+              id,
+              1,
+              null,
+              new io.aeyer.plowshare.protocol.Information.Step(
+                  "extract", "ready", 0, null, 1, null, null, null, null)));
+    when(catalogue.extractionStates(context, ids)).thenReturn(Map.copyOf(facts));
+    var sources = ids.stream().map(id -> new InformationReadiness.Source(id, null)).toList();
+    assertEquals(100, InformationReadiness.await(catalogue, context, sources, 0).ready());
+    verify(catalogue).extractionStates(context, ids);
+    verifyNoMoreInteractions(catalogue);
   }
 
   @Test
@@ -99,7 +90,7 @@ class InformationReadinessTest {
                 Files.readString(Path.of("src/test/resources/scripted/extraction-pending.json")),
                 new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
     var json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
-    when(catalogue.status(context, REVISION))
+    when(catalogue.extractionStates(context, List.of(REVISION)))
         .thenReturn(
             snapshot(
                 ((Number) receipt.get("generation")).longValue(),
@@ -123,7 +114,7 @@ class InformationReadinessTest {
   void successful_fetch_receipts_are_pending_until_extraction_is_ready() {
     when(catalogue.acquisitionStatus(context, TICKET))
         .thenReturn(acquisition("succeeded", REVISION, null));
-    when(catalogue.status(context, REVISION))
+    when(catalogue.extractionStates(context, List.of(REVISION)))
         .thenReturn(status("pending"))
         .thenReturn(status("ready"));
     var sources = List.of(new InformationReadiness.Source(null, TICKET));
@@ -140,13 +131,13 @@ class InformationReadinessTest {
 
   @Test
   void native_wait_observes_later_completion_without_waiting_for_summary_or_embedding() {
-    when(catalogue.status(context, REVISION))
+    when(catalogue.extractionStates(context, List.of(REVISION)))
         .thenReturn(status("pending"))
         .thenReturn(status("ready"));
     var fence =
         InformationFixtures.view(InformationReadiness.await(catalogue, context, revisions(), 50));
     assertEquals(true, fence.get("complete"));
-    verify(catalogue, times(2)).requireReadable(context, REVISION);
+    verify(catalogue, times(2)).extractionStates(context, List.of(REVISION));
   }
 
   @Test
@@ -172,16 +163,14 @@ class InformationReadinessTest {
   @Test
   void extraction_failures_and_unavailable_revisions_are_terminal_outcomes() {
     for (String state : List.of("failed", "blocked", "cancelled", "skipped")) {
-      when(catalogue.status(context, REVISION)).thenReturn(status(state));
+      when(catalogue.extractionStates(context, List.of(REVISION))).thenReturn(status(state));
       var fence =
           InformationFixtures.view(InformationReadiness.await(catalogue, context, revisions(), 0));
       assertEquals(true, fence.get("complete"));
       assertEquals(state, first(fence).get("state"));
       assertEquals(0, fence.get("ready"));
     }
-    doThrow(new NotFoundFault("hidden source details"))
-        .when(catalogue)
-        .requireReadable(context, REVISION);
+    when(catalogue.extractionStates(context, List.of(REVISION))).thenReturn(Map.of());
     var fence =
         InformationFixtures.view(InformationReadiness.await(catalogue, context, revisions(), 0));
     assertEquals(true, fence.get("complete"));
@@ -191,7 +180,7 @@ class InformationReadinessTest {
 
   @Test
   void stale_generations_and_pending_acquisitions_do_not_count_as_completion() {
-    when(catalogue.status(context, REVISION))
+    when(catalogue.extractionStates(context, List.of(REVISION)))
         .thenReturn(
             snapshot(
                 2,
@@ -216,7 +205,7 @@ class InformationReadinessTest {
 
   @Test
   void a_batch_waits_for_every_reference_including_unavailable_sources() {
-    when(catalogue.status(context, REVISION)).thenReturn(status("ready"));
+    when(catalogue.extractionStates(context, List.of(REVISION))).thenReturn(status("ready"));
     when(catalogue.acquisitionStatus(context, TICKET))
         .thenReturn(acquisition("queued", null, null))
         .thenReturn(acquisition("failed", null, null));
@@ -238,7 +227,7 @@ class InformationReadinessTest {
 
   @Test
   void interruption_ends_only_the_observer_and_pending_remains_pending() {
-    when(catalogue.status(context, REVISION)).thenReturn(status("pending"));
+    when(catalogue.extractionStates(context, List.of(REVISION))).thenReturn(status("pending"));
     Thread.currentThread().interrupt();
     try {
       var fence =

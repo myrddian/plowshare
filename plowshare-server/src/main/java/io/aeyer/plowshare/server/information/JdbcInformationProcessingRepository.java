@@ -117,7 +117,10 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       }
       var rows =
           jdbc.query(
-              stageQuery
+              "WITH "
+                  + InformationQueueSql.processingAuthority()
+                  + " "
+                  + stageQuery
                   + excluded
                   + " ORDER BY r.created_at,r.id LIMIT 100 FOR UPDATE OF r,s SKIP LOCKED",
               (row, index) ->
@@ -153,7 +156,8 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       }
       var rows =
           jdbc.query(
-              "SELECT s.*,r.resource_id,q.owner_handle,q.project_id,p.name AS project_name FROM information_steps s"
+              (revision == null ? "WITH " + InformationQueueSql.processingAuthority() + " " : "")
+                  + "SELECT s.*,r.resource_id,q.owner_handle,q.project_id,p.name AS project_name FROM information_steps s"
                   + " JOIN information_revision_allowances r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
                   + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
                   + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
@@ -161,7 +165,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                   // A scan shares SYSTEM lineage across candidates. A targeted claim has only
                   // one revision; its existing predicate avoids scanning unrelated inputs.
                   + (revision == null
-                      ? "r.id IN (SELECT revision FROM information_system_processing_revisions())"
+                      ? "r.id IN (SELECT revision FROM processing_authority)"
                       : SYSTEM_OPERATION_VALID)
                   + " AND "
                   + PROCESSING_AUTHORIZED

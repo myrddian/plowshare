@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
  * compatibility.
  */
 @Repository
-public class AdminStore {
+public class AdminStore implements SessionAuthority {
 
   private final JdbcTemplate jdbc;
   private org.springframework.context.ApplicationEventPublisher events;
@@ -174,6 +174,25 @@ public class AdminStore {
             handle,
             version)
         .isEmpty();
+  }
+
+  @Override
+  public java.util.Set<Session> currentSessions(java.util.Collection<Session> sessions) {
+    var requested = java.util.Set.copyOf(sessions);
+    var handles = requested.stream().map(Session::handle).distinct().sorted().toList();
+    var current = new java.util.HashSet<Session>();
+    for (int start = 0; start < handles.size(); start += 128) {
+      var batch = handles.subList(start, Math.min(start + 128, handles.size()));
+      current.addAll(
+          jdbc.query(
+              "SELECT handle,session_version FROM admins WHERE handle IN ("
+                  + String.join(",", java.util.Collections.nCopies(batch.size(), "?"))
+                  + ") AND account_active(handle)",
+              (row, index) -> new Session(row.getString(1), row.getLong(2)),
+              batch.toArray()));
+    }
+    current.retainAll(requested);
+    return java.util.Set.copyOf(current);
   }
 
   public void requireServerAdmin(String handle) {

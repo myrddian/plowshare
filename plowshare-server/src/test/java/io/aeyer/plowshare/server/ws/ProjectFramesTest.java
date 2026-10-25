@@ -28,7 +28,6 @@ import io.aeyer.plowshare.server.session.PresenceRegistry;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -84,6 +83,16 @@ class ProjectFramesTest {
   void setUp() {
     projects = mock(ProjectStore.class);
     presences = new PresenceRegistry();
+    when(projects.listingDetails(any()))
+        .thenAnswer(
+            call -> {
+              java.util.Collection<String> names = call.getArgument(0);
+              return names.stream()
+                  .collect(
+                      java.util.stream.Collectors.toUnmodifiableMap(
+                          value -> value,
+                          value -> new ProjectStore.ListingDetails(null, null, List.of())));
+            });
 
     // FrameParity.endpointsOf and not a bare standaloneSetup: what the
     // deployed server's converters do is what a frame is being compared
@@ -158,8 +167,12 @@ class ProjectFramesTest {
         .thenReturn(List.of(ledger, notes));
     when(projects.effectiveExclusions(ledger)).thenReturn(List.of());
     when(projects.effectiveExclusions(notes)).thenReturn(List.of());
-    when(projects.rootedElsewhere("ledger")).thenReturn(Optional.of("bench.local"));
-    when(projects.rootedElsewhere("notes")).thenReturn(Optional.empty());
+    org.mockito.Mockito.doReturn(
+            java.util.Map.of(
+                "ledger", new ProjectStore.ListingDetails("bench.local", null, List.of()),
+                "notes", new ProjectStore.ListingDetails(null, null, List.of())))
+        .when(projects)
+        .listingDetails(any());
 
     MockHttpServletResponse http = read("/v1/projects");
     Outcome outcome = route(FrameTypes.PROJECT_LIST, "{}");
@@ -636,11 +649,19 @@ class ProjectFramesTest {
   // --- driving the two surfaces off one request ----------------------------
 
   private Outcome route(String type, String payload) {
-    return router.route(FrameParity.frame(type, payload), FrameParity.ASKING);
+    return router.route(
+        FrameParity.frame(type, payload),
+        type.equals(FrameTypes.PROJECT_LIST)
+            ? new Asking(FrameParity.ASKING.sessionId(), "fixture")
+            : FrameParity.ASKING);
   }
 
   private MockHttpServletResponse read(String path) throws Exception {
-    return mvc.perform(get(path)).andReturn().getResponse();
+    return mvc.perform(
+            get(path)
+                .requestAttr(io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE, "fixture"))
+        .andReturn()
+        .getResponse();
   }
 
   private MockHttpServletResponse posted(String path, String body) throws Exception {

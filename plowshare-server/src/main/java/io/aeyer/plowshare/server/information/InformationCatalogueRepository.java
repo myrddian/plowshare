@@ -99,6 +99,12 @@ public interface InformationCatalogueRepository {
   boolean readable(InformationContext context, UUID revision);
 
   /** Applies current readability in the same SQL snapshot as the metadata projection. */
+  /** Narrow extraction facts only; missing entries are unavailable under this exact selection. */
+  record ExtractionState(
+      UUID revision, long generation, String sourceUri, Information.Step extraction) {}
+
+  Map<UUID, ExtractionState> extractionStates(InformationContext context, List<UUID> revisions);
+
   Optional<AuthorizedMetadata> authorizedMetadata(InformationContext context, UUID revision);
 
   /**

@@ -68,6 +68,27 @@ public final class ApplicationProjectMembers implements ProjectMembers {
   }
 
   @Override
+  public java.util.Map<String, ProjectRole> roles(
+      java.util.Collection<String> projects, String handle) {
+    var selection =
+        new ReadSelection(handle, projects == null ? null : new java.util.ArrayList<>(projects));
+    var storedRoles = stored.roles(selection.projects(), handle);
+    String account =
+        io.aeyer.plowshare.server.auth.ServiceCredentials.principal(handle)
+            ? stored.authorityAccount(handle).orElse(null)
+            : handle;
+    if (account == null) return java.util.Map.of();
+    var result = new java.util.LinkedHashMap<String, ProjectRole>();
+    storedRoles.forEach(
+        (project, role) ->
+            applications
+                .read(project)
+                .limit(account, lineage.projectRole(project, account, Optional.of(role)))
+                .ifPresent(value -> result.put(project, value)));
+    return java.util.Map.copyOf(result);
+  }
+
+  @Override
   public boolean mayUse(String project, String handle) {
     return role(project, handle).isPresent();
   }

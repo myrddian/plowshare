@@ -17,7 +17,8 @@ import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
 /**
  * Dedicated PostgreSQL listener infrastructure. Composition supplies an explicitly configured
  * unpooled source; this connection is never borrowed from caller transactions or used for domain
- * queries. Driver notification transport is drained each poll; retained local hints are five bits.
+ * queries. Driver notification transport is drained each poll; retained local hints are a bounded
+ * domain set.
  */
 public final class PostgresProjectionNotificationSource implements ProjectionNotificationSource {
   static final String CHANNEL = "plowshare_projection_changes";
@@ -104,6 +105,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
                   case "relay" -> ProjectionVersions.Domain.RELAY;
                   case "transcripts" -> ProjectionVersions.Domain.TRANSCRIPTS;
                   case "authority" -> ProjectionVersions.Domain.AUTHORITY;
+                  case "observations" -> ProjectionVersions.Domain.OBSERVATIONS;
                   default -> throw unavailable();
                 });
           }

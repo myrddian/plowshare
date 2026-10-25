@@ -63,6 +63,51 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
+  void observationFactsInvalidateOnRuntimeWritesAndClockOnlyLeaseExpiry() throws Exception {
+    var domains = Set.of(ProjectionVersions.Domain.OBSERVATIONS);
+    var before = versions.capture(domains).orElseThrow();
+    String job = "cache-job-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO jobs(id,agent,started_at) VALUES(?,'fixture',now())", job);
+    assertFalse(versions.current(before));
+    var committed = versions.capture(domains).orElseThrow();
+    assertTrue(versions.current(committed));
+    var work = new TransactionTemplate(new DataSourceTransactionManager(data));
+    work.executeWithoutResult(
+        status -> {
+          jdbc.update("UPDATE jobs SET started_at=started_at+interval '1 second' WHERE id=?", job);
+          assertFalse(versions.canShare());
+          status.setRollbackOnly();
+        });
+    // Sequence allocation is conservative on rollback; a fresh committed snapshot remains usable.
+    var rolledBack = versions.capture(domains).orElseThrow();
+    assertTrue(versions.current(rolledBack));
+    UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+        resource,
+        resource.toString());
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) VALUES(?,?,1,'fixture','text/plain','fixture',1)",
+        revision,
+        resource);
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state,lease_token,lease_until) VALUES(?,1,'extract','running',?,clock_timestamp()+interval '2 seconds')",
+        revision,
+        UUID.randomUUID());
+    var running = versions.capture(domains).orElseThrow();
+    assertNotNull(running.validUntil());
+    assertTrue(versions.current(running));
+    long sleep =
+        Math.max(
+            0, Duration.between(Instant.now(), running.validUntil().plusMillis(100)).toMillis());
+    assertTrue(sleep < 3000, "The observation window must include the running lease");
+    TimeUnit.MILLISECONDS.sleep(sleep);
+    assertFalse(
+        versions.current(running),
+        "Expiry must retire running/pending counts without a row update");
+  }
+
+  @Test
   void bootCompositionPreservesThePrimaryPoolMigratesBeforeRecoveryAndClosesOwnedResources() {
     var primaryPool = new AtomicReference<HikariDataSource>();
     var versionPool = new AtomicReference<HikariDataSource>();
@@ -544,6 +589,21 @@ class ProjectionVersionsDatabaseTest {
       assertTrue(versions.current(versions.capture(domains).orElseThrow()));
     } finally {
       listener.close();
+    }
+  }
+
+  @Test
+  void listenerUnderstandsEveryVersionDomainIncludingObservationWakeups() {
+    var source = new PostgresProjectionNotificationSource(source());
+    try (var listener = source.open()) {
+      listener.listen();
+      for (var domain : ProjectionVersions.Domain.values()) {
+        jdbc.queryForObject(
+            "SELECT pg_notify('plowshare_projection_changes',?)",
+            String.class,
+            domain.name().toLowerCase(java.util.Locale.ROOT));
+        assertEquals(Set.of(domain), listener.poll(Duration.ofSeconds(2)));
+      }
     }
   }
 

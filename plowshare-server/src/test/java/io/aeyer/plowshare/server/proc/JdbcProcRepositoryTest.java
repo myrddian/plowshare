@@ -242,6 +242,11 @@ class JdbcProcRepositoryTest {
     var page = repository.queues("alice", query("mine", null, null, 2));
     assertEquals(2, page.queues().size());
     assertNotNull(page.cursor());
+    var exhausted = repository.queues("alice", query("mine", null, "zzzz", 2));
+    assertTrue(exhausted.queues().isEmpty());
+    assertEquals(
+        page.summaries(), exhausted.summaries(), "Totals must survive an empty cursor page");
+    assertQueueWorkIsShared();
     assertEquals(
         105,
         page.summaries().stream()
@@ -273,6 +278,98 @@ class JdbcProcRepositoryTest {
             .findFirst()
             .orElseThrow()
             .pending());
+  }
+
+  @Test
+  void targetedInspectionDoesNotBuildUnrelatedConversationTrees() throws Exception {
+    jdbc.update(
+        "INSERT INTO conversations(id,owner_handle,created_at,origin,budget_total,budget_spent) SELECT 'unrelated-'||n,'alice',now(),'turn',20,0 FROM generate_series(1,1000) n");
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", child)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 3)
+            .addValue("live", List.of("fixture-no-live"));
+    String explained =
+        new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+            .queryForObject(
+                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.conversationPageSql(false),
+                args,
+                String.class);
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkTargetedTree(plan));
+    assertEquals(
+        List.of(child),
+        repository
+            .conversations("alice", query("mine", child, null, 2), live())
+            .conversations()
+            .stream()
+            .map(row -> row.id())
+            .toList());
+  }
+
+  private int checkTargetedTree(com.fasterxml.jackson.databind.JsonNode plan) {
+    int found = 0;
+    if ("CTE tree".equals(plan.path("Subplan Name").asText())) {
+      found++;
+      assertEquals(
+          2,
+          plan.path("Actual Rows").asLong(),
+          "Only the selected root and child belong in the walk");
+    }
+    for (var childPlan : plan) found += checkTargetedTree(childPlan);
+    return found;
+  }
+
+  private void assertQueueWorkIsShared() {
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 3);
+    String explained =
+        new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+            .queryForObject(
+                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.queueSql(false),
+                args,
+                String.class);
+    try {
+      var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+      assertEquals(1, checkSharedQueueWork(plan, "CTE processing_authority"));
+      assertEquals(1, checkSharedQueueWork(plan, "CTE counters"));
+    } catch (java.io.IOException invalid) {
+      throw new AssertionError("PostgreSQL must return a JSON plan", invalid);
+    }
+  }
+
+  private int checkSharedQueueWork(com.fasterxml.jackson.databind.JsonNode plan, String subplan) {
+    int found = 0;
+    if (subplan.equals(plan.path("Subplan Name").asText())) {
+      found++;
+      assertEquals(1, plan.path("Actual Loops").asLong(), subplan + " must be built only once");
+      if (subplan.equals("CTE processing_authority")) checkAuthorityScans(plan);
+    }
+    for (var child : plan) found += checkSharedQueueWork(child, subplan);
+    return found;
+  }
+
+  private void checkAuthorityScans(com.fasterxml.jackson.databind.JsonNode plan) {
+    if (plan.path("Relation Name").asText().equals("information_revisions")
+        && plan.path("Node Type").asText().equals("Seq Scan"))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "Worker eligibility must not rescan every revision per candidate: " + plan);
+    for (var child : plan) checkAuthorityScans(child);
   }
 
   @Test

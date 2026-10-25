@@ -149,6 +149,19 @@ plowshare:
     ceiling: ${PLOWSHARE_POOL_ADMISSION_CEILING:3s}
     # Half-life over which observed acquire-latency pressure decays.
     pressure-window: ${PLOWSHARE_POOL_ADMISSION_PRESSURE_WINDOW:10s}
+  # Logical work capacity spans all feeds/sockets for each authenticated principal.
+  # These limits precede database borrowing; the connection throttle remains in place.
+  read-capacity:
+    interactive: ${PLOWSHARE_READ_CAPACITY_INTERACTIVE:16}
+    interactive-per-principal: ${PLOWSHARE_READ_CAPACITY_INTERACTIVE_PER_PRINCIPAL:4}
+    reports: ${PLOWSHARE_READ_CAPACITY_REPORTS:2}
+    reports-per-principal: ${PLOWSHARE_READ_CAPACITY_REPORTS_PER_PRINCIPAL:1}
+    observers: ${PLOWSHARE_READ_CAPACITY_OBSERVERS:64}
+    observers-per-principal: ${PLOWSHARE_READ_CAPACITY_OBSERVERS_PER_PRINCIPAL:4}
+    sockets: ${PLOWSHARE_READ_CAPACITY_SOCKETS:1024}
+    sockets-per-principal: ${PLOWSHARE_READ_CAPACITY_SOCKETS_PER_PRINCIPAL:32}
+    subscriptions: ${PLOWSHARE_READ_CAPACITY_SUBSCRIPTIONS:512}
+    subscriptions-per-principal: ${PLOWSHARE_READ_CAPACITY_SUBSCRIPTIONS_PER_PRINCIPAL:32}
   # Per-projection cache budgets (ProjectionCacheProperties). Every budget is a
   # hard bound; invalid combinations fail startup. The version connections are
   # a separate pool from the main one. Details: docs/server-administration.md.
@@ -168,7 +181,7 @@ plowshare:
     notification-poll: ${PLOWSHARE_PROJECTION_CACHE_NOTIFICATION_POLL:1s}
     reconnect-delay: ${PLOWSHARE_PROJECTION_CACHE_RECONNECT_DELAY:1s}
     max-pending-transactions: ${PLOWSHARE_PROJECTION_CACHE_MAX_PENDING_TRANSACTIONS:128}
-    max-projections: ${PLOWSHARE_PROJECTION_CACHE_MAX_PROJECTIONS:16}
+    max-projections: ${PLOWSHARE_PROJECTION_CACHE_MAX_PROJECTIONS:20}
     # Connections of the separate projection-versions pool (1..32).
     version-connections: ${PLOWSHARE_PROJECTION_CACHE_VERSION_CONNECTIONS:4}
   information:

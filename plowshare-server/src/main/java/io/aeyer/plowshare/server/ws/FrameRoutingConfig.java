@@ -63,6 +63,13 @@ public class FrameRoutingConfig {
    *     FrameRouter}'s own constructor
    */
   @Bean
+  public FrameRouter frameRouter(
+      List<FrameArea> areas,
+      ActingRequests acting,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    return assemble(areas, acting, admission);
+  }
+
   public FrameRouter frameRouter(List<FrameArea> areas, ActingRequests acting) {
     return assemble(areas, acting);
   }
@@ -72,6 +79,13 @@ public class FrameRoutingConfig {
   }
 
   private FrameRouter assemble(List<FrameArea> areas, ActingRequests acting) {
+    return assemble(areas, acting, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
+  }
+
+  private FrameRouter assemble(
+      List<FrameArea> areas,
+      ActingRequests acting,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
     Map<String, FrameHandler> table = new HashMap<>();
     for (FrameArea area : areas) {
       for (Map.Entry<String, FrameHandler> entry : area.frames().entrySet()) {
@@ -90,6 +104,6 @@ public class FrameRoutingConfig {
         }
       }
     }
-    return new FrameRouter(table, acting);
+    return new FrameRouter(table, acting, admission);
   }
 }

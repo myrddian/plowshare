@@ -1635,6 +1635,14 @@ public final class InformationCatalogue implements InformationReadAccess {
         });
   }
 
+  /**
+   * Admit the selection once and load only extraction-stage facts for the requested readiness set.
+   */
+  public java.util.Map<UUID, InformationCatalogueRepository.ExtractionState> extractionStates(
+      InformationContext context, List<UUID> revisions) {
+    return repository.extractionStates(access.admitted(context), revisions);
+  }
+
   public void requireReadable(InformationContext context, UUID revision) {
     access.requireSelection(context);
     if (!repository.readable(context, revision)) throw absent();

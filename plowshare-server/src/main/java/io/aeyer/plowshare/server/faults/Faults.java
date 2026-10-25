@@ -134,6 +134,9 @@ public final class Faults {
 
   private static Map<Class<? extends Throwable>, Function<Throwable, Fault>> buildMappers() {
     Map<Class<? extends Throwable>, Function<Throwable, Fault>> m = new HashMap<>();
+    m.put(
+        io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
+        e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
 
     // Row 2: CallerFault. Same status and slug as row 1's BadRequestException,
     // which this class does not map at all -- see the class javadoc.

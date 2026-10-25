@@ -319,6 +319,21 @@ public class ProjectAuthorization {
     return projects;
   }
 
+  /**
+   * Current effective project roles resolved once for this output selection, including Application
+   * ceilings.
+   */
+  public java.util.Set<String> readableProjects(
+      java.util.Collection<String> projects, String account) {
+    return projectRoles(projects, account).keySet();
+  }
+
+  public java.util.Map<String, ProjectRole> projectRoles(
+      java.util.Collection<String> projects, String account) {
+    var candidates = projects.stream().filter(java.util.Objects::nonNull).distinct().toList();
+    return candidates.isEmpty() ? java.util.Map.of() : members.roles(candidates, account);
+  }
+
   public boolean readable(String project, String account) {
     return project == null || members.mayUse(project, account);
   }
