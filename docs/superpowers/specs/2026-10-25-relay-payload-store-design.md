@@ -311,11 +311,13 @@ because that is a design decision of its own:
   order, so two such transactions sharing two digests in opposite orders can deadlock
   on the unique index. Content addressing makes that collision possible where it was
   not before.
-- Nothing is mis-stored or lost in either case. How likely identical digests are across
-  concurrent transactions is not established: the information notice's event ID carries
-  a fresh UUID, but the payload is built from the revision, generation, stage, action and
-  document fields, so two notices for the same revision, stage and action encode
-  identically.
+- Nothing is mis-stored or lost in either case. Identical payloads across distinct
+  notices are expected by design, not merely possible: the information notice's event ID
+  carries a fresh UUID, but the payload is built from the revision, generation, stage,
+  action and document fields, and `RelayInformationEvents` records that the catalogue
+  legitimately repeats the same revision, stage and action ("two retries of one stage are
+  two events"). What is unquantified is only how often two such publishes overlap
+  concurrently.
 
 Where the appender has no transaction open, committing the payload first makes the staging path a 50 MiB
 payload will eventually want reachable rather than hypothetical. Three
@@ -560,7 +562,8 @@ applied to servers that still need what it removes:
   *reading* after it. The commit structure does not prevent this problem.
 - `V192`'s cost: it is an unqualified `UPDATE` of both of the largest tables, rewriting
   every row in one Flyway transaction and holding row locks on all of them, so concurrent
-  `prune` and `admit` block until it completes. The dual-write fallback described under
+  `prune` and `admit` block until it completes. (Reasoned from the
+  migration's shape, not run.) The dual-write fallback described under
   "Why a data-preserving migration is still right" is offered only for `V193`'s stall;
   whether it would also remove this one was not analysed.
 
