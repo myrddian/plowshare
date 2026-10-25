@@ -1,12 +1,14 @@
 # ADR 0042: Nested Application containment
 
-Status: proposed, 25 October 2026. Written to satisfy
+Status: accepted for slice one, 25 October 2026, following the user's
+authorization to build the containment primitive alone; the remaining capability
+is proposed. Written to satisfy
 [the integration boundary decision](0001-integration-boundary.md) for the design
 in [nested Applications](../superpowers/specs/2026-10-25-nested-applications-design.md).
 That design is the binding authority; this record states its decisions in the
-repository's decision form and does not add to them. The user has authorized
-building the containment primitive alone. The recursive harness-improvement
-workflow that motivated it is a separate design and is not authorized here.
+repository's decision form and does not add to them. The recursive
+harness-improvement workflow that motivated the capability is a separate design
+and is not authorized here.
 
 ## Platform need
 
@@ -76,9 +78,10 @@ each hop. The operations this record adds are the parent's own typed ones:
 create, configure, read trajectory, read resources and destroy. Every other
 attempt to address a child is refused.
 
-Every surface that lacks narrowing today is reduced to the parent's hold or
-refused when a child manifest declares it, and is never honoured as written:
-Relay topic ports and audiences ([ADR 0010](0010-relay-processing-and-topic-policy-authority.md),
+Three distinct inventories carry the confinement proof, and none stands in for
+another. The first lists the surfaces a child manifest can declare, each reduced
+to the parent's hold or refused and never honoured as written: Relay topic ports
+and audiences ([ADR 0010](0010-relay-processing-and-topic-policy-authority.md),
 [ADR 0039](0039-relay-audiences-beyond-a-project.md)), tool bindings and
 provider declarations ([ADR 0006](0006-application-scoped-live-tools.md),
 [ADR 0007](0007-provider-scopes-and-interactive-tool-policy.md)), FileStore
@@ -87,11 +90,22 @@ destinations and writable areas, named swarm types
 ([ADR 0020](0020-application-schedule-operational-authority.md)) and service
 account attribution and spending pools
 ([ADR 0025](0025-service-account-attribution-and-spending-pools.md)). Refusing a
-surface is an acceptable first slice. Honouring a child's declaration of one is
-not. Separately from these manifest surfaces, an inventory of every place the
-server makes a project addressable without anyone naming it records a decision
-for each entry, fenced or refused. That inventory is the confinement proof and is
-kept in the final section of this record.
+surface is an acceptable first slice; honouring a child's declaration of one is
+not. Task 5 owns this inventory. The second is the compiler-forced list: every
+site the sealed `AuthorityScope` interface forces to decide what containment
+means, each marked fenced or refused. It is recorded in the final section of this
+record by Task 2. The third lists every place the server makes a project
+addressable without anyone naming it. It consumes the second as one input but is
+not equal to it, because it includes sites that never switch on `AuthorityScope`,
+among them the `project.list` SQL and the union and git provisioning. Known
+starting points are `project.list` and the kind and `routingIdentity` surface,
+messaging `from_project` and `to_project`, Relay project-scoped subscribers
+([ADR 0038](0038-relay-read-tier-subscribers-project-scoped.md)) and audiences
+(ADR 0039), startup schedule reconciliation, conversation search, and the union
+and git provisioning that ordinary project creation performs per
+[personal space](../personal-space.md); a child must not silently acquire a
+working tree and a git hub. Each entry receives a decision, fenced or refused.
+Task 8 owns this inventory, which is the confinement proof.
 
 Children are ephemeral. The parent creates and destroys them and a destroyed
 child's source is collected. The server allocates a child's source area under a
@@ -189,8 +203,9 @@ destruction is the normal path.
 Compatibility: existing Applications, projects, receipts and the `Home` API are
 unchanged, and nesting is opt-in, so no existing Application gains the capability
 by upgrade. The schema change is a new migration and no shipped migration is
-edited. The relation is additive, so rollback removes children and the relation
-without touching top-level data. Operation and DTO contracts are regenerated
+edited. The migration is additive and its tables and contracts are retained rather
+than dropped. Returning to an older binary needs a schema-aware compatibility
+release or a write stop, as this repository already requires elsewhere. Operation and DTO contracts are regenerated
 across the Java, TypeScript/Node, Python, Go and .NET SDKs through their owning
 scripts and affected clients change together. A sealed `AuthorityScope` kind is a
 source-incompatible change inside the server that the compiler enumerates, and
