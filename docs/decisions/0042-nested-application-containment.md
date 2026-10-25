@@ -677,9 +677,32 @@ processes the bound is `plowshare.containment.sweep-grace`, a minimum directory
 age below which an unaccounted stage is assumed to belong to a creation still
 running. The grace defaults long and is floored at one minute, because the two
 failure directions are not symmetric: too long leaks for one more sweep, too
-short deletes live work. **The residual gap** is a second server sweeping inside
-another server's grace window; closing it needs a durable staging claim with an
-owner and a lease, which is new lifecycle machinery and is not in this slice.
+short deletes live work.
+
+**The residual window, which slice one accepts.** The in-process claim is
+authoritative and total, but only for the server holding it: within one process
+no sweep can collect a stage a creation is writing, whatever that stage's age.
+Across processes there is no claim at all — only the floored directory age, which
+rests on filesystem mtime and is therefore advisory rather than authoritative. So
+in a **multi-server deployment sharing one containment root**, one server's sweep
+can collect a stage another server is still writing once that stage is older than
+the grace: a creation slower than `sweep-grace` — a large package on slow storage,
+a long validation, a stalled transaction — is the case. A single-server
+deployment does not have this window, because the claim covers it entirely. It
+fails in the safe direction only in the sense that the grace floor keeps the
+window from being immediate; the failure itself is not safe — the creating server
+would return a receipt for an Application whose source another server deleted,
+which is why the grace defaults to thirty minutes rather than to something a
+creation could plausibly exceed. What closes it is a **durable staging claim with
+an owner and a lease**, so a claim survives the process that made it and expires
+if that process dies; that is new lifecycle machinery and is deliberately not in
+this slice.
+
+`ContainmentConfig` therefore now holds one value that defaults when absent
+(`sweep-grace`) beside two that fail at startup when absent (the depth and
+breadth bounds), and the asymmetry is deliberate rather than an oversight: a
+tuning knob is not a deployment identity, and an absent bound would mean
+*unlimited* whereas an absent grace merely means *long*.
 
 ## Destruction under delivery uncertainty
 
