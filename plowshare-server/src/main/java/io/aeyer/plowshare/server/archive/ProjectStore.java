@@ -1304,6 +1304,15 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
       throw new ArchiveRefusedException(
           "Personal space is managed by its account and cannot be changed as an ordinary project");
     }
+    // Reserved case-insensitively, because the prefix is what the authority substrate keys
+    // containment on: a project named 'contained:...' receives no authority scope from
+    // authority_map_project and is an eligible host for a CONTAINED one, so letting a caller
+    // create or rename one here would hand it a project with no scope at all.
+    if (name != null && name.regionMatches(true, 0, "contained:", 0, "contained:".length())) {
+      throw new ArchiveRefusedException(
+          "Contained projects are created and destroyed by their container and cannot be made or"
+              + " changed as ordinary projects");
+    }
   }
 
   public List<ProjectRecord> all() {

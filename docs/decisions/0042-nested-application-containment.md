@@ -256,9 +256,21 @@ tests over the kinds they admit, not as exhaustive switches:
 `LiveScopedAuthority.covers` widens `ORDINARY_PROJECT_CONTROL` only for
 `Project`, and `LiveActingAuthorization` and `AccountRequestProjects` likewise
 require a named kind. Such a test excludes a new kind silently rather than forcing
-a decision about it. The exclusion is usually fail-safe, and here it is: a
-contained scope is inadmissible, uncoverable and unactable-upon in this slice
-without further change. But a silent fail-safe exclusion is not a proof, because
+a decision about it. The exclusion is usually fail-safe, and in the Java
+authority path it was: a contained scope is inadmissible, uncoverable and
+unactable-upon there. It was not fail-safe in the database. V156 declares its own
+`RESTRICTED`-only predicates, and three live ones admitted a contained scope until
+V195 closed them — `authority_live_grants()`, which would have reported a grant
+against a contained scope as live; `authority_grant_insert()`, the database's own
+grant admission check; and `authority_membership_changed()`, which minted a
+`MEMBERSHIP` grant against a contained scope from a row trigger on
+`project_members`, with no application code involved and so beyond the reach of
+any Java predicate. So the statement that holds is the narrow one: *after* V195
+and the repository exclusion, a contained scope is inadmissible, uncoverable and
+unactable-upon. Nothing about the sealed interface made that true, and the
+compiler reported none of the three.
+
+A silent fail-safe exclusion is not a proof, because
 nothing distinguishes a site that excluded containment deliberately from one that
 excluded it by accident, and nothing will force the question if such a site is
 later widened.
@@ -287,6 +299,50 @@ marker, constant at any depth; containment ancestry stays in the `container`
 column, so no readable name grows with depth and
 [ADR 0021](0021-tool-and-relay-topic-name-capacity.md)'s capacity bound is
 untouched.
+
+`authority_membership_changed` belongs beside it. An ordinary `project_members`
+row for a child project minted a `MEMBERSHIP` grant against that project's scope
+from inside an `AFTER INSERT OR UPDATE OR DELETE` row trigger, so a child could
+have acquired real authority with no application call to refuse and nothing named
+in a manifest. V195 makes the trigger resolve nothing for a contained scope, as
+it already did for a restricted one. It is the clearest case of a confinement
+decision living in SQL rather than in Java, and it is why this inventory cannot
+be the proof.
+
+Because the prefix is now load-bearing, the per-call-site prefix checks are a
+list (c) surface in their own right. The following exclude `personal:` and
+`client:` but not `contained:`, so each is a place that must decide whether a
+contained project is in or out of its answer. `ProjectStore.ordinary` has been
+reserved as part of this slice, since a project a caller named `contained:x`
+would otherwise be created with no authority scope at all; the rest are recorded
+for Task 8's audit and are not changed here.
+
+| Site | Form |
+| --- | --- |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:78` | `startsWith("personal:")` |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:137` | `startsWith("personal:")` |
+| `plowshare-server/.../auth/ServiceAccounts.java:137-139` | `personal:`, `Personal:`, `client:` |
+| `plowshare-server/.../agents/WorkspaceApplicationPolicy.java:47` | `startsWith("personal:")` |
+| `plowshare-server/.../applications/SourceApplicationDeployments.java:63` | `startsWith("personal:")` |
+| `plowshare-server/.../union/UnionFrames.java:166` | `startsWith("personal:")` |
+| `plowshare-server/.../events/FileScheduleDefinitions.java:82-83` | `personal:`, `Personal:` |
+| `plowshare-server/.../ws/ScheduleListHandler.java:37-38` | `personal:`, `Personal:` |
+| `plowshare-protocol/.../ApplicationIdentity.java:100-102` | `personal:`, `Personal:`, `client:` |
+| `plowshare-protocol/.../HostedToolScopes.java:309` | `startsWith("client:")` |
+| `plowshare-server/.../archive/ProjectStore.java:1289` | SQL `name NOT LIKE 'client:%'` |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:59` | SQL `p.name LIKE 'client:%'` |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:175-176` | SQL `LIKE 'personal:%'`, `LIKE 'client:%'` |
+| `plowshare-server/.../events/JdbcScheduleStore.java:38` | SQL `NOT LIKE 'client:%'`, `NOT LIKE 'personal:%'` |
+
+Fourteen sites, found by grepping for both the `startsWith` and the SQL `LIKE`
+forms of the two existing prefixes across `plowshare-server`, `plowshare-protocol`
+and `sdk`. Three further matches are the prefix *definitions* rather than
+exclusions and are listed separately for that reason:
+`archive/ClientProjects.java:15` and `personal/PersonalSpaces.java:67` and `:74`.
+A contained project is excluded from the authority mapping by name, so several of
+these would hand back a project with no scope rather than refuse; which of the
+fourteen should refuse, which should filter and which are already correct is
+Task 8's decision, not this record's.
 
 The refusal at `home(AuthorityScope)` is the consequential one. A contained scope
 carries an ordinary `projects.id`, so answering `value.projectId()` there would

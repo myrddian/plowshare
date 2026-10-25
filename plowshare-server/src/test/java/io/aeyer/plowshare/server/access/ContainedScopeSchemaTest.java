@@ -48,12 +48,22 @@ class ContainedScopeSchemaTest {
     source.setConnectionProperties(properties);
     Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).load().migrate();
     jdbc = new JdbcTemplate(source);
+    user("admin", true);
+    user("alice", false);
     parentProject = project("parent");
     ordinaryProject = project("ordinary");
     childProject = contained();
     parentScope =
         jdbc.queryForObject(
             "SELECT id FROM authority_scopes WHERE project_id=?", UUID.class, parentProject);
+  }
+
+  private void user(String handle, boolean admin) {
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,must_change_password,server_admin)"
+            + " VALUES (?,'fixture',FALSE,?)",
+        handle,
+        admin);
   }
 
   private long project(String name) {
@@ -196,6 +206,109 @@ class ContainedScopeSchemaTest {
             () -> insert(UUID.randomUUID(), "CONTAINED", childProject, UUID.randomUUID()));
     assertTrue(
         refusal.getMessage().contains("requires an existing container"), refusal.getMessage());
+  }
+
+  private UUID containedScope() {
+    var child = UUID.randomUUID();
+    assertEquals(1, insert(child, "CONTAINED", childProject, parentScope));
+    return child;
+  }
+
+  private long grants(UUID scope) {
+    return jdbc.queryForObject(
+        "SELECT count(*) FROM authority_grants WHERE scope_id=?", Long.class, scope);
+  }
+
+  /**
+   * The database mints MEMBERSHIP grants itself, from an AFTER INSERT OR UPDATE OR DELETE trigger
+   * on {@code project_members}. No application-side exclusion can see that, so the trigger must
+   * resolve nothing for a contained scope.
+   */
+  @Test
+  void aProjectMembersRowMintsNoGrantAgainstAContainedScope() {
+    var child = containedScope();
+    assertEquals(
+        1,
+        jdbc.update(
+            "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,'CONTRIBUTOR')",
+            childProject,
+            "alice"));
+    assertEquals(0L, grants(child));
+  }
+
+  @Test
+  void anExplicitGrantAgainstAContainedScopeIsRefusedByAdmission() {
+    var child = containedScope();
+    var control = control();
+    var refusal = assertThrows(DataAccessException.class, () -> grant(child, control, "READER"));
+    assertTrue(refusal.getMessage().contains("cannot receive that role"), refusal.getMessage());
+    assertEquals(0L, grants(child));
+  }
+
+  /**
+   * Defence in depth, asserted independently of the admission trigger: were a grant to reach the
+   * table by any route, every live-grant read must still decline to honour it. The trigger is
+   * disabled only to place the row.
+   */
+  @Test
+  void aGrantAgainstAContainedScopeIsNotLive() {
+    var child = containedScope();
+    var control = control();
+    jdbc.execute("ALTER TABLE authority_grants DISABLE TRIGGER authority_grant_insert");
+    try {
+      grant(child, control, "READER");
+    } finally {
+      jdbc.execute("ALTER TABLE authority_grants ENABLE TRIGGER authority_grant_insert");
+    }
+    assertEquals(1L, grants(child));
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM authority_grants g JOIN authority_live_grants() l ON l.id=g.id "
+                + "WHERE g.scope_id=?",
+            Long.class,
+            child));
+  }
+
+  /**
+   * The server admin's own live project-control authority; more than one ADMIN_CONTROL row exists,
+   * so the coverage and an explicit order pick the same one every run.
+   */
+  private UUID control() {
+    return jdbc.queryForObject(
+        "SELECT g.id FROM authority_grants g JOIN authority_live_grants() l ON l.id=g.id "
+            + "WHERE g.provenance='ADMIN_CONTROL' AND g.coverage='ORDINARY_PROJECT_CONTROL' "
+            + "ORDER BY g.created_at,g.id LIMIT 1",
+        UUID.class);
+  }
+
+  private void grant(UUID scope, UUID authority, String role) {
+    jdbc.update(
+        "INSERT INTO authority_grants(subject_account,scope_id,role_id,requested_role,"
+            + "issuer_account,issuing_grant,provenance) "
+            + "SELECT a.id,?,r.id,?,p.subject_account,p.id,'ROLE' "
+            + "FROM authority_accounts a, authority_roles r, authority_grants p "
+            + "WHERE a.legacy_handle='alice' AND r.name=? AND p.id=?",
+        scope,
+        role,
+        role,
+        authority);
+  }
+
+  /**
+   * The prefix is load-bearing, so losing it must not be survivable. Renaming a contained project
+   * drives the mapping trigger, which tries to upsert the scope back to PROJECT and is stopped by
+   * the kind/container shape constraint.
+   */
+  @Test
+  void renamingAContainedProjectOutOfItsPrefixIsRefused() {
+    var child = containedScope();
+    assertThrows(
+        DataAccessException.class,
+        () -> jdbc.update("UPDATE projects SET name='now-ordinary' WHERE id=?", childProject));
+    assertEquals(
+        "CONTAINED",
+        jdbc.queryForObject("SELECT kind FROM authority_scopes WHERE id=?", String.class, child));
   }
 
   @Test
