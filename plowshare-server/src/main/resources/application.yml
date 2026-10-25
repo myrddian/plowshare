@@ -85,11 +85,11 @@ plowshare:
     # queueing, not execution; a request beyond it is answered CAPACITY_EXHAUSTED.
     request-depth: ${PLOWSHARE_TRANSPORT_REQUEST_DEPTH:8}
     # Requests of one connection executing at once. This is the only transport
-    # execution bound while request-global is 0, so raising it pressures the
-    # database pool.
+    # transport execution bound while request-global is 0. Logical read-capacity
+    # budgets and the database acquisition throttle apply independently.
     request-per-connection: ${PLOWSHARE_TRANSPORT_REQUEST_PER_CONNECTION:2}
     # Requests executing at once across all connections; 0 is unlimited, because
-    # the database pool (spring.datasource.hikari) is the real bound.
+    # logical read budgets and database connection admission provide separate bounds.
     request-global: ${PLOWSHARE_TRANSPORT_REQUEST_GLOBAL:0}
     # Long parked waits (such as information.await) across all connections; must
     # be at least request-per-connection.

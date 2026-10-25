@@ -618,6 +618,18 @@ class TokenStoreTest {
     assertEquals(Optional.of(new TokenStore.Redeemed(null)), store.redeemTicket(ticket));
   }
 
+  @Test
+  void a_version_bound_ticket_refuses_missing_or_unverifiable_identity_without_a_lookup() {
+    String unbacked = store.mintTicket("enzo", 0L);
+    assertTrue(store.redeemTicket(unbacked).isEmpty());
+    var durable = org.mockito.Mockito.mock(DurableSessions.class);
+    store.withDurableSessions(durable);
+    String anonymousVersion = store.mintTicket(null, 0L);
+    assertTrue(store.redeemTicket(anonymousVersion).isEmpty());
+    assertTrue(store.redeemTicket(anonymousVersion).isEmpty());
+    org.mockito.Mockito.verifyNoInteractions(durable);
+  }
+
   // --- the operator token --------------------------------------------------
 
   /**

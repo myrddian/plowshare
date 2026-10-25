@@ -96,6 +96,48 @@ class RepositoryProxyCompatibilityTest {
     }
   }
 
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void readCapacityCompositionPreservesAccountAndReportRepositoryProxyContracts(
+      boolean classProxy) {
+    var jdbc = new JdbcTemplate(mock(javax.sql.DataSource.class));
+    var caches = mock(io.aeyer.plowshare.server.cache.ProjectionCaches.class);
+    when(caches.create(anyString(), anySet()))
+        .thenAnswer(call -> io.aeyer.plowshare.server.cache.ProjectionCache.direct());
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(JdbcTemplate.class, () -> jdbc);
+      context.registerBean(
+          com.fasterxml.jackson.databind.ObjectMapper.class,
+          () -> new com.fasterxml.jackson.databind.ObjectMapper());
+      context.registerBean(
+          org.springframework.transaction.PlatformTransactionManager.class,
+          () -> mock(org.springframework.transaction.PlatformTransactionManager.class));
+      context.registerBean(io.aeyer.plowshare.server.cache.ProjectionCaches.class, () -> caches);
+      context.registerBean(
+          PersistenceExceptionTranslationPostProcessor.class,
+          () -> {
+            var translation = new PersistenceExceptionTranslationPostProcessor();
+            translation.setProxyTargetClass(classProxy);
+            return translation;
+          });
+      context.register(
+          io.aeyer.plowshare.server.auth.AdminStore.class,
+          io.aeyer.plowshare.server.auth.StoredSessionAuthority.class,
+          io.aeyer.plowshare.server.llm.accounting.JdbcUsageReportRepository.class,
+          io.aeyer.plowshare.server.reads.ReportReadConfiguration.class,
+          io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class,
+          io.aeyer.plowshare.server.ws.SocketAuthorization.class);
+      context.refresh();
+      assertNotNull(
+          context.getBean(io.aeyer.plowshare.server.auth.AdminStore.class),
+          "Legacy account consumers require their existing concrete bean");
+      assertNotNull(context.getBean(io.aeyer.plowshare.server.ws.SocketAuthorization.class));
+      assertInstanceOf(
+          io.aeyer.plowshare.server.llm.accounting.CachedUsageReportRepository.class,
+          context.getBean(io.aeyer.plowshare.server.llm.accounting.UsageReportRepository.class));
+    }
+  }
+
   @Test
   void applicationAndContextRepositoriesSupportClassProxiesAndTypedInjection() {
     var jdbc = mock(JdbcTemplate.class);
