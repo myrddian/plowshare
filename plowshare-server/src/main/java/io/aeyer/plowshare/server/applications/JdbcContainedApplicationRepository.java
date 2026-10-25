@@ -252,16 +252,21 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
   }
 
   /**
-   * One recorded containment edge downwards. {@code scope IS NOT NULL} keeps a swept stage off the
-   * chain: it never had a scope, because it never had a committed record.
+   * One recorded containment edge downwards.
+   *
+   * <p>A swept stage is off this chain already and not by a predicate here: V200's shape constraint
+   * makes {@code cause='SWEPT'} imply a null {@code container}, so {@code container=?} cannot match
+   * one. {@code cause='DESTROYED'} is kept because it states the intent in the statement; a {@code
+   * scope IS NOT NULL} test was removed, because the same constraint makes {@code
+   * cause='DESTROYED'} imply it — it guarded nothing, and its comment credited it with work these
+   * two columns already do.
    */
   @Override
   public List<Collection> collectedUnder(ScopeId container) {
     return jdbc.query(
         "SELECT "
             + COLLECTION_COLUMNS
-            + " FROM contained_collections WHERE container=? AND scope IS NOT NULL"
-            + " AND cause='DESTROYED' ORDER BY child",
+            + " FROM contained_collections WHERE container=? AND cause='DESTROYED' ORDER BY child",
         JdbcContainedApplicationRepository::collection,
         container.value());
   }

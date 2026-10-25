@@ -65,9 +65,19 @@ public final class ContainedCollectionSweeps implements ApplicationListener<Appl
     if (!ready || !running.compareAndSet(false, true)) return;
     try {
       var swept = collector.sweep();
-      // Logged only when it did something, so a quiet server stays quiet. Counts, never paths:
-      // a containment root is deployment configuration and does not belong in a log.
-      if (swept.collected() > 0)
+      // Counts, never paths: a containment root is deployment configuration and does not belong
+      // in a log. A quiet server stays quiet -- but a *blind* one does not. A sweep that could not
+      // read its root answers the same zeroes a clean root does, and staying silent about that
+      // would leave an operator unable to tell a system with nothing to collect from one that has
+      // stopped collecting. This component carries ADR 0042's observability claim; it cannot be
+      // the thing that hides its own failure.
+      if (swept.outcome() == ContainedSourceCollector.Outcome.PARTIAL)
+        LOG.warn(
+            "Contained source sweep did not enumerate its whole root; collected {}, retained {}."
+                + " Counts are what this sweep managed, not what the root holds",
+            swept.collected(),
+            swept.retained());
+      else if (swept.collected() > 0)
         LOG.info(
             "Collected {} contained source areas, retained {}",
             swept.collected(),

@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.*;
 import org.junit.jupiter.api.*;
@@ -403,6 +404,91 @@ class ContainedRecoveryTest {
     verify(records, times(2)).uncollectedSources();
   }
 
+  /**
+   * Fix round 3, Finding B. An operator must be able to tell a quiet system from a blind one, and
+   * this is the component that carries the ADR's "collection is observable" claim. A root it could
+   * not read answered {@code Sweep(0, 0)} — indistinguishable from a clean root — and the scheduler
+   * logged nothing, because it logged only when something was collected.
+   */
+  @Test
+  void aSweepReportsThatItCouldNotLookRatherThanThatItFoundNothing() throws Exception {
+    // A clean root: looked, found nothing.
+    assertEquals(ContainedSourceCollector.Outcome.COMPLETE, collector.sweep().outcome());
+    // A root that is not there at all: could not look. The counts are the same; the outcome is not.
+    Files.delete(root);
+    var blind = collector.sweep();
+    assertEquals(0, blind.collected());
+    assertEquals(0, blind.retained());
+    assertEquals(ContainedSourceCollector.Outcome.PARTIAL, blind.outcome());
+  }
+
+  /**
+   * An unreadable entry mid-enumeration reports what it did and says it did not finish, rather than
+   * returning a partial count as though it were complete. The previous javadoc claimed it "never
+   * partially reports", which the enumeration-wide catch made false.
+   */
+  @Test
+  void aSweepThatCannotFinishEnumeratingReportsWhatItDidAndThatItDidNotFinish() throws Exception {
+    String orphan = UUID.randomUUID().toString();
+    Files.createDirectories(root.resolve(orphan));
+    when(records.committed("contained:" + orphan)).thenReturn(false);
+    // A directory entry whose own removal cannot complete, so the loop reaches the end having
+    // collected one and retained one, and says so.
+    String stuck = UUID.randomUUID().toString();
+    Path held = Files.createDirectories(root.resolve(stuck).resolve("inner"));
+    when(records.committed("contained:" + stuck)).thenReturn(false);
+    Assumptions.assumeTrue(
+        FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+        "An un-removable entry needs POSIX attributes");
+    var original = Files.getPosixFilePermissions(held.getParent());
+    Files.setPosixFilePermissions(
+        held.getParent(),
+        EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
+    try {
+      var swept = collector.sweep();
+      assertEquals(1, swept.collected());
+      assertEquals(1, swept.retained(), "the entry it could not remove is accounted for");
+      assertEquals(ContainedSourceCollector.Outcome.COMPLETE, swept.outcome());
+      assertTrue(Files.isDirectory(held));
+    } finally {
+      Files.setPosixFilePermissions(held.getParent(), original);
+    }
+  }
+
+  /**
+   * And the scheduler says so. It logged only when it collected something, so a blind sweep was
+   * silent — the worst possible behaviour for the component that carries observability.
+   */
+  @Test
+  void theSchedulerLogsASweepThatCouldNotLook() throws Exception {
+    var logger =
+        (ch.qos.logback.classic.Logger)
+            org.slf4j.LoggerFactory.getLogger(ContainedCollectionSweeps.class);
+    var captured =
+        new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+    captured.start();
+    logger.addAppender(captured);
+    try {
+      var sweeps = new ContainedCollectionSweeps(collector);
+      sweeps.onApplicationEvent(
+          new org.springframework.boot.context.event.ApplicationReadyEvent(
+              new org.springframework.boot.SpringApplication(),
+              new String[0],
+              null,
+              Duration.ZERO));
+      // A clean root is quiet: nothing collected and nothing wrong.
+      assertEquals(List.of(), captured.list);
+      Files.delete(root);
+      sweeps.sweep();
+      assertEquals(1, captured.list.size(), "a blind sweep is never silent");
+      assertEquals(ch.qos.logback.classic.Level.WARN, captured.list.getFirst().getLevel());
+      // Counts, never paths: a containment root is deployment configuration.
+      assertFalse(captured.list.getFirst().getFormattedMessage().contains(root.toString()));
+    } finally {
+      logger.detachAppender(captured);
+    }
+  }
+
   /** An unconfigured server has no containment root, so the sweep refuses to guess one. */
   @Test
   void sweepDoesNothingWhenNestingIsNotConfigured() {
@@ -412,6 +498,9 @@ class ContainedRecoveryTest {
     var swept = unconfigured.sweep();
     assertEquals(0, swept.collected());
     assertEquals(0, swept.retained());
+    // Distinguished from both of the other two: a server that has not configured nesting has
+    // nothing to look at, which is neither a clean root nor a blind one.
+    assertEquals(ContainedSourceCollector.Outcome.UNCONFIGURED, swept.outcome());
     verifyNoInteractions(records);
   }
 }

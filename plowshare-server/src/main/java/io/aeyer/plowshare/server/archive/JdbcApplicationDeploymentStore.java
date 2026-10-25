@@ -23,9 +23,10 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
   private final io.aeyer.plowshare.server.acting.ActingRepository acting;
 
   /**
-   * ADR 0042's live-child fence. Optional for the same reason {@code identities} and {@code acting}
-   * are: a server that has not configured nesting has no containment relation to ask about, and a
-   * test store that is not asserting containment constructs without one.
+   * ADR 0042's live-child fence. <strong>Required</strong>, unlike {@code identities} and {@code
+   * acting}: a store without it would activate a new revision over live contained Applications --
+   * which is the orphan the fence exists to prevent -- and would do it silently. A caller with no
+   * containment relation passes {@code ContainmentFence.unfenced()} and says so.
    */
   private final io.aeyer.plowshare.server.applications.ContainmentFence containment;
 
@@ -53,7 +54,14 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
       io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
       io.aeyer.plowshare.server.acting.ActingRepository acting) {
-    this(jdbc, work, projects, schedules, identities, acting, null);
+    this(
+        jdbc,
+        work,
+        projects,
+        schedules,
+        identities,
+        acting,
+        io.aeyer.plowshare.server.applications.ContainmentFence.unfenced());
   }
 
   public JdbcApplicationDeploymentStore(
@@ -64,7 +72,7 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
       io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
       io.aeyer.plowshare.server.acting.ActingRepository acting,
       io.aeyer.plowshare.server.applications.ContainmentFence containment) {
-    this.containment = containment;
+    this.containment = Objects.requireNonNull(containment, "containment fence");
     this.acting = acting;
     this.identities = identities;
     this.jdbc = jdbc;
@@ -135,7 +143,7 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
           // survive the change and destroying them silently were both rejected, because each
           // produces an orphan. Creation takes this same project row lock, so the count cannot be
           // taken a moment before a child row lands.
-          if (containment != null) containment.requireNoLiveChildren(mutation.project());
+          containment.requireNoLiveChildren(mutation.project());
           var prior =
               receipt(account, mutation.project(), mutation.requestId(), mutation.fingerprint());
           if (prior.isPresent()) return prior.get();

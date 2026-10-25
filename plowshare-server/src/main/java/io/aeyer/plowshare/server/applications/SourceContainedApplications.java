@@ -143,54 +143,76 @@ public final class SourceContainedApplications implements ContainedApplications 
     // source of a creation that is about to succeed.
     staging.claim(project);
     try {
-      stage(staged, request.files(), project);
-      // Both sides of the comparison are read through the same reader, from the container's own
-      // retained source and from the child's staged source, so a declaration cannot be honoured
-      // because the two were parsed differently.
-      ContainedDeclarations.requireWithin(
-          ContainedDeclarations.read(project, staged),
-          ContainedDeclarations.read(parent.admission().home().project(), containerRoot));
-      manifest(staged, project);
-      validator.validate(project, staged);
       var allowance = new AllowanceId(UUID.randomUUID());
+      try {
+        stage(staged, request.files(), project);
+        // Both sides of the comparison are read through the same reader, from the container's own
+        // retained source and from the child's staged source, so a declaration cannot be honoured
+        // because the two were parsed differently.
+        ContainedDeclarations.requireWithin(
+            ContainedDeclarations.read(project, staged),
+            ContainedDeclarations.read(parent.admission().home().project(), containerRoot));
+        manifest(staged, project);
+        validator.validate(project, staged);
+      } catch (RuntimeException | IOException before) {
+        // Everything above runs before the unit of work opens, so no durable row can exist and
+        // the staged bytes are certainly garbage.
+        collect(workspace);
+        throw before instanceof RuntimeException refused
+            ? refused
+            : new CallerFault("Contained Application source could not be staged");
+      }
+      // From here the staged source is collected only by a failure that is DEFINITELY a rollback,
+      // which means a failure thrown by the body below -- never one thrown by the commit.
+      //
+      // A commit that reports failure may still have committed, and collecting on that would
+      // produce the one orphan this capability calls unrecoverable: a live child row whose source
+      // is gone. committed(project) answers true for it, so the sweep neither collects it nor
+      // repairs it, and no record says anything is wrong. Leaving the bytes is safe in both
+      // branches and requires distinguishing nothing -- if it committed they are the child's
+      // correct source, and if it did not there is no row, so the sweep collects them. So nothing
+      // here catches what escapes inTransaction itself.
       return work.inTransaction(
           () -> {
-            // The container's own project row lock, which is the row a parent revision change
-            // locks. Taken before the insert so that creation and activation contend on one lock:
-            // without it, activation could count zero live children a moment before this row
-            // lands and both would commit, leaving the orphan the fence exists to prevent.
-            records.lockContainer(parent.admission().scope());
-            var retained =
-                records.create(
-                    new ContainedApplicationRepository.Creation(
-                        parent.admission().scope(),
-                        request.requestId(),
-                        fingerprint,
-                        project,
-                        workspace,
-                        revision,
-                        allowance,
-                        request.ceiling()));
-            var scope =
-                new AuthorityScope.Contained(
-                    retained.scope(), retained.projectId(), retained.container());
-            // The child allocates its OWN allowance, as nested starts already do, under the
-            // ceiling its container set. There is no shared counter: child spend is attributed to
-            // the child, which leaves ADR 0025's immutable attribution and the rule that
-            // delegation cannot change the accounting account exactly as they are.
-            allowances.retain(new AllowanceSnapshot(allowance, retained.ceiling(), 0));
-            principals.issue(scope);
-            // Last, because it is the one step that can still refuse on authority rather than on
-            // data: the hop proves the stored containment row, the depth bound and the parent's
-            // live grants. Its refusal rolls the rest of this unit back.
-            authority.contain(parent.admission(), scope, narrowed(parent.admission()));
-            return child(retained);
+            try {
+              // The container's own project row lock, which is the row a parent revision change
+              // locks. Taken before the insert so that creation and activation contend on one lock:
+              // without it, activation could count zero live children a moment before this row
+              // lands and both would commit, leaving the orphan the fence exists to prevent.
+              records.lockContainer(parent.admission().scope());
+              var retained =
+                  records.create(
+                      new ContainedApplicationRepository.Creation(
+                          parent.admission().scope(),
+                          request.requestId(),
+                          fingerprint,
+                          project,
+                          workspace,
+                          revision,
+                          allowance,
+                          request.ceiling()));
+              var scope =
+                  new AuthorityScope.Contained(
+                      retained.scope(), retained.projectId(), retained.container());
+              // The child allocates its OWN allowance, as nested starts already do, under the
+              // ceiling its container set. There is no shared counter: child spend is attributed to
+              // the child, which leaves ADR 0025's immutable attribution and the rule that
+              // delegation cannot change the accounting account exactly as they are.
+              allowances.retain(new AllowanceSnapshot(allowance, retained.ceiling(), 0));
+              principals.issue(scope);
+              // Last, because it is the one step that can still refuse on authority rather than on
+              // data: the hop proves the stored containment row, the depth bound and the parent's
+              // live grants. Its refusal rolls the rest of this unit back.
+              authority.contain(parent.admission(), scope, narrowed(parent.admission()));
+              return child(retained);
+            } catch (RuntimeException rolledBack) {
+              // Thrown by the body, so this unit of work will roll back: the project row, the
+              // scope, the principal, the allowance and the containment record all go, and the
+              // staged bytes are garbage with certainty.
+              collect(workspace);
+              throw rolledBack;
+            }
           });
-    } catch (RuntimeException | IOException failed) {
-      collect(workspace);
-      throw failed instanceof RuntimeException refused
-          ? refused
-          : new CallerFault("Contained Application source could not be staged");
     } finally {
       staging.release(project);
     }
@@ -255,9 +277,8 @@ public final class SourceContainedApplications implements ContainedApplications 
     var retained = live.get();
     if (!parent.admission().scope().equals(retained.container()))
       throw new CallerFault("This Application does not contain that Application");
+    // Never empty: find() just resolved this child, and the subtree read selects it at depth 0.
     var subtree = records.subtree(retained.scope());
-    if (subtree.isEmpty())
-      throw new CallerFault("This contained Application has already been collected");
     work.inTransaction(
         () -> {
           for (var held : subtree) {

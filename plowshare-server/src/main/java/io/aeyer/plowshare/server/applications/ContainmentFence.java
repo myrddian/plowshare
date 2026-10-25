@@ -20,6 +20,20 @@ package io.aeyer.plowshare.server.applications;
  */
 public interface ContainmentFence {
   /**
+   * A fence that refuses nothing, for wiring that has no containment relation to ask about.
+   *
+   * <p>It exists so that <em>omission is not expressible</em>. The collaborator was nullable with
+   * the call site guarded by a null check, which meant a silently fenceless production store was
+   * one constructor call away — and this fence is what stops a child outliving the revision that
+   * authorized it. Naming the absence makes it a visible choice at the call site instead of a
+   * default nobody reads. Production wiring passes the real one; this is for tests and for a caller
+   * that genuinely has no containment schema.
+   */
+  static ContainmentFence unfenced() {
+    return project -> {};
+  }
+
+  /**
    * Refuses when this project's authority scope holds a live contained Application beneath it.
    *
    * @throws io.aeyer.plowshare.server.faults.CallerFault naming the destruction the caller must

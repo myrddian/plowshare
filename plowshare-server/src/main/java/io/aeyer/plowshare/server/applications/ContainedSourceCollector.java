@@ -40,13 +40,40 @@ import java.util.UUID;
  * <p>An unconfigured server has no root and this does nothing. It never guesses a path.
  */
 public final class ContainedSourceCollector {
+  /** Whether a sweep looked at the whole containment root, part of it, or none of it. */
+  public enum Outcome {
+    /** The root was enumerated to the end. {@code collected} and {@code retained} are the total. */
+    COMPLETE,
+    /**
+     * The root could not be read, or the enumeration stopped partway. The counts are what this
+     * sweep managed, <em>not</em> what the root holds. An operator reading this is being told the
+     * difference between a quiet system and a blind one, which is the whole point of the field.
+     */
+    PARTIAL,
+    /** No containment root is configured, so there is nothing to look at. Not a fault. */
+    UNCONFIGURED
+  }
+
   /**
    * One sweep's accounting, which is the observable half of recovery.
    *
+   * <p>{@code outcome} exists because the counts alone cannot distinguish "looked, found nothing"
+   * from "could not look": both answered zero and zero, and a scheduler that logged only non-zero
+   * collections said nothing about either. For the component that carries this record's
+   * observability claim, that was the one failure mode it could least afford.
+   *
    * @param collected source areas removed, from either input
-   * @param retained directories left alone because a committed child accounts for them
+   * @param retained directories left alone, because a committed child accounts for them, because a
+   *     creation holds them, because they are younger than the grace, or because their removal did
+   *     not complete
    */
-  public record Sweep(int collected, int retained) {}
+  public record Sweep(int collected, int retained, Outcome outcome) {
+    public Sweep {
+      java.util.Objects.requireNonNull(outcome);
+      if (collected < 0 || retained < 0)
+        throw new IllegalArgumentException("A sweep counts what it did");
+    }
+  }
 
   private final ContainedApplicationRepository records;
   private final UnitOfWork work;
@@ -67,10 +94,19 @@ public final class ContainedSourceCollector {
     this.grace = Objects.requireNonNull(grace);
   }
 
-  /** Finishes interrupted removals, then collects unaccounted stages. Never partially reports. */
+  /**
+   * Finishes interrupted removals, then collects unaccounted stages.
+   *
+   * <p>Best effort, and it says which: the result's {@link Outcome} reports whether the whole root
+   * was enumerated. It does <strong>not</strong> guarantee that everything collectable was
+   * collected — a directory whose removal does not complete is counted as retained and swept again
+   * next time — and it never throws for a filesystem it could not read, because a caller asking for
+   * housekeeping is not asking to be failed.
+   */
   public Sweep sweep() {
-    if (!config.configured()) return new Sweep(0, 0);
+    if (!config.configured()) return new Sweep(0, 0, Outcome.UNCONFIGURED);
     int collected = 0;
+    int pendingRetained = 0;
     for (var pending : records.uncollectedSources()) {
       // Confined to the root even though the record names the path: a stored row is data, and the
       // one directory this will remove for it is the one its project name resolves to here.
@@ -82,9 +118,16 @@ public final class ContainedSourceCollector {
       if (remove(workspace)) {
         records.sourceCollected(pending.child());
         collected++;
+      } else {
+        // Still there, still unmarked: next sweep's work, and counted so the totals account for
+        // every row this one looked at.
+        pendingRetained++;
       }
     }
-    int retained = 0;
+    int retained = pendingRetained;
+    // Enumerated to the end unless something below says otherwise. The previous shape wrapped the
+    // whole loop in one catch and returned the partial count as though it were the total.
+    var outcome = Outcome.COMPLETE;
     try (var entries = Files.newDirectoryStream(config.root())) {
       for (Path entry : entries) {
         if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) continue;
@@ -106,7 +149,13 @@ public final class ContainedSourceCollector {
           retained++;
           continue;
         }
-        if (!remove(entry)) continue;
+        if (!remove(entry)) {
+          // Tried and could not finish. Counted as retained rather than dropped from the
+          // accounting: a sweep whose totals do not add up to what it looked at is the same
+          // dishonesty as one that reports a partial count as complete.
+          retained++;
+          continue;
+        }
         // Written after the bytes are gone and already marked, because for this input there was no
         // earlier record to mark: a sweep's own collection is never left half-recorded.
         var record =
@@ -127,12 +176,15 @@ public final class ContainedSourceCollector {
             });
         collected++;
       }
-    } catch (IOException unreadable) {
+    } catch (IOException | java.nio.file.DirectoryIteratorException unreadable) {
       // A sweep is best effort by necessity and reports what it did rather than failing a caller
       // that asked for cleanup. What it could not read this time it reads on the next sweep, and
-      // nothing treats a surviving directory as live.
+      // nothing treats a surviving directory as live. But it no longer reports the partial count
+      // as a total: an unreadable root and a clean root are different facts about the system, and
+      // only one of them needs an operator's attention.
+      outcome = Outcome.PARTIAL;
     }
-    return new Sweep(collected, retained);
+    return new Sweep(collected, retained, outcome);
   }
 
   /**

@@ -698,11 +698,35 @@ an owner and a lease**, so a claim survives the process that made it and expires
 if that process dies; that is new lifecycle machinery and is deliberately not in
 this slice.
 
+A sweep reports **what it looked at**, not only what it did. Its result carries
+whether the whole root was enumerated, whether it could not be, or whether no root
+is configured, because the counts alone cannot tell "looked, found nothing" from
+"could not look" — both answer zero — and the scheduler logs a sweep that could
+not look. Collection is this record's observability claim, so the component
+carrying it cannot be the one that hides its own failure.
+
 `ContainmentConfig` therefore now holds one value that defaults when absent
 (`sweep-grace`) beside two that fail at startup when absent (the depth and
 breadth bounds), and the asymmetry is deliberate rather than an oversight: a
 tuning knob is not a deployment identity, and an absent bound would mean
 *unlimited* whereas an absent grace merely means *long*.
+
+## The ordering of the staged-source collection, and the orphan it must not make
+
+Collection on a refused create is ordered by which failures are *certainly* a
+rollback. Everything before the unit of work opens — staging, the declared-surface
+comparison, the manifest, the validator — is certainly a rollback, because no
+durable row can exist yet, so its bytes go. A failure thrown by the transactional
+body is also certainly a rollback, so its bytes go.
+
+A failure thrown by the **commit** is not. A commit that reports failure may
+still have committed, and collecting on that would make the one orphan this
+record calls unrecoverable: a live child row whose source is gone, for which
+`committed(project)` answers true, so the sweep neither collects nor repairs it
+and nothing says anything is wrong. Nothing therefore collects on a failure that
+escapes the unit of work itself. Leaving the bytes is safe in both branches and
+requires distinguishing nothing: if it committed they are the child's correct
+source; if it did not, there is no row, so the sweep collects them.
 
 ## Destruction under delivery uncertainty
 

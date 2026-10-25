@@ -121,21 +121,30 @@ class ContainedDestructionTest {
     }
   }
 
-  /** Records whether the durable unit committed, which the source removal order rests on. */
+  /**
+   * Records whether the durable unit committed, which the source removal order rests on.
+   *
+   * <p>{@code failOnCommit} models the case Finding A is about: the body succeeded and the commit
+   * reported a failure, so the outcome is <em>unknown</em> rather than rolled back. It is thrown
+   * from {@code inTransaction} and not from the body, which is exactly the distinction the
+   * production code now draws.
+   */
   static final class Work implements UnitOfWork {
     boolean rolledBack;
     boolean committed;
     boolean inside;
+    RuntimeException failOnCommit;
 
     @Override
     public <T> T inTransaction(java.util.function.Supplier<T> body) {
       inside = true;
       try {
         T answer = body.get();
+        if (failOnCommit != null) throw failOnCommit;
         committed = true;
         return answer;
       } catch (RuntimeException failed) {
-        rolledBack = true;
+        if (failed != failOnCommit) rolledBack = true;
         throw failed;
       } finally {
         inside = false;
@@ -196,6 +205,92 @@ class ContainedDestructionTest {
         allowance,
         5,
         true);
+  }
+
+  /**
+   * A service wired for the creation path, which the destruction fixture otherwise has no need of.
+   * The parent's manifest declares nesting and its workspace exists, so a create gets as far as
+   * staging and then as far as the unit of work.
+   */
+  SourceContainedApplications creator(ContainedStaging claims, Work unit) {
+    try {
+      Path parentWorkspace = Files.createDirectories(directory.resolve("parent-source"));
+      Files.writeString(
+          parentWorkspace.resolve("plowshare.json"),
+          "{\"version\":1,\"name\":\"parent\",\"nesting\":true}");
+      when(projects.find("parent"))
+          .thenReturn(
+              Optional.of(
+                  new io.aeyer.plowshare.server.archive.ProjectRecord(
+                      "parent", parentWorkspace, List.of(), List.of(), "MANAGED", List.of())));
+      when(projects.effectiveExclusions(any())).thenReturn(List.of());
+      when(records.receipt(any(), any())).thenReturn(Optional.empty());
+      when(records.liveDescendants(parentScope.id())).thenReturn(0);
+      when(records.create(any()))
+          .thenAnswer(
+              call -> {
+                ContainedApplicationRepository.Creation made = call.getArgument(0);
+                return new ContainedApplicationRepository.Retained(
+                    UUID.randomUUID(),
+                    new ScopeId(UUID.randomUUID()),
+                    99,
+                    made.project(),
+                    made.container(),
+                    made.requestId(),
+                    made.fingerprint(),
+                    made.revision(),
+                    made.allowance(),
+                    made.ceiling(),
+                    true);
+              });
+      when(principals.issue(any()))
+          .thenAnswer(
+              call ->
+                  new ContainedPrincipals.ContainedPrincipal(
+                      UUID.randomUUID(), ((AuthorityScope.Contained) call.getArgument(0)).id()));
+      when(authority.contain(any(), any(), any())).thenReturn(parentAdmission);
+    } catch (Exception impossible) {
+      throw new IllegalStateException(impossible);
+    }
+    return new SourceContainedApplications(
+        records,
+        projects,
+        validator,
+        authority,
+        principals,
+        allowances,
+        unit,
+        new ContainmentConfig(root.toString(), 3, 4, null),
+        claims);
+  }
+
+  ContainedApplications.Create creation() {
+    return new ContainedApplications.Create(
+        "c-1",
+        UUID.randomUUID(),
+        1,
+        null,
+        List.of(),
+        List.of(
+            new io.aeyer.plowshare.protocol.ApplicationDeployment.File(
+                "plowshare.json", "{\"version\":1,\"name\":\"child\"}"),
+            new io.aeyer.plowshare.protocol.ApplicationDeployment.File("agents/README.md", "x")));
+  }
+
+  /** Directories under the containment root that a creation staged, excluding the two fixtures. */
+  Set<String> stagedProjects() {
+    try (var entries = Files.list(root)) {
+      var fixtures =
+          Set.of(
+              child.project().substring("contained:".length()),
+              grandchild.project().substring("contained:".length()));
+      return entries
+          .map(path -> path.getFileName().toString())
+          .filter(name -> !fixtures.contains(name))
+          .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
+    } catch (java.io.IOException unreadable) {
+      throw new IllegalStateException(unreadable);
+    }
   }
 
   Path workspace(ContainedApplicationRepository.Retained held) {
@@ -547,6 +642,80 @@ class ContainedDestructionTest {
         workspace(held),
         ContainedApplicationRepository.Cause.DESTROYED,
         removed);
+  }
+
+  /**
+   * Fix round 3, Finding A — the inverse orphan, which is the one direction ADR 0042 calls
+   * unrecoverable.
+   *
+   * <p>A failure thrown out of {@code work.inTransaction} <em>itself</em> is a failure of the
+   * commit, and a commit that reports failure may still have committed. Collecting the staged
+   * source on that would leave a live child row whose source is gone: {@code committed(project)}
+   * answers true, so the sweep neither collects it nor repairs it, and no record says anything is
+   * wrong. Leaving the bytes is safe in both branches and requires distinguishing nothing — if it
+   * committed they are the child's correct source, and if it did not there is no row, so the sweep
+   * collects them.
+   *
+   * <p>A failure thrown by the transactional <em>body</em> is the opposite case: the unit of work
+   * will roll back, so the bytes are collected there, which is where the pre-existing refusal
+   * totality tests already exercise it.
+   */
+  @Test
+  void anAmbiguousCommitLeavesTheStagedSourceOnDisk() {
+    var staging = new InProcessContainedStaging();
+    var creating = creator(staging, work);
+    work.failOnCommit = new org.springframework.transaction.TransactionSystemException("uncertain");
+    assertThrows(
+        org.springframework.transaction.TransactionSystemException.class,
+        () -> creating.create("@service/parent", creation()));
+    // The bytes survive, because the row may exist. A sweep will not touch them if it does, and
+    // will collect them if it does not.
+    assertFalse(stagedProjects().isEmpty(), "an ambiguous commit leaves its staged source");
+    // And the claim is still released, so the stage is not exempt from collection forever.
+    assertEquals(Set.of(), staging.claimed());
+  }
+
+  /**
+   * The other side of the same ordering, asserted here rather than only in {@code
+   * ContainedRecoveryTest}: a failure thrown by the body is a definite rollback, so its bytes go.
+   */
+  @Test
+  void aFailureInsideTheTransactionalBodyStillCollectsItsStagedSource() {
+    var staging = new InProcessContainedStaging();
+    var creating = creator(staging, work);
+    doThrow(new CallerFault("the body refused")).when(records).create(any());
+    assertThrows(CallerFault.class, () -> creating.create("@service/parent", creation()));
+    assertEquals(Set.of(), stagedProjects());
+    assertEquals(Set.of(), staging.claimed());
+  }
+
+  /**
+   * Fix round 3, Finding C. The fence was a nullable collaborator guarded by a null check, so a
+   * silently fenceless production store was one constructor call away — and the fence is what stops
+   * a child outliving the revision that authorized it. It is required now, and the absence has a
+   * name, so omitting it is a visible choice rather than a default nobody reads.
+   */
+  @Test
+  void theDeploymentStoreCannotBeWiredWithoutAContainmentFence() {
+    var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    var unit = mock(UnitOfWork.class);
+    var servers = mock(io.aeyer.plowshare.server.archive.ServerProjects.class);
+    var schedules = mock(io.aeyer.plowshare.server.events.ScheduleDefinitionStore.class);
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new io.aeyer.plowshare.server.archive.JdbcApplicationDeploymentStore(
+                jdbc, unit, servers, schedules, null, null, null));
+    // The named absence is constructible and refuses nothing, which is what makes it a choice.
+    var unfenced =
+        new io.aeyer.plowshare.server.archive.JdbcApplicationDeploymentStore(
+            jdbc, unit, servers, schedules, null, null, ContainmentFence.unfenced());
+    assertNotNull(unfenced);
+    assertDoesNotThrow(() -> ContainmentFence.unfenced().requireNoLiveChildren("anything"));
+    // And the shorter overloads are not a back door: they supply the named absence, not a null.
+    assertNotNull(
+        new io.aeyer.plowshare.server.archive.JdbcApplicationDeploymentStore(
+            jdbc, unit, servers, schedules));
   }
 
   /** Zeroing precedes deletion, so a descendant in flight cannot claim another call. */
