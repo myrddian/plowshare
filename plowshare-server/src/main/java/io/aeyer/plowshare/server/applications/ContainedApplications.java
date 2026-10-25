@@ -91,8 +91,65 @@ public interface ContainedApplications {
     }
   }
 
+  /**
+   * One retained conversation envelope of a contained Application, as its container reads it.
+   *
+   * <p>A boundary DTO over {@link
+   * io.aeyer.plowshare.server.access.OperationAuthority.Conversation}, which is a durable execution
+   * envelope whose provenance and budget owner are never inferred on resume. What crosses out here
+   * is the evidence a container needs to see what it confined do: the conversation, the agent that
+   * answered it, its delegation {@code parent}, the allowance its spend was attributed to and the
+   * capability fingerprint it ran under. The admission itself does not cross: it carries grant
+   * identifiers and an account id, which are the container's own authority restated, not the
+   * child's behaviour.
+   *
+   * <p>Evidence, not permission. {@code OperationAuthority.Conversation} says so of itself —
+   * callers must still recheck live authority — and both read paths here do, before any of this is
+   * assembled.
+   */
+  record Step(String conversation, String agent, String parent, UUID budget, String capabilities) {
+    public Step {
+      Objects.requireNonNull(conversation);
+      Objects.requireNonNull(budget);
+      if (agent == null || agent.isBlank())
+        throw new IllegalArgumentException("A retained conversation names its agent");
+    }
+  }
+
   /** Validates, allocates and admits a child, or refuses leaving nothing behind. */
   Child create(String account, Create request);
+
+  /**
+   * The live Applications the caller's conversation directly contains.
+   *
+   * <p>Takes a conversation and not a project name, for {@link #ceiling}'s reasons: the retained
+   * admission is the authority and the scope it lists is the scope that admission acts as, so a
+   * caller cannot name a container it is not. A project name would have to be resolved to a scope,
+   * and the general scope read refuses a contained row — which would have failed this listing
+   * closed for every container that is itself contained, exactly as it once failed {@code ceiling}.
+   *
+   * <p>Direct children only, and this is what makes siblings invisible rather than merely
+   * unmentioned: the answer is keyed on the caller's own scope, so a child asking lists what
+   * <em>it</em> contains — nothing, in the ordinary case — and never its own level. There is no
+   * argument through which it could ask about another.
+   */
+  List<Child> list(String account, String conversation);
+
+  /**
+   * One contained Application's retained conversation lineage, oldest first.
+   *
+   * <p>Authorized exactly as {@link #ceiling} authorizes a reconfiguration, and then once more: the
+   * caller's retained admission must be an <em>ancestor</em> of the child's stored container, which
+   * is the containment relation walked upwards from the child. A grandparent therefore reads
+   * through the chain, and a sibling, a child's own container or an unrelated scope never appears
+   * on it. The walk is bounded by the configured depth, so a chain that ought to be impossible
+   * refuses rather than running.
+   *
+   * <p>Nothing travels the other way. A contained Application asking this about its container finds
+   * no containment row to compare against, or a chain that does not pass through its own scope, and
+   * is refused before any envelope is read.
+   */
+  List<Step> trajectory(String account, String conversation, UUID child);
 
   /**
    * Lowers or raises a child's own ceiling under its container's authority. Zero disables the

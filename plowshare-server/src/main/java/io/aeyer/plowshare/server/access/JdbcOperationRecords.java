@@ -119,6 +119,72 @@ public class JdbcOperationRecords implements OperationRecords {
         id);
   }
 
+  /**
+   * One statement for the whole scope, grouped in the mapper rather than one read per conversation.
+   *
+   * <p>The support join multiplies rows, so the result set is ordered by conversation first and the
+   * extractor closes a conversation when that column changes — the same shape {@link
+   * #conversation(String)} extracts for one id, made to repeat. A per-conversation second query
+   * would be the N+1 the query rules forbid, and the admission it would fetch is already on these
+   * rows.
+   *
+   * <p>{@code ORDER BY c.conversation} is the oldest-first order the contract promises: a
+   * conversation id is {@code cnv_} plus a time-ordered identifier, so lexical order is creation
+   * order. A row with no sealed admission is skipped rather than failing the read: this is a
+   * listing, and one unusable row must not refuse the rest.
+   */
+  @Override
+  public List<OperationAuthority.Conversation> conversationsIn(AuthorityIds.ScopeId scope) {
+    Objects.requireNonNull(scope, "scope");
+    return jdbc.query(
+        "SELECT c.conversation,c.agent,c.parent_conversation,c.allowance_id,c.capabilities,"
+            + "a.*,s.action AS support_action,s.grant_id FROM operation_conversations c"
+            + " JOIN operation_admissions a ON a.id=c.operation AND a.sealed"
+            + " LEFT JOIN operation_admission_support s ON s.operation=a.id"
+            + " WHERE a.scope=? ORDER BY c.conversation,s.action,s.grant_id",
+        (ResultSetExtractor<List<OperationAuthority.Conversation>>)
+            rows -> {
+              var found = new ArrayList<OperationAuthority.Conversation>();
+              boolean more = rows.next();
+              while (more) {
+                String conversation = rows.getString("conversation"),
+                    agent = rows.getString("agent"),
+                    parent = rows.getString("parent_conversation"),
+                    capabilities = rows.getString("capabilities");
+                var header = AdmissionHeader.read(rows);
+                var budget =
+                    migratedAllowance(rows.getObject("allowance_id", UUID.class), conversation);
+                // Consumes this conversation's contiguous support rows. The cursor is left on the
+                // next conversation's first row, which is what the returned flag reports; the
+                // ResultSet is forward-only, so position is never read back from it.
+                var support = new ArrayList<OperationAuthority.Support>();
+                more = false;
+                do {
+                  if (!conversation.equals(rows.getString("conversation"))) {
+                    more = true;
+                    break;
+                  }
+                  String action = rows.getString("support_action");
+                  if (action != null)
+                    support.add(
+                        new OperationAuthority.Support(
+                            AuthorityAction.valueOf(action),
+                            rows.getObject("grant_id", UUID.class)));
+                } while (rows.next());
+                found.add(
+                    new OperationAuthority.Conversation(
+                        conversation,
+                        agent,
+                        header.admission(List.copyOf(support)),
+                        parent,
+                        budget,
+                        capabilities));
+              }
+              return List.copyOf(found);
+            },
+        scope.value());
+  }
+
   private static List<OperationAuthority.Support> supports(ResultSet rows) throws SQLException {
     var support = new ArrayList<OperationAuthority.Support>();
     do {

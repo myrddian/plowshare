@@ -942,6 +942,33 @@
       "child": "33333333-3333-3333-3333-333333333333"
     }
   },
+  "application.child.list": {
+    "code": "OK",
+    "payload": {
+      "children": [
+        {
+          "id": "33333333-3333-3333-3333-333333333333",
+          "scope": "44444444-4444-4444-4444-444444444444",
+          "project": "contained:55555555-5555-5555-5555-555555555555",
+          "revision": "66666666-6666-6666-6666-666666666666"
+        }
+      ]
+    }
+  },
+  "application.child.trajectory": {
+    "code": "OK",
+    "payload": {
+      "steps": [
+        {
+          "conversation": "cnv_01",
+          "agent": "worker",
+          "parent": null,
+          "budget": "77777777-7777-7777-7777-777777777777",
+          "capabilities": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
   "application.deployment.receipt": {
     "code": "OK",
     "payload": {

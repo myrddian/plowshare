@@ -32,6 +32,8 @@ var operationNames = []string{
 	"application.activate",
 	"application.child.ceiling",
 	"application.child.create",
+	"application.child.list",
+	"application.child.trajectory",
 	"application.create",
 	"application.deploy",
 	"application.deployment.receipt",

@@ -213,6 +213,75 @@ public final class SourceContainedApplications implements ContainedApplications 
         });
   }
 
+  /**
+   * What this container holds directly. One query, keyed on the caller's own admitted scope.
+   *
+   * <p>No argument of this call names a container, which is the whole of sibling isolation on this
+   * path: the scope listed is the scope the caller's retained admission acts as. A contained
+   * Application asking gets its own children, so a sibling is not merely absent from the answer —
+   * there is no question that would return it.
+   */
+  @Override
+  public List<Child> list(String account, String conversation) {
+    var parent = parent(account, conversation);
+    return records.children(parent.admission().scope()).stream()
+        .map(SourceContainedApplications::child)
+        .toList();
+  }
+
+  /**
+   * One child's retained conversation lineage, after the chain proves the caller contains it.
+   *
+   * <p>The order is the contract. The caller's own live authority is proved first, then the
+   * containment chain is walked from the child upwards until it reaches the caller's scope — a
+   * structural resolution, not a permission denial — and only then is any envelope read. A refused
+   * read therefore learns nothing about the child, not even that its conversations exist.
+   */
+  @Override
+  public List<Step> trajectory(String account, String conversation, UUID child) {
+    var retained =
+        records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
+    var parent = parent(account, conversation);
+    requireAncestor(parent.admission().scope(), retained);
+    return authority.conversationsIn(retained.scope()).stream()
+        .map(
+            envelope ->
+                new Step(
+                    envelope.id(),
+                    envelope.agent(),
+                    envelope.parent(),
+                    envelope.budget().value(),
+                    envelope.capabilities()))
+        .toList();
+  }
+
+  /**
+   * Refuses unless {@code ancestor} is this child's container or a container of one.
+   *
+   * <p>The relation is walked in the only direction it is recorded in: a contained scope's own row
+   * names its container, so the walk climbs and can only ever reach a scope that genuinely contains
+   * the child. A sibling's scope is never on that chain, and neither is a child's own container
+   * when the child is the one asking, so both are refused here rather than later.
+   *
+   * <p>Bounded by the configured depth, which is the same fence the hop enforces. A chain longer
+   * than that cannot be created — the hop refuses it — so exceeding it means the stored rows
+   * disagree with the bound, and a walk that would loop on bad data refuses instead of looping.
+   */
+  private void requireAncestor(
+      AuthorityIds.ScopeId ancestor, ContainedApplicationRepository.Retained child) {
+    var container = child.container();
+    var seen = new HashSet<AuthorityIds.ScopeId>();
+    seen.add(child.scope());
+    for (int hop = 0; hop < config.bounds().maxDepth(); hop++) {
+      if (container.equals(ancestor)) return;
+      if (!seen.add(container)) break;
+      var enclosing = records.ofScope(container);
+      if (enclosing.isEmpty()) break;
+      container = enclosing.get().container();
+    }
+    throw new CallerFault("This Application does not contain that Application");
+  }
+
   /** The creating Application's live conversation: its admission and the pool it is spending. */
   private OperationAuthority.Conversation parent(String account, String conversation) {
     var retained =

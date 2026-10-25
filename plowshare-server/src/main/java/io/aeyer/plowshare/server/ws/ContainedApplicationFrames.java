@@ -35,7 +35,49 @@ public final class ContainedApplicationFrames implements FrameArea {
         FrameTypes.APPLICATION_CHILD_CREATE,
         this::create,
         FrameTypes.APPLICATION_CHILD_CEILING,
-        this::ceiling);
+        this::ceiling,
+        FrameTypes.APPLICATION_CHILD_LIST,
+        this::list,
+        FrameTypes.APPLICATION_CHILD_TRAJECTORY,
+        this::trajectory);
+  }
+
+  /**
+   * What this container holds. The payload names a conversation and nothing else, so the scope
+   * listed is the one the caller is already admitted as and no field can redirect the read.
+   */
+  private Outcome list(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation"));
+    return Outcome.ok(
+        Map.of(
+            "children",
+            children.list(
+                asking.requireHandle(FrameTypes.APPLICATION_CHILD_LIST),
+                Payloads.required(
+                    payload,
+                    "conversation",
+                    FrameTypes.APPLICATION_CHILD_LIST,
+                    "the container's conversation"))));
+  }
+
+  /**
+   * One child's retained conversation lineage. {@code child} is the only target, and it is proved
+   * against the caller's own admitted scope through the stored containment chain before any
+   * envelope is read, so naming a sibling or a container is refused rather than answered.
+   */
+  private Outcome trajectory(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation", "child"));
+    return Outcome.ok(
+        Map.of(
+            "steps",
+            children.trajectory(
+                asking.requireHandle(FrameTypes.APPLICATION_CHILD_TRAJECTORY),
+                Payloads.required(
+                    payload,
+                    "conversation",
+                    FrameTypes.APPLICATION_CHILD_TRAJECTORY,
+                    "the container's conversation"),
+                uuid(payload, "child"))));
   }
 
   private Outcome create(Map<String, Object> payload, Asking asking) {

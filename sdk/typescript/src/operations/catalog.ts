@@ -214,6 +214,16 @@ export interface ExtendedPayloads
     readonly child: string;
     readonly calls: number;
   };
+  // One-way visibility. Neither payload names a container: the scope read is the scope the
+  // caller's own retained conversation is admitted as, so there is no field through which a
+  // sibling, a parent or an unrelated Application could be asked about. `child` on the trajectory
+  // read is proved against that scope through the stored containment chain before any envelope is
+  // read, so a grandparent reads through the chain and a sibling is refused.
+  'application.child.list': { readonly conversation: string };
+  'application.child.trajectory': {
+    readonly conversation: string;
+    readonly child: string;
+  };
   'filestore.list': Record<string, never>;
   'application.deployment.status': { readonly project: string };
   'application.deployment.receipt': {
@@ -477,6 +487,8 @@ export const CLI_OPERATIONS = {
   'application activate': 'application.activate',
   'application child create': 'application.child.create',
   'application child ceiling': 'application.child.ceiling',
+  'application child list': 'application.child.list',
+  'application child trajectory': 'application.child.trajectory',
   'filestore list': 'filestore.list',
   'application deployment status': 'application.deployment.status',
   'application deployment receipt': 'application.deployment.receipt',

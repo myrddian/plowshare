@@ -170,6 +170,40 @@ export const containedChildCheck = record({
   revision: deploymentUuid,
 });
 export const containedCeilingCheck = record({ child: deploymentUuid });
+/** What a container holds, as its own listing returns it: live direct children, oldest first. */
+export interface ContainedApplicationChildren {
+  readonly children: readonly ContainedApplicationChild[];
+}
+/**
+ * One retained conversation envelope of a contained Application. `parent` is its delegation
+ * parent and is null for a root; `budget` is the allowance its spend was attributed to. The
+ * admission itself never crosses: it carries the container's own grant identifiers, not the
+ * child's behaviour.
+ */
+export interface ContainedApplicationStep {
+  readonly conversation: string;
+  readonly agent: string;
+  readonly parent: string | null;
+  readonly budget: string;
+  readonly capabilities: string;
+}
+export interface ContainedApplicationTrajectory {
+  readonly steps: readonly ContainedApplicationStep[];
+}
+export const containedChildrenCheck = record({
+  children: list(containedChildCheck),
+});
+export const containedStepCheck = record({
+  conversation: named,
+  agent: named,
+  parent: nullable(named),
+  budget: deploymentUuid,
+  capabilities: (value: unknown): value is string =>
+    typeof value === 'string' && /^[0-9a-f]{64}$/.test(value),
+});
+export const containedTrajectoryCheck = record({
+  steps: list(containedStepCheck),
+});
 export const deploymentStatusCheck = record({
   project: named,
   activeRevision: nullable(deploymentUuid),

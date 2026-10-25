@@ -17,6 +17,18 @@ public interface OperationRecords {
   /** Original agent, source budget and admission for an existing conversation. */
   java.util.Optional<OperationAuthority.Conversation> conversation(String id);
 
+  /**
+   * Every retained conversation envelope whose admission acts as exactly this scope, oldest first.
+   *
+   * <p>This scope and no scope beneath it. The relation between scopes belongs to the containment
+   * records, so a reader that wants a subtree authorizes each scope it reads and asks for that
+   * scope; a transitive read here would hand out envelopes nothing proved authority over.
+   *
+   * <p>Immutable evidence, exactly as {@link #conversation} returns: it is never a live permission,
+   * and a caller still rechecks its own authority before presenting any of it.
+   */
+  java.util.List<OperationAuthority.Conversation> conversationsIn(AuthorityIds.ScopeId scope);
+
   /** Retained conversation inputs, output and durable allowance owner for live scope checks. */
   java.util.List<AccessRequest.Resource> targets(java.util.UUID operation);
 

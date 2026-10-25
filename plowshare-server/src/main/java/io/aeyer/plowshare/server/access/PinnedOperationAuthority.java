@@ -177,6 +177,17 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     return records.conversation(id);
   }
 
+  /**
+   * Immutable evidence, passed through unchanged. No check belongs here: the scope is not a
+   * caller-supplied name but a value the caller already holds from evidence of its own, and a
+   * resolution here would be the general scope read that refuses a contained row — the exact defect
+   * the containment paths were corrected to avoid.
+   */
+  @Override
+  public List<Conversation> conversationsIn(AuthorityIds.ScopeId scope) {
+    return records.conversationsIn(scope);
+  }
+
   @Override
   public void bind(Conversation conversation) {
     requireTargets(

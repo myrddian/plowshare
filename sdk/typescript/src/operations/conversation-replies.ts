@@ -26,10 +26,14 @@ import {
   deploymentReceiptCheck,
   containedChildCheck,
   containedCeilingCheck,
+  containedChildrenCheck,
+  containedTrajectoryCheck,
   deploymentStatusCheck,
   type ApplicationDeploymentReceipt,
   type ContainedApplicationChild,
   type ContainedApplicationCeiling,
+  type ContainedApplicationChildren,
+  type ContainedApplicationTrajectory,
   type ApplicationDeploymentStatus,
 } from './application-deployments.ts';
 import {
@@ -454,6 +458,8 @@ export interface ConversationReplies {
   'application.deployment.receipt': ApplicationDeploymentReceipt;
   'application.child.create': ContainedApplicationChild;
   'application.child.ceiling': ContainedApplicationCeiling;
+  'application.child.list': ContainedApplicationChildren;
+  'application.child.trajectory': ContainedApplicationTrajectory;
   'filestore.list': FileStoreCatalog;
   'application.deployment.status': ApplicationDeploymentStatus;
   'application.create': ProjectView;
@@ -933,6 +939,8 @@ const readers = {
   'application.deployment.receipt': deploymentReceiptCheck,
   'application.child.create': containedChildCheck,
   'application.child.ceiling': containedCeilingCheck,
+  'application.child.list': containedChildrenCheck,
+  'application.child.trajectory': containedTrajectoryCheck,
   'filestore.list': fileStoreCatalogCheck,
   'application.deployment.status': deploymentStatusCheck,
   'application.create': project,

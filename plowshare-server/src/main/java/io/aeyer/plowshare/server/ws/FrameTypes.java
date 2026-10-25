@@ -82,6 +82,15 @@ public final class FrameTypes {
   public static final String APPLICATION_CHILD_CREATE = "application.child.create";
 
   public static final String APPLICATION_CHILD_CEILING = "application.child.ceiling";
+
+  /**
+   * One-way visibility. Neither names a container: the scope read is the scope the caller's own
+   * retained conversation is admitted as, so there is no field through which a sibling, a parent or
+   * an unrelated Application could be asked about.
+   */
+  public static final String APPLICATION_CHILD_LIST = "application.child.list";
+
+  public static final String APPLICATION_CHILD_TRAJECTORY = "application.child.trajectory";
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";

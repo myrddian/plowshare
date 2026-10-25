@@ -132,6 +132,38 @@ acquire the capability by upgrade alone.
 A child allocates its own allowance under a ceiling its parent sets at creation
 and may reduce to zero. Child spend is attributed to the child.
 
+One-way visibility is a property of the questions, not of a filter on the
+answers. `application.child.list` and `application.child.trajectory` take the
+caller's own conversation and no container field, so the scope read is the scope
+the caller's retained admission is already admitted as: a child asking lists what
+*it* contains, which is nothing in the ordinary case, and there is no argument
+through which it could ask about a sibling. `trajectory` names one child and
+proves it by walking the stored containment relation upwards from that child to
+the caller's scope, which is the one direction the rows record, so a grandparent
+reads through the chain while a sibling, a container and an unrelated scope fail
+to resolve rather than being denied a permission later. Neither read resolves a
+scope, for the reason `application.child.ceiling` does not.
+
+A child's read ceiling is its own home with Global knowledge read off, which is
+where `contain` already leaves a contained admission, and
+`KnowledgeReadScope.intersect` can only narrow it further, so a selection
+arriving on the wire cannot lift it. Inside the SQL boundary that ceiling becomes
+`knowledge_readable_scopes(account, 'contained:…')`, which resolves nothing above
+or beside the subtree, and `knowledge_document_admitted` applies `bool_and` over
+the whole dependency closure — so a child revision whose closure reaches a row
+outside the subtree is refused entirely rather than admitted through a dependency
+the child never named.
+
+**What that leaves open.** `knowledge_scope_readable` admits
+`ACCOUNT_KNOWLEDGE`, the `GLOBAL_KNOWLEDGE` builtin, `PROJECT` and `PERSONAL`,
+and a `CONTAINED` scope is none of those — the SQL-side closure this slice
+shipped deliberately. So a reader under a contained home resolves an *empty*
+readable set: the fence holds in full, and a contained Application cannot read
+its own writable home either. Writes into that home are not refused and land
+under the child's own scope, which is what this slice decided; making those rows
+readable *to the child* is an authority question for whatever executes a
+contained child, and it is recorded here rather than widened by a read task.
+
 A child's output is untrusted input to its parent. The parent reads trajectories
 and deliverables in order to act on them, which makes those reads a
 prompt-injection surface by construction. Child output is data, never

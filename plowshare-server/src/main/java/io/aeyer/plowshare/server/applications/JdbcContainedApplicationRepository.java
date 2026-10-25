@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.applications;
 import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -121,6 +122,41 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
                 + " WHERE c.id=?",
             JdbcContainedApplicationRepository::read,
             id)
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Live direct children, oldest first. {@code live} is in the predicate rather than left to the
+   * caller: a destroyed child is history, and a container listing what it holds is asking about
+   * what it holds now.
+   */
+  @Override
+  public List<Retained> children(ScopeId container) {
+    return jdbc.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM contained_applications c JOIN projects p ON p.id=c.project_id"
+            + " WHERE c.container=? AND c.live ORDER BY c.id",
+        JdbcContainedApplicationRepository::read,
+        container.value());
+  }
+
+  /**
+   * The record a contained scope belongs to, live or not. Unlike {@link #children}, this answers an
+   * ancestry walk rather than a listing: a destroyed container's row still names <em>its</em>
+   * container, and dropping it would break the chain above a child that is still live.
+   */
+  @Override
+  public Optional<Retained> ofScope(ScopeId scope) {
+    return jdbc
+        .query(
+            "SELECT "
+                + COLUMNS
+                + " FROM contained_applications c JOIN projects p ON p.id=c.project_id"
+                + " WHERE c.scope_id=?",
+            JdbcContainedApplicationRepository::read,
+            scope.value())
         .stream()
         .findFirst();
   }

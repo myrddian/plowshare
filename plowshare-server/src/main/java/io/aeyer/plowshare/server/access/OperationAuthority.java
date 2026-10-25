@@ -86,6 +86,18 @@ public interface OperationAuthority {
   /** Reads immutable evidence only; callers must still recheck live authority. */
   Optional<Conversation> conversation(String id);
 
+  /**
+   * The retained conversation envelopes of one scope, oldest first, for a reader that has already
+   * proved its authority over that scope by other means.
+   *
+   * <p>Exactly {@link #conversation}'s contract, in the plural and keyed by scope: immutable
+   * evidence only, never a live permission, and never transitive — one scope's envelopes and
+   * nothing beneath it, because the relation between scopes is not this interface's to walk. This
+   * resolves nothing and grants nothing; a caller that cannot name the scope from evidence it
+   * already holds has no business reading them.
+   */
+  List<Conversation> conversationsIn(ScopeId scope);
+
   /** Attaches an existing conversation exactly once; a different binding is never substituted. */
   void bind(Conversation conversation);
 

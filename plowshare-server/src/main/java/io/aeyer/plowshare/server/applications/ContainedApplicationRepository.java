@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.applications;
 import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -95,6 +96,27 @@ public interface ContainedApplicationRepository {
   Retained create(Creation creation);
 
   Optional<Retained> find(UUID id);
+
+  /**
+   * The live Applications this container holds <em>directly</em>, oldest first.
+   *
+   * <p>Direct and not the subtree, deliberately. A container addresses what it created; reaching a
+   * grandchild is a read of that grandchild, authorized by walking the containment chain from the
+   * grandchild upwards, which is the direction the stored rows answer and the direction a sibling
+   * can never travel. Returning the transitive subtree here would hand a reader rows it has not
+   * asked to be authorized for, and no caller needs them.
+   */
+  List<Retained> children(ScopeId container);
+
+  /**
+   * The record a contained authority scope belongs to, if it is a contained scope at all.
+   *
+   * <p>This is the containment relation read in the one direction containment permits: a scope's
+   * own row names its container, so an ancestry walk only ever climbs. Absence is an ordinary
+   * answer meaning "not a contained scope" — an uncontained parent, or a scope that never existed —
+   * and it authorizes nothing by itself.
+   */
+  Optional<Retained> ofScope(ScopeId scope);
 
   /** Records an authorized ceiling change; the allowance itself is the allowance owner's row. */
   void ceiling(UUID id, Integer calls);
