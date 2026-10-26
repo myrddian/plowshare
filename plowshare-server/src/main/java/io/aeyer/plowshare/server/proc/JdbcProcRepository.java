@@ -428,28 +428,48 @@ public final class JdbcProcRepository implements ProcRepository {
         });
   }
 
+  /**
+   * Materialize current authority once, and join it to attributed calls outside an OR predicate.
+   * The former IN-subplan beneath that OR could rescan a materialized conversation selection for
+   * every retained call when PostgreSQL estimated it would not fit a hashed subplan. Keep orphan
+   * calls in a separate disjoint branch with their own current account/project authorization.
+   */
+  static String callsPageSql(boolean active) {
+    String cursor =
+        " AND (CAST(:after AS text) IS NULL OR ic.call_id::text>:after)"
+            + (active ? " AND ic.ended_at IS NULL" : "");
+    return TREE
+        + ", selected AS MATERIALIZED (SELECT c.id"
+        + JOIN
+        + " WHERE "
+        + WHERE
+        + ")"
+        + ", matched AS (SELECT ic.call_id FROM selected s JOIN inference_calls ic ON ic.conversation_id=s.id WHERE true"
+        + cursor
+        + " UNION ALL SELECT ic.call_id FROM inference_calls ic LEFT JOIN projects p ON p.id::text=ic.project_id"
+        + " WHERE ic.conversation_id IS NULL AND CAST(:conversation AS text) IS NULL"
+        + " AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL"
+        + " AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS("
+        + "SELECT 1 FROM project_members m WHERE m.project_id::text=ic.project_id AND m.handle=:account))))"
+        + " AND (CAST(:project AS text) IS NULL OR p.name=:project)"
+        + cursor
+        + ")"
+        + ", page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
+        + " SELECT ic.call_id,ic.conversation_id,ic.root_conversation_id,ic.run_id,ic.attribution_status,"
+        + "ic.account_handle,ic.agent_name,ic.operation,ic.pool,ic.wire_model,ic.lane,ic.billing_route,"
+        + "ic.instance_id,ic.lifecycle,ic.created_at,ic.ended_at,ic.attempt_count,"
+        + "p.name AS project,c.owner_handle AS owner FROM page selected"
+        + " JOIN inference_calls ic ON ic.call_id=selected.call_id"
+        + " LEFT JOIN conversations c ON c.id=ic.conversation_id"
+        + " LEFT JOIN projects p ON p.id::text=ic.project_id ORDER BY ic.call_id";
+  }
+
   @Override
   public ProcViews.Calls calls(String account, ProcQuery q) {
     return read(
         () -> {
           var args = parameters(account, q);
-          String selected = TREE + "SELECT c.id" + JOIN + " WHERE " + WHERE;
-          String sql =
-              """
-          SELECT ic.*,p.name AS project,c.owner_handle AS owner
-          FROM inference_calls ic LEFT JOIN conversations c ON c.id=ic.conversation_id
-          LEFT JOIN projects p ON p.id::text=ic.project_id
-          WHERE (ic.conversation_id IN (
-          """
-                  + selected
-                  + ") OR (ic.conversation_id IS NULL AND "
-                  + "CAST(:conversation AS text) IS NULL AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL"
-                  + " AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS("
-                  + "SELECT 1 FROM project_members m WHERE m.project_id::text=ic.project_id AND m.handle=:account))))"
-                  + " AND (CAST(:project AS text) IS NULL OR p.name=:project)))"
-                  + " AND (CAST(:after AS text) IS NULL OR ic.call_id::text>:after)"
-                  + (Boolean.TRUE.equals(q.active()) ? " AND ic.ended_at IS NULL" : "")
-                  + " ORDER BY ic.call_id::text LIMIT :limit";
+          String sql = callsPageSql(Boolean.TRUE.equals(q.active()));
           var rows =
               jdbc.query(
                   sql,

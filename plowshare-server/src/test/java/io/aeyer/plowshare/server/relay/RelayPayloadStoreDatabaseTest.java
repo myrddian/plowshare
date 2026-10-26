@@ -8,7 +8,6 @@ import io.aeyer.plowshare.server.cache.SnapshotCache;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -280,8 +279,8 @@ class RelayPayloadStoreDatabaseTest {
         1L,
         one(
             template,
-            "SELECT count(*) FROM pg_constraint WHERE conname='relay_payloads_payload_check'"),
-        "the same bounds are now enforced once, on the stored row");
+            "SELECT count(*) FROM pg_trigger WHERE tgname='relay_payloads_validate_bytes' AND NOT tgisinternal"),
+        "the same bounds are enforced on every stored-payload write");
 
     // The rows are still readable as what was inserted, through the joined reader.
     var topic = new Relay.TopicKey(backfilledProject(), "release.observed");
@@ -577,47 +576,20 @@ class RelayPayloadStoreDatabaseTest {
     }
   }
 
-  /**
-   * Review Focus 2. Two orderings of the same race.
-   *
-   * <p>Order one is the ordinary case: the reference is already committed when the guard runs, so
-   * the guard sees it and defers.
-   *
-   * <p>Order two is the window the guard cannot close, and it is reached with an admission rather
-   * than an append. An admission takes its {@code payload_digest} from the publication and never
-   * calls {@link RelayPayloadStore#store}, so unlike a repeat append it neither re-arms the staging
-   * window nor holds the store's row lock -- which is what leaves the payload a live candidate
-   * while the reference is in flight. The insert's own foreign-key check holds a {@code KEY SHARE}
-   * lock on the payload row, so the sweep's delete waits on it and the reference is committed by
-   * the time the lock is released; the {@code NO ACTION} check then raises. The sweep must absorb
-   * that per candidate: report no removal, keep the row, and still defer it, because the aborted
-   * transaction rolled back the deferral the survivor path would have written and a row left
-   * matured is re-selected on every pass.
-   */
+  /** In-flight FK references are skipped; the next pass sees their committed facts. */
   @Test
   void aSweepConcurrentWithAReferenceCommittedInItsWindowKeepsAndDefersThePayload() {
     var topic = configure("payload.sweep.race", Duration.ofSeconds(1));
     var subscription = new Relay.SubscriptionKey(topic, "notices");
-    var payload = new RelayPayload.Text("contended bytes");
     var admittedAt = Instant.parse("2026-10-11T03:00:00Z");
-    broker.append(topic, new Relay.Draft("first", "source", NOW, null, null, payload), NOW);
+    broker.append(topic, draft("first", "contended bytes"), NOW);
     broker.subscribe(subscription, Relay.Start.OLDEST_RETAINED, NOW);
     String digest = publicationDigest(topic, 1);
-
-    // Order one: the reference commits first. The guard's NOT EXISTS sees it and defers.
-    mature(digest);
-    assertEquals(0, store.sweep(NOW, 10));
-    assertEquals(1L, one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", digest));
-    assertTrue(ejection(digest).isAfter(NOW));
-
-    // Order two: nothing references the digest when the guard runs, and an admission naming it
-    // commits while the sweep's delete is blocked on the payload row.
     jdbc.update("DELETE FROM relay_publications WHERE scope_key=?", RelayScopeCodec.write(topic));
     mature(digest);
     var held = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    var pool = Executors.newFixedThreadPool(2);
-    try {
+    try (var pool = Executors.newFixedThreadPool(2)) {
       var admitting =
           pool.submit(
               () ->
@@ -626,34 +598,19 @@ class RelayPayloadStoreDatabaseTest {
                         admitDirectly(topic, digest, admittedAt);
                         held.countDown();
                         await(release);
-                        return Boolean.TRUE;
+                        return true;
                       }));
       await(held);
-      var sweeping = pool.submit(() -> store.sweep(NOW, 10));
-      // Let the sweep reach its DELETE and block on the referencing insert's lock.
-      Thread.sleep(500);
+      var result = get(pool.submit(() -> store.sweepBatch(NOW, 10)));
+      assertEquals(
+          0, result.examined(), "the FK's KEY SHARE lock must prevent selection without waiting");
       release.countDown();
-      assertEquals(Boolean.TRUE, get(admitting));
-      assertEquals(
-          0,
-          get(sweeping),
-          "the foreign-key refusal must be absorbed per candidate, not end the pass");
-      assertEquals(
-          1L,
-          one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", digest),
-          "the payload must survive the race");
-      // The deferral proves the survivor was rescheduled rather than merely skipped, and the exact
-      // date proves it came from the horizon query: one admission, no deliveries.
-      assertEquals(
-          admittedAt.plus(SETTLED),
-          ejection(digest),
-          "a refused candidate must be deferred to its horizon, or it is re-selected every pass");
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("test interrupted", interrupted);
+      assertTrue(get(admitting));
+      assertEquals(0, store.sweep(NOW, 10));
+      assertEquals(1L, one(jdbc, "SELECT count(*) FROM relay_payloads WHERE digest=?", digest));
+      assertWithinHorizon(admittedAt.plus(SETTLED), ejection(digest));
     } finally {
       release.countDown();
-      pool.shutdownNow();
     }
   }
 
@@ -755,18 +712,9 @@ class RelayPayloadStoreDatabaseTest {
     }
   }
 
-  /**
-   * The regression guard for the sweep's date predicate. {@code sweep} selects every candidate in
-   * one query and then reclaims them one transaction at a time, so a digest selected early can wait
-   * behind earlier candidates. A repeat {@code store} that re-arms it in that interval changes
-   * nothing the reference checks look at, so a delete that named only the digest and the two {@code
-   * NOT EXISTS} checks would reclaim it under the appender. The interval is made deterministic by a
-   * unit of work that, as the first candidate's transaction opens, stores the second candidate's
-   * payload again. With {@code p.ejection_at<=?} removed from the delete this test fails: the
-   * second payload is reclaimed and the pass reports two removals.
-   */
+  /** A repeat store re-arms a matured digest before cleanup acquires the batch locks. */
   @Test
-  void aCandidateReArmedAfterSelectionSurvivesThePassThatSelectedIt() {
+  void aRearmedCandidateIsExcludedBeforeBatchLocking() {
     var first = new RelayPayload.Text("first candidate");
     var second = new RelayPayload.Text("second candidate");
     String firstDigest = store.store(first, NOW);
@@ -895,8 +843,7 @@ class RelayPayloadStoreDatabaseTest {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // D: the horizon query. Each fixture puts its expected date exactly on an hour boundary well
-  // after NOW, so the asserted value is the date the SQL computed and not a rounding artefact.
+  // D: reference horizon semantics, with independently bounded digest-derived scheduling spread.
   // ---------------------------------------------------------------------------------------------
 
   @Test
@@ -904,7 +851,7 @@ class RelayPayloadStoreDatabaseTest {
     var topic = configure("payload.horizon.publication", Duration.ofHours(1));
     var publishedAt = Instant.parse("2026-10-10T05:00:00Z");
     broker.append(topic, draft("published", "alpha"), publishedAt);
-    assertEquals(
+    assertWithinHorizon(
         Instant.parse("2026-10-10T06:00:00Z"),
         deferral(store, publicationDigest(topic, 1)),
         "published_at + retention_seconds * interval '1 second'");
@@ -929,7 +876,7 @@ class RelayPayloadStoreDatabaseTest {
             dispatching.claim(), new RelayDeliveries.Receipt("fixture", "receipt"), acceptedAt);
     assertEquals(RelayDeliveries.State.ACCEPTED, accepted.state());
     // The publication's own contribution elapsed in January, so GREATEST reports the admission's.
-    assertEquals(
+    assertWithinHorizon(
         acceptedAt.plus(SETTLED),
         deferral(store, publicationDigest(topic, 1)),
         "GREATEST(admitted_at, max delivery updated_at) + settledRetention");
@@ -944,7 +891,7 @@ class RelayPayloadStoreDatabaseTest {
     broker.subscribe(subscription, Relay.Start.OLDEST_RETAINED, NOW);
     deliveries.admit(
         new RelayDeliveries.AdmissionKey(subscription, 1), decision(List.of()), admittedAt);
-    assertEquals(
+    assertWithinHorizon(
         admittedAt.plus(SETTLED),
         deferral(store, publicationDigest(topic, 1)),
         "COALESCE over an admission with no delivery falls back to admitted_at");
@@ -954,7 +901,7 @@ class RelayPayloadStoreDatabaseTest {
    * Three outcomes are distinguishable here. The unsettled admission is excluded from the settled
    * maximum (including it would give 2026-11-03), the settled admission's elapsed horizon loses to
    * the unsettled flag (its own date would floor to 02:00), and the flag defers by the staging
-   * window instead: 01:30 + 5h, truncated down to the hour.
+   * window instead: 01:30 + 5h, subject to bounded scheduling spread.
    */
   @Test
   void aNonTerminalDeliverySetsTheUnsettledFlagAndIsExcludedFromTheSettledMaximum() {
@@ -983,8 +930,8 @@ class RelayPayloadStoreDatabaseTest {
                     .getFirst())
             .orElseThrow()
             .state());
-    assertEquals(
-        Instant.parse("2026-10-05T06:00:00Z"),
+    assertWithinHorizon(
+        NOW.plus(STAGING),
         deferral(store, publicationDigest(topic, 1)),
         "an unbounded reference is re-examined after the staging window, not at a settled date");
   }
@@ -996,10 +943,10 @@ class RelayPayloadStoreDatabaseTest {
     broker.append(topic, draft("decade", "alpha"), publishedAt);
     String digest = publicationDigest(topic, 1);
     // 3650 days of retention_seconds multiplied by interval '1 second' is a valid timestamptz.
-    assertEquals(publishedAt.plusSeconds(3650L * 86400L), deferral(store, digest));
-    // The same horizon through a 48-hour ceiling stops at now + 48h, truncated down to the hour.
+    assertWithinHorizon(publishedAt.plusSeconds(3650L * 86400L), deferral(store, digest));
+    // The same horizon through a 48-hour ceiling stops within the final hour before now + 48h.
     var tight = payloadStore(jdbc, transactions, TIGHT_CEILING);
-    assertEquals(NOW.plus(TIGHT_CEILING).truncatedTo(ChronoUnit.HOURS), deferral(tight, digest));
+    assertWithinHorizon(NOW.plus(TIGHT_CEILING), deferral(tight, digest));
   }
 
   @Test
@@ -1008,10 +955,159 @@ class RelayPayloadStoreDatabaseTest {
     broker.append(topic, draft("elapsed", "alpha"), Instant.parse("2026-01-01T00:00:00Z"));
     Instant next = deferral(store, publicationDigest(topic, 1));
     assertEquals(
-        NEXT_HOUR,
+        NOW.plusSeconds(60),
         next,
         "a horizon already in the past must not keep a referenced payload in the candidate set");
     assertTrue(next.isAfter(NOW));
+  }
+
+  private static void assertWithinHorizon(Instant horizon, Instant actual, String... reason) {
+    assertTrue(
+        !actual.isAfter(horizon), "never beyond the reference horizon or configured ceiling");
+    Duration spread = Duration.between(NOW, horizon).dividedBy(4);
+    if (spread.compareTo(Duration.ofHours(1)) > 0) spread = Duration.ofHours(1);
+    assertTrue(
+        !actual.isBefore(horizon.minus(spread)),
+        "jitter stays within the final quarter, capped at one hour");
+    assertTrue(actual.isAfter(NOW));
+  }
+
+  @Test
+  void payloadByteValidationStillRejectsInvalidInsertsAndUpdates() {
+    String digest = store.store(new RelayPayload.Text("valid"), NOW);
+    for (String payload : List.of("[]", "{\"text\":null}", "{\"text\":12}")) {
+      assertThrows(
+          DataIntegrityViolationException.class,
+          () ->
+              jdbc.update(
+                  "UPDATE relay_payloads SET payload=?::jsonb WHERE digest=?", payload, digest));
+      assertThrows(
+          DataIntegrityViolationException.class,
+          () ->
+              jdbc.update(
+                  "INSERT INTO relay_payloads(digest,payload,byte_length,ejection_at) VALUES(?,?::jsonb,1,?)",
+                  "a".repeat(64),
+                  payload,
+                  Timestamp.from(NOW)));
+    }
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "UPDATE relay_payloads SET payload=jsonb_build_object('text',repeat('x',52428801)) WHERE digest=?",
+                digest));
+    assertEquals(
+        new RelayPayload.Text("valid"),
+        RelayPayloadCodec.read(
+            RelayPayload.Kind.TEXT, 1, store.load(List.of(digest)).get(digest).json()));
+  }
+
+  @Test
+  void metadataOnlyDeferralDoesNotReadThePayloadToast() throws Exception {
+    String text =
+        java.util.stream.IntStream.range(0, 32768)
+            .mapToObj(
+                n ->
+                    java.util
+                        .UUID
+                        .nameUUIDFromBytes(
+                            Integer.toString(n).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                        .toString())
+            .collect(java.util.stream.Collectors.joining());
+    String digest = store.store(new RelayPayload.Text(text), NOW);
+    String explained =
+        jdbc.queryForObject(
+            "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) UPDATE relay_payloads SET ejection_at=ejection_at+interval '1 minute' WHERE digest=?",
+            String.class,
+            digest);
+    var plan =
+        new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained).get(0).get("Plan");
+    long hits = plan.path("Shared Hit Blocks").asLong() + plan.path("Shared Read Blocks").asLong();
+    assertTrue(
+        hits < 100,
+        "metadata-only deferral must not detoast/validate the retained megabyte payload; blocks="
+            + hits);
+  }
+
+  @Test
+  void saturatedBatchesMakeProgressAndSpreadReferencedRechecksWithoutReadingPayloadBytes() {
+    var topic = configure("payload.batch.progress", Duration.ofDays(365));
+    for (int i = 0; i < 250; i++) broker.append(topic, draft("batch-" + i, "bytes-" + i), NOW);
+    for (int i = 0; i < 20; i++) store.store(new RelayPayload.Text("orphan-" + i), NOW);
+    matureAll();
+    var dates = new java.util.HashSet<Instant>();
+    int examined = 0, removed = 0;
+    RelayPayloadStore.SweepResult result;
+    do {
+      result = store.sweepBatch(NOW, 100);
+      examined += result.examined();
+      removed += result.removed();
+    } while (result.oldestDueAt().isPresent());
+    assertEquals(270, examined);
+    assertEquals(20, removed);
+    assertEquals(250, one(jdbc, "SELECT count(*) FROM relay_payloads"));
+    for (var at : jdbc.queryForList("SELECT ejection_at FROM relay_payloads", Timestamp.class)) {
+      dates.add(at.toInstant());
+      assertWithinHorizon(NOW.plus(Duration.ofDays(365)), at.toInstant());
+    }
+    assertTrue(
+        dates.size() > 200, "a shared expiry must not put every digest on one hourly boundary");
+    assertEquals(
+        0, store.sweepBatch(NOW, 100).examined(), "unchanged rows must leave the candidate set");
+  }
+
+  @Test
+  void concurrentSweepersPartitionTheLockedBatchAndRollbackDoesNotLosePayloads() {
+    for (int i = 0; i < 200; i++) store.store(new RelayPayload.Text("orphan-" + i), NOW);
+    matureAll();
+    var locked = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var blocking =
+        new JdbcTemplate(source) {
+          @Override
+          public <T> List<T> queryForList(String sql, Class<T> type, Object... args) {
+            var result = super.queryForList(sql, type, args);
+            if (sql.contains("FOR UPDATE SKIP LOCKED")) {
+              locked.countDown();
+              await(release);
+            }
+            return result;
+          }
+        };
+    try (var pool = Executors.newFixedThreadPool(2)) {
+      var first =
+          pool.submit(
+              () -> payloadStore(blocking, transactions, OPEN_CEILING).sweepBatch(NOW, 100));
+      await(locked);
+      var second = get(pool.submit(() -> store.sweepBatch(NOW, 100)));
+      assertEquals(100, second.examined());
+      assertEquals(100, second.removed());
+      release.countDown();
+      assertEquals(100, get(first).removed());
+      assertEquals(0, one(jdbc, "SELECT count(*) FROM relay_payloads"));
+    } finally {
+      release.countDown();
+    }
+    store.store(new RelayPayload.Text("rollback"), NOW);
+    matureAll();
+    UnitOfWork rollback =
+        new UnitOfWork() {
+          @Override
+          public <T> T inTransaction(Supplier<T> action) {
+            return transactions.inTransaction(
+                () -> {
+                  action.get();
+                  throw new IllegalStateException("rollback fixture");
+                });
+          }
+        };
+    assertThrows(
+        IllegalStateException.class,
+        () -> payloadStore(jdbc, rollback, OPEN_CEILING).sweepBatch(NOW, 100));
+    assertEquals(
+        1,
+        one(jdbc, "SELECT count(*) FROM relay_payloads WHERE ejection_at<=?", Timestamp.from(NOW)));
+    assertEquals(1, store.sweep(NOW, 100));
   }
 
   // ---------------------------------------------------------------------------------------------

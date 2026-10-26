@@ -57,7 +57,7 @@ class RelayPayloadWritePlacementTest {
         }
 
         @Override
-        public int sweep(Instant now, int limit) {
+        public SweepResult sweepBatch(Instant now, int limit) {
           throw new UnsupportedOperationException();
         }
       };

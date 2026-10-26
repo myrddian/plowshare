@@ -410,6 +410,84 @@ class JdbcProcRepositoryTest {
   }
 
   @Test
+  void modelCallAuthorityIsMaterializedOnceUnderLowWorkMemoryAndPagesDoNotOverlap()
+      throws Exception {
+    UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
+        journal);
+    jdbc.update(
+        "INSERT INTO inference_accounting_instances(instance_id,journal_id,started_at) VALUES (?,?,now())",
+        instance,
+        journal);
+    jdbc.update(
+        """
+        INSERT INTO inference_calls(call_id,instance_id,attribution,project_id,scope,conversation_id,
+          root_conversation_id,ancestor_conversation_ids,ancestor_run_ids,ancestor_orchestration_ids,
+          agent_name,operation,attribution_status,specifier,pool,wire_model,billing_route,lane,
+          created_at,last_event_at,ended_at,lifecycle,attempt_count,last_call_sequence)
+        SELECT gen_random_uuid(),?,'{}',c.project_id::text,'PROJECT',c.id,c.id,ARRAY[]::text[],ARRAY[]::text[],ARRAY[]::text[],
+          'fixture','DOCUMENT_SUMMARY','SYSTEM','fast','fixture-pool','fixture-model',
+          'fixture-pool','CHAT',now(),now(),now(),'SUCCEEDED',0,1
+        FROM conversations c CROSS JOIN generate_series(1,1000) n WHERE c.id IN (?,?)
+        """,
+        instance,
+        child,
+        foreign);
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 51);
+    var tx =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new DataSourceTransactionManager(data));
+    String explained =
+        tx.execute(
+            status -> {
+              jdbc.execute("SET LOCAL work_mem='64kB'; SET LOCAL jit=off");
+              return new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+                  .queryForObject(
+                      "EXPLAIN (ANALYZE,FORMAT JSON) " + JdbcProcRepository.callsPageSql(false),
+                      args,
+                      String.class);
+            });
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE selected"));
+    checkCallScans(plan);
+    var first = repository.calls("alice", query("mine", null, null, 50));
+    var next = repository.calls("alice", query("mine", null, first.cursor(), 50));
+    assertEquals(50, first.calls().size());
+    assertEquals(50, next.calls().size());
+    var ids = new java.util.HashSet<String>();
+    first
+        .calls()
+        .forEach(
+            call -> {
+              assertEquals(child, call.conversation());
+              assertTrue(ids.add(call.id()));
+            });
+    next.calls()
+        .forEach(
+            call -> {
+              assertEquals(child, call.conversation());
+              assertTrue(ids.add(call.id()));
+            });
+    jdbc.update("DELETE FROM project_members WHERE handle='alice'");
+    assertTrue(
+        repository.calls("alice", query("mine", null, null, 50)).calls().isEmpty(),
+        "warm selection never leases project authority");
+    assertFalse(
+        repository.calls("alice", query("server", null, null, 50)).calls().isEmpty(),
+        "explicit administrator metadata scope remains available");
+  }
+
+  @Test
   void systemCallsAndToolReceiptsAreAttributableWithoutLeakingContent() throws Exception {
     UUID journal = UUID.randomUUID(), instance = UUID.randomUUID(), call = UUID.randomUUID();
     jdbc.update(

@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.relay;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.RelayPort;
@@ -129,30 +128,6 @@ class RelayPayloadStoreTest {
     verify(jdbc, times(1)).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
     assertEquals(Set.of("a".repeat(64)), loaded.keySet());
     assertEquals(14L, loaded.get("a".repeat(64)).byteLength());
-  }
-
-  @Test
-  void sweepSelectsMaturedCandidatesWithTheBatchLimitAndDeletesEach() {
-    when(jdbc.queryForList(anyString(), eq(String.class), any(), eq(2)))
-        .thenReturn(List.of("a".repeat(64), "b".repeat(64)));
-    when(jdbc.update(anyString(), any(Object.class), any(Object.class))).thenReturn(1);
-    assertEquals(2, store.sweep(NOW, 2));
-    var sql = ArgumentCaptor.forClass(String.class);
-    verify(jdbc).queryForList(sql.capture(), eq(String.class), any(), eq(2));
-    assertTrue(sql.getValue().contains("ejection_at<=?"));
-    assertTrue(sql.getValue().contains("ORDER BY ejection_at"));
-    var delete = ArgumentCaptor.forClass(String.class);
-    verify(jdbc, times(2)).update(delete.capture(), any(Object.class), any(Object.class));
-    assertTrue(delete.getValue().contains("p.ejection_at<=?"));
-    // Reachability is checked by the delete itself, against both referencing tables.
-    assertTrue(
-        delete
-            .getValue()
-            .contains("NOT EXISTS (SELECT 1 FROM relay_publications r WHERE r.payload_digest"));
-    assertTrue(
-        delete
-            .getValue()
-            .contains("NOT EXISTS (SELECT 1 FROM relay_admissions a WHERE a.payload_digest"));
   }
 
   @Test
