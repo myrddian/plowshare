@@ -24,6 +24,7 @@ export async function nativeApp() {
       dir: source, out: join(build, 'native'), name: 'Plowshare', appBundleId: 'io.aeyer.plowshare',
       platform: 'darwin', arch: process.arch, electronVersion: manifest.devDependencies.electron,
       asar: true, prune: false, overwrite: true, icon: join(desktopRoot, 'assets/icons/plowshare.icns'),
+      extendInfo: join(desktopRoot, 'assets/macos-info.plist'),
       osxSign: {
         identity: '-', identityValidation: false, timestamp: 'none',
         preAutoEntitlements: false, preEmbedProvisioningProfile: false,

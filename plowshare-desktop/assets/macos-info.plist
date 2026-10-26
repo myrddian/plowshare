@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Both packaging paths merge this before signing. Terminal-launched children
+       can reach LAN servers without exercising the normal macOS permission flow. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Plowshare needs local network access to connect to the server you choose and serve your workspace files.</string>
+</dict>
+</plist>
