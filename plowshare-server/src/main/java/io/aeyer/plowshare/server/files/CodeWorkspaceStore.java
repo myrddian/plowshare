@@ -48,6 +48,9 @@ public interface CodeWorkspaceStore {
 
   void unavailable(CodeMapObservations.Ticket ticket, String reason);
 
+  /** Capacity deferral keeps retained observations and makes the claimed generation retryable. */
+  void defer(CodeMapObservations.Ticket ticket);
+
   String mutationStarted(Scope scope);
 
   void mutationFinished(Scope scope, String token);
@@ -59,6 +62,16 @@ public interface CodeWorkspaceStore {
   void forget(Scope scope);
 
   UUID indexed(Scope scope, String key, String hash, String parser);
+
+  record IndexSource(String key, io.aeyer.plowshare.protocol.FileSource source) {
+    public IndexSource {
+      Objects.requireNonNull(key);
+      Objects.requireNonNull(source);
+    }
+  }
+
+  /** Exact source/hash/parser matches, at most 100 per page; no content or symbols are loaded. */
+  Map<String, UUID> indexed(Scope scope, List<IndexSource> sources, String parser);
 
   void index(Scope scope, String key, String hash, String parser, UUID revision);
 

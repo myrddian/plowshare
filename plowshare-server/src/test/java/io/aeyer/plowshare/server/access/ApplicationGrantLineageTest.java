@@ -20,15 +20,20 @@ class ApplicationGrantLineageTest {
   void a_narrowed_or_invalid_issuer_manifest_invalidates_dependent_grants_live() {
     var child = binding("reader", StandardRole.CONTRIBUTOR);
     var parent = binding("issuer", StandardRole.MANAGER);
-    when(grants.projectBindings("app", "reader")).thenReturn(List.of(child));
+    when(grants.projectLineages("app", "reader")).thenReturn(List.of(List.of(child, parent)));
     when(grants.lineage(child.id())).thenReturn(List.of(child, parent));
     boundary(Map.of("reader", ProjectRole.MANAGER, "issuer", ProjectRole.VIEWER));
     assertFalse(lineage.valid(child.id()));
     assertTrue(lineage.projectRole("app", "reader", Optional.of(ProjectRole.MANAGER)).isEmpty());
     boundary(Map.of("reader", ProjectRole.MANAGER, "issuer", ProjectRole.MANAGER));
+    clearInvocations(grants, applications);
     assertEquals(
         Optional.of(ProjectRole.CONTRIBUTOR),
         lineage.projectRole("app", "reader", Optional.of(ProjectRole.MANAGER)));
+    verify(grants).projectLineages("app", "reader");
+    verify(grants, never()).lineage(any());
+    verify(grants, never()).projectBindings(anyString(), anyString());
+    verify(applications, times(1)).read("app");
     when(applications.read("app"))
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.INVALID, Map.of()));
     assertFalse(lineage.valid(child.id()));
@@ -37,7 +42,7 @@ class ApplicationGrantLineageTest {
   @Test
   void direct_token_ceiling_and_each_binding_stay_narrower_than_the_account() {
     var manager = binding("service", StandardRole.MANAGER);
-    when(grants.projectBindings("app", "service")).thenReturn(List.of(manager));
+    when(grants.projectLineages("app", "service")).thenReturn(List.of(List.of(manager)));
     when(grants.lineage(manager.id())).thenReturn(List.of(manager));
     boundary(Map.of("service", ProjectRole.MANAGER));
     assertEquals(
@@ -53,7 +58,7 @@ class ApplicationGrantLineageTest {
   @Test
   void administrative_control_never_becomes_a_data_role_and_unavailable_lineage_is_not_cached() {
     var admin = binding("admin", StandardRole.ADMIN);
-    when(grants.projectBindings("app", "admin")).thenReturn(List.of(admin));
+    when(grants.projectLineages("app", "admin")).thenReturn(List.of(List.of(admin)));
     assertTrue(lineage.projectRole("app", "admin", Optional.of(ProjectRole.MANAGER)).isEmpty());
     when(grants.lineage(admin.id())).thenReturn(List.of());
     assertFalse(lineage.valid(admin.id()));

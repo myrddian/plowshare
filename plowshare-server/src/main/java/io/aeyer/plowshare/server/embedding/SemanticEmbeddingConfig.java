@@ -36,8 +36,9 @@ public class SemanticEmbeddingConfig {
   public EmbeddingWorkRepository embeddingWorkRepository(
       org.springframework.jdbc.core.JdbcTemplate jdbc,
       UnitOfWork transactions,
-      EmbeddingSpaceRepository spaces) {
-    return new JdbcEmbeddingWorkRepository(jdbc, transactions, spaces);
+      EmbeddingSpaceRepository spaces,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    return new JdbcEmbeddingWorkRepository(jdbc, transactions, spaces).useAdmission(admission);
   }
 
   @Bean

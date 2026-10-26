@@ -201,6 +201,15 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
             "unavailable", ticket.generation(), "", clock.instant(), List.of(reason), List.of()));
   }
 
+  @Override
+  public void defer(CodeMapObservations.Ticket ticket) {
+    jdbc.update(
+        "UPDATE code_workspaces SET state='dirty',lease_until=NULL,next_poll=? WHERE id=? AND generation=? AND state='checking'",
+        at(clock.instant().plusSeconds(2)),
+        ticket.workspace(),
+        ticket.generation());
+  }
+
   /** Writers hold a bounded crash-recovery lease. The token is never executable work. */
   public String mutationStarted(Scope scope) {
     return work.inTransaction(
@@ -301,6 +310,36 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
             hash,
             parser);
     return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  @Override
+  public Map<String, UUID> indexed(Scope scope, List<IndexSource> sources, String parser) {
+    Objects.requireNonNull(scope);
+    Objects.requireNonNull(parser);
+    if (sources == null || sources.size() > 100)
+      throw new IllegalArgumentException("Code index page must have at most 100 sources");
+    if (sources.isEmpty()) return Map.of();
+    var arguments = new ArrayList<Object>();
+    var originals = new HashMap<String, String>();
+    for (var source : sources) {
+      String key = sourceKey(source.key());
+      if (originals.put(key, source.key()) != null)
+        throw new IllegalArgumentException("Duplicate code source");
+      arguments.add(key);
+      arguments.add(source.source().sha256());
+    }
+    arguments.add(scope.id());
+    arguments.add(parser);
+    var result = new HashMap<String, UUID>();
+    jdbc.query(
+        "WITH requested(source_key,source_hash) AS (VALUES "
+            + String.join(",", Collections.nCopies(sources.size(), "(?::text,?::text)"))
+            + ") SELECT i.source_key,i.revision_id FROM requested r JOIN code_workspace_indexes i"
+            + " ON i.source_key=r.source_key AND i.source_hash=r.source_hash WHERE i.workspace_id=? AND i.parser_version=?",
+        (org.springframework.jdbc.core.RowCallbackHandler)
+            row -> result.put(originals.get(row.getString(1)), row.getObject(2, UUID.class)),
+        arguments.toArray());
+    return Map.copyOf(result);
   }
 
   public void index(Scope scope, String key, String hash, String parser, UUID revision) {

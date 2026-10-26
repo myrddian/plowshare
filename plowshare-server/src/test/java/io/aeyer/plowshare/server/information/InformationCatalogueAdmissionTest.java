@@ -98,6 +98,21 @@ class InformationCatalogueAdmissionTest {
   }
 
   @Test
+  void codeStatusBatchAdmitsOnceAndRechecksRevocationOnTheNextCall() {
+    when(members.role("research", "reader"))
+        .thenReturn(Optional.of(ProjectRole.VIEWER))
+        .thenReturn(Optional.empty());
+    var hashes = Map.of(revision, "hash");
+    when(repository.codeStates(context, hashes)).thenReturn(Map.of());
+    var catalogue = catalogue(UnitOfWork.NONE);
+    assertTrue(catalogue.codeStates(context, hashes).isEmpty());
+    assertThrows(CallerFault.class, () -> catalogue.codeStates(context, hashes));
+    verify(members, times(2)).role("research", "reader");
+    verify(repository).codeStates(context, hashes);
+    verifyNoMoreInteractions(members, repository);
+  }
+
+  @Test
   void corpusValidationStillPrecedesSyntaxRepositoryWork() {
     when(members.role("research", "reader")).thenReturn(Optional.of(ProjectRole.VIEWER));
     var documents = context.withCorpus(InformationContext.Corpus.DOCUMENTS);

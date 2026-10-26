@@ -441,6 +441,8 @@ class ScopedGrantPersistenceTest {
                 Optional.empty(),
                 false));
     assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
+    assertEquals(List.of(grants.lineage(child.id())), grants.projectLineages("one", "bob"));
+    assertTrue(grants.projectLineages("two", "bob").isEmpty());
     assertThrows(
         DataAccessException.class,
         () ->
@@ -496,6 +498,9 @@ class ScopedGrantPersistenceTest {
     grants.revoke(manager.id(), 1, who("admin"), control());
     assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
     assertTrue(grants.find(child.id()).orElseThrow().revokedAt().isEmpty());
+    assertTrue(
+        grants.projectLineages("one", "bob").isEmpty(),
+        "retained child records cannot revive a revoked issuing chain");
     assertEquals(2, grants.find(manager.id()).orElseThrow().version());
     assertThrows(CallerFault.class, () -> grants.revoke(manager.id(), 1, who("admin"), control()));
     assertEquals(

@@ -16,6 +16,14 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
   private final EmbeddingSpaceRepository spaces;
+  private io.aeyer.plowshare.server.reads.ReadAdmission admission =
+      io.aeyer.plowshare.server.reads.ReadAdmission.direct();
+
+  public JdbcEmbeddingWorkRepository useAdmission(
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    this.admission = Objects.requireNonNull(admission);
+    return this;
+  }
 
   public JdbcEmbeddingWorkRepository(
       JdbcTemplate jdbc, UnitOfWork transactions, EmbeddingSpaceRepository spaces) {
@@ -257,37 +265,301 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
         + " AND staged.slot=? AND staged.space_id=? AND staged.source_revision=s.embedding_source_revision)";
   }
 
+  private static String queueIdentity(Store store, String queue) {
+    return store == Store.PASSAGES
+        ? queue
+            + ".source_type=s.source_type AND "
+            + queue
+            + ".source_id=s.source_id AND "
+            + queue
+            + ".position=s.position"
+        : "s.id="
+            + (store == Store.CHUNKS || store == Store.DOCUMENTS
+                ? "CAST(" + queue + ".source_id AS uuid)"
+                : queue + ".source_id");
+  }
+
+  private String missing(EmbeddingProfile target, Store store) {
+    return eligible(store)
+        + automaticInformation(store)
+        + " AND NOT ("
+        + ready(target, store)
+        + ") AND NOT EXISTS(SELECT 1 FROM "
+        + table(store)
+        + "_embedding_failures f WHERE "
+        + link(store, "f")
+        + " AND f.slot=? AND f.space_id=? AND f.source_revision=s.embedding_source_revision AND f.retry_at>CURRENT_TIMESTAMP)";
+  }
+
+  private record ScanPage(int count, String type, String id, Integer position) {}
+
+  private record ScanCursor(String type, String id, Integer position) {}
+
+  @Override
+  public boolean discoveryDue() {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM embedding_repair_work WHERE available_at<=CURRENT_TIMESTAMP)"
+                + " OR EXISTS(SELECT 1 FROM embedding_repair_scans WHERE next_at<=CURRENT_TIMESTAMP)",
+            Boolean.class));
+  }
+
+  @Override
+  public boolean activationCandidate(EmbeddingProfile profile) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT NOT EXISTS(SELECT 1 FROM embedding_repair_scans WHERE slot=? AND space_id=? AND NOT enumerated)"
+                + " AND NOT EXISTS(SELECT 1 FROM embedding_repair_work WHERE slot=? AND space_id=?)",
+            Boolean.class,
+            profile.slot().stored(),
+            profile.space().id(),
+            profile.slot().stored(),
+            profile.space().id()));
+  }
+
+  /**
+   * Recovery walks at most 1,000 primary keys per call, once per profile/store across replicas.
+   * Source triggers enqueue late commits atomically; this cursor is never a commit watermark. Once
+   * caught up, reconciliation sleeps five minutes. It also catches eligibility-only edits without
+   * turning every idle worker tick into an all-corpus anti-join.
+   */
+  private void reconcile(EmbeddingProfile target, Store store) {
+    String name = table(store);
+    var scans =
+        jdbc.query(
+            "SELECT source_type,source_id,position FROM embedding_repair_scans WHERE slot=? AND space_id=? AND store=? AND next_at<=CURRENT_TIMESTAMP FOR UPDATE SKIP LOCKED",
+            (row, n) ->
+                new ScanCursor(
+                    row.getString("source_type"),
+                    row.getString("source_id"),
+                    (Integer) row.getObject("position")),
+            target.slot().stored(),
+            target.space().id(),
+            name);
+    if (scans.isEmpty()) return;
+    var cursor = scans.getFirst();
+    String id = cursor.id();
+    // Keep the initial and continuation statements distinct. A nullable OR cursor prevents
+    // generic prepared plans from seeking directly to the primary-key boundary and turns a full
+    // reconciliation into repeated prefix scans as the corpus grows.
+    String selection =
+        id == null
+            ? "true"
+            : store == Store.PASSAGES
+                ? "(s.source_type,s.source_id,s.position)>(?,?,?)"
+                : "s.id>CAST(? AS "
+                    + (store == Store.CHUNKS || store == Store.DOCUMENTS ? "uuid" : "text")
+                    + ")";
+    String order = store == Store.PASSAGES ? "s.source_type,s.source_id,s.position" : "s.id";
+    String columns = store == Store.PASSAGES ? "s.source_type,s.source_id,s.position" : "s.id";
+    String pageJoin =
+        store == Store.PASSAGES
+            ? "page.source_type=s.source_type AND page.source_id=s.source_id AND page.position=s.position"
+            : "page.id=s.id";
+    var args = new ArrayList<Object>();
+    if (id != null) {
+      if (store == Store.PASSAGES) args.addAll(Arrays.asList(cursor.type(), id, cursor.position()));
+      else args.add(id);
+    }
+    args.addAll(List.of(target.slot().stored(), target.space().id(), name));
+    args.addAll(
+        List.of(
+            target.slot().stored(),
+            target.space().id(),
+            target.slot().stored(),
+            target.space().id()));
+    String last =
+        store == Store.PASSAGES ? "source_type DESC,source_id DESC,position DESC" : "id DESC";
+    ScanPage page =
+        jdbc.queryForObject(
+            "WITH page AS MATERIALIZED (SELECT "
+                + columns
+                + " FROM "
+                + name
+                + " s WHERE "
+                + selection
+                + " ORDER BY "
+                + order
+                + " LIMIT 1000),"
+                + " queued AS (INSERT INTO embedding_repair_work(slot,space_id,store,source_type,source_id,position,source_revision) SELECT ?,?,?,"
+                + (store == Store.PASSAGES
+                    ? "s.source_type,s.source_id,s.position"
+                    : "'',s.id::text,0")
+                + ",s.embedding_source_revision FROM page JOIN "
+                + name
+                + " s ON "
+                + pageJoin
+                + joins(store)
+                + " WHERE "
+                + missing(target, store)
+                + " ON CONFLICT DO NOTHING RETURNING 1) SELECT (SELECT count(*) FROM page) AS scanned,"
+                + (store == Store.PASSAGES
+                    ? "(SELECT source_type FROM page ORDER BY " + last + " LIMIT 1)"
+                    : "NULL::text")
+                + " AS source_type,"
+                + "(SELECT "
+                + (store == Store.PASSAGES ? "source_id" : "id::text")
+                + " FROM page ORDER BY "
+                + last
+                + " LIMIT 1) AS source_id,"
+                + (store == Store.PASSAGES
+                    ? "(SELECT position FROM page ORDER BY " + last + " LIMIT 1)"
+                    : "NULL::integer")
+                + " AS position",
+            (row, n) ->
+                new ScanPage(
+                    row.getInt("scanned"),
+                    row.getString("source_type"),
+                    row.getString("source_id"),
+                    (Integer) row.getObject("position")),
+            args.toArray());
+    Objects.requireNonNull(page);
+    boolean done = page.count() < 1000;
+    jdbc.update(
+        "UPDATE embedding_repair_scans SET source_type=?,source_id=?,position=?,enumerated=enumerated OR ?,next_at=CURRENT_TIMESTAMP + CASE WHEN ? THEN INTERVAL '5 minutes' ELSE INTERVAL '0 seconds' END WHERE slot=? AND space_id=? AND store=?",
+        done ? null : page.type(),
+        done ? null : page.id(),
+        done ? null : page.position(),
+        done,
+        done,
+        target.slot().stored(),
+        target.space().id(),
+        name);
+  }
+
   @Override
   public List<Source> pending(EmbeddingProfile target, Store store, int limit) {
+    return pending(target, store, limit, false);
+  }
+
+  @Override
+  public List<Source> claimPending(EmbeddingProfile target, Store store, int limit) {
+    return admission.read(
+        "embedding-repair",
+        io.aeyer.plowshare.server.reads.ReadAdmission.Work.MAINTENANCE,
+        () -> pending(target, store, limit, true));
+  }
+
+  private List<Source> pending(EmbeddingProfile target, Store store, int limit, boolean claim) {
+    Objects.requireNonNull(target);
+    Objects.requireNonNull(store);
     if (limit < 1 || limit > 100)
       throw new IllegalArgumentException("embedding repair batch must be 1..100");
-    return jdbc.query(
-        "SELECT "
-            + sourceColumns(store)
-            + " FROM "
-            + table(store)
-            + " s"
-            + joins(store)
-            + " WHERE "
-            + eligible(store)
-            + automaticInformation(store)
-            + " AND NOT ("
-            + ready(target, store)
-            + ")"
-            + " AND NOT EXISTS(SELECT 1 FROM "
-            + table(store)
-            + "_embedding_failures f WHERE "
-            + link(store, "f")
-            + " AND f.slot=? AND f.space_id=? AND f.source_revision=s.embedding_source_revision AND f.retry_at>CURRENT_TIMESTAMP)"
-            + " ORDER BY s.embedding_source_revision,"
-            + (store == Store.PASSAGES ? "s.source_type,s.source_id,s.position" : "s.id")
-            + " LIMIT ?",
-        sourceMapper(store),
-        target.slot().stored(),
-        target.space().id(),
-        target.slot().stored(),
-        target.space().id(),
-        limit);
+    return transactions.inTransaction(
+        () -> {
+          // Scope compilation to short discovery SQL. Provider calls and activation/index DDL
+          // run outside this transaction. Global planner configuration stays unchanged.
+          return discovery(
+              () -> {
+                // Match source DDL/TRUNCATE order before taking cursor or queue row locks.
+                // ACCESS SHARE permits normal source writers and holds no provider connection.
+                jdbc.execute("LOCK TABLE " + table(store) + " IN ACCESS SHARE MODE");
+                reconcile(target, store);
+                String name = table(store);
+                var keys =
+                    jdbc.query(
+                        "SELECT source_type,source_id,position FROM embedding_repair_work WHERE slot=? AND space_id=? AND store=? AND available_at<=CURRENT_TIMESTAMP ORDER BY available_at,source_type,source_id,position LIMIT ?"
+                            + " FOR UPDATE SKIP LOCKED",
+                        (row, n) ->
+                            new Key(
+                                store,
+                                row.getString("source_id"),
+                                store == Store.PASSAGES ? row.getString("source_type") : null,
+                                row.getInt("position")),
+                        target.slot().stored(),
+                        target.space().id(),
+                        name,
+                        limit);
+                if (keys.isEmpty()) return List.of();
+                // Hydrate only the bounded reserved keys, in one statement. Casting the key
+                // to the source's UUID type preserves primary-key seeks; casting the indexed
+                // source column to text would reintroduce a corpus scan for every batch.
+                var arguments = queueKeyArguments(keys);
+                arguments.addAll(List.of(target.slot().stored(), target.space().id(), name));
+                arguments.addAll(
+                    List.of(
+                        target.slot().stored(),
+                        target.space().id(),
+                        target.slot().stored(),
+                        target.space().id()));
+                var found =
+                    jdbc.query(
+                        "WITH picked(source_type,source_id,position) AS MATERIALIZED (VALUES "
+                            + queueKeyValues(keys)
+                            + ") SELECT "
+                            + sourceColumns(store)
+                            + " FROM picked JOIN "
+                            + name
+                            + " s ON "
+                            + queueIdentity(store, "picked")
+                            + joins(store)
+                            + " JOIN embedding_repair_work queued ON "
+                            + queueIdentity(store, "queued")
+                            + " AND queued.source_revision=s.embedding_source_revision WHERE queued.slot=? AND queued.space_id=? AND queued.store=? AND "
+                            + missing(target, store),
+                        sourceMapper(store),
+                        arguments.toArray());
+                var matched =
+                    found.stream().map(Source::key).collect(java.util.stream.Collectors.toSet());
+                updateQueue(
+                    target,
+                    store,
+                    keys.stream().filter(key -> !matched.contains(key)).toList(),
+                    true);
+                if (claim)
+                  updateQueue(target, store, found.stream().map(Source::key).toList(), false);
+                return List.copyOf(found);
+              });
+        });
+  }
+
+  private static String queueKeyValues(List<Key> keys) {
+    return String.join(",", Collections.nCopies(keys.size(), "(?::text,?::text,?::integer)"));
+  }
+
+  private static ArrayList<Object> queueKeyArguments(List<Key> keys) {
+    var args = new ArrayList<Object>();
+    for (var key : keys)
+      args.addAll(
+          List.of(key.sourceType() == null ? "" : key.sourceType(), key.id(), key.position()));
+    return args;
+  }
+
+  /**
+   * Rows remain locked until the discovery TX ends; stale sources cannot overwrite a new enqueue.
+   */
+  private void updateQueue(EmbeddingProfile target, Store store, List<Key> keys, boolean discard) {
+    if (keys.isEmpty()) return;
+    var args = queueKeyArguments(keys);
+    args.addAll(List.of(target.slot().stored(), target.space().id(), table(store)));
+    jdbc.update(
+        "WITH picked(source_type,source_id,position) AS (VALUES "
+            + queueKeyValues(keys)
+            + ") "
+            + (discard
+                ? "DELETE FROM embedding_repair_work queued USING picked"
+                : "UPDATE embedding_repair_work queued SET available_at=CURRENT_TIMESTAMP + INTERVAL '5 minutes' FROM picked")
+            + " WHERE queued.slot=? AND queued.space_id=? AND queued.store=? AND queued.source_type=picked.source_type AND queued.source_id=picked.source_id AND queued.position=picked.position",
+        args.toArray());
+  }
+
+  private <T> T discovery(Supplier<T> action) {
+    String[] settings =
+        jdbc.queryForObject(
+            "SELECT current_setting('jit'),current_setting('statement_timeout')",
+            (row, n) -> new String[] {row.getString(1), row.getString(2)});
+    jdbc.execute("SET LOCAL jit=off");
+    jdbc.execute("SET LOCAL statement_timeout='2s'");
+    // Restore on success even inside an existing caller transaction. On failure the owning unit
+    // rolls back the transaction (including LOCAL settings); do not mask an aborted-TX error with
+    // a second statement. Neither a pooled lease nor an enclosing activation inherits this policy.
+    T result = action.get();
+    jdbc.queryForObject(
+        "SELECT set_config('jit',?,true),set_config('statement_timeout',?,true)",
+        (row, n) -> row.getString(1),
+        Objects.requireNonNull(settings)[0],
+        settings[1]);
+    return result;
   }
 
   @Override

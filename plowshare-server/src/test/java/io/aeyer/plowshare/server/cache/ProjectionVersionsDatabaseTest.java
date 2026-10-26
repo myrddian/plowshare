@@ -599,8 +599,11 @@ class ProjectionVersionsDatabaseTest {
       listener.listen();
       for (var domain : ProjectionVersions.Domain.values()) {
         jdbc.queryForObject(
-            "SELECT pg_notify('plowshare_projection_changes',?)",
+            "SELECT pg_notify(?,?)",
             String.class,
+            domain == ProjectionVersions.Domain.READABILITY
+                ? PostgresProjectionNotificationSource.READABILITY_CHANNEL
+                : PostgresProjectionNotificationSource.CHANNEL,
             domain.name().toLowerCase(java.util.Locale.ROOT));
         assertEquals(Set.of(domain), listener.poll(Duration.ofSeconds(2)));
       }

@@ -204,7 +204,7 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
   private Counters captureCounters(Set<Domain> domains) {
     return Objects.requireNonNull(
         authoritative.queryForObject(
-            "SELECT database_id,documents,search,schedules,relay,transcripts,authority,observations FROM snapshot_cache_capture_counters()",
+            "SELECT database_id,documents,search,schedules,relay,transcripts,authority,observations,readability FROM snapshot_cache_capture_counters()",
             (row, index) -> {
               var values = new EnumMap<Domain, Long>(Domain.class);
               for (Domain domain : domains)

@@ -926,6 +926,15 @@ public final class InformationCatalogue implements InformationReadAccess {
     return retained.text();
   }
 
+  /** Background metadata admission remains current, but does not hydrate text or declarations. */
+  public java.util.Map<UUID, io.aeyer.plowshare.server.documents.CodeOutline> codeStates(
+      InformationContext context, java.util.Map<UUID, String> hashes) {
+    if (hashes == null || hashes.size() > 100)
+      throw new CallerFault("Code status has at most 100 revisions");
+    requireCode(context);
+    return repository.codeStates(context, java.util.Map.copyOf(hashes));
+  }
+
   /** Bounded, syntax-only outline; source/evidence continue to use the existing read API. */
   public io.aeyer.plowshare.server.documents.CodeProjection codeProjection(
       InformationContext context, UUID revision, String rawHash) {

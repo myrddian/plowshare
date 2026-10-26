@@ -15,7 +15,11 @@ public record ReadCapacityProperties(
     @DefaultValue("1024") int sockets,
     @DefaultValue("32") int socketsPerPrincipal,
     @DefaultValue("512") int subscriptions,
-    @DefaultValue("32") int subscriptionsPerPrincipal) {
+    @DefaultValue("32") int subscriptionsPerPrincipal,
+    @DefaultValue("2") int authority,
+    @DefaultValue("1") int authorityPerPrincipal,
+    @DefaultValue("1") int maintenance,
+    @DefaultValue("1") int maintenancePerPrincipal) {
   @org.springframework.boot.context.properties.bind.ConstructorBinding
   public ReadCapacityProperties {
     check(interactive, interactivePerPrincipal);
@@ -23,6 +27,36 @@ public record ReadCapacityProperties(
     check(observers, observersPerPrincipal);
     check(sockets, socketsPerPrincipal);
     check(subscriptions, subscriptionsPerPrincipal);
+    check(authority, authorityPerPrincipal);
+    check(maintenance, maintenancePerPrincipal);
+  }
+
+  public ReadCapacityProperties(
+      int interactive,
+      int interactivePerPrincipal,
+      int reports,
+      int reportsPerPrincipal,
+      int observers,
+      int observersPerPrincipal,
+      int sockets,
+      int socketsPerPrincipal,
+      int subscriptions,
+      int subscriptionsPerPrincipal) {
+    this(
+        interactive,
+        interactivePerPrincipal,
+        reports,
+        reportsPerPrincipal,
+        observers,
+        observersPerPrincipal,
+        sockets,
+        socketsPerPrincipal,
+        subscriptions,
+        subscriptionsPerPrincipal,
+        2,
+        1,
+        1,
+        1);
   }
 
   public ReadCapacityProperties(
@@ -54,6 +88,8 @@ public record ReadCapacityProperties(
     return switch (work) {
       case INTERACTIVE -> interactive;
       case REPORT -> reports;
+      case AUTHORITY -> authority;
+      case MAINTENANCE -> maintenance;
       case OBSERVER -> observers;
       case SOCKET -> sockets;
       case SUBSCRIPTION -> subscriptions;
@@ -64,6 +100,8 @@ public record ReadCapacityProperties(
     return switch (work) {
       case INTERACTIVE -> interactivePerPrincipal;
       case REPORT -> reportsPerPrincipal;
+      case AUTHORITY -> authorityPerPrincipal;
+      case MAINTENANCE -> maintenancePerPrincipal;
       case OBSERVER -> observersPerPrincipal;
       case SOCKET -> socketsPerPrincipal;
       case SUBSCRIPTION -> subscriptionsPerPrincipal;

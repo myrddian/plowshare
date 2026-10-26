@@ -20,6 +20,70 @@ class WorkspaceCodeMapTest {
   }
 
   @Test
+  void backgroundTrackingBatchesOnlyMetadataAndNeverLoadsUnchangedContent() throws Exception {
+    Path root = temp.toRealPath();
+    for (int file = 0; file < 207; file++)
+      Files.writeString(root.resolve("F" + file + ".java"), "class F" + file + " {}");
+    var provider = spy(local(root, List.of()));
+    var pages = new java.util.concurrent.atomic.AtomicInteger();
+    var observations =
+        new CodeMapObservations() {
+          public Ticket begin(Home home, String pattern) {
+            return null;
+          }
+
+          public void publish(Ticket ticket, WorkspaceCodeMap.View view) {}
+
+          public void invalidate(Home home) {}
+
+          public CodeTrackingStatus status(Home home) {
+            return CodeTrackingStatus.state("background");
+          }
+
+          public Map<String, IndexState> indexes(
+              Home home, List<CodeWorkspaceStore.IndexSource> sources) {
+            pages.incrementAndGet();
+            assertTrue(sources.size() <= 100);
+            var result = new HashMap<String, IndexState>();
+            for (var source : sources)
+              result.put(
+                  source.key(),
+                  new IndexState(
+                      UUID.randomUUID(),
+                      new io.aeyer.plowshare.server.documents.CodeOutline(
+                          "ready", null, "java", "parser", source.source().sha256(), List.of())));
+            return result;
+          }
+
+          public io.aeyer.plowshare.server.documents.CodeProjection cached(
+              Home home, String key, FileSource source) {
+            return fail("Background tracking must not load text or symbols");
+          }
+
+          public io.aeyer.plowshare.server.documents.CodeProjection retain(
+              Home home, WorkspaceCodeMap.Entry file, byte[] bytes) {
+            return fail("Unchanged files must not be admitted again");
+          }
+        };
+    var view =
+        new WorkspaceCodeMap(new ProviderRouter(home -> List.of(provider)), () -> false)
+            .metadataOnly()
+            .observing(observations)
+            .reconcile(Home.global(), "**");
+    assertEquals("observed", view.state());
+    assertEquals(207, view.files().size());
+    assertEquals(3, pages.get());
+    assertTrue(
+        view.files().stream()
+            .allMatch(
+                file ->
+                    file.text() == null
+                        && file.outline().symbols().isEmpty()
+                        && file.revision() != null));
+    verify(provider, never()).snapshot(any(), any(), anyInt());
+  }
+
+  @Test
   void repeated_external_edits_additions_renames_and_deletes_reconcile_without_git()
       throws Exception {
     Path root = temp.toRealPath(), file = root.resolve("First.java");

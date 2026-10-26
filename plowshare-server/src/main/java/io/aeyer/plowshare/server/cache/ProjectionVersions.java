@@ -27,6 +27,7 @@ public interface ProjectionVersions {
     RELAY,
     TRANSCRIPTS,
     OBSERVATIONS,
+    READABILITY,
     AUTHORITY
   }
 

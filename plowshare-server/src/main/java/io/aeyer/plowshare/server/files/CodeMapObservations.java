@@ -9,6 +9,15 @@ import io.aeyer.plowshare.server.documents.CodeProjection;
 public interface CodeMapObservations {
   record Ticket(String workspace, long generation) {}
 
+  record IndexState(
+      java.util.UUID revision, io.aeyer.plowshare.server.documents.CodeOutline outline) {}
+
+  /** Background scans consume metadata only; foreground navigation loads content on demand. */
+  default java.util.Map<String, IndexState> indexes(
+      Home home, java.util.List<CodeWorkspaceStore.IndexSource> sources) {
+    return java.util.Map.of();
+  }
+
   default boolean supportsIndexes() {
     return false;
   }

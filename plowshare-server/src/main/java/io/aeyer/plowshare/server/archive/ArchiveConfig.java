@@ -145,8 +145,10 @@ public class ArchiveConfig {
       JdbcTemplate jdbc,
       UnitOfWork transactions,
       org.springframework.beans.factory.ObjectProvider<ConversationSearch> retrieval,
-      io.aeyer.plowshare.server.cache.ProjectionCaches caches) {
+      io.aeyer.plowshare.server.cache.ProjectionCaches caches,
+      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
     return new EntryStore(jdbc, transactions)
+        .useVisibility(visibility)
         .retrieving(retrieval::getObject)
         .useTranscriptCache(
             caches.create(

@@ -20,7 +20,12 @@ public final class ApplicationGrantLineage implements GrantLineage {
 
   @Override
   public boolean valid(UUID grant) {
-    var chain = grants.lineage(grant);
+    return valid(grants.lineage(grant), new java.util.HashMap<>());
+  }
+
+  private boolean valid(
+      java.util.List<ScopedGrantRepository.Binding> chain,
+      java.util.Map<String, ApplicationPolicy.Boundary> policies) {
     if (chain.isEmpty()) return false;
     // Persistence checks scope, versions, account/token activity and acyclic bounded lineage.
     // Manifest boundaries are live filesystem policy, so they must be intersected here too.
@@ -28,8 +33,8 @@ public final class ApplicationGrantLineage implements GrantLineage {
       var issuer = chain.get(i);
       if (issuer.role() == StandardRole.MANAGER
           && issuer.project().isPresent()
-          && applications
-              .read(issuer.project().orElseThrow())
+          && policies
+              .computeIfAbsent(issuer.project().orElseThrow(), applications::read)
               .limit(issuer.recipientHandle(), Optional.of(ProjectRole.MANAGER))
               .filter(role -> role == ProjectRole.MANAGER)
               .isEmpty()) return false;
@@ -42,7 +47,12 @@ public final class ApplicationGrantLineage implements GrantLineage {
       String project, String account, Optional<ProjectRole> ceiling) {
     if (ceiling.isEmpty() || ClientProjects.privateProject(project)) return ceiling;
     Optional<ProjectRole> result = Optional.empty();
-    for (var grant : grants.projectBindings(project, account)) {
+    // One current database statement supplies the live bindings and all ancestor facts. Filesystem
+    // manifests are read once per project within this invocation, never retained as an allow lease.
+    var policies = new java.util.HashMap<String, ApplicationPolicy.Boundary>();
+    for (var chain : grants.projectLineages(project, account)) {
+      if (chain.isEmpty()) continue;
+      var grant = chain.getFirst();
       Optional<ProjectRole> role =
           switch (grant.role()) {
             case READER -> Optional.of(ProjectRole.VIEWER);
@@ -50,8 +60,8 @@ public final class ApplicationGrantLineage implements GrantLineage {
             case MANAGER -> Optional.of(ProjectRole.MANAGER);
             case ADMIN, SYSTEM, GLOBAL_READ -> Optional.empty();
           };
-      if (role.isEmpty() || !valid(grant.id())) continue;
-      role = applications.read(project).limit(account, role);
+      if (role.isEmpty() || !valid(chain, policies)) continue;
+      role = policies.computeIfAbsent(project, applications::read).limit(account, role);
       if (role.isPresent() && (result.isEmpty() || role.get().allows(result.get()))) result = role;
     }
     return result.map(role -> role.allows(ceiling.orElseThrow()) ? ceiling.orElseThrow() : role);

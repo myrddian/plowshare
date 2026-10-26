@@ -157,6 +157,10 @@ public interface InformationCatalogueRepository {
   io.aeyer.plowshare.server.documents.CodeProjection codeProjection(
       InformationContext context, UUID revision, String rawHash);
 
+  /** Current authorized syntax status for at most 100 exact revision/hash pairs; no content. */
+  java.util.Map<UUID, io.aeyer.plowshare.server.documents.CodeOutline> codeStates(
+      InformationContext context, java.util.Map<UUID, String> hashes);
+
   Information.Outline outline(InformationContext context, UUID revision, int offset, int limit);
 
   Information.Symbols symbols(

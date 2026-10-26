@@ -299,7 +299,30 @@ class DualEmbeddingsTest {
   }
 
   @Test
+  void idleMaintenanceDoesNotReloadProfilesOrProbeEveryStore() {
+    when(work.discoveryDue()).thenReturn(false);
+    assertEquals(0, dual.tick());
+    verify(work).discoveryDue();
+    verifyNoMoreInteractions(work);
+    verifyNoInteractions(dispatcher);
+  }
+
+  @Test
+  void exhaustedMaintenanceNeverDiscoversSourcesOrAttemptsProviders() {
+    when(work.target(EmbeddingSlot.CODE))
+        .thenReturn(
+            Optional.of(profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE)));
+    var operations = mock(OperationEmbeddings.class);
+    dual.useOperations(operations, io.aeyer.plowshare.server.agents.Budget::noCalls);
+    assertEquals(0, dual.tick());
+    verify(work, never()).claimPending(any(), any(), anyInt());
+    verify(work, never()).activate(any());
+    verifyNoInteractions(dispatcher, operations);
+  }
+
+  @Test
   void activatedMaintenanceDoesNotAutomaticallyRepeatAnUncertainSubmission() {
+    when(work.discoveryDue()).thenReturn(true);
     var profile = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
     var source =
         new EmbeddingWorkRepository.Source(
@@ -311,7 +334,8 @@ class DualEmbeddingsTest {
     when(work.target(EmbeddingSlot.CODE))
         .thenReturn(
             Optional.of(profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE)));
-    when(work.pending(eq(profile), eq(source.key().store()), anyInt())).thenReturn(List.of(source));
+    when(work.claimPending(eq(profile), eq(source.key().store()), anyInt()))
+        .thenReturn(List.of(source));
     when(work.inputLimit(profile.space())).thenReturn(100);
     when(work.beginRepair(profile, source)).thenReturn(true, false);
     var operations = mock(OperationEmbeddings.class);

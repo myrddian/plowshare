@@ -61,7 +61,8 @@ class EmbeddingRuntimeRepositoryTest {
 
   @BeforeEach
   void fixtures() {
-    jdbc.execute("TRUNCATE memories,documents,conversations,digests,retrieval_sources CASCADE");
+    jdbc.execute(
+        "TRUNCATE memories,information_resources,documents,conversations,digests,retrieval_sources CASCADE");
     jdbc.update(
         "UPDATE embedding_slots SET active_space_id=NULL,target_space_id=NULL,active_mode=NULL,target_mode=NULL,active_distance=NULL,target_distance=NULL");
     repository = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
@@ -102,6 +103,20 @@ class EmbeddingRuntimeRepositoryTest {
         "INSERT INTO information_document_policies(document_id,owner_handle,visibility,assigned_at) VALUES(?,?,'personal',now())",
         id,
         account);
+    // Live catalogue discovery uses substrate homes. Legacy projection rows alone are not an
+    // authorized knowledge resource; retain the owning resource/revision just as ingestion does.
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,kind,home_scope_id) SELECT ?,?,?,?,'source',s.id FROM authority_scopes s JOIN authority_accounts a ON a.id=s.account_id WHERE a.legacy_handle=? AND s.kind='ACCOUNT_KNOWLEDGE' AND s.builtin IS NULL",
+        id,
+        "account:" + account,
+        name,
+        account,
+        account);
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,text_hash,byte_size,document_type) VALUES(?,?,1,'needle','text/plain','hash','text-hash',1,?)",
+        id,
+        id,
+        type);
     return id;
   }
 
@@ -382,7 +397,8 @@ class EmbeddingRuntimeRepositoryTest {
 
   @Test
   void anIvfflatIndexBuiltOnAnEmptyStoreServesItsFirstCommittedVector() {
-    jdbc.execute("TRUNCATE memories,documents,conversations,digests,retrieval_sources CASCADE");
+    jdbc.execute(
+        "TRUNCATE memories,information_resources,documents,conversations,digests,retrieval_sources CASCADE");
     var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.IVFFLAT_HALF, 4);
     assertTrue(repository.activate(target));
     var active = repository.active(EmbeddingSlot.PROSE).orElseThrow();
@@ -432,6 +448,249 @@ class EmbeddingRuntimeRepositoryTest {
     assertNotNull(
         jdbc.queryForObject(
             "SELECT embedding::text FROM memories WHERE id='memory'", String.class));
+  }
+
+  @Test
+  void discoveryDisablesCompilationForGenericAndCustomPlansWithoutLeakingSessionSettings() {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    for (String mode : List.of("force_generic_plan", "force_custom_plan")) {
+      var explained = new java.util.concurrent.atomic.AtomicInteger();
+      var observed =
+          new JdbcTemplate(Objects.requireNonNull(jdbc.getDataSource())) {
+            @Override
+            public <T> T queryForObject(
+                String sql,
+                org.springframework.jdbc.core.RowMapper<T> mapper,
+                Object... arguments) {
+              if (sql.startsWith("WITH page AS MATERIALIZED")) {
+                assertEquals("off", super.queryForObject("SHOW jit", String.class));
+                String plan =
+                    super.queryForObject("EXPLAIN (FORMAT JSON) " + sql, String.class, arguments);
+                try {
+                  assertFalse(
+                      new com.fasterxml.jackson.databind.ObjectMapper()
+                          .readTree(plan)
+                          .get(0)
+                          .has("JIT"));
+                } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+                  throw new IllegalStateException(invalid);
+                }
+                explained.incrementAndGet();
+              }
+              return super.queryForObject(sql, mapper, arguments);
+            }
+
+            @Override
+            public <T> List<T> query(
+                String sql,
+                org.springframework.jdbc.core.RowMapper<T> mapper,
+                Object... arguments) {
+              if (sql.startsWith("WITH page AS MATERIALIZED")
+                  || sql.startsWith(
+                      "SELECT source_type,source_id,position FROM embedding_repair_work")) {
+                assertEquals("off", super.queryForObject("SHOW jit", String.class));
+                // Planning DML is read-only. Never execute a second discovery mutation just to
+                // profile
+                // it; the actual repository statement below owns its one atomic execution.
+                String plan =
+                    super.queryForObject("EXPLAIN (FORMAT JSON) " + sql, String.class, arguments);
+                try {
+                  assertFalse(
+                      new com.fasterxml.jackson.databind.ObjectMapper()
+                          .readTree(plan)
+                          .get(0)
+                          .has("JIT"));
+                } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+                  throw new IllegalStateException(invalid);
+                }
+                explained.incrementAndGet();
+              }
+              return super.query(sql, mapper, arguments);
+            }
+          };
+      var measured = new JdbcEmbeddingWorkRepository(observed, work, spaces);
+      work.inTransaction(
+          () -> {
+            jdbc.execute("SET LOCAL jit=on");
+            jdbc.execute("SET LOCAL jit_above_cost=0");
+            jdbc.execute("SET LOCAL plan_cache_mode=" + mode);
+            jdbc.execute("SET LOCAL statement_timeout='7s'");
+            jdbc.update(
+                "UPDATE embedding_repair_scans SET next_at=now() WHERE slot=? AND space_id=?",
+                target.slot().stored(),
+                target.space().id());
+            for (int request = 0; request < 7; request++)
+              measured.pending(target, EmbeddingWorkRepository.Store.CHUNKS, 4);
+            assertTrue(explained.get() >= 8);
+            assertEquals("on", jdbc.queryForObject("SHOW jit", String.class));
+            assertEquals("7s", jdbc.queryForObject("SHOW statement_timeout", String.class));
+            return null;
+          });
+    }
+  }
+
+  @Test
+  void aLateSourceCommitBehindTheRecoveryCursorIsStillDiscovered() throws Exception {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    UUID paragraph =
+        jdbc.queryForObject("SELECT paragraph_id FROM chunks WHERE id=?", UUID.class, chunk);
+    UUID late = new UUID(0, 1);
+    try (var connection = Objects.requireNonNull(jdbc.getDataSource()).getConnection()) {
+      connection.setAutoCommit(false);
+      try (var insert =
+          connection.prepareStatement(
+              "INSERT INTO chunks(id,paragraph_id,ordinal,text,byte_size,split_mid_sentence) VALUES(?,?,2,'x',1,false)")) {
+        insert.setObject(1, late);
+        insert.setObject(2, paragraph);
+        insert.executeUpdate();
+      }
+      assertFalse(
+          repository.pending(target, EmbeddingWorkRepository.Store.CHUNKS, 100).stream()
+              .anyMatch(source -> source.key().id().equals(late.toString())));
+      connection.commit();
+      assertTrue(
+          repository.pending(target, EmbeddingWorkRepository.Store.CHUNKS, 100).stream()
+              .anyMatch(source -> source.key().id().equals(late.toString())),
+          "source enqueue is atomic with the late commit, independent of cursor position");
+    }
+  }
+
+  @Test
+  void reconciliationIsKeysetPagedAndConcurrentWorkersReserveDistinctSources() throws Exception {
+    UUID paragraph =
+        jdbc.queryForObject("SELECT paragraph_id FROM chunks WHERE id=?", UUID.class, chunk);
+    jdbc.update(
+        "INSERT INTO chunks(id,paragraph_id,ordinal,text,byte_size,split_mid_sentence) SELECT gen_random_uuid(),?,n,'x',1,false FROM generate_series(2,1006) n",
+        paragraph);
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    assertFalse(repository.activationCandidate(target));
+    assertEquals(100, repository.pending(target, EmbeddingWorkRepository.Store.CHUNKS, 100).size());
+    assertEquals(
+        1000,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM embedding_repair_work WHERE store='chunks'", Integer.class));
+    assertNotNull(
+        jdbc.queryForObject(
+            "SELECT source_id FROM embedding_repair_scans WHERE store='chunks' AND slot='prose'",
+            String.class));
+    assertEquals(100, repository.pending(target, EmbeddingWorkRepository.Store.CHUNKS, 100).size());
+    assertEquals(
+        1008,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM embedding_repair_work WHERE store='chunks'", Integer.class));
+    var next =
+        jdbc.queryForObject(
+            "SELECT next_at FROM embedding_repair_scans WHERE store='chunks' AND slot='prose'",
+            java.time.OffsetDateTime.class);
+    assertTrue(next.isAfter(java.time.OffsetDateTime.now().plusMinutes(4)));
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var start = new java.util.concurrent.CountDownLatch(1);
+      java.util.concurrent.Callable<List<EmbeddingWorkRepository.Source>> claim =
+          () -> {
+            assertTrue(start.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            return new JdbcEmbeddingWorkRepository(jdbc, work, spaces)
+                .claimPending(target, EmbeddingWorkRepository.Store.CHUNKS, 4);
+          };
+      var first = executor.submit(claim);
+      var second = executor.submit(claim);
+      start.countDown();
+      var a = first.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      var b = second.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      assertEquals(4, a.size());
+      assertEquals(4, b.size());
+      var keys = new HashSet<EmbeddingWorkRepository.Key>();
+      a.forEach(source -> keys.add(source.key()));
+      b.forEach(source -> keys.add(source.key()));
+      assertEquals(8, keys.size());
+    }
+  }
+
+  @Test
+  void discoveryReservationsSurviveReopenAndDoNotReplayAnUncertainSubmission() {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var first = repository.claimPending(target, EmbeddingWorkRepository.Store.MEMORIES, 100);
+    assertEquals(2, first.size());
+    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    assertTrue(
+        reopened.claimPending(target, EmbeddingWorkRepository.Store.MEMORIES, 100).isEmpty());
+    // A crashed discoverer did not submit anything; only this reservation can expire.
+    jdbc.update("UPDATE embedding_repair_work SET available_at=now()-INTERVAL '1 second'");
+    var recovered = reopened.claimPending(target, EmbeddingWorkRepository.Store.MEMORIES, 100);
+    assertEquals(new HashSet<>(first), new HashSet<>(recovered));
+    var submitted = recovered.getFirst();
+    assertTrue(reopened.beginRepair(target, submitted));
+    jdbc.update("UPDATE embedding_repair_work SET available_at=now()-INTERVAL '1 second'");
+    assertFalse(reopened.pending(target, submitted.key().store(), 100).contains(submitted));
+    assertFalse(reopened.beginRepair(target, submitted));
+    jdbc.update("UPDATE memories SET summary='fresh source' WHERE id=?", submitted.key().id());
+    assertTrue(
+        reopened.claimPending(target, submitted.key().store(), 100).stream()
+            .anyMatch(
+                source ->
+                    source.key().equals(submitted.key())
+                        && source.revision() != submitted.revision()));
+  }
+
+  @Test
+  void idleDiscoveryDoesNotScanTheCorpusAndRestoresJitAndTimeoutInsideTheCallerTransaction() {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    populate(target);
+    assertTrue(repository.activate(target));
+    for (var store : EmbeddingWorkRepository.Store.values())
+      assertTrue(
+          repository
+              .pending(repository.target(EmbeddingSlot.PROSE).orElseThrow(), store, 4)
+              .isEmpty());
+    assertFalse(repository.discoveryDue());
+    assertTrue(
+        repository.activationCandidate(repository.target(EmbeddingSlot.PROSE).orElseThrow()));
+    for (String mode : List.of("force_generic_plan", "force_custom_plan")) {
+      work.inTransaction(
+          () -> {
+            jdbc.execute("SET LOCAL jit=on");
+            jdbc.execute("SET LOCAL jit_above_cost=0");
+            jdbc.execute("SET LOCAL plan_cache_mode=" + mode);
+            jdbc.execute("SET LOCAL statement_timeout='7s'");
+            var scan =
+                jdbc.queryForMap(
+                    "SELECT * FROM embedding_repair_scans WHERE slot=? AND space_id=? AND store='chunks'",
+                    target.slot().stored(),
+                    target.space().id());
+            for (int attempt = 0; attempt < 7; attempt++)
+              assertTrue(
+                  repository
+                      .claimPending(target, EmbeddingWorkRepository.Store.CHUNKS, 4)
+                      .isEmpty());
+            assertEquals("on", jdbc.queryForObject("SHOW jit", String.class));
+            assertEquals("7s", jdbc.queryForObject("SHOW statement_timeout", String.class));
+            assertEquals(
+                scan,
+                jdbc.queryForMap(
+                    "SELECT * FROM embedding_repair_scans WHERE slot=? AND space_id=? AND store='chunks'",
+                    target.slot().stored(),
+                    target.space().id()));
+            return null;
+          });
+    }
+  }
+
+  @Test
+  void pendingDiscoveryAndSourceEnqueueRollbackTogether() {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var source = repository.pending(target, EmbeddingWorkRepository.Store.MEMORIES, 100).getFirst();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  jdbc.update(
+                      "UPDATE memories SET summary='rolled back' WHERE id=?", source.key().id());
+                  assertNotEquals(
+                      source.revision(), repository.source(source.key()).orElseThrow().revision());
+                  throw new IllegalStateException("rollback");
+                }));
+    assertEquals(source, repository.source(source.key()).orElseThrow());
+    assertTrue(repository.pending(target, source.key().store(), 100).contains(source));
   }
 
   @Test

@@ -22,6 +22,9 @@ import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
  */
 public final class PostgresProjectionNotificationSource implements ProjectionNotificationSource {
   static final String CHANNEL = "plowshare_projection_changes";
+  // Older binaries reject unknown domain payloads on CHANNEL. A separate hint channel lets a
+  // mixed-version fleet retain its existing projections during a rolling database migration.
+  static final String READABILITY_CHANNEL = "plowshare_readability_changes";
 
   private final DataSource source;
 
@@ -75,6 +78,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
       if (closed.get()) throw unavailable();
       try {
         jdbc.execute("LISTEN " + CHANNEL);
+        jdbc.execute("LISTEN " + READABILITY_CHANNEL);
         // LISTEN is transactional: baseline reads are forbidden until this commit has succeeded.
         connection.commit();
         connection.setAutoCommit(true);
@@ -96,7 +100,8 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         var changed = EnumSet.noneOf(ProjectionVersions.Domain.class);
         if (notifications != null) {
           for (PGNotification notification : notifications) {
-            if (!CHANNEL.equals(notification.getName())) continue;
+            if (!CHANNEL.equals(notification.getName())
+                && !READABILITY_CHANNEL.equals(notification.getName())) continue;
             changed.add(
                 switch (notification.getParameter()) {
                   case "documents" -> ProjectionVersions.Domain.DOCUMENTS;
@@ -106,6 +111,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
                   case "transcripts" -> ProjectionVersions.Domain.TRANSCRIPTS;
                   case "authority" -> ProjectionVersions.Domain.AUTHORITY;
                   case "observations" -> ProjectionVersions.Domain.OBSERVATIONS;
+                  case "readability" -> ProjectionVersions.Domain.READABILITY;
                   default -> throw unavailable();
                 });
           }

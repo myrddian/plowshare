@@ -9,10 +9,17 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Bridges verified snapshots to the gated, immutable information pipeline. */
-public final class CodeWorkspaceIndex {
+public final class CodeWorkspaceIndex implements CodeIndexes {
   private final CodeWorkspaceStore store;
   private final InformationCatalogue catalogue;
   private final InformationLifecycle lifecycle;
+  private io.aeyer.plowshare.server.reads.ReadAdmission admission =
+      io.aeyer.plowshare.server.reads.ReadAdmission.direct();
+
+  public CodeWorkspaceIndex useAdmission(io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    this.admission = Objects.requireNonNull(admission);
+    return this;
+  }
 
   public CodeWorkspaceIndex(
       CodeWorkspaceStore store, InformationCatalogue catalogue, InformationLifecycle lifecycle) {
@@ -31,10 +38,44 @@ public final class CodeWorkspaceIndex {
   }
 
   public CodeProjection cached(CodeWorkspaceStore.Scope scope, String key, FileSource source) {
-    UUID revision = store.indexed(scope, key, source.sha256(), CodeOutline.VERSION);
-    return revision == null
-        ? null
-        : catalogue.codeProjection(context(scope), revision, source.sha256());
+    return admission.read(
+        scope.owner(),
+        io.aeyer.plowshare.server.reads.ReadAdmission.Work.AUTHORITY,
+        () -> {
+          UUID revision = store.indexed(scope, key, source.sha256(), CodeOutline.VERSION);
+          return revision == null
+              ? null
+              : catalogue.codeProjection(context(scope), revision, source.sha256());
+        });
+  }
+
+  public java.util.Map<String, CodeMapObservations.IndexState> states(
+      CodeWorkspaceStore.Scope scope, java.util.List<CodeWorkspaceStore.IndexSource> sources) {
+    if (sources == null || sources.size() > 100)
+      throw new IllegalArgumentException("Code index page must have at most 100 sources");
+    return admission.read(
+        scope.owner(),
+        io.aeyer.plowshare.server.reads.ReadAdmission.Work.MAINTENANCE,
+        () -> loadStates(scope, sources));
+  }
+
+  private java.util.Map<String, CodeMapObservations.IndexState> loadStates(
+      CodeWorkspaceStore.Scope scope, java.util.List<CodeWorkspaceStore.IndexSource> sources) {
+    var revisions = store.indexed(scope, sources, CodeOutline.VERSION);
+    var hashes = new java.util.HashMap<UUID, String>();
+    for (var source : sources) {
+      UUID revision = revisions.get(source.key());
+      if (revision != null) hashes.put(revision, source.source().sha256());
+    }
+    if (hashes.isEmpty()) return java.util.Map.of();
+    var states = catalogue.codeStates(context(scope), hashes);
+    var result = new java.util.HashMap<String, CodeMapObservations.IndexState>();
+    revisions.forEach(
+        (key, revision) -> {
+          var state = states.get(revision);
+          if (state != null) result.put(key, new CodeMapObservations.IndexState(revision, state));
+        });
+    return java.util.Map.copyOf(result);
   }
 
   public CodeProjection retain(

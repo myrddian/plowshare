@@ -296,10 +296,18 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
       throw new IllegalStateException("Bound embedding operation cannot authorize maintenance");
     int published = 0;
     var budget = operations == null ? null : maintenancePolicy.get();
+    if (Thread.currentThread().isInterrupted() || budget != null && budget.exhausted())
+      return published;
+    if (!repository.discoveryDue()) return published;
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
-      for (EmbeddingProfile target : writeProfiles(slot)) {
+      var profiles = writeProfiles(slot);
+      for (EmbeddingProfile target : profiles) {
         for (EmbeddingWorkRepository.Store store : EmbeddingWorkRepository.Store.values()) {
-          for (var source : repository.pending(target, store, 4)) {
+          // Discovery itself consumes database capacity. Exhausted/cancelled passes must not
+          // scan every store just to discover that no provider submission can be admitted.
+          if (Thread.currentThread().isInterrupted() || budget != null && budget.exhausted())
+            return published;
+          for (var source : repository.claimPending(target, store, 4)) {
             if (Thread.currentThread().isInterrupted()) return published;
             if (budget != null && budget.exhausted()) break;
             try {
@@ -330,7 +338,11 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
         }
       }
       if (Thread.currentThread().isInterrupted()) return published;
-      repository.activate(repository.target(slot).orElseThrow());
+      var target = repository.target(slot).orElseThrow();
+      // Known queued/retrying work or an unfinished initial discovery cannot be full coverage.
+      // Avoid recompiling/scanning the corpus to prove that on every repair batch. The eventual
+      // activation still locks sources and establishes coverage authoritatively.
+      if (repository.activationCandidate(target)) repository.activate(target);
     }
     return published;
   }
