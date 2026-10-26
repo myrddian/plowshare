@@ -112,7 +112,10 @@ relation between text and symbols and retaining its final current READ fence. Pr
 agent definition, session ownership and generation/mutation fences remain independent. Maintenance
 saturation defers a scan without replacing its retained manifest with an empty one.
 
-Inbox pages and unread counts use one authorized relation before pagination and counting. Inbox,
+Inbox pages and unread counts use one narrow authorized ID relation before pagination and counting;
+only the selected page hydrates notice bodies. Cached deny identities use an uncorrelated membership
+subquery so PostgreSQL hashes the set once, including for generic prepared plans, instead of
+comparing an entire parameter array per result row. Inbox,
 account-scoped transcript collections and orchestration lists reuse the same bounded deny-set
 projection per effective account across sockets and feeds. Every consuming read has a fresh access
 and authority fence around it. A changed fence refuses disclosure without replaying the query.

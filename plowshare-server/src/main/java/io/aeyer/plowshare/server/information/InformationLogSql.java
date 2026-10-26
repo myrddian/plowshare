@@ -17,7 +17,7 @@ public final class InformationLogSql {
         .<InformationSql.Filter>map(
             logs ->
                 new InformationSql.Filter(
-                    column + " <> ALL(?::text[])",
+                    column + " NOT IN (SELECT blocked FROM unnest(?::text[]) AS denied(blocked))",
                     List.of(new SqlArrayValue("text", logs.toArray()))))
         .orElseGet(
             () ->
