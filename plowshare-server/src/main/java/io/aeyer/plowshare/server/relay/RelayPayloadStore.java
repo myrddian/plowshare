@@ -28,5 +28,24 @@ public interface RelayPayloadStore {
    * Examines up to {@code limit} payloads whose {@code ejection_at} has matured and removes those
    * that are unreachable. Returns how many rows were removed.
    */
-  int sweep(Instant now, int limit);
+  default int sweep(Instant now, int limit) {
+    return sweepBatch(now, limit).removed();
+  }
+
+  /**
+   * Atomically examines a locked bounded batch and reports an indexed hint about remaining work.
+   * Concurrent sweepers skip locked payloads; a zero-examination result ends catch-up, including
+   * when all due rows are busy. The hint can change immediately after commit and never authorizes
+   * deletion or a receiver retry.
+   */
+  SweepResult sweepBatch(Instant now, int limit);
+
+  /** No payload content or caller identity is exposed by cleanup diagnostics. */
+  record SweepResult(int examined, int removed, java.util.Optional<Instant> oldestDueAt) {
+    public SweepResult {
+      if (examined < 0 || removed < 0 || removed > examined || examined > 1000)
+        throw new IllegalArgumentException("invalid payload sweep counts");
+      java.util.Objects.requireNonNull(oldestDueAt, "oldestDueAt");
+    }
+  }
 }

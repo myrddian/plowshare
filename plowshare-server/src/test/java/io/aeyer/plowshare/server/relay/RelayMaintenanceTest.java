@@ -56,7 +56,8 @@ class RelayMaintenanceTest {
     when(repository.topicsToPrune(now, properties.getTopicBatchSize()))
         .thenReturn(List.of(new Relay.TopicKey(1, "release.observed")));
     when(repository.prune(any(), eq(now), anyInt())).thenReturn(3);
-    when(payloads.sweep(now, 25)).thenReturn(2);
+    when(payloads.sweepBatch(now, 25))
+        .thenReturn(new RelayPayloadStore.SweepResult(2, 2, java.util.Optional.empty()));
     try (var maintenance =
         new RelayMaintenance(
             repository,
@@ -71,7 +72,77 @@ class RelayMaintenanceTest {
     }
     var order = inOrder(repository, payloads);
     order.verify(repository).prune(any(), eq(now), anyInt());
-    order.verify(payloads).sweep(now, 25);
+    order.verify(payloads).sweepBatch(now, 25);
+  }
+
+  @Test
+  void catchUpStopsAtBatchAndTimeBudgetsAndDoesNotSpinOnLockedRows() {
+    var payloads = mock(RelayPayloadStore.class);
+    var properties = new RelayProperties();
+    properties.setPayloadSweepMaxBatches(3);
+    Instant now = Instant.parse("2026-10-05T01:00:00Z");
+    var backlog = java.util.Optional.of(now.minusSeconds(60));
+    when(payloads.sweepBatch(now, 100))
+        .thenReturn(new RelayPayloadStore.SweepResult(100, 50, backlog));
+    var ticks = new java.util.concurrent.atomic.AtomicLong();
+    try (var maintenance =
+        new RelayMaintenance(
+            mock(RelayRepository.class),
+            mock(RelayDeliveryRepository.class),
+            mock(RelayExecutions.class),
+            properties,
+            () -> now,
+            mock(RelayOperationRepository.class),
+            mock(RelayNativeRepository.class),
+            ticks::get)) {
+      maintenance.usePayloads(payloads);
+      assertEquals(150, maintenance.sweep());
+      verify(payloads, times(3)).sweepBatch(now, 100);
+      clearInvocations(payloads);
+      when(payloads.sweepBatch(now, 100))
+          .thenAnswer(
+              call -> {
+                ticks.addAndGet(properties.getPayloadSweepBudget().toNanos());
+                return new RelayPayloadStore.SweepResult(100, 50, backlog);
+              });
+      assertEquals(50, maintenance.sweep());
+      verify(payloads).sweepBatch(now, 100);
+      clearInvocations(payloads);
+      when(payloads.sweepBatch(now, 100))
+          .thenReturn(new RelayPayloadStore.SweepResult(0, 0, backlog));
+      assertEquals(0, maintenance.sweep());
+      verify(payloads).sweepBatch(now, 100);
+    }
+  }
+
+  @Test
+  void overlappingLocalSweepsBorrowNoExtraConnectionAndFailureReleasesTheLane() {
+    var payloads = mock(RelayPayloadStore.class);
+    var properties = new RelayProperties();
+    Instant now = Instant.parse("2026-10-05T01:00:00Z");
+    try (var maintenance =
+        new RelayMaintenance(
+            mock(RelayRepository.class),
+            mock(RelayDeliveryRepository.class),
+            mock(RelayExecutions.class),
+            properties,
+            () -> now,
+            mock(RelayOperationRepository.class),
+            mock(RelayNativeRepository.class))) {
+      maintenance.usePayloads(payloads);
+      when(payloads.sweepBatch(now, 100))
+          .thenAnswer(
+              call -> {
+                assertEquals(0, maintenance.sweep());
+                throw new IllegalStateException("fixture failure");
+              });
+      assertThrows(IllegalStateException.class, maintenance::sweep);
+      doReturn(new RelayPayloadStore.SweepResult(0, 0, java.util.Optional.empty()))
+          .when(payloads)
+          .sweepBatch(now, 100);
+      assertEquals(0, maintenance.sweep());
+      verify(payloads, times(2)).sweepBatch(now, 100);
+    }
   }
 
   @Test
@@ -97,6 +168,16 @@ class RelayMaintenanceTest {
   @Test
   void configuration_rejects_unbounded_or_nonpositive_sweeps() {
     var properties = new RelayProperties();
+    assertThrows(IllegalArgumentException.class, () -> properties.setPayloadSweepMaxBatches(0));
+    assertThrows(IllegalArgumentException.class, () -> properties.setPayloadSweepMaxBatches(17));
+    assertThrows(
+        IllegalArgumentException.class, () -> properties.setPayloadSweepBudget(Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> properties.setPayloadSweepBudget(Duration.ofSeconds(6)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> properties.setPayloadBacklogWarningAge(Duration.ZERO));
     assertThrows(IllegalArgumentException.class, () -> properties.setTopicBatchSize(101));
     assertThrows(IllegalArgumentException.class, () -> properties.setPublicationBatchSize(0));
     assertThrows(

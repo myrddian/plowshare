@@ -64,10 +64,27 @@ public class RelayConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayPayloadStore relayPayloadStore(
-      JdbcTemplate jdbc, UnitOfWork transactions, RelayProperties properties) {
+      JdbcTemplate jdbc,
+      org.springframework.transaction.PlatformTransactionManager manager,
+      RelayProperties properties) {
+    // Selection locks must be followed by a fresh statement snapshot, even when a caller already
+    // owns a repeatable-read transaction. Bound total batch time as well as individual statements.
+    var template = new org.springframework.transaction.support.TransactionTemplate(manager);
+    template.setIsolationLevel(
+        org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+    template.setPropagationBehavior(
+        org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    template.setTimeout(5);
+    UnitOfWork cleanup =
+        new UnitOfWork() {
+          @Override
+          public <T> T inTransaction(java.util.function.Supplier<T> action) {
+            return java.util.Objects.requireNonNull(template.execute(status -> action.get()));
+          }
+        };
     return new JdbcRelayPayloadStore(
         jdbc,
-        transactions,
+        cleanup,
         properties.getPayloadStagingWindow(),
         properties.getPayloadDeferralCeiling(),
         properties.getSettledRetention());
