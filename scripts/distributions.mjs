@@ -101,6 +101,7 @@ if (kind === 'clients') {
   const { packager } = requireDesktop('@electron/packager');
   const [packaged] = await packager({ dir: application, out: join(stage, 'native'), name: 'Plowshare', appBundleId: 'io.aeyer.plowshare', platform: 'darwin', arch: 'arm64', electronVersion, asar: true, prune: false, overwrite: true,
     icon: join(root, 'plowshare-desktop/assets/icons/plowshare.icns'),
+    extendInfo: join(root, 'plowshare-desktop/assets/macos-info.plist'),
     osxSign: { identity: '-', identityValidation: false, timestamp: 'none', preAutoEntitlements: false, preEmbedProvisioningProfile: false,
       optionsForFile: () => ({ entitlements: join(root, 'scripts/distribution-entitlements.plist'), hardenedRuntime: true }) } });
   const desktop = join(stage, `plowshare-desktop-${version}-darwin-arm64`);
