@@ -530,6 +530,43 @@ class EmbeddingRuntimeRepositoryTest {
   }
 
   @Test
+  void bootstrapKeepsExistingRetryDeadlinesAndUncertainAttemptsInTheDurableQueue() {
+    var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var key = EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "memory");
+    var source = repository.source(key).orElseThrow();
+    // This models an existing failure from before the queue migration: no pending key exists yet.
+    repository.failed(target, source, "EmbeddingException");
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM embedding_repair_work WHERE source_id='memory'", Integer.class),
+        "failure writes enqueue their own deadline before discovery");
+    jdbc.update("DELETE FROM embedding_repair_work WHERE source_id='memory'");
+    assertFalse(repository.pending(target, key.store(), 100).contains(source));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM embedding_repair_work q JOIN memories_embedding_failures f ON f.source_id=q.source_id AND f.slot=q.slot AND f.space_id=q.space_id WHERE q.source_id='memory' AND q.available_at=f.retry_at",
+            Integer.class));
+    jdbc.update(
+        "UPDATE memories_embedding_failures SET retry_at=now()-interval '1 second' WHERE source_id='memory'");
+    assertTrue(
+        repository.pending(target, key.store(), 100).contains(source),
+        "a retained retry wakes immediately, without waiting for another recovery sweep");
+    assertTrue(repository.beginRepair(target, source));
+    // Simulate queue re-bootstrap while the retained in-flight attempt remains authoritative.
+    jdbc.update("DELETE FROM embedding_repair_work WHERE source_id='memory'");
+    jdbc.update(
+        "UPDATE embedding_repair_scans SET next_at=now(),source_id=NULL,enumerated=false WHERE slot='prose' AND store='memories'");
+    assertFalse(repository.pending(target, key.store(), 100).contains(source));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT available_at='infinity'::timestamptz FROM embedding_repair_work WHERE source_id='memory' AND slot='prose'",
+            Boolean.class));
+    assertFalse(repository.beginRepair(target, source));
+  }
+
+  @Test
   void aLateSourceCommitBehindTheRecoveryCursorIsStillDiscovered() throws Exception {
     var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
     UUID paragraph =

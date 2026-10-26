@@ -280,15 +280,20 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   }
 
   private String missing(EmbeddingProfile target, Store store) {
-    return eligible(store)
-        + automaticInformation(store)
-        + " AND NOT ("
-        + ready(target, store)
-        + ") AND NOT EXISTS(SELECT 1 FROM "
+    return missingRepresentation(target, store)
+        + " AND NOT EXISTS(SELECT 1 FROM "
         + table(store)
         + "_embedding_failures f WHERE "
         + link(store, "f")
         + " AND f.slot=? AND f.space_id=? AND f.source_revision=s.embedding_source_revision AND f.retry_at>CURRENT_TIMESTAMP)";
+  }
+
+  private String missingRepresentation(EmbeddingProfile target, Store store) {
+    return eligible(store)
+        + automaticInformation(store)
+        + " AND NOT ("
+        + ready(target, store)
+        + ")";
   }
 
   private record ScanPage(int count, String type, String id, Integer position) {}
@@ -306,11 +311,16 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
 
   @Override
   public boolean activationCandidate(EmbeddingProfile profile) {
+    // An already-active profile only checks index health, even while new sources are pending.
+    // Rebuilding profiles must finish enumeration/known work before the expensive coverage scan.
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT NOT EXISTS(SELECT 1 FROM embedding_repair_scans WHERE slot=? AND space_id=? AND NOT enumerated)"
-                + " AND NOT EXISTS(SELECT 1 FROM embedding_repair_work WHERE slot=? AND space_id=?)",
+            "SELECT EXISTS(SELECT 1 FROM embedding_slots WHERE slot=? AND target_space_id=? AND active_space_id=target_space_id AND active_mode=target_mode AND active_distance=target_distance)"
+                + " OR (NOT EXISTS(SELECT 1 FROM embedding_repair_scans WHERE slot=? AND space_id=? AND NOT enumerated)"
+                + " AND NOT EXISTS(SELECT 1 FROM embedding_repair_work WHERE slot=? AND space_id=?))",
             Boolean.class,
+            profile.slot().stored(),
+            profile.space().id(),
             profile.slot().stored(),
             profile.space().id(),
             profile.slot().stored(),
@@ -381,17 +391,21 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
                 + " ORDER BY "
                 + order
                 + " LIMIT 1000),"
-                + " queued AS (INSERT INTO embedding_repair_work(slot,space_id,store,source_type,source_id,position,source_revision) SELECT ?,?,?,"
+                + " queued AS (INSERT INTO embedding_repair_work(slot,space_id,store,source_type,source_id,position,source_revision,available_at) SELECT ?,?,?,"
                 + (store == Store.PASSAGES
                     ? "s.source_type,s.source_id,s.position"
                     : "'',s.id::text,0")
-                + ",s.embedding_source_revision FROM page JOIN "
+                + ",s.embedding_source_revision,coalesce((SELECT f.retry_at FROM "
+                + name
+                + "_embedding_failures f WHERE "
+                + link(store, "f")
+                + " AND f.slot=? AND f.space_id=? AND f.source_revision=s.embedding_source_revision),CURRENT_TIMESTAMP) FROM page JOIN "
                 + name
                 + " s ON "
                 + pageJoin
                 + joins(store)
                 + " WHERE "
-                + missing(target, store)
+                + missingRepresentation(target, store)
                 + " ON CONFLICT DO NOTHING RETURNING 1) SELECT (SELECT count(*) FROM page) AS scanned,"
                 + (store == Store.PASSAGES
                     ? "(SELECT source_type FROM page ORDER BY " + last + " LIMIT 1)"

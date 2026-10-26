@@ -88,7 +88,9 @@ Embedding maintenance uses `embedding_repair_work` rather than repeating corpus-
 queries on every timer tick. One indexed due-work probe skips profile hydration, store discovery
 and activation checks while idle. Source changes enqueue exact keys and revisions in the source writer's
 transaction. Staging publication removes completed work; failure timestamps defer discovery,
-including infinite deferral for an uncertain retained submission. A discovery reservation expires
+including infinite deferral for an uncertain retained submission. Existing failure rows seed their
+original deadlines, and failure writers upsert a missing key atomically so a rolling upgrade cannot
+lose a retry wakeup before enumeration. A discovery reservation expires
 after five minutes without releasing that separate submission fence. Duplicate processes reserve
 work with `SKIP LOCKED`; provider calls hold neither the discovery connection nor its budget lease.
 The existing source, target, lease, authority and accounting checks still govern submission and
