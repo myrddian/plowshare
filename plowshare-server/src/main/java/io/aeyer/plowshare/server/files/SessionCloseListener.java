@@ -33,8 +33,8 @@ package io.aeyer.plowshare.server.files;
 public interface SessionCloseListener {
 
   /**
-   * The file channel for {@code sessionId} has closed. Drop anything kept under that session's
-   * name; it must not be answered from again.
+   * The file channel for {@code sessionId} has closed or been replaced. Drop anything kept under
+   * that session's name; it must not be answered from again.
    *
    * @param sessionId the id the client registered under when it opened the socket — the same string
    *     {@link SessionChannel#ask} takes

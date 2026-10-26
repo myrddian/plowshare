@@ -130,13 +130,18 @@ import org.slf4j.LoggerFactory;
  * entry per id, per project. That is the unbounded growth this whole mechanism exists to bound,
  * reopened through the one door it left unlocked.
  *
+ * <p>A client may also reuse a session name while replacing its file connection. Every cached
+ * client tier therefore retains the actual connection fence, checked on a hit and around
+ * publication. A fresh lookup rebuilds after replacement; an in-flight resolution crossing the
+ * replacement refuses its result. The session name alone is never freshness evidence.
+ *
  * <p><b>Both are closed by one question, asked at install time: is anything holding this session's
  * file channel right now?</b> {@link #sessionLive} is that question and {@code
  * session.SessionRegistry} answers it — {@code find} returns empty for an id nothing ever attached
  * to and inserts nothing by being asked, so asking cannot itself become the leak. {@code
  * FileChannelHandler.afterConnectionClosed} detaches the channel from that registry <em>before</em>
- * it calls its close listeners, so from the moment a session closes the answer for it is no, for
- * good. An entry is therefore kept under a session key only while that session still holds the one
+ * it calls its close listeners. A reconnect may make that name live again, which is why the
+ * connection fence is checked too. An entry is kept under a session key only while it holds the one
  * thing a session contributes here.
  *
  * <p><b>That makes eviction total rather than best-effort, which is the second reason the question
@@ -261,7 +266,11 @@ public final class DefinitionResolver implements SessionCloseListener {
    * and a second place for the pair to disagree — a registry serving under a stamp that had already
    * been replaced is a stale read that nothing would ever notice.
    */
-  private record Cached(Stamp stamp, AgentRegistry inherited, AgentRegistry registry) {}
+  private record Cached(
+      Stamp stamp,
+      AgentRegistry inherited,
+      AgentRegistry registry,
+      Optional<SessionChannel> inputs) {}
 
   /**
    * The {@link #refusalsFor} key for a project-wide refusal — no real agent name can collide with
@@ -591,27 +600,40 @@ public final class DefinitionResolver implements SessionCloseListener {
             ownStamp.agents() + inheritedStamp.agents(), ownStamp.bots() + inheritedStamp.bots());
     Cached cached = byProject.get(key);
     if (cached != null && cached.stamp().equals(stamp) && cached.inherited() == inherited) {
-      return cached.registry();
+      try {
+        currentInputs(key, cached.inputs());
+        return cached.registry();
+      } catch (io.aeyer.plowshare.server.files.SessionGoneException changed) {
+        // A fresh lookup cannot inherit a replaced connection's definitions merely because the
+        // server-side directory stamp is unchanged. This does not replay an in-flight operation.
+        byProject.remove(key, cached);
+      }
     }
+    var inputs =
+        Optional.ofNullable(key.sessionId())
+            .map(id -> Objects.requireNonNull(channel.bound(id), "bound channel"));
+    currentInputs(key, inputs);
     AgentRegistry built = readProject(key, inherited);
-    byProject.put(key, new Cached(stamp, inherited, built));
-    if (key.sessionId() != null && !sessionLive.test(key.sessionId())) {
-      // The session this entry is keyed by has stopped being attached to
-      // anything since keyFor asked -- it closed while the tier above was
-      // being read. Nothing will ever ask for this key again under an id
-      // its client minted, and sessionClosed's sweep may already have run
-      // past the absent key before the write above landed, so this is the
-      // removal that has to happen: see this class's javadoc for why
-      // asking here rather than before the write leaves no third case.
-      //
-      // The refusals go with it, and only ever for this key's own dead
-      // session. That is the whole difference from the close counter this
-      // replaced, which fired on ANY session's close and so could drop a
-      // live caller's refusals after forCaller had already answered it.
-      byProject.remove(key);
+    currentInputs(key, inputs);
+    var loaded = new Cached(stamp, inherited, built, inputs);
+    byProject.put(key, loaded);
+    try {
+      currentInputs(key, inputs);
+    } catch (io.aeyer.plowshare.server.files.SessionGoneException changed) {
+      // A close/takeover can land after the pre-publication check or after its listener's cache
+      // sweep. Remove only this exact install, preserving a newer concurrent lookup's registry.
+      byProject.remove(key, loaded);
       refusals.remove(key);
+      throw changed;
     }
     return built;
+  }
+
+  private void currentInputs(CacheKey key, Optional<SessionChannel> inputs) {
+    inputs.ifPresent(captured -> captured.requireCurrent(key.sessionId()));
+    if (key.sessionId() != null && !sessionLive.test(key.sessionId()))
+      throw new io.aeyer.plowshare.server.files.SessionGoneException(
+          "The file session closed while resolving project definitions");
   }
 
   /** The file a tier's {@code bots/} holds to say who answers there by default. */

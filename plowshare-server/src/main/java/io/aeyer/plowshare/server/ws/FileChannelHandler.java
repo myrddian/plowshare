@@ -476,6 +476,9 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
               + id
               + "' was replaced by a second connection under"
               + " the same name while this was waiting");
+      // A reused name does not extend the old connection's cache/union lifetime. Run outside the
+      // claims lock; in-flight definition loads independently fence their publication.
+      notifyClosed(id);
       // AND THE SOCKET IS CLOSED, not merely forgotten. Leaving it open
       // leaves a Tomcat session alive until the peer closes it, which this
       // class's own javadoc says can be minutes on a half-open connection —
@@ -658,6 +661,10 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
             + id
             + "' closed while this was waiting, so the files it"
             + " owned cannot be reached");
+    notifyClosed(id);
+  }
+
+  private void notifyClosed(String id) {
     // Everything else that must forget this session -- DefinitionResolver
     // among them, for a project tier a ChannelDefinitions built for this
     // session and cannot outlive it. One listener's own bug must not stop
@@ -685,6 +692,49 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   }
 
   @Override
+  public SessionChannel bound(String session) {
+    Objects.requireNonNull(session, "session");
+    Live captured = live(session);
+    return new SessionChannel() {
+      @Override
+      public SessionChannel bound(String asked) {
+        requireCurrent(asked);
+        return this;
+      }
+
+      @Override
+      public void requireCurrent(String asked) {
+        if (!session.equals(asked))
+          throw new IllegalArgumentException("a bound file channel belongs to one session");
+        FileChannelHandler.this.requireCurrent(session, captured);
+      }
+
+      @Override
+      public boolean sources(String asked) {
+        requireCurrent(asked);
+        return captured != null && "1".equals(parameter(captured.socket.getUri(), SOURCE_PARAM));
+      }
+
+      @Override
+      public FileReply ask(String asked, FileRequest request) {
+        return ask(asked, request, deadline);
+      }
+
+      @Override
+      public FileReply ask(String asked, FileRequest request, Duration wait) {
+        requireCurrent(asked);
+        return FileChannelHandler.this.ask(session, captured, request, wait);
+      }
+    };
+  }
+
+  private void requireCurrent(String session, Live captured) {
+    if (live(session) != captured || captured != null && captured.closed)
+      throw new SessionGoneException(
+          "the file connection for session '" + session + "' changed or closed while reading");
+  }
+
+  @Override
   public boolean sources(String session) {
     Live attached = live(session);
     return attached != null
@@ -696,9 +746,13 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   @Override
   public FileReply ask(String session, FileRequest request, Duration deadline) {
     Objects.requireNonNull(session, "session");
+    return ask(session, live(session), request, deadline);
+  }
+
+  private FileReply ask(String session, Live live, FileRequest request, Duration deadline) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(deadline, "deadline");
-    Live live = live(session);
+    requireCurrent(session, live);
     if (live == null) {
       // GONE. Either it never opened the channel or it closed and was
       // removed, and neither is distinguishable from here — nor needs to
@@ -725,7 +779,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       // close landing between the two would otherwise leave this future in
       // nobody's map — the drain has already run — and it would wait out
       // the whole deadline over a socket that is provably gone.
-      if (live.closed) {
+      if (live.closed || live(session) != live) {
         throw new SessionGoneException(
             "the session '"
                 + session
@@ -737,7 +791,9 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       // Blocking is free: this is a virtual thread and a job blocked here
       // holds no lane slot, exactly as a parent blocked on a child does
       // not. That is what lets the tool call simply return an answer.
-      return answer.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
+      FileReply reply = answer.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
+      requireCurrent(session, live);
+      return reply;
     } catch (TimeoutException wedged) {
       // What is known is that no answer arrived in the time allowed. The
       // message says that and does not guess whether the client is slow or

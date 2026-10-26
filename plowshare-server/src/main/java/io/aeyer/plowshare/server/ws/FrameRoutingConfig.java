@@ -1,8 +1,11 @@
 package io.aeyer.plowshare.server.ws;
 
+import io.aeyer.plowshare.server.files.SessionChannel;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -23,10 +26,14 @@ import org.springframework.context.annotation.Configuration;
  * <h2>Still literal, still readable without running anything</h2>
  *
  * <p>The mapping from type to handler is written out in source, per area — see {@link FrameArea}.
- * This class only unions those maps, and the union is checked rather than assumed: <b>two areas
- * claiming one type fails the boot</b>, naming the type, which is the failure two parallel tasks
- * are most likely to produce (the same endpoint given a frame by two different tasks, each green in
- * its own branch).
+ * This class unions those maps, and the union is checked rather than assumed: <b>two areas claiming
+ * one type fails the boot</b>, naming the type, which is the failure two parallel tasks are most
+ * likely to produce (the same endpoint given a frame by two different tasks, each green in its own
+ * branch).
+ *
+ * <p>Pure context reads also receive one file-connection fence around their complete input
+ * assembly. It changes neither their authorization nor their dispatcher ordering, and never retries
+ * a handler. Other frame types retain their original handlers.
  *
  * <h2>Why this is not in {@link EventChannelConfig}, which is where the router bean used to live
  * </h2>
@@ -66,8 +73,16 @@ public class FrameRoutingConfig {
   public FrameRouter frameRouter(
       List<FrameArea> areas,
       ActingRequests acting,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission,
+      ObjectProvider<SessionChannel> channels) {
+    return assemble(areas, acting, admission, channels.getIfAvailable());
+  }
+
+  public FrameRouter frameRouter(
+      List<FrameArea> areas,
+      ActingRequests acting,
       io.aeyer.plowshare.server.reads.ReadAdmission admission) {
-    return assemble(areas, acting, admission);
+    return assemble(areas, acting, admission, null);
   }
 
   public FrameRouter frameRouter(List<FrameArea> areas, ActingRequests acting) {
@@ -79,13 +94,14 @@ public class FrameRoutingConfig {
   }
 
   private FrameRouter assemble(List<FrameArea> areas, ActingRequests acting) {
-    return assemble(areas, acting, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
+    return assemble(areas, acting, io.aeyer.plowshare.server.reads.ReadAdmission.direct(), null);
   }
 
   private FrameRouter assemble(
       List<FrameArea> areas,
       ActingRequests acting,
-      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+      io.aeyer.plowshare.server.reads.ReadAdmission admission,
+      SessionChannel files) {
     Map<String, FrameHandler> table = new HashMap<>();
     for (FrameArea area : areas) {
       for (Map.Entry<String, FrameHandler> entry : area.frames().entrySet()) {
@@ -102,6 +118,18 @@ public class FrameRoutingConfig {
                   + " frame type, and which of the two answered would otherwise"
                   + " depend on bean ordering.");
         }
+      }
+    }
+    if (files != null) {
+      // These are pure context reads. Keep the existing admission, mutation ordering and caller
+      // checks, while pinning all inputs to the file connection visible when the read began.
+      for (String type :
+          Set.of(
+              FrameTypes.CONVERSATION_CONTEXT,
+              FrameTypes.CONVERSATION_PROJECTION,
+              FrameTypes.CONVERSATION_CONTEXT_COUNT,
+              FrameTypes.CONVERSATION_CONTEXT_SNAPSHOT)) {
+        table.computeIfPresent(type, (ignored, handler) -> new ContextInputHandler(handler, files));
       }
     }
     return new FrameRouter(table, acting, admission);

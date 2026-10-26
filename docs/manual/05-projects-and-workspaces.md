@@ -163,6 +163,11 @@ nor a content hash establishes machine-failure durability or external-writer CAS
 File-channel disconnects still leave uncertain mutation outcomes; never replay
 them automatically.
 
+Context refreshes use the file connection that was present when the refresh began. If it closes
+or is replaced, the refresh refuses the incomplete result. Restore that project's file connection
+and explicitly refresh again. The server does not substitute another session's rules or retry
+the request through a replacement connection. A server-only context needs no file connection.
+
 ## Runtime settings and overrides
 
 The project manifest can carry caps, command policy, selected default bot and
