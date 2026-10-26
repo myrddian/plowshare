@@ -205,6 +205,44 @@ class LogAndWorkerAuthorityDatabaseTest {
   }
 
   @Test
+  void cachedDenyMembershipIsHashedOnceForGenericAndCustomPlans() throws Exception {
+    jdbc.update(
+        "INSERT INTO conversations(id,created_at,origin,budget_total,budget_spent,owner_handle) SELECT 'bulk-'||n,now(),'turn',1,0,'reader' FROM generate_series(0,9999) n");
+    jdbc.execute("ANALYZE conversations");
+    var blocked =
+        java.util.stream.IntStream.range(0, 16384).mapToObj(n -> "bulk-" + (2 * n)).toList();
+    var facts = new InformationLogVisibility.Facts(Optional.of(blocked));
+    for (String mode : List.of("force_generic_plan", "force_custom_plan")) {
+      work.inTransaction(
+          () -> {
+            jdbc.execute("SET LOCAL plan_cache_mode=" + mode);
+            jdbc.execute("SET LOCAL statement_timeout='2s'");
+            var filter = InformationLogSql.visible("c.id", "reader", facts);
+            String sql = "SELECT count(*) FROM conversations c WHERE " + filter.sql();
+            assertEquals(
+                5000, jdbc.queryForObject(sql, Integer.class, filter.arguments().toArray()));
+            String plan =
+                jdbc.queryForObject(
+                    "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + sql,
+                    String.class,
+                    InformationLogSql.visible("c.id", "reader", facts).arguments().toArray());
+            try {
+              var tree = new com.fasterxml.jackson.databind.ObjectMapper().readTree(plan);
+              assertTrue(
+                  tree.toString().contains("hashed SubPlan"),
+                  "Deny membership must be hashed before filtering rows: " + mode);
+              assertFalse(
+                  tree.toString().contains("<> ALL"),
+                  "Generic prepared plans must not compare the whole array per result row");
+            } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+              throw new IllegalStateException(invalid);
+            }
+            return null;
+          });
+    }
+  }
+
+  @Test
   void sharedVisibilityKeepsInboxCountsPagingAndRevocationCurrentWithoutMessageChurn() {
     log("root", null);
     log("child", "root");
