@@ -31,6 +31,21 @@ import org.junit.jupiter.api.Test;
  */
 class FaultsTest {
 
+  @Test
+  void a_closed_file_session_and_a_deadline_are_availability_failures_without_private_details() {
+    for (var failure :
+        java.util.List.of(
+            new io.aeyer.plowshare.server.files.SessionGoneException("private session identity"),
+            new io.aeyer.plowshare.server.files.WorkspaceUnavailableException(
+                "private file path"))) {
+      var fault = Faults.of(failure);
+      assertEquals(Code.ARCHIVE_UNAVAILABLE, fault.code());
+      assertTrue(fault.detail().contains("Restore the owning file connection"));
+      org.junit.jupiter.api.Assertions.assertFalse(fault.detail().contains("private"));
+      org.junit.jupiter.api.Assertions.assertFalse(fault.detail().contains("Nothing was read"));
+    }
+  }
+
   // -- Row 2: CallerFault -------------------------------------------------
 
   @Test

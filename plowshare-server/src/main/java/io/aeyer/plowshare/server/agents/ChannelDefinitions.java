@@ -202,8 +202,9 @@ public final class ChannelDefinitions implements DefinitionSource {
 
   private ChannelDefinitions(
       SessionChannel channel, String sessionId, String directory, List<String> subdirectories) {
-    this.channel = Objects.requireNonNull(channel, "channel");
     this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
+    this.channel = Objects.requireNonNull(channel, "channel").bound(sessionId);
+    Objects.requireNonNull(this.channel, "bound channel");
     this.directory = directory == null ? DEFAULT_DIRECTORY : directory;
     this.subdirectories = List.copyOf(subdirectories);
   }
@@ -229,10 +230,17 @@ public final class ChannelDefinitions implements DefinitionSource {
         return FileRead.unreadable("a resource path contains an unsafe segment");
       }
     }
-    if (parsed.isAbsolute() && clientRoots().stream().noneMatch(parsed::startsWith)) {
+    if (parsed.isAbsolute() && clientRoots(true).stream().noneMatch(parsed::startsWith)) {
       return FileRead.unreadable("a resource must belong to this session's roots");
     }
-    return readWhole(path);
+    FileRead read = readWhole(path, true);
+    requireCurrent();
+    return read;
+  }
+
+  /** A complete rules/resource snapshot still belongs to the connection that supplied it. */
+  void requireCurrent() {
+    channel.requireCurrent(sessionId);
   }
 
   /**
@@ -785,6 +793,10 @@ public final class ChannelDefinitions implements DefinitionSource {
    * client this server could not ask contributes nothing rather than everything.
    */
   private List<Path> clientRoots() {
+    return clientRoots(false);
+  }
+
+  private List<Path> clientRoots(boolean requireAvailable) {
     if (roots != null) {
       return roots;
     }
@@ -817,6 +829,8 @@ public final class ChannelDefinitions implements DefinitionSource {
         }
       }
     } catch (RuntimeException failed) {
+      if (requireAvailable && failed instanceof WorkspaceUnavailableException unavailable)
+        throw unavailable;
       log.debug(
           "session '{}': its roots could not be had, so no absolute listing entry"
               + " can be anchored and none contributes anything: {}",
@@ -866,6 +880,11 @@ public final class ChannelDefinitions implements DefinitionSource {
 
   /** {@link #read}, saying why a file contributes nothing — absent, or unreadable and why. */
   private FileRead readWhole(String path) {
+    return readWhole(path, false);
+  }
+
+  /** Required resources preserve transport failures; optional caps keep their last known values. */
+  private FileRead readWhole(String path, boolean requireAvailable) {
     List<String> lines = new ArrayList<>();
     long bytes = 0;
     int offset = 0;
@@ -883,6 +902,8 @@ public final class ChannelDefinitions implements DefinitionSource {
         }
         span = reply.span();
       } catch (RuntimeException failed) {
+        if (requireAvailable && failed instanceof WorkspaceUnavailableException unavailable)
+          throw unavailable;
         log.debug(
             "session '{}': '{}' could not be read to completion, so it contributes"
                 + " nothing: {}",
@@ -1028,7 +1049,9 @@ public final class ChannelDefinitions implements DefinitionSource {
     // FileRequest.DEFINITIONS reaches a client's .plowshare/agents or
     // .plowshare/bots, and this is the harness saying so rather than a
     // model's file tool, which never calls forDefinitions() at all.
+    channel.requireCurrent(sessionId);
     FileReply reply = channel.ask(sessionId, request.forDefinitions());
+    channel.requireCurrent(sessionId);
     if (!request.id().equals(reply.id())) {
       throw brokenAnswer(request.op(), "answered a different request");
     }

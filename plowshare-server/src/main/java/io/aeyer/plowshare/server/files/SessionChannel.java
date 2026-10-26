@@ -46,6 +46,35 @@ import io.aeyer.plowshare.protocol.FileRequest;
  */
 public interface SessionChannel {
 
+  /**
+   * Capture the current file connection, including its absence. A transport-backed channel must
+   * never route this view to a replacement connection with the same session name. Standalone
+   * channels without a reconnect lifecycle are already bound.
+   */
+  default SessionChannel bound(String session) {
+    return this;
+  }
+
+  /**
+   * Refuse if a bound connection was closed or replaced. An unchanged absence is valid until a file
+   * operation is actually requested; server-only reads do not require a file connection.
+   */
+  default void requireCurrent(String session) {}
+
+  /**
+   * Fence a pure context read across all of its input resolutions. Individual resources may have
+   * their own readers, but no result assembled across a file reconnect can escape this fence. This
+   * never retries work and must not be used to promise replay safety for mutations.
+   */
+  default <T> T readSnapshot(String session, java.util.function.Supplier<T> read) {
+    if (session == null) return read.get();
+    SessionChannel captured = bound(session);
+    captured.requireCurrent(session);
+    T result = read.get();
+    captured.requireCurrent(session);
+    return result;
+  }
+
   /** Opt-in from the actual attached file socket; old clients keep text replies. */
   default boolean sources(String session) {
     return false;
