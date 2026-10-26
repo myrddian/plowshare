@@ -21,6 +21,13 @@ public final class WorkspaceCodeMap {
   private final ProviderRouter router;
   private final BooleanSupplier cancelled;
   private boolean syntax = true;
+  private boolean metadataOnly;
+
+  /** Used only by durable background tracking, whose publication never contains source content. */
+  public WorkspaceCodeMap metadataOnly() {
+    metadataOnly = true;
+    return this;
+  }
 
   public WorkspaceCodeMap fingerprintsOnly() {
     syntax = false;
@@ -196,6 +203,39 @@ public final class WorkspaceCodeMap {
                   + ": inventory_unavailable; narrow the files pattern if the provider's glob limit was reached");
           continue;
         }
+        var metadataPage = new LinkedHashMap<Path, FileSource>();
+        var unavailableMetadata = new HashSet<Path>();
+        var indexed = new HashMap<String, CodeMapObservations.IndexState>();
+        if (metadataOnly) {
+          var requests = new ArrayList<CodeWorkspaceStore.IndexSource>();
+          long pageBytes = bytes;
+          for (Path path : candidates.stream().limit(MAX_FILES - found.size()).toList()) {
+            if (cancelled.getAsBoolean()
+                || Thread.currentThread().isInterrupted()
+                || System.nanoTime() > deadline) break;
+            FileSource metadata;
+            try {
+              metadata = provider.files().fingerprint(path);
+            } catch (WorkspaceRefusedException
+                | WorkspaceUnavailableException
+                | IllegalArgumentException unavailable) {
+              unavailableMetadata.add(path);
+              trouble.add(provider.files().name() + ": source_unavailable " + path);
+              continue;
+            }
+            metadataPage.put(path, metadata);
+            pageBytes += metadata.size();
+            if (pageBytes > MAX_TOTAL_BYTES) break;
+            requests.add(
+                new CodeWorkspaceStore.IndexSource(provider.key() + "\n" + path, metadata));
+            if (requests.size() == 100) {
+              indexed.putAll(observations.indexes(home, List.copyOf(requests)));
+              requests.clear();
+            }
+          }
+          if (!requests.isEmpty())
+            indexed.putAll(observations.indexes(home, List.copyOf(requests)));
+        }
         for (Path path : candidates) {
           if (cancelled.getAsBoolean()
               || Thread.currentThread().isInterrupted()
@@ -206,7 +246,13 @@ public final class WorkspaceCodeMap {
           }
           String key = provider.key() + "\n" + path;
           try {
-            FileSource metadata = provider.files().fingerprint(path);
+            FileSource metadata =
+                metadataOnly ? metadataPage.get(path) : provider.files().fingerprint(path);
+            if (metadata == null) {
+              if (unavailableMetadata.contains(path)) continue;
+              trouble.add("scan_limit_or_cancellation");
+              break outer;
+            }
             fingerprints++;
             Instant observed = Instant.now();
             bytes += metadata.size();
@@ -223,14 +269,33 @@ public final class WorkspaceCodeMap {
                         () -> new WorkspaceRefusedException("file is outside advertised roots"));
             String language = DocumentType.classify(path.toString(), null).subtype();
             CodeProjection cached = null;
-            if (syntax && metadata.size() <= MAX_FILE_BYTES) {
+            var indexState = indexed.get(key);
+            if (syntax && !metadataOnly && metadata.size() <= MAX_FILE_BYTES) {
               try {
                 cached = observations.cached(home, key, metadata);
+              } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
+                // Capacity cannot turn a cached read into source hydration and a new intake.
+                throw capacity;
               } catch (RuntimeException unavailable) {
                 trouble.add("retained_index_unavailable");
               }
             }
-            if (cached != null) {
+            if (metadataOnly && indexState != null) {
+              hits++;
+              found.put(
+                  key,
+                  new Entry(
+                      key,
+                      provider.files().name(),
+                      root,
+                      path,
+                      metadata,
+                      language,
+                      null,
+                      indexState.outline(),
+                      observed,
+                      indexState.revision()));
+            } else if (cached != null) {
               hits++;
               found.put(
                   key,
@@ -393,6 +458,9 @@ public final class WorkspaceCodeMap {
         found.clear();
         trouble.add("workspace_or_session_changed");
       }
+    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
+      // Defer the claimed background generation without publishing an empty replacement manifest.
+      throw capacity;
     } catch (WorkspaceRefusedException | WorkspaceUnavailableException failed) {
       found.clear();
       trouble.add("workspace_unavailable");

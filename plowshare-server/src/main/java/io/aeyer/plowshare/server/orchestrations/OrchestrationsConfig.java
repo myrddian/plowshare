@@ -98,8 +98,11 @@ public class OrchestrationsConfig {
   public static final String CHANGED = "orchestration.changed";
 
   @Bean
-  public OrchestrationStore orchestrationStore(JdbcTemplate jdbc, UnitOfWork work) {
-    return new OrchestrationStore(jdbc, Instant::now, work);
+  public OrchestrationStore orchestrationStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
+    return new OrchestrationStore(jdbc, Instant::now, work).useVisibility(visibility);
   }
 
   /**

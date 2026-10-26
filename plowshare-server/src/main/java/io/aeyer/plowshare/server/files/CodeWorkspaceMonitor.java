@@ -17,9 +17,9 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
   private final CodeWorkspaceStore store;
   private final Access access;
   private final boolean enabled;
-  private java.util.function.Supplier<CodeWorkspaceIndex> indexes = () -> null;
+  private java.util.function.Supplier<CodeIndexes> indexes = () -> null;
 
-  public CodeWorkspaceMonitor indexing(java.util.function.Supplier<CodeWorkspaceIndex> indexes) {
+  public CodeWorkspaceMonitor indexing(java.util.function.Supplier<CodeIndexes> indexes) {
     this.indexes = Objects.requireNonNull(indexes);
     return this;
   }
@@ -100,12 +100,19 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
       var index = indexes.get();
       var map = new WorkspaceCodeMap(router, () -> closed);
       if (index == null) map.fingerprintsOnly();
-      else map.observing(indexObservations(scan.scope(), index));
+      else map.metadataOnly().observing(indexObservations(scan.scope(), index));
       var view = map.reconcile(scan.scope().home(), scan.pattern());
       if (closed) store.unavailable(scan.ticket(), "monitor_stopped");
-      else store.publish(scan.ticket(), view);
+      else {
+        // Metadata admission is batched, not a permission lease. Recheck the live definition and
+        // provider/session boundary after physical I/O, before generation-fenced publication.
+        access.router(scan.scope());
+        store.publish(scan.ticket(), view);
+      }
     } catch (RuntimeException unavailable) {
-      store.unavailable(scan.ticket(), "workspace_access_or_scan_unavailable");
+      if (unavailable instanceof io.aeyer.plowshare.server.reads.ReadUnavailableException)
+        store.defer(scan.ticket());
+      else store.unavailable(scan.ticket(), "workspace_access_or_scan_unavailable");
     }
   }
 
@@ -222,9 +229,15 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
     };
   }
 
-  private CodeMapObservations indexObservations(
-      CodeWorkspaceStore.Scope scope, CodeWorkspaceIndex index) {
+  private CodeMapObservations indexObservations(CodeWorkspaceStore.Scope scope, CodeIndexes index) {
     return new CodeMapObservations() {
+      public Map<String, IndexState> indexes(
+          Home home, List<CodeWorkspaceStore.IndexSource> sources) {
+        if (!scope.home().equals(home))
+          throw new WorkspaceRefusedException("code tracking scope changed");
+        return index.states(scope, sources);
+      }
+
       public boolean supportsIndexes() {
         return true;
       }

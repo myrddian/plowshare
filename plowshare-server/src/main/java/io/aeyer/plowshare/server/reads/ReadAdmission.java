@@ -10,6 +10,8 @@ public interface ReadAdmission {
   enum Work {
     INTERACTIVE,
     REPORT,
+    AUTHORITY,
+    MAINTENANCE,
     OBSERVER,
     SOCKET,
     SUBSCRIPTION

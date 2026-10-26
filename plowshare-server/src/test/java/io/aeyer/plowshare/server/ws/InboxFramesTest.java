@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.ws;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,6 +28,8 @@ class InboxFramesTest {
   void setUp() {
     inbox = mock(Inbox.class);
     store = mock(InboxStore.class);
+    when(inbox.page(anyString(), anyBoolean(), anyInt(), anyInt()))
+        .thenReturn(new InboxStore.Page(List.of(), 0));
     router = new FrameRoutingConfig().frameRouter(List.of(new InboxFrames(inbox, store)));
   }
 
@@ -43,13 +46,14 @@ class InboxFramesTest {
             "hi",
             Instant.parse("2026-09-13T09:00:00Z"),
             null);
-    when(inbox.list("enzo", true, 0, 50)).thenReturn(List.of(item));
-    when(store.unread("enzo")).thenReturn(1);
+    when(inbox.page("enzo", true, 0, 50)).thenReturn(new InboxStore.Page(List.of(item), 1));
     Outcome outcome =
         router.route(
             FrameParity.frame(FrameTypes.INBOX_LIST, "{\"unread\":true}"), new Asking("s", "enzo"));
     assertEquals(Code.OK, outcome.code());
     assertEquals(new InboxListHandler.Page(List.of(item), 1), outcome.payload());
+    verify(inbox, never()).list(anyString(), anyBoolean(), anyInt(), anyInt());
+    verify(store, never()).unread(anyString());
   }
 
   @Test
@@ -74,7 +78,7 @@ class InboxFramesTest {
     Outcome outcome =
         router.route(FrameParity.frame(FrameTypes.INBOX_LIST, "{}"), new Asking("s", "enzo"));
     assertEquals(Code.OK, outcome.code());
-    verify(inbox).list("enzo", false, 0, 50);
+    verify(inbox).page("enzo", false, 0, 50);
   }
 
   @Test
@@ -83,7 +87,7 @@ class InboxFramesTest {
         router.route(
             FrameParity.frame(FrameTypes.INBOX_LIST, "{\"limit\":1000}"), new Asking("s", "enzo"));
     assertEquals(Code.OK, outcome.code());
-    verify(inbox).list("enzo", false, 0, 200);
+    verify(inbox).page("enzo", false, 0, 200);
   }
 
   @Test
@@ -92,7 +96,7 @@ class InboxFramesTest {
         router.route(
             FrameParity.frame(FrameTypes.INBOX_LIST, "{\"limit\":0}"), new Asking("s", "enzo"));
     assertEquals(Code.OK, outcome.code());
-    verify(inbox).list("enzo", false, 0, 1);
+    verify(inbox).page("enzo", false, 0, 1);
   }
 
   @Test
@@ -101,7 +105,7 @@ class InboxFramesTest {
         router.route(
             FrameParity.frame(FrameTypes.INBOX_LIST, "{\"offset\":-5}"), new Asking("s", "enzo"));
     assertEquals(Code.OK, outcome.code());
-    verify(inbox).list("enzo", false, 0, 50);
+    verify(inbox).page("enzo", false, 0, 50);
   }
 
   @Test

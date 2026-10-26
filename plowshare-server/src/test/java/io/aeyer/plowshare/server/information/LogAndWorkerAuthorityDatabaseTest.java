@@ -1,16 +1,19 @@
 package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.*;
 import io.aeyer.plowshare.server.events.JdbcInboxStore;
+import io.aeyer.plowshare.server.reads.*;
 import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import org.flywaydb.core.Flyway;
@@ -161,6 +164,130 @@ class LogAndWorkerAuthorityDatabaseTest {
                   actor));
       assertEquals(expected, targeted, "targeted verdicts for " + actor);
       assertEquals(expected, batched, "collection verdicts for " + actor);
+    }
+  }
+
+  private static final class CountedVisibilityJdbc extends JdbcTemplate {
+    int graphs;
+
+    CountedVisibilityJdbc() {
+      super(source);
+    }
+
+    @Override
+    public <T> List<T> queryForList(String sql, Class<T> type, Object... arguments) {
+      if (sql.contains("information_unreadable_logs")) graphs++;
+      return super.queryForList(sql, type, arguments);
+    }
+  }
+
+  private VersionedProjectionCache<InformationLogVisibility.Facts> visibilityCache(
+      ProjectionVersions versions) {
+    var domains =
+        Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY);
+    var signals = mock(ProjectionChangeSignals.class);
+    when(signals.subscribe(eq(domains), any()))
+        .thenAnswer(
+            call -> {
+              ProjectionChangeSignals.Observer observer = call.getArgument(1);
+              observer.stateChanged(new ProjectionChangeSignals.State(1, true));
+              return (ProjectionChangeSignals.Subscription) () -> {};
+            });
+    return new VersionedProjectionCache<>(
+        new BoundedSnapshotCache<>(
+            new SnapshotCache.Namespace(UUID.randomUUID().toString(), "visibility"),
+            new SnapshotCache.Limits(
+                8, 4_000_000, 2, 4_000_000, 64, 64, 2, 32, Duration.ofSeconds(5))),
+        versions,
+        signals,
+        domains,
+        1_000_000);
+  }
+
+  @Test
+  void sharedVisibilityKeepsInboxCountsPagingAndRevocationCurrentWithoutMessageChurn() {
+    log("root", null);
+    log("child", "root");
+    log("other-owner", null);
+    var value = retained("reader", "one");
+    input("root", value);
+    input("other-owner", "other", retained("other", "two"), "project", "two", false);
+    var counted = new CountedVisibilityJdbc();
+    var versions = new JdbcProjectionVersions(jdbc, source, 128);
+    try (var cache = visibilityCache(versions)) {
+      var visibility =
+          new JdbcInformationLogVisibility(counted, cache, versions, ReadAdmission.direct());
+      var inbox = new JdbcInboxStore(jdbc).useVisibility(visibility);
+      inbox.useInformationInputs(mock(InformationJobs.class));
+      inbox.deliver("reader", null, "child", "ANSWERED", "visible", Instant.now());
+      inbox.deliver(
+          "reader", null, "other-owner", "ANSWERED", "restricted", Instant.now().plusSeconds(1));
+      inbox.deliver("other", null, "child", "ANSWERED", "other inbox", Instant.now());
+      assertEquals(1, inbox.page("reader", false, 0, 1).items().size());
+      assertEquals("visible", inbox.page("reader", false, 0, 1).items().getFirst().answer());
+      assertEquals(1, inbox.unread("reader"));
+      assertEquals(1, counted.graphs, "page and count feeds share the same READ graph");
+      jdbc.update("UPDATE conversations SET last_turn_at=now() WHERE id='root'");
+      jdbc.update(
+          "INSERT INTO entries(conversation_id,ordinal,kind,role,content,turn_ordinal) VALUES('root',1,'utterance','user','ordinary message',1)");
+      jdbc.update(
+          "INSERT INTO information_steps(revision_id,generation,stage,state) VALUES(?,1,'extract','pending')",
+          value.revision());
+      assertEquals(1, inbox.page("reader", false, 1, 1).unread());
+      assertTrue(inbox.page("reader", false, 1, 1).items().isEmpty());
+      assertEquals(1, counted.graphs, "display/progress writes do not invalidate access topology");
+      audience(value, "QUARANTINED", false);
+      assertEquals(0, inbox.page("reader", false, 0, 50).unread());
+      assertEquals(2, counted.graphs, "durable versions work even without notification callbacks");
+      audience(value, "HOME", false);
+      assertEquals(1, inbox.unread("reader"));
+      assertEquals(3, counted.graphs);
+      jdbc.update(
+          "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='one')");
+      assertEquals(0, inbox.unread("reader"));
+      assertEquals(4, counted.graphs);
+    }
+  }
+
+  @Test
+  void aVisibilityVersionSeesLateCommitsRolledBackInputsAndNewAncestry() throws Exception {
+    log("root", null);
+    log("child", "root");
+    var value = retained("reader", "one");
+    input("root", value);
+    var versions = new JdbcProjectionVersions(jdbc, source, 128);
+    var domains =
+        Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY);
+    try (var connection = source.getConnection()) {
+      connection.setAutoCommit(false);
+      try (var statement =
+          connection.prepareStatement(
+              "INSERT INTO information_quarantined_payloads(payload_id,reason) VALUES('root','fixture')")) {
+        statement.executeUpdate();
+      }
+      var token = versions.capture(domains).orElseThrow();
+      assertTrue(versions.current(token));
+      connection.commit();
+      assertFalse(
+          versions.current(token), "a counter allocated before capture cannot hide a late commit");
+      var committed = versions.capture(domains).orElseThrow();
+      try (var statement =
+          connection.prepareStatement(
+              "INSERT INTO information_job_inputs(job_id,owner_handle,revision_id,scope,project_name,include_shared) VALUES('child','reader',?,'project','one',false)")) {
+        statement.setObject(1, value.revision());
+        statement.executeUpdate();
+      }
+      var pending = versions.capture(domains).orElseThrow();
+      connection.rollback();
+      assertTrue(
+          versions.current(pending), "rolled back topology must not publish a replacement value");
+      // The allocation itself may invalidate older snapshots, but cannot authorize the child.
+      assertFalse(readable("child", "reader"));
+      assertNotNull(committed);
+      var beforeChild = versions.capture(domains).orElseThrow();
+      log("new-child", "root");
+      assertFalse(versions.current(beforeChild));
+      assertFalse(readable("new-child", "reader"));
     }
   }
 
