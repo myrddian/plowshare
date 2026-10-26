@@ -268,7 +268,7 @@ val clientDistributions by tasks.registering(Exec::class) {
     description = "Bundles CLI/MCP/TUI and the macOS Apple Silicon desktop."
     dependsOn(":plowshare-desktop:desktopBuild", ":plowshare-cli:cliBuild", ":plowshare-mcp:mcpBuild", ":plowshare-tui:pnpmTypecheck")
     workingDir = rootDir
-    inputs.files("scripts/distributions.mjs", "scripts/distribution-archive.py", "scripts/distribution-talk.mjs", "scripts/distribution-native.mjs", "scripts/distribution-runtime.mjs", "scripts/distribution-runtime.json", "scripts/distribution-entitlements.plist", "docs/distributions.md")
+    inputs.files("scripts/distributions.mjs", "scripts/distribution-archive.py", "scripts/distribution-talk.mjs", "scripts/distribution-native.mjs", "scripts/distribution-runtime.mjs", "scripts/distribution-runtime.json", "scripts/distribution-entitlements.plist", "plowshare-desktop/scripts/macos-identity.mjs", "docs/distributions.md")
     inputs.dir("plowshare-desktop/assets").withPathSensitivity(PathSensitivity.RELATIVE)
     for (module in listOf("plowshare-cli", "plowshare-mcp", "plowshare-tui", "plowshare-desktop", "plowshare-client-ts", "plowshare-client-node", "plowshare-mcp-integration")) {
         inputs.dir(project(":$module").file("src"))
@@ -321,7 +321,7 @@ val desktopPackagingCheck by tasks.registering(Exec::class) {
     description = "Checks LAN permission metadata and signatures in both macOS desktop packages."
     dependsOn(clientDistributions)
     workingDir = rootDir
-    inputs.files("scripts/desktop-packaging.test.mjs", "plowshare-desktop/scripts/native-app.mjs")
+    inputs.files("scripts/desktop-packaging.test.mjs", "plowshare-desktop/scripts/native-app.mjs", "plowshare-desktop/scripts/macos-identity.mjs")
     commandLine("node", "--test", "scripts/desktop-packaging.test.mjs")
 }
 tasks.register<Exec>("desktopDistributionCheck") {

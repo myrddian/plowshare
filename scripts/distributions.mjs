@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { distributionRuntime } from './distribution-runtime.mjs';
+import { macBundleIdentifier, prepareMacAppIdentity } from '../plowshare-desktop/scripts/macos-identity.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const requireDesktop = createRequire(join(root, 'plowshare-desktop/package.json'));
@@ -99,9 +100,10 @@ if (kind === 'clients') {
   await writeFile(join(application, 'THIRD-PARTY-NOTICES.txt'), notices);
   const electronVersion = JSON.parse(await readFile(join(root, 'plowshare-desktop/package.json'), 'utf8')).devDependencies.electron;
   const { packager } = requireDesktop('@electron/packager');
-  const [packaged] = await packager({ dir: application, out: join(stage, 'native'), name: 'Plowshare', appBundleId: 'io.aeyer.plowshare', platform: 'darwin', arch: 'arm64', electronVersion, asar: true, prune: false, overwrite: true,
+  const [packaged] = await packager({ dir: application, out: join(stage, 'native'), name: 'Plowshare', appBundleId: macBundleIdentifier, platform: 'darwin', arch: 'arm64', electronVersion, asar: true, prune: false, overwrite: true,
     icon: join(root, 'plowshare-desktop/assets/icons/plowshare.icns'),
     extendInfo: join(root, 'plowshare-desktop/assets/macos-info.plist'),
+    afterExtract: [prepareMacAppIdentity],
     osxSign: { identity: '-', identityValidation: false, timestamp: 'none', preAutoEntitlements: false, preEmbedProvisioningProfile: false,
       optionsForFile: () => ({ entitlements: join(root, 'scripts/distribution-entitlements.plist'), hardenedRuntime: true }) } });
   const desktop = join(stage, `plowshare-desktop-${version}-darwin-arm64`);
