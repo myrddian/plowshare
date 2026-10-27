@@ -297,6 +297,12 @@ describe('external DTOs and typed notifications', () => {
     wire.push({ kind: 'inbox.changed', unread: 2, future: { private: true } });
     wire.push({ kind: 'inbox.changed', unread: -1 });
     wire.push({ kind: 'information.invalidated', ignored: 'private' });
+    wire.push({
+      kind: 'information.invalidated',
+      progressOnly: true,
+      ignored: 'private',
+    });
+    wire.push({ kind: 'information.invalidated', progressOnly: 'true' });
     const requestId = '00000000-0000-4000-8000-000000000001';
     wire.push({
       kind: 'orchestration.resumed',
@@ -314,9 +320,10 @@ describe('external DTOs and typed notifications', () => {
     expect(pushes).toEqual([
       { kind: 'inbox.changed', unread: 2 },
       { kind: 'information.invalidated' },
+      { kind: 'information.invalidated', progressOnly: true },
       { kind: 'orchestration.resumed', orchestration: 'root', requestId },
     ]);
-    expect(faults).toHaveLength(2);
+    expect(faults).toHaveLength(3);
     expect(wire.sent).toHaveLength(1);
     client.close();
   });

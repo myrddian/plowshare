@@ -151,6 +151,52 @@ class CodeWorkspaceMonitorTest {
   }
 
   @Test
+  void repeatedScansRetainUnchangedManifestRowsButStillPublishChangesAndRemovals()
+      throws Exception {
+    var monitor = monitor(store);
+    enrolled(monitor);
+    // Foreground parsing and a fingerprint-only monitor have different outline facts. Warm the
+    // monitor representation once; repeated identical background scans must then be physical
+    // no-ops.
+    due();
+    assertTrue(monitor.pollOnce());
+    String identity =
+        jdbc.queryForObject(
+            "SELECT xmin::text||':'||ctid::text FROM code_workspace_sources WHERE workspace_id=?",
+            String.class,
+            scope().id());
+    for (int i = 0; i < 3; i++) {
+      due();
+      assertTrue(monitor.pollOnce());
+      assertEquals(
+          identity,
+          jdbc.queryForObject(
+              "SELECT xmin::text||':'||ctid::text FROM code_workspace_sources WHERE workspace_id=?",
+              String.class,
+              scope().id()));
+    }
+    Files.writeString(file, "class Changed {}");
+    due();
+    assertTrue(monitor.pollOnce());
+    assertNotEquals(
+        identity,
+        jdbc.queryForObject(
+            "SELECT xmin::text||':'||ctid::text FROM code_workspace_sources WHERE workspace_id=?",
+            String.class,
+            scope().id()));
+    assertEquals(FileContents.sha256(Files.readAllBytes(file)), hash());
+    Files.delete(file);
+    due();
+    assertTrue(monitor.pollOnce());
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM code_workspace_sources WHERE workspace_id=?",
+            Integer.class,
+            scope().id()));
+  }
+
+  @Test
   void periodic_reconciliation_runs_while_the_agent_is_idle() throws Exception {
     var monitor = monitor(store);
     enrolled(monitor);
@@ -415,7 +461,7 @@ class CodeWorkspaceMonitorTest {
     } finally {
       jdbc.execute("ALTER TABLE code_workspace_sources DROP CONSTRAINT reject_test");
     }
-    // DELETE/INSERT and the status update roll back as a single transaction.
+    // Manifest changes and the status update roll back as a single transaction.
     assertEquals(original, hash());
     assertNotEquals("observed", store.status(scope()).state());
   }

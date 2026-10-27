@@ -28,6 +28,7 @@ class ProjectionChangeSignalsTest {
           UUID.fromString("a55d80be-4134-4d0d-98bc-696ac3b32f31"),
           Map.of(ProjectionVersions.Domain.SEARCH, 1L),
           List.of(),
+          "999999",
           null,
           null);
 

@@ -1814,7 +1814,7 @@ export const OPERATION_SCHEMAS: { inputs: Record<string, Schema>; results: Recor
     "shape1242": {"const":"inbox.changed"},
     "shape1241": {"type":"object","properties":{"kind":{"$ref":"#/$defs/shape1242"},"unread":{"$ref":"#/$defs/shape16"}},"required":["kind","unread"],"additionalProperties":false},
     "shape1244": {"const":"information.invalidated"},
-    "shape1243": {"type":"object","properties":{"kind":{"$ref":"#/$defs/shape1244"}},"required":["kind"],"additionalProperties":false},
+    "shape1243": {"type":"object","properties":{"kind":{"$ref":"#/$defs/shape1244"},"progressOnly":{"$ref":"#/$defs/shape8"}},"required":["kind"],"additionalProperties":false},
     "shape1246": {"const":"information.changed"},
     "shape1245": {"type":"object","properties":{"generation":{"$ref":"#/$defs/shape16"},"kind":{"$ref":"#/$defs/shape1246"},"revision":{"$ref":"#/$defs/shape1"},"sequence":{"$ref":"#/$defs/shape16"}},"required":["generation","kind","revision","sequence"],"additionalProperties":false},
     "shape1248": {"const":"orchestration.changed"},

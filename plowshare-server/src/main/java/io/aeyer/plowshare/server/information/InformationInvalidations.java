@@ -9,4 +9,13 @@ public interface InformationInvalidations {
   InformationInvalidations NONE = () -> {};
 
   void invalidate();
+
+  /**
+   * Identifier-free progress hint. It cannot change content or authorize disclosure. Legacy
+   * transports conservatively use their full invalidation path; capable clients refresh current
+   * progress without discarding content, registry definitions or navigation capabilities.
+   */
+  default void progress() {
+    invalidate();
+  }
 }

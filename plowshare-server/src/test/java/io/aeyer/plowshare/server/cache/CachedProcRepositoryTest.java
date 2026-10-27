@@ -30,6 +30,7 @@ class CachedProcRepositoryTest {
                     ProjectionVersions.Domain.AUTHORITY,
                     1L),
                 List.of(),
+                "999999",
                 null,
                 null));
     var versions = mock(ProjectionVersions.class);
@@ -105,6 +106,7 @@ class CachedProcRepositoryTest {
                   ProjectionVersions.Domain.AUTHORITY,
                   2L),
               List.of(),
+              "999999",
               null,
               null));
       when(source.queues("alice", query)).thenThrow(new CallerFault("Membership revoked"));

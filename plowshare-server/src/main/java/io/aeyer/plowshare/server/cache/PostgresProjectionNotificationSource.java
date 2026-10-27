@@ -26,6 +26,8 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
   // mixed-version fleet retain its existing projections during a rolling database migration.
   static final String READABILITY_CHANNEL = "plowshare_readability_changes";
 
+  static final String PROJECTION_V2_CHANNEL = "plowshare_projection_changes_v2";
+
   private final DataSource source;
 
   public PostgresProjectionNotificationSource(DataSource source) {
@@ -79,6 +81,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
       try {
         jdbc.execute("LISTEN " + CHANNEL);
         jdbc.execute("LISTEN " + READABILITY_CHANNEL);
+        jdbc.execute("LISTEN " + PROJECTION_V2_CHANNEL);
         // LISTEN is transactional: baseline reads are forbidden until this commit has succeeded.
         connection.commit();
         connection.setAutoCommit(true);
@@ -101,7 +104,8 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         if (notifications != null) {
           for (PGNotification notification : notifications) {
             if (!CHANNEL.equals(notification.getName())
-                && !READABILITY_CHANNEL.equals(notification.getName())) continue;
+                && !READABILITY_CHANNEL.equals(notification.getName())
+                && !PROJECTION_V2_CHANNEL.equals(notification.getName())) continue;
             changed.add(
                 switch (notification.getParameter()) {
                   case "documents" -> ProjectionVersions.Domain.DOCUMENTS;
@@ -112,6 +116,10 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
                   case "authority" -> ProjectionVersions.Domain.AUTHORITY;
                   case "observations" -> ProjectionVersions.Domain.OBSERVATIONS;
                   case "readability" -> ProjectionVersions.Domain.READABILITY;
+                  case "queues" -> ProjectionVersions.Domain.QUEUES;
+                  case "progress" -> ProjectionVersions.Domain.PROGRESS;
+                  case "types" -> ProjectionVersions.Domain.TYPES;
+                  case "extractions" -> ProjectionVersions.Domain.EXTRACTIONS;
                   default -> throw unavailable();
                 });
           }

@@ -76,6 +76,36 @@ class ScheduleFilesDatabaseTest {
   }
 
   @Test
+  void repeatedRefusalAndEqualSourceUpdatesDoNotInvalidateSchedulesButChangedErrorsDo() {
+    store.reject(source, "invalid", "invalid definition");
+    Long before =
+        jdbc.queryForObject("SELECT last_value FROM snapshot_cache_schedules", Long.class);
+    for (int i = 0; i < 20; i++) store.reject(source, "invalid", "invalid definition");
+    jdbc.update(
+        "UPDATE schedule_sources SET account=account,source=source WHERE id=?", source.id());
+    assertEquals(
+        before, jdbc.queryForObject("SELECT last_value FROM snapshot_cache_schedules", Long.class));
+    store.reject(source, "invalid", "changed definition error");
+    assertTrue(
+        jdbc.queryForObject("SELECT last_value FROM snapshot_cache_schedules", Long.class)
+            > before);
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            store.reject(
+                new ScheduleDefinitionStore.Source(
+                    source.id(), "other", source.projectId(), source.project(), source.source()),
+                "invalid",
+                "foreign refusal"));
+    assertEquals(
+        "changed definition error",
+        jdbc.queryForObject(
+            "SELECT error FROM schedule_files WHERE source_id=? AND name='invalid'",
+            String.class,
+            source.id()));
+  }
+
+  @Test
   void projectOwnerCanFireAndRevocationStopsClaims() {
     var file =
         store.apply(

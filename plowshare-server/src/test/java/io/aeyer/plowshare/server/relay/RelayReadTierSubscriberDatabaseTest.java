@@ -253,6 +253,28 @@ class RelayReadTierSubscriberDatabaseTest {
   // ------------------------------------------------------------------------------------- pin 1
 
   @Test
+  void repeatedRegistrationKeepsItsAtomicOwnerFenceWithoutPublishingFalseRelayChanges() {
+    published("released");
+    var original = consumption.subscribe(VIEWER, request(GROUP), Relay.Start.OLDEST_RETAINED);
+    Long before = jdbc.queryForObject("SELECT last_value FROM snapshot_cache_relay", Long.class);
+    for (int i = 0; i < 20; i++)
+      assertEquals(
+          original, consumption.subscribe(VIEWER, request(GROUP), Relay.Start.OLDEST_RETAINED));
+    assertEquals(
+        before, jdbc.queryForObject("SELECT last_value FROM snapshot_cache_relay", Long.class));
+    assertEquals(VIEWER, reader(stored(VIEWER, GROUP)));
+    assertEquals(0L, committed(stored(VIEWER, GROUP)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            broker.subscribeAsReader(
+                readerKey(VIEWER, GROUP), Relay.Start.OLDEST_RETAINED, STRANGER, now));
+    assertEquals(
+        before, jdbc.queryForObject("SELECT last_value FROM snapshot_cache_relay", Long.class));
+    assertEquals(VIEWER, reader(stored(VIEWER, GROUP)));
+  }
+
+  @Test
   void a_viewer_subscribes_consumes_and_commits_its_own_groups_offset() {
     published("released");
     var subscription = consumption.subscribe(VIEWER, request(GROUP), Relay.Start.OLDEST_RETAINED);

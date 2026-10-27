@@ -32,7 +32,7 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
     if (closed.get() || !started.compareAndSet(false, true)) return;
     var opened =
         signals.subscribe(
-            Set.of(Domain.DOCUMENTS, Domain.AUTHORITY),
+            Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY, Domain.PROGRESS),
             new ProjectionChangeSignals.Observer() {
               @Override
               public void stateChanged(ProjectionChangeSignals.State next) {
@@ -47,8 +47,10 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
 
               @Override
               public void changed(Set<Domain> domains) {
-                if (domains.contains(Domain.DOCUMENTS) || domains.contains(Domain.AUTHORITY))
-                  publish();
+                if (domains.contains(Domain.DOCUMENTS)
+                    || domains.contains(Domain.READABILITY)
+                    || domains.contains(Domain.AUTHORITY)) publish();
+                else if (domains.contains(Domain.PROGRESS) && !closed.get()) pushes.progress();
               }
             });
     if (!subscription.compareAndSet(null, opened) || closed.get()) {

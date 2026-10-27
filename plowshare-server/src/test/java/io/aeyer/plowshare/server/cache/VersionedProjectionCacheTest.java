@@ -440,7 +440,12 @@ class VersionedProjectionCacheTest {
 
   private static ProjectionVersions.Token token(List<String> pending) {
     return new ProjectionVersions.Token(
-        new UUID(0, 1), Map.of(ProjectionVersions.Domain.SEARCH, 4L), pending, null, null);
+        new UUID(0, 1),
+        Map.of(ProjectionVersions.Domain.SEARCH, 4L),
+        pending,
+        "999999",
+        null,
+        null);
   }
 
   private static void await(CountDownLatch latch) {

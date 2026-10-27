@@ -10692,7 +10692,8 @@ type NotificationVariant3Dto struct {
 
 // NotificationVariant4Dto is the explicit NotificationVariant4Dto protocol shape.
 type NotificationVariant4Dto struct {
-	Kind string `json:"kind"`
+	Kind         string `json:"kind"`
+	ProgressOnly *bool  `json:"progressOnly,omitempty"`
 }
 
 // NotificationVariant5Dto is the explicit NotificationVariant5Dto protocol shape.
