@@ -67,6 +67,31 @@ and made 11,776 `account_active` calls; the batched query admitted the same 65 i
 database execution in that snapshot. These are individual query measurements,
 not end-to-end Desktop timings or proof of a deployed release.
 
+### Processing heartbeats do not invalidate document readers
+
+Information processing renews each active stage on a lifecycle-owned five-second
+timer, independently of model events and silent prefill. Cancellation callbacks
+read only a local flag; they never perform JDBC work. Renewal loss or failure
+stops that stage, and the original failure returns to its owner. The timer is
+cancelled when the stage ends; shutdown drains outstanding renewals before
+repository dependencies close. A late renewal retains the exact generation and
+lease-token predicates, so it cannot renew replacement or completed work.
+
+The flag is a liveness hint, not an authorization lease. Cancellation observation
+may lag a durable change until the next heartbeat. Provider admission, checkpoint
+transactions and completion still check current SYSTEM authority, retained input
+validity, generation and lease ownership. A previously true flag cannot authorize
+an effect after withdrawal or revocation.
+
+V204 keeps lease-deadline-only updates in the observation domain used by PROC.
+They do not advance document/search versions or broadcast Library invalidations.
+Every other step column participates in document/search invalidation, including
+future columns and key changes. Insert, delete and truncate behavior is preserved.
+Authority and readability invalidation and transaction/expiry fences are
+unchanged. PostgreSQL tests verify the actual counters, commit-only notifications,
+rollback, mixed batches and metadata changes; mock tests bound renewal work under
+concurrent token callbacks and preserve fresh checkpoint fences.
+
 ## Interactive plans and activity polling must not stall Library reads
 
 The V195 function-count tests did not cover SQL-function inlining/JIT compilation

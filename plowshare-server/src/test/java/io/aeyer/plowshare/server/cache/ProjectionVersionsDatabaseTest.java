@@ -21,6 +21,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
@@ -60,6 +62,106 @@ class ProjectionVersionsDatabaseTest {
     jdbc = new JdbcTemplate(data);
     outside = new JdbcTemplate(source());
     versions = new JdbcProjectionVersions(jdbc, source(), 128);
+  }
+
+  private UUID informationStep() {
+    UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+        resource,
+        resource.toString());
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) VALUES(?,?,1,'fixture','text/plain','fixture',1)",
+        revision,
+        resource);
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state,lease_token,lease_until) VALUES(?,1,'extract','running',?,clock_timestamp()+interval '5 minutes')",
+        revision,
+        UUID.randomUUID());
+    return revision;
+  }
+
+  @Test
+  void informationStepHeartbeatsWakeProcWithoutInvalidatingCorpusOrAuthority() {
+    UUID revision = informationStep();
+    var corpus =
+        versions
+            .capture(
+                Set.of(
+                    ProjectionVersions.Domain.DOCUMENTS,
+                    ProjectionVersions.Domain.SEARCH,
+                    ProjectionVersions.Domain.READABILITY,
+                    ProjectionVersions.Domain.AUTHORITY))
+            .orElseThrow();
+    var observations =
+        versions.capture(Set.of(ProjectionVersions.Domain.OBSERVATIONS)).orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      for (int i = 0; i < 100; i++)
+        jdbc.update(
+            "UPDATE information_steps SET lease_until=lease_until+interval '1 second' WHERE revision_id=?",
+            revision);
+      assertTrue(versions.current(corpus), "Lease traffic must not retire document/authority DTOs");
+      assertFalse(versions.current(observations), "PROC lease deadlines must remain current");
+      assertEquals(
+          Set.of(ProjectionVersions.Domain.OBSERVATIONS), listener.poll(Duration.ofSeconds(2)));
+      var work = new TransactionTemplate(new DataSourceTransactionManager(data));
+      work.executeWithoutResult(
+          status -> {
+            jdbc.update(
+                "UPDATE information_steps SET lease_until=NULL WHERE revision_id=?", revision);
+            assertFalse(versions.canShare(), "A heartbeat still dirties its caller transaction");
+            assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+            status.setRollbackOnly();
+          });
+      assertTrue(versions.current(corpus));
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty(), "Rollback sends no wakeup");
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "state='ready'",
+        "attempt=attempt+1",
+        "error='failure'",
+        "fingerprint='changed'",
+        "lease_token=gen_random_uuid()",
+        "started_at=clock_timestamp()",
+        "finished_at=clock_timestamp()",
+        "generation=generation+1",
+        "stage='derive'"
+      })
+  void informationStepMetadataAndIdentityChangesStillInvalidateReaders(String assignment) {
+    UUID first = informationStep(), second = informationStep();
+    var corpus =
+        versions
+            .capture(Set.of(ProjectionVersions.Domain.DOCUMENTS, ProjectionVersions.Domain.SEARCH))
+            .orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      // Exercise transition-table batches, including a lease-only row beside a metadata change.
+      // The assignment comes exclusively from the closed parameterized fixture above.
+      var column = assignment.split("=", 2);
+      jdbc.update(
+          "UPDATE information_steps SET "
+              + column[0]
+              + "=CASE WHEN revision_id=? THEN "
+              + column[1]
+              + " ELSE "
+              + column[0]
+              + " END,lease_until=lease_until+interval '1 second' WHERE revision_id IN (?,?)",
+          first,
+          first,
+          second);
+      assertFalse(versions.current(corpus));
+      assertEquals(
+          Set.of(
+              ProjectionVersions.Domain.DOCUMENTS,
+              ProjectionVersions.Domain.SEARCH,
+              ProjectionVersions.Domain.OBSERVATIONS),
+          listener.poll(Duration.ofSeconds(2)));
+    }
   }
 
   @Test

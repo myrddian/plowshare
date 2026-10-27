@@ -47,6 +47,7 @@ class InformationInvalidationPublisherTest {
       source.observer.changed(Set.of(Domain.AUTHORITY));
       assertEquals(4, sent.get());
       source.observer.changed(Set.of(Domain.TRANSCRIPTS));
+      for (int i = 0; i < 1000; i++) source.observer.changed(Set.of(Domain.OBSERVATIONS));
       source.observer.stateChanged(new ProjectionChangeSignals.State(1, false));
       assertEquals(4, sent.get(), "Unrelated or reordered callbacks must not invalidate");
       source.observer.stateChanged(new ProjectionChangeSignals.State(3, false));
