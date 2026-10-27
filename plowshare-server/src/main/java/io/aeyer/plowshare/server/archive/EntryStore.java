@@ -1161,6 +1161,7 @@ public final class EntryStore {
   public EntryStore forAccount(String account) {
     EntryStore copy = new EntryStore(jdbc, now, transactions);
     copy.informationScoped = true;
+    copy.visibility = visibility;
     copy.informationAccount = account;
     copy.transcriptCache = transcriptCache;
     if (retrieval != null) copy.retrieval = () -> retrieval.get().forAccount(account);
@@ -1175,19 +1176,37 @@ public final class EntryStore {
           "log inputs are unavailable to this account");
   }
 
+  private io.aeyer.plowshare.server.information.InformationLogVisibility visibility =
+      io.aeyer.plowshare.server.information.InformationLogVisibility.direct();
+
+  public EntryStore useVisibility(
+      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
+    this.visibility = java.util.Objects.requireNonNull(visibility);
+    return this;
+  }
+
   private <T> T informationQuery(
       String sql, org.springframework.jdbc.core.ResultSetExtractor<T> mapper, Object... args) {
+    if (informationScoped)
+      return visibility.read(
+          informationAccount, facts -> informationQuery(sql, mapper, facts, args));
+    return jdbc.query(sql.replace("/*information*/", ""), mapper, args);
+  }
+
+  private <T> T informationQuery(
+      String sql,
+      org.springframework.jdbc.core.ResultSetExtractor<T> mapper,
+      io.aeyer.plowshare.server.information.InformationLogVisibility.Facts facts,
+      Object... args) {
     String marker = "/*information*/";
     int at = sql.indexOf(marker);
-    java.util.List<Object> bound = new java.util.ArrayList<>(java.util.Arrays.asList(args));
-    if (informationScoped) {
-      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-      bound.add(before, informationAccount);
-    }
-    return jdbc.query(
-        sql.replace(marker, informationScoped ? " AND information_log_readable(c.id,?)" : ""),
-        mapper,
-        bound.toArray());
+    var bound = new java.util.ArrayList<>(java.util.Arrays.asList(args));
+    int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
+    var filter =
+        io.aeyer.plowshare.server.information.InformationLogSql.visible(
+            "c.id", informationAccount, facts);
+    bound.addAll(before, filter.arguments());
+    return jdbc.query(sql.replace(marker, " AND " + filter.sql()), mapper, bound.toArray());
   }
 
   private <T> java.util.List<T> informationRows(
@@ -2791,7 +2810,8 @@ public final class EntryStore {
             jdbc.queryForList(
                 protectInformationLearning
                     ? CONVERSATIONS_AWAITING_THE_LEARNER.replace(
-                        ") queued", ") queued WHERE information_log_readable(conversation_id,NULL)")
+                        ") queued",
+                        ") queued WHERE conversation_id NOT IN (SELECT log FROM information_unreadable_logs(NULL))")
                     : CONVERSATIONS_AWAITING_THE_LEARNER,
                 String.class,
                 most));

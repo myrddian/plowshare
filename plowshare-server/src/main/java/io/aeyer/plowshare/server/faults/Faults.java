@@ -12,6 +12,7 @@ import io.aeyer.plowshare.server.archive.ValidationException;
 import io.aeyer.plowshare.server.config.ConfigUnavailableException;
 import io.aeyer.plowshare.server.documents.UnreadableDocumentException;
 import io.aeyer.plowshare.server.events.ModelUnavailableException;
+import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.images.UnstorableImageException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
@@ -134,6 +135,19 @@ public final class Faults {
 
   private static Map<Class<? extends Throwable>, Function<Throwable, Fault>> buildMappers() {
     Map<Class<? extends Throwable>, Function<Throwable, Fault>> m = new HashMap<>();
+    m.put(
+        io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
+        e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
+    // Keep the existing availability outcome understood by deployed clients. Unlike the archive
+    // mapper, this must not blame PostgreSQL or promise that an enclosing mutation never started.
+    m.put(
+        WorkspaceUnavailableException.class,
+        e -> {
+          log.debug("workspace inputs are unavailable while answering a request");
+          return new Fault(
+              Code.ARCHIVE_UNAVAILABLE,
+              "Workspace inputs are unavailable. Restore the owning file connection, then refresh the read.");
+        });
 
     // Row 2: CallerFault. Same status and slug as row 1's BadRequestException,
     // which this class does not map at all -- see the class javadoc.

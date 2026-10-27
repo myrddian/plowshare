@@ -15,10 +15,13 @@ curl, tar and codesign available:
 ```sh
 ./gradlew --no-daemon clientDistributions serverDistribution
 ./gradlew --no-daemon distributionCheck
+./gradlew --no-daemon desktopPackagingCheck
 ./gradlew --no-daemon desktopDistributionCheck
 ```
 
-The last command opens an isolated native application on a macOS Apple Silicon host.
+`desktopPackagingCheck` inspects the signed developer bundle and the extracted
+Desktop archive, including their Local Network usage declaration. The last command
+includes that check and opens an isolated native application on a macOS Apple Silicon host.
 Ordinary `check` stays headless. Frozen pnpm lockfiles and the pinned Electron/packager
 versions determine dependencies. Downloads require network access on the first build.
 The desktop uses [Electron Packager](https://packages.electronjs.org/packager/v20.0.4/interfaces/Options.html).
@@ -101,6 +104,26 @@ under `~/Library/Application Support/Plowshare`; desktop connection/project/job 
 live in the existing Plowshare configuration directory, outside the application bundle.
 `PLOWSHARE_DESKTOP_PROFILE` and `PLOWSHARE_DESKTOP_CONFIG` retain their isolated-profile
 overrides for testing.
+
+When connecting to a LAN server, allow Plowshare's Local Network request. Review
+that permission in System Settings > Privacy & Security > Local Network if access
+was denied. Both packaging paths merge the shared usage description before signing.
+Verify LAN connectivity by opening the app normally from Finder or Applications:
+macOS automatically permits Terminal-launched child processes to access the LAN,
+so `npm start` and terminal-driven smoke tests do not verify the app's own permission.
+See [Apple's local network privacy guidance](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
+
+The packagers also give the main launcher an application-specific Mach-O build UUID
+before signing. It is derived from the bundle ID, CPU and original Electron build
+UUID, so fresh builds using the same runtime keep the same identity across paths,
+while other Electron apps have a different identity. Renaming the app and its plist
+alone leaves the stock launcher UUID shared, which can confuse macOS network policy.
+Only the extracted launcher is changed: the shared runtime cache, helpers and
+Electron Framework remain untouched. The launcher no longer matches Electron's
+original launcher dSYM; framework symbols retain their original UUIDs. The packaging
+regressions compare against a stock control bundle and check names, helpers,
+application identity, archive integrity and final signatures in both build paths.
+See [Apple TN3178](https://developer.apple.com/documentation/technotes/tn3178-checking-for-and-resolving-build-uuid-problems).
 
 This initial artifact has a verified local ad-hoc signature. It has no Developer ID signature or Apple
 notarization. macOS may require explicit approval in System Settings for an application

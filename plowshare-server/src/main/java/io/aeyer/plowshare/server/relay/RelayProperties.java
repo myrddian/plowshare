@@ -131,6 +131,41 @@ public final class RelayProperties {
   private Duration payloadStagingWindow = Duration.ofHours(1);
   private Duration payloadDeferralCeiling = Duration.ofHours(24);
   private int payloadSweepBatch = 100;
+  private int payloadSweepMaxBatches = 4;
+  private Duration payloadSweepBudget = Duration.ofMillis(250);
+  private Duration payloadBacklogWarningAge = Duration.ofMinutes(15);
+
+  public int getPayloadSweepMaxBatches() {
+    return payloadSweepMaxBatches;
+  }
+
+  public void setPayloadSweepMaxBatches(int value) {
+    RelayValues.limit(value, 16);
+    payloadSweepMaxBatches = value;
+  }
+
+  public Duration getPayloadSweepBudget() {
+    return payloadSweepBudget;
+  }
+
+  public void setPayloadSweepBudget(Duration value) {
+    Objects.requireNonNull(value, "payloadSweepBudget");
+    if (value.compareTo(Duration.ofMillis(10)) < 0 || value.compareTo(Duration.ofSeconds(5)) > 0)
+      throw new IllegalArgumentException("payload sweep budget must be 10ms through 5s");
+    payloadSweepBudget = value;
+  }
+
+  public Duration getPayloadBacklogWarningAge() {
+    return payloadBacklogWarningAge;
+  }
+
+  public void setPayloadBacklogWarningAge(Duration value) {
+    Objects.requireNonNull(value, "payloadBacklogWarningAge");
+    if (value.compareTo(Duration.ofMinutes(1)) < 0 || value.compareTo(Duration.ofDays(1)) > 0)
+      throw new IllegalArgumentException(
+          "payload backlog warning age must be 1 minute through 1 day");
+    payloadBacklogWarningAge = value;
+  }
 
   public int getDeliveryBatchSize() {
     return deliveryBatchSize;

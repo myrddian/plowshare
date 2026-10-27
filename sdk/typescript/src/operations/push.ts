@@ -15,7 +15,10 @@ export type {
 } from '../binding/job-notification.ts';
 export type AccountEvent =
   | { readonly kind: 'inbox.changed'; readonly unread: number }
-  | { readonly kind: 'information.invalidated' }
+  | {
+      readonly kind: 'information.invalidated';
+      readonly progressOnly?: boolean;
+    }
   | {
       readonly kind: 'information.changed';
       readonly sequence: number;
@@ -158,7 +161,11 @@ export function decodeServerPush(value: unknown): ServerPush {
         ? { kind: value.kind, unread: value.unread }
         : fail();
     case 'information.invalidated':
-      return { kind: value.kind };
+      return value.progressOnly === undefined
+        ? { kind: value.kind }
+        : typeof value.progressOnly === 'boolean'
+          ? { kind: value.kind, progressOnly: value.progressOnly }
+          : fail();
     case 'information.changed':
       return whole(value.sequence) &&
         value.sequence >= 1 &&

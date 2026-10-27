@@ -908,6 +908,47 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
   }
 
   /**
+   * Operation-local listing facts; authority remains the caller's effective ProjectMembers policy.
+   */
+  public record ListingDetails(String machine, String personalOwner, List<String> members) {
+    public ListingDetails {
+      members = List.copyOf(members);
+    }
+  }
+
+  public java.util.Map<String, ListingDetails> listingDetails(java.util.Collection<String> names) {
+    return ArchiveUnavailableException.translating(
+        "read project listing facts",
+        () -> {
+          var requested = names.stream().map(ProjectStore::named).distinct().sorted().toList();
+          var result = new java.util.LinkedHashMap<String, ListingDetails>();
+          for (int start = 0; start < requested.size(); start += 128) {
+            var batch = requested.subList(start, Math.min(start + 128, requested.size()));
+            jdbc.query(
+                "SELECT p.name,p.machine,p.personal_owner,ARRAY(SELECT m.handle FROM project_members m WHERE m.project_id=p.id ORDER BY m.handle) AS members FROM projects p WHERE p.name IN ("
+                    + String.join(",", java.util.Collections.nCopies(batch.size(), "?"))
+                    + ")",
+                (org.springframework.jdbc.core.RowCallbackHandler)
+                    row -> {
+                      var array = row.getArray("members");
+                      try {
+                        result.put(
+                            row.getString("name"),
+                            new ListingDetails(
+                                row.getString("machine"),
+                                row.getString("personal_owner"),
+                                List.of((String[]) array.getArray())));
+                      } finally {
+                        array.free();
+                      }
+                    },
+                batch.toArray());
+          }
+          return java.util.Map.copyOf(result);
+        });
+  }
+
+  /**
    * The machine that roots this project, or empty when it is this server's or there is no row.
    *
    * <p><b>The design spec's §5 asked once, and answered from a column instead of from a filesystem

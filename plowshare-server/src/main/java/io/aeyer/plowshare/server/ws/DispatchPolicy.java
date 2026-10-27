@@ -24,34 +24,124 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
   }
 
   /**
-   * Reads that need no ordering on their connection. {@code board.topics}, {@code swarm.status} and
-   * {@code admin.status} are polled by the desktop client; left to the fall-through default each
-   * poll was a connection-wide barrier. They are safe to run concurrently because they only read,
-   * declare no resource key, and were never made correct by barrier ordering: a barrier's scope is
-   * one connection, not the data, so PostgreSQL transactions, locks and version fences remain the
-   * cross-process authority. A FINITE read still waits behind a running barrier on its connection.
+   * Audited independent reads, shared with legacy event scheduling. Full effect and authority
+   * paths, including intentionally retained barriers, are recorded in
+   * docs/dispatcher-read-audit.md. These operations may overlap within the existing execution and
+   * admission bounds; they still wait behind earlier connection barriers. Scheduling never grants
+   * authority: routing, repository checks and the reply disclosure fence remain current.
    *
-   * <p>The {@link #barrier()} fall-through in {@link #decode} is deliberately unchanged. An
-   * unaudited operation keeps the conservative ordered barrier until the slice 04 audit has
-   * classified its full effects and authority lifecycle; the remaining operations await that audit.
+   * <p>Use explicit operations, never verb/prefix matching: memory.read counts uses,
+   * provider.credential.status can expire credentials, and orchestration.caps applies changes.
+   * Conversation-scoped inspection belongs in CONVERSATIONS so it shares mutation ordering.
    */
-  private static final Set<String> FINITE =
+  private static final Set<String> INDEPENDENT_READS =
       Set.of(
-          "board.topics",
-          "swarm.status",
           "admin.status",
+          "admin.accounts",
+          "admin.sessions",
+          "admin.audit",
+          "admin.service.accounts",
+          "admin.service.tokens",
+          "admin.pricing.list",
+          "project.list",
+          "project.access",
+          "conversation.list",
+          "conversation.latest",
+          "agent.list",
+          "job.list",
+          "job.status",
+          "board.topics",
+          "board.messages",
+          "swarm.status",
+          "swarm.types",
+          "proc.list",
+          "proc.inspect",
+          "proc.calls",
+          "proc.queues",
+          "proc.tools",
+          "usage.conversation",
+          "usage.project",
+          "usage.agent",
+          "usage.run",
+          "usage.orchestration",
+          "usage.models",
+          "usage.pools",
+          "usage.calls",
+          "document.list",
+          "document.detail",
+          "document.chunk",
+          "document.citations",
+          "inbox.list",
+          "approval.list",
+          "orchestration.list",
+          "orchestration.status",
+          "orchestration.receipt",
+          "orchestration.definitions",
+          "orchestration.record",
+          "memory.index",
+          "proposal.list",
+          "provider.list",
+          "trigger.list",
+          "firing.list",
+          "union.conflict.list",
+          "message.instances",
+          "message.instance",
+          "message.deliveries",
+          "message.delivery",
+          "incoming.catalog",
+          "incoming.status",
+          "outgoing.status",
+          "outgoing.peers",
+          "application.files",
+          "application.file.read",
+          "application.identity.status",
+          "application.token.receipt",
+          "application.deployment.status",
+          "application.deployment.receipt",
+          "filestore.list",
+          "provider.connection.list",
+          "provider.connection.status",
+          "provider.connection.receipt",
+          "tool.scope.list",
+          "tool.scope.host.list",
+          "tool.scope.host.status",
+          "tool.scope.host.receipt",
+          "tool.scope.worker.status",
           "information.list",
           "information.facets",
           "information.read",
+          "information.inventory",
+          "information.acquisitions",
+          "information.outline",
+          "information.symbols",
+          "information.events",
+          "information.evidence.read",
+          "information.migration.list",
+          "information.types.capabilities",
+          "information.types.list",
+          "information.types.get",
+          "information.types.validate",
+          "information.content.get",
           "information.navigation.capabilities",
           "information.documents.list",
           "information.documents.facets",
           "information.documents.get",
           "information.relationships.list",
+          "information.policy.get",
+          "information.views.list",
+          "information.views.get",
+          "information.interchange.capabilities",
+          "information.interchange.export",
+          "information.interchange.readable",
+          "information.interchange.origin",
           "relay.topics",
           "relay.log",
           "schedule.list",
           "schedule.files");
+
+  static boolean independentRead(String type) {
+    return INDEPENDENT_READS.contains(type);
+  }
 
   private static final Set<String> CONVERSATIONS =
       Set.of(
@@ -60,6 +150,9 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "conversation.chat",
           "conversation.trajectory",
           "conversation.context",
+          "conversation.context.count",
+          "conversation.context.snapshot",
+          "todos.read",
           "conversation.projection",
           "conversation.compactions",
           "conversation.resume");
@@ -101,7 +194,7 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
       return new DispatchPolicy(Kind.OBSERVER, List.of());
     if (request.actingFor() != null)
       return resource("acting", connection, request.actingFor().context().toString());
-    if (FINITE.contains(type)) return new DispatchPolicy(Kind.FINITE, List.of());
+    if (independentRead(type)) return new DispatchPolicy(Kind.FINITE, List.of());
     if (type.equals("web.search")) {
       Object query = payload.get("query");
       Object max = payload.get("max");

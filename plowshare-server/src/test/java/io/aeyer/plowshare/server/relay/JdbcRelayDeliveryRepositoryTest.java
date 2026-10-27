@@ -523,6 +523,32 @@ class JdbcRelayDeliveryRepositoryTest {
   }
 
   @Test
+  void idempotentRenewalChecksTheFenceWithoutRewritingOrInvalidatingRelay() {
+    var claimed = claim();
+    Long before = jdbc.queryForObject("SELECT last_value FROM snapshot_cache_relay", Long.class);
+    String row =
+        jdbc.queryForObject(
+            "SELECT xmin::text||':'||ctid::text FROM relay_deliveries WHERE id=?",
+            String.class,
+            claimed.key().id());
+    var unchanged = deliveries.renew(claimed.claim(), LEASE.minusSeconds(1), T0.plusSeconds(1));
+    assertEquals(claimed.leaseUntil(), unchanged.leaseUntil());
+    assertEquals(
+        before, jdbc.queryForObject("SELECT last_value FROM snapshot_cache_relay", Long.class));
+    assertEquals(
+        row,
+        jdbc.queryForObject(
+            "SELECT xmin::text||':'||ctid::text FROM relay_deliveries WHERE id=?",
+            String.class,
+            claimed.key().id()));
+    assertThrows(
+        IllegalStateException.class,
+        () -> deliveries.renew(claimed.claim(), Duration.ofSeconds(1), claimed.leaseUntil()));
+    assertEquals(
+        before, jdbc.queryForObject("SELECT last_value FROM snapshot_cache_relay", Long.class));
+  }
+
+  @Test
   void renewal_extends_live_leases_but_cannot_revive_an_expired_owner() {
     var claimed = claim();
     var renewed = deliveries.renew(claimed.claim(), LEASE, T0.plusSeconds(5));

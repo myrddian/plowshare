@@ -102,12 +102,13 @@ public final class CitationStore {
     List<Object> bound = new ArrayList<>(java.util.Arrays.asList(arguments).subList(0, before));
     bound.addAll(filter.arguments());
     bound.add(context.account());
+    bound.add(context.account());
     bound.addAll(java.util.Arrays.asList(arguments).subList(before, arguments.length));
     String allowed =
         filter.sql()
             + " AND (c.conversation_id IS NULL OR EXISTS"
             + " (SELECT 1 FROM conversations log WHERE log.id = c.conversation_id"
-            + " AND log.owner_handle = ? AND information_log_readable(log.id,log.owner_handle)))";
+            + " AND log.owner_handle = ? AND log.id NOT IN (SELECT log FROM information_unreadable_logs(?))))";
     return jdbc.query(
         sql.replace(marker, (hasWhere ? " AND " : " WHERE ") + allowed), CITED, bound.toArray());
   }

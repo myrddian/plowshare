@@ -36,6 +36,13 @@ class ApplicationVisibilityTest {
     when(projects.allForSession("reader", "session")).thenReturn(List.of(application, legacy));
     when(projects.effectiveExclusions(any(ProjectRecord.class))).thenReturn(List.of());
     when(stored.role(anyString(), eq("reader"))).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(stored.roles(any(), eq("reader")))
+        .thenReturn(Map.of("chatbot", ProjectRole.MANAGER, "legacy", ProjectRole.MANAGER));
+    when(projects.listingDetails(any()))
+        .thenReturn(
+            Map.of(
+                "chatbot", new ProjectStore.ListingDetails(null, null, List.of()),
+                "legacy", new ProjectStore.ListingDetails(null, null, List.of())));
     when(policy.read("chatbot"))
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
     when(policy.read("legacy"))

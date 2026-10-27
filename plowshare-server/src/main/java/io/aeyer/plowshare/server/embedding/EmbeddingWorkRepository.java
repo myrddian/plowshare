@@ -57,7 +57,26 @@ public interface EmbeddingWorkRepository {
 
   Optional<EmbeddingProfile> target(EmbeddingSlot slot);
 
+  /** Cheap indexed wakeup hint. Claims, source and activation fences still decide actual work. */
+  default boolean discoveryDue() {
+    return true;
+  }
+
+  /** Negative-only background hint; activate still owns the authoritative coverage/slot fence. */
+  default boolean activationCandidate(EmbeddingProfile profile) {
+    return true;
+  }
+
   List<Source> pending(EmbeddingProfile profile, Store store, int limit);
+
+  /**
+   * Reserves bounded discovery work across server processes. Reservations expire if no attempt
+   * begins; beginRepair retains uncertain submissions independently, without a timed replay. No
+   * connection or transaction may remain held while the caller invokes an encoder.
+   */
+  default List<Source> claimPending(EmbeddingProfile profile, Store store, int limit) {
+    return pending(profile, store, limit);
+  }
 
   Optional<Source> source(Key key);
 

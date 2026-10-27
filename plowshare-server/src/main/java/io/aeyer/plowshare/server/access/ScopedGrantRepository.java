@@ -70,6 +70,9 @@ public interface ScopedGrantRepository {
   /** Live project account bindings; token callers use their owner's bindings plus their ceiling. */
   List<Binding> projectBindings(String project, String account);
 
+  /** All live project-account bindings and their complete ancestry from one authority relation. */
+  List<List<Binding>> projectLineages(String project, String account);
+
   /** Live chain from this binding through its root, in child-to-parent order; empty if invalid. */
   List<Binding> lineage(UUID id);
 

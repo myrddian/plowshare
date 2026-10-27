@@ -716,8 +716,13 @@ public final class TokenStore {
     if (spent == null || !clock.instant().isBefore(spent.expiresAt())) {
       return Optional.empty();
     }
+    // A revocation between filtering and ticket minting can remove the account while leaving
+    // its captured version on the request. Such a ticket cannot become anonymous authority and
+    // must be refused before asking persistence to resolve an absent identity.
     if (spent.version() != null
-        && !durable.version(spent.handle()).filter(spent.version()::equals).isPresent())
+        && (spent.handle() == null
+            || durable == null
+            || !durable.version(spent.handle()).filter(spent.version()::equals).isPresent()))
       return Optional.empty();
     return Optional.of(new Redeemed(spent.handle(), spent.version()));
   }

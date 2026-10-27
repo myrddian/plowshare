@@ -325,3 +325,51 @@ await test('manual recovery consumes pending hint and destroy fences cancelled c
   f.clock.advance(120_000);
   assert.equal(f.reads(), 1);
 });
+
+await test('progress coalesces without hiding or cancelling reads; authority upgrades its timer', () => {
+  const f = refreshFixture();
+  f.owner.observe('selection', 0, 0);
+  f.clock.advance(0);
+  f.owner.readStarted();
+  for (let hint = 1; hint <= 100; hint++) f.owner.observe('selection', 0, hint);
+  assert.deepEqual(
+    f.invalidations,
+    [true],
+    'Progress must not hide content or retire in-flight reads',
+  );
+  f.clock.advance(999);
+  assert.equal(f.reads(), 1);
+  f.clock.advance(1);
+  assert.equal(
+    f.reads(),
+    2,
+    'Continuous progress must neither starve nor multiply refreshes',
+  );
+  f.owner.readStarted();
+  f.owner.observe('selection', 0, 101);
+  const stale = f.clock.tasks.filter(
+    (task) => !task.cancelled && task.at < 60_000,
+  );
+  f.owner.observe('selection', 1, 101);
+  assert.deepEqual(
+    f.invalidations,
+    [true, false],
+    'Authority/content still fences immediately',
+  );
+  f.clock.advance(250);
+  assert.equal(
+    f.reads(),
+    3,
+    'A full invalidation takes priority over progress',
+  );
+  for (const task of stale) task.action();
+  assert.equal(
+    f.reads(),
+    3,
+    'Cancelled soft work cannot resurrect after authority invalidation',
+  );
+  f.owner.observe('selection', 1, 102);
+  f.owner.observe(undefined, 1, 102);
+  f.clock.advance(120_000);
+  assert.equal(f.reads(), 3, 'Logout fences progress timers too');
+});

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.files;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.CodeTrackingStatus;
 import io.aeyer.plowshare.protocol.Home;
@@ -144,6 +145,34 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
         });
   }
 
+  private record SourceObservation(
+      @JsonProperty("source_key") String sourceKey,
+      String provider,
+      String root,
+      String path,
+      @JsonProperty("relative_path") String relativePath,
+      @JsonProperty("source_hash") String sourceHash,
+      @JsonProperty("source_bytes") long sourceBytes,
+      String language,
+      @JsonProperty("outline_status") String outlineStatus,
+      @JsonProperty("observed_at") String observedAt,
+      @JsonProperty("revision_id") UUID revisionId) {
+    static SourceObservation from(WorkspaceCodeMap.Entry file) {
+      return new SourceObservation(
+          FileContents.sha256(file.key().getBytes(StandardCharsets.UTF_8)),
+          file.provider(),
+          file.root().toString(),
+          file.path().toString(),
+          file.root().relativize(file.path()).toString(),
+          file.fingerprint().sha256(),
+          file.fingerprint().size(),
+          file.language(),
+          file.outline().status(),
+          file.observedAt().toString(),
+          file.revision());
+    }
+  }
+
   /** Atomically replace the manifest only if this is still the most recent scan. */
   public boolean publish(CodeMapObservations.Ticket ticket, WorkspaceCodeMap.View view) {
     return work.inTransaction(
@@ -166,30 +195,39 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
                   ticket.generation(),
                   at(clock.instant()));
           if (won == 0) return false;
+          // The winning workspace update holds this generation's row lock until commit. Apply
+          // the bounded manifest as one set: retain unchanged facts, update changed sources, and
+          // remove only absent keys. checked_at above records every scan; observed_at below records
+          // the accepted source observation when its facts change, not a reason to rewrite a row.
           jdbc.update(
-              "DELETE FROM code_workspace_sources WHERE workspace_id = ?", ticket.workspace());
-          jdbc.batchUpdate(
               """
-                    INSERT INTO code_workspace_sources(workspace_id, source_key, provider, root, path, relative_path,
-                        source_hash, source_bytes, language, outline_status, observed_at, revision_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-              view.files(),
-              100,
-              (statement, file) -> {
-                statement.setString(1, ticket.workspace());
-                statement.setString(
-                    2, FileContents.sha256(file.key().getBytes(StandardCharsets.UTF_8)));
-                statement.setString(3, file.provider());
-                statement.setString(4, file.root().toString());
-                statement.setString(5, file.path().toString());
-                statement.setString(6, file.root().relativize(file.path()).toString());
-                statement.setString(7, file.fingerprint().sha256());
-                statement.setLong(8, file.fingerprint().size());
-                statement.setString(9, file.language());
-                statement.setString(10, file.outline().status());
-                statement.setTimestamp(11, at(file.observedAt()));
-                statement.setObject(12, file.revision());
-              });
+              WITH incoming AS MATERIALIZED (
+                SELECT * FROM jsonb_to_recordset(?::jsonb) AS source(
+                  source_key text,provider text,root text,path text,relative_path text,
+                  source_hash text,source_bytes bigint,language text,outline_status text,
+                  observed_at timestamptz,revision_id uuid)
+              ), removed AS (
+                DELETE FROM code_workspace_sources retained WHERE workspace_id=?
+                  AND NOT EXISTS(SELECT 1 FROM incoming WHERE incoming.source_key=retained.source_key)
+              )
+              INSERT INTO code_workspace_sources AS retained(workspace_id,source_key,provider,root,path,
+                relative_path,source_hash,source_bytes,language,outline_status,observed_at,revision_id)
+              SELECT ?,source_key,provider,root,path,relative_path,source_hash,source_bytes,language,
+                outline_status,observed_at,revision_id FROM incoming
+              ON CONFLICT(workspace_id,source_key) DO UPDATE SET provider=EXCLUDED.provider,
+                root=EXCLUDED.root,path=EXCLUDED.path,relative_path=EXCLUDED.relative_path,
+                source_hash=EXCLUDED.source_hash,source_bytes=EXCLUDED.source_bytes,
+                language=EXCLUDED.language,outline_status=EXCLUDED.outline_status,
+                observed_at=EXCLUDED.observed_at,revision_id=EXCLUDED.revision_id
+              WHERE ROW(retained.provider,retained.root,retained.path,retained.relative_path,
+                retained.source_hash,retained.source_bytes,retained.language,retained.outline_status,
+                retained.revision_id) IS DISTINCT FROM ROW(EXCLUDED.provider,EXCLUDED.root,
+                EXCLUDED.path,EXCLUDED.relative_path,EXCLUDED.source_hash,EXCLUDED.source_bytes,
+                EXCLUDED.language,EXCLUDED.outline_status,EXCLUDED.revision_id)
+              """,
+              json(view.files().stream().map(SourceObservation::from).toList()),
+              ticket.workspace(),
+              ticket.workspace());
           return true;
         });
   }
@@ -199,6 +237,15 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
         ticket,
         new WorkspaceCodeMap.View(
             "unavailable", ticket.generation(), "", clock.instant(), List.of(reason), List.of()));
+  }
+
+  @Override
+  public void defer(CodeMapObservations.Ticket ticket) {
+    jdbc.update(
+        "UPDATE code_workspaces SET state='dirty',lease_until=NULL,next_poll=? WHERE id=? AND generation=? AND state='checking'",
+        at(clock.instant().plusSeconds(2)),
+        ticket.workspace(),
+        ticket.generation());
   }
 
   /** Writers hold a bounded crash-recovery lease. The token is never executable work. */
@@ -301,6 +348,36 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
             hash,
             parser);
     return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  @Override
+  public Map<String, UUID> indexed(Scope scope, List<IndexSource> sources, String parser) {
+    Objects.requireNonNull(scope);
+    Objects.requireNonNull(parser);
+    if (sources == null || sources.size() > 100)
+      throw new IllegalArgumentException("Code index page must have at most 100 sources");
+    if (sources.isEmpty()) return Map.of();
+    var arguments = new ArrayList<Object>();
+    var originals = new HashMap<String, String>();
+    for (var source : sources) {
+      String key = sourceKey(source.key());
+      if (originals.put(key, source.key()) != null)
+        throw new IllegalArgumentException("Duplicate code source");
+      arguments.add(key);
+      arguments.add(source.source().sha256());
+    }
+    arguments.add(scope.id());
+    arguments.add(parser);
+    var result = new HashMap<String, UUID>();
+    jdbc.query(
+        "WITH requested(source_key,source_hash) AS (VALUES "
+            + String.join(",", Collections.nCopies(sources.size(), "(?::text,?::text)"))
+            + ") SELECT i.source_key,i.revision_id FROM requested r JOIN code_workspace_indexes i"
+            + " ON i.source_key=r.source_key AND i.source_hash=r.source_hash WHERE i.workspace_id=? AND i.parser_version=?",
+        (org.springframework.jdbc.core.RowCallbackHandler)
+            row -> result.put(originals.get(row.getString(1)), row.getObject(2, UUID.class)),
+        arguments.toArray());
+    return Map.copyOf(result);
   }
 
   public void index(Scope scope, String key, String hash, String parser, UUID revision) {

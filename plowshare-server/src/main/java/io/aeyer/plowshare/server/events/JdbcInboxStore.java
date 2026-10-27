@@ -1,12 +1,14 @@
 package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.MemoryIds;
+import io.aeyer.plowshare.server.information.*;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -44,6 +46,64 @@ public class JdbcInboxStore implements InboxStore {
             """;
 
   private final JdbcTemplate jdbc;
+  private InformationLogVisibility visibility = InformationLogVisibility.direct();
+
+  public JdbcInboxStore useVisibility(InformationLogVisibility visibility) {
+    this.visibility = java.util.Objects.requireNonNull(visibility);
+    return this;
+  }
+
+  private <T> T visible(
+      String account, java.util.function.Function<InformationLogVisibility.Facts, T> read) {
+    return information == null
+        ? read.apply(InformationLogVisibility.Facts.authoritative())
+        : visibility.read(account, read);
+  }
+
+  private String visibilitySql(
+      String account, InformationLogVisibility.Facts facts, List<Object> args) {
+    if (information == null) return "";
+    var filter = InformationLogSql.visible("conversation", account, facts);
+    args.addAll(filter.arguments());
+    return " AND (conversation IS NULL OR " + filter.sql() + ")";
+  }
+
+  @Override
+  public Page page(String handle, boolean unreadOnly, int offset, int limit) {
+    if (offset < 0 || limit < 1 || limit > 200)
+      throw new IllegalArgumentException("Invalid inbox page");
+    return visible(
+        handle,
+        facts -> {
+          var args = new ArrayList<Object>();
+          args.add(handle);
+          String filter = visibilitySql(handle, facts, args);
+          args.add(offset);
+          args.add(limit);
+          return jdbc.query(
+              "WITH visible AS MATERIALIZED (SELECT id,arrived_at,read_at"
+                  + " FROM user_inbox WHERE handle=? AND settled_at IS NULL"
+                  + filter
+                  + "), page_keys AS (SELECT id,arrived_at FROM visible"
+                  + (unreadOnly ? " WHERE read_at IS NULL" : "")
+                  + " ORDER BY arrived_at DESC,id DESC OFFSET ? LIMIT ?), page AS (SELECT i."
+                  + COLUMNS.replace(", ", ", i.")
+                  + " FROM page_keys selected JOIN user_inbox i ON i.id=selected.id) "
+                  + "SELECT (SELECT count(*) FROM visible WHERE read_at IS NULL) AS unread_total,page.* "
+                  + "FROM (SELECT 1) seed LEFT JOIN page ON true ORDER BY page.arrived_at DESC,page.id DESC",
+              (org.springframework.jdbc.core.ResultSetExtractor<Page>)
+                  rows -> {
+                    var items = new ArrayList<InboxItem>();
+                    int count = 0;
+                    while (rows.next()) {
+                      count = rows.getInt("unread_total");
+                      if (rows.getString("id") != null) items.add(row(rows, items.size()));
+                    }
+                    return new Page(items, count);
+                  },
+              args.toArray());
+        });
+  }
 
   public JdbcInboxStore(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
@@ -56,9 +116,11 @@ public class JdbcInboxStore implements InboxStore {
   }
 
   private String informationVisible() {
+    // The bound account makes this an uncorrelated set, evaluated once before paging/counting.
+    // Passing the row's handle would rebuild authority for each notice in the same inbox.
     return information == null
         ? ""
-        : " AND (conversation IS NULL OR information_log_readable(conversation,handle))";
+        : " AND (conversation IS NULL OR conversation NOT IN (SELECT log FROM information_unreadable_logs(?)))";
   }
 
   public InboxItem deliver(
@@ -215,19 +277,25 @@ public class JdbcInboxStore implements InboxStore {
 
   private List<InboxItem> list(
       String handle, boolean unreadOnly, int offset, int limit, boolean ordinaryOnly) {
-    return jdbc.query(
-        "SELECT "
-            + COLUMNS
-            + " FROM user_inbox WHERE handle = ?"
-            + " AND settled_at IS NULL"
-            + informationVisible()
-            + (unreadOnly ? " AND read_at IS NULL" : "")
-            + (ordinaryOnly ? " AND kind<>'approval'" : "")
-            + " ORDER BY arrived_at DESC, id DESC OFFSET ? LIMIT ?",
-        JdbcInboxStore::row,
+    return visible(
         handle,
-        offset,
-        limit);
+        facts -> {
+          var args = new ArrayList<Object>();
+          args.add(handle);
+          String filter = visibilitySql(handle, facts, args);
+          args.add(offset);
+          args.add(limit);
+          return jdbc.query(
+              "SELECT "
+                  + COLUMNS
+                  + " FROM user_inbox WHERE handle=? AND settled_at IS NULL"
+                  + filter
+                  + (unreadOnly ? " AND read_at IS NULL" : "")
+                  + (ordinaryOnly ? " AND kind<>'approval'" : "")
+                  + " ORDER BY arrived_at DESC,id DESC OFFSET ? LIMIT ?",
+              JdbcInboxStore::row,
+              args.toArray());
+        });
   }
 
   public int markRead(String handle, List<String> ids, Instant at) {
@@ -242,17 +310,25 @@ public class JdbcInboxStore implements InboxStore {
         ps -> {
           ps.setTimestamp(1, Timestamp.from(at));
           ps.setString(2, handle);
-          ps.setArray(3, ps.getConnection().createArrayOf("text", ids.toArray()));
+          int next = 3;
+          if (information != null) ps.setString(next++, handle);
+          ps.setArray(next, ps.getConnection().createArrayOf("text", ids.toArray()));
         });
   }
 
   public int unread(String handle) {
-    Integer n =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM user_inbox WHERE handle = ?" + UNREAD + informationVisible(),
-            Integer.class,
-            handle);
-    return n == null ? 0 : n;
+    return visible(
+        handle,
+        facts -> {
+          var args = new ArrayList<Object>();
+          args.add(handle);
+          String filter = visibilitySql(handle, facts, args);
+          return java.util.Objects.requireNonNull(
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM user_inbox WHERE handle=?" + UNREAD + filter,
+                  Integer.class,
+                  args.toArray()));
+        });
   }
 
   public int unreadSinceLastTurn(String handle, String conversation) {
@@ -262,10 +338,11 @@ public class JdbcInboxStore implements InboxStore {
                 + SINCE_LAST_TURN
                 + (information == null
                     ? ""
-                    : " AND (i.conversation IS NULL OR information_log_readable(i.conversation,i.handle))"),
+                    : " AND (i.conversation IS NULL OR i.conversation NOT IN (SELECT log FROM information_unreadable_logs(?)))"),
             Integer.class,
-            handle,
-            conversation);
+            information == null
+                ? new Object[] {handle, conversation}
+                : new Object[] {handle, conversation, handle});
     return n == null ? 0 : n;
   }
 
@@ -276,10 +353,11 @@ public class JdbcInboxStore implements InboxStore {
                 + SINCE_LAST_TURN
                 + (information == null
                     ? ""
-                    : " AND (i.conversation IS NULL OR information_log_readable(i.conversation,i.handle))"),
+                    : " AND (i.conversation IS NULL OR i.conversation NOT IN (SELECT log FROM information_unreadable_logs(?)))"),
             OffsetDateTime.class,
-            handle,
-            conversation);
+            information == null
+                ? new Object[] {handle, conversation}
+                : new Object[] {handle, conversation, handle});
     return Optional.ofNullable(at).map(OffsetDateTime::toInstant);
   }
 

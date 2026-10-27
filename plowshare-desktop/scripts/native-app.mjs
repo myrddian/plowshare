@@ -2,6 +2,7 @@ import { packager } from '@electron/packager';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { macBundleIdentifier, prepareMacAppIdentity } from './macos-identity.mjs';
 
 export const desktopRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -21,9 +22,11 @@ export async function nativeApp() {
       name: manifest.name, productName: 'Plowshare', version: manifest.version, main: 'build/main.cjs',
     }));
     const [directory] = await packager({
-      dir: source, out: join(build, 'native'), name: 'Plowshare', appBundleId: 'io.aeyer.plowshare',
+      dir: source, out: join(build, 'native'), name: 'Plowshare', appBundleId: macBundleIdentifier,
       platform: 'darwin', arch: process.arch, electronVersion: manifest.devDependencies.electron,
       asar: true, prune: false, overwrite: true, icon: join(desktopRoot, 'assets/icons/plowshare.icns'),
+      extendInfo: join(desktopRoot, 'assets/macos-info.plist'),
+      afterExtract: [prepareMacAppIdentity],
       osxSign: {
         identity: '-', identityValidation: false, timestamp: 'none',
         preAutoEntitlements: false, preEmbedProvisioningProfile: false,

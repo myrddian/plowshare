@@ -40,7 +40,10 @@ class DigestStoreReuseTest {
     store.protectInformation();
     store.captureUnfolded(Home.of("research"));
     assertEquals(1, statements.size());
-    assertTrue(statements.getFirst().contains("information_log_readable(c.id,NULL)"));
+    assertTrue(
+        statements
+            .getFirst()
+            .contains("c.id NOT IN (SELECT log FROM information_unreadable_logs(NULL))"));
     assertTrue(
         statements.getFirst().contains("ORDER BY e.conversation_id,e.turn_ordinal LIMIT 64"));
     assertTrue(statements.getFirst().contains("string_agg(left(e.content,4000)"));

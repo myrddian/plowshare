@@ -174,9 +174,7 @@ class CapacityTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         peer = CapacityPeer(refusals=1)
         async with peer.open() as client:
-            reply = await client.request(
-                MemoryIndexRequest(), wait_for_capacity=False
-            )
+            reply = await client.request(MemoryIndexRequest(), wait_for_capacity=False)
             self.assertEqual(reply.code, "CAPACITY_EXHAUSTED")
             self.assertEqual(
                 len(peer.frames), 1, "the non-blocking form resubmitted a refusal"

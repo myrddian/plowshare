@@ -14,9 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -36,7 +33,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * window writes no row version.
  */
 public final class JdbcRelayPayloadStore implements RelayPayloadStore {
-  private static final Logger LOG = LoggerFactory.getLogger(JdbcRelayPayloadStore.class);
   private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
   private static final int MAX_DIGESTS = 1000;
   private final JdbcTemplate jdbc;
@@ -140,174 +136,111 @@ public final class JdbcRelayPayloadStore implements RelayPayloadStore {
   }
 
   /**
-   * Examines matured candidates, oldest first, one transaction each. Reachability is the only
-   * authority: the delete itself carries the guard, so a publication or admission that references
-   * the digest, including one committed after the candidate was selected, keeps its row. The
-   * foreign keys are the backstop, and they do fire in one window the guard cannot close: a
-   * reference that commits after the guard's {@code NOT EXISTS} has been evaluated but before the
-   * delete acquires its row lock. The delete waits on the lock the referencing insert's own
-   * foreign-key check holds, proceeds when it is released, and the {@code NO ACTION} check then
-   * finds the committed row and raises.
+   * Locks a bounded set before taking a fresh READ COMMITTED snapshot of its references. FOR UPDATE
+   * conflicts with the foreign key's KEY SHARE lock: in-flight append/admission rows are skipped,
+   * and another sweeper cannot examine the same payload. A separate statement after selection is
+   * essential; a CTE in the selection statement would keep its pre-lock snapshot. The live date
+   * predicate and both foreign keys remain deletion fences. No payload bytes are selected.
    *
-   * <p>That violation is handled per candidate rather than allowed to end the pass. The statement
-   * is a single {@code DELETE FROM relay_payloads}, and the only foreign keys that can fire on it
-   * are the two reference columns the guard already reads, so the violation carries exactly the
-   * guard's own meaning: a reference exists, keep the row. It is therefore treated as a survivor.
-   * The aborted transaction also rolled back the deferral the survivor path would have written, so
-   * the row is deferred in a second transaction afterwards -- without that it stays matured and is
-   * re-selected on every pass, which is the permanent sweep work {@link #nextExamination}'s
-   * strictly-future rule exists to prevent.
-   *
-   * <p>A candidate that survives is rescheduled, otherwise it would match the candidate query on
-   * every pass. {@code ejection_at} only defers the next examination and never authorizes a
-   * deletion, so a wrong date costs at most one wasted examination or one more window of
-   * unreachable bytes. Retention also runs by {@code max_records} and as a sweep, and cascades from
-   * topics, subscriptions and projects remove references unobserved, which is why the date is a
-   * lower bound on removal and why the deferral ceiling exists.
+   * <p>All candidates commit together. A failure rolls the batch back and the next scheduled pass
+   * can retry; there is no per-row fallback or unbounded drain. The caller must supply a real
+   * transaction boundary in production. Sweeps must not join a REPEATABLE READ transaction.
    */
   @Override
-  public int sweep(Instant now, int limit) {
+  public SweepResult sweepBatch(Instant now, int limit) {
     RelayValues.limit(limit, 1000);
     Instant at = RelayValues.time(now);
+    return transactions.inTransaction(() -> sweepLocked(at, limit));
+  }
+
+  private SweepResult sweepLocked(Instant now, int limit) {
+    // Bound physical work and lock retention even if a plan regresses or another writer stalls.
+    // Settings are transaction-local and never change the pool's session defaults.
+    jdbc.execute(
+        "SET LOCAL statement_timeout='2s'; SET LOCAL lock_timeout='100ms'; SET LOCAL jit=off");
     List<String> candidates =
         jdbc.queryForList(
-            "SELECT digest FROM relay_payloads WHERE ejection_at<=? ORDER BY ejection_at LIMIT ?",
+            """
+            SELECT digest FROM relay_payloads WHERE ejection_at<=?
+            ORDER BY ejection_at LIMIT ? FOR UPDATE SKIP LOCKED
+            """,
             String.class,
-            Timestamp.from(at),
+            Timestamp.from(now),
             limit);
-    // A full candidate list means the pass could not see every matured row, so a saturated pass is
-    // otherwise indistinguishable from an idle one. Ordering is by ejection_at, so a backlog of
-    // overdue referenced rows can hide newly orphaned ones behind it.
-    if (candidates.size() == limit)
-      LOG.warn(
-          "Relay payload sweep batch of {} was saturated; the payload corpus may exceed sweep"
-              + " capacity (payloadSweepBatch * payloadDeferralCeiling / cleanupInterval)",
-          limit);
-    int removed = 0;
-    for (String digest : candidates) {
-      try {
-        removed += transactions.inTransaction(() -> reclaimOrDefer(digest, at));
-      } catch (DataIntegrityViolationException referenced) {
-        // A reference committed inside the guard-to-lock window; see this method's contract. The
-        // row survives, and its deferral is written outside the aborted transaction.
-        transactions.inTransaction(() -> defer(digest, at));
-      }
-    }
-    return removed;
-  }
-
-  /**
-   * Deletes the payload when it is both still matured and unreachable, otherwise moves its next
-   * examination out. The date is a necessary condition here, never a sufficient one: reachability
-   * is still required, so adding it only makes the delete more conservative. It matters because
-   * {@link #sweep} selects every candidate in one query and then works through them one transaction
-   * at a time, so a digest can wait many candidates before its turn. Without the date, a repeat
-   * {@code store} that re-arms the row in that interval changes nothing the delete looks at, and
-   * the row is reclaimed under the appender whose reference does not yet exist. With it, a row
-   * re-armed after selection fails the predicate, deletes nothing and falls through to {@link
-   * #defer}.
-   */
-  private int reclaimOrDefer(String digest, Instant now) {
-    int deleted =
-        jdbc.update(
+    if (candidates.isEmpty()) return new SweepResult(0, 0, java.util.Optional.empty());
+    String placeholders = String.join(",", Collections.nCopies(candidates.size(), "(?::text)"));
+    var arguments = new java.util.ArrayList<Object>(candidates);
+    arguments.add(settledRetention.toSeconds());
+    arguments.add(Timestamp.from(now.plus(stagingWindow)));
+    arguments.add(Timestamp.from(now.plus(deferralCeiling)));
+    arguments.add(Timestamp.from(now));
+    arguments.add(Timestamp.from(now));
+    arguments.add(Timestamp.from(now));
+    arguments.add(Timestamp.from(now));
+    arguments.add(Timestamp.from(now));
+    // Aggregate only references to the locked digest set. Each admission's deliveries are folded
+    // once; the same facts decide both reachability and the next examination date. The mutations
+    // affect disjoint rows, so the data-modifying CTEs cannot update a row twice.
+    return Objects.requireNonNull(
+        jdbc.queryForObject(
             """
-            DELETE FROM relay_payloads p WHERE p.digest=? AND p.ejection_at<=?
-              AND NOT EXISTS (SELECT 1 FROM relay_publications r WHERE r.payload_digest=p.digest)
-              AND NOT EXISTS (SELECT 1 FROM relay_admissions a WHERE a.payload_digest=p.digest)
-            """,
-            digest,
-            Timestamp.from(now));
-    if (deleted > 0) return deleted;
-    return defer(digest, now);
-  }
-
-  /**
-   * Moves a surviving candidate's next examination out. Returns zero removals so it can stand in
-   * for {@link #reclaimOrDefer} on the path where the delete was refused by a foreign key.
-   *
-   * <p>Deferral only ever moves a date later. A row re-armed after selection reaches here with no
-   * references yet, and {@link #nextExamination} then falls back to a staging window truncated
-   * down, which can be earlier than the date the re-arm wrote; {@code GREATEST} keeps the later of
-   * the two so no path pulls an examination forward.
-   */
-  private int defer(String digest, Instant now) {
-    jdbc.update(
-        "UPDATE relay_payloads SET ejection_at=GREATEST(ejection_at,?) WHERE digest=?",
-        Timestamp.from(nextExamination(digest, now)),
-        digest);
-    return 0;
-  }
-
-  /**
-   * The furthest-out earliest possible removal among the references: {@code published_at +
-   * retention} for a publication, and for a settled admission the same cut {@code pruneSettled}
-   * applies (the admission and every delivery older than the retention). The second column reports
-   * an admission with a delivery that is not terminal, whose removal is unbounded.
-   */
-  private Horizon horizon(String digest) {
-    return jdbc.query(
+            WITH chosen(digest) AS MATERIALIZED (VALUES %s), publications AS MATERIALIZED (
+              SELECT r.payload_digest,max(r.published_at+t.retention_seconds*interval '1 second') AS horizon
+              FROM chosen c JOIN relay_publications r ON r.payload_digest=c.digest
+              JOIN relay_topics t ON t.scope_key=r.scope_key AND t.name=r.topic
+              GROUP BY r.payload_digest
+            ), admissions AS MATERIALIZED (
+              SELECT a.payload_digest,a.admitted_at,
+                max(d.updated_at) AS updated_at,
+                coalesce(bool_or(d.state NOT IN ('ACCEPTED','FAILED','ABANDONED')),false) AS unsettled
+              FROM chosen c JOIN relay_admissions a ON a.payload_digest=c.digest
+              LEFT JOIN relay_deliveries d ON d.scope_key=a.scope_key AND d.topic=a.topic
+                AND d.subscriber=a.subscriber AND d.publication_position=a.publication_position
+              GROUP BY a.payload_digest,a.scope_key,a.topic,a.subscriber,a.publication_position,a.admitted_at
+            ), admission_horizons AS MATERIALIZED (
+              SELECT payload_digest,
+                max(GREATEST(admitted_at,coalesce(updated_at,admitted_at))
+                    + ? * interval '1 second') FILTER (WHERE NOT unsettled) AS horizon,
+                bool_or(unsettled) AS unsettled
+              FROM admissions GROUP BY payload_digest
+            ), facts AS MATERIALIZED (
+              SELECT c.digest,(p.payload_digest IS NOT NULL OR a.payload_digest IS NOT NULL) AS referenced,
+                LEAST(GREATEST(p.horizon,a.horizon,
+                  CASE WHEN coalesce(a.unsettled,false) THEN ?::timestamptz END),?::timestamptz) AS capped
+              FROM chosen c LEFT JOIN publications p ON p.payload_digest=c.digest
+              LEFT JOIN admission_horizons a ON a.payload_digest=c.digest
+            ), scheduled AS MATERIALIZED (
+              SELECT digest,referenced,
+                GREATEST(?::timestamptz+interval '1 minute', capped
+                  - LEAST(interval '1 hour',GREATEST(capped-?::timestamptz,interval '0')/4)
+                    * ((('x'||substr(digest,1,8))::bit(32)::bigint)::double precision/4294967296.0)) AS next_at
+              FROM facts
+            ), removed AS (
+              DELETE FROM relay_payloads p USING scheduled s
+              WHERE p.digest=s.digest AND NOT s.referenced AND p.ejection_at<=?
+              RETURNING p.digest
+            ), deferred AS (
+              UPDATE relay_payloads p SET ejection_at=GREATEST(p.ejection_at,s.next_at)
+              FROM scheduled s WHERE p.digest=s.digest AND s.referenced AND p.ejection_at<=?
+              RETURNING p.digest
+            )
+            SELECT (SELECT count(*) FROM removed),(SELECT count(*) FROM deferred),
+              (SELECT p.ejection_at FROM relay_payloads p WHERE p.ejection_at<=?
+                AND NOT EXISTS (SELECT 1 FROM chosen c WHERE c.digest=p.digest)
+                ORDER BY p.ejection_at LIMIT 1)
             """
-            SELECT GREATEST(
-                (SELECT max(r.published_at + t.retention_seconds * interval '1 second')
-                   FROM relay_publications r
-                   JOIN relay_topics t ON t.scope_key=r.scope_key AND t.name=r.topic
-                  WHERE r.payload_digest=?),
-                (SELECT max(GREATEST(a.admitted_at, COALESCE(
-                            (SELECT max(d.updated_at) FROM relay_deliveries d
-                              WHERE d.scope_key=a.scope_key AND d.topic=a.topic
-                                AND d.subscriber=a.subscriber
-                                AND d.publication_position=a.publication_position),
-                            a.admitted_at)) + ? * interval '1 second')
-                   FROM relay_admissions a
-                  WHERE a.payload_digest=? AND NOT EXISTS (
-                        SELECT 1 FROM relay_deliveries d
-                         WHERE d.scope_key=a.scope_key AND d.topic=a.topic
-                           AND d.subscriber=a.subscriber
-                           AND d.publication_position=a.publication_position
-                           AND d.state NOT IN ('ACCEPTED','FAILED','ABANDONED')))),
-                EXISTS (SELECT 1 FROM relay_admissions a
-                         WHERE a.payload_digest=? AND EXISTS (
-                               SELECT 1 FROM relay_deliveries d
-                                WHERE d.scope_key=a.scope_key AND d.topic=a.topic
-                                  AND d.subscriber=a.subscriber
-                                  AND d.publication_position=a.publication_position
-                                  AND d.state NOT IN ('ACCEPTED','FAILED','ABANDONED')))
-            """,
-            (rs, row) -> {
-              Timestamp furthest = rs.getTimestamp(1);
-              return new Horizon(furthest == null ? null : furthest.toInstant(), rs.getBoolean(2));
+                .formatted(placeholders),
+            (row, index) -> {
+              int removed = row.getInt(1);
+              if (removed + row.getInt(2) != candidates.size())
+                throw new IllegalStateException(
+                    "Relay payload sweep did not account for its locked batch");
+              Timestamp oldest = row.getTimestamp(3);
+              return new SweepResult(
+                  candidates.size(),
+                  removed,
+                  java.util.Optional.ofNullable(oldest).map(Timestamp::toInstant));
             },
-            digest,
-            settledRetention.toSeconds(),
-            digest,
-            digest)
-        .get(0);
+            arguments.toArray()));
   }
-
-  private Instant nextExamination(String digest, Instant now) {
-    Horizon horizon = horizon(digest);
-    Instant furthest = horizon.furthestRemoval();
-    // An unsettled admission has no removal date, so it is examined again after the staging window.
-    Instant unsettled = now.plus(stagingWindow);
-    if (horizon.unsettledAdmission() && (furthest == null || furthest.isBefore(unsettled)))
-      furthest = unsettled;
-    if (furthest == null) furthest = unsettled;
-    Instant capped = now.plus(deferralCeiling);
-    if (furthest.isAfter(capped)) furthest = capped;
-    // Truncate DOWN, the opposite of store(). There the staging window is a minimum protection and
-    // so rounds up; here the horizon is a maximum deferral, subject to the strictly-future floor
-    // below, which can place the examination up to an hour after a nearer horizon. The floor cannot
-    // breach the deferral ceiling: the ceiling is validated to be at least one hour in both the
-    // properties setter and this class's constructor, and the floor is at most one hour out. A
-    // date that is too early costs one wasted examination, while one that is too late leaves
-    // unreachable bytes a whole bucket longer.
-    Instant bucket = furthest.truncatedTo(ChronoUnit.HOURS);
-    // The result must be strictly in the future. A publication whose retention has elapsed but not
-    // yet been pruned still references the payload, and a past date would keep it in the candidate
-    // set on every pass, turning a referenced payload into permanent sweep work.
-    Instant nextHour = now.truncatedTo(ChronoUnit.HOURS).plus(Duration.ofHours(1));
-    return bucket.isBefore(nextHour) ? nextHour : bucket;
-  }
-
-  private record Horizon(Instant furthestRemoval, boolean unsettledAdmission) {}
 }

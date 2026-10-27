@@ -63,6 +63,30 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
   }
 
   @Override
+  public List<List<Binding>> projectLineages(String project, String account) {
+    io.aeyer.plowshare.protocol.Home.of(project);
+    if (account == null || account.isBlank())
+      throw new IllegalArgumentException("Account required");
+    var chains = new LinkedHashMap<UUID, List<Binding>>();
+    jdbc.query(
+        "WITH RECURSIVE live AS MATERIALIZED (SELECT * FROM authority_live_grants()), "
+            + "chain(root,id,issuing_grant,depth) AS ("
+            + "SELECT g.id,g.id,g.issuing_grant,0 FROM authority_grant_records g JOIN live ON live.id=g.id "
+            + "WHERE g.project_name=? AND g.subject_handle=? AND g.subject_agent IS NULL AND g.coverage='SELF' "
+            + "UNION ALL SELECT c.root,p.id,p.issuing_grant,c.depth+1 FROM chain c JOIN authority_grants p ON p.id=c.issuing_grant WHERE c.depth<32) "
+            + "SELECT c.root,g.* FROM chain c JOIN authority_grant_records g ON g.id=c.id ORDER BY c.root,c.depth",
+        (org.springframework.jdbc.core.RowCallbackHandler)
+            row ->
+                chains
+                    .computeIfAbsent(
+                        row.getObject("root", UUID.class), ignored -> new ArrayList<>())
+                    .add(read(row)),
+        project,
+        account);
+    return chains.values().stream().map(List::copyOf).toList();
+  }
+
+  @Override
   public List<Binding> lineage(UUID id) {
     Objects.requireNonNull(id);
     return List.copyOf(

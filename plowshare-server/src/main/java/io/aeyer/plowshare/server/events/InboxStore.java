@@ -44,6 +44,16 @@ public interface InboxStore {
 
   List<InboxItem> list(String handle, boolean unreadOnly, int offset, int limit);
 
+  record Page(List<InboxItem> items, int unread) {
+    public Page {
+      items = List.copyOf(items);
+      if (unread < 0) throw new IllegalArgumentException("Invalid unread count");
+    }
+  }
+
+  /** Page and unread count share one current visibility evaluation and one database snapshot. */
+  Page page(String handle, boolean unreadOnly, int offset, int limit);
+
   /**
    * Unread ordinary items for a bot to consume. Human approval notices are excluded before
    * pagination, so retaining their unread receipts cannot hide older ordinary deliveries.

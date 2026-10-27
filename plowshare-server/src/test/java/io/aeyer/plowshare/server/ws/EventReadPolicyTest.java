@@ -10,6 +10,10 @@ class EventReadPolicyTest {
   void only_audited_independent_reads_with_valid_envelopes_are_admitted() {
     for (String type :
         List.of(
+            "document.list",
+            "document.detail",
+            "inbox.list",
+            "orchestration.list",
             "information.facets",
             "information.list",
             "information.read",
@@ -23,6 +27,9 @@ class EventReadPolicyTest {
     }
     for (String type :
         List.of(
+            "inbox.read",
+            "orchestration.answer",
+            "document.ask",
             "information.status",
             "information.await",
             "information.search",

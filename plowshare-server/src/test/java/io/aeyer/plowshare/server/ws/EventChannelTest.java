@@ -1155,6 +1155,29 @@ class EventChannelTest {
   }
 
   @Test
+  void fullInvalidationsUpgradePendingProgressWithoutLosingRevocationOrMultiplyingFrames()
+      throws Exception {
+    var registry = new SessionRegistry();
+    var channel = new EventChannelHandler(registry, answering("test.ping"), new Watchers());
+    var socket = new Stalling(true);
+    attachAs(channel, registry, "progress-session", "reader", socket);
+    channel.push("reader", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
+    assertTrue(socket.awaitWedged(PATIENCE_MILLIS));
+    channel.progress();
+    channel.invalidate();
+    for (int i = 0; i < 10000; i++) channel.progress();
+    socket.release();
+    var frames = socket.await(2, PATIENCE_MILLIS);
+    assertEquals(2, frames.size());
+    assertEquals(Map.of("kind", "information.invalidated"), frame(frames.get(1)));
+    channel.progress();
+    frames = socket.await(3, PATIENCE_MILLIS);
+    assertEquals(
+        Map.of("kind", "information.invalidated", "progressOnly", true), frame(frames.get(2)));
+    channel.afterConnectionClosed(socket, CloseStatus.NORMAL);
+  }
+
+  @Test
   void continuous_information_hints_and_job_tokens_each_make_progress_when_both_lanes_stay_busy()
       throws Exception {
     var registry = new SessionRegistry();

@@ -47,6 +47,7 @@ public final class AgentRules {
     if (!ChannelDefinitions.isSafeSegment(agent))
       throw new IllegalArgumentException("unsafe agent name");
     List<Rule> rules = new ArrayList<>();
+    ChannelDefinitions remote = null;
     List<String> scopes = new ArrayList<>();
     scopes.add("");
     if (relativeFile != null) {
@@ -77,6 +78,7 @@ public final class AgentRules {
         && live.test(caller.sessionId())
         && roots.test(caller.projectId(), caller.sessionId())) {
       ChannelDefinitions files = ChannelDefinitions.skills(channel, caller.sessionId());
+      remote = files;
       for (String scope : scopes) addChannel(rules, files, scope, scope);
       addChannel(rules, files, ".plowshare", "");
       addChannel(rules, files, ".plowshare/agents/" + agent, "agent:" + agent);
@@ -96,6 +98,13 @@ public final class AgentRules {
             .sum();
     if (bytes > ChannelDefinitions.MAX_SOURCE_BYTES)
       throw new IllegalArgumentException("agent rules exceed source limit");
+    if (remote != null) {
+      remote.requireCurrent();
+      // A still-open connection may have stopped rooting this project during the reads.
+      if (!live.test(caller.sessionId()) || !roots.test(caller.projectId(), caller.sessionId()))
+        throw new io.aeyer.plowshare.server.files.WorkspaceUnavailableException(
+            "The file session no longer roots the selected project; reconnect files and refresh");
+    }
     return List.copyOf(rules);
   }
 
@@ -144,6 +153,7 @@ public final class AgentRules {
             .sum();
     if (bytes > ChannelDefinitions.MAX_SOURCE_BYTES)
       throw new IllegalArgumentException("agent rules exceed source limit");
+    if (remote != null) remote.requireCurrent();
     return List.copyOf(rules);
   }
 

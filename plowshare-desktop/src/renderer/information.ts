@@ -1898,6 +1898,7 @@ export function installInformation(
         ? JSON.stringify([connectionContext(), scope()])
         : undefined,
       snapshot.informationRevision ?? 0,
+      snapshot.informationProgressRevision ?? 0,
     );
   }
   const unsubscribe = api.subscribe((snapshot) => {

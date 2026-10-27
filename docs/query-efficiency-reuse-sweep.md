@@ -20,13 +20,133 @@ The functions preserve account activity, exact Personal ownership, project roles
 service-token issuance and current owner authority, Global inclusion, grant
 lineage and expiry, root audience, dependency cycles and the fail-closed closure
 limit. Pinned revision and live reference-head semantics remain distinct.
-Retained scope ceilings constrain selection as before. Mutation authority and
-worker claim functions remain separate.
+Retained scope ceilings constrain selection as before. Mutation authority remains
+separate. V195 extends statement-local reuse to log disclosure and bulk worker
+eligibility as described below; lease checkpoints still resolve current authority.
 
 The authority database tests compare the new relation with existing policy for
 those cases. They also count PostgreSQL function work across 48 selected roots and
 a corpus skewed with 32 unrelated Personal roots. These assertions establish
 bounded repeated authority work, not a production latency target.
+
+## Logs and workers share authority within each statement
+
+V195 batches retained log input selections against one `knowledge_read_authority`
+relation. Targeted `information_log_readable` calls walk only their own ancestry,
+deduplicate exact retained selections and share dependency facts across inputs.
+Collection reads use the uncorrelated `information_unreadable_logs(account)`
+relation before ordering, pagination and counts, rather than invoking a permission
+function per result row. Quarantined or unreadable seeds propagate through the
+inverse of all four ancestry edges. Ownership, each retained scope and Global
+inclusion flag, privacy, live grant lineage and the per-root dependency limit
+remain disclosure fences. Missing accounts and missing dependency facts fail
+closed; logs carrying no protected inputs retain their existing behavior.
+
+Bulk processing claims and both metadata sweeps use
+`information_system_processing_revisions()`. It resolves intrinsic SYSTEM lineage
+and the four required actions once, then checks each revision's registered home
+and transitive input validity. Creator access is provenance, not processing
+authority. Claim ordering, row locks, `SKIP LOCKED`, generation, explicit-stage
+authorization and lease predicates remain in their owning repository statements.
+Targeted claims and post-lock checkpoints retain their scalar current-authority
+checks: these are deliberate freshness boundaries, not a cross-request cache.
+
+`LogAndWorkerAuthorityDatabaseTest` compares admitted log sets with the shipped
+V186 predicate and processing eligibility with the unchanged scalar SYSTEM
+predicate. Transaction-local PostgreSQL function counters verify that adding
+inputs, log rows and worker candidates does not multiply account/grant checks.
+The existing processing persistence suite exercises concurrent claims and lease
+withdrawal. These checks establish SQL behavior and work bounds; deployed latency
+still requires measurement after release.
+
+On 25 October 2026, standalone query bodies were compared in a bounded read-only
+snapshot of the running database, without installing the migration. For the same
+65 retained input selections, the scalar predicates admitted all 65 in 1,473.9 ms
+and made 11,776 `account_active` calls; the batched query admitted the same 65 in
+17.8 ms and added 44 calls. The bulk SYSTEM eligibility relation took 13.3 ms of
+database execution in that snapshot. These are individual query measurements,
+not end-to-end Desktop timings or proof of a deployed release.
+
+### Processing heartbeats do not invalidate document readers
+
+Information processing renews each active stage on a lifecycle-owned five-second
+timer, independently of model events and silent prefill. Cancellation callbacks
+read only a local flag; they never perform JDBC work. Renewal loss or failure
+stops that stage, and the original failure returns to its owner. The timer is
+cancelled when the stage ends; shutdown drains outstanding renewals before
+repository dependencies close. A late renewal retains the exact generation and
+lease-token predicates, so it cannot renew replacement or completed work.
+
+The flag is a liveness hint, not an authorization lease. Cancellation observation
+may lag a durable change until the next heartbeat. Provider admission, checkpoint
+transactions and completion still check current SYSTEM authority, retained input
+validity, generation and lease ownership. A previously true flag cannot authorize
+an effect after withdrawal or revocation.
+
+V204 keeps lease-deadline-only updates in the observation domain used by PROC.
+They do not advance document/search versions or broadcast Library invalidations.
+Every other step column participates in document/search invalidation, including
+future columns and key changes. Insert, delete and truncate behavior is preserved.
+Authority and readability invalidation and transaction/expiry fences are
+unchanged. PostgreSQL tests verify the actual counters, commit-only notifications,
+rollback, mixed batches and metadata changes; mock tests bound renewal work under
+concurrent token callbacks and preserve fresh checkpoint fences.
+
+## Interactive plans and activity polling must not stall Library reads
+
+The V195 function-count tests did not cover SQL-function inlining/JIT compilation
+or contention with Desktop activity polling. The remaining Library delay had
+both causes, rather than a slow document body query alone:
+
+- `DocumentStore.page` and `count` inline `knowledge_readable_selection` into
+  prepared callers. On the inspected installation, their generic plans cost
+  about 748,000 units and compiled 335–361 JIT functions. Compilation took
+  1.39–1.71 seconds; the same reads with session-local diagnostic JIT disabled
+  executed in 21–85 ms. Fixed-binding plans took 20–45 ms without compilation.
+- `JdbcInboxStore.unread` and `OrchestrationStore.byCaller` inline
+  `information_unreadable_logs`. Even an empty run-state result compiled
+  253–254 functions: 1.32–1.55 seconds compiling versus 5–8 ms executing without
+  compilation. Both custom and generic plans exhibited this cost.
+- The dispatch policy introduced in `e91181ef` conservatively left
+  `document.list`, `document.detail`, `inbox.list` and `orchestration.list` as
+  connection-wide barriers. Desktop polls recent runs, three live states and
+  unread notices together. Reproducing that sequence on one segmented connection
+  made the following document detail/text reads take 9.28–9.46 seconds, where
+  isolated detail reads took 123–143 ms. The document request waited behind the
+  activity sequence. Activity timing, pooled-connection prepared-plan history and
+  custom/generic selection explain the apparent intermittent document latency.
+
+V178's selection routine arrived in `876ae2ce`; V195's log relation arrived in
+`e51c6587`. V196 retains both routines' bodies and adds function-local `jit=off`.
+The local setting prevents SQL-function expansion into callers and prevents the
+internal plan from incurring the same compilation cost. It restores the caller's
+JIT setting on return. Other statements retain their JIT policy. These remain
+STABLE, invoker-rights, statement-local reads with current grant, dependency,
+privacy, ancestry and retained-ceiling checks; no allow decision is cached.
+
+The four audited handlers now use bounded finite dispatch: document metadata and
+hierarchy, corpus page/count, account inbox reads and account run listings only
+read authorized data. They do not acknowledge notices, acquire leases, change
+selection or start work. Acting-context serialization, actual mutation barriers,
+unknown-operation barriers and execution/admission limits remain enforced.
+
+`InteractiveLibraryPlanDatabaseTest` exercises actual PostgreSQL custom/generic
+prepared plans, checks that authority remains behind a function scan rather than
+an expanded compiler-heavy graph, and reuses the same prepared selection after
+grant revocation. It explains the owning inbox repository's captured SQL and
+checks that function-local settings do not change the caller's JIT setting.
+Existing verdict-equivalence, expiry, closure-limit and ancestry tests still
+apply. Concurrent dispatch tests hold an inbox/run read open while a Library read
+uses the other permit, and retain write/acting-context ordering tests.
+
+Release acceptance uses the same Desktop binary and retained document/catalogue:
+ten document opens and repeated list refreshes, including activity-poll overlap.
+The target is a median below one second and no sampled operation above two
+seconds on that corpus. Record the first post-restart sample separately and keep
+SQL execution, queueing and Desktop dispatch/render timings distinct. These
+targets are live verification criteria, not timing assertions on shared CI hosts.
+Private bindings, SQL activity text and content are excluded from diagnostics;
+the evidence contains operation labels, numeric plan work and durations only.
 
 ## Desktop refresh follows invalidation
 

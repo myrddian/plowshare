@@ -161,6 +161,64 @@ public class JdbcProjectMembers implements ProjectMembers {
   }
 
   @Override
+  public java.util.Map<String, ProjectRole> roles(
+      java.util.Collection<String> projects, String account) {
+    var selection =
+        new ReadSelection(account, projects == null ? null : new java.util.ArrayList<>(projects));
+    if (selection.projects().isEmpty()) return java.util.Map.of();
+    var rows =
+        jdbc.query(
+            """
+        WITH live AS MATERIALIZED (SELECT id FROM authority_live_grants()),
+        actor AS MATERIALIZED (SELECT ?::text AS handle,?::text AS personal,?::boolean AS service),
+        requested AS MATERIALIZED (SELECT value AS project FROM jsonb_array_elements_text(?::jsonb)),
+        ordinary AS MATERIALIZED (
+          SELECT p.name,CASE WHEN bool_or(role.name='MANAGER') THEN 'MANAGER'
+            WHEN bool_or(role.name='CONTRIBUTOR') THEN 'CONTRIBUTOR'
+            WHEN bool_or(role.name='READER') THEN 'VIEWER' END AS role
+          FROM actor JOIN authority_accounts a ON a.legacy_handle=CASE WHEN actor.service
+            THEN (SELECT owner_handle FROM service_tokens WHERE principal_handle=actor.handle)
+            ELSE actor.handle END
+          JOIN authority_grants g ON g.subject_account=a.id JOIN live ON live.id=g.id
+          JOIN authority_scopes scope ON scope.id=g.scope_id
+          JOIN projects p ON p.id=scope.project_id JOIN requested ON requested.project=p.name
+          JOIN authority_roles role ON role.id=g.role_id
+          WHERE g.subject_agent IS NULL AND g.coverage='SELF'
+            AND (scope.kind='PROJECT' OR (scope.kind='PERSONAL' AND scope.account_id=a.id))
+          GROUP BY p.name
+        ), resolved AS (
+          SELECT requested.project,CASE
+            WHEN actor.service THEN (
+              SELECT CASE WHEN ordinary.role='VIEWER' OR ceiling.role='VIEWER' THEN 'VIEWER'
+                WHEN ordinary.role='CONTRIBUTOR' OR ceiling.role='CONTRIBUTOR' THEN 'CONTRIBUTOR'
+                ELSE 'MANAGER' END
+              FROM service_tokens token JOIN service_token_scopes ceiling ON ceiling.token_id=token.id
+              JOIN projects p ON p.id=ceiling.project_id AND p.name=requested.project
+              WHERE token.principal_handle=actor.handle AND account_active(actor.handle)
+                AND ordinary.role IS NOT NULL AND p.personal_owner IS NULL
+                AND p.name NOT LIKE 'client:%' AND p.name NOT LIKE 'personal:%')
+            WHEN requested.project LIKE 'personal:%' AND requested.project<>actor.personal THEN NULL
+            WHEN requested.project LIKE 'client:%' THEN (
+              SELECT m.role FROM project_members m JOIN projects p ON p.id=m.project_id
+              JOIN admins a ON a.handle=m.handle AND a.enabled
+              WHERE p.name=requested.project AND m.handle=actor.handle)
+            WHEN requested.project=actor.personal AND ordinary.role IS NOT NULL THEN 'MANAGER'
+            ELSE ordinary.role END AS role
+          FROM requested CROSS JOIN actor LEFT JOIN ordinary ON ordinary.name=requested.project
+        ) SELECT project,role FROM resolved WHERE role IS NOT NULL
+        """,
+            (row, index) ->
+                java.util.Map.entry(row.getString(1), ProjectRole.parse(row.getString(2))),
+            selection.account(),
+            io.aeyer.plowshare.server.personal.PersonalSpaces.name(selection.account()),
+            io.aeyer.plowshare.server.auth.ServiceCredentials.principal(selection.account()),
+            io.aeyer.plowshare.server.information.InformationJson.json(selection.projects()));
+    var result = new java.util.LinkedHashMap<String, ProjectRole>();
+    rows.forEach(row -> result.put(row.getKey(), row.getValue()));
+    return java.util.Map.copyOf(result);
+  }
+
+  @Override
   public java.util.Set<String> readableProjects(
       java.util.Collection<String> projects, String account) {
     var selection =

@@ -93,6 +93,7 @@ public final class FrameRouter {
 
   private final Map<String, FrameHandler> handlers;
   private final ActingRequests acting;
+  private final io.aeyer.plowshare.server.reads.ReadAdmission readAdmission;
 
   /**
    * @param handlers every type this router knows, keyed by the dotted discriminator a frame's
@@ -106,6 +107,14 @@ public final class FrameRouter {
   }
 
   public FrameRouter(Map<String, FrameHandler> handlers, ActingRequests acting) {
+    this(handlers, acting, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
+  }
+
+  public FrameRouter(
+      Map<String, FrameHandler> handlers,
+      ActingRequests acting,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    this.readAdmission = java.util.Objects.requireNonNull(admission);
     this.acting = acting;
     handlers.keySet().forEach(FrameTypes::requireWellFormed);
     this.handlers = Map.copyOf(handlers);
@@ -203,6 +212,34 @@ public final class FrameRouter {
           Outcome.failed(
               Code.NOT_FOUND, "no handler is registered for type \"" + request.type() + "\""));
     }
+    boolean observer = request.type().equals("information.await");
+    if (!DispatchPolicy.independentRead(request.type()) && !observer)
+      return routeAdmitted(request, asking, disclosureFence);
+    io.aeyer.plowshare.server.reads.ReadAdmission.Lease lease;
+    try {
+      lease =
+          readAdmission.admit(
+              asking.handle(),
+              observer
+                  ? io.aeyer.plowshare.server.reads.ReadAdmission.Work.OBSERVER
+                  : io.aeyer.plowshare.server.reads.ReadAdmission.Work.INTERACTIVE);
+    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException busy) {
+      Fault fault = Faults.of(busy);
+      return java.util.concurrent.CompletableFuture.completedFuture(
+          Outcome.failed(fault.code(), fault.detail()));
+    }
+    try {
+      return routeAdmitted(request, asking, disclosureFence)
+          .whenComplete((answer, failure) -> lease.close());
+    } catch (RuntimeException | Error failed) {
+      lease.close();
+      throw failed;
+    }
+  }
+
+  private java.util.concurrent.CompletionStage<Outcome> routeAdmitted(
+      Envelope request, Asking asking, boolean disclosureFence) {
+    FrameHandler handler = handlers.get(request.type());
     try {
       if (request.actingFor() != null) {
         if (acting == null) throw new CallerFault("Acting request admission is unavailable");

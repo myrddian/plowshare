@@ -208,6 +208,7 @@ class SearchCacheTest {
               new UUID(0, 1),
               Map.of(ProjectionVersions.Domain.SEARCH, 1L, ProjectionVersions.Domain.AUTHORITY, 1L),
               List.of(),
+              "999999",
               null,
               null);
       when(versions.databaseIdentity()).thenReturn(token.database());

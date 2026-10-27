@@ -28,10 +28,20 @@ public final class JdbcProcRepository implements ProcRepository {
   private final NamedParameterJdbcTemplate jdbc;
   private final TransactionTemplate reads;
 
+  // A targeted inspection resolves its owning root with indexed parent lookups, then walks only
+  // that tree. Rootless/cyclic origins remain unavailable exactly as in the full inventory.
   private static final String TREE =
       """
       WITH RECURSIVE tree(id,root,lifecycle,ancestors) AS (
         SELECT id,id,lifecycle,ARRAY[]::text[] FROM conversations WHERE parent_id IS NULL
+          AND (CAST(:root AS text) IS NULL OR id=:root)
+          AND (CAST(:conversation AS text) IS NULL OR id=(
+            WITH RECURSIVE parents(id,parent_id,visited) AS (
+              SELECT id,parent_id,ARRAY[id] FROM conversations WHERE id=:conversation
+              UNION ALL
+              SELECT c.id,c.parent_id,p.visited||c.id FROM conversations c
+                JOIN parents p ON c.id=p.parent_id WHERE NOT c.id=ANY(p.visited)
+            ) SELECT id FROM parents WHERE parent_id IS NULL))
         UNION ALL
         SELECT c.id,t.root,t.lifecycle,t.ancestors || t.id
         FROM conversations c JOIN tree t ON c.parent_id=t.id
@@ -83,10 +93,21 @@ public final class JdbcProcRepository implements ProcRepository {
     reads = new TransactionTemplate(Objects.requireNonNull(transactions));
     reads.setReadOnly(true);
     reads.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    reads.setTimeout(5);
   }
 
   private <T> T read(Supplier<T> action) {
-    return Objects.requireNonNull(reads.execute(ignored -> action.get()));
+    return Objects.requireNonNull(
+        reads.execute(
+            ignored -> {
+              // These bounded metadata reads must not spend seconds compiling inlined eligibility
+              // expressions. The production plan spent 2.9s in JIT after redundant scans were
+              // removed.
+              // This setting is transaction-local; neither pooled connections nor other workloads
+              // inherit it.
+              jdbc.getJdbcTemplate().execute("SET LOCAL jit=off");
+              return action.get();
+            }));
   }
 
   private MapSqlParameterSource parameters(String account, ProcQuery q) {
@@ -117,8 +138,10 @@ public final class JdbcProcRepository implements ProcRepository {
   /**
    * Fix the authorized page before reading per-conversation aggregates. Without this
    * materialization PostgreSQL can enrich every retained conversation before sorting and limiting,
-   * turning a small audit page into repeated full-table scans. Counts still cover the entire
-   * authorized selection.
+   * turning a small audit page into repeated full-table scans. Call facts are then loaded once for
+   * that page and reused by totals, activity and repetition groups. The direct conversation index
+   * keeps this selection independent of retained calls in unrelated conversations. Counts cover the
+   * entire authorized selection.
    */
   static String conversationPageSql(boolean active) {
     String filter = WHERE + (active ? " AND " + ACTIVE : "");
@@ -129,6 +152,23 @@ public final class JdbcProcRepository implements ProcRepository {
         + filter
         + " AND (CAST(:after AS text) IS NULL OR c.id>:after) ORDER BY c.id LIMIT :limit)"
         + """
+          , page_calls AS MATERIALIZED (
+            SELECT call.conversation_id,call.attempt_count,call.ended_at,call.attribution_status,
+              call.account_handle,call.agent_name,call.operation,call.pool,call.wire_model
+            FROM inference_calls call JOIN page selected ON selected.id=call.conversation_id
+          ), call_totals AS MATERIALIZED (
+            SELECT conversation_id,count(*) AS calls,sum(attempt_count) AS attempts,
+              count(*) FILTER(WHERE ended_at IS NULL) AS active_calls,
+              CASE WHEN bool_and(attribution_status='SYSTEM') THEN 'SYSTEM'
+                WHEN bool_and(attribution_status='ATTRIBUTED') AND count(DISTINCT account_handle)=1 THEN max(account_handle)
+                ELSE 'MIXED_OR_UNKNOWN' END AS principal
+            FROM page_calls GROUP BY conversation_id
+          ), call_repetitions AS MATERIALIZED (
+            SELECT conversation_id,max(n) AS repeated FROM (
+              SELECT conversation_id,agent_name,operation,pool,wire_model,count(*) AS n
+              FROM page_calls GROUP BY conversation_id,agent_name,operation,pool,wire_model
+            ) repetition GROUP BY conversation_id
+          )
           SELECT c.id,c.audit_root AS root,c.parent_id,c.origin,c.audit_lifecycle AS lifecycle,c.audit_project AS project,c.owner_handle,
             acting.application,acting.actor,acting.subject AS acting_subject,c.agent,c.opened_by_call,source.resource,source.revision,c.relay_causation->>'rootId' AS causation_root,
             c.relay_causation->>'parentId' AS causation_parent,
@@ -138,8 +178,7 @@ public final class JdbcProcRepository implements ProcRepository {
               WHEN COALESCE(ps.running,0)>0 THEN 'PROCESSING'
               WHEN COALESCE(ps.pending,0)>0 THEN 'QUEUED'
               WHEN COALESCE(ps.blocked,0)>0 THEN 'BLOCKED'
-              WHEN EXISTS(SELECT 1 FROM inference_calls ic WHERE ic.conversation_id=c.id AND ic.ended_at IS NULL)
-                THEN 'RECORDED_ACTIVE'
+              WHEN COALESCE(ic.active_calls,0)>0 THEN 'RECORDED_ACTIVE'
               WHEN j.id IS NOT NULL AND j.ended_at IS NULL THEN 'UNKNOWN'
               WHEN c.last_turn_at IS NOT NULL OR j.ended_at IS NOT NULL THEN 'COMPLETED' ELSE 'IDLE' END AS state,
             CASE WHEN c.id IN (:live) THEN 'local runtime snapshot'
@@ -150,7 +189,7 @@ public final class JdbcProcRepository implements ProcRepository {
             j.id AS latest_job,j.ending,
             (SELECT count(*) FROM conversations child WHERE child.parent_id=c.id) AS children,
             COALESCE(ic.calls,0) AS calls,COALESCE(ic.attempts,0) AS attempts,
-            COALESCE(ic.active_calls,0) AS active_calls,COALESCE(ic.repeated,0) AS repeated,
+            COALESCE(ic.active_calls,0) AS active_calls,COALESCE(repetition.repeated,0) AS repeated,
             COALESCE(ic.principal,'UNKNOWN') AS principal
           """
         + " FROM page c "
@@ -167,14 +206,8 @@ public final class JdbcProcRepository implements ProcRepository {
             count(*) FILTER(WHERE s.state='blocked') AS blocked
             FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation
             WHERE r.processing_log=c.id AND r.availability='active' AND NOT r.excluded) ps ON true
-          LEFT JOIN LATERAL(SELECT count(*) AS calls,sum(attempt_count) AS attempts,
-            count(*) FILTER(WHERE ended_at IS NULL) AS active_calls,
-            (SELECT max(n) FROM(SELECT count(*) n FROM inference_calls r WHERE r.conversation_id=c.id
-              GROUP BY agent_name,operation,pool,wire_model) repetition) AS repeated,
-            CASE WHEN bool_and(attribution_status='SYSTEM') THEN 'SYSTEM'
-              WHEN bool_and(attribution_status='ATTRIBUTED') AND count(DISTINCT account_handle)=1 THEN max(account_handle)
-              ELSE 'MIXED_OR_UNKNOWN' END AS principal
-            FROM inference_calls WHERE conversation_id=c.id) ic ON true
+          LEFT JOIN call_totals ic ON ic.conversation_id=c.id
+          LEFT JOIN call_repetitions repetition ON repetition.conversation_id=c.id
           ORDER BY c.id
           """;
   }
@@ -238,9 +271,12 @@ public final class JdbcProcRepository implements ProcRepository {
         });
   }
 
-  private String revisionSelection() {
+  private static String revisionSelection() {
     return """
-        SELECT r.*,q.source_name,q.owner_handle,q.project_id,p.name AS project,
+        SELECT r.id,r.resource_id,r.generation,r.processing_log,r.processing_policy,r.availability,r.excluded,
+          r.auto_tag,r.auto_tag_generated,r.tag_groups_generated,r.tag_groups_input_tags,
+          r.allowance_total,r.allowance_spent,
+          q.tags,q.tag_groups_manual,q.source_name,q.owner_handle,q.project_id,p.name AS project,
           t.id AS audit_conversation
         FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id
         LEFT JOIN projects p ON p.id=q.project_id
@@ -258,17 +294,34 @@ public final class JdbcProcRepository implements ProcRepository {
         """;
   }
 
-  @Override
-  public ProcViews.Queues queues(String account, ProcQuery q) {
-    return read(
-        () -> {
-          var args = parameters(account, q);
-          String counters =
-              TREE
-                  + ", revisions AS ("
-                  + revisionSelection()
-                  + "), counters AS ("
-                  + """
+  /**
+   * Produce summary and cursor page from one materialized counter set. The summary covers the
+   * entire authorized selection, including when the cursor page is empty. Both eligibility branches
+   * share one statement-local worker authority set, rather than inlining it per revision.
+   */
+  static String queueSql(boolean activeOnly) {
+    String counters =
+        TREE
+            + ", "
+            + io.aeyer.plowshare.server.information.InformationQueueSql.processingAuthority()
+            + ", revisions AS MATERIALIZED ("
+            + revisionSelection()
+            + """
+                    ), eligibility_candidates AS MATERIALIZED (
+                      SELECT r.*,s.stage AS candidate_stage,s.state AS candidate_state,
+                        CASE WHEN s.stage='autoTag' AND r.processing_policy='automatic'
+                          AND r.owner_handle IS NOT NULL AND jsonb_array_length(r.tags)=0
+                          AND jsonb_array_length(r.auto_tag)=0 AND NOT r.auto_tag_generated
+                          AND r.allowance_spent<r.allowance_total THEN (
+                            SELECT CASE WHEN source.extracted_text IS NOT NULL AND btrim(source.extracted_text)<>''
+                              THEN 'present' END FROM information_revisions source WHERE source.id=r.id)
+                          END AS extracted_text
+                      FROM revisions r JOIN information_steps s
+                        ON s.revision_id=r.id AND s.generation=r.generation
+                      WHERE s.stage IN ('autoTag','tagGroups') AND s.state IN ('skipped','ready')
+                    ), counters AS MATERIALIZED (
+                    """
+            + """
           SELECT r.id::text||':stages' AS id,'stages' AS unit,'processing' AS stage,
             r.project,r.owner_handle,r.processing_log,r.id::text AS revision,r.source_name AS resource,
             count(*) AS total,count(*) FILTER(WHERE s.state='ready') AS completed,
@@ -318,63 +371,45 @@ public final class JdbcProcRepository implements ProcRepository {
           GROUP BY r.id,r.source_name,r.project,r.owner_handle,r.processing_log,target.slot
           UNION ALL
           """
-                  + eligible(
-                      "autoTag",
-                      io.aeyer.plowshare.server.information.InformationQueueSql.tagging())
-                  + " UNION ALL "
-                  + eligible(
-                      "tagGroups",
-                      io.aeyer.plowshare.server.information.InformationQueueSql.grouping())
-                  + ") ";
-          String active =
-              Boolean.TRUE.equals(q.active()) ? " WHERE (pending>0 OR running>0 OR blocked>0)" : "";
-          var summaries =
-              jdbc.query(
-                  counters
-                      + """
-          SELECT 'summary:'||unit||':'||stage AS id,unit,stage,NULL::text AS project,
+            + eligible(
+                "autoTag", io.aeyer.plowshare.server.information.InformationQueueSql.tagging())
+            + " UNION ALL "
+            + eligible(
+                "tagGroups", io.aeyer.plowshare.server.information.InformationQueueSql.grouping())
+            + ") ";
+    return counters
+        + ", selected AS MATERIALIZED (SELECT * FROM counters"
+        + (activeOnly ? " WHERE pending>0 OR running>0 OR blocked>0" : "")
+        + ") SELECT * FROM ("
+        + """
+          SELECT true AS summary,'summary:'||unit||':'||stage AS id,unit,stage,NULL::text AS project,
             NULL::text AS owner_handle,NULL::text AS processing_log,NULL::text AS revision,NULL::text AS resource,
-            sum(total) AS total,sum(completed) AS completed,sum(pending) AS pending,
-            sum(running)::bigint AS running,sum(blocked) AS blocked,sum(failed) AS failed,sum(skipped) AS skipped,
+            sum(total)::bigint AS total,sum(completed)::bigint AS completed,sum(pending)::bigint AS pending,
+            sum(running)::bigint AS running,sum(blocked)::bigint AS blocked,sum(failed)::bigint AS failed,sum(skipped)::bigint AS skipped,
             min(oldest) AS oldest,max(lease_until) AS lease_until,
             'Entire authorized selection; independent of page cursor. Unknown per-item running counts remain null.' AS coverage
-          FROM counters
-          """
-                      + active
-                      + " GROUP BY unit,stage ORDER BY unit,stage",
-                  args,
-                  (r, n) -> queue(r));
-          String sql =
-              counters
-                  + "SELECT * FROM counters WHERE (CAST(:after AS text) IS NULL OR id>:after)"
-                  + (Boolean.TRUE.equals(q.active())
-                      ? " AND (pending>0 OR running>0 OR blocked>0)"
-                      : "")
-                  + " ORDER BY id LIMIT :limit";
-          var rows =
+          FROM selected GROUP BY unit,stage
+          UNION ALL
+          (SELECT false AS summary,* FROM selected
+           WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT :limit)
+          ) result ORDER BY summary DESC,id
+          """;
+  }
+
+  private record QueueRow(boolean summary, ProcViews.Queue value) {}
+
+  @Override
+  public ProcViews.Queues queues(String account, ProcQuery q) {
+    return read(
+        () -> {
+          var args = parameters(account, q);
+          var result =
               jdbc.query(
-                  sql,
+                  queueSql(Boolean.TRUE.equals(q.active())),
                   args,
-                  (r, n) ->
-                      new ProcViews.Queue(
-                          r.getString("id"),
-                          r.getString("unit"),
-                          r.getString("stage"),
-                          r.getString("project"),
-                          r.getString("owner_handle"),
-                          r.getString("processing_log"),
-                          r.getString("revision"),
-                          r.getString("resource"),
-                          r.getLong("total"),
-                          r.getLong("completed"),
-                          r.getLong("pending"),
-                          r.getObject("running", Long.class),
-                          r.getLong("blocked"),
-                          r.getLong("failed"),
-                          r.getLong("skipped"),
-                          instant(r, "oldest"),
-                          instant(r, "lease_until"),
-                          r.getString("coverage")));
+                  (r, n) -> new QueueRow(r.getBoolean("summary"), queue(r)));
+          var summaries = result.stream().filter(QueueRow::summary).map(QueueRow::value).toList();
+          var rows = result.stream().filter(row -> !row.summary()).map(QueueRow::value).toList();
           boolean more = rows.size() > q.limit();
           var page = rows.stream().limit(q.limit()).toList();
           return new ProcViews.Queues(
@@ -393,28 +428,48 @@ public final class JdbcProcRepository implements ProcRepository {
         });
   }
 
+  /**
+   * Materialize current authority once, and join it to attributed calls outside an OR predicate.
+   * The former IN-subplan beneath that OR could rescan a materialized conversation selection for
+   * every retained call when PostgreSQL estimated it would not fit a hashed subplan. Keep orphan
+   * calls in a separate disjoint branch with their own current account/project authorization.
+   */
+  static String callsPageSql(boolean active) {
+    String cursor =
+        " AND (CAST(:after AS text) IS NULL OR ic.call_id::text>:after)"
+            + (active ? " AND ic.ended_at IS NULL" : "");
+    return TREE
+        + ", selected AS MATERIALIZED (SELECT c.id"
+        + JOIN
+        + " WHERE "
+        + WHERE
+        + ")"
+        + ", matched AS (SELECT ic.call_id FROM selected s JOIN inference_calls ic ON ic.conversation_id=s.id WHERE true"
+        + cursor
+        + " UNION ALL SELECT ic.call_id FROM inference_calls ic LEFT JOIN projects p ON p.id::text=ic.project_id"
+        + " WHERE ic.conversation_id IS NULL AND CAST(:conversation AS text) IS NULL"
+        + " AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL"
+        + " AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS("
+        + "SELECT 1 FROM project_members m WHERE m.project_id::text=ic.project_id AND m.handle=:account))))"
+        + " AND (CAST(:project AS text) IS NULL OR p.name=:project)"
+        + cursor
+        + ")"
+        + ", page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
+        + " SELECT ic.call_id,ic.conversation_id,ic.root_conversation_id,ic.run_id,ic.attribution_status,"
+        + "ic.account_handle,ic.agent_name,ic.operation,ic.pool,ic.wire_model,ic.lane,ic.billing_route,"
+        + "ic.instance_id,ic.lifecycle,ic.created_at,ic.ended_at,ic.attempt_count,"
+        + "p.name AS project,c.owner_handle AS owner FROM page selected"
+        + " JOIN inference_calls ic ON ic.call_id=selected.call_id"
+        + " LEFT JOIN conversations c ON c.id=ic.conversation_id"
+        + " LEFT JOIN projects p ON p.id::text=ic.project_id ORDER BY ic.call_id";
+  }
+
   @Override
   public ProcViews.Calls calls(String account, ProcQuery q) {
     return read(
         () -> {
           var args = parameters(account, q);
-          String selected = TREE + "SELECT c.id" + JOIN + " WHERE " + WHERE;
-          String sql =
-              """
-          SELECT ic.*,p.name AS project,c.owner_handle AS owner
-          FROM inference_calls ic LEFT JOIN conversations c ON c.id=ic.conversation_id
-          LEFT JOIN projects p ON p.id::text=ic.project_id
-          WHERE (ic.conversation_id IN (
-          """
-                  + selected
-                  + ") OR (ic.conversation_id IS NULL AND "
-                  + "CAST(:conversation AS text) IS NULL AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL"
-                  + " AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS("
-                  + "SELECT 1 FROM project_members m WHERE m.project_id::text=ic.project_id AND m.handle=:account))))"
-                  + " AND (CAST(:project AS text) IS NULL OR p.name=:project)))"
-                  + " AND (CAST(:after AS text) IS NULL OR ic.call_id::text>:after)"
-                  + (Boolean.TRUE.equals(q.active()) ? " AND ic.ended_at IS NULL" : "")
-                  + " ORDER BY ic.call_id::text LIMIT :limit";
+          String sql = callsPageSql(Boolean.TRUE.equals(q.active()));
           var rows =
               jdbc.query(
                   sql,
@@ -576,11 +631,10 @@ public final class JdbcProcRepository implements ProcRepository {
         + ":eligible-not-enqueued',"
         + "r.project,r.owner_handle,r.processing_log,r.id::text,r.source_name,1,0,1,NULL::bigint,0,0,0,NULL::timestamptz,NULL::timestamptz,"
         + "'Eligible under the owning sweep predicate; not yet enqueued. The next sweep batch does not bound this count.' "
-        + "FROM revisions r JOIN information_resources q ON q.id=r.resource_id JOIN information_steps s "
-        + "ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='"
+        + "FROM eligibility_candidates r WHERE r.candidate_stage='"
         + stage
-        + "' WHERE "
-        + predicate;
+        + "' AND "
+        + predicate.replace("q.", "r.").replace("s.state", "r.candidate_state");
   }
 
   private static ProcViews.Queue queue(ResultSet r) throws SQLException {

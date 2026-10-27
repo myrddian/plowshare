@@ -242,6 +242,11 @@ class JdbcProcRepositoryTest {
     var page = repository.queues("alice", query("mine", null, null, 2));
     assertEquals(2, page.queues().size());
     assertNotNull(page.cursor());
+    var exhausted = repository.queues("alice", query("mine", null, "zzzz", 2));
+    assertTrue(exhausted.queues().isEmpty());
+    assertEquals(
+        page.summaries(), exhausted.summaries(), "Totals must survive an empty cursor page");
+    assertQueueWorkIsShared();
     assertEquals(
         105,
         page.summaries().stream()
@@ -273,6 +278,213 @@ class JdbcProcRepositoryTest {
             .findFirst()
             .orElseThrow()
             .pending());
+  }
+
+  @Test
+  void targetedInspectionDoesNotBuildUnrelatedConversationTrees() throws Exception {
+    jdbc.update(
+        "INSERT INTO conversations(id,owner_handle,created_at,origin,budget_total,budget_spent) SELECT 'unrelated-'||n,'alice',now(),'turn',20,0 FROM generate_series(1,1000) n");
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", child)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 3)
+            .addValue("live", List.of("fixture-no-live"));
+    String explained =
+        new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+            .queryForObject(
+                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.conversationPageSql(false),
+                args,
+                String.class);
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkTargetedTree(plan));
+    assertEquals(
+        List.of(child),
+        repository
+            .conversations("alice", query("mine", child, null, 2), live())
+            .conversations()
+            .stream()
+            .map(row -> row.id())
+            .toList());
+  }
+
+  private int checkTargetedTree(com.fasterxml.jackson.databind.JsonNode plan) {
+    int found = 0;
+    if ("CTE tree".equals(plan.path("Subplan Name").asText())) {
+      found++;
+      assertEquals(
+          2,
+          plan.path("Actual Rows").asLong(),
+          "Only the selected root and child belong in the walk");
+    }
+    for (var childPlan : plan) found += checkTargetedTree(childPlan);
+    return found;
+  }
+
+  private void assertConversationCallWorkIsShared() throws Exception {
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 51)
+            .addValue("live", List.of(""));
+    var explained =
+        new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+            .queryForObject(
+                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.conversationPageSql(false),
+                args,
+                String.class);
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE page_calls"));
+    checkCallScans(plan);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM pg_indexes WHERE indexname='inference_calls_direct_conversation' AND indexdef LIKE '%(conversation_id)%'",
+            Integer.class));
+  }
+
+  private void checkCallScans(com.fasterxml.jackson.databind.JsonNode plan) {
+    if ("inference_calls".equals(plan.path("Relation Name").asText())
+        && "Seq Scan".equals(plan.path("Node Type").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "A page must not rescan all retained calls per conversation");
+    for (var childPlan : plan) checkCallScans(childPlan);
+  }
+
+  private void assertQueueWorkIsShared() {
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 3);
+    String explained =
+        new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+            .queryForObject(
+                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.queueSql(false),
+                args,
+                String.class);
+    try {
+      var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+      assertEquals(1, checkSharedQueueWork(plan, "CTE processing_authority"));
+      assertEquals(1, checkSharedQueueWork(plan, "CTE counters"));
+    } catch (java.io.IOException invalid) {
+      throw new AssertionError("PostgreSQL must return a JSON plan", invalid);
+    }
+  }
+
+  private int checkSharedQueueWork(com.fasterxml.jackson.databind.JsonNode plan, String subplan) {
+    int found = 0;
+    if (subplan.equals(plan.path("Subplan Name").asText())) {
+      found++;
+      assertEquals(1, plan.path("Actual Loops").asLong(), subplan + " must be built only once");
+      if (subplan.equals("CTE processing_authority")) checkAuthorityScans(plan);
+    }
+    for (var child : plan) found += checkSharedQueueWork(child, subplan);
+    return found;
+  }
+
+  private void checkAuthorityScans(com.fasterxml.jackson.databind.JsonNode plan) {
+    if (plan.path("Relation Name").asText().equals("information_revisions")
+        && plan.path("Node Type").asText().equals("Seq Scan"))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "Worker eligibility must not rescan every revision per candidate: " + plan);
+    for (var child : plan) checkAuthorityScans(child);
+  }
+
+  @Test
+  void modelCallAuthorityIsMaterializedOnceUnderLowWorkMemoryAndPagesDoNotOverlap()
+      throws Exception {
+    UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
+        journal);
+    jdbc.update(
+        "INSERT INTO inference_accounting_instances(instance_id,journal_id,started_at) VALUES (?,?,now())",
+        instance,
+        journal);
+    jdbc.update(
+        """
+        INSERT INTO inference_calls(call_id,instance_id,attribution,project_id,scope,conversation_id,
+          root_conversation_id,ancestor_conversation_ids,ancestor_run_ids,ancestor_orchestration_ids,
+          agent_name,operation,attribution_status,specifier,pool,wire_model,billing_route,lane,
+          created_at,last_event_at,ended_at,lifecycle,attempt_count,last_call_sequence)
+        SELECT gen_random_uuid(),?,'{}',c.project_id::text,'PROJECT',c.id,c.id,ARRAY[]::text[],ARRAY[]::text[],ARRAY[]::text[],
+          'fixture','DOCUMENT_SUMMARY','SYSTEM','fast','fixture-pool','fixture-model',
+          'fixture-pool','CHAT',now(),now(),now(),'SUCCEEDED',0,1
+        FROM conversations c CROSS JOIN generate_series(1,1000) n WHERE c.id IN (?,?)
+        """,
+        instance,
+        child,
+        foreign);
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("after", null)
+            .addValue("limit", 51);
+    var tx =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new DataSourceTransactionManager(data));
+    String explained =
+        tx.execute(
+            status -> {
+              jdbc.execute("SET LOCAL work_mem='64kB'; SET LOCAL jit=off");
+              return new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+                  .queryForObject(
+                      "EXPLAIN (ANALYZE,FORMAT JSON) " + JdbcProcRepository.callsPageSql(false),
+                      args,
+                      String.class);
+            });
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE selected"));
+    checkCallScans(plan);
+    var first = repository.calls("alice", query("mine", null, null, 50));
+    var next = repository.calls("alice", query("mine", null, first.cursor(), 50));
+    assertEquals(50, first.calls().size());
+    assertEquals(50, next.calls().size());
+    var ids = new java.util.HashSet<String>();
+    first
+        .calls()
+        .forEach(
+            call -> {
+              assertEquals(child, call.conversation());
+              assertTrue(ids.add(call.id()));
+            });
+    next.calls()
+        .forEach(
+            call -> {
+              assertEquals(child, call.conversation());
+              assertTrue(ids.add(call.id()));
+            });
+    jdbc.update("DELETE FROM project_members WHERE handle='alice'");
+    assertTrue(
+        repository.calls("alice", query("mine", null, null, 50)).calls().isEmpty(),
+        "warm selection never leases project authority");
+    assertFalse(
+        repository.calls("alice", query("server", null, null, 50)).calls().isEmpty(),
+        "explicit administrator metadata scope remains available");
   }
 
   @Test
@@ -379,7 +591,7 @@ class JdbcProcRepositoryTest {
   }
 
   @Test
-  void attemptBatchKeepsItsIndependentCapAndOrderForEveryAuthorizedCall() {
+  void attemptBatchKeepsItsIndependentCapAndOrderForEveryAuthorizedCall() throws Exception {
     UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
@@ -411,6 +623,17 @@ class JdbcProcRepositoryTest {
         """);
     var page = repository.calls("alice", query("mine", root, null, 100));
     assertEquals(2, page.calls().size());
+    var conversations = repository.conversations("alice", query("mine", root, null, 100), live());
+    var childSummary =
+        conversations.conversations().stream()
+            .filter(row -> row.id().equals(child))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(2, childSummary.calls());
+    assertEquals(202, childSummary.attempts());
+    assertEquals(2, childSummary.repeatedCalls());
+    assertEquals("SYSTEM", childSummary.principal());
+    assertConversationCallWorkIsShared();
     for (var call : page.calls()) {
       assertEquals(101, call.attempts());
       assertEquals(100, call.observations().size());

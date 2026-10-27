@@ -1281,6 +1281,15 @@ public class OrchestrationStore {
    */
   private boolean informationProtected;
 
+  private io.aeyer.plowshare.server.information.InformationLogVisibility visibility =
+      io.aeyer.plowshare.server.information.InformationLogVisibility.direct();
+
+  public OrchestrationStore useVisibility(
+      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
+    this.visibility = java.util.Objects.requireNonNull(visibility);
+    return this;
+  }
+
   public void protectInformation() {
     informationProtected = true;
   }
@@ -1290,12 +1299,30 @@ public class OrchestrationStore {
     if (limit < 1 || limit > 200) {
       throw new IllegalArgumentException("limit must be between 1 and 200, was " + limit);
     }
+    if (informationProtected)
+      return visibility.read(handle, facts -> byCaller(handle, project, state, limit, facts));
+    return byCaller(
+        handle,
+        project,
+        state,
+        limit,
+        io.aeyer.plowshare.server.information.InformationLogVisibility.Facts.authoritative());
+  }
+
+  private List<OrchestrationRecord> byCaller(
+      String handle,
+      String project,
+      OrchestrationState state,
+      int limit,
+      io.aeyer.plowshare.server.information.InformationLogVisibility.Facts facts) {
     StringBuilder sql = new StringBuilder(SELECT_ORCHESTRATIONS).append(" WHERE caller_handle = ?");
     List<Object> params = new ArrayList<>();
     params.add(handle);
     if (informationProtected) {
-      sql.append(" AND information_log_readable(id,?)");
-      params.add(handle);
+      var filter =
+          io.aeyer.plowshare.server.information.InformationLogSql.visible("id", handle, facts);
+      sql.append(" AND ").append(filter.sql());
+      params.addAll(filter.arguments());
     }
     if (project != null) {
       sql.append(" AND project = ?");

@@ -40,13 +40,16 @@ class InformationInvalidationPublisherTest {
     try (var publisher = new InformationInvalidationPublisher(source, sent::incrementAndGet)) {
       publisher.start();
       publisher.start();
-      assertEquals(Set.of(Domain.DOCUMENTS, Domain.AUTHORITY), source.domains);
+      assertEquals(
+          Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY, Domain.PROGRESS),
+          source.domains);
       assertEquals(1, sent.get());
       source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
       source.observer.changed(Set.of(Domain.DOCUMENTS));
       source.observer.changed(Set.of(Domain.AUTHORITY));
       assertEquals(4, sent.get());
       source.observer.changed(Set.of(Domain.TRANSCRIPTS));
+      for (int i = 0; i < 1000; i++) source.observer.changed(Set.of(Domain.OBSERVATIONS));
       source.observer.stateChanged(new ProjectionChangeSignals.State(1, false));
       assertEquals(4, sent.get(), "Unrelated or reordered callbacks must not invalidate");
       source.observer.stateChanged(new ProjectionChangeSignals.State(3, false));
@@ -62,6 +65,36 @@ class InformationInvalidationPublisherTest {
                 new ObjectMapper().writeValueAsString(new AccountEvent.InformationInvalidated()));
     assertEquals(1, serialized.size());
     assertEquals("information.invalidated", serialized.get("kind").asText());
+  }
+
+  @Test
+  void progressIsSoftButAnyConcurrentContentOrAuthorityChangeDominates() {
+    var source = new Signals();
+    var full = new AtomicInteger();
+    var progress = new AtomicInteger();
+    var pushes =
+        new InformationInvalidations() {
+          public void invalidate() {
+            full.incrementAndGet();
+          }
+
+          public void progress() {
+            progress.incrementAndGet();
+          }
+        };
+    try (var publisher = new InformationInvalidationPublisher(source, pushes)) {
+      publisher.start();
+      source.observer.changed(Set.of(Domain.PROGRESS));
+      assertEquals(1, progress.get());
+      assertEquals(1, full.get());
+      source.observer.changed(Set.of(Domain.PROGRESS, Domain.AUTHORITY));
+      source.observer.changed(Set.of(Domain.PROGRESS, Domain.READABILITY));
+      source.observer.changed(Set.of(Domain.PROGRESS, Domain.DOCUMENTS));
+      assertEquals(1, progress.get());
+      assertEquals(4, full.get());
+    }
+    source.observer.changed(Set.of(Domain.PROGRESS));
+    assertEquals(1, progress.get());
   }
 
   @Test

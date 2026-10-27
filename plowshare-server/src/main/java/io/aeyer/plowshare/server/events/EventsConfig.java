@@ -69,8 +69,10 @@ public class EventsConfig {
   }
 
   @Bean
-  public InboxStore inboxStore(JdbcTemplate jdbc) {
-    return new JdbcInboxStore(jdbc);
+  public InboxStore inboxStore(
+      JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
+    return new JdbcInboxStore(jdbc).useVisibility(visibility);
   }
 
   @Bean

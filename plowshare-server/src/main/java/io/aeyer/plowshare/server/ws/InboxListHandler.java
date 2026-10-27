@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.ws;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.events.InboxItem;
-import io.aeyer.plowshare.server.events.InboxStore;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -16,11 +15,9 @@ public final class InboxListHandler implements FrameHandler {
   public record Page(List<InboxItem> items, int unread) {}
 
   private final Inbox inbox;
-  private final InboxStore store;
 
-  public InboxListHandler(Inbox inbox, InboxStore store) {
+  public InboxListHandler(Inbox inbox) {
     this.inbox = Objects.requireNonNull(inbox, "inbox");
-    this.store = Objects.requireNonNull(store, "store");
   }
 
   @Override
@@ -29,9 +26,7 @@ public final class InboxListHandler implements FrameHandler {
     Body body = Payloads.as(payload, Body.class, FrameTypes.INBOX_LIST);
     int offset = body.offset() == null ? 0 : Math.max(0, body.offset());
     int limit = body.limit() == null ? 50 : Math.min(200, Math.max(1, body.limit()));
-    return Outcome.ok(
-        new Page(
-            inbox.list(handle, Boolean.TRUE.equals(body.unread()), offset, limit),
-            store.unread(handle)));
+    var page = inbox.page(handle, Boolean.TRUE.equals(body.unread()), offset, limit);
+    return Outcome.ok(new Page(page.items(), page.unread()));
   }
 }

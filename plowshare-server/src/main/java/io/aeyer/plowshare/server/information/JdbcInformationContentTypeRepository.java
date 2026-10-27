@@ -34,7 +34,7 @@ public final class JdbcInformationContentTypeRepository
     this(jdbc, ProjectionCache.direct(), ProjectionCache.direct(), ProjectionCache.direct());
   }
 
-  /** Current caller admission remains outside these DOCUMENTS/AUTHORITY-fenced projections. */
+  /** Current caller admission remains outside these TYPES/AUTHORITY-fenced projections. */
   public JdbcInformationContentTypeRepository(
       JdbcTemplate jdbc,
       ProjectionCache<InformationContent.Versions> lists,

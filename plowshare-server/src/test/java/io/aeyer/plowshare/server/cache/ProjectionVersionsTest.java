@@ -19,6 +19,19 @@ class ProjectionVersionsTest {
     var second = token(1, List.of("102"), null, null);
     assertEquals(first.sourceVersion(), second.sourceVersion());
     assertNotEquals(first, second, "Stored loader evidence must not be replaced by fresh evidence");
+    var laterSnapshot =
+        new ProjectionVersions.Token(
+            first.database(),
+            first.counters(),
+            first.pendingTransactions(),
+            "1000000",
+            first.windowStart(),
+            first.validUntil());
+    assertNotEquals(first, laterSnapshot);
+    assertEquals(
+        first.sourceVersion(),
+        laterSnapshot.sourceVersion(),
+        "Snapshot evidence must not defeat cross-reader coalescing");
     assertNotEquals(first.sourceVersion(), token(2, List.of("101"), null, null).sourceVersion());
     assertEquals(64, first.sourceVersion().value().length());
     assertEquals(
@@ -39,7 +52,7 @@ class ProjectionVersionsTest {
     var counters = new EnumMap<ProjectionVersions.Domain, Long>(ProjectionVersions.Domain.class);
     counters.put(ProjectionVersions.Domain.SEARCH, 1L);
     var pending = new ArrayList<>(List.of("100"));
-    var captured = new ProjectionVersions.Token(DATABASE, counters, pending, null, null);
+    var captured = new ProjectionVersions.Token(DATABASE, counters, pending, "999999", null, null);
     counters.put(ProjectionVersions.Domain.SEARCH, 9L);
     pending.clear();
     assertEquals(1, captured.counters().get(ProjectionVersions.Domain.SEARCH));
@@ -58,6 +71,6 @@ class ProjectionVersionsTest {
   private static ProjectionVersions.Token token(
       long value, List<String> pending, Instant start, Instant until) {
     return new ProjectionVersions.Token(
-        DATABASE, Map.of(ProjectionVersions.Domain.SEARCH, value), pending, start, until);
+        DATABASE, Map.of(ProjectionVersions.Domain.SEARCH, value), pending, "999999", start, until);
   }
 }

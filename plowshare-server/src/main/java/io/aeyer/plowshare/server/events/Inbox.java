@@ -58,6 +58,10 @@ public class Inbox {
     return store.list(handle, unreadOnly, offset, limit);
   }
 
+  public InboxStore.Page page(String handle, boolean unreadOnly, int offset, int limit) {
+    return store.page(handle, unreadOnly, offset, limit);
+  }
+
   /** Bot consumption cannot acknowledge or page over unread human command approvals. */
   public List<InboxItem> unreadForAgent(String handle, int offset, int limit) {
     return store.unreadForAgent(handle, offset, limit);

@@ -7564,6 +7564,7 @@ public sealed record NotificationVariant3Dto {
 /// <summary>Fields of the NotificationVariant4Dto protocol contract.</summary>
 public sealed record NotificationVariant4Dto {
  [JsonPropertyName("kind")] public required string Kind { get; init; }
+ [JsonPropertyName("progressOnly")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> ProgressOnly { get; init; }
 }
 
 /// <summary>Fields of the NotificationVariant5Dto protocol contract.</summary>

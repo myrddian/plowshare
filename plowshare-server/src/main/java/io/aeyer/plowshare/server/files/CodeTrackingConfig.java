@@ -77,18 +77,17 @@ public class CodeTrackingConfig {
 
   @Bean
   @Lazy
-  public CodeWorkspaceIndex codeWorkspaceIndex(
+  public CodeIndexes codeWorkspaceIndex(
       CodeWorkspaceStore store,
       io.aeyer.plowshare.server.information.InformationCatalogue catalogue,
-      io.aeyer.plowshare.server.information.InformationLifecycle lifecycle) {
-    return new CodeWorkspaceIndex(store, catalogue, lifecycle);
+      io.aeyer.plowshare.server.information.InformationLifecycle lifecycle,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    return new CodeWorkspaceIndex(store, catalogue, lifecycle).useAdmission(admission);
   }
 
   @Bean
   public SmartInitializingSingleton codeTrackingBinding(
-      CodeWorkspaceMonitor monitor,
-      JobRuntime runtime,
-      ObjectProvider<CodeWorkspaceIndex> indexes) {
+      CodeWorkspaceMonitor monitor, JobRuntime runtime, ObjectProvider<CodeIndexes> indexes) {
     return () -> {
       monitor.indexing(indexes::getObject);
       runtime.useCodeMonitor(monitor);

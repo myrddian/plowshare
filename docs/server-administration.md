@@ -101,6 +101,12 @@ measurements are logged at TRACE when changed) and
 summary is logged). The keepalive block keeps its existing `PLOWSHARE_WS_KEEPALIVE_*`
 names.
 
+### Logical read capacity
+
+[Server read work and capacity](server-read-capacity.md) describes shared per-principal and
+process budgets across HTTP requests, event/file sockets, report loaders and subscriptions.
+These bounds apply before database acquisition and complement the connection throttle below.
+
 ### Database admission throttle
 
 A wait-only throttle sits in front of connection acquisition on the main pool. It
@@ -213,7 +219,7 @@ inconsistent values fail startup.
 | `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
 | `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
 | `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
-| `max-projections` | `16` | Distinct projections (1..64). |
+| `max-projections` | `20` | Distinct projections (1..64). |
 | `version-connections` | `4` | Connections of the separate `projection-versions` pool (1..32). |
 
 ### Actuator endpoints

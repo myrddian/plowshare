@@ -98,6 +98,9 @@ public class EmbeddingConfig {
               if (properties.paused()) return;
               try {
                 dual.tick();
+              } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
+                // Shared maintenance admission defers this tick; it is not an outage to log on
+                // every timer pass. No provider attempt has started at this discovery boundary.
               } catch (RuntimeException failure) {
                 org.slf4j.LoggerFactory.getLogger(EmbeddingConfig.class)
                     .warn(

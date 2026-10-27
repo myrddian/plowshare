@@ -129,6 +129,41 @@ class ScopedGrantPersistenceTest {
   }
 
   @Test
+  void batchProjectRolesMatchScalarPolicyForHumansTokensAndLiveWithdrawal() {
+    migrate();
+    members.assign("one", "alice", ProjectRole.MANAGER, "admin", true);
+    members.assign("two", "bob", ProjectRole.VIEWER, "admin", true);
+    var serviceAccounts = new io.aeyer.plowshare.server.auth.JdbcServiceAccountRepository(jdbc);
+    serviceAccounts.create("service");
+    members.assign("one", "service", ProjectRole.MANAGER, "admin", true);
+    UUID token = UUID.randomUUID();
+    String principal = "@service/" + token;
+    serviceAccounts.issue(
+        token,
+        "service",
+        "reader",
+        principal,
+        "2".repeat(64),
+        OffsetDateTime.now().plusDays(1),
+        List.of(
+            new io.aeyer.plowshare.server.auth.ServiceAccounts.Scope("one", ProjectRole.VIEWER)));
+    var names = List.of("one", "two", "missing", "personal:someone-else");
+    for (String actor : List.of("alice", "bob", "admin", principal)) assertRoleParity(names, actor);
+    jdbc.update("UPDATE service_tokens SET revoked_at=now() WHERE id=?", token);
+    assertRoleParity(names, principal);
+    assertTrue(members.roles(names, principal).isEmpty());
+    jdbc.update("UPDATE admins SET enabled=false WHERE handle='alice'");
+    assertRoleParity(names, "alice");
+    assertTrue(members.roles(names, "alice").isEmpty());
+  }
+
+  private void assertRoleParity(List<String> names, String actor) {
+    var expected = new LinkedHashMap<String, ProjectRole>();
+    for (String name : names) members.role(name, actor).ifPresent(role -> expected.put(name, role));
+    assertEquals(expected, members.roles(names, actor));
+  }
+
+  @Test
   void migration_snapshots_legacy_admin_data_but_new_admins_and_projects_get_control_only() {
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) SELECT id,'alice','VIEWER' FROM projects WHERE name='one'");
@@ -406,6 +441,8 @@ class ScopedGrantPersistenceTest {
                 Optional.empty(),
                 false));
     assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
+    assertEquals(List.of(grants.lineage(child.id())), grants.projectLineages("one", "bob"));
+    assertTrue(grants.projectLineages("two", "bob").isEmpty());
     assertThrows(
         DataAccessException.class,
         () ->
@@ -461,6 +498,9 @@ class ScopedGrantPersistenceTest {
     grants.revoke(manager.id(), 1, who("admin"), control());
     assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
     assertTrue(grants.find(child.id()).orElseThrow().revokedAt().isEmpty());
+    assertTrue(
+        grants.projectLineages("one", "bob").isEmpty(),
+        "retained child records cannot revive a revoked issuing chain");
     assertEquals(2, grants.find(manager.id()).orElseThrow().version());
     assertThrows(CallerFault.class, () -> grants.revoke(manager.id(), 1, who("admin"), control()));
     assertEquals(
@@ -567,6 +607,7 @@ class ScopedGrantPersistenceTest {
                 ApplicationPolicy.Kind.APPLICATION,
                 Map.of("alice", ProjectRole.VIEWER, "bob", ProjectRole.MANAGER)));
     assertTrue(effective.role("one", "bob").isEmpty());
+    assertTrue(effective.roles(List.of("one"), "bob").isEmpty());
     assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
     when(applications.read("one"))
         .thenReturn(
@@ -574,6 +615,7 @@ class ScopedGrantPersistenceTest {
                 ApplicationPolicy.Kind.APPLICATION,
                 Map.of("alice", ProjectRole.MANAGER, "bob", ProjectRole.MANAGER)));
     assertEquals(ProjectRole.CONTRIBUTOR, effective.role("one", "bob").orElseThrow());
+    assertEquals(Map.of("one", ProjectRole.CONTRIBUTOR), effective.roles(List.of("one"), "bob"));
     assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
   }
 

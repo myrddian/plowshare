@@ -347,8 +347,10 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
         () -> {
           var delivery = locked(claim.key());
           live(delivery, claim, at);
-          Instant until =
-              requested.isAfter(delivery.leaseUntil()) ? requested : delivery.leaseUntil();
+          // The locked snapshot and live fence already validate this owner. An idempotent
+          // renewal must not rewrite updated_at or wake every Relay consumer.
+          if (!requested.isAfter(delivery.leaseUntil())) return delivery;
+          Instant until = requested;
           return transition(
               delivery,
               "UPDATE relay_deliveries SET lease_until=?,updated_at=? WHERE id=?",

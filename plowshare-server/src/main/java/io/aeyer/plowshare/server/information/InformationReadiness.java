@@ -54,9 +54,31 @@ public final class InformationReadiness {
       InformationCatalogue catalogue, InformationContext context, List<Source> sources) {
     if (sources == null || sources.isEmpty() || sources.size() > 100)
       throw new CallerFault("readiness sources must contain 1..100 references");
-    var outcomes =
-        new LinkedHashSet<>(sources)
-            .stream().map(source -> outcome(catalogue, context, source)).toList();
+    var selected = new LinkedHashSet<>(sources);
+    var acquisitions = new java.util.LinkedHashMap<UUID, AcquisitionRepository.Status>();
+    for (var source : selected) {
+      if (source.acquisition() == null || acquisitions.containsKey(source.acquisition())) continue;
+      try {
+        acquisitions.put(
+            source.acquisition(), catalogue.acquisitionStatus(context, source.acquisition()));
+      } catch (NotFoundFault unavailable) {
+        acquisitions.put(source.acquisition(), null);
+      }
+    }
+    var revisions = new LinkedHashSet<UUID>();
+    for (var source : selected) {
+      if (source.revision() != null) revisions.add(source.revision());
+      else {
+        var ticket = acquisitions.get(source.acquisition());
+        if (ticket != null && "succeeded".equals(ticket.state()) && ticket.revisionId() != null)
+          revisions.add(ticket.revisionId());
+      }
+    }
+    var states =
+        revisions.isEmpty()
+            ? java.util.Map.<UUID, InformationCatalogueRepository.ExtractionState>of()
+            : catalogue.extractionStates(context, List.copyOf(revisions));
+    var outcomes = selected.stream().map(source -> outcome(source, acquisitions, states)).toList();
     int settled = (int) outcomes.stream().filter(value -> !"pending".equals(value.state())).count();
     int ready = (int) outcomes.stream().filter(value -> "ready".equals(value.state())).count();
     return new Information.Readiness(
@@ -70,12 +92,15 @@ public final class InformationReadiness {
   }
 
   private static Information.ReadinessOutcome outcome(
-      InformationCatalogue catalogue, InformationContext context, Source source) {
+      Source source,
+      java.util.Map<UUID, AcquisitionRepository.Status> acquisitions,
+      java.util.Map<UUID, InformationCatalogueRepository.ExtractionState> states) {
     UUID revision = source.revision();
     String acquisitionState = null;
     try {
       if (source.acquisition() != null) {
-        var ticket = catalogue.acquisitionStatus(context, source.acquisition());
+        var ticket = acquisitions.get(source.acquisition());
+        if (ticket == null) throw new NotFoundFault("Unavailable acquisition");
         acquisitionState = ticket.state();
         if (!acquisitionState.equals("succeeded"))
           return new Information.ReadinessOutcome(
@@ -107,24 +132,24 @@ public final class InformationReadiness {
               null,
               null);
       }
-      catalogue.requireReadable(context, revision);
-      var status = catalogue.status(context, revision);
-      for (var step : status.steps())
-        if (step.stage().equals("extract") && step.generation() == status.generation())
-          return new Information.ReadinessOutcome(
-              revision,
-              source.acquisition(),
-              acquisitionState,
-              step.state(),
-              List.of("ready", "failed", "blocked", "cancelled", "skipped").contains(step.state())
-                  ? step.state()
-                  : "pending",
-              step.attempt(),
-              step.error(),
-              status.generation(),
-              status.sourceUri(),
-              step.startedAt(),
-              step.finishedAt());
+      var status = states.get(revision);
+      if (status == null) throw new NotFoundFault("Unavailable revision");
+      var step = status.extraction();
+      if (step != null)
+        return new Information.ReadinessOutcome(
+            revision,
+            source.acquisition(),
+            acquisitionState,
+            step.state(),
+            List.of("ready", "failed", "blocked", "cancelled", "skipped").contains(step.state())
+                ? step.state()
+                : "pending",
+            step.attempt(),
+            step.error(),
+            status.generation(),
+            status.sourceUri(),
+            step.startedAt(),
+            step.finishedAt());
       return new Information.ReadinessOutcome(
           revision,
           source.acquisition(),

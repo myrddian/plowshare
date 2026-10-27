@@ -11,6 +11,134 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class ConcurrentResourceOrderingTest {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {
+        "project.member.remove",
+        "provider.connection.change",
+        "application.file.save",
+        "approval.answer"
+      })
+  void queued_mutations_drain_prior_reads_and_prevent_later_reads_from_overtaking(String mutation)
+      throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    var firstEntered = new CompletableFuture<Void>();
+    var mutationEntered = new CompletableFuture<Void>();
+    var secondMutationEntered = new CompletableFuture<Void>();
+    var afterEntered = new CompletableFuture<Void>();
+    var firstRelease = new CompletableFuture<Void>();
+    var mutationRelease = new CompletableFuture<Void>();
+    var secondMutationRelease = new CompletableFuture<Void>();
+    var order = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 4, new DispatchTelemetry())) {
+      var connection =
+          dispatcher.connect(
+              "mutation-order",
+              (frame, delivered) -> {
+                order.add(frame);
+                return switch (frame) {
+                  case "before" -> {
+                    firstEntered.complete(null);
+                    yield firstRelease.thenRun(delivered);
+                  }
+                  case "mutation" -> {
+                    mutationEntered.complete(null);
+                    yield mutationRelease.thenRun(delivered);
+                  }
+                  case "second-mutation" -> {
+                    secondMutationEntered.complete(null);
+                    yield secondMutationRelease.thenRun(delivered);
+                  }
+                  default -> {
+                    afterEntered.complete(null);
+                    delivered.run();
+                    yield CompletableFuture.completedFuture(null);
+                  }
+                };
+              },
+              () -> fail("Unexpected failure"),
+              8);
+      try {
+        connection.offer("before", typed("before", "proc.calls"), "alice");
+        firstEntered.get(5, TimeUnit.SECONDS);
+        connection.offer("mutation", typed("mutation", mutation), "alice");
+        connection.offer("second-mutation", typed("second-mutation", mutation), "alice");
+        connection.offer("after", typed("after", "usage.calls"), "alice");
+        // Capacity is free. The queued barrier must prevent the later finite read overtaking it.
+        assertThrows(
+            java.util.concurrent.TimeoutException.class,
+            () -> afterEntered.get(100, TimeUnit.MILLISECONDS));
+        assertFalse(mutationEntered.isDone());
+        firstRelease.complete(null);
+        mutationEntered.get(5, TimeUnit.SECONDS);
+        assertFalse(secondMutationEntered.isDone());
+        assertFalse(afterEntered.isDone());
+        mutationRelease.complete(null);
+        secondMutationEntered.get(5, TimeUnit.SECONDS);
+        assertFalse(afterEntered.isDone());
+        secondMutationRelease.complete(null);
+        afterEntered.get(5, TimeUnit.SECONDS);
+        assertEquals(java.util.List.of("before", "mutation", "second-mutation", "after"), order);
+      } finally {
+        firstRelease.complete(null);
+        mutationRelease.complete(null);
+        secondMutationRelease.complete(null);
+      }
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {"conversation.context.count", "conversation.context.snapshot", "todos.read"})
+  void conversation_inspection_waits_for_its_mutation_while_another_conversation_progresses(
+      String type) throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    var entered = new CompletableFuture<Void>();
+    var same = new CompletableFuture<Void>();
+    var other = new CompletableFuture<Void>();
+    var release = new CompletableFuture<Void>();
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 4, new DispatchTelemetry())) {
+      var connection =
+          dispatcher.connect(
+              "contexts",
+              (frame, delivered) -> {
+                if (frame.equals("mutation")) {
+                  entered.complete(null);
+                  return release.thenRun(delivered);
+                }
+                (frame.equals("same") ? same : other).complete(null);
+                delivered.run();
+                return CompletableFuture.completedFuture(null);
+              },
+              () -> fail("Unexpected failure"),
+              8);
+      try {
+        connection.offer("mutation", request("mutation", "one"), "alice");
+        entered.get(5, TimeUnit.SECONDS);
+        connection.offer(
+            "same",
+            new Envelope("same", type, Envelope.CURRENT_VERSION, Map.of("conversation", "one")),
+            "alice");
+        connection.offer(
+            "other",
+            new Envelope("other", type, Envelope.CURRENT_VERSION, Map.of("conversation", "two")),
+            "alice");
+        other.get(5, TimeUnit.SECONDS);
+        assertFalse(same.isDone());
+        release.complete(null);
+        same.get(5, TimeUnit.SECONDS);
+      } finally {
+        release.complete(null);
+      }
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+    }
+  }
+
   private Envelope request(String id, String conversation) {
     return new Envelope(
         id, "conversation.resume", Envelope.CURRENT_VERSION, Map.of("conversation", conversation));
@@ -116,7 +244,16 @@ class ConcurrentResourceOrderingTest {
 
   @Test
   void the_desktop_read_hot_path_is_finite() {
-    for (String type : new String[] {"board.topics", "swarm.status", "admin.status"}) {
+    for (String type :
+        new String[] {
+          "board.topics",
+          "swarm.status",
+          "admin.status",
+          "document.list",
+          "document.detail",
+          "inbox.list",
+          "orchestration.list"
+        }) {
       var policy = DispatchPolicy.decode(typed("id", type), "alice", "connection");
       assertEquals(DispatchPolicy.Kind.FINITE, policy.kind(), type);
       assertTrue(policy.resources().isEmpty(), type);
@@ -125,6 +262,54 @@ class ConcurrentResourceOrderingTest {
     assertEquals(
         DispatchPolicy.Kind.BARRIER,
         DispatchPolicy.decode(typed("id", "unaudited.operation"), "alice", "connection").kind());
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({
+    "orchestration.list,document.detail",
+    "orchestration.list,document.list",
+    "orchestration.list,information.read",
+    "inbox.list,document.detail",
+    "inbox.list,document.list",
+    "inbox.list,information.read"
+  })
+  void a_library_read_uses_the_free_permit_while_an_activity_read_is_still_running(
+      String background, String foreground) throws Exception {
+    var budget = new PacketBudget(1024 * 1024);
+    var telemetry = new DispatchTelemetry();
+    var release = new CompletableFuture<Void>();
+    try (var dispatcher = new ConcurrentRequests(budget, 2, 4, telemetry)) {
+      var activityEntered = new CompletableFuture<Void>();
+      var libraryEntered = new CompletableFuture<Void>();
+      var connection =
+          dispatcher.connect(
+              "library",
+              (frame, delivered) -> {
+                if (frame.equals("activity")) {
+                  activityEntered.complete(null);
+                  return release.thenRun(delivered);
+                }
+                libraryEntered.complete(null);
+                delivered.run();
+                return CompletableFuture.completedFuture(null);
+              },
+              () -> fail("Unexpected transport failure"),
+              8);
+      try {
+        connection.offer("activity", typed("poll", background), "alice");
+        activityEntered.get(5, TimeUnit.SECONDS);
+        connection.offer("library", typed("read", foreground), "alice");
+        // A connection-wide barrier would wait for release, despite a free execution permit.
+        libraryEntered.get(5, TimeUnit.SECONDS);
+        assertFalse(release.isDone());
+      } finally {
+        release.complete(null);
+      }
+      dispatcher.stopAdmission();
+      dispatcher.drained().toCompletableFuture().get(5, TimeUnit.SECONDS);
+      assertEquals(0, budget.heldBytes());
+      assertEquals(0, telemetry.snapshot().resourceKeys());
+    }
   }
 
   @Test

@@ -134,7 +134,9 @@ public final class JdbcPassageRepository implements PassageRepository {
     return jdbc.query(
         sql.replace(
             marker,
-            scope.constrained() ? " AND information_log_readable(s.conversation_id,?)" : ""),
+            scope.constrained()
+                ? " AND s.conversation_id NOT IN (SELECT log FROM information_unreadable_logs(?))"
+                : ""),
         mapper,
         bound.toArray());
   }

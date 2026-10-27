@@ -1,11 +1,13 @@
 package io.aeyer.plowshare.server.relay;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +27,8 @@ public final class RelayMaintenance
   private final Supplier<Instant> clock;
   private final ScheduledExecutorService executor;
   private final AtomicBoolean started = new AtomicBoolean();
+  private final AtomicBoolean sweeping = new AtomicBoolean();
+  private final LongSupplier nanoTime;
   private RelayApprovalInboxRepository approvalInbox;
   private RelayPayloadStore payloads;
 
@@ -45,6 +49,27 @@ public final class RelayMaintenance
       Supplier<Instant> clock,
       RelayOperationRepository operations,
       RelayNativeRepository nativeInboxes) {
+    this(
+        repository,
+        deliveries,
+        executions,
+        properties,
+        clock,
+        operations,
+        nativeInboxes,
+        System::nanoTime);
+  }
+
+  RelayMaintenance(
+      RelayRepository repository,
+      RelayDeliveryRepository deliveries,
+      RelayExecutions executions,
+      RelayProperties properties,
+      Supplier<Instant> clock,
+      RelayOperationRepository operations,
+      RelayNativeRepository nativeInboxes,
+      LongSupplier nanoTime) {
+    this.nanoTime = Objects.requireNonNull(nanoTime);
     this.nativeInboxes = Objects.requireNonNull(nativeInboxes);
     this.operations = Objects.requireNonNull(operations);
     this.repository = Objects.requireNonNull(repository, "repository");
@@ -63,6 +88,17 @@ public final class RelayMaintenance
 
   /** One bounded pass, also usable with a controlled clock in tests. */
   public int sweep() {
+    // Scheduled and manually requested passes share one local lane. Other processes partition
+    // payload work with SKIP LOCKED; no connection is borrowed to wait for another local pass.
+    if (!sweeping.compareAndSet(false, true)) return 0;
+    try {
+      return sweepOnce();
+    } finally {
+      sweeping.set(false);
+    }
+  }
+
+  private int sweepOnce() {
     Instant now = RelayValues.time(clock.get());
     deliveries.recoverExpired(now, properties.getDeliveryBatchSize());
     deliveries.pruneSettled(
@@ -80,9 +116,51 @@ public final class RelayMaintenance
     // After the publication prune so references it just removed are already gone when payloads are
     // examined. Only payloads whose ejection_at has matured are examined, and each examination
     // re-checks reachability.
-    if (payloads != null) deleted += payloads.sweep(now, properties.getPayloadSweepBatch());
+    if (payloads != null) deleted += sweepPayloads(now);
     else LOG.warn("Relay payload store is not registered; unreferenced payloads are not reclaimed");
     return deleted;
+  }
+
+  /**
+   * Catch up without an unbounded loop or a catch-up thread pool. The time budget is checked
+   * between atomic batches; one in-flight batch can exceed it, bounded by repository timeouts.
+   * Empty/locked batches stop immediately. A full batch alone is ordinary progress, not overload.
+   */
+  private int sweepPayloads(Instant now) {
+    long start = nanoTime.getAsLong();
+    int examined = 0;
+    int removed = 0;
+    int batches = 0;
+    java.util.Optional<Instant> oldest = java.util.Optional.empty();
+    do {
+      var result = payloads.sweepBatch(now, properties.getPayloadSweepBatch());
+      batches++;
+      examined += result.examined();
+      removed += result.removed();
+      oldest = result.oldestDueAt();
+      if (result.examined() == 0 || oldest.isEmpty()) break;
+    } while (batches < properties.getPayloadSweepMaxBatches()
+        && nanoTime.getAsLong() - start < properties.getPayloadSweepBudget().toNanos());
+    long elapsedMs = (nanoTime.getAsLong() - start) / 1_000_000;
+    long oldestAgeSeconds =
+        oldest.map(at -> Math.max(0, Duration.between(at, now).toSeconds())).orElse(0L);
+    if (examined > 0)
+      LOG.info(
+          "Relay payload cleanup: examined={}, removed={}, batches={}, elapsedMs={}, backlog={}, oldestDueSeconds={}",
+          examined,
+          removed,
+          batches,
+          elapsedMs,
+          oldest.isPresent(),
+          oldestAgeSeconds);
+    if (oldest.isPresent()
+        && oldestAgeSeconds >= properties.getPayloadBacklogWarningAge().toSeconds())
+      LOG.warn(
+          "Relay payload cleanup backlog exceeded warning age: oldestDueSeconds={}, examined={}, batches={}",
+          oldestAgeSeconds,
+          examined,
+          batches);
+    return removed;
   }
 
   @Override

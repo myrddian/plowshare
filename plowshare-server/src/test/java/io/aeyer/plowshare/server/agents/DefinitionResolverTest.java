@@ -171,6 +171,75 @@ class DefinitionResolverTest {
                 + "max-model-calls: 4\n---\nonly on the laptop\n");
   }
 
+  private static final class ReconnectingFiles implements SessionChannel {
+    final AtomicInteger generation = new AtomicInteger();
+    final AtomicInteger asks = new AtomicInteger();
+    final AtomicBoolean replaceDuringRead = new AtomicBoolean();
+    final List<FakeFiles> versions =
+        List.of(clientOffering("oldclient"), clientOffering("newclient"));
+
+    @Override
+    public io.aeyer.plowshare.protocol.FileReply ask(
+        String session, io.aeyer.plowshare.protocol.FileRequest request) {
+      throw new AssertionError("definition reads must bind their connection");
+    }
+
+    @Override
+    public SessionChannel bound(String session) {
+      int captured = generation.get();
+      return new SessionChannel() {
+        @Override
+        public void requireCurrent(String asked) {
+          if (!session.equals(asked) || generation.get() != captured)
+            throw new io.aeyer.plowshare.server.files.SessionGoneException("connection replaced");
+        }
+
+        @Override
+        public io.aeyer.plowshare.protocol.FileReply ask(
+            String asked, io.aeyer.plowshare.protocol.FileRequest request) {
+          requireCurrent(asked);
+          asks.incrementAndGet();
+          var reply = versions.get(captured).ask(asked, request);
+          if (replaceDuringRead.getAndSet(false)) generation.incrementAndGet();
+          return reply;
+        }
+      };
+    }
+  }
+
+  @Test
+  void a_same_name_reconnect_cannot_reuse_the_old_connections_cached_definitions(@TempDir Path data)
+      throws Exception {
+    var channel = new ReconnectingFiles();
+    var resolver = resolverOver(new DataLayout(data).initialise(), id -> true, channel);
+    var caller = new DefinitionResolver.Caller(7L, "reused-session");
+    var old = resolver.forCaller(caller);
+    assertTrue(old.find("oldclient").isPresent());
+    int asks = channel.asks.get();
+    assertSame(old, resolver.forCaller(caller));
+    assertEquals(asks, channel.asks.get(), "a current cache hit must not refetch definitions");
+    channel.generation.incrementAndGet();
+    var fresh = resolver.forCaller(caller);
+    assertTrue(fresh.find("newclient").isPresent());
+    assertFalse(fresh.find("oldclient").isPresent());
+    assertSame(fresh, resolver.forCaller(caller));
+  }
+
+  @Test
+  void a_replaced_connection_cannot_publish_its_inflight_tier_into_the_new_connections_cache(
+      @TempDir Path data) throws Exception {
+    var channel = new ReconnectingFiles();
+    channel.replaceDuringRead.set(true);
+    var resolver = resolverOver(new DataLayout(data).initialise(), id -> true, channel);
+    var caller = new DefinitionResolver.Caller(7L, "reused-session");
+    assertThrows(
+        io.aeyer.plowshare.server.files.SessionGoneException.class,
+        () -> resolver.forCaller(caller));
+    var fresh = resolver.forCaller(caller);
+    assertTrue(fresh.find("newclient").isPresent());
+    assertFalse(fresh.find("oldclient").isPresent());
+  }
+
   @Test
   void deployed_application_needs_no_data_or_client_and_release_switch_invalidates_cache(
       @TempDir Path root) throws Exception {
@@ -843,21 +912,17 @@ class DefinitionResolverTest {
     holder.set(resolver);
     DefinitionResolver.Caller caller = new DefinitionResolver.Caller(7L, "session-A");
 
-    AgentRegistry first = resolver.forCaller(caller);
+    assertThrows(
+        io.aeyer.plowshare.server.files.SessionGoneException.class,
+        () -> resolver.forCaller(caller));
     AgentRegistry second = resolver.forCaller(caller);
 
     assertTrue(
-        first.find("mine").isPresent(),
-        "the fixture is wrong: this resolution must actually have built a project tier");
+        second.find("mine").isPresent(),
+        "the subsequent sessionless lookup still reads the server's project tier");
     assertTrue(
         fired.get(),
         "the fixture is wrong: the channel was never asked, so no close landed mid-read");
-    assertNotSame(
-        first,
-        second,
-        "a registry keyed by a session that closed mid-resolution stayed in the cache;"
-            + " the session id is chosen by the client, so that entry can never be"
-            + " asked for again and nothing will ever remove it");
   }
 
   /**

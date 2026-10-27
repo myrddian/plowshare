@@ -6290,6 +6290,7 @@ class NotificationVariant3Dto:
 class NotificationVariant4Dto:
     """Validated fields of the NotificationVariant4Dto protocol contract."""
     kind: Literal["information.invalidated"]
+    progress_only: bool | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
 class NotificationVariant5Dto:
@@ -10606,7 +10607,7 @@ _FIELDS = {
     WebFetchPayloadDto: {"offset": "offset", "url": "url"},
     WebSearchPayloadDto: {"max": "max", "page": "page", "pageSize": "page_size", "query": "query"},
     NotificationVariant3Dto: {"kind": "kind", "unread": "unread"},
-    NotificationVariant4Dto: {"kind": "kind"},
+    NotificationVariant4Dto: {"kind": "kind", "progressOnly": "progress_only"},
     NotificationVariant5Dto: {"generation": "generation", "kind": "kind", "revision": "revision", "sequence": "sequence"},
     NotificationVariant6Dto: {"kind": "kind", "orchestration": "orchestration", "state": "state"},
     NotificationVariant7Dto: {"kind": "kind", "orchestration": "orchestration", "requestId": "request_id"},

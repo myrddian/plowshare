@@ -26,6 +26,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final ProjectionCache<List<Information.Revision>> listCache;
   private final ProjectionCache<Information.Facets> facetsCache;
   private final InformationEvents events;
+  private final ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   /**
@@ -71,6 +72,29 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       ProjectionCache<List<Information.Revision>> listCache,
       ProjectionCache<Information.Facets> facetsCache,
       InformationEvents events) {
+    this(
+        jdbc,
+        clock,
+        allowances,
+        metadataCache,
+        textCache,
+        listCache,
+        facetsCache,
+        ProjectionCache.direct(),
+        events);
+  }
+
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache,
+      ProjectionCache<List<Information.Revision>> listCache,
+      ProjectionCache<Information.Facets> facetsCache,
+      ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache,
+      InformationEvents events) {
+    this.readinessCache = Objects.requireNonNull(readinessCache);
     this.events = Objects.requireNonNull(events);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
@@ -163,6 +187,101 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             Integer.class,
             args.toArray())
         .isEmpty();
+  }
+
+  @Override
+  public java.util.Map<UUID, ExtractionState> extractionStates(
+      InformationContext context, List<UUID> revisions) {
+    if (revisions == null || revisions.size() > 100)
+      throw new io.aeyer.plowshare.server.faults.CallerFault("Readiness has at most 100 revisions");
+    var ids = List.copyOf(revisions).stream().distinct().sorted().toList();
+    if (ids.isEmpty()) return java.util.Map.of();
+    if (!readinessCache.enabled()) return loadExtractionStates(context, ids, null);
+    long available = readinessCache.maxWeight() - contextWeight(context) - 1024L * ids.size();
+    long bound = Math.max(0, available / (4L * ids.size()));
+    return readinessCache.read(
+        new SnapshotCache.Key(
+            "readiness",
+            ProjectionCache.fingerprint(InformationJson.json(context), InformationJson.json(ids))),
+        bound > 0,
+        () -> loadExtractionStates(context, ids, bound),
+        () -> loadExtractionStates(context, ids, null),
+        value ->
+            contextWeight(context)
+                + 4L * InformationJson.json(value).length()
+                + 1024L * value.size());
+  }
+
+  private java.util.Map<UUID, ExtractionState> loadExtractionStates(
+      InformationContext context, List<UUID> ids, Long maximumBytes) {
+    var boundary = context.readBoundary();
+    var args =
+        new ArrayList<Object>(
+            java.util.Arrays.asList(
+                context.account(),
+                context.selection().scope().name().toLowerCase(Locale.ROOT),
+                context.selection().project(),
+                context.selection().includeGlobal(),
+                boundary == null ? null : boundary.home().project(),
+                boundary == null ? null : boundary.globalRead(),
+                "{"
+                    + ids.stream()
+                        .map(UUID::toString)
+                        .collect(java.util.stream.Collectors.joining(","))
+                    + "}"));
+    String bytes = "(octet_length(coalesce(r.source_uri,''))+octet_length(coalesce(s.error,'')))";
+    String fits = maximumBytes == null ? "true" : bytes + "<=?";
+    if (maximumBytes != null) {
+      args.add(maximumBytes);
+      args.add(maximumBytes);
+    }
+    var content = InformationSql.content(context, "r");
+    args.addAll(content.arguments());
+    var rows =
+        jdbc.query(
+            "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) "
+                + "SELECT r.id,r.generation,CASE WHEN "
+                + fits
+                + " THEN r.source_uri END AS source_uri,s.stage,s.state,s.attempt,"
+                + "CASE WHEN "
+                + fits
+                + " THEN s.error END AS error,s.started_at,s.finished_at,"
+                + bytes
+                + " AS projection_bytes "
+                + "FROM admitted JOIN information_revisions r ON r.id=admitted.revision "
+                + "LEFT JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='extract' WHERE "
+                + content.sql(),
+            (row, index) -> {
+              if (maximumBytes != null && row.getLong("projection_bytes") > maximumBytes)
+                throw new ProjectionCache.Bypass();
+              return new ExtractionState(
+                  row.getObject("id", UUID.class),
+                  row.getLong("generation"),
+                  row.getString("source_uri"),
+                  row.getString("stage") == null
+                      ? null
+                      : new Information.Step(
+                          row.getString("stage"),
+                          row.getString("state"),
+                          row.getInt("attempt"),
+                          row.getString("error"),
+                          row.getLong("generation"),
+                          null,
+                          row.getObject("started_at", java.time.OffsetDateTime.class) == null
+                              ? null
+                              : row.getObject("started_at", java.time.OffsetDateTime.class)
+                                  .toInstant(),
+                          row.getObject("finished_at", java.time.OffsetDateTime.class) == null
+                              ? null
+                              : row.getObject("finished_at", java.time.OffsetDateTime.class)
+                                  .toInstant(),
+                          null));
+            },
+            args.toArray());
+    return rows.stream()
+        .collect(
+            java.util.stream.Collectors.toUnmodifiableMap(
+                ExtractionState::revision, value -> value));
   }
 
   public Optional<AuthorizedMetadata> authorizedMetadata(
@@ -596,53 +715,101 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     return decode(found.getFirst(), Information.Evidence.class);
   }
 
-  public io.aeyer.plowshare.server.documents.CodeProjection codeProjection(
-      InformationContext context, UUID revision, String rawHash) {
-
-    if (!readable(context, revision)) throw absent();
-    var filter = io.aeyer.plowshare.server.information.InformationSql.read(context, "r");
+  @Override
+  public Map<UUID, io.aeyer.plowshare.server.documents.CodeOutline> codeStates(
+      InformationContext context, Map<UUID, String> hashes) {
+    if (hashes == null || hashes.size() > 100)
+      throw new IllegalArgumentException("Code status has at most 100 revisions");
+    if (hashes.isEmpty()) return Map.of();
+    var ids = hashes.keySet().stream().sorted().toList();
+    var boundary = context.readBoundary();
     var args =
         new ArrayList<Object>(
-            List.of(revision, rawHash, io.aeyer.plowshare.server.documents.CodeOutline.VERSION));
+            Arrays.asList(
+                context.account(),
+                context.selection().scope().name().toLowerCase(Locale.ROOT),
+                context.selection().project(),
+                context.selection().includeGlobal(),
+                boundary == null ? null : boundary.home().project(),
+                boundary == null ? null : boundary.globalRead(),
+                "{"
+                    + ids.stream()
+                        .map(UUID::toString)
+                        .collect(java.util.stream.Collectors.joining(","))
+                    + "}"));
+    var content = InformationSql.content(context, "r");
+    args.add(io.aeyer.plowshare.server.documents.CodeOutline.VERSION);
+    args.addAll(content.arguments());
+    var result = new HashMap<UUID, io.aeyer.plowshare.server.documents.CodeOutline>();
+    jdbc.query(
+        "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) "
+            + "SELECT r.id,r.content_hash,o.status,o.reason,o.language,o.parser_version,o.source_hash "
+            + "FROM admitted JOIN information_revisions r ON r.id=admitted.revision JOIN code_outlines o ON o.document_id=r.id "
+            + "JOIN information_steps step ON step.revision_id=r.id AND step.generation=r.generation AND step.stage='derive' AND step.state='ready' "
+            + "WHERE r.document_type='code' AND NOT r.excluded AND o.parser_version=? AND o.source_hash=r.text_hash AND "
+            + content.sql(),
+        (org.springframework.jdbc.core.RowCallbackHandler)
+            row -> {
+              UUID id = row.getObject("id", UUID.class);
+              if (Objects.equals(hashes.get(id), row.getString("content_hash")))
+                result.put(
+                    id,
+                    new io.aeyer.plowshare.server.documents.CodeOutline(
+                        row.getString("status"),
+                        row.getString("reason"),
+                        row.getString("language"),
+                        row.getString("parser_version"),
+                        row.getString("source_hash"),
+                        List.of()));
+            },
+        args.toArray());
+    return Map.copyOf(result);
+  }
+
+  public io.aeyer.plowshare.server.documents.CodeProjection codeProjection(
+      InformationContext context, UUID revision, String rawHash) {
+    var filter = InformationSql.read(context, "r");
+    var args = new ArrayList<Object>();
+    args.add(revision);
     args.addAll(filter.arguments());
+    args.add(rawHash);
+    args.add(io.aeyer.plowshare.server.documents.CodeOutline.VERSION);
+    // One authorized relation feeds both metadata and symbols. JSON is only a JDBC-boundary
+    // encoding, so source text is transferred once instead of once per symbol. The final current
+    // READ remains a concurrency fence, not another hydration of this immutable projection.
     var rows =
         jdbc.queryForList(
-            "SELECT r.extracted_text,o.* FROM information_revision_allowances r JOIN code_outlines o ON o.document_id=r.id"
-                + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='derive' AND s.state='ready'"
-                + " WHERE r.id=? AND r.content_hash=? AND r.document_type='code' AND r.availability='active' AND NOT r.excluded AND o.parser_version=? AND o.source_hash=r.text_hash AND "
-                + filter.sql(),
-            args.toArray());
-    if (rows.isEmpty()) return null;
-    var row = rows.getFirst();
-    var symbolArgs = new ArrayList<Object>(List.of(revision));
-    symbolArgs.addAll(filter.arguments());
-    var symbols =
-        jdbc.query(
-            "SELECT s.ordinal,s.name,s.kind,s.qualified_name,s.parent_ordinal,s.signature,s.start_offset,s.end_offset,s.start_line,s.end_line"
-                + " FROM code_symbols s JOIN information_revision_allowances r ON r.id=s.document_id WHERE r.id=? AND "
+            "WITH allowed AS MATERIALIZED (SELECT r.id FROM information_revision_allowances r WHERE r.id=? AND "
                 + filter.sql()
-                + " ORDER BY s.ordinal LIMIT 10001",
-            (rs, n) ->
-                new io.aeyer.plowshare.server.documents.CodeOutline.Symbol(
-                    rs.getInt(1),
-                    rs.getString(2),
-                    rs.getString(3),
-                    rs.getString(4),
-                    (Integer) rs.getObject(5),
-                    rs.getString(6),
-                    rs.getInt(7),
-                    rs.getInt(8),
-                    rs.getInt(9),
-                    rs.getInt(10)),
-            symbolArgs.toArray());
-    String text = (String) row.get("extracted_text");
-    if (text == null
-        || text.length() > io.aeyer.plowshare.server.documents.CodeOutline.MAX_SOURCE_CHARS
-        || symbols.size() > 10000) return null;
+                + "), "
+                + "projection AS MATERIALIZED (SELECT r.id,CASE WHEN length(r.extracted_text)<=1048576 THEN r.extracted_text END AS extracted_text,o.* "
+                + "FROM allowed JOIN information_revisions r ON r.id=allowed.id JOIN code_outlines o ON o.document_id=r.id "
+                + "JOIN information_steps step ON step.revision_id=r.id AND step.generation=r.generation AND step.stage='derive' AND step.state='ready' "
+                + "WHERE r.content_hash=? AND r.document_type='code' AND r.availability='active' AND NOT r.excluded AND o.parser_version=? AND o.source_hash=r.text_hash) "
+                + "SELECT EXISTS(SELECT 1 FROM allowed) AS readable,p.*, "
+                + "(SELECT coalesce(jsonb_agg(jsonb_build_object('ordinal',s.ordinal,'name',s.name,'kind',s.kind,'qualifiedName',s.qualified_name,"
+                + "'parentOrdinal',s.parent_ordinal,'signature',s.signature,'start',s.start_offset,'end',s.end_offset,'startLine',s.start_line,'endLine',s.end_line) ORDER BY s.ordinal),'[]'::jsonb)::text "
+                + "FROM (SELECT * FROM code_symbols WHERE document_id=p.id ORDER BY ordinal LIMIT 10001) s) AS symbols "
+                + "FROM (SELECT 1) seed LEFT JOIN projection p ON true",
+            args.toArray());
+    var row = rows.getFirst();
+    if (!Boolean.TRUE.equals(row.get("readable"))) throw absent();
+    if (row.get("extracted_text") == null || row.get("status") == null) return null;
+    List<io.aeyer.plowshare.server.documents.CodeOutline.Symbol> symbols;
+    try {
+      symbols =
+          JSON.readValue(
+              (String) row.get("symbols"),
+              new com.fasterxml.jackson.core.type.TypeReference<
+                  List<io.aeyer.plowshare.server.documents.CodeOutline.Symbol>>() {});
+    } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+      throw new IllegalStateException("Invalid retained code symbols", invalid);
+    }
+    if (symbols.size() > 10000) return null;
     if (!readable(context, revision)) throw absent();
     return new io.aeyer.plowshare.server.documents.CodeProjection(
         revision,
-        text,
+        (String) row.get("extracted_text"),
         new io.aeyer.plowshare.server.documents.CodeOutline(
             (String) row.get("status"),
             (String) row.get("reason"),

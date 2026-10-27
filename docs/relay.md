@@ -887,27 +887,59 @@ the payload row reachable. There is no reason to limit subscribers on a topic th
 carries large TEXT, or to hold the bytes elsewhere behind a reference payload, to
 avoid copying.
 
-A payload row is reclaimed by a sweep on the retention schedule, and only when no
-publication and no admission references it. `ejection_at` schedules the next
-examination and never authorizes a deletion. The sweep is governed by three
-settings, which are not independent:
+A payload row is reclaimed only when no publication and no admission references it.
+`ejection_at` schedules an examination; it never authorizes deletion. Cleanup reads
+only digests, reference metadata and dates, without loading payload bytes.
+`V200` preserves V192's exact JSON/type/byte bounds in an INSERT/content-UPDATE
+trigger. Metadata-only changes therefore avoid re-rendering and validating the
+whole retained JSONB value; NOT NULL, digest, byte-length and reference constraints
+remain in force. The migration changes no retained bytes or examination dates.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `plowshare.relay.payload-staging-window` | 1 hour (5 minutes to 7 days) | Minimum protection for a stored but not yet referenced payload; it must exceed the longest append and the expected clock skew between nodes |
-| `plowshare.relay.payload-deferral-ceiling` | 24 hours (1 hour to 30 days) | Longest a sweep defers the next examination of a referenced payload |
-| `plowshare.relay.payload-sweep-batch` | 100 (to 1000) | Candidates examined per pass |
+| `plowshare.relay.payload-staging-window` | 1 hour (5 minutes to 7 days) | Minimum protection before a stored payload is referenced; must exceed the longest append and expected inter-node clock skew |
+| `plowshare.relay.payload-deferral-ceiling` | 24 hours (1 hour to 30 days) | Maximum next-examination delay for a referenced payload |
+| `plowshare.relay.payload-sweep-batch` | 100 (1 to 1000) | Payloads locked and examined in one transaction |
+| `plowshare.relay.payload-sweep-max-batches` | 4 (1 to 16) | Maximum catch-up batches per scheduled pass |
+| `plowshare.relay.payload-sweep-budget` | 250 ms (10 ms to 5 s) | Monotonic time budget, checked between batches |
+| `plowshare.relay.payload-backlog-warning-age` | 15 minutes (1 minute to 1 day) | Age of the oldest remaining due payload before warning |
 
-Every referenced payload is re-examined at least once per deferral ceiling, so the
-sweep must cover the whole corpus in that time. The corpus fits only while
-`distinct payloads <= payload-sweep-batch * payload-deferral-ceiling / cleanup-interval`,
-which is about 144,000 for the defaults (100 per pass, one pass a minute, 24 hours),
-and lowering the ceiling lowers that capacity in proportion. Beyond it, candidates are
-taken oldest `ejection_at` first, so newly orphaned payloads can queue behind overdue
-referenced ones and unreferenced bytes accumulate. A pass that fills its whole batch
-logs a warning naming the batch size; treat it as a sign to raise the batch or the
-ceiling. (This is how the sweep is designed to behave; no test exercises a saturated
-corpus.)
+These settings have explicit `PLOWSHARE_RELAY_*` environment bindings in
+`application.yml`. Cleanup retains the global database admission throttle. A local
+pass cannot overlap another local pass. Processes partition due rows with
+`FOR UPDATE SKIP LOCKED`; busy payloads are retried on a later schedule, without
+waiting or starting a catch-up thread pool.
+
+A nonempty batch uses one transaction and three JDBC calls: transaction-local
+limits, an indexed locked selection, then one set-based statement. That statement
+aggregates references to the selected digests once, deletes unreachable rows,
+defers survivors and reports an indexed remaining-work hint. The locked selection
+and reference query are separate statements in a fresh READ COMMITTED transaction:
+this ensures references committed before lock acquisition are visible. Both foreign
+keys and the live `ejection_at` predicate remain fences. No per-row SQL, fallback
+transactions or receiver effects are involved. Any failure rolls back the batch.
+
+Each statement has a two-second timeout, locks have a 100 ms timeout, and the batch
+transaction has a five-second timeout. The catch-up budget does not interrupt an
+atomic batch, so a slow in-flight batch can exceed that budget up to these limits.
+It stops immediately on an empty/locked batch. Unfinished work remains durable for
+the next scheduled pass; raising limits consumes more database capacity.
+
+Referenced rows are rescheduled near their reference-retention horizon, capped by
+the deferral ceiling. A stable digest-derived spread moves that date earlier by
+up to one hour or one quarter of the remaining delay, whichever is smaller. A
+one-minute future floor prevents an elapsed-but-still-referenced row from being
+selected again in the same pass. Re-storing a digest still only moves its date
+forward and preserves its full staging window. Spreading examinations avoids
+recreating the hourly herd while keeping reachability authoritative.
+
+An INFO summary reports examined/removed rows, batches, elapsed time, remaining
+backlog and oldest due age. A full batch is normal progress; warning is based on
+remaining overdue work. The remaining-work hint is not a full-table count and can
+change immediately after commit. Capacity remains finite: required examinations
+must fit the configured batch, time, interval and PostgreSQL headroom budgets.
+Regression tests cover bounded catch-up, 1/100/1000-row SQL budgets, saturated
+progress, rescheduling, rollback, concurrent sweepers and FK/reference races.
 
 **Deploy ordering.** `V194` drops the old `payload` columns, so it must not be
 applied while any instance that predates the payload-store release is still serving:

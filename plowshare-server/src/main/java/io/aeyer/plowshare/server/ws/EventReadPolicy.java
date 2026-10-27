@@ -14,8 +14,9 @@ import java.util.Set;
  * Search, await, subscriptions, cursor/lease acquisition and acting-context operations stay
  * ordered. Malformed envelopes also stay ordered; operation payload validation belongs to the
  * router and may run independently for an admitted envelope. Information status also stays ordered:
- * its hidden-read fallback acquires write-admission locks. Add a type only after auditing its
- * complete handler path for effects, including optional fields.
+ * its hidden-read fallback acquires write-admission locks. The shared dispatch read inventory
+ * admits a type only after auditing its complete handler path for effects, including optional
+ * fields.
  */
 final class EventReadPolicy {
   private static final ObjectMapper JSON =
@@ -29,21 +30,6 @@ final class EventReadPolicy {
       JSON.coercionConfigFor(LogicalType.Textual).setCoercion(shape, CoercionAction.Fail);
     }
   }
-
-  private static final Set<String> INDEPENDENT =
-      Set.of(
-          "information.list",
-          "information.facets",
-          "information.read",
-          "information.navigation.capabilities",
-          "information.documents.list",
-          "information.documents.facets",
-          "information.documents.get",
-          "information.relationships.list",
-          "relay.topics",
-          "relay.log",
-          "schedule.list",
-          "schedule.files");
 
   private EventReadPolicy() {}
 
@@ -59,7 +45,7 @@ final class EventReadPolicy {
           && !request.id().isBlank()
           && request.payload() != null
           && request.actingFor() == null
-          && INDEPENDENT.contains(request.type());
+          && DispatchPolicy.independentRead(request.type());
     } catch (IOException | IllegalArgumentException malformed) {
       // Routing owns the refusal and correlation. Failed scheduling decode is an ordered barrier.
       return false;

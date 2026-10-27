@@ -24,14 +24,14 @@ import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
  * Caller SQL is used only to refuse dirty, historical or expiry-spanning shared admission.
  *
  * <p>Spring synchronization may retain the independent autocommit lease until the caller
- * transaction completes. Freshness and the completed probe barrier are per statement, not
- * necessarily per new physical lease. The version pool is separately bounded and must account for
- * this occupancy.
+ * transaction completes. Freshness and the captured snapshot are per statement, not necessarily per
+ * new physical lease. The version pool is separately bounded and must account for this occupancy.
  */
 public final class JdbcProjectionVersions implements ProjectionVersions {
   private record Counters(UUID database, Map<Domain, Long> values) {}
 
-  private record Pending(List<String> transactions, Instant start, Instant until) {}
+  private record Captured(
+      Counters counters, List<String> pending, String futureFrom, Instant start, Instant until) {}
 
   private record Eligibility(
       boolean safe, String callerTransaction, Instant transactionTime, UUID database) {}
@@ -47,6 +47,20 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
         (SELECT expires_at FROM service_tokens WHERE expires_at>moment.at ORDER BY expires_at LIMIT 1)
       ) AS valid_until
       """;
+
+  private static String expiryWindow(Set<Domain> domains) {
+    if (!domains.contains(Domain.OBSERVATIONS) && !domains.contains(Domain.QUEUES))
+      return EXPIRY_WINDOW;
+    return EXPIRY_WINDOW
+        .replace(
+            "(SELECT expires_at FROM service_tokens WHERE expires_at<=moment.at ORDER BY expires_at DESC LIMIT 1)",
+            "(SELECT expires_at FROM service_tokens WHERE expires_at<=moment.at ORDER BY expires_at DESC LIMIT 1),"
+                + "(SELECT lease_until FROM information_steps WHERE state='running' AND lease_until IS NOT NULL AND lease_until<=moment.at ORDER BY lease_until DESC LIMIT 1)")
+        .replace(
+            "(SELECT expires_at FROM service_tokens WHERE expires_at>moment.at ORDER BY expires_at LIMIT 1)",
+            "(SELECT expires_at FROM service_tokens WHERE expires_at>moment.at ORDER BY expires_at LIMIT 1),"
+                + "(SELECT lease_until FROM information_steps WHERE state='running' AND lease_until IS NOT NULL AND lease_until>moment.at ORDER BY lease_until LIMIT 1)");
+  }
 
   private final JdbcTemplate caller;
   private final JdbcTemplate authoritative;
@@ -76,28 +90,29 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
     Set<Domain> selected = checked(domains);
     Eligibility eligibility = eligibility();
     if (!eligibility.safe()) return Optional.empty();
-    // Do not combine these statements. The first reads counters then allocates/commits a probe XID.
-    // Snapshot xmax follows completed XIDs; without that barrier an active tail writer might be
-    // absent from xip even though its allocation was observed. Autocommit completes the probe
-    // statement before the first JdbcTemplate call returns; the second gets a fresh snapshot even
-    // if Spring synchronization retains/reuses the independent lease until the outer transaction
-    // ends.
-    Counters counters = captureCounters(selected);
-    // Dedicated pool configuration must identify the caller's actual database/schema. A separate
-    // but healthy database cannot fence this caller's mutations, even with equal numeric counters.
-    if (!counters.database().equals(eligibility.database())) return Optional.empty();
-    Pending pending =
+    // Snapshot xmax is essential: an assigned tail writer may be absent from snapshot xip.
+    // Relevant committed journal rows at/above xmax remain evidence even when counters stay flat.
+    // The snapshot and counters need no completed reader probe, XID allocation or second checkout.
+    Captured captured =
         Objects.requireNonNull(
             authoritative.queryForObject(
-                "WITH moment AS MATERIALIZED (SELECT clock_timestamp() AS at) SELECT "
-                    + "ARRAY(SELECT xid::text FROM pg_snapshot_xip(pg_current_snapshot()) xid LIMIT ?) AS pending,"
-                    + EXPIRY_WINDOW
-                    + " FROM moment",
+                "WITH moment AS MATERIALIZED (SELECT clock_timestamp() AS at,pg_current_snapshot() AS snapshot),"
+                    + " version AS MATERIALIZED (SELECT * FROM snapshot_cache_capture_counters()) SELECT version.*,"
+                    + " ARRAY(SELECT xid::text FROM pg_snapshot_xip(moment.snapshot) xid LIMIT ?) AS pending,"
+                    + " pg_snapshot_xmax(moment.snapshot)::text AS future_from,"
+                    + expiryWindow(selected)
+                    + " FROM moment,version",
                 (row, index) -> {
+                  var values = new EnumMap<Domain, Long>(Domain.class);
+                  for (Domain domain : selected)
+                    values.put(
+                        domain, row.getLong(domain.name().toLowerCase(java.util.Locale.ROOT)));
                   java.sql.Array array = row.getArray("pending");
                   try {
-                    return new Pending(
+                    return new Captured(
+                        new Counters(row.getObject("database_id", UUID.class), Map.copyOf(values)),
                         List.of((String[]) array.getArray()),
+                        row.getString("future_from"),
                         instant(row.getObject("window_start", OffsetDateTime.class)),
                         instant(row.getObject("valid_until", OffsetDateTime.class)));
                   } finally {
@@ -105,26 +120,25 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
                   }
                 },
                 maxPending + 2));
-    // An expiry may cross after the caller guard but before the authoritative window query. A
-    // warm hit must not attach the new visibility window to SQL evaluated using an older now().
-    // Check both interval ends: wall clock may also move backwards across an expiry boundary.
-    if (pending.start() != null && eligibility.transactionTime().isBefore(pending.start())
-        || pending.until() != null && !eligibility.transactionTime().isBefore(pending.until()))
+    if (!captured.counters().database().equals(eligibility.database())) return Optional.empty();
+    // Protect an outer READ COMMITTED transaction's now(), including expiry during capture and
+    // backwards clock movement. Sharing cannot attach a new authority window to historical SQL.
+    if (captured.start() != null && eligibility.transactionTime().isBefore(captured.start())
+        || captured.until() != null && !eligibility.transactionTime().isBefore(captured.until()))
       return Optional.empty();
-    // One extra slot permits the explicitly safe caller-XID exception; a second is the overflow
-    // sentinel, so filtering the caller can never hide omitted active transactions.
-    List<String> transactions =
-        pending.transactions().stream()
+    var pending =
+        captured.pending().stream()
             .filter(id -> !id.equals(eligibility.callerTransaction()))
             .toList();
-    if (transactions.size() > maxPending) return Optional.empty();
+    if (pending.size() > maxPending) return Optional.empty();
     return Optional.of(
         new Token(
-            counters.database(),
-            counters.values(),
-            transactions,
-            pending.start(),
-            pending.until()));
+            captured.counters().database(),
+            captured.counters().values(),
+            pending,
+            captured.futureFrom(),
+            captured.start(),
+            captured.until()));
   }
 
   @Override
@@ -135,7 +149,7 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
         new StringBuilder("WITH version AS MATERIALIZED (")
             .append(counterSql(token.counters().keySet()))
             .append("), moment AS MATERIALIZED (SELECT clock_timestamp() AS at FROM version) ")
-            .append("SELECT database_id=?");
+            .append("SELECT database_id=? AND writer_floor IS NOT NULL");
     var args = new ArrayList<Object>();
     args.add(token.database());
     for (Domain domain : Domain.values()) {
@@ -145,17 +159,36 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
     }
     sql.append(" AND (?::timestamptz IS NULL OR moment.at>=?::timestamptz)")
         .append(" AND (?::timestamptz IS NULL OR moment.at<?::timestamptz)")
-        .append(" AND NOT EXISTS(SELECT 1 FROM unnest(?::text[]) xid")
-        .append(" WHERE pg_xact_status(xid::xid8) IS DISTINCT FROM 'in progress'")
-        .append(" AND pg_xact_status(xid::xid8) IS DISTINCT FROM 'aborted') FROM version,moment");
+        .append(" AND ?::xid8>writer_floor")
+        .append(" AND NOT EXISTS(SELECT 1 FROM unnest(?::text[]) pending(xid)")
+        .append(
+            " WHERE pending.xid::xid8<=writer_floor OR pg_xact_status(pending.xid::xid8) IS NULL)")
+        .append(" AND NOT EXISTS(SELECT 1 FROM snapshot_cache_writers writer")
+        .append(" WHERE writer.domain=ANY(?::text[]) AND writer.xid>=?::xid8)")
+        .append(" AND NOT EXISTS(SELECT 1 FROM snapshot_cache_writers writer")
+        .append(
+            " WHERE writer.domain=ANY(?::text[]) AND writer.xid=ANY(?::xid8[])) FROM version,moment");
     args.add(offset(token.windowStart()));
     args.add(offset(token.windowStart()));
     args.add(offset(token.validUntil()));
     args.add(offset(token.validUntil()));
-    args.add("{" + String.join(",", token.pendingTransactions()) + "}");
-    // Counters never decrease and transaction outcomes are terminal. If all predicates hold,
-    // they held together during this check even if a later commit races its completion. Unlike
-    // capture, validation does not need a newer MVCC snapshot after the allocation observation.
+    args.add(token.futureTransactionsFrom());
+    String pending = "{" + String.join(",", token.pendingTransactions()) + "}";
+    String domains =
+        "{"
+            + token.counters().keySet().stream()
+                .map(domain -> domain.name().toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.joining(","))
+            + "}";
+    args.add(pending);
+    args.add(domains);
+    args.add(token.futureTransactionsFrom());
+    args.add(domains);
+    args.add(pending);
+    // Writer evidence and its retention floor use this statement's single MVCC snapshot. An
+    // unrelated/read-only commit cannot retire a value. Relevant commits after this snapshot
+    // linearize after the read and are detected next time; missing/pruned evidence fails closed.
+    // Counters remain conservative allocation hints, including during rollback.
     return Boolean.TRUE.equals(
         authoritative.queryForObject(sql.toString(), Boolean.class, args.toArray()));
   }
@@ -188,20 +221,10 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
                     row.getObject("caller_database", UUID.class))));
   }
 
-  private Counters captureCounters(Set<Domain> domains) {
-    return Objects.requireNonNull(
-        authoritative.queryForObject(
-            "SELECT database_id,documents,search,schedules,relay,transcripts,authority FROM snapshot_cache_capture_counters()",
-            (row, index) -> {
-              var values = new EnumMap<Domain, Long>(Domain.class);
-              for (Domain domain : domains)
-                values.put(domain, row.getLong(domain.name().toLowerCase(java.util.Locale.ROOT)));
-              return new Counters(row.getObject("database_id", UUID.class), Map.copyOf(values));
-            }));
-  }
-
   private static String counterSql(Set<Domain> domains) {
-    var sql = new StringBuilder("SELECT database_id");
+    var sql =
+        new StringBuilder(
+            "SELECT database_id, (SELECT through FROM snapshot_cache_writer_retention WHERE singleton) AS writer_floor");
     for (Domain domain : Domain.values()) {
       if (!domains.contains(domain)) continue;
       // Identifiers come exclusively from the closed enum, never a caller-supplied string.

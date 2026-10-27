@@ -24,7 +24,7 @@ public class InboxFrames implements FrameArea {
   @Override
   public Map<String, FrameHandler> frames() {
     return Map.ofEntries(
-        Map.entry(FrameTypes.INBOX_LIST, new InboxListHandler(inbox, store)),
+        Map.entry(FrameTypes.INBOX_LIST, new InboxListHandler(inbox)),
         Map.entry(FrameTypes.INBOX_READ, new InboxReadHandler(inbox, store)));
   }
 }

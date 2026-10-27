@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -21,6 +22,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
@@ -60,6 +63,155 @@ class ProjectionVersionsDatabaseTest {
     jdbc = new JdbcTemplate(data);
     outside = new JdbcTemplate(source());
     versions = new JdbcProjectionVersions(jdbc, source(), 128);
+  }
+
+  private UUID informationStep() {
+    UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+        resource,
+        resource.toString());
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) VALUES(?,?,1,'fixture','text/plain','fixture',1)",
+        revision,
+        resource);
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state,lease_token,lease_until) VALUES(?,1,'extract','running',?,clock_timestamp()+interval '5 minutes')",
+        revision,
+        UUID.randomUUID());
+    return revision;
+  }
+
+  @Test
+  void informationStepHeartbeatsWakeProcWithoutInvalidatingCorpusOrAuthority() {
+    UUID revision = informationStep();
+    var corpus =
+        versions
+            .capture(
+                Set.of(
+                    ProjectionVersions.Domain.DOCUMENTS,
+                    ProjectionVersions.Domain.SEARCH,
+                    ProjectionVersions.Domain.READABILITY,
+                    ProjectionVersions.Domain.AUTHORITY))
+            .orElseThrow();
+    var observations =
+        versions.capture(Set.of(ProjectionVersions.Domain.OBSERVATIONS)).orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      for (int i = 0; i < 100; i++)
+        jdbc.update(
+            "UPDATE information_steps SET lease_until=lease_until+interval '1 second' WHERE revision_id=?",
+            revision);
+      assertTrue(versions.current(corpus), "Lease traffic must not retire document/authority DTOs");
+      assertFalse(versions.current(observations), "PROC lease deadlines must remain current");
+      assertEquals(
+          Set.of(ProjectionVersions.Domain.OBSERVATIONS, ProjectionVersions.Domain.QUEUES),
+          listener.poll(Duration.ofSeconds(2)));
+      var work = new TransactionTemplate(new DataSourceTransactionManager(data));
+      work.executeWithoutResult(
+          status -> {
+            jdbc.update(
+                "UPDATE information_steps SET lease_until=NULL WHERE revision_id=?", revision);
+            assertFalse(versions.canShare(), "A heartbeat still dirties its caller transaction");
+            assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+            status.setRollbackOnly();
+          });
+      assertTrue(versions.current(corpus));
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty(), "Rollback sends no wakeup");
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "state='ready'",
+        "attempt=attempt+1",
+        "error='failure'",
+        "fingerprint='changed'",
+        "lease_token=gen_random_uuid()",
+        "started_at=clock_timestamp()",
+        "finished_at=clock_timestamp()",
+        "generation=generation+1",
+        "stage='derive'"
+      })
+  void informationStepChangesInvalidateOnlyTheirActualProjectionDependencies(String assignment) {
+    UUID first = informationStep(), second = informationStep();
+    var corpus =
+        versions
+            .capture(Set.of(ProjectionVersions.Domain.DOCUMENTS, ProjectionVersions.Domain.SEARCH))
+            .orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      // Exercise transition-table batches, including a lease-only row beside a metadata change.
+      // The assignment comes exclusively from the closed parameterized fixture above.
+      var column = assignment.split("=", 2);
+      jdbc.update(
+          "UPDATE information_steps SET "
+              + column[0]
+              + "=CASE WHEN revision_id=? THEN "
+              + column[1]
+              + " ELSE "
+              + column[0]
+              + " END,lease_until=lease_until+interval '1 second' WHERE revision_id IN (?,?)",
+          first,
+          first,
+          second);
+      boolean searchChanged =
+          Set.of("state", "fingerprint", "generation", "stage").contains(column[0]);
+      assertEquals(!searchChanged, versions.current(corpus));
+      var expected =
+          java.util.EnumSet.of(
+              ProjectionVersions.Domain.OBSERVATIONS,
+              ProjectionVersions.Domain.QUEUES,
+              ProjectionVersions.Domain.PROGRESS);
+      if (searchChanged) expected.add(ProjectionVersions.Domain.SEARCH);
+      assertEquals(expected, listener.poll(Duration.ofSeconds(2)));
+    }
+  }
+
+  @Test
+  void observationFactsInvalidateOnRuntimeWritesAndClockOnlyLeaseExpiry() throws Exception {
+    var domains = Set.of(ProjectionVersions.Domain.OBSERVATIONS);
+    var before = versions.capture(domains).orElseThrow();
+    String job = "cache-job-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO jobs(id,agent,started_at) VALUES(?,'fixture',now())", job);
+    assertFalse(versions.current(before));
+    var committed = versions.capture(domains).orElseThrow();
+    assertTrue(versions.current(committed));
+    var work = new TransactionTemplate(new DataSourceTransactionManager(data));
+    work.executeWithoutResult(
+        status -> {
+          jdbc.update("UPDATE jobs SET started_at=started_at+interval '1 second' WHERE id=?", job);
+          assertFalse(versions.canShare());
+          status.setRollbackOnly();
+        });
+    // Sequence allocation is conservative on rollback; a fresh committed snapshot remains usable.
+    var rolledBack = versions.capture(domains).orElseThrow();
+    assertTrue(versions.current(rolledBack));
+    UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+        resource,
+        resource.toString());
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) VALUES(?,?,1,'fixture','text/plain','fixture',1)",
+        revision,
+        resource);
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state,lease_token,lease_until) VALUES(?,1,'extract','running',?,clock_timestamp()+interval '2 seconds')",
+        revision,
+        UUID.randomUUID());
+    var running = versions.capture(domains).orElseThrow();
+    assertNotNull(running.validUntil());
+    assertTrue(versions.current(running));
+    long sleep =
+        Math.max(
+            0, Duration.between(Instant.now(), running.validUntil().plusMillis(100)).toMillis());
+    assertTrue(sleep < 3000, "The observation window must include the running lease");
+    TimeUnit.MILLISECONDS.sleep(sleep);
+    assertFalse(
+        versions.current(running),
+        "Expiry must retire running/pending counts without a row update");
   }
 
   @Test
@@ -205,6 +357,15 @@ class ProjectionVersionsDatabaseTest {
     assertThrows(IllegalStateException.class, () -> factory.get().create("after-close", SEARCH));
   }
 
+  private static boolean covers(ProjectionVersions.Token token, String xid) {
+    return token.pendingTransactions().contains(xid)
+        || token.futureTransactionsFrom() != null
+            && Long.compareUnsigned(
+                    Long.parseUnsignedLong(xid),
+                    Long.parseUnsignedLong(token.futureTransactionsFrom()))
+                >= 0;
+  }
+
   private static void awaitLoaderRelease(CountDownLatch release) {
     try {
       if (!release.await(5, TimeUnit.SECONDS))
@@ -231,6 +392,266 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
+  void writerEvidenceRejectsInvalidRetentionAndUnknownDomainsBeforeChangingState() {
+    for (String statement :
+        List.of(
+            "SELECT snapshot_cache_prune_writers(0,1)",
+            "SELECT snapshot_cache_prune_writers(8193,1)",
+            "SELECT snapshot_cache_prune_writers(1,1025)",
+            "SELECT snapshot_cache_record_writer(ARRAY['unknown'])",
+            "SELECT snapshot_cache_record_writer(ARRAY[]::text[])",
+            "SELECT snapshot_cache_record_writer(NULL)"))
+      assertThrows(
+          org.springframework.dao.DataAccessException.class, () -> outside.execute(statement));
+  }
+
+  @Test
+  void relevantWriterLookupDoesNotScanUnrelatedCommittedHistory() throws Exception {
+    var authority = versions.capture(Set.of(ProjectionVersions.Domain.AUTHORITY)).orElseThrow();
+    try (var connection = data.getConnection()) {
+      connection.setAutoCommit(true);
+      var writes = view(connection);
+      for (int i = 0; i < 7000; i++)
+        writes.execute("SELECT snapshot_cache_bump(ARRAY['observations'])");
+    }
+    assertTrue(
+        versions.current(authority), "Thousands of unrelated commits must preserve a warm token");
+    outside.execute("ANALYZE snapshot_cache_writers");
+    String plan =
+        outside
+            .queryForList(
+                "EXPLAIN (ANALYZE,BUFFERS,COSTS OFF) SELECT 1 FROM snapshot_cache_writers "
+                    + "WHERE domain=ANY(?::text[]) AND xid>=?::xid8",
+                String.class,
+                "{authority}",
+                authority.futureTransactionsFrom())
+            .stream()
+            .collect(java.util.stream.Collectors.joining("\n"));
+    assertTrue(plan.contains("Index") && plan.contains("Index Cond:"), plan);
+    assertFalse(plan.contains("Seq Scan"), plan);
+    assertFalse(
+        plan.contains("Rows Removed by Filter"),
+        "Lookup must use the domain/XID bounds rather than discard history: " + plan);
+  }
+
+  @Test
+  void accountingWritesDoNotInvalidateProcQueuesButTheirActualLeaseChangesStillDo() {
+    UUID journal = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES(?,now())",
+        journal);
+    UUID revision = informationStep();
+    var queues =
+        versions
+            .capture(
+                Set.of(
+                    ProjectionVersions.Domain.QUEUES,
+                    ProjectionVersions.Domain.PROGRESS,
+                    ProjectionVersions.Domain.DOCUMENTS,
+                    ProjectionVersions.Domain.SEARCH,
+                    ProjectionVersions.Domain.TRANSCRIPTS,
+                    ProjectionVersions.Domain.AUTHORITY))
+            .orElseThrow();
+    var usage = versions.capture(Set.of(ProjectionVersions.Domain.OBSERVATIONS)).orElseThrow();
+    for (int i = 0; i < 100; i++)
+      jdbc.update(
+          "UPDATE inference_accounting_journals SET projected_sequence=projected_sequence+1,last_projected_at=clock_timestamp() WHERE journal_id=?",
+          journal);
+    assertTrue(
+        versions.current(queues), "Accounting must not rerun unrelated processing aggregates");
+    assertFalse(versions.current(usage), "Usage still observes durable accounting changes");
+    jdbc.update(
+        "UPDATE information_steps SET lease_until=lease_until+interval '1 second' WHERE revision_id=?",
+        revision);
+    assertFalse(versions.current(queues));
+  }
+
+  @Test
+  void budgetAndStageProgressRetainTextTypesAndFacetsUntilTheirFactsReallyChange() {
+    UUID revision = informationStep();
+    UUID budget =
+        jdbc.queryForObject(
+            "SELECT processing_budget_id FROM information_revisions WHERE id=?",
+            UUID.class,
+            revision);
+    jdbc.update("UPDATE execution_allowances SET call_limit=100 WHERE id=?", budget);
+    var stable =
+        versions
+            .capture(
+                Set.of(
+                    ProjectionVersions.Domain.DOCUMENTS,
+                    ProjectionVersions.Domain.EXTRACTIONS,
+                    ProjectionVersions.Domain.TYPES,
+                    ProjectionVersions.Domain.READABILITY,
+                    ProjectionVersions.Domain.AUTHORITY))
+            .orElseThrow();
+    var progress = versions.capture(Set.of(ProjectionVersions.Domain.PROGRESS)).orElseThrow();
+    jdbc.queryForObject(
+        "SELECT ordinal FROM execution_allowance_claim(?,0,NULL)", Integer.class, budget);
+    jdbc.update(
+        "UPDATE information_steps SET attempt=attempt+1,error='fixture',started_at=clock_timestamp() WHERE revision_id=?",
+        revision);
+    assertTrue(versions.current(stable));
+    assertFalse(versions.current(progress));
+    // Generated tags do enter visible facets: readiness must still invalidate them.
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state) VALUES(?,1,'autoTag','pending')",
+        revision);
+    var facets = versions.capture(Set.of(ProjectionVersions.Domain.DOCUMENTS)).orElseThrow();
+    jdbc.update(
+        "UPDATE information_steps SET state='ready' WHERE revision_id=? AND stage='autoTag'",
+        revision);
+    assertFalse(versions.current(facets));
+    var text = versions.capture(Set.of(ProjectionVersions.Domain.EXTRACTIONS)).orElseThrow();
+    jdbc.update(
+        "UPDATE information_revisions SET extracted_text='new protected body' WHERE id=?",
+        revision);
+    assertFalse(versions.current(text));
+  }
+
+  @Test
+  void noOpStageUpdatesDoNotAllocateVersionsOrPublishAnyDomainHint() {
+    UUID revision = informationStep();
+    var token = versions.capture(Set.of(ProjectionVersions.Domain.values())).orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      jdbc.update(
+          "UPDATE information_steps SET state=state,lease_until=lease_until WHERE revision_id=?",
+          revision);
+      assertTrue(versions.current(token));
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+    }
+  }
+
+  @Test
+  void concurrentReaderAndCaptureProbeCommitsDoNotInvalidateUnchangedProjections()
+      throws Exception {
+    var readers = new java.util.ArrayList<Connection>();
+    try {
+      var pending = new java.util.ArrayList<String>();
+      for (int i = 0; i < 8; i++) {
+        var reader = transaction();
+        readers.add(reader);
+        view(reader).execute("SET TRANSACTION READ ONLY");
+        // Even assigned read-lock/diagnostic XIDs must not produce writer evidence or retire
+        // another reader's DTO. Normal cache captures now assign no transaction ID at all.
+        pending.add(view(reader).queryForObject("SELECT pg_current_xact_id()::text", String.class));
+      }
+      var token = versions.capture(SEARCH).orElseThrow();
+      assertTrue(pending.stream().allMatch(xid -> covers(token, xid)));
+      for (var reader : readers) {
+        reader.commit();
+        assertTrue(versions.current(token), "A committed reader must not discard the loaded DTO");
+      }
+      assertEquals(token.counters(), versions.capture(SEARCH).orElseThrow().counters());
+      assertEquals(
+          0,
+          outside.queryForObject(
+              "SELECT count(*) FROM snapshot_cache_writers WHERE xid::text=ANY(?::text[])",
+              Integer.class,
+              "{" + String.join(",", pending) + "}"));
+    } finally {
+      for (var reader : readers) reader.close();
+    }
+  }
+
+  @Test
+  void pendingCommitInvalidatesOnlyTheDomainsItActuallyWrote() throws Exception {
+    String owner = "writer-domain-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'fixture')", owner);
+    try (var writer = transaction()) {
+      var pending = view(writer);
+      pending.update("UPDATE admins SET password_hash='changed' WHERE handle=?", owner);
+      String xid = pending.queryForObject("SELECT pg_current_xact_id()::text", String.class);
+      var search = versions.capture(SEARCH).orElseThrow();
+      var authority = versions.capture(Set.of(ProjectionVersions.Domain.AUTHORITY)).orElseThrow();
+      assertTrue(covers(search, xid));
+      assertTrue(covers(authority, xid));
+      assertTrue(versions.current(search));
+      assertTrue(versions.current(authority));
+      writer.commit();
+      assertTrue(versions.current(search), "Unrelated authority writes do not change search facts");
+      assertFalse(versions.current(authority), "A late authority commit must still revoke its DTO");
+    }
+  }
+
+  @Test
+  void aPreviouslyReadOnlyPendingTransactionThatLaterWritesCannotEvadeTheFence() throws Exception {
+    try (var writer = transaction()) {
+      var pending = view(writer);
+      String xid = pending.queryForObject("SELECT pg_current_xact_id()::text", String.class);
+      var before = versions.capture(SEARCH).orElseThrow();
+      assertTrue(covers(before, xid));
+      bump(pending, "code");
+      // Capture after allocation to isolate the late-commit fence from the sequence comparison.
+      var afterAllocation = versions.capture(SEARCH).orElseThrow();
+      assertTrue(versions.current(afterAllocation));
+      writer.commit();
+      assertFalse(versions.current(before));
+      assertFalse(versions.current(afterAllocation));
+    }
+  }
+
+  @Test
+  void savepointRollbackDoesNotEraseEarlierWriterEvidenceOrRetainRolledBackDomains()
+      throws Exception {
+    String owner = "writer-savepoint-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'fixture')", owner);
+    try (var writer = transaction()) {
+      var pending = view(writer);
+      bump(pending, "code");
+      var savepoint = writer.setSavepoint();
+      pending.update("UPDATE admins SET password_hash='changed' WHERE handle=?", owner);
+      var search = versions.capture(SEARCH).orElseThrow();
+      var authority = versions.capture(Set.of(ProjectionVersions.Domain.AUTHORITY)).orElseThrow();
+      writer.rollback(savepoint);
+      writer.releaseSavepoint(savepoint);
+      writer.commit();
+      assertFalse(versions.current(search));
+      assertTrue(versions.current(authority), "Rolled-back authority evidence must not survive");
+    }
+  }
+
+  @Test
+  void pruningEvidenceFailsClosedAndRollsBackAtomically() throws Exception {
+    try (var reader = transaction()) {
+      String xid = view(reader).queryForObject("SELECT pg_current_xact_id()::text", String.class);
+      var token = versions.capture(SEARCH).orElseThrow();
+      reader.commit();
+      assertTrue(versions.current(token));
+      // Seed legitimate later writers; a small explicit retention bound exercises the same
+      // bounded maintenance SQL without thousands of fixture transactions.
+      for (int i = 0; i < 4; i++) bump(outside, "code");
+      var fresh = versions.capture(SEARCH).orElseThrow();
+      var sameEvidence =
+          new ProjectionVersions.Token(
+              token.database(),
+              fresh.counters(),
+              List.of(xid),
+              fresh.futureTransactionsFrom(),
+              token.windowStart(),
+              token.validUntil());
+      assertTrue(versions.current(sameEvidence));
+      try (var maintenance = transaction()) {
+        view(maintenance).execute("SELECT snapshot_cache_prune_writers(1,1024)");
+        assertTrue(versions.current(sameEvidence), "Uncommitted pruning cannot retire readers");
+        maintenance.rollback();
+        assertTrue(versions.current(sameEvidence), "Rollback restores journal and floor together");
+      }
+      outside.execute("SELECT snapshot_cache_prune_writers(1,1024)");
+      assertTrue(
+          outside.queryForObject(
+              "SELECT through>=?::xid8 FROM snapshot_cache_writer_retention WHERE singleton",
+              Boolean.class,
+              xid));
+      assertFalse(versions.current(sameEvidence), "Missing old evidence is never an allow lease");
+      assertTrue(versions.current(versions.capture(SEARCH).orElseThrow()));
+      assertTrue(
+          outside.queryForObject("SELECT count(*)<=1 FROM snapshot_cache_writers", Boolean.class));
+    }
+  }
+
+  @Test
   void anOlderAllocationCommittingAfterANewerOneCannotHideBehindTheSameCounter() throws Exception {
     try (var older = transaction();
         var newer = transaction()) {
@@ -245,7 +666,7 @@ class ProjectionVersionsDatabaseTest {
       newer.commit();
 
       var loaded = versions.capture(SEARCH).orElseThrow();
-      assertTrue(loaded.pendingTransactions().contains(oldXid));
+      assertTrue(covers(loaded, oldXid));
       assertEquals(
           visible,
           outside.queryForObject(
@@ -284,17 +705,15 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
-  void aSingleTailWriterIsCapturedWithoutAnyNewerWriterCommit() throws Exception {
+  void aSingleTailWriterIsCoveredWithoutAnyNewerWriterOrReaderProbeCommit() throws Exception {
     try (var writer = transaction()) {
       var pendingWriter = view(writer);
       bump(pendingWriter, "code");
       String xid = pendingWriter.queryForObject("SELECT pg_current_xact_id()::text", String.class);
-      // No other writer allocates/commits here. Capture itself must finish its probe transaction
-      // after observing the counter, otherwise a tail XID can be absent from snapshot xip.
+      // No newer transaction allocates/commits here. The tail may be absent from snapshot xip;
+      // the snapshot xmax boundary must cover it without any read-side probe transaction.
       var loaded = versions.capture(SEARCH).orElseThrow();
-      assertTrue(
-          loaded.pendingTransactions().contains(xid),
-          "Completed capture probe must expose the active tail writer");
+      assertTrue(covers(loaded, xid), "The future-XID boundary must cover the active tail writer");
       assertTrue(versions.current(loaded));
       writer.commit();
       var after = versions.capture(SEARCH).orElseThrow();
@@ -321,6 +740,12 @@ class ProjectionVersionsDatabaseTest {
     var guarded = new JdbcProjectionVersions(jdbc, readOnly, 128);
     var captured = guarded.capture(SEARCH).orElseThrow();
     assertTrue(guarded.current(captured));
+    assertNull(
+        new JdbcTemplate(readOnly)
+            .queryForObject(
+                "SELECT pg_current_xact_id_if_assigned()::text FROM snapshot_cache_capture_counters()",
+                String.class),
+        "Counter capture must not allocate a reader transaction ID");
   }
 
   @Test
@@ -394,14 +819,20 @@ class ProjectionVersionsDatabaseTest {
   @Test
   void pendingCapacityBypassesCaptureButDatabaseIdentityRemainsAvailable() throws Exception {
     try (var first = transaction();
-        var second = transaction()) {
+        var second = transaction();
+        var tail = transaction()) {
       view(first).queryForObject("SELECT pg_current_xact_id()::text", String.class);
       view(second).queryForObject("SELECT pg_current_xact_id()::text", String.class);
+      view(tail).queryForObject("SELECT pg_current_xact_id()::text", String.class);
+      // Advance snapshot xmax so these are explicit pending identities, rather than the bounded
+      // future-XID range that can cover any number of tail transactions without retaining IDs.
+      outside.queryForObject("SELECT pg_current_xact_id()::text", String.class);
       var bounded = new JdbcProjectionVersions(jdbc, source(), 1);
       assertNotNull(bounded.databaseIdentity());
       assertTrue(bounded.capture(SEARCH).isEmpty());
       first.rollback();
       second.rollback();
+      tail.rollback();
       assertTrue(bounded.capture(SEARCH).isPresent());
     }
   }
@@ -473,7 +904,11 @@ class ProjectionVersionsDatabaseTest {
             "SELECT processing_budget_id FROM information_revisions WHERE id=?",
             UUID.class,
             revision);
-    var document = versions.capture(Set.of(ProjectionVersions.Domain.DOCUMENTS)).orElseThrow();
+    var document =
+        versions
+            .capture(
+                Set.of(ProjectionVersions.Domain.DOCUMENTS, ProjectionVersions.Domain.PROGRESS))
+            .orElseThrow();
     var search = versions.capture(SEARCH).orElseThrow();
     assertEquals(
         1,
@@ -548,6 +983,24 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
+  void listenerUnderstandsEveryVersionDomainIncludingObservationWakeups() {
+    var source = new PostgresProjectionNotificationSource(source());
+    try (var listener = source.open()) {
+      listener.listen();
+      for (var domain : ProjectionVersions.Domain.values()) {
+        jdbc.queryForObject(
+            "SELECT pg_notify(?,?)",
+            String.class,
+            domain == ProjectionVersions.Domain.READABILITY
+                ? PostgresProjectionNotificationSource.READABILITY_CHANNEL
+                : PostgresProjectionNotificationSource.CHANNEL,
+            domain.name().toLowerCase(java.util.Locale.ROOT));
+        assertEquals(Set.of(domain), listener.poll(Duration.ofSeconds(2)));
+      }
+    }
+  }
+
+  @Test
   void notificationsRequireCommitAndRollbackEmitsNoHintOnTheIndependentListener() throws Exception {
     var notifications = new PostgresProjectionNotificationSource(source());
     var listener = notifications.open();
@@ -608,16 +1061,13 @@ class ProjectionVersionsDatabaseTest {
                         statements.incrementAndGet();
                       if (method.getName().equals("prepareStatement")
                           && ((String) arguments[0]).contains("pg_snapshot_xip")) {
-                        // Spring may retain one independent lease until the caller transaction
-                        // ends.
-                        // Stage the SECOND statement, not the second checkout: its probe must
-                        // already
-                        // be committed even when this same physical autocommit connection is
-                        // reused.
+                        // Stage the one authoritative capture statement after the caller guard.
+                        // Spring may retain its independent physical lease until the outer caller
+                        // ends, but the statement must still be fresh, read-only and autocommit.
                         assertEquals(
-                            2,
+                            1,
                             statements.get(),
-                            "Pending window must follow the completed counter statement");
+                            "The snapshot and counters must share one authoritative statement");
                         assertTrue(connection.getAutoCommit());
                         int backend =
                             connection.unwrap(org.postgresql.PGConnection.class).getBackendPID();
@@ -626,7 +1076,7 @@ class ProjectionVersionsDatabaseTest {
                                 "SELECT state='idle' AND backend_xid IS NULL FROM pg_stat_activity WHERE pid=?",
                                 Boolean.class,
                                 backend),
-                            "Capture probe must commit before the pending-window statement");
+                            "A fresh read-only capture must start without a backend XID");
                         assertTrue(
                             ((String) arguments[0]).contains("pg_snapshot_xip"),
                             "Fixture must intercept the pending-window statement");
@@ -653,12 +1103,12 @@ class ProjectionVersionsDatabaseTest {
         status -> {
           assertTrue(guarded.canShare(), "Fixture must start before the expiry boundary");
           var captured = guarded.capture(Set.of(ProjectionVersions.Domain.AUTHORITY));
-          assertTrue(crossed.get(), "Fixture must exercise expiry between the two capture stages");
-          assertEquals(
-              2, statements.get(), "Counter/probe and pending/window are distinct statements");
           assertTrue(
-              leases.get() >= 1 && leases.get() <= 2,
-              "Independent autocommit statements may reuse a synchronized lease");
+              crossed.get(),
+              "Fixture must cross expiry between the caller guard and its snapshot capture");
+          assertEquals(
+              1, statements.get(), "Snapshot and counters use a single read-only statement");
+          assertEquals(1, leases.get(), "Capture must use one independent read-only lease");
           assertTrue(
               captured.isEmpty(),
               () ->

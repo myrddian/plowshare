@@ -517,6 +517,20 @@ await test('Relay receipts register unlisted owned logs with project metadata be
   );
 });
 
+await test('validated progress hints preserve content counters and malformed flags fail closed', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  f.push({ kind: 'information.invalidated', progressOnly: true });
+  assert.equal(f.client.state.informationProgressRevision, 1);
+  assert.equal(f.client.state.informationRevision, 0);
+  f.push({ kind: 'information.invalidated', progressOnly: 'true' });
+  assert.equal(f.client.state.informationProgressRevision, 1);
+  assert.equal(f.client.state.informationRevision, 1);
+  f.push({ kind: 'information.invalidated' });
+  assert.equal(f.client.state.informationRevision, 2);
+});
+
 await test('information hints expose only a validated invalidation counter and socket recovery fences', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());

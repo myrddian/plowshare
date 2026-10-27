@@ -129,7 +129,9 @@ class FrameShapeTest {
           io.aeyer.plowshare.server.requests.RequestProjects.class,
           () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY);
       FrameAreas.declared().forEach(context::register);
-      context.register(FrameRoutingConfig.class);
+      context.register(
+          FrameRoutingConfig.class,
+          io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class);
       context
           .getEnvironment()
           .getPropertySources()

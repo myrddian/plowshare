@@ -99,6 +99,12 @@ public interface InformationCatalogueRepository {
   boolean readable(InformationContext context, UUID revision);
 
   /** Applies current readability in the same SQL snapshot as the metadata projection. */
+  /** Narrow extraction facts only; missing entries are unavailable under this exact selection. */
+  record ExtractionState(
+      UUID revision, long generation, String sourceUri, Information.Step extraction) {}
+
+  Map<UUID, ExtractionState> extractionStates(InformationContext context, List<UUID> revisions);
+
   Optional<AuthorizedMetadata> authorizedMetadata(InformationContext context, UUID revision);
 
   /**
@@ -150,6 +156,10 @@ public interface InformationCatalogueRepository {
 
   io.aeyer.plowshare.server.documents.CodeProjection codeProjection(
       InformationContext context, UUID revision, String rawHash);
+
+  /** Current authorized syntax status for at most 100 exact revision/hash pairs; no content. */
+  java.util.Map<UUID, io.aeyer.plowshare.server.documents.CodeOutline> codeStates(
+      InformationContext context, java.util.Map<UUID, String> hashes);
 
   Information.Outline outline(InformationContext context, UUID revision, int offset, int limit);
 

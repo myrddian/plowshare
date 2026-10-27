@@ -9,6 +9,8 @@ export interface InformationRefreshClock {
 export class InformationRefresh {
   private identity: string | undefined;
   private revision = 0;
+  private progressRevision = 0;
+  private pendingProgress = false;
   private generation = 0;
   private requestGeneration = 0;
   private pending: (() => void) | undefined;
@@ -29,12 +31,17 @@ export class InformationRefresh {
     this.refresh = refresh;
   }
 
-  observe(identity: string | undefined, revision: number): void {
+  observe(
+    identity: string | undefined,
+    revision: number,
+    progressRevision = 0,
+  ): void {
     if (identity !== this.identity) {
       const previous = this.identity;
       this.stop();
       this.identity = identity;
       this.revision = revision;
+      this.progressRevision = progressRevision;
       if (previous !== undefined || identity !== undefined)
         this.invalidateOnce(true);
       if (identity !== undefined) {
@@ -44,7 +51,16 @@ export class InformationRefresh {
     } else if (identity !== undefined && revision !== this.revision) {
       this.revision = revision;
       this.invalidateOnce(false);
+      this.progressRevision = progressRevision;
       this.request(250);
+    } else if (
+      identity !== undefined &&
+      progressRevision !== this.progressRevision
+    ) {
+      this.progressRevision = progressRevision;
+      // Progress does not revoke content or change registry/navigation identity. Refresh through
+      // ordinary authorized reads, coalescing continuous updates without cancelling useful reads.
+      this.request(1000, true);
     }
   }
 
@@ -56,9 +72,14 @@ export class InformationRefresh {
     this.invalidated = true;
   }
 
-  private request(delay: number): void {
-    // The first hint owns the deadline: a continuous burst cannot starve refresh.
-    if (this.pending) return;
+  private request(delay: number, progress = false): void {
+    // The first hint owns the deadline. A hard content/authority hint upgrades a queued progress
+    // refresh, fences immediately in observe(), and must never wait behind soft progress work.
+    if (this.pending) {
+      if (!this.pendingProgress || progress) return;
+      this.pending();
+    }
+    this.pendingProgress = progress;
     const generation = this.generation;
     const request = ++this.requestGeneration;
     this.pending = this.clock.schedule(delay, () => {
@@ -69,6 +90,7 @@ export class InformationRefresh {
       )
         return;
       this.pending = undefined;
+      this.pendingProgress = false;
       this.refresh();
     });
   }
@@ -90,6 +112,7 @@ export class InformationRefresh {
     this.requestGeneration++;
     this.pending?.();
     this.pending = undefined;
+    this.pendingProgress = false;
   }
 
   /** Manual refresh remains available and consumes an already coalesced hint. */
@@ -105,6 +128,7 @@ export class InformationRefresh {
     this.reconciliation?.();
     this.pending = this.reconciliation = undefined;
     this.identity = undefined;
+    this.pendingProgress = false;
     this.invalidated = false;
   }
 }
