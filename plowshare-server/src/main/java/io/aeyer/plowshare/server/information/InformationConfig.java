@@ -226,7 +226,19 @@ public class InformationConfig {
       io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
       ObjectProvider<InformationInvalidations> pushes) {
     return new InformationInvalidationPublisher(
-        signals, () -> pushes.getIfAvailable(() -> InformationInvalidations.NONE).invalidate());
+        signals,
+        new InformationInvalidations() {
+          // Resolve at delivery time to retain the optional transport's construction/lifecycle
+          // boundary. Forward both methods: a single-method lambda upgrades progress to full
+          // invalidation through the legacy default and discards protected reader surfaces.
+          public void invalidate() {
+            pushes.getIfAvailable(() -> InformationInvalidations.NONE).invalidate();
+          }
+
+          public void progress() {
+            pushes.getIfAvailable(() -> InformationInvalidations.NONE).progress();
+          }
+        });
   }
 
   @Bean(destroyMethod = "close")

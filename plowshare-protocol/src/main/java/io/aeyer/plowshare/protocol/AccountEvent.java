@@ -40,7 +40,9 @@ public sealed interface AccountEvent extends ServerPush {
    * Opaque account-socket invalidation. It carries no resource identity or authority decision;
    * clients must reauthorize their selected reads and reconcile dropped hints after reconnect.
    */
-  record InformationInvalidated(@JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean progressOnly)
+  record InformationInvalidated(
+      @JsonInclude(JsonInclude.Include.NON_DEFAULT) @JsonProperty(defaultValue = "false")
+          boolean progressOnly)
       implements AccountEvent {
     /** An absent progress flag preserves the existing full-invalidation wire contract. */
     public InformationInvalidated() {

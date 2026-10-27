@@ -19,6 +19,9 @@ class PushDecoderTest {
         "{\"kind\":\"orchestration.resumed\",\"requestId\":\"00000000-0000-0000-0000-000000000001\"}",
         "{\"kind\":\"inbox.changed\",\"unread\":\"1\"}",
         "{\"kind\":\"inbox.changed\",\"unread\":-1}",
+        "{\"kind\":\"information.invalidated\",\"progressOnly\":null}",
+        "{\"kind\":\"information.invalidated\",\"progressOnly\":\"true\"}",
+        "{\"kind\":\"information.invalidated\",\"progressOnly\":1}",
         "{\"kind\":\"information.changed\",\"revision\":\"bad\",\"sequence\":1,\"generation\":1}",
         "{\"kind\":\"todos.changed\",\"conversation\":\"cnv\\nforged\"}",
         "{\"protocol_version\":\"different\",\"type\":\"inbox.changed\",\"payload\":{\"unread\":1}}",
@@ -41,6 +44,21 @@ class PushDecoderTest {
     var event = new AccountEvent.OrchestrationResumed("orc_one", requestId);
     assertEquals(event, PushDecoder.decode(json, json.valueToTree(event)));
     assertEquals("orchestration.resumed", event.kind());
+  }
+
+  @Test
+  void invalidationHintsReachTypedListenersInBothWireFormatsWithoutCoercion() throws Exception {
+    var json = SdkJson.mapper();
+    for (var field : new String[] {"", ",\"progressOnly\":false", ",\"progressOnly\":true"}) {
+      var expected = new AccountEvent.InformationInvalidated(field.endsWith("true"));
+      var payload = "{\"kind\":\"information.invalidated\"" + field + ",\"future\":\"ignored\"}";
+      assertEquals(expected, PushDecoder.decode(json, json.readTree(payload)));
+      var envelope =
+          "{\"protocol_version\":\"plowshare-v1\",\"type\":\"information.invalidated\",\"payload\":"
+              + payload
+              + "}";
+      assertEquals(expected, PushDecoder.decode(json, json.readTree(envelope)));
+    }
   }
 
   @Test

@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 class InformationInvalidationPublisherTest {
   private static final class Signals implements ProjectionChangeSignals {
@@ -95,6 +96,43 @@ class InformationInvalidationPublisherTest {
     }
     source.observer.changed(Set.of(Domain.PROGRESS));
     assertEquals(1, progress.get());
+  }
+
+  @Test
+  void compositionForwardsBothHintKindsThroughTheLateBoundTransport() {
+    var source = new Signals();
+    var beans = new StaticListableBeanFactory();
+    var full = new AtomicInteger();
+    var progress = new AtomicInteger();
+    var transport =
+        new InformationInvalidations() {
+          public void invalidate() {
+            full.incrementAndGet();
+          }
+
+          public void progress() {
+            progress.incrementAndGet();
+          }
+        };
+    try (var publisher =
+        new InformationConfig()
+            .informationInvalidationPublisher(
+                source, beans.getBeanProvider(InformationInvalidations.class))) {
+      publisher.start(); // An absent transport remains a safe no-op during construction.
+      beans.addBean("transport", transport);
+      source.observer.changed(Set.of(Domain.PROGRESS));
+      assertEquals(1, progress.get());
+      assertEquals(
+          0, full.get(), "Composition must not promote soft progress to full invalidation");
+      source.observer.changed(Set.of(Domain.PROGRESS, Domain.AUTHORITY));
+      source.observer.changed(Set.of(Domain.READABILITY));
+      source.observer.changed(Set.of(Domain.DOCUMENTS));
+      source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
+      assertEquals(4, full.get(), "Authority, content and recovery still fence retained surfaces");
+      assertEquals(1, progress.get());
+    }
+    source.observer.changed(Set.of(Domain.PROGRESS));
+    assertEquals(1, progress.get(), "Closing still fences late callbacks");
   }
 
   @Test
