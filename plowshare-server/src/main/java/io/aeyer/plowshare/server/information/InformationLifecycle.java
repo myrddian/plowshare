@@ -14,16 +14,24 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 /** Database leases are the work queue. Expired running work resumes from committed checkpoints. */
 public final class InformationLifecycle implements AutoCloseable {
+  // A durable lease lasts five minutes. Renew independently of token traffic and silent prefill;
+  // this cadence bounds cancellation observation, never permission to publish a result/effect.
+  private static final long HEARTBEAT_SECONDS = 5;
   private final InformationProcessingRepository repository;
   private final UnitOfWork transactions;
   private final InformationCatalogue catalogue;
   private final Processor processor;
   private final Gates gates;
+  private final ScheduledExecutorService heartbeats;
   private ScheduledExecutorService worker;
   private boolean closed;
   private final java.util.concurrent.CompletableFuture<Void> stopped =
@@ -31,6 +39,11 @@ public final class InformationLifecycle implements AutoCloseable {
 
   @FunctionalInterface
   public interface Processor {
+    /**
+     * Process one leased stage. Cancellation is a local liveness hint, not authorization. Call the
+     * fresh fence inside each checkpoint transaction; provider/effect admission retains its own
+     * current authority checks. The cancellation callback becomes terminal when this stage ends.
+     */
     void process(Lease lease, BooleanSupplier cancelled, Runnable fence);
   }
 
@@ -81,11 +94,30 @@ public final class InformationLifecycle implements AutoCloseable {
       InformationCatalogue catalogue,
       Processor processor,
       Gates gates) {
+    this(repository, transactions, catalogue, processor, gates, heartbeatExecutor());
+  }
+
+  InformationLifecycle(
+      InformationProcessingRepository repository,
+      UnitOfWork transactions,
+      InformationCatalogue catalogue,
+      Processor processor,
+      Gates gates,
+      ScheduledExecutorService heartbeats) {
     this.repository = java.util.Objects.requireNonNull(repository);
     this.transactions = transactions;
     this.catalogue = catalogue;
     this.processor = processor;
     this.gates = gates;
+    this.heartbeats = java.util.Objects.requireNonNull(heartbeats);
+  }
+
+  private static ScheduledExecutorService heartbeatExecutor() {
+    var executor =
+        new ScheduledThreadPoolExecutor(
+            1, Thread.ofVirtual().name("information-lease-heartbeat").factory());
+    executor.setRemoveOnCancelPolicy(true);
+    return executor;
   }
 
   public synchronized void start() {
@@ -179,11 +211,22 @@ public final class InformationLifecycle implements AutoCloseable {
         finish(lease, "blocked", pre.denied());
         return true;
       }
-      processor.process(lease, () -> !renew(lease), () -> requireLease(lease));
-      if (!renew(lease)) return true;
-      Gate post = safeGate(lease, true);
-      record(lease, "stage.post", post);
-      finish(lease, post.isDenied() ? "blocked" : "ready", post.denied());
+      try (var heartbeat = new LeaseHeartbeat(lease)) {
+        // Transport callbacks run per event and every 50 ms during silent prefill. They must only
+        // read local cancellation state, never renew a SQL lease or resolve permission graphs.
+        processor.process(
+            lease,
+            heartbeat::cancelled,
+            () -> {
+              heartbeat.requireCurrent();
+              requireLease(lease);
+            });
+        heartbeat.requireCurrent();
+        if (!renew(lease)) return true;
+        Gate post = safeGate(lease, true);
+        record(lease, "stage.post", post);
+        finish(lease, post.isDenied() ? "blocked" : "ready", post.denied());
+      }
     } catch (StaleLease invalidated) {
       // Availability or generation changed. No obsolete checkpoint or completion may commit.
     } catch (RuntimeException failure) {
@@ -258,6 +301,51 @@ public final class InformationLifecycle implements AutoCloseable {
     return repository.renew(lease);
   }
 
+  /** One timer per active stage, serviced by one lifecycle-owned, connection-free idle worker. */
+  private final class LeaseHeartbeat implements AutoCloseable {
+    private final AtomicBoolean current = new AtomicBoolean(true);
+    private final AtomicReference<Throwable> failure = new AtomicReference<>();
+    private final ScheduledFuture<?> scheduled;
+
+    LeaseHeartbeat(Lease lease) {
+      scheduled =
+          heartbeats.scheduleWithFixedDelay(
+              () -> {
+                if (!current.get()) return;
+                try {
+                  if (!renew(lease)) current.set(false);
+                } catch (RuntimeException | Error lost) {
+                  // An uncertain database result cannot become a positive liveness/allow lease.
+                  // Stop the stream locally and deliver the original failure on its owner thread.
+                  failure.compareAndSet(null, lost);
+                  current.set(false);
+                }
+              },
+              HEARTBEAT_SECONDS,
+              HEARTBEAT_SECONDS,
+              TimeUnit.SECONDS);
+    }
+
+    boolean cancelled() {
+      return !current.get();
+    }
+
+    void requireCurrent() {
+      var lost = failure.get();
+      if (lost instanceof RuntimeException exception) throw exception;
+      if (lost instanceof Error error) throw error;
+      if (!current.get()) throw new StaleLease();
+    }
+
+    @Override
+    public void close() {
+      current.set(false);
+      // An in-flight renewal may finish, but its exact generation/token fence cannot renew a
+      // replacement or terminal stage. Owning shutdown drains it before closing repositories.
+      scheduled.cancel(false);
+    }
+  }
+
   /**
    * Called inside the same transaction that writes a checkpoint; row lock excludes invalidation.
    */
@@ -289,7 +377,12 @@ public final class InformationLifecycle implements AutoCloseable {
       stopping = worker;
     }
     try {
-      io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "information-lifecycle");
+      try {
+        io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "information-lifecycle");
+      } finally {
+        io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(
+            heartbeats, "information-lease-heartbeat");
+      }
       stopped.complete(null);
     } catch (RuntimeException | Error failure) {
       stopped.completeExceptionally(failure);
