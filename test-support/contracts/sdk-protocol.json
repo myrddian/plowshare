@@ -24169,6 +24169,9 @@
         "properties": {
           "kind": {
             "$ref": "#/$defs/shape1244"
+          },
+          "progressOnly": {
+            "$ref": "#/$defs/shape8"
           }
         },
         "required": [

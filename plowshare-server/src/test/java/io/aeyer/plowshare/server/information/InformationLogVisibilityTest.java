@@ -25,6 +25,7 @@ class InformationLogVisibilityTest {
             Map.of(
                 ProjectionVersions.Domain.READABILITY, 1L, ProjectionVersions.Domain.AUTHORITY, 1L),
             List.of(),
+            "999999",
             null,
             null);
     final BoundedReadAdmission admission =

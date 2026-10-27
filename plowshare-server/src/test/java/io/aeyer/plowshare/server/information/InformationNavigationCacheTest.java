@@ -229,6 +229,7 @@ class InformationNavigationCacheTest {
             ProjectionVersions.Domain.AUTHORITY,
             1L),
         List.of(),
+        "999999",
         null,
         null);
   }

@@ -129,6 +129,7 @@ class RelayProjectionCacheTest {
               new UUID(0, 1),
               Map.of(ProjectionVersions.Domain.RELAY, 1L, ProjectionVersions.Domain.AUTHORITY, 1L),
               List.of(),
+              "999999",
               null,
               null);
       when(versions.databaseIdentity()).thenReturn(token.database());

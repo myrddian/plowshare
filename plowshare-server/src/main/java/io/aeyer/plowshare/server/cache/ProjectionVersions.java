@@ -27,16 +27,23 @@ public interface ProjectionVersions {
     RELAY,
     TRANSCRIPTS,
     OBSERVATIONS,
+    QUEUES,
+    PROGRESS,
+    TYPES,
+    EXTRACTIONS,
     READABILITY,
     AUTHORITY
   }
 
   /**
    * Counter values are allocation hints, not commit order. Pending top-level transaction IDs close
-   * the late-commit hole: any captured pending transaction subsequently committing invalidates the
-   * token, even if the counters do not move. Unknown transaction status also fails closed. Owners
-   * must validate the token stored alongside the loaded DTO, not substitute a newly captured token
-   * for an old DTO's evidence. Authority windows prevent a clock-only expiry from reusing or
+   * the late-commit hole: a captured pending transaction subsequently committing a write to a
+   * selected domain invalidates the token, even if counters do not move. The snapshot's future-XID
+   * boundary covers assigned tail writers absent from its pending list and writers starting later.
+   * Read-only and unrelated commits do not. Transactional writer evidence and its pruning floor
+   * share one validation snapshot; pruned evidence or unknown transaction status fails closed.
+   * Owners must validate the token stored alongside the loaded DTO, not substitute a newly captured
+   * token for an old DTO's evidence. Authority windows prevent a clock-only expiry from reusing or
    * joining an earlier visibility projection.
    *
    * <p>This value is process-local evidence; database restore/reconnect additionally requires the
@@ -46,6 +53,7 @@ public interface ProjectionVersions {
       UUID database,
       Map<Domain, Long> counters,
       List<String> pendingTransactions,
+      String futureTransactionsFrom,
       Instant windowStart,
       Instant validUntil) {
     public Token {
@@ -61,6 +69,8 @@ public interface ProjectionVersions {
       if (pendingTransactions.stream().anyMatch(value -> !transactionId(value))
           || Set.copyOf(pendingTransactions).size() != pendingTransactions.size())
         throw new IllegalArgumentException("Invalid pending transaction identity");
+      if (!transactionId(futureTransactionsFrom))
+        throw new IllegalArgumentException("Invalid future transaction boundary");
       if (windowStart != null && validUntil != null && !windowStart.isBefore(validUntil))
         throw new IllegalArgumentException("Invalid authority version window");
     }
@@ -110,12 +120,13 @@ public interface ProjectionVersions {
   UUID databaseIdentity();
 
   /**
-   * Captures counters, allocates and commits a newer probe XID, then takes a fresh
-   * pending-transaction snapshot. The completed-XID barrier makes active tail writers visible in
-   * snapshot xip; it costs one short-lived XID per capture, not a global row lock or a commit-order
-   * cursor. The caller's SQL transaction timestamp must belong to the complete captured authority
-   * window, including when an expiry crosses during capture. Unsafe callers or pending-bound
-   * overflow return empty; database failures propagate, without implicit source retry.
+   * Captures allocation counters and a transaction snapshot in one independent read-only statement.
+   * Its pending XIDs AND future-XID lower bound cover late writers, including an assigned tail XID
+   * absent from snapshot xip. Transactional, domain-specific writer evidence decides whether a
+   * subsequent commit affects this projection. Readers allocate no XID and write no journal row.
+   * The caller's SQL transaction timestamp must belong to the complete captured authority window,
+   * including when an expiry crosses during capture. Unsafe callers or pending-bound overflow
+   * return empty; database failures propagate, without implicit source retry.
    */
   Optional<Token> capture(Set<Domain> domains);
 

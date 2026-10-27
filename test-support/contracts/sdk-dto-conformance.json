@@ -9821,6 +9821,64 @@
   {
     "boundary": "push",
     "value": {
+      "kind": "information.invalidated",
+      "progressOnly": true,
+      "future": "ignored"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "progressOnly": false,
+      "future": "ignored"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "progressOnly": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "progressOnly": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "progressOnly": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "progressOnly": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "progressOnly": {}
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
       "kind": "inbox.changed",
       "unread": -1
     },

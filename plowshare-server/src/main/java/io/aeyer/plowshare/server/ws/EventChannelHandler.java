@@ -1244,10 +1244,19 @@ public final class EventChannelHandler extends TextWebSocketHandler
   /** Only authenticated account sockets receive this fixed, content-free refresh hint. */
   @Override
   public void invalidate() {
+    informationHint(false);
+  }
+
+  @Override
+  public void progress() {
+    informationHint(true);
+  }
+
+  private void informationHint(boolean progressOnly) {
     for (var sockets : byHandle.values()) {
       for (var socket : sockets) {
         if (socket.getAttributes().get(DELIVERY) instanceof Delivery live)
-          live.informationInvalidated();
+          live.informationInvalidated(progressOnly);
       }
     }
   }
@@ -1394,14 +1403,28 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     private final BlockingQueue<Pending> tokens = new ArrayBlockingQueue<>(STREAMING);
 
-    /** One coalesced refresh hint cannot consume lifecycle/reply or subscription capacity. */
-    private final BlockingQueue<Pending> informationHints = new ArrayBlockingQueue<>(1);
+    /**
+     * One coalesced refresh hint cannot consume lifecycle/reply or subscription capacity. A full
+     * content/authority invalidation upgrades a pending progress hint atomically; progress never
+     * downgrades it or hides a revocation. Exactly one permit belongs to a nonempty slot.
+     */
+    private final java.util.concurrent.atomic.AtomicReference<
+            io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated>
+        informationHint = new java.util.concurrent.atomic.AtomicReference<>();
 
-    void informationInvalidated() {
-      if (running
-          && informationHints.offer(
-              new Pushed(new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated())))
-        waiting.release();
+    void informationInvalidated(boolean progressOnly) {
+      if (!running) return;
+      var next = new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated(progressOnly);
+      var previous =
+          informationHint.getAndUpdate(
+              current ->
+                  current == null || current.progressOnly() && !progressOnly ? next : current);
+      if (previous == null) waiting.release();
+    }
+
+    private Pending nextInformationHint() {
+      var hint = informationHint.getAndSet(null);
+      return hint == null ? null : new Pushed(hint);
     }
 
     /**
@@ -1508,7 +1531,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
         if (queued instanceof Reply reply) reply.release().run();
       transport.close();
       whenStopped.run();
-      informationHints.clear();
+      informationHint.set(null);
       synchronized (this) {
         snapshots.clear();
       }
@@ -1747,10 +1770,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
         }
         if (next == null) {
           boolean servedHint = hintNext;
-          next = servedHint ? informationHints.poll() : tokens.poll();
+          next = servedHint ? nextInformationHint() : tokens.poll();
           if (next == null) {
             servedHint = !servedHint;
-            next = servedHint ? informationHints.poll() : tokens.poll();
+            next = servedHint ? nextInformationHint() : tokens.poll();
           }
           if (next != null) hintNext = !servedHint;
         }

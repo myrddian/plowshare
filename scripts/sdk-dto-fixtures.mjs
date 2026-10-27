@@ -419,6 +419,10 @@ result('outgoing.claim', { work: null, action: 'send' }, false);
 push({ kind: 'inbox.changed', unread: 1, future: 1 }, true);
 push({ kind: 'information.invalidated' }, true);
 push({ kind: 'information.invalidated', future: 'ignored' }, true);
+for (const progressOnly of [true, false])
+  push({ kind: 'information.invalidated', progressOnly, future: 'ignored' }, true);
+for (const progressOnly of [null, 'true', 1, [], {}])
+  push({ kind: 'information.invalidated', progressOnly }, false);
 for (const unread of [-1, 1.5, '1'])
   push({ kind: 'inbox.changed', unread }, false);
 push(

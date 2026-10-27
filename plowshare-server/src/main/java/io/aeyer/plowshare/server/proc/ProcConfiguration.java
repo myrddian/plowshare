@@ -24,7 +24,8 @@ public class ProcConfiguration {
         caches.create(
             "proc-queues-v1",
             java.util.Set.of(
-                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.OBSERVATIONS,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.QUEUES,
+                io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.PROGRESS,
                 io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.DOCUMENTS,
                 io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.SEARCH,
                 io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.TRANSCRIPTS,

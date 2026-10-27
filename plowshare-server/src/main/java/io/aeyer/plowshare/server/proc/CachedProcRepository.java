@@ -10,10 +10,11 @@ import java.util.Objects;
 
 /**
  * Shares immutable queue snapshots across feeds/sockets. The key includes the actual principal and
- * complete typed selection. Current durable authority, corpus, transcript, search and observation
- * versions fence every hit. Runtime pool occupancy is attached by ProcAudit after this read. Report
- * admission is inside the elected loader, so followers never retain a report slot or a database
- * lease. Uncached/recovery reads retain the same budget and repository authority checks.
+ * complete typed selection. Current durable authority, corpus, transcript, search and
+ * processing-queue versions fence every hit. Runtime pool occupancy is attached by ProcAudit after
+ * this read. Report admission is inside the elected loader, so followers never retain a report slot
+ * or a database lease. Uncached/recovery reads retain the same budget and repository authority
+ * checks.
  */
 public final class CachedProcRepository implements ProcRepository {
   private final ProcRepository source;

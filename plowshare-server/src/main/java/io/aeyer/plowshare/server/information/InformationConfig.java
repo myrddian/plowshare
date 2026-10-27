@@ -59,11 +59,15 @@ public class InformationConfig {
     return new JdbcInformationNavigationRepository(
         jdbc,
         members,
-        caches.create("manual-heads-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create(
-            "manual-head-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+            "manual-heads-v1",
+            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)),
         caches.create(
-            "manual-connections-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
+            "manual-head-facets-v1",
+            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)),
+        caches.create(
+            "manual-connections-v1",
+            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -71,11 +75,12 @@ public class InformationConfig {
       JdbcTemplate jdbc, ProjectionCaches caches) {
     return new JdbcInformationContentTypeRepository(
         jdbc,
-        caches.create("content-type-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+        caches.create("content-type-list-v1", java.util.Set.of(Domain.TYPES, Domain.AUTHORITY)),
+        caches.create("content-type-version-v1", java.util.Set.of(Domain.TYPES, Domain.AUTHORITY)),
         caches.create(
-            "content-type-version-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
-        caches.create(
-            "content-type-attached-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)));
+            "content-type-attached-v1",
+            java.util.Set.of(
+                Domain.DOCUMENTS, Domain.TYPES, Domain.READABILITY, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -179,12 +184,24 @@ public class InformationConfig {
         jdbc,
         Clock.systemUTC(),
         allowances,
-        caches.create("document-metadata-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
         caches.create(
-            "document-extraction-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
-        caches.create("catalogue-list-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
-        caches.create("catalogue-facets-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
-        caches.create("readiness-v1", java.util.Set.of(Domain.DOCUMENTS, Domain.AUTHORITY)),
+            "document-metadata-v1",
+            java.util.Set.of(
+                Domain.DOCUMENTS, Domain.PROGRESS, Domain.READABILITY, Domain.AUTHORITY)),
+        caches.create(
+            "document-extraction-v1",
+            java.util.Set.of(Domain.EXTRACTIONS, Domain.READABILITY, Domain.AUTHORITY)),
+        caches.create(
+            "catalogue-list-v1",
+            java.util.Set.of(
+                Domain.DOCUMENTS, Domain.PROGRESS, Domain.READABILITY, Domain.AUTHORITY)),
+        caches.create(
+            "catalogue-facets-v1",
+            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)),
+        caches.create(
+            "readiness-v1",
+            java.util.Set.of(
+                Domain.DOCUMENTS, Domain.PROGRESS, Domain.READABILITY, Domain.AUTHORITY)),
         events);
   }
 
