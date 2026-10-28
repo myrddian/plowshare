@@ -66,11 +66,11 @@ cache state and establishes the existing durable baseline before sharing resumes
 | PROC queue aggregates | QUEUES, PROGRESS, DOCUMENTS, SEARCH, TRANSCRIPTS, AUTHORITY; running lease expiry |
 | Accounting reports | Existing OBSERVATIONS, TRANSCRIPTS, AUTHORITY |
 | Type registry list/version | TYPES, AUTHORITY; current caller admission remains outside |
-| Attached type contract | TYPES, DOCUMENTS, READABILITY, AUTHORITY |
-| Extracted text DTO | EXTRACTIONS, READABILITY, AUTHORITY |
-| Catalogue metadata/list | DOCUMENTS, PROGRESS, READABILITY, AUTHORITY |
-| Catalogue facets/navigation | DOCUMENTS, READABILITY, AUTHORITY |
-| Extraction readiness | DOCUMENTS, PROGRESS, READABILITY, AUTHORITY |
+| Attached type contract | TYPES, DOCUMENTS, KNOWLEDGE_ACCESS, AUTHORITY |
+| Extracted text DTO | EXTRACTIONS, KNOWLEDGE_ACCESS, AUTHORITY |
+| Catalogue metadata/list | DOCUMENTS, PROGRESS, KNOWLEDGE_ACCESS, AUTHORITY |
+| Catalogue facets/navigation | DOCUMENTS, KNOWLEDGE_ACCESS, AUTHORITY |
+| Extraction readiness | DOCUMENTS, PROGRESS, KNOWLEDGE_ACCESS, AUTHORITY |
 
 Budget spending is progress and affects queue eligibility; it does not change
 text, types, facets or navigation. Lease deadlines affect queue counts and their
@@ -79,14 +79,28 @@ state and fingerprint can affect search eligibility; generated metadata readines
 also affects visible facets, so those changes retain their relevant invalidation.
 New extraction columns/dependencies require explicit review of the text DTO fence.
 
-`information.invalidated` optionally carries `progressOnly: true`. It contains no
-resource, project, account or authority facts. Legacy clients conservatively use a
-full refresh. Updated Desktop clients coalesce progress reads without hiding
-content, clearing registry/navigation state or cancelling useful reads. Content,
-READABILITY, AUTHORITY and recovery changes retain immediate protected-surface
-fencing. A full hint atomically upgrades a queued progress hint and cannot be
-downgraded by subsequent progress. Every resulting read still passes server
-admission and authorization; correctness does not depend on client cooperation.
+V207 separates catalogue access facts (`KNOWLEDGE_ACCESS`) from log `READABILITY`.
+V208 separates membership changes from possible revocation (`KNOWLEDGE_REVOCATIONS`).
+Every relevant source change still advances the existing access/cache fences. New
+resources, revisions belonging to those resources, and their initial policies and
+inputs cannot revoke a previously delivered graph. Fixed transaction-local birth
+markers cover that case without looking up audiences or permission graphs. They
+retain at most 128 identities per relation, roll back at savepoints and reset at
+commit. Evicted/unknown evidence is conservative and produces a hard hint. A new
+head of an existing resource remains hard: it can redirect unpinned dependencies
+of a previously visible report. Updates/deletes of existing policy or dependency
+facts, TRUNCATE, authority changes and listener recovery remain hard. All writers
+retain transactional journal evidence and pending/future-XID checks; the markers
+never authorize a read or replace freshness evidence.
+
+`information.invalidated` optionally carries `refreshOnly: true` for nonrevoking
+membership/content changes or `progressOnly: true` for processing progress. It
+contains no resource, project, account or authority facts. Soft hints share one
+global one-second deadline and do not hide retained content or cancel useful
+reads. Hard hints immediately hide/fence protected surfaces, dominate queued soft
+hints and reject late replies. Identity changes always fence. Every resulting
+read still passes server admission and authorization; correctness does not depend
+on client cooperation. Legacy peers conservatively use the hard form.
 
 ## Semantic no-ops and manifests
 

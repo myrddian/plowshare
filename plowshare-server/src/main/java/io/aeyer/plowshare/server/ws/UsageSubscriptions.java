@@ -133,7 +133,9 @@ public class UsageSubscriptions {
     try {
       // Report IO is outside the service-wide monitor. The pending reservation counts toward
       // capacity and cannot become ready if disconnect/unsubscribe wins while this query runs.
-      var report = queries.refresh(c.account, query);
+      // Initial subscription delivery is foreground work. Only periodic publication uses the
+      // yielding refresh lane; otherwise existing feeds can monopolize every admission attempt.
+      var report = queries.report(c.account, query);
       synchronized (this) {
         if (connections.get(asking.connectionId()) != c || c.active.get(id) != reserved)
           throw new CallerFault("usage subscription connection ended");

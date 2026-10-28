@@ -20,7 +20,9 @@ class UsageSubscriptionCoordinationTest {
     when(report.filters()).thenReturn(query);
     when(report.health()).thenReturn(mock(Usage.Health.class));
     when(report.groups()).thenReturn(List.of());
-    when(reports.refresh("alice", query)).thenReturn(report);
+    when(reports.report("alice", query)).thenReturn(report);
+    when(reports.refresh("alice", query))
+        .thenThrow(new io.aeyer.plowshare.server.reads.ReadUnavailableException());
     var limits =
         new io.aeyer.plowshare.server.reads.ReadCapacityProperties(4, 2, 2, 1, 8, 2, 16, 8, 4, 2);
     var admission = new io.aeyer.plowshare.server.reads.BoundedReadAdmission(limits);
@@ -33,7 +35,8 @@ class UsageSubscriptionCoordinationTest {
     assertThrows(
         io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
         () -> subscriptions.subscribe(new Asking("session", "alice", "three"), query));
-    verify(reports, times(2)).refresh("alice", query);
+    verify(reports, times(2)).report("alice", query);
+    verify(reports, never()).refresh(anyString(), any());
     subscriptions.unsubscribe(new Asking("session", "alice", "one"), first.subscription());
     subscriptions.subscribe(new Asking("session", "alice", "three"), query);
     assertEquals(
@@ -51,6 +54,7 @@ class UsageSubscriptionCoordinationTest {
     var reports = mock(UsageReports.class);
     var query = query("usage.models");
     var otherQuery = query("usage.pools");
+    when(reports.report(anyString(), any())).thenAnswer(call -> report(call.getArgument(1), 0));
     when(reports.refresh(anyString(), any())).thenAnswer(call -> report(call.getArgument(1), 0));
     var subscriptions = new UsageSubscriptions(reports);
     var updates =
@@ -102,6 +106,7 @@ class UsageSubscriptionCoordinationTest {
       throws Exception {
     var reports = mock(UsageReports.class);
     var query = query("usage.models");
+    when(reports.report(anyString(), any())).thenReturn(report(query, 0));
     when(reports.refresh(anyString(), any())).thenReturn(report(query, 0));
     var subscriptions = new UsageSubscriptions(reports);
     var delivered = new java.util.concurrent.CopyOnWriteArrayList<String>();
@@ -149,6 +154,7 @@ class UsageSubscriptionCoordinationTest {
     var reports = mock(UsageReports.class);
     var query = query("usage.models");
     var calls = new java.util.concurrent.atomic.AtomicInteger();
+    when(reports.report(anyString(), any())).thenAnswer(call -> report(query, calls.get()));
     when(reports.refresh(anyString(), any())).thenAnswer(call -> report(query, calls.get()));
     var subscriptions = new UsageSubscriptions(reports);
     var delivered = new java.util.ArrayList<io.aeyer.plowshare.protocol.frames.Envelope>();
@@ -174,6 +180,7 @@ class UsageSubscriptionCoordinationTest {
   @Test
   void distinctSelectionsHaveABoundedRotatingRefreshBudget() {
     var reports = mock(UsageReports.class);
+    when(reports.report(anyString(), any())).thenAnswer(call -> report(call.getArgument(1), 0));
     when(reports.refresh(anyString(), any())).thenAnswer(call -> report(call.getArgument(1), 0));
     var subscriptions = new UsageSubscriptions(reports);
     for (int i = 0; i < 20; i++) {
@@ -287,14 +294,14 @@ class UsageSubscriptionCoordinationTest {
     when(report.groups()).thenReturn(List.of());
     var entered = new CompletableFuture<Void>();
     var release = new CompletableFuture<Void>();
-    when(reports.refresh("alice", query))
+    when(reports.report("alice", query))
         .thenAnswer(
             ignored -> {
               entered.complete(null);
               release.get(5, TimeUnit.SECONDS);
               return report;
             });
-    when(reports.refresh("bob", query)).thenReturn(report);
+    when(reports.report("bob", query)).thenReturn(report);
     var subscriptions = new UsageSubscriptions(reports);
     subscriptions.connect("alice-socket", "alice", (id, body) -> {});
     var result = new CompletableFuture<Usage.Initial>();

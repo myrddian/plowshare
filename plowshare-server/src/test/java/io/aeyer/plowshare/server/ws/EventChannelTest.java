@@ -1281,7 +1281,7 @@ class EventChannelTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
         .thenReturn(query);
     org.mockito.Mockito.when(
-            queries.refresh(
+            queries.report(
                 org.mockito.ArgumentMatchers.eq("enzo"), org.mockito.ArgumentMatchers.eq(query)))
         .thenAnswer(
             invocation ->
@@ -1307,6 +1307,10 @@ class EventChannelTest {
                         null,
                         null,
                         null)));
+    org.mockito.Mockito.when(
+            queries.refresh(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(call -> queries.report(call.getArgument(0), call.getArgument(1)));
     var subscriptions = new UsageSubscriptions(queries);
     var registry = new SessionRegistry();
     var channel =
