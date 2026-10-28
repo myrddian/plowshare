@@ -33,6 +33,7 @@ public interface ProjectionVersions {
     EXTRACTIONS,
     READABILITY,
     KNOWLEDGE_ACCESS,
+    KNOWLEDGE_REVOCATIONS,
     AUTHORITY
   }
 

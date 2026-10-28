@@ -67,7 +67,7 @@ pass, including across sockets. At most eight groups are refreshed per one-secon
 all live groups; admission may defer them further. The map is bounded by subscription seats.
 Each socket retains its own revision, initial-reply fence and unsubscribe/disconnect tombstone.
 Every pass uses current repository authorization; no cross-principal or cross-selection reuse occurs.
-Initial subscriptions use the same background report lane. Mutation ordering is unchanged.
+Initial subscriptions use the foreground report lane and its bounded fair wait. Periodic publication alone uses the yielding background lane, so existing feeds cannot monopolize every new subscription attempt. Both lanes retain the same global/principal report limits. Mutation ordering is unchanged.
 
 Cache load/waiter exhaustion refuses the read; it must not start another uncached SQL load.
 Recovery, dirty/historical transactions and non-shareable values retain ordinary read semantics
@@ -161,6 +161,14 @@ revision-history row atomically, with independent durable subscriber positions a
 checks on read. History writes advance PROGRESS; they no longer run an audience query or emit an
 identified `information.changed` push per event. The legacy decoder remains for older servers.
 Consumers reconcile their scoped durable stream after hints, reconnects or lost notifications.
+
+Catalogue membership changes alone are soft hints. `KNOWLEDGE_REVOCATIONS` separately records
+changes that may revoke existing readers. V208 records up to 128 physical resource/revision/document
+births per relation in fixed transaction-local markers; nested initial policy writes and ordinary
+new-resource intake remain soft. Markers roll back at savepoints and clear on commit. Overflow or
+unknown provenance stays hard. New heads of existing resources stay hard because unpinned reference
+obligations can redirect existing reports. No marker bypasses authorization or cache-version checks,
+no source identity is sent in a notification, and no audience or permission graph is queried.
 
 Socket hints distinguish immediate access/recovery invalidation from nonrevoking `refreshOnly`
 content and `progressOnly` processing hints. Content dominates progress; access dominates both.

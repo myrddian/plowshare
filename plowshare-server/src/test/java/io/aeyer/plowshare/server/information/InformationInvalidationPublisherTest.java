@@ -81,6 +81,7 @@ class InformationInvalidationPublisherTest {
           Set.of(
               Domain.DOCUMENTS,
               Domain.KNOWLEDGE_ACCESS,
+              Domain.KNOWLEDGE_REVOCATIONS,
               Domain.AUTHORITY,
               Domain.PROGRESS,
               Domain.TYPES,
@@ -90,6 +91,7 @@ class InformationInvalidationPublisherTest {
       for (int i = 0; i < 10000; i++) {
         source.observer.changed(Set.of(Domain.PROGRESS));
         source.observer.changed(Set.of(Domain.DOCUMENTS));
+        source.observer.changed(Set.of(Domain.KNOWLEDGE_ACCESS));
         source.observer.changed(Set.of(Domain.READABILITY)); // Worker/log visibility is unrelated.
       }
       assertEquals(1, clock.scheduled);
@@ -105,7 +107,7 @@ class InformationInvalidationPublisherTest {
       assertEquals(2, full.get(), "Revocation must never wait for a soft deadline");
       clock.tick();
       assertEquals(1, content.get(), "Revocation consumes previous soft work");
-      source.observer.changed(Set.of(Domain.KNOWLEDGE_ACCESS));
+      source.observer.changed(Set.of(Domain.KNOWLEDGE_REVOCATIONS));
       source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
       source.observer.stateChanged(new ProjectionChangeSignals.State(1, false));
       assertEquals(4, full.get());
@@ -160,7 +162,7 @@ class InformationInvalidationPublisherTest {
       assertEquals(1, content.get());
       assertEquals(0, full.get(), "Composition must not promote soft hints to revocation");
       source.observer.changed(Set.of(Domain.PROGRESS, Domain.AUTHORITY));
-      source.observer.changed(Set.of(Domain.KNOWLEDGE_ACCESS));
+      source.observer.changed(Set.of(Domain.KNOWLEDGE_REVOCATIONS));
       source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
       assertEquals(3, full.get());
     }

@@ -83,6 +83,187 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
+  void newResourceIntakeAndInitialPoliciesNeverRevokeExistingReaders() throws Exception {
+    UUID input = informationStep();
+    var hard =
+        versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS)).orElseThrow();
+    var membership =
+        versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_ACCESS)).orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open();
+        var writer = transaction()) {
+      listener.listen();
+      var db = view(writer);
+      for (int i = 0; i < 140; i++) {
+        UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+        db.update(
+            "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+            resource,
+            resource.toString());
+        db.update(
+            "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) VALUES(?,?,1,'new intake','text/plain','fixture',1)",
+            revision,
+            resource);
+        db.update(
+            "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?)",
+            revision,
+            input);
+        db.update(
+            "INSERT INTO documents(id,source_name,title,content_hash,text_hash,byte_size,ingested_at,ingested_by) VALUES(?,?,'new projection','fixture','fixture',1,now(),'fixture')",
+            revision,
+            revision.toString());
+        db.update(
+            "INSERT INTO information_document_policies(document_id) VALUES(?) ON CONFLICT DO NOTHING",
+            revision);
+      }
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+      writer.commit();
+      var changes = listener.poll(Duration.ofSeconds(2));
+      assertTrue(changes.contains(ProjectionVersions.Domain.KNOWLEDGE_ACCESS));
+      assertFalse(
+          changes.contains(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS),
+          "Nested initial policies and more than 128 sequential intakes must stay soft");
+      assertFalse(versions.current(membership), "New membership still fences every server cache");
+      assertTrue(versions.current(hard), "Unrelated new resources cannot revoke existing content");
+    }
+  }
+
+  @Test
+  void creationEvidenceIsBoundedAndUnknownOldPoliciesStillRevoke() throws Exception {
+    String handle = "birth-policy-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'fixture')", handle);
+    UUID actor =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, handle);
+    UUID old = informationStep();
+    UUID oldResource =
+        jdbc.queryForObject(
+            "SELECT resource_id FROM information_revisions WHERE id=?", UUID.class, old);
+    try (var listener = new PostgresProjectionNotificationSource(source()).open();
+        var writer = transaction()) {
+      listener.listen();
+      var db = view(writer);
+      // A no-op INSERT must not mark a previously committed resource as newly created.
+      db.update(
+          "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source') ON CONFLICT DO NOTHING",
+          oldResource,
+          oldResource.toString());
+      db.update(
+          "UPDATE information_resource_policies SET private_only=NOT private_only,version=version+1,reason='ASSIGNMENT',actor=? WHERE resource_id=?",
+          actor,
+          oldResource);
+      writer.commit();
+      assertTrue(
+          listener
+              .poll(Duration.ofSeconds(2))
+              .contains(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS));
+    }
+    var stable =
+        versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS)).orElseThrow();
+    try (var writer = transaction()) {
+      var db = view(writer);
+      var resources = new java.util.ArrayList<UUID>();
+      for (int i = 0; i < 130; i++) {
+        UUID resource = UUID.randomUUID();
+        resources.add(resource);
+        db.update(
+            "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+            resource,
+            resource.toString());
+      }
+      assertEquals(
+          128,
+          db.queryForObject(
+              "SELECT cardinality(string_to_array(current_setting('plowshare.cache_born_resources'),','))",
+              Integer.class));
+      db.update(
+          "UPDATE information_resource_policies SET private_only=NOT private_only,version=version+1,reason='ASSIGNMENT',actor=? WHERE resource_id=?",
+          actor,
+          resources.getFirst());
+      writer.commit();
+      assertFalse(
+          versions.current(stable), "Evicted birth evidence must fall back to a hard fence");
+    }
+  }
+
+  @Test
+  void outerCreationEvidenceSurvivesSavepointRollbackWithoutPublishingHardHints() throws Exception {
+    String handle = "birth-savepoint-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'fixture')", handle);
+    UUID actor =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, handle);
+    var stable =
+        versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS)).orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open();
+        var writer = transaction()) {
+      listener.listen();
+      var db = view(writer);
+      UUID retained = UUID.randomUUID(), rolledBack = UUID.randomUUID();
+      db.update(
+          "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+          retained,
+          retained.toString());
+      var point = writer.setSavepoint();
+      db.update(
+          "INSERT INTO information_resources(id,namespace,source_name,kind) VALUES(?,'legacy',?,'source')",
+          rolledBack,
+          rolledBack.toString());
+      writer.rollback(point);
+      db.update(
+          "UPDATE information_resource_policies SET private_only=NOT private_only,version=version+1,reason='ASSIGNMENT',actor=? WHERE resource_id=?",
+          actor,
+          retained);
+      writer.commit();
+      assertFalse(
+          listener
+              .poll(Duration.ofSeconds(2))
+              .contains(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS));
+      assertTrue(
+          versions.current(stable),
+          "An inner rollback cannot discard proven outer creation evidence");
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM information_resources WHERE id=?", Integer.class, rolledBack));
+    }
+  }
+
+  @Test
+  void existingResourceHeadsAndLateRevocationsRemainHardWhileCreationMarkersClearAtCommit()
+      throws Exception {
+    UUID old = informationStep();
+    UUID resource =
+        jdbc.queryForObject(
+            "SELECT resource_id FROM information_revisions WHERE id=?", UUID.class, old);
+    try (var listener = new PostgresProjectionNotificationSource(source()).open();
+        var writer = transaction()) {
+      listener.listen();
+      view(writer)
+          .update(
+              "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size) VALUES(?,?,2,'new head','text/plain','fixture',1)",
+              UUID.randomUUID(),
+              resource);
+      var token =
+          versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS)).orElseThrow();
+      assertTrue(versions.current(token));
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+      writer.commit();
+      assertFalse(
+          versions.current(token),
+          "A new head can redirect existing unpinned obligations and must fence a late commit");
+      assertTrue(
+          listener
+              .poll(Duration.ofSeconds(2))
+              .contains(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS));
+    }
+    var token =
+        versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS)).orElseThrow();
+    jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", old);
+    assertFalse(
+        versions.current(token), "A prior transaction's birth marker cannot suppress revocation");
+  }
+
+  @Test
   void logInputChurnRetiresLogVisibilityWithoutRetiringCatalogueAccessOrContent() {
     var catalogue =
         versions
