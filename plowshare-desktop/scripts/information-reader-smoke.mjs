@@ -76,6 +76,31 @@ try {
     await expect(page.locator('[data-ask] input')).toHaveValue(
       'Keep this draft question',
     );
+    // A continuous content storm must permit a slow read to complete and retain its authorized
+    // text/selection while the next soft refresh validates. This exercises the installed reader.
+    await page.evaluate(() => {
+      window.informationReaderFixture.hold();
+      window.informationReaderFixture.refresh();
+    });
+    await expect.poll(() => page.evaluate(() => window.informationReaderFixture.pendingCount())).toBeGreaterThan(0);
+    for (let tick=0; tick<90; tick++) {
+      await page.evaluate(() => window.informationReaderFixture.contentHint());
+      await page.clock.runFor(100);
+    }
+    await page.evaluate(() => window.informationReaderFixture.release());
+    await expect(rendered).toContainText('Final retained paragraph.');
+    await expect(page.locator('[data-detail]')).toHaveCSS('visibility','visible');
+    await page.evaluate(() => {
+      window.retainedReader = document.querySelector('[data-rendered-passage]');
+      window.readerHidden = false;
+    });
+    for (let tick=0; tick<30; tick++) {
+      await page.evaluate(() => window.informationReaderFixture.contentHint());
+      await page.clock.runFor(100);
+    }
+    assert.equal(await page.evaluate(() => window.retainedReader === document.querySelector('[data-rendered-passage]')),true);
+    assert.equal(await page.evaluate(() => window.readerHidden),false);
+    await expect(page.locator('[data-ask] input')).toHaveValue('Keep this draft question');
     // A failed read must not be retained as a successful text snapshot, otherwise
     // unchanged metadata can make the Refresh control permanently ineffective.
     await page.evaluate(() => {

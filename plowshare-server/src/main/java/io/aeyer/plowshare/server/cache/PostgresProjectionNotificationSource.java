@@ -28,6 +28,8 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
 
   static final String PROJECTION_V2_CHANNEL = "plowshare_projection_changes_v2";
 
+  static final String KNOWLEDGE_ACCESS_CHANNEL = "plowshare_knowledge_access_changes";
+
   private final DataSource source;
 
   public PostgresProjectionNotificationSource(DataSource source) {
@@ -82,6 +84,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         jdbc.execute("LISTEN " + CHANNEL);
         jdbc.execute("LISTEN " + READABILITY_CHANNEL);
         jdbc.execute("LISTEN " + PROJECTION_V2_CHANNEL);
+        jdbc.execute("LISTEN " + KNOWLEDGE_ACCESS_CHANNEL);
         // LISTEN is transactional: baseline reads are forbidden until this commit has succeeded.
         connection.commit();
         connection.setAutoCommit(true);
@@ -105,7 +108,8 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
           for (PGNotification notification : notifications) {
             if (!CHANNEL.equals(notification.getName())
                 && !READABILITY_CHANNEL.equals(notification.getName())
-                && !PROJECTION_V2_CHANNEL.equals(notification.getName())) continue;
+                && !PROJECTION_V2_CHANNEL.equals(notification.getName())
+                && !KNOWLEDGE_ACCESS_CHANNEL.equals(notification.getName())) continue;
             changed.add(
                 switch (notification.getParameter()) {
                   case "documents" -> ProjectionVersions.Domain.DOCUMENTS;
@@ -115,6 +119,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
                   case "transcripts" -> ProjectionVersions.Domain.TRANSCRIPTS;
                   case "authority" -> ProjectionVersions.Domain.AUTHORITY;
                   case "observations" -> ProjectionVersions.Domain.OBSERVATIONS;
+                  case "knowledge_access" -> ProjectionVersions.Domain.KNOWLEDGE_ACCESS;
                   case "readability" -> ProjectionVersions.Domain.READABILITY;
                   case "queues" -> ProjectionVersions.Domain.QUEUES;
                   case "progress" -> ProjectionVersions.Domain.PROGRESS;

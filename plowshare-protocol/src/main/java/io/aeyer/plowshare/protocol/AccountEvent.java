@@ -22,6 +22,9 @@ public sealed interface AccountEvent extends ServerPush {
     }
   }
 
+  /**
+   * Legacy identified hint retained for decoding older servers; current servers emit opaque hints.
+   */
   record InformationChanged(long sequence, UUID revision, int generation) implements AccountEvent {
     public InformationChanged {
       if (sequence < 1 || generation < 1)
@@ -40,11 +43,20 @@ public sealed interface AccountEvent extends ServerPush {
    * Opaque account-socket invalidation. It carries no resource identity or authority decision;
    * clients must reauthorize their selected reads and reconcile dropped hints after reconnect.
    */
-  record InformationInvalidated(@JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean progressOnly)
+  record InformationInvalidated(
+      @JsonInclude(JsonInclude.Include.NON_DEFAULT) @JsonProperty(defaultValue = "false")
+          boolean progressOnly,
+      @JsonInclude(JsonInclude.Include.NON_DEFAULT) @JsonProperty(defaultValue = "false")
+          boolean refreshOnly)
       implements AccountEvent {
     /** An absent progress flag preserves the existing full-invalidation wire contract. */
     public InformationInvalidated() {
-      this(false);
+      this(false, false);
+    }
+
+    /** Content refresh dominates progress when both optional flags are present. Neither revokes. */
+    public InformationInvalidated(boolean progressOnly) {
+      this(progressOnly, false);
     }
 
     @Override

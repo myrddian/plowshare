@@ -83,6 +83,129 @@ class ProjectionVersionsDatabaseTest {
   }
 
   @Test
+  void logInputChurnRetiresLogVisibilityWithoutRetiringCatalogueAccessOrContent() {
+    var catalogue =
+        versions
+            .capture(
+                Set.of(
+                    ProjectionVersions.Domain.KNOWLEDGE_ACCESS,
+                    ProjectionVersions.Domain.AUTHORITY,
+                    ProjectionVersions.Domain.DOCUMENTS))
+            .orElseThrow();
+    var logs =
+        versions
+            .capture(
+                Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY))
+            .orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      for (int i = 0; i < 100; i++)
+        jdbc.update(
+            "INSERT INTO information_quarantined_payloads(payload_id,reason) VALUES(?,'fixture')",
+            "log-churn-" + UUID.randomUUID());
+      assertTrue(versions.current(catalogue));
+      assertFalse(versions.current(logs), "Log revocation must still fence current log readers");
+      var changes = listener.poll(Duration.ofSeconds(2));
+      assertTrue(changes.contains(ProjectionVersions.Domain.READABILITY));
+      assertFalse(changes.contains(ProjectionVersions.Domain.KNOWLEDGE_ACCESS));
+      assertFalse(changes.contains(ProjectionVersions.Domain.DOCUMENTS));
+    }
+  }
+
+  @Test
+  void historyWritesWakeProgressWithoutRevokingCatalogueAccessAndRollbackEmitsNothing()
+      throws Exception {
+    UUID revision = informationStep();
+    long project =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name) VALUES(?) RETURNING id",
+            Long.class,
+            "history-fence-" + UUID.randomUUID());
+    var stable =
+        versions
+            .capture(
+                Set.of(
+                    ProjectionVersions.Domain.KNOWLEDGE_ACCESS,
+                    ProjectionVersions.Domain.AUTHORITY,
+                    ProjectionVersions.Domain.DOCUMENTS))
+            .orElseThrow();
+    var progress = versions.capture(Set.of(ProjectionVersions.Domain.PROGRESS)).orElseThrow();
+    try (var listener = new PostgresProjectionNotificationSource(source()).open()) {
+      listener.listen();
+      jdbc.update(
+          "INSERT INTO information_revision_events(revision_id,relay_project,relay_position,generation,stage,action) VALUES(?,?,1,1,'derive','ready')",
+          revision,
+          project);
+      assertTrue(versions.current(stable));
+      assertFalse(versions.current(progress));
+      assertEquals(
+          Set.of(ProjectionVersions.Domain.PROGRESS), listener.poll(Duration.ofSeconds(2)));
+      var unchanged = versions.capture(Set.of(ProjectionVersions.Domain.PROGRESS)).orElseThrow();
+      jdbc.update(
+          "UPDATE information_revision_events SET detail=detail WHERE revision_id=? AND relay_project=?",
+          revision,
+          project);
+      assertTrue(versions.current(unchanged), "No-op history edits must not generate refresh work");
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+      try (var writer = transaction()) {
+        view(writer)
+            .update(
+                "INSERT INTO information_revision_events(revision_id,relay_project,relay_position,generation,stage,action) VALUES(?,?,2,1,'derive','retry')",
+                revision,
+                project);
+        assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+        writer.rollback();
+      }
+      assertTrue(listener.poll(Duration.ofMillis(20)).isEmpty());
+      assertTrue(versions.current(stable));
+    }
+  }
+
+  @Test
+  void catalogueLateCommitFenceRetiresATokenCapturedAfterAccessCounterAllocation()
+      throws Exception {
+    UUID revision = informationStep();
+    try (var writer = transaction()) {
+      view(writer).update("UPDATE information_revisions SET excluded=true WHERE id=?", revision);
+      var token =
+          versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_ACCESS)).orElseThrow();
+      assertTrue(versions.current(token));
+      writer.commit();
+      assertFalse(
+          versions.current(token),
+          "Unchanged allocation counters must not hide a late access commit");
+    }
+    var stable = versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_ACCESS)).orElseThrow();
+    jdbc.update("UPDATE information_revisions SET title='content only' WHERE id=?", revision);
+    assertTrue(versions.current(stable), "Non-policy content updates use ordinary refresh");
+    jdbc.update("UPDATE information_revisions SET excluded=false WHERE id=?", revision);
+    assertFalse(versions.current(stable));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "information_revisions",
+        "information_resources",
+        "information_links",
+        "information_inputs",
+        "information_resource_policies",
+        "information_navigation_policies",
+        "information_reference_obligations",
+        "information_document_policies"
+      })
+  void everyCatalogueAccessSourceRetainsItsTruncateFence(String table) throws Exception {
+    var token = versions.capture(Set.of(ProjectionVersions.Domain.KNOWLEDGE_ACCESS)).orElseThrow();
+    try (var writer = transaction()) {
+      // Closed fixture vocabulary only. Rollback preserves all other fixtures; sequence allocation
+      // is deliberately conservative even for a transaction that is subsequently rolled back.
+      view(writer).execute("TRUNCATE TABLE " + table + " CASCADE");
+      assertFalse(versions.current(token));
+      writer.rollback();
+    }
+  }
+
+  @Test
   void informationStepHeartbeatsWakeProcWithoutInvalidatingCorpusOrAuthority() {
     UUID revision = informationStep();
     var corpus =

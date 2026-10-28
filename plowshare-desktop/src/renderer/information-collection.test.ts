@@ -373,3 +373,61 @@ await test('progress coalesces without hiding or cancelling reads; authority upg
   f.clock.advance(120_000);
   assert.equal(f.reads(), 3, 'Logout fences progress timers too');
 });
+
+await test('continuous content refreshes let an authorized Reports read complete; access still fences it', async () => {
+  const clock = new RefreshClock();
+  let epoch = 0;
+  let visible = '';
+  let reads = 0;
+  const report = deferred<string>();
+  let pending: Promise<void> | undefined;
+  const owner = new InformationRefresh(
+    clock,
+    () => {
+      epoch++;
+      visible = '';
+    },
+    () => {
+      reads++;
+      if (pending) return;
+      owner.readStarted();
+      const started = epoch;
+      pending = report.promise.then((value) => {
+        if (epoch === started) visible = value;
+      });
+    },
+  );
+  owner.observe('server/account/scope/socket', 0, 0, 0);
+  clock.advance(0);
+  for (let hint = 1; hint <= 90; hint++) {
+    owner.observe('server/account/scope/socket', 0, hint, hint);
+    clock.advance(100);
+  }
+  assert.equal(
+    epoch,
+    1,
+    'Soft content must not retire the running nine-second read',
+  );
+  assert.ok(reads <= 10, 'Continuous hints retain the first bounded deadline');
+  report.resolve('protected report');
+  await pending;
+  assert.equal(visible, 'protected report');
+  assert.equal(
+    owner.readStarted(),
+    true,
+    'Content refresh work survives until an actual read starts',
+  );
+  assert.equal(
+    owner.readStarted(),
+    false,
+    'One read consumes the coalesced content work',
+  );
+  owner.observe('server/account/scope/socket', 1, 90, 90);
+  assert.equal(
+    visible,
+    '',
+    'An access hint still hides protected content synchronously',
+  );
+  assert.equal(epoch, 2);
+  owner.stop();
+});

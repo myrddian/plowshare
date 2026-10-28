@@ -10,6 +10,7 @@ public interface ReadAdmission {
   enum Work {
     INTERACTIVE,
     REPORT,
+    REPORT_REFRESH,
     AUTHORITY,
     MAINTENANCE,
     OBSERVER,

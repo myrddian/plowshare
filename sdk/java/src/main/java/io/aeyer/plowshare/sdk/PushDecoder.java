@@ -29,6 +29,8 @@ final class PushDecoder {
       case "inbox.changed" -> SdkJson.decode(json, payload, AccountEvent.InboxChanged.class);
       case "information.changed" ->
           SdkJson.decode(json, payload, AccountEvent.InformationChanged.class);
+      case "information.invalidated" ->
+          SdkJson.decode(json, payload, AccountEvent.InformationInvalidated.class);
       case "orchestration.resumed" ->
           SdkJson.decode(json, payload, AccountEvent.OrchestrationResumed.class);
       case "orchestration.changed" ->

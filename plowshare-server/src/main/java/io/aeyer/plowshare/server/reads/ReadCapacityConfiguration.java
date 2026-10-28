@@ -9,18 +9,22 @@ import org.springframework.context.annotation.Configuration;
 
 /** One shared budget across server entry points; metrics contain no principal/resource labels. */
 @Configuration
-@EnableConfigurationProperties(ReadCapacityProperties.class)
+@EnableConfigurationProperties({ReadCapacityProperties.class, ReadSchedulingProperties.class})
 public class ReadCapacityConfiguration {
   @Bean
   ReadAdmission readAdmission(
-      ReadCapacityProperties properties, ObjectProvider<MeterRegistry> registries) {
-    var admission = new BoundedReadAdmission(properties);
+      ReadCapacityProperties properties,
+      ReadSchedulingProperties scheduling,
+      ObjectProvider<MeterRegistry> registries) {
+    var admission = new BoundedReadAdmission(properties, scheduling);
     var registry = registries.getIfAvailable();
     if (registry != null) {
       for (var work : ReadAdmission.Work.values())
         Gauge.builder("plowshare.read.active", admission, value -> value.active(work))
             .tag("work", work.name())
             .register(registry);
+      Gauge.builder("plowshare.read.waiting", admission, BoundedReadAdmission::waitingReports)
+          .register(registry);
       Gauge.builder("plowshare.read.rejected", admission, BoundedReadAdmission::rejected)
           .register(registry);
     }

@@ -1837,7 +1837,7 @@ export const OPERATION_SCHEMAS: { inputs: Record<string, Schema>; results: Recor
     "shape1255": {"const":"inbox.changed"},
     "shape1254": {"type":"object","properties":{"kind":{"$ref":"#/$defs/shape1255"},"unread":{"$ref":"#/$defs/shape16"}},"required":["kind","unread"],"additionalProperties":false},
     "shape1257": {"const":"information.invalidated"},
-    "shape1256": {"type":"object","properties":{"kind":{"$ref":"#/$defs/shape1257"},"progressOnly":{"$ref":"#/$defs/shape8"}},"required":["kind"],"additionalProperties":false},
+    "shape1256": {"type":"object","properties":{"kind":{"$ref":"#/$defs/shape1257"},"progressOnly":{"$ref":"#/$defs/shape8"},"refreshOnly":{"$ref":"#/$defs/shape8"}},"required":["kind"],"additionalProperties":false},
     "shape1259": {"const":"information.changed"},
     "shape1258": {"type":"object","properties":{"generation":{"$ref":"#/$defs/shape16"},"kind":{"$ref":"#/$defs/shape1259"},"revision":{"$ref":"#/$defs/shape1"},"sequence":{"$ref":"#/$defs/shape16"}},"required":["generation","kind","revision","sequence"],"additionalProperties":false},
     "shape1261": {"const":"orchestration.changed"},

@@ -32,6 +32,7 @@ public interface ProjectionVersions {
     TYPES,
     EXTRACTIONS,
     READABILITY,
+    KNOWLEDGE_ACCESS,
     AUTHORITY
   }
 

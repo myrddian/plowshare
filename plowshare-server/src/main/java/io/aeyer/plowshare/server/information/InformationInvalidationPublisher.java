@@ -15,6 +15,11 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class InformationInvalidationPublisher implements AutoCloseable {
   private final ProjectionChangeSignals signals;
   private final InformationInvalidations pushes;
+  private final InformationInvalidationClock clock;
+  // Only one soft deadline is retained. Source hints cannot grow a queue or postpone it.
+  private boolean scheduled;
+  private boolean content;
+  private boolean progress;
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final AtomicReference<ProjectionChangeSignals.Subscription> subscription =
@@ -23,6 +28,14 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
 
   public InformationInvalidationPublisher(
       ProjectionChangeSignals signals, InformationInvalidations pushes) {
+    this(signals, pushes, new ScheduledInformationInvalidationClock());
+  }
+
+  public InformationInvalidationPublisher(
+      ProjectionChangeSignals signals,
+      InformationInvalidations pushes,
+      InformationInvalidationClock clock) {
+    this.clock = Objects.requireNonNull(clock);
     this.signals = Objects.requireNonNull(signals);
     this.pushes = Objects.requireNonNull(pushes);
   }
@@ -32,7 +45,13 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
     if (closed.get() || !started.compareAndSet(false, true)) return;
     var opened =
         signals.subscribe(
-            Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY, Domain.PROGRESS),
+            Set.of(
+                Domain.DOCUMENTS,
+                Domain.KNOWLEDGE_ACCESS,
+                Domain.AUTHORITY,
+                Domain.PROGRESS,
+                Domain.TYPES,
+                Domain.EXTRACTIONS),
             new ProjectionChangeSignals.Observer() {
               @Override
               public void stateChanged(ProjectionChangeSignals.State next) {
@@ -47,10 +66,14 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
 
               @Override
               public void changed(Set<Domain> domains) {
-                if (domains.contains(Domain.DOCUMENTS)
-                    || domains.contains(Domain.READABILITY)
-                    || domains.contains(Domain.AUTHORITY)) publish();
-                else if (domains.contains(Domain.PROGRESS) && !closed.get()) pushes.progress();
+                if (domains.contains(Domain.KNOWLEDGE_ACCESS)
+                    || domains.contains(Domain.AUTHORITY)) {
+                  publish();
+                } else if (domains.contains(Domain.DOCUMENTS)
+                    || domains.contains(Domain.TYPES)
+                    || domains.contains(Domain.EXTRACTIONS)) {
+                  soft(true);
+                } else if (domains.contains(Domain.PROGRESS)) soft(false);
               }
             });
     if (!subscription.compareAndSet(null, opened) || closed.get()) {
@@ -60,12 +83,42 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
   }
 
   private void publish() {
-    if (!closed.get()) pushes.invalidate();
+    synchronized (this) {
+      if (closed.get()) return;
+      // A revocation/recovery supersedes preceding soft work but never waits for its timer.
+      content = progress = false;
+    }
+    pushes.invalidate();
+  }
+
+  private synchronized void soft(boolean changedContent) {
+    if (closed.get()) return;
+    content |= changedContent;
+    progress = true;
+    if (scheduled) return;
+    scheduled = true;
+    clock.schedule(this::flush);
+  }
+
+  private void flush() {
+    boolean refresh;
+    synchronized (this) {
+      scheduled = false;
+      if (closed.get() || !progress) return;
+      refresh = content;
+      content = progress = false;
+    }
+    // Transport callbacks are never executed under the publisher monitor.
+    if (refresh) pushes.refresh();
+    else pushes.progress();
   }
 
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) return;
+    synchronized (this) {
+      if (!closed.compareAndSet(false, true)) return;
+    }
+    clock.close();
     var opened = subscription.getAndSet(null);
     if (opened != null) opened.close();
   }

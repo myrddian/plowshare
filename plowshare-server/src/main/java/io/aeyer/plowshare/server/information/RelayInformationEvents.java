@@ -1,10 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
-import io.aeyer.plowshare.protocol.AccountEvent;
 import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
-import io.aeyer.plowshare.server.archive.UnitOfWork;
-import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayConsumption;
@@ -71,8 +68,6 @@ public final class RelayInformationEvents implements InformationEvents {
   private final Relay relay;
   private final RelayConsumption consumption;
   private final ProjectWorkspaces projects;
-  private final UnitOfWork transactions;
-  private final AccountPushes pushes;
   private final Supplier<Instant> clock;
 
   public RelayInformationEvents(
@@ -80,15 +75,11 @@ public final class RelayInformationEvents implements InformationEvents {
       Relay relay,
       RelayConsumption consumption,
       ProjectWorkspaces projects,
-      UnitOfWork transactions,
-      AccountPushes pushes,
       Supplier<Instant> clock) {
     this.records = Objects.requireNonNull(records, "records");
     this.relay = Objects.requireNonNull(relay, "relay");
     this.consumption = Objects.requireNonNull(consumption, "consumption");
     this.projects = Objects.requireNonNull(projects, "projects");
-    this.transactions = Objects.requireNonNull(transactions, "transactions");
-    this.pushes = Objects.requireNonNull(pushes, "pushes");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -142,37 +133,11 @@ public final class RelayInformationEvents implements InformationEvents {
             event.action(),
             event.detail(),
             publication.event().occurredAt()));
-    // The audience is resolved after commit, not captured during it, so a membership change
-    // committing in between withdraws the hint rather than being raced past by it.
-    transactions.afterCommit(() -> hint(topic, event, publication.position()));
-  }
-
-  /**
-   * Wakes the topic's current audience once the publication is committed.
-   *
-   * <p>This is the only fan-out left and it is a hint, not delivery: the audience comes from Relay
-   * in one set-based read, nothing is persisted per recipient, and a lost hint costs a reader only
-   * latency because its durable position still holds the event. {@link AccountPushes} never throws,
-   * and this runs after commit so it can neither roll back nor delay the mutation.
-   *
-   * <p>The audience, not the subscriber list. A hint names a revision, its generation and a stream
-   * position, so sending one is a disclosure and is governed by the same invariant delivery is: no
-   * account may receive an information event for a scope it may not read. A {@code
-   * relay_subscriptions} row outlives the withdrawal of its authority — revocation removes the
-   * authority record and leaves the subscription — so hinting to every subscriber would keep
-   * telling a revoked account which document changed and when, while the consume path refused it.
-   * {@link RelayConsumption#audience} answers with the accounts whose authority is established and
-   * still valid, by the one definition the consume gate also uses.
-   */
-  private void hint(Relay.TopicKey topic, Occurrence event, long position) {
-    var body =
-        new AccountEvent.InformationChanged(
-            position, event.revision(), Math.toIntExact(event.generation()));
-    // The key the publication was appended under, not a second derivation of it: the audience must
-    // be the audience of the topic that was written, even if a later recipe change made the two
-    // differ.
-    for (String account : consumption.audience(topic.scope(), topic.name()))
-      pushes.push(account, body);
+    // Live sockets use the identifier-free projection publisher. The history INSERT participates
+    // in its transactional PROGRESS fence, so rollback emits no hint and continuous processing
+    // coalesces globally. Do not resolve a recipient audience or send information.changed here:
+    // that duplicated policy IO per event and bypassed refresh coalescing with a hard hint.
+    // Durable Relay publications, audience checks on read, and each subscriber's cursor remain.
   }
 
   @Override

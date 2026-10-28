@@ -28,7 +28,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -102,7 +101,6 @@ class RelayInformationEventsDatabaseTest {
   private RelayConsumption consumption;
   private InformationEventRecords records;
   private InformationEvents events;
-  private final CopyOnWriteArrayList<String> hinted = new CopyOnWriteArrayList<>();
   private Instant now = T0;
 
   @BeforeAll
@@ -158,7 +156,6 @@ class RelayInformationEventsDatabaseTest {
         ELSEWHERE);
 
     now = T0;
-    hinted.clear();
     broker =
         new JdbcRelayRepository(
             jdbc,
@@ -179,15 +176,7 @@ class RelayInformationEventsDatabaseTest {
         new ReadTierRelayConsumption(
             new JdbcProjectMembers(jdbc), projects, relay, consumers, authority, WINDOW, () -> now);
     records = new JdbcInformationEventRecords(jdbc);
-    events =
-        new RelayInformationEvents(
-            records,
-            relay,
-            consumption,
-            projects,
-            work,
-            (handle, body) -> hinted.add(handle),
-            () -> now);
+    events = new RelayInformationEvents(records, relay, consumption, projects, () -> now);
   }
 
   /** Real project rows; the personal-owner rule is load-bearing and must not be stubbed. */
@@ -284,16 +273,6 @@ class RelayInformationEventsDatabaseTest {
         status ->
             events.publish(
                 new InformationEvents.Occurrence(revision, 1, AUTHOR, stage, action, detail)));
-  }
-
-  /**
-   * Publishes with no enclosing transaction, so {@code UnitOfWork.afterCommit} runs the wake hint
-   * inline instead of on a virtual thread. The hint pins are about <i>who</i> is hinted, and a
-   * negative assertion against an asynchronous fan-out cannot distinguish "never sent" from "not
-   * sent yet". The transactional path is what every other pin here exercises.
-   */
-  private void publishAndHint(UUID revision, String action) {
-    events.publish(new InformationEvents.Occurrence(revision, 1, AUTHOR, "derive", action, ""));
   }
 
   private InformationContext reader(String account, String project) {
@@ -586,84 +565,39 @@ class RelayInformationEventsDatabaseTest {
   }
 
   @Test
-  void a_wake_hint_reaches_a_currently_authorized_reader() {
-    publish(projectHomed(), "intake", "retained", "");
-    events.read(reader(VIEWER, PROJECT), 0, 50);
-    hinted.clear();
-
-    publishAndHint(projectHomed(), "ready");
-    assertEquals(
-        List.of(VIEWER),
-        List.copyOf(hinted),
-        "the capability has to survive the authority gate, not be removed by it");
-  }
-
-  @Test
-  void an_account_that_never_subscribed_is_never_hinted() {
-    publishAndHint(projectHomed(), "ready");
-    assertEquals(
-        List.of(),
-        List.copyOf(hinted),
-        "a hint names a revision, so an account with no established authority must not get one");
-    assertEquals(
-        List.of(), consumption.audience(new Relay.ProjectScope(projectId), topic(projectId)));
-  }
-
-  /**
-   * A hint is a disclosure: it names a revision, its generation and a stream position. So it is
-   * governed by the same invariant delivery is, and withheld by <b>every</b> route that invalidates
-   * authority — not only the one revocation happens to take.
-   *
-   * <p>Each route is asserted together with the fact that makes it non-trivial: the {@code
-   * relay_subscriptions} row survives in all three, so nothing here passes because the subscription
-   * vanished. The audience query is checked alongside the push, because an empty push list could
-   * also mean the fan-out never ran.
-   */
-  @Test
-  void an_account_whose_authority_lapsed_is_not_hinted_by_any_invalidation_route() {
+  void durableEventsRemainReadableAndRetainedSubscriptionsNeverAuthorizeRevokedAccounts() {
+    UUID revision = projectHomed();
+    publish(revision, "intake", "retained", "");
+    var initial = events.read(reader(VIEWER, PROJECT), 0, 50);
+    publish(revision, "derive", "ready", "owner private detail");
+    var next = events.read(reader(VIEWER, PROJECT), initial.cursor(), 50);
+    assertEquals(1, next.events().size());
+    assertEquals("ready", next.events().getFirst().action());
+    assertEquals("", next.events().getFirst().detail());
     var scope = new Relay.ProjectScope(projectId);
-
-    // Route 1: membership withdrawn. The V187 trigger drops the authority record in the same
-    // change; the subscription row is left exactly where it was.
-    publish(projectHomed(), "intake", "retained", "");
-    events.read(reader(VIEWER, PROJECT), 0, 50);
     assertEquals(List.of(VIEWER), consumption.audience(scope, topic(projectId)));
     jdbc.update("DELETE FROM project_members WHERE project_id=? AND handle=?", projectId, VIEWER);
-    assertTrue(subscribed(VIEWER), "the subscription row must outlive its authority record");
+    assertTrue(subscribed(VIEWER), "A retained subscription must not become authorization");
     assertEquals(List.of(), consumption.audience(scope, topic(projectId)));
-    hinted.clear();
-    publishAndHint(projectHomed(), "ready");
-    assertEquals(List.of(), List.copyOf(hinted), "a revoked account must stop being told");
+    publish(revision, "derive", "retry", "");
+    assertThrows(CallerFault.class, () -> events.read(reader(VIEWER, PROJECT), next.cursor(), 50));
+  }
 
-    // Route 2: the topic's incarnation moved. The authority record survives and is stale.
-    jdbc.update(
-        "INSERT INTO project_members(project_id,handle,role) VALUES(?,?,'VIEWER')",
-        projectId,
-        VIEWER);
+  @Test
+  void topicIncarnationAndAuthorityAgeRemainIndependentOfDurableSubscriptionRows() {
+    publish(projectHomed(), "intake", "retained", "");
+    var scope = new Relay.ProjectScope(projectId);
     events.read(reader(VIEWER, PROJECT), 0, 50);
-    assertEquals(List.of(VIEWER), consumption.audience(scope, topic(projectId)));
     authority.invalidateTopic(new Relay.TopicKey(projectId, topic(projectId)));
     assertTrue(subscribed(VIEWER));
-    assertEquals(1, authorityRows(), "the record must still be there, and still be refused");
+    assertEquals(1, authorityRows());
     assertEquals(List.of(), consumption.audience(scope, topic(projectId)));
-    hinted.clear();
-    publishAndHint(projectHomed(), "ready");
-    assertEquals(
-        List.of(), List.copyOf(hinted), "a reset topic must stop hinting to stale records");
-
-    // Route 3: aged past the configured window. Nothing was revoked and nothing was reset; the
-    // fallback bound alone must withhold the hint. A join against the authority table that
-    // forgot the age would pass both routes above and fail here.
     events.read(reader(VIEWER, PROJECT), 0, 50);
     assertEquals(List.of(VIEWER), consumption.audience(scope, topic(projectId)));
     now = now.plus(WINDOW).plusSeconds(1);
     assertTrue(subscribed(VIEWER));
     assertEquals(1, authorityRows());
     assertEquals(List.of(), consumption.audience(scope, topic(projectId)));
-    hinted.clear();
-    publishAndHint(projectHomed(), "ready");
-    assertEquals(
-        List.of(), List.copyOf(hinted), "an aged-out subscription must stop hinting as well");
   }
 
   @Test
