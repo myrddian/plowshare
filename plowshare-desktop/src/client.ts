@@ -187,6 +187,7 @@ export function emptyConnectionState(
     connection: 'Disconnected',
     informationRevision: 0,
     informationProgressRevision: 0,
+    informationRefreshRevision: 0,
     informationConnection: 0,
     base,
     handle,
@@ -2491,6 +2492,7 @@ export class DesktopClient {
       event['kind'] === 'information.invalidated'
     ) {
       let progressOnly = false;
+      let refreshOnly = false;
       try {
         // The shared SDK validates this boundary. No resource identity or extra wire fields
         // enter Desktop state: the renderer reconciles through its authenticated selection.
@@ -2500,14 +2502,21 @@ export class DesktopClient {
           decoded.kind === 'information.invalidated' &&
           'progressOnly' in decoded &&
           decoded.progressOnly === true;
+        refreshOnly =
+          'kind' in decoded &&
+          decoded.kind === 'information.invalidated' &&
+          'refreshOnly' in decoded &&
+          decoded.refreshOnly === true;
       } catch (error) {
         this.state.backgroundError = errorMessage(error);
       }
       // Invalid hints also invalidate private snapshots and trigger a bounded authoritative
       // recovery read. This bounded process-local counter is a hint, never a durable cursor.
-      const field = progressOnly
-        ? 'informationProgressRevision'
-        : 'informationRevision';
+      const field = refreshOnly
+        ? 'informationRefreshRevision'
+        : progressOnly
+          ? 'informationProgressRevision'
+          : 'informationRevision';
       const previous = this.state[field] ?? 0;
       this.state[field] =
         previous === Number.MAX_SAFE_INTEGER ? 0 : previous + 1;

@@ -26,8 +26,10 @@ public interface InformationEvents {
    * Appends one event to its revision's audience, inside the caller's transaction.
    *
    * <p>The revision's allowance row is locked first and the home scope resolved once; the append
-   * then takes only Relay's lock on that one topic row. Delivery hints to subscribed readers are
-   * deferred until the caller's transaction commits, so a rolled-back mutation announces nothing.
+   * then takes only Relay's lock on that one topic row. The same transactional history write wakes
+   * the opaque projection publisher after commit; a rolled-back mutation announces nothing. There
+   * is no per-event socket recipient lookup. Readers reconcile through their independently
+   * authorized durable subscriptions.
    *
    * @throws InformationEventRecords.Unaddressable if the home scope has no Relay audience. This is
    *     not caught anywhere: a refused publication is a visible defect, while one delivered to the

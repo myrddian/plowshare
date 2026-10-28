@@ -119,6 +119,11 @@ Object.assign(window, {
       state.informationRevision = (state.informationRevision ?? 0) + 1;
       listener?.(state);
     },
+    contentHint() {
+      state.informationRefreshRevision =
+        (state.informationRefreshRevision ?? 0) + 1;
+      listener?.(state);
+    },
     release() {
       held = false;
       for (const resolve of pending.splice(0)) resolve();

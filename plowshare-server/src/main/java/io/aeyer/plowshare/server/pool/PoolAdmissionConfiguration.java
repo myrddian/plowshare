@@ -107,7 +107,9 @@ public class PoolAdmissionConfiguration {
 
   @Bean
   GatedConnections gatedConnections(DataSource primary, AdmissionThrottle throttle) {
-    return new GatedConnections(new ThrottledDataSource(primary, throttle));
+    return new GatedConnections(
+        new ThrottledDataSource(
+            new TracedDataSource(primary, new JfrJdbcExecutionTrace()), throttle));
   }
 
   @Bean

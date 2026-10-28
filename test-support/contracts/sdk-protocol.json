@@ -24172,6 +24172,9 @@
           },
           "progressOnly": {
             "$ref": "#/$defs/shape8"
+          },
+          "refreshOnly": {
+            "$ref": "#/$defs/shape8"
           }
         },
         "required": [

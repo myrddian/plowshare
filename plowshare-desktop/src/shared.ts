@@ -174,6 +174,7 @@ export interface DesktopState {
   /** Opaque invalidation/reconnect counters; they never confer read authority. */
   informationRevision?: number;
   informationProgressRevision?: number;
+  informationRefreshRevision?: number;
   informationConnection?: number;
   localFileStores?: FileStoreState;
   applicationFiles?: {

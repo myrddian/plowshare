@@ -32,6 +32,15 @@ public final class CachedUsageReportRepository implements UsageReportRepository 
   }
 
   public Report report(String account, Resolved query) {
+    return load(account, query, ReadAdmission.Work.REPORT);
+  }
+
+  @Override
+  public Report refresh(String account, Resolved query) {
+    return load(account, query, ReadAdmission.Work.REPORT_REFRESH);
+  }
+
+  private Report load(String account, Resolved query, ReadAdmission.Work work) {
     if (account == null || account.isBlank())
       throw new io.aeyer.plowshare.server.faults.CallerFault("A signed-in account is required");
     Objects.requireNonNull(query);
@@ -40,8 +49,7 @@ public final class CachedUsageReportRepository implements UsageReportRepository 
     return reports.read(
         key,
         true,
-        () ->
-            admission.read(account, ReadAdmission.Work.REPORT, () -> source.report(account, query)),
+        () -> admission.read(account, work, () -> source.report(account, query)),
         value -> 4096L + 4L * canonical(value).length());
   }
 

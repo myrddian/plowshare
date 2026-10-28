@@ -87,7 +87,7 @@ public record ReadCapacityProperties(
   int global(ReadAdmission.Work work) {
     return switch (work) {
       case INTERACTIVE -> interactive;
-      case REPORT -> reports;
+      case REPORT, REPORT_REFRESH -> reports;
       case AUTHORITY -> authority;
       case MAINTENANCE -> maintenance;
       case OBSERVER -> observers;
@@ -99,7 +99,7 @@ public record ReadCapacityProperties(
   int principal(ReadAdmission.Work work) {
     return switch (work) {
       case INTERACTIVE -> interactivePerPrincipal;
-      case REPORT -> reportsPerPrincipal;
+      case REPORT, REPORT_REFRESH -> reportsPerPrincipal;
       case AUTHORITY -> authorityPerPrincipal;
       case MAINTENANCE -> maintenancePerPrincipal;
       case OBSERVER -> observersPerPrincipal;

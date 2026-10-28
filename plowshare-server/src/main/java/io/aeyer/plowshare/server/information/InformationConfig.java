@@ -61,13 +61,13 @@ public class InformationConfig {
         members,
         caches.create(
             "manual-heads-v1",
-            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)),
+            java.util.Set.of(Domain.DOCUMENTS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         caches.create(
             "manual-head-facets-v1",
-            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)),
+            java.util.Set.of(Domain.DOCUMENTS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         caches.create(
             "manual-connections-v1",
-            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)));
+            java.util.Set.of(Domain.DOCUMENTS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -80,7 +80,7 @@ public class InformationConfig {
         caches.create(
             "content-type-attached-v1",
             java.util.Set.of(
-                Domain.DOCUMENTS, Domain.TYPES, Domain.READABILITY, Domain.AUTHORITY)));
+                Domain.DOCUMENTS, Domain.TYPES, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -150,28 +150,15 @@ public class InformationConfig {
     return new JdbcInformationEventRecords(jdbc);
   }
 
-  /**
-   * Information events on Relay (decision 0037). {@link
-   * io.aeyer.plowshare.server.events.AccountPushes} is optional because a headless server has no
-   * sockets to wake; the durable publication and every subscriber's position are unaffected by its
-   * absence, since a push is only a latency hint.
-   */
+  /** Durable Relay events; live wakeups are owned by the opaque projection publisher. */
   @Bean
   public InformationEvents informationEvents(
       InformationEventRecords records,
       io.aeyer.plowshare.server.relay.Relay relay,
       io.aeyer.plowshare.server.relay.RelayConsumption consumption,
-      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects,
-      UnitOfWork work,
-      ObjectProvider<io.aeyer.plowshare.server.events.AccountPushes> pushes) {
+      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects) {
     return new RelayInformationEvents(
-        records,
-        relay,
-        consumption,
-        projects,
-        work,
-        pushes.getIfAvailable(() -> io.aeyer.plowshare.server.events.AccountPushes.NONE),
-        java.time.Instant::now);
+        records, relay, consumption, projects, java.time.Instant::now);
   }
 
   @Bean
@@ -187,21 +174,21 @@ public class InformationConfig {
         caches.create(
             "document-metadata-v1",
             java.util.Set.of(
-                Domain.DOCUMENTS, Domain.PROGRESS, Domain.READABILITY, Domain.AUTHORITY)),
+                Domain.DOCUMENTS, Domain.PROGRESS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         caches.create(
             "document-extraction-v1",
-            java.util.Set.of(Domain.EXTRACTIONS, Domain.READABILITY, Domain.AUTHORITY)),
+            java.util.Set.of(Domain.EXTRACTIONS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         caches.create(
             "catalogue-list-v1",
             java.util.Set.of(
-                Domain.DOCUMENTS, Domain.PROGRESS, Domain.READABILITY, Domain.AUTHORITY)),
+                Domain.DOCUMENTS, Domain.PROGRESS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         caches.create(
             "catalogue-facets-v1",
-            java.util.Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY)),
+            java.util.Set.of(Domain.DOCUMENTS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         caches.create(
             "readiness-v1",
             java.util.Set.of(
-                Domain.DOCUMENTS, Domain.PROGRESS, Domain.READABILITY, Domain.AUTHORITY)),
+                Domain.DOCUMENTS, Domain.PROGRESS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
         events);
   }
 
@@ -225,6 +212,14 @@ public class InformationConfig {
   public InformationInvalidationPublisher informationInvalidationPublisher(
       io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
       ObjectProvider<InformationInvalidations> pushes) {
+    return informationInvalidationPublisher(
+        signals, pushes, new ScheduledInformationInvalidationClock());
+  }
+
+  InformationInvalidationPublisher informationInvalidationPublisher(
+      io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
+      ObjectProvider<InformationInvalidations> pushes,
+      InformationInvalidationClock clock) {
     return new InformationInvalidationPublisher(
         signals,
         new InformationInvalidations() {
@@ -235,10 +230,15 @@ public class InformationConfig {
             pushes.getIfAvailable(() -> InformationInvalidations.NONE).invalidate();
           }
 
+          public void refresh() {
+            pushes.getIfAvailable(() -> InformationInvalidations.NONE).refresh();
+          }
+
           public void progress() {
             pushes.getIfAvailable(() -> InformationInvalidations.NONE).progress();
           }
-        });
+        },
+        clock);
   }
 
   @Bean(destroyMethod = "close")

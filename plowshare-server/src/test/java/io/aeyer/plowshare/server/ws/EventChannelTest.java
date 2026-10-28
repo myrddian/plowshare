@@ -1164,8 +1164,12 @@ class EventChannelTest {
     channel.push("reader", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
     assertTrue(socket.awaitWedged(PATIENCE_MILLIS));
     channel.progress();
+    channel.refresh();
     channel.invalidate();
-    for (int i = 0; i < 10000; i++) channel.progress();
+    for (int i = 0; i < 10000; i++) {
+      channel.progress();
+      channel.refresh();
+    }
     socket.release();
     var frames = socket.await(2, PATIENCE_MILLIS);
     assertEquals(2, frames.size());
@@ -1232,6 +1236,25 @@ class EventChannelTest {
   }
 
   @Test
+  void contentRefreshUpgradesProgressWithoutBeingPromotedToRevocation() throws Exception {
+    var registry = new SessionRegistry();
+    var channel = new EventChannelHandler(registry, answering("test.ping"), new Watchers());
+    var socket = new Stalling(true);
+    attachAs(channel, registry, "content-session", "reader", socket);
+    channel.push("reader", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
+    assertTrue(socket.awaitWedged(PATIENCE_MILLIS));
+    for (int i = 0; i < 10000; i++) {
+      channel.progress();
+      channel.refresh();
+    }
+    socket.release();
+    var frames = socket.await(2, PATIENCE_MILLIS);
+    assertEquals(
+        Map.of("kind", "information.invalidated", "refreshOnly", true), frame(frames.get(1)));
+    channel.afterConnectionClosed(socket, CloseStatus.NORMAL);
+  }
+
+  @Test
   void usage_snapshots_coalesce_without_displacing_the_correlated_initial_reply() throws Exception {
     var queries =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.accounting.UsageQueryService.class);
@@ -1258,7 +1281,7 @@ class EventChannelTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
         .thenReturn(query);
     org.mockito.Mockito.when(
-            queries.report(
+            queries.refresh(
                 org.mockito.ArgumentMatchers.eq("enzo"), org.mockito.ArgumentMatchers.eq(query)))
         .thenAnswer(
             invocation ->

@@ -9822,6 +9822,80 @@
     "boundary": "push",
     "value": {
       "kind": "information.invalidated",
+      "refreshOnly": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": true,
+      "progressOnly": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": false,
+      "progressOnly": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": "true"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": {}
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
+      "refreshOnly": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "push",
+    "value": {
+      "kind": "information.invalidated",
       "progressOnly": true,
       "future": "ignored"
     },

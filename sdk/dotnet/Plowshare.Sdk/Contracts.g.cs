@@ -7492,6 +7492,7 @@ public sealed record NotificationVariant3Dto {
 public sealed record NotificationVariant4Dto {
  [JsonPropertyName("kind")] public required string Kind { get; init; }
  [JsonPropertyName("progressOnly")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> ProgressOnly { get; init; }
+ [JsonPropertyName("refreshOnly")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> RefreshOnly { get; init; }
 }
 
 /// <summary>Fields of the NotificationVariant5Dto protocol contract.</summary>

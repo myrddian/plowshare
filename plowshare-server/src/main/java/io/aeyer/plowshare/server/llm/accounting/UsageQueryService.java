@@ -50,7 +50,15 @@ public class UsageQueryService implements UsageReports {
   }
 
   public Report report(String account, Resolved resolved) {
-    var result = repository.report(account, resolved);
+    return withHealth(repository.report(account, resolved));
+  }
+
+  @Override
+  public Report refresh(String account, Resolved resolved) {
+    return withHealth(repository.refresh(account, resolved));
+  }
+
+  private Report withHealth(Report result) {
     return new Report(
         result.filters(),
         result.totals(),
