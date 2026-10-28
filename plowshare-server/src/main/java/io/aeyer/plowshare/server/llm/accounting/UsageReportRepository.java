@@ -8,6 +8,11 @@ import io.aeyer.plowshare.protocol.Usage.*;
 public interface UsageReportRepository {
   Report report(String account, Resolved query);
 
+  /** Same live policy and snapshot as report; background admission yields to foreground reads. */
+  default Report refresh(String account, Resolved query) {
+    return report(account, query);
+  }
+
   Audit calls(String account, Resolved query);
 
   AttemptPage attempts(String account, Resolved query, String call, String cursor);

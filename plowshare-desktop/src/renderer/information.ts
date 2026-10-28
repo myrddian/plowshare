@@ -397,7 +397,14 @@ export function installInformation(
       return;
     }
     reloadRequested = false;
-    refreshes.readStarted();
+    const contentChanged = refreshes.readStarted();
+    if (contentChanged) {
+      // Content hints refresh these projections at the next actual read, without cancelling the
+      // authorized read already in flight or hiding its result. Identity/revocation uses epoch.
+      typeIdentity = '';
+      navigation?.reset();
+      navigationIdentity = '';
+    }
     reloading = true;
     const stamp = epoch;
     const context = collectionContext();
@@ -641,7 +648,8 @@ export function installInformation(
             offset === 0;
           dialog.querySelector<HTMLButtonElement>('[data-next]')!.disabled =
             data.length < 20;
-          if (selected) await inspect(selected, acquisition, stamp);
+          if (selected)
+            await inspect(selected, acquisition, stamp, contentChanged);
           else if (!detail.hasChildNodes()) {
             // Scope invalidation clears protected text synchronously. Once this
             // collection is authorised, restore its static selection prompt without
@@ -671,7 +679,12 @@ export function installInformation(
         background(reload());
     }
   }
-  async function inspect(id: string, isAcquisition: boolean, stamp = epoch) {
+  async function inspect(
+    id: string,
+    isAcquisition: boolean,
+    stamp = epoch,
+    refreshText = false,
+  ) {
     if (selected !== id) {
       question.hidden = true;
       question.innerHTML = '';
@@ -799,94 +812,97 @@ export function installInformation(
       value.availability !== 'active' ||
       !extracted ||
       cachedText?.key === textKey;
-    if (detailSignature === nextSignature && textReady) {
+    if (detailSignature === nextSignature && textReady && !refreshText) {
       renderAnswer();
       return;
     }
     const sameSource = detail.dataset.sourceId === id;
-    const expanded = sameSource
-      ? Array.from(detail.querySelectorAll<HTMLDetailsElement>('details')).map(
-          (node) => node.open,
-        )
-      : [];
-    const drafts = sameSource
-      ? Array.from(
-          dialog.querySelectorAll<
-            HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-          >(
-            '[data-detail] input[name],[data-detail] textarea[name],[data-detail] select[name],[data-question] input[name]',
-          ),
-        ).map((node) => [node.name, node.value])
-      : [];
-    const scroll = detail.scrollTop;
     const renderedScroll = sameSource
       ? (detail.querySelector<HTMLElement>('[data-rendered-passage]')
           ?.scrollTop ?? 0)
       : 0;
-    detail.dataset.sourceId = id;
-    detailSignature = nextSignature;
-    const attention = steps.some(
-      (row) =>
-        row.state === 'failed' ||
-        row.state === 'blocked' ||
-        (row.state === 'ready' && row.compatible === false),
-    );
-    const preparing = steps.some(
-      (row) => !['ready', 'skipped'].includes(String(row.state)),
-    );
-    const legacy = steps.some((row) => row.state === 'skipped');
-    const questionHelp = sourceCanAsk
-      ? 'The answer uses this saved source and may take a moment. It uses the configured model.'
-      : value.availability !== 'active'
-        ? 'Questions are unavailable for this version.'
-        : extractionFailed
-          ? 'Questions are unavailable because text extraction did not finish.'
+    // A content refresh validates text without replacing unchanged, already authorized DOM.
+    // A hard access/identity hint still hides it and changes epoch before any late response.
+    if (detailSignature !== nextSignature || !textReady) {
+      const expanded = sameSource
+        ? Array.from(
+            detail.querySelectorAll<HTMLDetailsElement>('details'),
+          ).map((node) => node.open)
+        : [];
+      const drafts = sameSource
+        ? Array.from(
+            dialog.querySelectorAll<
+              HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+            >(
+              '[data-detail] input[name],[data-detail] textarea[name],[data-detail] select[name],[data-question] input[name]',
+            ),
+          ).map((node) => [node.name, node.value])
+        : [];
+      const scroll = detail.scrollTop;
+      detail.dataset.sourceId = id;
+      detailSignature = nextSignature;
+      const attention = steps.some(
+        (row) =>
+          row.state === 'failed' ||
+          row.state === 'blocked' ||
+          (row.state === 'ready' && row.compatible === false),
+      );
+      const preparing = steps.some(
+        (row) => !['ready', 'skipped'].includes(String(row.state)),
+      );
+      const legacy = steps.some((row) => row.state === 'skipped');
+      const questionHelp = sourceCanAsk
+        ? 'The answer uses this saved source and may take a moment. It uses the configured model.'
+        : value.availability !== 'active'
+          ? 'Questions are unavailable for this version.'
+          : extractionFailed
+            ? 'Questions are unavailable because text extraction did not finish.'
+            : !extracted
+              ? 'Questions will be available after text extraction and passage preparation finish.'
+              : 'The saved text is readable. Questions will be available after passage preparation finishes.';
+      const textUnavailable =
+        value.availability !== 'active'
+          ? '<p>Source text is unavailable for this version.</p>'
           : !extracted
-            ? 'Questions will be available after text extraction and passage preparation finish.'
-            : 'The saved text is readable. Questions will be available after passage preparation finishes.';
-    const textUnavailable =
-      value.availability !== 'active'
-        ? '<p>Source text is unavailable for this version.</p>'
-        : !extracted
-          ? `<h3>${blank ? 'No readable text was extracted' : extractionFailed ? 'Source text is unavailable' : 'Preparing source text'}</h3><p>${blank ? 'The server tried to extract this source but found no readable text.' : extractionFailed ? 'Text extraction did not finish. See Processing details for the server’s reason.' : 'Text extraction has not finished yet. This view will update when it is ready.'}</p>${extractionFailed && manage ? `<p>${blank ? 'Open Manage source and paste readable text into Replacement text to save a new version. Retrying the same saved content may fail again.' : 'Open Manage source to retry incomplete work or supply replacement text as a new version.'}</p><button data-repair-source>Open Manage source</button>` : ''}`
-          : '';
-    const questionBusy =
-      asking.has(id) ||
-      (!!answerJob &&
-        ['starting', 'running', 'cancelling', 'unknown'].includes(
-          answerJob.status,
-        ));
-    const status =
-      value.availability !== 'active'
-        ? String(value.availability)
-        : attention
-          ? 'Needs attention'
-          : !steps.length
-            ? 'Processing status unavailable'
-            : content?.processingPolicy === 'explicit_only' &&
-                steps.some(
-                  (step) =>
-                    step.state === 'pending' &&
-                    !content.authorisedStages.includes(step.stage),
-                )
-              ? 'Saved; processing awaits an explicit request'
-              : preparing
-                ? 'Preparing source'
-                : legacy
-                  ? 'Saved legacy text'
-                  : 'Processing complete';
-    question.hidden = false;
-    question.innerHTML = `<form data-ask data-ready="${sourceCanAsk}" class="information-ask"><label>Ask about this source<input name="question" aria-describedby="source-question-help-${host.id}" placeholder="What does this source say about…?" required></label><button class="primary-button" title="${escape(questionHelp)}" ${questionBusy || !sourceCanAsk ? 'disabled' : ''}>${questionBusy ? 'Reading…' : 'Ask source'}</button><p class="information-help" id="source-question-help-${host.id}">${escape(questionHelp)}</p></form>`;
-    const metadata = content
-      ? contentHtml(
-          content,
-          availableTypes,
-          manage,
-          !!authored?.typedWrites,
-          !!pendingMetadataEdit,
-        )
-      : '';
-    detail.innerHTML = `<header class="information-source-heading"><h2>${escape(value.title ?? value.source_name)}</h2>${value.documentAuthor ? `<p class="information-document-author">Document author: ${escape(value.documentAuthor)}${value.documentAuthorSource === 'organisation' ? ' · issuing organisation' : value.documentAuthorSource === 'account' ? ' · owner account (fallback)' : ''}</p>` : ''}<p>Version ${escape(value.ordinal)} · ${escape(status)}${report?.status ? ` · ${escape(report?.status)} report` : ''}</p>${attention ? '<p role="status">Some processing needs attention. Open Processing details below for the reason and recovery options.</p>' : ''}</header>
+            ? `<h3>${blank ? 'No readable text was extracted' : extractionFailed ? 'Source text is unavailable' : 'Preparing source text'}</h3><p>${blank ? 'The server tried to extract this source but found no readable text.' : extractionFailed ? 'Text extraction did not finish. See Processing details for the server’s reason.' : 'Text extraction has not finished yet. This view will update when it is ready.'}</p>${extractionFailed && manage ? `<p>${blank ? 'Open Manage source and paste readable text into Replacement text to save a new version. Retrying the same saved content may fail again.' : 'Open Manage source to retry incomplete work or supply replacement text as a new version.'}</p><button data-repair-source>Open Manage source</button>` : ''}`
+            : '';
+      const questionBusy =
+        asking.has(id) ||
+        (!!answerJob &&
+          ['starting', 'running', 'cancelling', 'unknown'].includes(
+            answerJob.status,
+          ));
+      const status =
+        value.availability !== 'active'
+          ? String(value.availability)
+          : attention
+            ? 'Needs attention'
+            : !steps.length
+              ? 'Processing status unavailable'
+              : content?.processingPolicy === 'explicit_only' &&
+                  steps.some(
+                    (step) =>
+                      step.state === 'pending' &&
+                      !content.authorisedStages.includes(step.stage),
+                  )
+                ? 'Saved; processing awaits an explicit request'
+                : preparing
+                  ? 'Preparing source'
+                  : legacy
+                    ? 'Saved legacy text'
+                    : 'Processing complete';
+      question.hidden = false;
+      question.innerHTML = `<form data-ask data-ready="${sourceCanAsk}" class="information-ask"><label>Ask about this source<input name="question" aria-describedby="source-question-help-${host.id}" placeholder="What does this source say about…?" required></label><button class="primary-button" title="${escape(questionHelp)}" ${questionBusy || !sourceCanAsk ? 'disabled' : ''}>${questionBusy ? 'Reading…' : 'Ask source'}</button><p class="information-help" id="source-question-help-${host.id}">${escape(questionHelp)}</p></form>`;
+      const metadata = content
+        ? contentHtml(
+            content,
+            availableTypes,
+            manage,
+            !!authored?.typedWrites,
+            !!pendingMetadataEdit,
+          )
+        : '';
+      detail.innerHTML = `<header class="information-source-heading"><h2>${escape(value.title ?? value.source_name)}</h2>${value.documentAuthor ? `<p class="information-document-author">Document author: ${escape(value.documentAuthor)}${value.documentAuthorSource === 'organisation' ? ' · issuing organisation' : value.documentAuthorSource === 'account' ? ' · owner account (fallback)' : ''}</p>` : ''}<p>Version ${escape(value.ordinal)} · ${escape(status)}${report?.status ? ` · ${escape(report?.status)} report` : ''}</p>${attention ? '<p role="status">Some processing needs attention. Open Processing details below for the reason and recovery options.</p>' : ''}</header>
       ${options.kind === 'report' ? '' : metadata}
       <div data-answer role="status">${answerJob ? `<p>${escape(answerJob.status === 'finished' ? 'Answer' : answerJob.status === 'running' ? 'Finding an answer…' : answerJob.status)}</p><div class="markdown-body">${markdownHtml(answerJob.text || answerJob.detail || 'Waiting for the source answer.')}</div>` : ''}</div>
       <div data-source>${textUnavailable || (cachedText?.key === textKey ? cachedText.html : '<p>Loading source text…</p>')}</div>
@@ -929,38 +945,39 @@ export function installInformation(
           : ''
       }</details>
       </details>`;
-    if (options.kind === 'report') {
-      // Keep secondary disclosures on one wrapping tools row below the text.
-      // A separate Tags footer otherwise takes a full reading row at every size.
-      detail
-        .querySelector('.information-source-tools')!
-        .append(detail.querySelector('.information-tag-metadata')!);
-    }
-    Array.from(detail.querySelectorAll<HTMLDetailsElement>('details')).forEach(
-      (node, i) => {
+      if (options.kind === 'report') {
+        // Keep secondary disclosures on one wrapping tools row below the text.
+        // A separate Tags footer otherwise takes a full reading row at every size.
+        detail
+          .querySelector('.information-source-tools')!
+          .append(detail.querySelector('.information-tag-metadata')!);
+      }
+      Array.from(
+        detail.querySelectorAll<HTMLDetailsElement>('details'),
+      ).forEach((node, i) => {
         node.open = expanded[i] ?? false;
-      },
-    );
-    for (const [name, value] of drafts) {
-      if (name === 'groups' && resetGroupDraft) continue;
-      const field = Array.from(
-        dialog.querySelectorAll<
-          HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-        >('[data-detail] [name],[data-question] [name]'),
-      ).find((node) => node.name === name);
-      if (field && value !== undefined) field.value = value;
+      });
+      for (const [name, value] of drafts) {
+        if (name === 'groups' && resetGroupDraft) continue;
+        const field = Array.from(
+          dialog.querySelectorAll<
+            HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+          >('[data-detail] [name],[data-question] [name]'),
+        ).find((node) => node.name === name);
+        if (field && value !== undefined) field.value = value;
+      }
+      resetGroupDraft = false;
+      detail.scrollTop = scroll;
+      applySourceFormat();
+      const retainedReport = detail.querySelector<HTMLElement>(
+        '[data-rendered-passage]',
+      );
+      if (retainedReport) retainedReport.scrollTop = renderedScroll;
     }
-    resetGroupDraft = false;
-    detail.scrollTop = scroll;
-    applySourceFormat();
-    const retainedReport = detail.querySelector<HTMLElement>(
-      '[data-rendered-passage]',
-    );
-    if (retainedReport) retainedReport.scrollTop = renderedScroll;
     if (
       value.availability === 'active' &&
       extracted &&
-      cachedText?.key !== textKey
+      (cachedText?.key !== textKey || refreshText)
     ) {
       try {
         const wholeReport =
@@ -1024,8 +1041,10 @@ export function installInformation(
         const source = detail.querySelector<HTMLElement>('[data-source]');
         if (!source) return;
         sourceWindow = window;
-        source.innerHTML = `<div class="information-text-heading"><h3>Source text</h3><span class="information-help">${wholeReport ? `${escape(window.total)} characters` : `Characters ${escape(Number(window.start) + 1)}–${escape(window.end)} of ${escape(window.total)}`}</span>${wholeReport ? '<button data-source-format type="button" aria-pressed="false">Show source</button>' : ''}</div>${wholeReport ? `<div data-rendered-passage class="markdown-body information-rendered-report" tabindex="0" role="region" aria-label="${options.manual ? 'Rendered manual chapter' : 'Rendered report'}">${markdownHtml(String(window.text), options.manual)}</div>` : ''}<textarea data-passage readonly rows="12" aria-label="Saved source text" ${wholeReport ? 'hidden' : ''}>${escape(window.text)}</textarea><div class="information-toolbar information-text-actions">${wholeReport ? '' : `<button data-source-prev ${sourceOffset === 0 ? 'disabled' : ''}>Previous text</button><button data-source-next ${Number(window.end) >= Number(window.total) ? 'disabled' : ''}>Next text</button>`}<button data-record-evidence title="Select a quotation in the source text, then save it as evidence">Save selected quotation</button></div><div data-new-evidence></div>`;
-        cachedText = { key: textKey, html: source.innerHTML };
+        const sourceHtml = `<div class="information-text-heading"><h3>Source text</h3><span class="information-help">${wholeReport ? `${escape(window.total)} characters` : `Characters ${escape(Number(window.start) + 1)}–${escape(window.end)} of ${escape(window.total)}`}</span>${wholeReport ? '<button data-source-format type="button" aria-pressed="false">Show source</button>' : ''}</div>${wholeReport ? `<div data-rendered-passage class="markdown-body information-rendered-report" tabindex="0" role="region" aria-label="${options.manual ? 'Rendered manual chapter' : 'Rendered report'}">${markdownHtml(String(window.text), options.manual)}</div>` : ''}<textarea data-passage readonly rows="12" aria-label="Saved source text" ${wholeReport ? 'hidden' : ''}>${escape(window.text)}</textarea><div class="information-toolbar information-text-actions">${wholeReport ? '' : `<button data-source-prev ${sourceOffset === 0 ? 'disabled' : ''}>Previous text</button><button data-source-next ${Number(window.end) >= Number(window.total) ? 'disabled' : ''}>Next text</button>`}<button data-record-evidence title="Select a quotation in the source text, then save it as evidence">Save selected quotation</button></div><div data-new-evidence></div>`;
+        if (cachedText?.key !== textKey || cachedText.html !== sourceHtml)
+          source.innerHTML = sourceHtml;
+        cachedText = { key: textKey, html: sourceHtml };
         applySourceFormat();
         const renderedReport = detail.querySelector<HTMLElement>(
           '[data-rendered-passage]',
@@ -1899,6 +1918,7 @@ export function installInformation(
         : undefined,
       snapshot.informationRevision ?? 0,
       snapshot.informationProgressRevision ?? 0,
+      snapshot.informationRefreshRevision ?? 0,
     );
   }
   const unsubscribe = api.subscribe((snapshot) => {

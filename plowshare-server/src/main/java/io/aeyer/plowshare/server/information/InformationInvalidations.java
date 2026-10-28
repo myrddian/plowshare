@@ -10,6 +10,11 @@ public interface InformationInvalidations {
 
   void invalidate();
 
+  /** Content changed without changing access. Legacy transports conservatively fence it. */
+  default void refresh() {
+    invalidate();
+  }
+
   /**
    * Identifier-free progress hint. It cannot change content or authorize disclosure. Legacy
    * transports conservatively use their full invalidation path; capable clients refresh current

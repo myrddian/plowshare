@@ -9,8 +9,6 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
-import io.aeyer.plowshare.server.archive.UnitOfWork;
-import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayConsumerRepository;
@@ -59,21 +57,8 @@ class RelayInformationEventsTest {
   private final Relay relay = mock(Relay.class);
   private final RelayConsumption consumption = mock(RelayConsumption.class);
   private final ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
-  private final List<String> hinted = new ArrayList<>();
-
-  /** Runs after-commit work immediately, which is what a committed transaction does. */
-  private final UnitOfWork work =
-      new UnitOfWork() {
-        @Override
-        public <T> T inTransaction(java.util.function.Supplier<T> action) {
-          return action.get();
-        }
-      };
-
-  private final AccountPushes pushes = (handle, body) -> hinted.add(handle);
-
   private final InformationEvents events =
-      new RelayInformationEvents(records, relay, consumption, projects, work, pushes, () -> T0);
+      new RelayInformationEvents(records, relay, consumption, projects, () -> T0);
 
   private InformationContext context(InformationContext.Selection selection) {
     return new InformationContext("reader", selection).withView(true);
@@ -97,7 +82,7 @@ class RelayInformationEventsTest {
     verify(relay, never()).registerTopic(any(), any(), any());
     verify(relay, never()).publish(any(), any());
     verify(records, never()).append(any());
-    assertTrue(hinted.isEmpty());
+    verifyNoInteractions(consumption);
   }
 
   @Test
@@ -110,8 +95,6 @@ class RelayInformationEventsTest {
     when(relay.publish(eq(topic), any()))
         .thenAnswer(
             call -> new Relay.Publication(topic, 42, T0, call.getArgument(1, Relay.Draft.class)));
-    when(consumption.audience(new Relay.ProjectScope(7), TOPIC))
-        .thenReturn(List.of("reader", "author"));
 
     events.publish(occurrence("private processing details"));
 
@@ -143,9 +126,7 @@ class RelayInformationEventsTest {
                 "ready",
                 "private processing details",
                 T0));
-    // The audience comes from Relay in one read, and only as a wake hint. It is the authorized
-    // audience and not the subscriber list: a hint names a revision, so sending one discloses.
-    assertEquals(List.of("reader", "author"), hinted);
+    verifyNoInteractions(consumption); // Publication never does per-event recipient-policy IO.
   }
 
   @Test
@@ -172,6 +153,25 @@ class RelayInformationEventsTest {
         identities.get(0),
         identities.get(1),
         "a content-derived identity would collapse two retries of one stage into one publication");
+  }
+
+  @Test
+  void aThousandEventsRetainEveryDurablePositionWithoutAudienceQueriesOrSocketFanout() {
+    when(records.resolve(REVISION))
+        .thenReturn(
+            new InformationEventRecords.Audience(
+                new Relay.ProjectScope(7), "document", null, "author"));
+    var position = new java.util.concurrent.atomic.AtomicLong();
+    when(relay.publish(any(), any()))
+        .thenAnswer(
+            call ->
+                new Relay.Publication(
+                    call.getArgument(0), position.incrementAndGet(), T0, call.getArgument(1)));
+    for (int i = 0; i < 1000; i++) events.publish(occurrence("private processing details"));
+    verify(records, times(1000)).append(any());
+    verify(relay, times(1000)).publish(any(), any());
+    verifyNoInteractions(consumption);
+    assertEquals(1000, position.get());
   }
 
   @Test

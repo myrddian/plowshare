@@ -19,6 +19,9 @@ class PushDecoderTest {
         "{\"kind\":\"orchestration.resumed\",\"requestId\":\"00000000-0000-0000-0000-000000000001\"}",
         "{\"kind\":\"inbox.changed\",\"unread\":\"1\"}",
         "{\"kind\":\"inbox.changed\",\"unread\":-1}",
+        "{\"kind\":\"information.invalidated\",\"refreshOnly\":null}",
+        "{\"kind\":\"information.invalidated\",\"refreshOnly\":\"true\"}",
+        "{\"kind\":\"information.invalidated\",\"refreshOnly\":1}",
         "{\"kind\":\"information.invalidated\",\"progressOnly\":null}",
         "{\"kind\":\"information.invalidated\",\"progressOnly\":\"true\"}",
         "{\"kind\":\"information.invalidated\",\"progressOnly\":1}",
@@ -58,6 +61,24 @@ class PushDecoderTest {
               + payload
               + "}";
       assertEquals(expected, PushDecoder.decode(json, json.readTree(envelope)));
+    }
+  }
+
+  @Test
+  void contentRefreshIsTypedInBothFormatsAndDominatesProgress() throws Exception {
+    var json = SdkJson.mapper();
+    for (boolean progress : new boolean[] {false, true}) {
+      var event = new AccountEvent.InformationInvalidated(progress, true);
+      var payload = json.writeValueAsString(event);
+      assertEquals(event, PushDecoder.decode(json, json.readTree(payload)));
+      assertEquals(
+          event,
+          PushDecoder.decode(
+              json,
+              json.readTree(
+                  "{\"protocol_version\":\"plowshare-v1\",\"type\":\"information.invalidated\",\"payload\":"
+                      + payload
+                      + "}")));
     }
   }
 

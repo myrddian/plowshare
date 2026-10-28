@@ -50,6 +50,79 @@ describe('scoped information screen', () => {
     expect(close).toHaveBeenCalledOnce();
     expect(root.childElementCount).toBe(0);
   });
+  it('coalesces opaque hints without starving a slow catalogue and fences access loss immediately', async () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    let options: EventStreamOptions | undefined;
+    let complete:
+      ((value: { code: string; payload: unknown }) => void) | undefined;
+    let denied = false;
+    let first = true;
+    const rows = [{ id: 'retained', title: 'private retained title' }];
+    const ask = vi.fn(async () => {
+      if (first) {
+        first = false;
+        return new Promise<{ code: string; payload: unknown }>((resolve) => {
+          complete = resolve;
+        });
+      }
+      return denied
+        ? { code: 'BAD_REQUEST', said: 'Permission revoked.' }
+        : { code: 'OK', payload: rows };
+    });
+    const screen = createInformation({
+      root,
+      session: 'pinned',
+      project: null,
+      openStream: (value) => {
+        options = value;
+        return {
+          ask,
+          close() {},
+          status: () => ({ state: 'open', attempt: 0, retryInMs: null }),
+        };
+      },
+    });
+    try {
+      const loading = screen.load();
+      for (let tick = 0; tick < 90; tick++) {
+        options?.onEvent({
+          kind: 'information.invalidated',
+          refreshOnly: true,
+        });
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      expect(ask).toHaveBeenCalledTimes(1);
+      if (!complete) throw new Error('Missing pending catalogue read');
+      complete({ code: 'OK', payload: rows });
+      await loading;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.textContent).toContain('private retained title');
+      expect(ask.mock.calls.length).toBeLessThanOrEqual(2);
+      root.hidden = true;
+      await vi.advanceTimersByTimeAsync(0);
+      const readsWhileHidden = ask.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(ask).toHaveBeenCalledTimes(readsWhileHidden);
+      root.hidden = false;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ask.mock.calls.length).toBeGreaterThan(readsWhileHidden);
+      denied = true;
+      options?.onEvent({ kind: 'information.invalidated' });
+      const catalogue = root.querySelector(
+        'button.information-document',
+      )?.parentElement;
+      expect(catalogue?.style.visibility).toBe('hidden');
+      await vi.advanceTimersByTimeAsync(250);
+      expect(root.textContent).not.toContain('private retained title');
+      expect(root.querySelector('[role=alert]')?.textContent).toBe(
+        'Permission revoked.',
+      );
+    } finally {
+      screen.destroy();
+      vi.useRealTimers();
+    }
+  });
   it('does not render a response from a selection left while the request was pending', async () => {
     const root = document.createElement('div');
     let resolve:

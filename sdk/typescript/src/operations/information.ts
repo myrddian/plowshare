@@ -180,6 +180,10 @@ export class InformationClient {
     return decodeReply(`information.${operation}`, outcome.payload);
   }
 }
+/** Identified compatibility hint from older servers. Current servers emit the opaque
+ * `information.invalidated` ServerPush variant; reconcile the selected scoped reads/stream.
+ * Neither hint shape is a durable cursor or permission lease.
+ */
 export interface InformationChanged {
   kind: 'information.changed';
   sequence: number;

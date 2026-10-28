@@ -1244,19 +1244,24 @@ public final class EventChannelHandler extends TextWebSocketHandler
   /** Only authenticated account sockets receive this fixed, content-free refresh hint. */
   @Override
   public void invalidate() {
-    informationHint(false);
+    informationHint(false, false);
   }
 
   @Override
   public void progress() {
-    informationHint(true);
+    informationHint(true, false);
   }
 
-  private void informationHint(boolean progressOnly) {
+  @Override
+  public void refresh() {
+    informationHint(false, true);
+  }
+
+  private void informationHint(boolean progressOnly, boolean refreshOnly) {
     for (var sockets : byHandle.values()) {
       for (var socket : sockets) {
         if (socket.getAttributes().get(DELIVERY) instanceof Delivery live)
-          live.informationInvalidated(progressOnly);
+          live.informationInvalidated(progressOnly, refreshOnly);
       }
     }
   }
@@ -1413,13 +1418,23 @@ public final class EventChannelHandler extends TextWebSocketHandler
         informationHint = new java.util.concurrent.atomic.AtomicReference<>();
 
     void informationInvalidated(boolean progressOnly) {
+      informationInvalidated(progressOnly, false);
+    }
+
+    void informationInvalidated(boolean progressOnly, boolean refreshOnly) {
       if (!running) return;
-      var next = new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated(progressOnly);
+      var next =
+          new io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated(
+              progressOnly, refreshOnly);
       var previous =
           informationHint.getAndUpdate(
-              current ->
-                  current == null || current.progressOnly() && !progressOnly ? next : current);
+              current -> current == null || priority(next) > priority(current) ? next : current);
       if (previous == null) waiting.release();
+    }
+
+    private static int priority(
+        io.aeyer.plowshare.protocol.AccountEvent.InformationInvalidated hint) {
+      return hint.refreshOnly() ? 1 : hint.progressOnly() ? 0 : 2;
     }
 
     private Pending nextInformationHint() {

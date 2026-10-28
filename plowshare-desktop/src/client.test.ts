@@ -524,11 +524,26 @@ await test('validated progress hints preserve content counters and malformed fla
   f.push({ kind: 'information.invalidated', progressOnly: true });
   assert.equal(f.client.state.informationProgressRevision, 1);
   assert.equal(f.client.state.informationRevision, 0);
+  f.push({
+    kind: 'information.invalidated',
+    refreshOnly: true,
+    progressOnly: true,
+  });
+  assert.equal(f.client.state.informationRefreshRevision, 1);
+  assert.equal(f.client.state.informationProgressRevision, 1);
+  assert.equal(f.client.state.informationRevision, 0);
+  f.push({
+    kind: 'information.invalidated',
+    refreshOnly: null,
+    progressOnly: true,
+  });
+  assert.equal(f.client.state.informationRefreshRevision, 1);
+  assert.equal(f.client.state.informationRevision, 1);
   f.push({ kind: 'information.invalidated', progressOnly: 'true' });
   assert.equal(f.client.state.informationProgressRevision, 1);
-  assert.equal(f.client.state.informationRevision, 1);
-  f.push({ kind: 'information.invalidated' });
   assert.equal(f.client.state.informationRevision, 2);
+  f.push({ kind: 'information.invalidated' });
+  assert.equal(f.client.state.informationRevision, 3);
 });
 
 await test('information hints expose only a validated invalidation counter and socket recovery fences', async (t) => {

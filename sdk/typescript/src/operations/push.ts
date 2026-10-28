@@ -18,6 +18,7 @@ export type AccountEvent =
   | {
       readonly kind: 'information.invalidated';
       readonly progressOnly?: boolean;
+      readonly refreshOnly?: boolean;
     }
   | {
       readonly kind: 'information.changed';
@@ -161,11 +162,22 @@ export function decodeServerPush(value: unknown): ServerPush {
         ? { kind: value.kind, unread: value.unread }
         : fail();
     case 'information.invalidated':
-      return value.progressOnly === undefined
-        ? { kind: value.kind }
-        : typeof value.progressOnly === 'boolean'
-          ? { kind: value.kind, progressOnly: value.progressOnly }
-          : fail();
+      if (
+        (value.progressOnly !== undefined &&
+          typeof value.progressOnly !== 'boolean') ||
+        (value.refreshOnly !== undefined &&
+          typeof value.refreshOnly !== 'boolean')
+      )
+        return fail();
+      return {
+        kind: value.kind,
+        ...(value.progressOnly === undefined
+          ? {}
+          : { progressOnly: value.progressOnly }),
+        ...(value.refreshOnly === undefined
+          ? {}
+          : { refreshOnly: value.refreshOnly }),
+      };
     case 'information.changed':
       return whole(value.sequence) &&
         value.sequence >= 1 &&

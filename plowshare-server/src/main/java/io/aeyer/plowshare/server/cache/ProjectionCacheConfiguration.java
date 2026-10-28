@@ -65,7 +65,10 @@ public class ProjectionCacheConfiguration {
   public ProjectionVersions projectionVersions(
       JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
     return new JdbcProjectionVersions(
-        jdbc, authoritative.source(), properties.maxPendingTransactions());
+        jdbc,
+        new io.aeyer.plowshare.server.pool.TracedDataSource(
+            authoritative.source(), new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace()),
+        properties.maxPendingTransactions());
   }
 
   @Bean(initMethod = "start", destroyMethod = "close")
@@ -82,7 +85,9 @@ public class ProjectionCacheConfiguration {
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
     return new ListeningProjectionChangeSignals(
-        new PostgresProjectionNotificationSource(notificationSource),
+        new PostgresProjectionNotificationSource(
+            new io.aeyer.plowshare.server.pool.TracedDataSource(
+                notificationSource, new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace())),
         versions,
         properties.maxProjections() + 2, // Relay wakeups and opaque information invalidation.
         properties.notificationPoll(),

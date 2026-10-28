@@ -30,7 +30,15 @@ Each per-principal limit must be positive and no greater than its process limit.
 initial configurable defaults, not a measured fleet capacity promise. Work leases settle on
 physical completion; asynchronous routing retains a lease until its handler completes.
 Disconnecting a client does not make still-running read work free. Admission retains state
-only for admitted work and has no additional unbounded waiting queue.
+only for admitted work and the bounded foreground report waiting queue. Background usage
+refreshes share the existing report total and principal limits; when the global report limit is
+larger than one, they leave at least one seat for foreground work. They yield whenever a foreground
+report is waiting. `plowshare.read-scheduling.waiting-reports` (64),
+`waiting-reports-per-principal` (4) and `report-wait-millis` (2000, maximum 5000) bound the queue.
+FIFO among eligible principals avoids blocking everyone behind an already busy principal.
+Timeout and interruption remove the waiter before SQL begins. A caller already inside a transaction
+or Spring synchronization retains nonblocking admission: it must not wait while holding a connection
+or disclosure lock. Other admission lanes remain nonblocking. `plowshare.read.waiting` exposes the queue without principal labels.
 
 Mutating operations retain dispatcher barriers/resource ordering. The shared read admission
 policy does not coalesce mutations, leases, cursor advances, acknowledgements or read receipts.
@@ -53,6 +61,13 @@ track corpus, search, transcript and authority versions. Membership, grants, del
 collection membership, pending writer commits and rollback use the existing durable version
 protocol. Clock-only running-lease expiry is included in the observation validity window.
 Notification delivery is a wakeup hint, never freshness or permission evidence.
+
+Usage subscription publishing groups equivalent effective-principal/resolved selections once per
+pass, including across sockets. At most eight groups are refreshed per one-second tick, rotating
+all live groups; admission may defer them further. The map is bounded by subscription seats.
+Each socket retains its own revision, initial-reply fence and unsubscribe/disconnect tombstone.
+Every pass uses current repository authorization; no cross-principal or cross-selection reuse occurs.
+Initial subscriptions use the same background report lane. Mutation ordering is unchanged.
 
 Cache load/waiter exhaustion refuses the read; it must not start another uncached SQL load.
 Recovery, dirty/historical transactions and non-shareable values retain ordinary read semantics
@@ -135,6 +150,26 @@ entry appends, processing leases and unrelated revision metadata do not invalida
 All writers, cascades and TRUNCATE participate; pending-XID, rollback and reconnect rules are the
 existing projection protocol. READABILITY uses a separate notification channel so older listeners
 in a rolling deployment never receive an unknown domain payload. Notifications remain hints.
+Catalogue caches instead watch `KNOWLEDGE_ACCESS` for the eight resource/revision, policy,
+dependency/link and reference source tables used by catalogue selection. Conversation ancestry,
+worker log inputs and quarantine still invalidate log visibility through READABILITY, without
+retiring unrelated catalogue projections. Both domains retain transactional writer evidence,
+pending/future-XID fences, rollback behavior, recovery and the independent AUTHORITY fence.
+
+Live information sockets use only opaque projection hints. Relay still stores every event and
+revision-history row atomically, with independent durable subscriber positions and current audience
+checks on read. History writes advance PROGRESS; they no longer run an audience query or emit an
+identified `information.changed` push per event. The legacy decoder remains for older servers.
+Consumers reconcile their scoped durable stream after hints, reconnects or lost notifications.
+
+Socket hints distinguish immediate access/recovery invalidation from nonrevoking `refreshOnly`
+content and `progressOnly` processing hints. Content dominates progress; access dominates both.
+Soft hints use one global pending slot/deadline and emit at most once per second, independently of
+feed/socket count. They schedule authorized reads without hiding retained content or cancelling
+in-flight reads. Unchanged revalidated text retains its DOM and drafts. Access and identity hints
+still hide/fence immediately. Missing flags preserve the legacy hard form; old clients treat an
+unknown refresh flag conservatively. Reconnect and periodic reconciliation remain required.
+
 The visibility projection occupies one of the configured 20 named projection slots, with the existing per-projection resident, in-flight
 and waiter budgets; it does not create another unbounded map or increase the registry maximum.
 
@@ -164,3 +199,17 @@ Broader owner snapshot reuse remains incremental work. Ordinary authority checks
 physical disclosure still run; sharing a projection does not turn an earlier check into a permission
 lease. Fleet operators must size the sum of process budgets against database CPU and connection
 capacity. A bounded server does not imply every read owner has completed its query-efficiency adoption.
+
+## Bounded execution tracing
+
+The optional JFR event `plowshare.JdbcExecute` is disabled by default. Enable it with a zero
+threshold in an operator-owned, duration/size-bounded recording to count actual JDBC execute
+invocations and attribute durations/failures to repository stacks. The event contains only a
+SHA-256 statement fingerprint, closed execute-method name and failure boolean. SQL text, binds,
+exception messages, principals and connection addresses are never recorded by this event.
+Prepared batches count as one JDBC invocation, not one row or server-side plan execution.
+Main application, independent projection-version and notification JDBC sources participate;
+Flyway/health checks using the raw primary pool are outside this trace. Result iteration,
+logical admission waits, connection acquisition and PostgreSQL CPU require their separate metrics.
+Disable JFR environment/property/exception events when creating the operator recording to avoid
+capturing unrelated private configuration. Recordings are private diagnostics, never source files.

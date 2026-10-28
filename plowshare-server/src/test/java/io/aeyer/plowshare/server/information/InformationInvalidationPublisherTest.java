@@ -34,44 +34,31 @@ class InformationInvalidationPublisherTest {
     public void close() {}
   }
 
-  @Test
-  void sourceAndRecoveryHintsInvalidateWithoutRetainingAnEventQueue() throws Exception {
-    var source = new Signals();
-    var sent = new AtomicInteger();
-    try (var publisher = new InformationInvalidationPublisher(source, sent::incrementAndGet)) {
-      publisher.start();
-      publisher.start();
-      assertEquals(
-          Set.of(Domain.DOCUMENTS, Domain.READABILITY, Domain.AUTHORITY, Domain.PROGRESS),
-          source.domains);
-      assertEquals(1, sent.get());
-      source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
-      source.observer.changed(Set.of(Domain.DOCUMENTS));
-      source.observer.changed(Set.of(Domain.AUTHORITY));
-      assertEquals(4, sent.get());
-      source.observer.changed(Set.of(Domain.TRANSCRIPTS));
-      for (int i = 0; i < 1000; i++) source.observer.changed(Set.of(Domain.OBSERVATIONS));
-      source.observer.stateChanged(new ProjectionChangeSignals.State(1, false));
-      assertEquals(4, sent.get(), "Unrelated or reordered callbacks must not invalidate");
-      source.observer.stateChanged(new ProjectionChangeSignals.State(3, false));
-      source.observer.stateChanged(new ProjectionChangeSignals.State(4, true));
-      assertEquals(6, sent.get());
+  private static final class Clock implements InformationInvalidationClock {
+    Runnable pending;
+    int scheduled;
+
+    public void schedule(Runnable action) {
+      assertNull(pending, "Only one pending task across all accounts and sockets");
+      pending = action;
+      scheduled++;
     }
-    source.observer.changed(Set.of(Domain.DOCUMENTS));
-    assertEquals(6, sent.get());
-    assertEquals(1, source.disposed.get());
-    var serialized =
-        new ObjectMapper()
-            .readTree(
-                new ObjectMapper().writeValueAsString(new AccountEvent.InformationInvalidated()));
-    assertEquals(1, serialized.size());
-    assertEquals("information.invalidated", serialized.get("kind").asText());
+
+    void tick() {
+      var action = pending;
+      pending = null;
+      if (action != null) action.run();
+    }
+
+    public void close() {}
   }
 
   @Test
-  void progressIsSoftButAnyConcurrentContentOrAuthorityChangeDominates() {
+  void stormCoalescesWithoutPostponingRefreshAndRevocationDominatesImmediately() throws Exception {
     var source = new Signals();
+    var clock = new Clock();
     var full = new AtomicInteger();
+    var content = new AtomicInteger();
     var progress = new AtomicInteger();
     var pushes =
         new InformationInvalidations() {
@@ -79,35 +66,80 @@ class InformationInvalidationPublisherTest {
             full.incrementAndGet();
           }
 
+          public void refresh() {
+            content.incrementAndGet();
+          }
+
           public void progress() {
             progress.incrementAndGet();
           }
         };
-    try (var publisher = new InformationInvalidationPublisher(source, pushes)) {
+    try (var publisher = new InformationInvalidationPublisher(source, pushes, clock)) {
       publisher.start();
-      source.observer.changed(Set.of(Domain.PROGRESS));
-      assertEquals(1, progress.get());
+      publisher.start();
+      assertEquals(
+          Set.of(
+              Domain.DOCUMENTS,
+              Domain.KNOWLEDGE_ACCESS,
+              Domain.AUTHORITY,
+              Domain.PROGRESS,
+              Domain.TYPES,
+              Domain.EXTRACTIONS),
+          source.domains);
       assertEquals(1, full.get());
-      source.observer.changed(Set.of(Domain.PROGRESS, Domain.AUTHORITY));
-      source.observer.changed(Set.of(Domain.PROGRESS, Domain.READABILITY));
-      source.observer.changed(Set.of(Domain.PROGRESS, Domain.DOCUMENTS));
+      for (int i = 0; i < 10000; i++) {
+        source.observer.changed(Set.of(Domain.PROGRESS));
+        source.observer.changed(Set.of(Domain.DOCUMENTS));
+        source.observer.changed(Set.of(Domain.READABILITY)); // Worker/log visibility is unrelated.
+      }
+      assertEquals(1, clock.scheduled);
+      assertEquals(1, full.get());
+      clock.tick();
+      assertEquals(1, content.get());
+      assertEquals(0, progress.get(), "Content dominates progress in one bounded slot");
+      source.observer.changed(Set.of(Domain.PROGRESS));
+      clock.tick();
       assertEquals(1, progress.get());
+      source.observer.changed(Set.of(Domain.DOCUMENTS));
+      source.observer.changed(Set.of(Domain.AUTHORITY));
+      assertEquals(2, full.get(), "Revocation must never wait for a soft deadline");
+      clock.tick();
+      assertEquals(1, content.get(), "Revocation consumes previous soft work");
+      source.observer.changed(Set.of(Domain.KNOWLEDGE_ACCESS));
+      source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
+      source.observer.stateChanged(new ProjectionChangeSignals.State(1, false));
       assertEquals(4, full.get());
+      source.observer.changed(Set.of(Domain.DOCUMENTS));
     }
-    source.observer.changed(Set.of(Domain.PROGRESS));
-    assertEquals(1, progress.get());
+    source.observer.changed(Set.of(Domain.AUTHORITY));
+    clock.tick();
+    assertEquals(4, full.get());
+    assertEquals(1, content.get());
+    assertEquals(1, source.disposed.get());
+    var serialized =
+        new ObjectMapper()
+            .readTree(
+                new ObjectMapper().writeValueAsString(new AccountEvent.InformationInvalidated()));
+    assertEquals(
+        1, serialized.size(), "Absent flags retain the full-invalidation legacy wire form");
   }
 
   @Test
-  void compositionForwardsBothHintKindsThroughTheLateBoundTransport() {
+  void compositionForwardsEveryHintKindThroughTheLateBoundTransport() {
     var source = new Signals();
+    var clock = new Clock();
     var beans = new StaticListableBeanFactory();
     var full = new AtomicInteger();
+    var content = new AtomicInteger();
     var progress = new AtomicInteger();
     var transport =
         new InformationInvalidations() {
           public void invalidate() {
             full.incrementAndGet();
+          }
+
+          public void refresh() {
+            content.incrementAndGet();
           }
 
           public void progress() {
@@ -117,22 +149,24 @@ class InformationInvalidationPublisherTest {
     try (var publisher =
         new InformationConfig()
             .informationInvalidationPublisher(
-                source, beans.getBeanProvider(InformationInvalidations.class))) {
-      publisher.start(); // An absent transport remains a safe no-op during construction.
+                source, beans.getBeanProvider(InformationInvalidations.class), clock)) {
+      publisher.start();
       beans.addBean("transport", transport);
       source.observer.changed(Set.of(Domain.PROGRESS));
-      assertEquals(1, progress.get());
-      assertEquals(
-          0, full.get(), "Composition must not promote soft progress to full invalidation");
-      source.observer.changed(Set.of(Domain.PROGRESS, Domain.AUTHORITY));
-      source.observer.changed(Set.of(Domain.READABILITY));
+      clock.tick();
       source.observer.changed(Set.of(Domain.DOCUMENTS));
-      source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
-      assertEquals(4, full.get(), "Authority, content and recovery still fence retained surfaces");
+      clock.tick();
       assertEquals(1, progress.get());
+      assertEquals(1, content.get());
+      assertEquals(0, full.get(), "Composition must not promote soft hints to revocation");
+      source.observer.changed(Set.of(Domain.PROGRESS, Domain.AUTHORITY));
+      source.observer.changed(Set.of(Domain.KNOWLEDGE_ACCESS));
+      source.observer.stateChanged(new ProjectionChangeSignals.State(2, true));
+      assertEquals(3, full.get());
     }
     source.observer.changed(Set.of(Domain.PROGRESS));
-    assertEquals(1, progress.get(), "Closing still fences late callbacks");
+    clock.tick();
+    assertEquals(1, progress.get());
   }
 
   @Test

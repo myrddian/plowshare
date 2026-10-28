@@ -14,10 +14,14 @@ import java.util.function.BiConsumer;
 import org.springframework.stereotype.Component;
 
 /**
- * Socket-owned snapshots with fixed ranges. The sender coalesces by subscription, never by account.
+ * Socket-owned delivery with fixed ranges. One publish pass loads each effective-principal/query
+ * snapshot once; cursors, revisions, acknowledgments and disconnect fences remain socket-owned. A
+ * bounded rotating group budget prevents arbitrary sockets from multiplying work per tick.
  */
 @Component
 public class UsageSubscriptions {
+  private static final org.slf4j.Logger LOG =
+      org.slf4j.LoggerFactory.getLogger(UsageSubscriptions.class);
   public static final String UPDATED = "usage.updated";
   public static final String CLOSED = "usage.closed";
 
@@ -50,6 +54,15 @@ public class UsageSubscriptions {
   private final io.aeyer.plowshare.server.reads.ReadAdmission admission;
   private final ConcurrentMap<String, Connection> connections = new ConcurrentHashMap<>();
   private ScheduledExecutorService timer;
+  private final java.util.concurrent.atomic.AtomicBoolean publishing =
+      new java.util.concurrent.atomic.AtomicBoolean();
+  // Accessed only by the elected publisher; at most one entry per live bounded subscription.
+  private final LinkedHashSet<Group> rotation = new LinkedHashSet<>();
+  private static final int GROUPS_PER_TICK = 8;
+
+  private record Group(String account, Usage.Resolved query) {}
+
+  private record Target(String socket, Connection connection, Subscription subscription) {}
 
   public UsageSubscriptions(UsageReports queries) {
     this(queries, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
@@ -120,7 +133,7 @@ public class UsageSubscriptions {
     try {
       // Report IO is outside the service-wide monitor. The pending reservation counts toward
       // capacity and cannot become ready if disconnect/unsubscribe wins while this query runs.
-      var report = queries.report(c.account, query);
+      var report = queries.refresh(c.account, query);
       synchronized (this) {
         if (connections.get(asking.connectionId()) != c || c.active.get(id) != reserved)
           throw new CallerFault("usage subscription connection ended");
@@ -154,65 +167,101 @@ public class UsageSubscriptions {
   }
 
   public void publish() {
-    List<Map.Entry<String, Connection>> snapshot;
-    synchronized (this) {
-      snapshot = new ArrayList<>(connections.entrySet());
-    }
-    for (var entry : snapshot) {
-      List<Subscription> subscriptions;
+    if (!publishing.compareAndSet(false, true)) return;
+    try {
+      var groups = new LinkedHashMap<Group, List<Target>>();
       synchronized (this) {
-        subscriptions = new ArrayList<>(entry.getValue().active.values());
-      }
-      for (var sub : subscriptions) {
-        synchronized (this) {
-          if (!sub.ready) continue;
+        for (var entry : connections.entrySet()) {
+          var connection = entry.getValue();
+          for (var sub : connection.active.values()) {
+            if (sub.ready)
+              groups
+                  .computeIfAbsent(
+                      new Group(connection.account, sub.query), ignored -> new ArrayList<>())
+                  .add(new Target(entry.getKey(), connection, sub));
+          }
         }
+      }
+      rotation.retainAll(groups.keySet());
+      rotation.addAll(groups.keySet());
+      var selected = rotation.stream().limit(GROUPS_PER_TICK).toList();
+      for (var group : selected) {
+        rotation.remove(group);
+        rotation.add(group);
+        Usage.Report report;
         try {
-          var report = queries.report(entry.getValue().account, sub.query);
-          Signature signature = signature(report);
-          entry.getValue().emitting.lock();
-          try {
-            Envelope update;
-            synchronized (this) {
-              Connection current = connections.get(entry.getKey());
-              if (current != entry.getValue() || current.active.get(sub.id) != sub) continue;
-              if (signature.equals(sub.signature)) continue;
-              sub.signature = signature;
-              update =
-                  new Envelope(
-                      null,
-                      UPDATED,
-                      Envelope.CURRENT_VERSION,
-                      pushPayload(new Usage.Updated(sub.id, ++sub.revision, report)));
-            }
-            entry.getValue().sink.accept(sub.id, update);
-          } finally {
-            entry.getValue().emitting.unlock();
-          }
+          // No registry lock or database permit survives between groups. Current policy is checked
+          // by the same authorized repository as foreground reads, on every pass (not a TTL).
+          report = queries.refresh(group.account, group.query);
         } catch (CallerFault revoked) {
-          entry.getValue().emitting.lock();
-          try {
-            Envelope closed;
-            synchronized (this) {
-              Connection current = connections.get(entry.getKey());
-              if (current != entry.getValue() || current.active.remove(sub.id) != sub) continue;
-              sub.release();
-              closed =
-                  new Envelope(
-                      null,
-                      CLOSED,
-                      Envelope.CURRENT_VERSION,
-                      pushPayload(new Usage.Closed(sub.id, "BAD_REQUEST")));
-            }
-            entry.getValue().sink.accept(sub.id, closed);
-          } finally {
-            entry.getValue().emitting.unlock();
-          }
+          for (var target : groups.get(group)) emit(() -> revoked(target));
+          continue;
         } catch (RuntimeException unavailable) {
-          // A transient query outage preserves the subscription and retries next tick. No error
-          // text crosses the socket.
+          // Bounded background admission yields; subscriptions retain their last snapshot.
+          continue;
         }
+        var signature = signature(report);
+        for (var target : groups.get(group)) emit(() -> updated(target, report, signature));
       }
+    } finally {
+      publishing.set(false);
+    }
+  }
+
+  private static void emit(Runnable action) {
+    try {
+      action.run();
+    } catch (RuntimeException failed) {
+      // One transport callback cannot terminate the shared periodic publisher. Its connection
+      // owner handles the failed delivery; do not log its payload, principal or exception message.
+      LOG.warn("Usage subscription delivery failed ({})", failed.getClass().getSimpleName());
+    }
+  }
+
+  private void updated(Target target, Usage.Report report, Signature signature) {
+    var connection = target.connection;
+    var sub = target.subscription;
+    connection.emitting.lock();
+    try {
+      Envelope update;
+      synchronized (this) {
+        if (connections.get(target.socket) != connection || connection.active.get(sub.id) != sub)
+          return;
+        if (signature.equals(sub.signature)) return;
+        sub.signature = signature;
+        update =
+            new Envelope(
+                null,
+                UPDATED,
+                Envelope.CURRENT_VERSION,
+                pushPayload(new Usage.Updated(sub.id, ++sub.revision, report)));
+      }
+      connection.sink.accept(sub.id, update);
+    } finally {
+      connection.emitting.unlock();
+    }
+  }
+
+  private void revoked(Target target) {
+    var connection = target.connection;
+    var sub = target.subscription;
+    connection.emitting.lock();
+    try {
+      Envelope closed;
+      synchronized (this) {
+        if (connections.get(target.socket) != connection || !connection.active.remove(sub.id, sub))
+          return;
+        sub.release();
+        closed =
+            new Envelope(
+                null,
+                CLOSED,
+                Envelope.CURRENT_VERSION,
+                pushPayload(new Usage.Closed(sub.id, "BAD_REQUEST")));
+      }
+      connection.sink.accept(sub.id, closed);
+    } finally {
+      connection.emitting.unlock();
     }
   }
 
