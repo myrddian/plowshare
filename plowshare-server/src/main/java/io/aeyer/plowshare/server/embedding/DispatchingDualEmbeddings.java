@@ -13,8 +13,13 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
   private final EmbeddingTokenizers tokenizers;
   private final EmbeddingAuthorization preparation;
   private final EmbeddingPermit permit;
+  private final java.util.function.LongSupplier maintenanceClock;
   private OperationEmbeddings operations;
   private Supplier<io.aeyer.plowshare.server.agents.Budget> maintenancePolicy;
+  // A bounded local scheduling hint, never an index-validity/authorization result. Activation
+  // still locks and checks current metadata. Failed audits remain due; restart audits immediately.
+  private volatile long nextIndexAudit;
+  private volatile boolean indexAuditScheduled;
 
   /** Only the maintenance composition selects an independent operation spending policy. */
   public void useOperations(
@@ -27,7 +32,7 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
       EmbeddingWorkRepository repository,
       EmbeddingDispatch dispatcher,
       EmbeddingTokenizers tokenizers) {
-    this(repository, dispatcher, tokenizers, null);
+    this(repository, dispatcher, tokenizers, (EmbeddingPermit) null);
   }
 
   private DispatchingDualEmbeddings(
@@ -35,6 +40,24 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
       EmbeddingDispatch dispatcher,
       EmbeddingTokenizers tokenizers,
       EmbeddingPermit permit) {
+    this(repository, dispatcher, tokenizers, permit, System::nanoTime);
+  }
+
+  DispatchingDualEmbeddings(
+      EmbeddingWorkRepository repository,
+      EmbeddingDispatch dispatcher,
+      EmbeddingTokenizers tokenizers,
+      java.util.function.LongSupplier maintenanceClock) {
+    this(repository, dispatcher, tokenizers, null, maintenanceClock);
+  }
+
+  private DispatchingDualEmbeddings(
+      EmbeddingWorkRepository repository,
+      EmbeddingDispatch dispatcher,
+      EmbeddingTokenizers tokenizers,
+      EmbeddingPermit permit,
+      java.util.function.LongSupplier maintenanceClock) {
+    this.maintenanceClock = Objects.requireNonNull(maintenanceClock);
     this.permit = permit;
     this.preparation = permit instanceof EmbeddingAuthorization p ? p : null;
     this.repository = Objects.requireNonNull(repository);
@@ -112,6 +135,16 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
       boolean query,
       UsageAttribution owner,
       Runnable submitted) {
+    return vectors(profile, texts, query, owner, submitted, InferenceProgress.NONE);
+  }
+
+  private List<float[]> vectors(
+      EmbeddingProfile profile,
+      List<String> texts,
+      boolean query,
+      UsageAttribution owner,
+      Runnable submitted,
+      InferenceProgress progress) {
     Objects.requireNonNull(owner);
     Objects.requireNonNull(texts);
     if (texts.isEmpty()) return List.of();
@@ -137,7 +170,10 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     }
     List<float[]> output;
     try {
-      var request = EmbeddingRequest.of(definition.modelId(), inputs).withAttribution(owner);
+      var request =
+          EmbeddingRequest.of(definition.modelId(), inputs)
+              .withAttribution(owner)
+              .withProgress(progress);
       if (permit != null)
         request =
             request.withAuthorization(
@@ -168,18 +204,18 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
       throw new EmbeddingException(failed.getMessage(), failed);
     }
     if (output.size() != inputs.size())
-      throw new EmbeddingException("embedding batch count differs from input count");
+      throw new InvalidRepairResult("embedding batch count differs from input count");
     var result = new ArrayList<float[]>();
     for (float[] vector : output) {
       if (vector == null || vector.length != definition.dimensions())
-        throw new EmbeddingException("embedding output width differs from registered model");
+        throw new InvalidRepairResult("embedding output width differs from registered model");
       float[] normalized = vector.clone();
       double magnitude = 0;
       for (float v : normalized) {
-        if (!Float.isFinite(v)) throw new EmbeddingException("non-finite embedding output");
+        if (!Float.isFinite(v)) throw new InvalidRepairResult("non-finite embedding output");
         magnitude += (double) v * v;
       }
-      if (magnitude == 0) throw new EmbeddingException("zero embedding output");
+      if (magnitude == 0) throw new InvalidRepairResult("zero embedding output");
       if (definition.normalization() == EmbeddingSpace.Normalization.L2) {
         double norm = Math.sqrt(magnitude);
         for (int i = 0; i < normalized.length; i++) normalized[i] = (float) (normalized[i] / norm);
@@ -266,28 +302,69 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
         : repository.publish(target, source, vector, preparation::publicationFence);
   }
 
+  private static final class InvalidRepairResult extends EmbeddingException {
+    InvalidRepairResult(String reason) {
+      super(reason);
+    }
+  }
+
   private boolean repairRetained(
       EmbeddingProfile target, EmbeddingWorkRepository.Source source, UsageAttribution owner) {
     if (repository.ready(target, source)) return true;
-    boolean[] retained = {false};
+    var selected = repository.beginRepairAttempt(target, source);
+    if (selected.isEmpty()) return false;
+    var attempt = selected.get();
+    var progress = new RepairInferenceProgress(repository, attempt);
+    boolean validated = false;
     try {
       var vector =
-          vectors(
-                  target,
-                  List.of(source.text()),
-                  false,
-                  owner,
-                  () -> {
-                    if (!repository.beginRepair(target, source))
-                      throw new EmbeddingWorkRepository.UnreconciledRepair(null);
-                    retained[0] = true;
-                  })
-              .getFirst();
-      return repository.publish(target, source, vector, preparation::publicationFence);
-    } catch (RuntimeException failed) {
-      if (retained[0]) throw new EmbeddingWorkRepository.UnreconciledRepair(failed);
-      throw failed;
+          vectors(target, List.of(source.text()), false, owner, () -> {}, progress).getFirst();
+      validated = true;
+      progress.phase(EmbeddingRepair.Phase.PUBLISHING);
+      return repository.publishRepair(attempt, vector, preparation::publicationFence);
+    } catch (RuntimeException failure) {
+      var reason = repairReason(failure);
+      if (validated && reason == EmbeddingRepair.Reason.DISPATCH_FAILED)
+        reason = EmbeddingRepair.Reason.PUBLICATION_FAILED;
+      try {
+        repository.repairFailed(
+            attempt,
+            progress.snapshot(EmbeddingRepair.Phase.EXECUTION_FINISHED),
+            reason,
+            failureType(failure));
+      } catch (RuntimeException persistence) {
+        // Database unavailability cannot be made durable by opening a transaction around IO.
+        // Preserve the last committed checkpoint, surface the persistence failure and never
+        // convert it into failed() backoff which could replay an uncertain provider operation.
+        failure.addSuppressed(persistence);
+        org.slf4j.LoggerFactory.getLogger(DispatchingDualEmbeddings.class)
+            .warn(
+                "Embedding repair {} outcome checkpoint unavailable ({})",
+                attempt.id(),
+                persistence.getClass().getSimpleName());
+      }
+      throw new EmbeddingWorkRepository.UnreconciledRepair(failure);
     }
+  }
+
+  private static EmbeddingRepair.Reason repairReason(Throwable failure) {
+    for (int n = 0; failure != null && n < 16; n++, failure = failure.getCause()) {
+      if (failure instanceof InvalidRepairResult) return EmbeddingRepair.Reason.INVALID_RESULT;
+      if (failure instanceof LlmSaturatedException)
+        return EmbeddingRepair.Reason.CAPACITY_EXHAUSTED;
+      if (failure instanceof io.aeyer.plowshare.server.faults.CallerFault)
+        return EmbeddingRepair.Reason.AUTHORIZATION_REJECTED;
+      if (failure
+          instanceof io.aeyer.plowshare.server.llm.accounting.AccountingUnavailableException)
+        return EmbeddingRepair.Reason.ACCOUNTING_UNAVAILABLE;
+      if (failure instanceof InterruptedException) return EmbeddingRepair.Reason.INTERRUPTED;
+    }
+    return EmbeddingRepair.Reason.DISPATCH_FAILED;
+  }
+
+  private static String failureType(Throwable failure) {
+    for (int n = 0; failure.getCause() != null && n < 16; n++) failure = failure.getCause();
+    return failure.getClass().getName();
   }
 
   /** One bounded pass; staged vectors and retry timestamps are the persisted rebuild checkpoint. */
@@ -298,51 +375,54 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     var budget = operations == null ? null : maintenancePolicy.get();
     if (Thread.currentThread().isInterrupted() || budget != null && budget.exhausted())
       return published;
-    if (!repository.discoveryDue()) return published;
-    for (EmbeddingSlot slot : EmbeddingSlot.values()) {
-      var profiles = writeProfiles(slot);
-      for (EmbeddingProfile target : profiles) {
-        for (EmbeddingWorkRepository.Store store : EmbeddingWorkRepository.Store.values()) {
-          // Discovery itself consumes database capacity. Exhausted/cancelled passes must not
-          // scan every store just to discover that no provider submission can be admitted.
-          if (Thread.currentThread().isInterrupted() || budget != null && budget.exhausted())
-            return published;
-          for (var source : repository.claimPending(target, store, 4)) {
-            if (Thread.currentThread().isInterrupted()) return published;
-            if (budget != null && budget.exhausted()) break;
-            try {
-              var owner =
-                  UsageAttribution.system(
-                      source.project(), UsageAttribution.Operation.EMBEDDING_REPAIR);
-              boolean repaired;
-              if (operations == null) {
-                repaired = repair(target, source, owner);
-              } else {
-                var home =
-                    source.project() == null
-                        ? io.aeyer.plowshare.protocol.Home.global()
-                        : io.aeyer.plowshare.protocol.Home.of(source.project());
-                try (var binding =
-                    operations.publication(home, List.of(source), budget, () -> {})) {
-                  repaired =
-                      new DispatchingDualEmbeddings(repository, dispatcher, tokenizers, binding)
-                          .repairRetained(target, source, owner);
-                }
-              }
-              if (repaired) published++;
-            } catch (EmbeddingException failed) {
-              if (!(failed instanceof EmbeddingWorkRepository.UnreconciledRepair))
-                repository.failed(target, source, failed.getClass().getSimpleName());
+    long now = maintenanceClock.getAsLong();
+    boolean auditIndexes = !indexAuditScheduled || now - nextIndexAudit >= 0;
+    var plan = repository.maintenancePlan(auditIndexes);
+    for (var due : plan.repairs()) {
+      var target = due.profile();
+      var store = due.store();
+      // Discovery itself consumes database capacity. Exhausted/cancelled passes must not
+      // scan every store just to discover that no provider submission can be admitted.
+      if (Thread.currentThread().isInterrupted() || budget != null && budget.exhausted())
+        return published;
+      for (var source : repository.claimPending(target, store, 4)) {
+        if (Thread.currentThread().isInterrupted()) return published;
+        if (budget != null && budget.exhausted()) break;
+        try {
+          var owner =
+              UsageAttribution.system(
+                  source.project(), UsageAttribution.Operation.EMBEDDING_REPAIR);
+          boolean repaired;
+          if (operations == null) {
+            repaired = repair(target, source, owner);
+          } else {
+            var home =
+                source.project() == null
+                    ? io.aeyer.plowshare.protocol.Home.global()
+                    : io.aeyer.plowshare.protocol.Home.of(source.project());
+            try (var binding = operations.publication(home, List.of(source), budget, () -> {})) {
+              repaired =
+                  new DispatchingDualEmbeddings(repository, dispatcher, tokenizers, binding)
+                      .repairRetained(target, source, owner);
             }
           }
+          if (repaired) published++;
+        } catch (EmbeddingException failed) {
+          if (!(failed instanceof EmbeddingWorkRepository.UnreconciledRepair))
+            repository.failed(target, source, failed.getClass().getSimpleName());
         }
       }
-      if (Thread.currentThread().isInterrupted()) return published;
-      var target = repository.target(slot).orElseThrow();
-      // Known queued/retrying work or an unfinished initial discovery cannot be full coverage.
-      // Avoid recompiling/scanning the corpus to prove that on every repair batch. The eventual
-      // activation still locks sources and establishes coverage authoritatively.
-      if (repository.activationCandidate(target)) repository.activate(target);
+    }
+    boolean auditComplete = true;
+    for (var target : plan.activations()) {
+      if (Thread.currentThread().isInterrupted() || budget != null && budget.exhausted())
+        return published;
+      if (!repository.activate(target)) auditComplete = false;
+    }
+    if (auditIndexes && auditComplete) {
+      nextIndexAudit =
+          maintenanceClock.getAsLong() + java.util.concurrent.TimeUnit.MINUTES.toNanos(5);
+      indexAuditScheduled = true;
     }
     return published;
   }

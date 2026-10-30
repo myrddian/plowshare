@@ -209,7 +209,7 @@ class DualEmbeddingsTest {
     assertThrows(EmbeddingException.class, () -> dual.repair(source.key(), owner));
     var code = work.target(EmbeddingSlot.CODE).orElseThrow();
     var prose = work.target(EmbeddingSlot.PROSE).orElseThrow();
-    verify(work).failed(eq(code), eq(source), eq("EmbeddingException"));
+    verify(work).failed(eq(code), eq(source), eq("InvalidRepairResult"));
     verify(work).publish(eq(prose), eq(source), any());
   }
 
@@ -300,11 +300,73 @@ class DualEmbeddingsTest {
 
   @Test
   void idleMaintenanceDoesNotReloadProfilesOrProbeEveryStore() {
-    when(work.discoveryDue()).thenReturn(false);
+    when(work.maintenancePlan(true))
+        .thenReturn(new EmbeddingWorkRepository.MaintenancePlan(List.of(), List.of()));
     assertEquals(0, dual.tick());
-    verify(work).discoveryDue();
+    verify(work).maintenancePlan(true);
     verifyNoMoreInteractions(work);
     verifyNoInteractions(dispatcher);
+  }
+
+  @Test
+  void onlySelectedStoreIsClaimedAndProfilesAreNotReloaded() {
+    var p = profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE);
+    var selected = new EmbeddingWorkRepository.RepairWork(p, EmbeddingWorkRepository.Store.CHUNKS);
+    when(work.maintenancePlan(anyBoolean()))
+        .thenReturn(new EmbeddingWorkRepository.MaintenancePlan(List.of(selected), List.of()));
+    assertEquals(0, dual.tick());
+    verify(work).maintenancePlan(true);
+    verify(work).claimPending(p, EmbeddingWorkRepository.Store.CHUNKS, 4);
+    verifyNoMoreInteractions(work);
+    verifyNoInteractions(dispatcher);
+  }
+
+  @Test
+  void indexAuditsDoNotFollowEveryQueueTickAndFailedAuditsStayDue() {
+    var p = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
+    when(work.maintenancePlan(true))
+        .thenReturn(new EmbeddingWorkRepository.MaintenancePlan(List.of(), List.of(p)));
+    when(work.activate(p)).thenReturn(false, true);
+    when(work.maintenancePlan(false))
+        .thenReturn(new EmbeddingWorkRepository.MaintenancePlan(List.of(), List.of()));
+    dual.tick();
+    dual.tick();
+    dual.tick();
+    verify(work, times(2)).maintenancePlan(true);
+    verify(work).maintenancePlan(false);
+    verify(work, times(2)).activate(p);
+    verifyNoMoreInteractions(work);
+    verifyNoInteractions(dispatcher);
+  }
+
+  @Test
+  void successfulIndexAuditBecomesDueAgainAtItsOwnDeadline() {
+    var nanos = new java.util.concurrent.atomic.AtomicLong();
+    var scheduled = new DispatchingDualEmbeddings(work, dispatcher::embed, tokenizers, nanos::get);
+    var p = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
+    when(work.maintenancePlan(true))
+        .thenReturn(new EmbeddingWorkRepository.MaintenancePlan(List.of(), List.of(p)));
+    when(work.maintenancePlan(false))
+        .thenReturn(new EmbeddingWorkRepository.MaintenancePlan(List.of(), List.of()));
+    when(work.activate(p)).thenReturn(true);
+    scheduled.tick();
+    nanos.set(java.util.concurrent.TimeUnit.MINUTES.toNanos(4));
+    scheduled.tick();
+    nanos.set(java.util.concurrent.TimeUnit.MINUTES.toNanos(5));
+    scheduled.tick();
+    verify(work, times(2)).maintenancePlan(true);
+    verify(work).maintenancePlan(false);
+    verify(work, times(2)).activate(p);
+  }
+
+  @Test
+  void maintenancePlansRejectUnboundedOrDuplicateWork() {
+    var p = profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE);
+    var selected = new EmbeddingWorkRepository.RepairWork(p, EmbeddingWorkRepository.Store.CHUNKS);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EmbeddingWorkRepository.MaintenancePlan(List.of(selected, selected), List.of()));
+    assertThrows(NullPointerException.class, () -> new EmbeddingWorkRepository.RepairWork(p, null));
   }
 
   @Test
@@ -320,9 +382,13 @@ class DualEmbeddingsTest {
     verifyNoInteractions(dispatcher, operations);
   }
 
-  @Test
-  void activatedMaintenanceDoesNotAutomaticallyRepeatAnUncertainSubmission() {
-    when(work.discoveryDue()).thenReturn(true);
+  private record Retained(
+      EmbeddingProfile profile,
+      EmbeddingWorkRepository.Source source,
+      EmbeddingRepair.Attempt attempt,
+      OperationEmbeddings.Publication permit) {}
+
+  private Retained retainedMaintenance() {
     var profile = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
     var source =
         new EmbeddingWorkRepository.Source(
@@ -330,23 +396,97 @@ class DualEmbeddingsTest {
             1,
             "summary",
             null);
-    when(work.target(EmbeddingSlot.PROSE)).thenReturn(Optional.of(profile));
-    when(work.target(EmbeddingSlot.CODE))
+    when(work.maintenancePlan(anyBoolean()))
         .thenReturn(
-            Optional.of(profile(EmbeddingSlot.CODE, "", EmbeddingSpace.Normalization.NONE)));
+            new EmbeddingWorkRepository.MaintenancePlan(
+                List.of(new EmbeddingWorkRepository.RepairWork(profile, source.key().store())),
+                List.of()));
     when(work.claimPending(eq(profile), eq(source.key().store()), anyInt()))
         .thenReturn(List.of(source));
     when(work.inputLimit(profile.space())).thenReturn(100);
-    when(work.beginRepair(profile, source)).thenReturn(true, false);
+    var attempt = new EmbeddingRepair.Attempt(UUID.randomUUID(), profile, source);
+    when(work.beginRepairAttempt(profile, source))
+        .thenReturn(Optional.of(attempt))
+        .thenReturn(Optional.empty());
     var operations = mock(OperationEmbeddings.class);
     var permit = mock(OperationEmbeddings.Publication.class);
     when(permit.authorize(any(EmbeddingPermit.Task.class))).thenReturn(CallAuthorization.DIRECT);
     when(operations.publication(any(), anyList(), any(), any())).thenReturn(permit);
-    when(dispatcher.embed(any())).thenThrow(new EmbeddingException("unknown provider outcome"));
     dual.useOperations(operations, io.aeyer.plowshare.server.agents.Budget::none);
+    return new Retained(profile, source, attempt, permit);
+  }
+
+  @Test
+  void activatedMaintenanceDoesNotAutomaticallyRepeatAnUncertainSubmission() {
+    var retained = retainedMaintenance();
+    var call = UUID.randomUUID();
+    var wire = UUID.randomUUID();
+    when(dispatcher.embed(any()))
+        .thenAnswer(
+            invocation -> {
+              EmbeddingRequest request = invocation.getArgument(0);
+              request.progress().accounted(new InferenceCapture(call, false));
+              request.progress().attempting(wire);
+              throw new EmbeddingException("unknown provider outcome");
+            });
     assertEquals(0, dual.tick());
     assertEquals(0, dual.tick());
     verify(dispatcher, times(1)).embed(any());
+    verify(work)
+        .repairFailed(
+            eq(retained.attempt()),
+            argThat(e -> call.equals(e.callId()) && wire.equals(e.wireAttemptId())),
+            eq(EmbeddingRepair.Reason.DISPATCH_FAILED),
+            eq(EmbeddingException.class.getName()));
     verify(work, never()).failed(any(), any(), anyString());
+  }
+
+  @Test
+  void capacityRejectionAndPublicationRevocationKeepTheirDistinctReasons() {
+    var retained = retainedMaintenance();
+    when(dispatcher.embed(any()))
+        .thenThrow(
+            new LlmSaturatedException(
+                "fixture", Lane.EMBEDDING, java.time.Duration.ofMillis(1), 2));
+    assertEquals(0, dual.tick());
+    verify(work)
+        .repairFailed(
+            eq(retained.attempt()),
+            any(),
+            eq(EmbeddingRepair.Reason.CAPACITY_EXHAUSTED),
+            eq(LlmSaturatedException.class.getName()));
+    verify(work, never()).publishRepair(any(), any(), any());
+    // A separate operation may obtain output but still lose publication authority.
+    var second = retainedMaintenance();
+    doReturn(new Embeddings(List.of(new float[] {1, 0, 0}), null)).when(dispatcher).embed(any());
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("fixture revocation"))
+        .when(work)
+        .publishRepair(eq(second.attempt()), any(), any());
+    assertEquals(0, dual.tick());
+    verify(work)
+        .repairFailed(
+            eq(second.attempt()),
+            any(),
+            eq(EmbeddingRepair.Reason.AUTHORIZATION_REJECTED),
+            eq(io.aeyer.plowshare.server.faults.CallerFault.class.getName()));
+    verify(work, never()).failed(any(), any(), anyString());
+  }
+
+  @Test
+  void aValidatedResultWhoseCheckpointFailsIsRecordedAsPublicationFailure() {
+    var retained = retainedMaintenance();
+    doReturn(new Embeddings(List.of(new float[] {1, 0, 0}), null)).when(dispatcher).embed(any());
+    doThrow(new IllegalStateException("fixture checkpoint failure"))
+        .when(work)
+        .repairProgress(
+            eq(retained.attempt()), argThat(p -> p.phase() == EmbeddingRepair.Phase.PUBLISHING));
+    assertEquals(0, dual.tick());
+    verify(work)
+        .repairFailed(
+            eq(retained.attempt()),
+            any(),
+            eq(EmbeddingRepair.Reason.PUBLICATION_FAILED),
+            eq(IllegalStateException.class.getName()));
+    verify(work, never()).publishRepair(any(), any(), any());
   }
 }

@@ -65,7 +65,7 @@ class EmbeddingRuntimeRepositoryTest {
         "TRUNCATE memories,information_resources,documents,conversations,digests,retrieval_sources CASCADE");
     jdbc.update(
         "UPDATE embedding_slots SET active_space_id=NULL,target_space_id=NULL,active_mode=NULL,target_mode=NULL,active_distance=NULL,target_distance=NULL");
-    repository = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    repository = new JdbcEmbeddingWorkRepository(jdbc, work);
     jdbc.update(
         "INSERT INTO memories(id,summary,scope,body,state,formed_at,formed_by,formed_where) VALUES('memory','needle','scope','body','active',now(),'fixture','fixture')");
     jdbc.update(
@@ -346,7 +346,7 @@ class EmbeddingRuntimeRepositoryTest {
     var memory = repository.pending(code, EmbeddingWorkRepository.Store.MEMORIES, 100).getFirst();
     repository.failed(code, memory, "EmbeddingException");
     assertEquals(1, repository.pending(code, EmbeddingWorkRepository.Store.MEMORIES, 100).size());
-    var restarted = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    var restarted = new JdbcEmbeddingWorkRepository(jdbc, work);
     assertEquals(1, restarted.pending(code, EmbeddingWorkRepository.Store.MEMORIES, 100).size());
     jdbc.update("UPDATE memories SET summary='new source' WHERE id='memory'");
     assertEquals(2, restarted.pending(code, EmbeddingWorkRepository.Store.MEMORIES, 100).size());
@@ -508,7 +508,7 @@ class EmbeddingRuntimeRepositoryTest {
               return super.query(sql, mapper, arguments);
             }
           };
-      var measured = new JdbcEmbeddingWorkRepository(observed, work, spaces);
+      var measured = new JdbcEmbeddingWorkRepository(observed, work);
       work.inTransaction(
           () -> {
             jdbc.execute("SET LOCAL jit=on");
@@ -625,7 +625,7 @@ class EmbeddingRuntimeRepositoryTest {
       java.util.concurrent.Callable<List<EmbeddingWorkRepository.Source>> claim =
           () -> {
             assertTrue(start.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            return new JdbcEmbeddingWorkRepository(jdbc, work, spaces)
+            return new JdbcEmbeddingWorkRepository(jdbc, work)
                 .claimPending(target, EmbeddingWorkRepository.Store.CHUNKS, 4);
           };
       var first = executor.submit(claim);
@@ -647,7 +647,7 @@ class EmbeddingRuntimeRepositoryTest {
     var target = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
     var first = repository.claimPending(target, EmbeddingWorkRepository.Store.MEMORIES, 100);
     assertEquals(2, first.size());
-    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work);
     assertTrue(
         reopened.claimPending(target, EmbeddingWorkRepository.Store.MEMORIES, 100).isEmpty());
     // A crashed discoverer did not submit anything; only this reservation can expire.
@@ -666,6 +666,500 @@ class EmbeddingRuntimeRepositoryTest {
                 source ->
                     source.key().equals(submitted.key())
                         && source.revision() != submitted.revision()));
+  }
+
+  private EmbeddingRepair.Attempt retainedAttempt() {
+    var profile = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var source = repository.pending(profile, EmbeddingWorkRepository.Store.MEMORIES, 4).getFirst();
+    return repository.beginRepairAttempt(profile, source).orElseThrow();
+  }
+
+  @Test
+  void attemptIdentityAndReplayFenceRollbackTogether() {
+    var profile = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var source = repository.pending(profile, EmbeddingWorkRepository.Store.MEMORIES, 4).getFirst();
+    var identity = new java.util.concurrent.atomic.AtomicReference<UUID>();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  identity.set(repository.beginRepairAttempt(profile, source).orElseThrow().id());
+                  throw new IllegalStateException("rollback the intent");
+                }));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM embedding_repair_attempts WHERE id=?",
+            Integer.class,
+            identity.get()));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM memories_embedding_failures WHERE source_id=? AND slot=? AND space_id=?",
+            Integer.class,
+            source.key().id(),
+            profile.slot().stored(),
+            profile.space().id()));
+    assertTrue(repository.beginRepairAttempt(profile, source).isPresent());
+  }
+
+  @Test
+  void provenNonDispatchStoresReasonAndFiniteBackoffWithoutReplayingAnUncertainAttempt() {
+    var attempt = retainedAttempt();
+    var call = UUID.randomUUID();
+    repository.repairFailed(
+        attempt,
+        new EmbeddingRepair.Progress(
+            EmbeddingRepair.Phase.EXECUTION_FINISHED,
+            call,
+            null,
+            null,
+            io.aeyer.plowshare.server.llm.accounting.CallLifecycle.NOT_DISPATCHED),
+        EmbeddingRepair.Reason.CAPACITY_EXHAUSTED,
+        "LlmSaturatedException");
+    var row =
+        jdbc.queryForMap(
+            "SELECT phase,reason,failure_phase,call_id,prepared_at FROM embedding_repair_attempts WHERE id=?",
+            attempt.id());
+    assertEquals("NOT_DISPATCHED", row.get("phase"));
+    assertEquals("CAPACITY_EXHAUSTED", row.get("reason"));
+    assertEquals("PREPARED", row.get("failure_phase"));
+    assertEquals(call, row.get("call_id"));
+    assertNotNull(row.get("prepared_at"));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT isfinite(retry_at) AND retry_at>now() FROM memories_embedding_failures WHERE source_id=? AND slot=? AND space_id=?",
+            Boolean.class,
+            attempt.source().key().id(),
+            attempt.profile().slot().stored(),
+            attempt.profile().space().id()));
+  }
+
+  @Test
+  void unknownWireOutcomeRetainsFenceAndCorrelatesExactCallAndAttempt() {
+    var attempt = retainedAttempt();
+    var call = UUID.randomUUID();
+    var wire = UUID.randomUUID();
+    repository.repairProgress(
+        attempt,
+        new EmbeddingRepair.Progress(EmbeddingRepair.Phase.ACCOUNTED, call, null, null, null));
+    repository.repairProgress(
+        attempt,
+        new EmbeddingRepair.Progress(
+            EmbeddingRepair.Phase.ATTEMPT_STARTED, null, wire, null, null));
+    var evidence =
+        new EmbeddingRepair.Progress(
+            EmbeddingRepair.Phase.EXECUTION_FINISHED,
+            call,
+            wire,
+            null,
+            io.aeyer.plowshare.server.llm.accounting.CallLifecycle.FAILED);
+    repository.repairFailed(
+        attempt,
+        evidence,
+        EmbeddingRepair.Reason.DISPATCH_FAILED,
+        "java.net.SocketTimeoutException");
+    var row =
+        jdbc.queryForMap(
+            "SELECT phase,reason,failure_phase,call_id,wire_attempt_id FROM embedding_repair_attempts WHERE id=?",
+            attempt.id());
+    assertEquals("OUTCOME_UNKNOWN", row.get("phase"));
+    assertEquals("TRANSPORT_OUTCOME_UNKNOWN", row.get("reason"));
+    assertEquals("ATTEMPT_STARTED", row.get("failure_phase"));
+    assertEquals(call, row.get("call_id"));
+    assertEquals(wire, row.get("wire_attempt_id"));
+    assertTrue(
+        new JdbcEmbeddingWorkRepository(jdbc, work)
+            .beginRepairAttempt(attempt.profile(), attempt.source())
+            .isEmpty());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            repository.repairProgress(
+                attempt,
+                new EmbeddingRepair.Progress(
+                    EmbeddingRepair.Phase.ATTEMPT_STARTED, null, UUID.randomUUID(), null, null)));
+  }
+
+  @Test
+  void failedPublicationRollsBackTheVectorButCommitsItsFailureInTheFollowingTransaction() {
+    var attempt = retainedAttempt();
+    var wire = UUID.randomUUID();
+    repository.repairProgress(
+        attempt,
+        new EmbeddingRepair.Progress(
+            EmbeddingRepair.Phase.ATTEMPT_STARTED, null, wire, null, null));
+    repository.repairProgress(
+        attempt, EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.PUBLISHING));
+    jdbc.execute(
+        "CREATE FUNCTION fixture_reject_repair_success() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.phase='PUBLISHED' THEN RAISE EXCEPTION 'fixture receipt failure'; END IF; RETURN NEW; END $$");
+    jdbc.execute(
+        "CREATE TRIGGER fixture_reject_repair_success BEFORE UPDATE ON embedding_repair_attempts FOR EACH ROW EXECUTE FUNCTION fixture_reject_repair_success()");
+    try {
+      assertThrows(
+          org.springframework.dao.DataAccessException.class,
+          () -> repository.publishRepair(attempt, vector(attempt.profile()), () -> {}));
+    } finally {
+      jdbc.execute("DROP TRIGGER fixture_reject_repair_success ON embedding_repair_attempts");
+      jdbc.execute("DROP FUNCTION fixture_reject_repair_success()");
+    }
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM memories_embedding_staging WHERE source_id=? AND slot=? AND space_id=?",
+            Integer.class,
+            attempt.source().key().id(),
+            attempt.profile().slot().stored(),
+            attempt.profile().space().id()));
+    repository.repairFailed(
+        attempt,
+        new EmbeddingRepair.Progress(
+            EmbeddingRepair.Phase.EXECUTION_FINISHED,
+            null,
+            wire,
+            200,
+            io.aeyer.plowshare.server.llm.accounting.CallLifecycle.SUCCEEDED),
+        EmbeddingRepair.Reason.PUBLICATION_FAILED,
+        "DataAccessException");
+    var row =
+        jdbc.queryForMap(
+            "SELECT phase,reason,failure_phase,http_status FROM embedding_repair_attempts WHERE id=?",
+            attempt.id());
+    assertEquals("FAILED", row.get("phase"));
+    assertEquals("PUBLICATION_FAILED", row.get("reason"));
+    assertEquals("PUBLISHING", row.get("failure_phase"));
+    assertEquals(200, row.get("http_status"));
+    assertTrue(repository.beginRepairAttempt(attempt.profile(), attempt.source()).isEmpty());
+  }
+
+  @Test
+  void publishedVectorAndSuccessReceiptCommitTogetherAndCannotBeOverwrittenByLateFailure() {
+    var attempt = retainedAttempt();
+    repository.repairProgress(
+        attempt, EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.PUBLISHING));
+    assertTrue(repository.publishRepair(attempt, vector(attempt.profile()), () -> {}));
+    repository.repairFailed(
+        attempt,
+        EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.EXECUTION_FINISHED),
+        EmbeddingRepair.Reason.DISPATCH_FAILED,
+        "IllegalStateException");
+    assertEquals(
+        "PUBLISHED",
+        jdbc.queryForObject(
+            "SELECT phase FROM embedding_repair_attempts WHERE id=?", String.class, attempt.id()));
+    assertTrue(repository.ready(attempt.profile(), attempt.source()));
+    assertNotNull(
+        jdbc.queryForObject(
+            "SELECT result_received_at FROM embedding_repair_attempts WHERE id=?",
+            java.time.OffsetDateTime.class,
+            attempt.id()));
+  }
+
+  @Test
+  void publicationRequiresItsExactAttemptAndThePublicationCheckpoint() {
+    var attempt = retainedAttempt();
+    assertThrows(
+        IllegalStateException.class,
+        () -> repository.publishRepair(attempt, vector(attempt.profile()), () -> {}));
+    var other =
+        repository
+            .source(
+                EmbeddingWorkRepository.Key.of(
+                    EmbeddingWorkRepository.Store.MEMORIES,
+                    attempt.source().key().id().equals("near") ? "memory" : "near"))
+            .orElseThrow();
+    var forged = new EmbeddingRepair.Attempt(attempt.id(), attempt.profile(), other);
+    assertThrows(
+        org.springframework.dao.EmptyResultDataAccessException.class,
+        () ->
+            repository.repairProgress(
+                forged, EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.PUBLISHING)));
+    assertFalse(repository.ready(attempt.profile(), attempt.source()));
+  }
+
+  @Test
+  void failedReasonWriteCannotCommitAFiniteRetryWithoutItsOutcome() {
+    var attempt = retainedAttempt();
+    var evidence = EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.EXECUTION_FINISHED);
+    jdbc.execute(
+        "CREATE FUNCTION fixture_reject_repair_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.phase='NOT_DISPATCHED' THEN RAISE EXCEPTION 'fixture failure checkpoint'; END IF; RETURN NEW; END $$");
+    jdbc.execute(
+        "CREATE TRIGGER fixture_reject_repair_failure BEFORE UPDATE ON embedding_repair_attempts FOR EACH ROW EXECUTE FUNCTION fixture_reject_repair_failure()");
+    try {
+      assertThrows(
+          org.springframework.dao.DataAccessException.class,
+          () ->
+              repository.repairFailed(
+                  attempt, evidence, EmbeddingRepair.Reason.CAPACITY_EXHAUSTED, "Fixture"));
+    } finally {
+      jdbc.execute("DROP TRIGGER fixture_reject_repair_failure ON embedding_repair_attempts");
+      jdbc.execute("DROP FUNCTION fixture_reject_repair_failure()");
+    }
+    assertEquals(
+        "PREPARED",
+        jdbc.queryForObject(
+            "SELECT phase FROM embedding_repair_attempts WHERE id=?", String.class, attempt.id()));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT retry_at='infinity'::timestamptz FROM memories_embedding_failures WHERE source_id=? AND slot=? AND space_id=?",
+            Boolean.class,
+            attempt.source().key().id(),
+            attempt.profile().slot().stored(),
+            attempt.profile().space().id()));
+    repository.repairFailed(
+        attempt, evidence, EmbeddingRepair.Reason.CAPACITY_EXHAUSTED, "A".repeat(256));
+    assertEquals(
+        256,
+        jdbc.queryForObject(
+            "SELECT length(failure_type) FROM embedding_repair_attempts WHERE id=?",
+            Integer.class,
+            attempt.id()));
+    assertThrows(
+        org.springframework.dao.DataAccessException.class,
+        () ->
+            jdbc.update(
+                "UPDATE embedding_repair_attempts SET failure_type=? WHERE id=?",
+                "A".repeat(257),
+                attempt.id()));
+  }
+
+  @Test
+  void publicationRevocationRetainsItsAuthorizationReasonAndNeverPublishes() {
+    var attempt = retainedAttempt();
+    repository.repairProgress(
+        attempt,
+        new EmbeddingRepair.Progress(
+            EmbeddingRepair.Phase.ATTEMPT_STARTED,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            null,
+            null));
+    repository.repairProgress(
+        attempt, EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.PUBLISHING));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () ->
+            repository.publishRepair(
+                attempt,
+                vector(attempt.profile()),
+                () -> {
+                  throw new io.aeyer.plowshare.server.faults.CallerFault(
+                      "fixture authority revoked");
+                }));
+    repository.repairFailed(
+        attempt,
+        EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.EXECUTION_FINISHED),
+        EmbeddingRepair.Reason.AUTHORIZATION_REJECTED,
+        "CallerFault");
+    var row =
+        jdbc.queryForMap(
+            "SELECT phase,reason,failure_phase FROM embedding_repair_attempts WHERE id=?",
+            attempt.id());
+    assertEquals("BLOCKED", row.get("phase"));
+    assertEquals("AUTHORIZATION_REJECTED", row.get("reason"));
+    assertEquals("PUBLISHING", row.get("failure_phase"));
+    assertFalse(repository.ready(attempt.profile(), attempt.source()));
+    assertTrue(repository.beginRepairAttempt(attempt.profile(), attempt.source()).isEmpty());
+  }
+
+  @Test
+  void failureRecordingRejectsAnActiveOwnerTransactionAndMalformedEvidence() {
+    var attempt = retainedAttempt();
+    var evidence = EmbeddingRepair.Progress.phase(EmbeddingRepair.Phase.EXECUTION_FINISHED);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  repository.repairFailed(
+                      attempt, evidence, EmbeddingRepair.Reason.DISPATCH_FAILED, "Fixture");
+                  return true;
+                }));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            repository.repairFailed(
+                attempt,
+                evidence,
+                EmbeddingRepair.Reason.DISPATCH_FAILED,
+                "raw error text is not a category"));
+    assertEquals(
+        "PREPARED",
+        jdbc.queryForObject(
+            "SELECT phase FROM embedding_repair_attempts WHERE id=?", String.class, attempt.id()));
+  }
+
+  @Test
+  void legacyMigrationPreservesUnknownReasonWithoutInventingSubmissionEvidence() {
+    jdbc.execute("CREATE DATABASE repair_legacy");
+    try {
+      var ds =
+          new DriverManagerDataSource(
+              POSTGRES.getJdbcUrl().replace("/" + POSTGRES.getDatabaseName(), "/repair_legacy"),
+              POSTGRES.getUsername(),
+              POSTGRES.getPassword());
+      Flyway.configure().dataSource(ds).target("208").load().migrate();
+      var old = new JdbcTemplate(ds);
+      var template = new TransactionTemplate(new DataSourceTransactionManager(ds));
+      UnitOfWork transaction =
+          new UnitOfWork() {
+            public <T> T inTransaction(Supplier<T> callback) {
+              return template.execute(status -> callback.get());
+            }
+          };
+      var legacy = new JdbcEmbeddingWorkRepository(old, transaction);
+      var space =
+          new JdbcEmbeddingSpaceRepository(old)
+              .register(
+                  new EmbeddingSpace.Definition(
+                      "fixture-legacy",
+                      "weights",
+                      4,
+                      "",
+                      "",
+                      "cls",
+                      EmbeddingSpace.Normalization.NONE,
+                      "none"));
+      var profile =
+          legacy.configure(
+              EmbeddingSlot.PROSE,
+              space,
+              new EmbeddingSearchPolicy(
+                  EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+      old.update(
+          "INSERT INTO memories(id,summary,scope,body,state,formed_at,formed_by,formed_where) VALUES('legacy','fixture','scope','body','active',now(),'fixture','fixture')");
+      var source =
+          legacy
+              .source(
+                  EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "legacy"))
+              .orElseThrow();
+      assertTrue(legacy.beginRepair(profile, source));
+      Flyway.configure().dataSource(ds).load().migrate();
+      var row =
+          old.queryForMap(
+              "SELECT phase,reason,legacy_imported,call_id,wire_attempt_id,prepared_at,provider_started_at FROM embedding_repair_attempts WHERE source_id='legacy'");
+      assertEquals("OUTCOME_UNKNOWN", row.get("phase"));
+      assertEquals("LEGACY_UNCORRELATED", row.get("reason"));
+      assertEquals(true, row.get("legacy_imported"));
+      for (String field :
+          List.of("call_id", "wire_attempt_id", "prepared_at", "provider_started_at"))
+        assertNull(row.get(field), field);
+      assertTrue(
+          old.queryForObject(
+              "SELECT retry_at='infinity'::timestamptz AND category='RepairInFlight' FROM memories_embedding_failures WHERE source_id='legacy'",
+              Boolean.class));
+      assertTrue(legacy.beginRepairAttempt(profile, source).isEmpty());
+    } finally {
+      jdbc.execute("DROP DATABASE repair_legacy WITH (FORCE)");
+    }
+  }
+
+  @Test
+  void dueSnapshotUsesOneExecuteAndSelectsOnlyItsStoreWithoutActivationChurn() {
+    var p = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    populate(p);
+    assertTrue(repository.activate(p));
+    for (var store : EmbeddingWorkRepository.Store.values())
+      repository.pending(repository.target(EmbeddingSlot.PROSE).orElseThrow(), store, 4);
+    var trace = mock(io.aeyer.plowshare.server.pool.JdbcExecutionTrace.class);
+    when(trace.begin(anyString(), anyString()))
+        .thenReturn(mock(io.aeyer.plowshare.server.pool.JdbcExecutionTrace.Span.class));
+    var traced = new io.aeyer.plowshare.server.pool.TracedDataSource(jdbc.getDataSource(), trace);
+    var transaction = new TransactionTemplate(new DataSourceTransactionManager(traced));
+    var measured =
+        new JdbcEmbeddingWorkRepository(
+            new JdbcTemplate(traced),
+            new UnitOfWork() {
+              public <T> T inTransaction(Supplier<T> callback) {
+                return transaction.execute(status -> callback.get());
+              }
+            });
+    var idle = measured.maintenancePlan(false);
+    assertTrue(idle.repairs().isEmpty());
+    assertTrue(idle.activations().isEmpty());
+    verify(trace, times(1)).begin(startsWith("WITH wake AS MATERIALIZED"), eq("executeQuery"));
+    verifyNoMoreInteractions(trace);
+    assertEquals(
+        List.of(repository.target(EmbeddingSlot.PROSE).orElseThrow()),
+        measured.maintenancePlan(true).activations());
+
+    jdbc.update(
+        "UPDATE embedding_repair_scans SET next_at=now() WHERE slot='prose' AND store='chunks'");
+    var selected = measured.maintenancePlan(false);
+    assertEquals(
+        List.of(
+            new EmbeddingWorkRepository.RepairWork(
+                repository.target(EmbeddingSlot.PROSE).orElseThrow(),
+                EmbeddingWorkRepository.Store.CHUNKS)),
+        selected.repairs());
+    assertTrue(selected.activations().isEmpty(), "an already-active slot has no activation work");
+    clearInvocations(trace);
+    assertTrue(
+        measured
+            .claimPending(
+                selected.repairs().getFirst().profile(), EmbeddingWorkRepository.Store.CHUNKS, 4)
+            .isEmpty());
+    verify(trace, times(8)).begin(anyString(), anyString());
+    verify(trace, times(1)).begin(startsWith("WITH page AS MATERIALIZED"), eq("executeQuery"));
+    // One plan execute plus eight for the actual due recovery store, instead of the old
+    // 105-execute all-store pass before any recovery page. No index/other-store probes.
+
+    jdbc.update("UPDATE chunks SET text='changed after snapshot' WHERE id=?", chunk);
+    assertTrue(
+        repository
+            .claimPending(
+                selected.repairs().getFirst().profile(), EmbeddingWorkRepository.Store.CHUNKS, 4)
+            .stream()
+            .anyMatch(x -> x.key().id().equals(chunk.toString())));
+    var stale = selected.repairs().getFirst().profile();
+    target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    assertTrue(
+        repository.claimPending(stale, EmbeddingWorkRepository.Store.CHUNKS, 4).isEmpty(),
+        "a scheduling snapshot cannot claim after its slot configuration changes");
+  }
+
+  @Test
+  void duePlanPreservesServingGenerationAndStorePriorityDuringRebuild() {
+    var old = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    populate(old);
+    assertTrue(repository.activate(old));
+    var replacement = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    jdbc.update("UPDATE embedding_repair_scans SET next_at=now() WHERE slot='prose'");
+    var plan = repository.maintenancePlan(false);
+    assertEquals(10, plan.repairs().size());
+    for (int i = 0; i < 10; i++) {
+      assertEquals(
+          i < 5 ? old.space() : replacement.space(), plan.repairs().get(i).profile().space());
+      assertEquals(EmbeddingWorkRepository.Store.values()[i % 5], plan.repairs().get(i).store());
+    }
+    assertTrue(plan.activations().isEmpty(), "rebuild coverage is not established yet");
+  }
+
+  @Test
+  void retainedInfiniteAttemptIsNotScheduledOrReplayedAfterReopen() {
+    var p = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    populate(p);
+    assertTrue(repository.activate(p));
+    p = repository.target(EmbeddingSlot.PROSE).orElseThrow();
+    for (var store : EmbeddingWorkRepository.Store.values()) repository.pending(p, store, 4);
+    jdbc.update("UPDATE chunks SET text='new retained input' WHERE id=?", chunk);
+    var source =
+        repository.claimPending(p, EmbeddingWorkRepository.Store.CHUNKS, 4).stream()
+            .filter(x -> x.key().id().equals(chunk.toString()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(repository.beginRepair(p, source));
+    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work);
+    var idle = reopened.maintenancePlan(false);
+    assertTrue(idle.repairs().isEmpty());
+    assertTrue(idle.activations().isEmpty());
+    assertFalse(reopened.beginRepair(p, source));
+    jdbc.update("UPDATE chunks SET text='later committed revision' WHERE id=?", chunk);
+    assertEquals(1, reopened.maintenancePlan(false).repairs().size());
+    assertTrue(
+        reopened.claimPending(p, EmbeddingWorkRepository.Store.CHUNKS, 4).stream()
+            .anyMatch(x -> x.revision() != source.revision()));
   }
 
   @Test
@@ -741,7 +1235,7 @@ class EmbeddingRuntimeRepositoryTest {
                 io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.MEMORY, "memory")),
         new DigestStore(jdbc, work).readTargets(Home.global(), "dig_m_memory"));
     assertTrue(repository.beginRepair(target, source));
-    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    var reopened = new JdbcEmbeddingWorkRepository(jdbc, work);
     assertFalse(reopened.beginRepair(target, source));
     assertFalse(reopened.pending(target, key.store(), 100).contains(source));
     jdbc.update("UPDATE memories SET summary='new content' WHERE id='memory'");

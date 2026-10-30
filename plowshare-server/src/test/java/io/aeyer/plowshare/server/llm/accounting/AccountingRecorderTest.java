@@ -17,6 +17,74 @@ class AccountingRecorderTest {
   @TempDir Path directory;
 
   @Test
+  void observedAttemptExposesTheIdentityAlreadyCommittedToTheCanonicalJournal() {
+    try (var journal = journal(channel -> channel.force(true))) {
+      var recorder = new AccountingRecorder(journal, AccountingFixtures.CLOCK, 10);
+      var prices = org.mockito.Mockito.mock(InferencePrices.class);
+      org.mockito.Mockito.when(prices.routeFor("fixture"))
+          .thenReturn(new PricingCatalog.Route("fixture", java.util.Map.of()));
+      var observer =
+          new DurableInferenceAccounting(recorder, prices, AccountingFixtures.CLOCK)
+              .begin(
+                  "fixture",
+                  "encoder",
+                  "encoder",
+                  io.aeyer.plowshare.server.llm.dispatch.Lane.EMBEDDING,
+                  UsageAttribution.system(null, UsageAttribution.Operation.EMBEDDING_REPAIR));
+      var wire = observer.attempt();
+      var receipt =
+          journal.readBatch(10).stream()
+              .filter(e -> e.event().payload() instanceof AccountingEvent.AttemptStarted)
+              .findFirst()
+              .orElseThrow()
+              .event();
+      assertEquals(observer.capture().callId(), receipt.callId());
+      assertEquals(wire.id(), ((AccountingEvent.AttemptStarted) receipt.payload()).attemptId());
+      wire.finished(CallLifecycle.FAILED);
+      observer.finished(CallLifecycle.FAILED);
+    }
+  }
+
+  @Test
+  void
+      operationCheckpointFailureClosesTheActualCanonicalAttemptWithoutAnInvalidZeroAttemptOutcome() {
+    try (var journal = journal(channel -> channel.force(true))) {
+      var recorder = new AccountingRecorder(journal, AccountingFixtures.CLOCK, 10);
+      var prices = org.mockito.Mockito.mock(InferencePrices.class);
+      org.mockito.Mockito.when(prices.routeFor("fixture"))
+          .thenReturn(new PricingCatalog.Route("fixture", java.util.Map.of()));
+      var canonical =
+          new DurableInferenceAccounting(recorder, prices, AccountingFixtures.CLOCK)
+              .begin(
+                  "fixture",
+                  "encoder",
+                  "encoder",
+                  io.aeyer.plowshare.server.llm.dispatch.Lane.EMBEDDING,
+                  UsageAttribution.system(null, UsageAttribution.Operation.EMBEDDING_REPAIR));
+      var progress =
+          org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.dispatch.InferenceProgress.class);
+      var failure = new IllegalStateException("fixture checkpoint failure");
+      org.mockito.Mockito.doThrow(failure)
+          .when(progress)
+          .attempting(org.mockito.ArgumentMatchers.any());
+      var observed =
+          io.aeyer.plowshare.server.llm.dispatch.InferenceObserver.progress(canonical, progress);
+      assertEquals(failure, assertThrows(IllegalStateException.class, observed::attempt));
+      observed.finished(CallLifecycle.FAILED);
+      var ended =
+          journal.readBatch(10).stream()
+              .filter(e -> e.event().payload() instanceof AccountingEvent.AttemptFinished)
+              .findFirst()
+              .orElseThrow()
+              .event();
+      assertEquals(
+          CallLifecycle.FAILED, ((AccountingEvent.AttemptFinished) ended.payload()).outcome());
+      assertTrue(observed.capture().durable());
+      assertEquals(0, failure.getSuppressed().length);
+    }
+  }
+
+  @Test
   void a_call_and_each_retry_have_distinct_durable_identities_and_original_price_snapshot() {
     try (var journal = journal(channel -> channel.force(true))) {
       var recorder = new AccountingRecorder(journal, AccountingFixtures.CLOCK, 10);

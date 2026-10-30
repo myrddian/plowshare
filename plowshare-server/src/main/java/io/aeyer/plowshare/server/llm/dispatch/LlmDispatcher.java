@@ -398,6 +398,7 @@ public final class LlmDispatcher implements AutoCloseable {
             request.specifier(),
             Lane.EMBEDDING,
             request.attribution());
+    observer = InferenceObserver.progress(observer, request.progress());
     boundary.accounted(request.authorization(), observer.capture());
     observer =
         InferenceObserver.authorized(

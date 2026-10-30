@@ -109,8 +109,8 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
         throw new IllegalStateException("invalid inference accounting attempt lifecycle");
       }
       long start = System.nanoTime();
-      call.startAttempt(); // No request may be sent before this is durable.
-      active = new ObservedAttempt(elapsed(start));
+      var attemptId = call.startAttempt(); // No request may be sent before this is durable.
+      active = new ObservedAttempt(attemptId, elapsed(start));
       return active;
     }
 
@@ -143,6 +143,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
     }
 
     private final class ObservedAttempt implements Attempt {
+      private final java.util.UUID id;
       private final long startAccountingMillis;
       private final long startedAt = System.nanoTime();
       private UsageObservation usage = UsageObservation.UNKNOWN;
@@ -152,8 +153,14 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
       private Long firstOutputMillis;
       private boolean finished;
 
-      ObservedAttempt(long startAccountingMillis) {
+      ObservedAttempt(java.util.UUID id, long startAccountingMillis) {
+        this.id = id;
         this.startAccountingMillis = startAccountingMillis;
+      }
+
+      @Override
+      public java.util.UUID id() {
+        return id;
       }
 
       @Override

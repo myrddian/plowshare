@@ -200,8 +200,7 @@ class GlobalPreparationPersistenceTest {
     var embeddings = new DispatchingEmbeddingClient(dispatcher, props, tokenizer);
     DualEmbeddings lanes = null;
     if (dual) {
-      var records =
-          new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+      var records = new JdbcEmbeddingWorkRepository(jdbc, work);
       var space =
           new JdbcEmbeddingSpaceRepository(jdbc)
               .register(
@@ -254,8 +253,7 @@ class GlobalPreparationPersistenceTest {
     // Search disabled deliberately: it is not the admitted write's policy.
     var archive = memoryQueries(dispatcher, dual, 0);
     store.protectInformation();
-    var records =
-        new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+    var records = new JdbcEmbeddingWorkRepository(jdbc, work);
     DualEmbeddings lanes = null;
     if (dual) {
       var prose = records.active(EmbeddingSlot.PROSE).orElseThrow();
@@ -763,8 +761,7 @@ class GlobalPreparationPersistenceTest {
     float[] vector = new float[768];
     vector[0] = 1;
     if (dual) {
-      var records =
-          new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+      var records = new JdbcEmbeddingWorkRepository(jdbc, work);
       assertTrue(
           records.publish(
               records.active(EmbeddingSlot.PROSE).orElseThrow(),
@@ -1106,8 +1103,7 @@ class GlobalPreparationPersistenceTest {
     reader.useQueries(
         queries(new EmbeddingProperties(false, null, null, false, null).searchLimit()));
     if (dual) {
-      var records =
-          new JdbcEmbeddingWorkRepository(jdbc, work, new JdbcEmbeddingSpaceRepository(jdbc));
+      var records = new JdbcEmbeddingWorkRepository(jdbc, work);
       for (var slot : EmbeddingSlot.values()) assertTrue(records.active(slot).isPresent());
       var counters = mock(EmbeddingTokenizers.class);
       when(counters.model(any())).thenReturn(tokenizer);
@@ -1364,7 +1360,7 @@ class GlobalPreparationPersistenceTest {
     DualEmbeddings lanes = null;
     if (dual) {
       var spaces = new JdbcEmbeddingSpaceRepository(jdbc);
-      var records = new JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+      var records = new JdbcEmbeddingWorkRepository(jdbc, work);
       for (var slot : EmbeddingSlot.values()) {
         var space =
             spaces.register(

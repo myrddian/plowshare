@@ -425,8 +425,7 @@ class AuthoredInformationPersistenceTest {
             "SELECT code_source_revision=embedding_source_revision AND prose_source_revision=embedding_source_revision FROM documents WHERE id=?",
             Boolean.class,
             copy.revision()));
-    var runtime =
-        new io.aeyer.plowshare.server.embedding.JdbcEmbeddingWorkRepository(jdbc, work, spaces);
+    var runtime = new io.aeyer.plowshare.server.embedding.JdbcEmbeddingWorkRepository(jdbc, work);
     // Removing a copied vector cannot let global maintenance infer a new spending grant.
     jdbc.update(
         "UPDATE documents SET code_embedding=NULL,code_space_id=NULL,code_source_revision=NULL WHERE id=?",
