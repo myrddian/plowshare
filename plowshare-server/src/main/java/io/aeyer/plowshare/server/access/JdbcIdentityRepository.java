@@ -86,10 +86,54 @@ public class JdbcIdentityRepository implements IdentityRepository {
           case AuthorityScope.Personal value -> value.projectId();
           case AuthorityScope.AccountKnowledge ignored -> 0L;
           case AuthorityScope.Administration ignored -> 0L;
+          // Refused, not defaulted. A contained scope does carry a project key, so answering
+          // value.projectId() here would compile, return a name, and silently make a child project
+          // addressable through every Home-keyed path in the server -- which is the one thing
+          // containment forbids. Whether a contained scope has an outwardly visible home, and who
+          // may see it, is decided where containment is resolved, not by a convenience read here.
+          case AuthorityScope.Contained ignored -> throw contained();
         };
     if (project == 0L) throw absent();
     return Home.of(
         one(jdbc.queryForList("SELECT name FROM projects WHERE id=?", String.class, project)));
+  }
+
+  @Override
+  public Home containedHome(AuthorityScope.Contained scope, ScopeId container) {
+    Objects.requireNonNull(scope);
+    Objects.requireNonNull(container);
+    // One read that resolves the stored containment row instead of trusting the caller's value.
+    // All four facts are bound in the predicate, so a value naming a sibling subtree's project, or
+    // another container's child, or an ordinary project, selects no row and is refused. The prefix
+    // alone would close only the ordinary-project case: every child's project carries it, so the
+    // container and project_id columns are what separate this parent's child from a sibling's.
+    return Home.of(
+        one(
+            jdbc.queryForList(
+                "SELECT p.name FROM authority_scopes s JOIN projects p ON p.id=s.project_id"
+                    + " WHERE s.id=? AND s.kind='CONTAINED' AND s.container=? AND s.project_id=?"
+                    + " AND p.name LIKE 'contained:%'",
+                String.class, scope.id().value(), container.value(), scope.projectId())));
+  }
+
+  @Override
+  public Optional<AuthorityScope.Contained> contained(ScopeId scope) {
+    Objects.requireNonNull(scope);
+    // One read, and only CONTAINED rows select: a PROJECT, PERSONAL, knowledge, administration or
+    // RESTRICTED scope answers empty rather than being reshaped into a containment relation. The
+    // columns are the relation itself, so nothing here is reconstructed from a name.
+    return jdbc
+        .query(
+            "SELECT s.id,s.project_id,s.container FROM authority_scopes s"
+                + " WHERE s.id=? AND s.kind='CONTAINED' AND s.container IS NOT NULL",
+            (row, n) ->
+                new AuthorityScope.Contained(
+                    new ScopeId(row.getObject("id", UUID.class)),
+                    row.getLong("project_id"),
+                    new ScopeId(row.getObject("container", UUID.class))),
+            scope.value())
+        .stream()
+        .findFirst();
   }
 
   @Override
@@ -136,6 +180,10 @@ public class JdbcIdentityRepository implements IdentityRepository {
       case "ADMINISTRATION" ->
           new AuthorityScope.Administration(
               id, new AccountId(row.getObject("account_id", UUID.class)));
+      // Named explicitly so the refusal is a decision rather than a fall-through. This slice adds
+      // the kind to the schema and to the sealed interface; nothing yet creates a contained row, so
+      // nothing may read one back into a resolved scope either.
+      case "CONTAINED" -> throw contained();
       default -> throw absent();
     };
   }
@@ -146,7 +194,12 @@ public class JdbcIdentityRepository implements IdentityRepository {
   }
 
   private static CallerFault absent() {
-    return new CallerFault("Identity or scope mapping is unavailable or restricted");
+    return new CallerFault(IdentityRepository.UNRESOLVED);
+  }
+
+  /** No legacy project home is published for a contained scope by this slice. */
+  private static CallerFault contained() {
+    return new CallerFault("A contained scope has no addressable project home");
   }
 
   @Override

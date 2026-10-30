@@ -24,8 +24,18 @@ import {
 } from './server-filestores.ts';
 import {
   deploymentReceiptCheck,
+  containedChildCheck,
+  containedCeilingCheck,
+  containedDestructionCheck,
+  containedChildrenCheck,
+  containedTrajectoryCheck,
   deploymentStatusCheck,
   type ApplicationDeploymentReceipt,
+  type ContainedApplicationChild,
+  type ContainedApplicationCeiling,
+  type ContainedApplicationDestruction,
+  type ContainedApplicationChildren,
+  type ContainedApplicationTrajectory,
   type ApplicationDeploymentStatus,
 } from './application-deployments.ts';
 import {
@@ -448,6 +458,11 @@ export interface ConversationReplies {
   'application.deploy': ApplicationDeploymentReceipt;
   'application.activate': ApplicationDeploymentReceipt;
   'application.deployment.receipt': ApplicationDeploymentReceipt;
+  'application.child.create': ContainedApplicationChild;
+  'application.child.ceiling': ContainedApplicationCeiling;
+  'application.child.destroy': ContainedApplicationDestruction;
+  'application.child.list': ContainedApplicationChildren;
+  'application.child.trajectory': ContainedApplicationTrajectory;
   'filestore.list': FileStoreCatalog;
   'application.deployment.status': ApplicationDeploymentStatus;
   'application.create': ProjectView;
@@ -925,6 +940,11 @@ const readers = {
   'application.deploy': deploymentReceiptCheck,
   'application.activate': deploymentReceiptCheck,
   'application.deployment.receipt': deploymentReceiptCheck,
+  'application.child.create': containedChildCheck,
+  'application.child.ceiling': containedCeilingCheck,
+  'application.child.destroy': containedDestructionCheck,
+  'application.child.list': containedChildrenCheck,
+  'application.child.trajectory': containedTrajectoryCheck,
   'filestore.list': fileStoreCatalogCheck,
   'application.deployment.status': deploymentStatusCheck,
   'application.create': project,

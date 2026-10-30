@@ -194,6 +194,45 @@ export interface ExtendedPayloads
     readonly expectedRevision: string;
     readonly revision: string;
   };
+  // A container's own typed operations over the Applications confined inside it (ADR 0042). No
+  // field names an authority: the creating Application's admission and the allowance it is
+  // spending both come from its own retained conversation, server side, because a request that
+  // supplied either would be authorizing itself. `destination` stays in the shape for
+  // request-shape compatibility with application.deploy, so every SDK sends the key, but its only
+  // accepted value is null: the server allocates a child's source area under its configured
+  // containment root, and a named destination is refused rather than accepted and dropped.
+  // `ceiling` is required and may be zero --
+  // an absent ceiling means unlimited, which a confined child is never.
+  'application.child.create': {
+    readonly conversation: string;
+    readonly requestId: string;
+    readonly ceiling: number;
+    readonly destination: FileStoreReference | null;
+    readonly writableAreas: readonly FileStoreReference[];
+    readonly files: readonly ApplicationSourceFile[];
+  };
+  'application.child.ceiling': {
+    readonly conversation: string;
+    readonly child: string;
+    readonly calls: number;
+  };
+  // Destruction, which for a contained Application is the normal path. `child` is the only
+  // target and is proved against the caller's own admitted scope before anything is removed, so a
+  // sibling, a container or an unrelated Application is refused rather than collected.
+  'application.child.destroy': {
+    readonly conversation: string;
+    readonly child: string;
+  };
+  // One-way visibility. Neither payload names a container: the scope read is the scope the
+  // caller's own retained conversation is admitted as, so there is no field through which a
+  // sibling, a parent or an unrelated Application could be asked about. `child` on the trajectory
+  // read is proved against that scope through the stored containment chain before any envelope is
+  // read, so a grandparent reads through the chain and a sibling is refused.
+  'application.child.list': { readonly conversation: string };
+  'application.child.trajectory': {
+    readonly conversation: string;
+    readonly child: string;
+  };
   'filestore.list': Record<string, never>;
   'application.deployment.status': { readonly project: string };
   'application.deployment.receipt': {
@@ -455,6 +494,11 @@ export const CLI_OPERATIONS = {
   'application token receipt': 'application.token.receipt',
   'application deploy': 'application.deploy',
   'application activate': 'application.activate',
+  'application child create': 'application.child.create',
+  'application child ceiling': 'application.child.ceiling',
+  'application child destroy': 'application.child.destroy',
+  'application child list': 'application.child.list',
+  'application child trajectory': 'application.child.trajectory',
   'filestore list': 'filestore.list',
   'application deployment status': 'application.deployment.status',
   'application deployment receipt': 'application.deployment.receipt',

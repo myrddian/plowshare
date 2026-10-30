@@ -160,6 +160,17 @@ const asked = (type: ConversationOperation): Request => {
     return request(type, { project: 'repo' });
   if (type === 'conversation.latest')
     return request(type, { project: 'repo', agent: 'worker' });
+  if (type === 'application.child.ceiling')
+    return request(type, {
+      conversation: 'c',
+      child: '33333333-3333-3333-3333-333333333333',
+      calls: 1,
+    });
+  if (type === 'application.child.destroy')
+    return request(type, {
+      conversation: 'c',
+      child: '33333333-3333-3333-3333-333333333333',
+    });
   return { type, payload: { conversation: 'c' } } as Request;
 };
 const object = (value: unknown): value is Record<string, unknown> =>

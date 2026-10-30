@@ -36,7 +36,10 @@ public final class ScheduleListHandler implements FrameHandler {
         || project.codePoints().anyMatch(Character::isISOControl)
         || project.startsWith("personal:")
         || project.startsWith("Personal:")
-        || io.aeyer.plowshare.server.archive.ClientProjects.privateProject(project))
+        || io.aeyer.plowshare.server.archive.ClientProjects.privateProject(project)
+        // ADR 0042, list (c): the same refusal as FileScheduleDefinitions.requireRead, made at
+        // the frame boundary so a child's project is not even decoded as a schedule selection.
+        || io.aeyer.plowshare.protocol.ContainedProjects.name(project))
       throw new io.aeyer.plowshare.server.faults.CallerFault(
           "Choose an ordinary project for schedule inspection");
     return project;

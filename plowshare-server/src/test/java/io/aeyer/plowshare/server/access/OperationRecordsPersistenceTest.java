@@ -245,6 +245,133 @@ class OperationRecordsPersistenceTest {
     assertDoesNotThrow(this::admit);
   }
 
+  /**
+   * Every retained envelope of one scope, read in one statement and grouped in the mapper.
+   *
+   * <p>Real PostgreSQL because the assertion is the grouping: the support join multiplies rows, so
+   * two conversations with different support sets is exactly the shape a per-row mapper gets wrong,
+   * and a mocked repository would be asserting the mapper against itself. The scope filter is here
+   * too, because it is what keeps the read from being transitive or cross-scope.
+   */
+  @Test
+  void everyRetainedEnvelopeOfOneScopeIsReadTogetherAndNothingFromAnother() {
+    var conversations = new ConversationStore(jdbc);
+    var wide = admit();
+    var narrow = policy.derive(wide, Set.of(AuthorityAction.READ));
+    var first =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "parent",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(3),
+            "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            first.id(), "parent", wide, null, first.budget().snapshot().id(), "0".repeat(64)));
+    var second =
+        conversations.log(Origin.DELEGATION, Home.of("one"), "child", first.id(), null, "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            second.id(),
+            "child",
+            narrow,
+            first.id(),
+            first.budget().snapshot().id(),
+            "1".repeat(64)));
+
+    jdbc.update("INSERT INTO projects(name) VALUES('two')");
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'alice','CONTRIBUTOR'"
+            + " FROM projects WHERE name='two'");
+    var elsewhere =
+        policy.admit("alice", policy.scope(Home.of("two")), Set.of(AuthorityAction.READ));
+    var other =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("two"),
+            "stranger",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(1),
+            "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            other.id(),
+            "stranger",
+            elsewhere,
+            null,
+            other.budget().snapshot().id(),
+            "2".repeat(64)));
+
+    var read = new JdbcOperationRecords(jdbc).conversationsIn(wide.scope());
+    assertEquals(List.of(first.id(), second.id()), read.stream().map(e -> e.id()).toList());
+    // The support sets are what the grouping gets wrong when it gets anything wrong.
+    assertEquals(wide.actions(), read.get(0).admission().actions());
+    assertEquals(Set.of(AuthorityAction.READ), read.get(1).admission().actions());
+    assertEquals(3, read.get(0).admission().support().size());
+    assertEquals(1, read.get(1).admission().support().size());
+    assertEquals(first.id(), read.get(1).parent());
+    assertEquals("1".repeat(64), read.get(1).capabilities());
+    assertEquals(
+        List.of(other.id()),
+        new JdbcOperationRecords(jdbc)
+            .conversationsIn(elsewhere.scope()).stream().map(e -> e.id()).toList());
+  }
+
+  /**
+   * A listing is a listing: one unusable row does not refuse the rest. {@code conversationsIn}
+   * documents that and then threw {@code IllegalArgumentException} out of its extractor for a
+   * sealed admission with no retained support — the whole read failed, for every conversation in
+   * the scope, because of one row. Real PostgreSQL because the assertion is what the extractor does
+   * with an actual multiplied result set.
+   */
+  @Test
+  void aConversationWhoseAdmissionRetainsNoSupportIsSkippedRatherThanFailingTheListing() {
+    var conversations = new ConversationStore(jdbc);
+    var wide = admit();
+    var log =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "parent",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(3),
+            "alice");
+    policy.bind(
+        new OperationAuthority.Conversation(
+            log.id(), "parent", wide, null, log.budget().snapshot().id(), "0".repeat(64)));
+    // Support is immutable by trigger, so the state is built the only way it can arise: an
+    // admission sealed with nothing retained against it. Its columns are copied from the live one,
+    // so the scope filter selects it and the mapper really does meet it.
+    var stranger =
+        conversations.log(
+            Origin.SUBMISSION,
+            Home.of("one"),
+            "stranger",
+            null,
+            io.aeyer.plowshare.server.agents.Budget.of(1),
+            "alice");
+    UUID unsupported = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO operation_admissions(id,executor,executor_handle,scope,project_name,"
+            + "source_account,sealed) SELECT ?,executor,executor_handle,scope,project_name,"
+            + "source_account,true FROM operation_admissions WHERE id=?",
+        unsupported,
+        wide.id());
+    jdbc.update(
+        "INSERT INTO operation_conversations(conversation,agent,operation,allowance_id,capabilities)"
+            + " VALUES(?,?,?,?,?)",
+        stranger.id(),
+        "stranger",
+        unsupported,
+        stranger.budget().snapshot().id().value(),
+        "1".repeat(64));
+
+    var read = new JdbcOperationRecords(jdbc).conversationsIn(wide.scope());
+    assertEquals(List.of(log.id()), read.stream().map(e -> e.id()).toList());
+    assertEquals(wide.actions(), read.getFirst().admission().actions());
+  }
+
   @Test
   void aRetainedContinuationCanDelegateWithItsOriginalConversationAndAllowance() {
     ConversationStore conversations = new ConversationStore(jdbc);

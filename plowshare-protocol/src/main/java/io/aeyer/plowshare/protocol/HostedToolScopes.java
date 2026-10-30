@@ -308,5 +308,9 @@ public final class HostedToolScopes {
     RelayPort.identity(value);
     if (value.startsWith("client:"))
       throw new IllegalArgumentException("Instance projects cannot own durable hosts");
+    // ADR 0042, list (c): a durable tool host is reachable by its route for as long as it exists,
+    // independently of who created it, which is precisely an address nobody has to name again.
+    if (ContainedProjects.name(value))
+      throw new IllegalArgumentException("Contained projects cannot own durable hosts");
   }
 }

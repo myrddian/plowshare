@@ -71,6 +71,22 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
     if (!members.mayWork(source, account))
       throw new io.aeyer.plowshare.server.faults.CallerFault(
           "This account needs CONTRIBUTOR access to send project messages");
+    // ADR 0042, list (c). Messaging is a narrowing of the existing Relay and Application scoping
+    // and not a forwarding surface: a child cannot message anything its container cannot, and
+    // there is no path here by which a request is re-proved against containment and then
+    // forwarded. Refused in both directions, so neither end of an edge can be a child.
+    //
+    // It is checked BEFORE the same-project early return below, and that ordering is the finding
+    // rather than a style choice: with the check after it, a child addressing its own project was
+    // admitted without any of the policy below being consulted. A contained project is not a
+    // messaging endpoint at all in this slice, its own included, because nothing executes a child
+    // yet and admitting the self-addressed case would be an endpoint nobody mediates. It is also
+    // ahead of the route policy, so the refusal names containment rather than an absent route.
+    if (io.aeyer.plowshare.protocol.ContainedProjects.name(source)
+        || io.aeyer.plowshare.protocol.ContainedProjects.name(destination))
+      throw new Board.Refused(
+          "A contained Application's project is not a messaging endpoint; every edge in or out"
+              + " belongs to its container.");
     if (source.equals(destination)) return;
     var sourceOwner = projects.personalOwner(source);
     var destinationOwner = projects.personalOwner(destination);

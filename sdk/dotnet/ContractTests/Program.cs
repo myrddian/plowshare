@@ -44,6 +44,27 @@ using var foreignCredential=JsonDocument.Parse("""{"project":"foreign","requestI
 bool foreignCredentialRefused=false;
 try {Codec.CorrelateDeployment("application.token.issue",foreignCredential.RootElement,credentialResult);}catch(JsonException){foreignCredentialRefused=true;}
 if(!foreignCredentialRefused)throw new Exception("Foreign credential receipt accepted");
+{
+    const string child = "11111111-1111-1111-1111-111111111111", foreign = "33333333-3333-3333-3333-333333333333";
+    using var containedAsked = JsonDocument.Parse($$"""{"conversation":"c","child":"{{child}}"}""");
+    foreach (var (operation, reply, accepted) in new[] {
+        ("application.child.ceiling", $$"""{"child":"{{child}}"}""", true),
+        ("application.child.ceiling", $$"""{"child":"{{foreign}}"}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{foreign}}","{{child}}"],"sources":2}""", true),
+        ("application.child.destroy", $$"""{"child":"{{foreign}}","collected":["{{foreign}}"],"sources":1}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{foreign}}"],"sources":1}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":2}""", false),
+        // A non-numeric count is a refusal, not an InvalidOperationException escaping the gate.
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":"1"}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":null}""", false),
+        ("application.child.destroy", $$"""{"child":"{{child}}","collected":["{{child}}"],"sources":true}""", false) })
+    {
+        using var answer = JsonDocument.Parse(reply);
+        bool admitted = true;
+        try { Codec.CorrelateDeployment(operation, containedAsked.RootElement, answer.RootElement); } catch (JsonException) { admitted = false; }
+        if (admitted != accepted) throw new Exception($"Contained reply correlation wrong for {operation} {reply}");
+    }
+}
 const int maximumRelayBytes = 50 * 1024 * 1024;
 foreach (var text in new[] { new string('x', maximumRelayBytes), new string('é', maximumRelayBytes / 2) })
 {

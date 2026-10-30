@@ -12,6 +12,18 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class PinnedOperationAuthority implements OperationAuthority {
+  /**
+   * The actions an admission may be narrowed to, whether the narrowing holds scope fixed ({@code
+   * derive}) or crosses a containment hop ({@code contain}). The management and administration
+   * actions are deliberately absent: a narrowed authority runs work, it does not re-grant it.
+   */
+  private static final Set<AuthorityAction> DERIVABLE =
+      Set.of(
+          AuthorityAction.READ,
+          AuthorityAction.WRITE,
+          AuthorityAction.CONVERSATION_CREATE,
+          AuthorityAction.RUN_MODEL);
+
   private final IdentityRepository identities;
   private final ScopedGrantRepository grants;
   private final ScopedAuthority authority;
@@ -19,6 +31,9 @@ public final class PinnedOperationAuthority implements OperationAuthority {
   private final OperationRecords records;
   private final ResourceScopeRepository resources;
   private final io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge;
+
+  /** Server configuration, never a caller's argument; absent until an operator configures it. */
+  private final ContainmentBounds bounds;
 
   public PinnedOperationAuthority(
       IdentityRepository identities,
@@ -37,7 +52,6 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         io.aeyer.plowshare.server.information.AccountKnowledgePermissions.DENY);
   }
 
-  @org.springframework.beans.factory.annotation.Autowired
   public PinnedOperationAuthority(
       IdentityRepository identities,
       ScopedGrantRepository grants,
@@ -46,6 +60,54 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       OperationRecords records,
       ResourceScopeRepository resources,
       io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        knowledge,
+        ContainmentBounds.absent());
+  }
+
+  /**
+   * The bounds bean is optional rather than required, so a deployment that has not opted into
+   * containment still starts; it then holds {@link ContainmentBounds#absent()} and refuses every
+   * containment hop. Absence must not be a startup failure for a capability the server does not
+   * use, and it must not become an unlimited default either.
+   */
+  @org.springframework.beans.factory.annotation.Autowired
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
+      org.springframework.beans.factory.ObjectProvider<ContainmentBounds> bounds) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        knowledge,
+        bounds.getIfAvailable(ContainmentBounds::absent));
+  }
+
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
+      ContainmentBounds bounds) {
+    this.bounds = Objects.requireNonNull(bounds);
     this.knowledge = Objects.requireNonNull(knowledge);
     this.identities = Objects.requireNonNull(identities);
     this.grants = Objects.requireNonNull(grants);
@@ -115,6 +177,17 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     return records.conversation(id);
   }
 
+  /**
+   * Immutable evidence, passed through unchanged. No check belongs here: the scope is not a
+   * caller-supplied name but a value the caller already holds from evidence of its own, and a
+   * resolution here would be the general scope read that refuses a contained row — the exact defect
+   * the containment paths were corrected to avoid.
+   */
+  @Override
+  public List<Conversation> conversationsIn(AuthorityIds.ScopeId scope) {
+    return records.conversationsIn(scope);
+  }
+
   @Override
   public void bind(Conversation conversation) {
     requireTargets(
@@ -123,12 +196,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         List.of(
             new AccessRequest.Resource(
                 ResourceScopeRepository.Kind.CONVERSATION, conversation.id())));
-    if (!Set.of(
-            AuthorityAction.READ,
-            AuthorityAction.WRITE,
-            AuthorityAction.CONVERSATION_CREATE,
-            AuthorityAction.RUN_MODEL)
-        .containsAll(conversation.admission().actions())) throw denied();
+    if (!DERIVABLE.containsAll(conversation.admission().actions())) throw denied();
     if (conversation.parent() != null) {
       if (records.parent(conversation.admission().id()).isEmpty()) throw denied();
       requireTargets(
@@ -147,12 +215,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     require(parent);
     if (actions.isEmpty()
         || !parent.actions().containsAll(actions)
-        || !Set.of(
-                AuthorityAction.READ,
-                AuthorityAction.WRITE,
-                AuthorityAction.CONVERSATION_CREATE,
-                AuthorityAction.RUN_MODEL)
-            .containsAll(actions)) throw denied();
+        || !DERIVABLE.containsAll(actions)) throw denied();
     var child =
         new Admission(
             UUID.randomUUID(),
@@ -168,24 +231,129 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     return child;
   }
 
+  /**
+   * One containment hop. The order below is the contract: the structural questions — is containment
+   * configured at all, does this child name this parent, is the chain short enough — are resolution
+   * failures and are answered before any identity, role or grant is read, so reaching above or
+   * beside oneself never becomes a permission question. Only then are the actions narrowed, and
+   * only then is the parent's own live authority rechecked.
+   *
+   * <p>Nothing here can enlarge. The support rows are filtered from the parent's own list, so each
+   * carries the parent's grant id and no grant is issued or resolved for the child; the account,
+   * executor and source are copied; {@code globalRead} is dropped; and the action set is checked
+   * against the parent's retained actions before anything is built. Applied repeatedly, each hop
+   * takes a subset of a subset.
+   *
+   * <p><strong>The child admission is retained and it is live, and the two gates that decide that
+   * were opened together.</strong> {@code requireOwn} proves the child's stored row still resolves
+   * to the exact home the admission retained — the agreement proof, run in the only direction
+   * containment permits, because {@link IdentityRepository#project} still refuses to resolve a
+   * contained scope from a project name — and then checks the retained grants against the nearest
+   * enclosing uncontained scope, which is the authority this hop was projected from. The ancestry
+   * walk accepts an ancestor whose scope and home differ from the child's exactly when the child's
+   * own row names that ancestor as its container, and for nothing else. Teaching one gate without
+   * the other would have left a contained admission refused anyway, and would have looked like a
+   * defect here rather than in the gate that still refused.
+   *
+   * <p>This method still does not finish with {@code require(child)}. The ancestry edge is retained
+   * and the child is checked by whoever goes on to use it, so a hop records evidence of itself even
+   * when the resulting authority is never exercised; evidence is not permission.
+   */
+  @Override
+  public Admission contain(
+      Admission parent, AuthorityScope.Contained child, Set<AuthorityAction> requested) {
+    Objects.requireNonNull(parent);
+    Objects.requireNonNull(child);
+    var actions = Set.copyOf(requested);
+    if (!bounds.configured()) throw denied();
+    if (!child.container().equals(parent.scope())) throw denied();
+    requireDepth(parent, child);
+    if (actions.isEmpty()
+        || !parent.actions().containsAll(actions)
+        || !DERIVABLE.containsAll(actions)) throw denied();
+    // The hop changes home, and resolving the child's home is also what resolves the child. The
+    // container comparison above is a free pre-check on a value the caller populated; this is the
+    // read that proves the stored row says the same thing. It therefore precedes any authority
+    // resolution, so a child naming a sibling subtree fails to resolve rather than being denied a
+    // permission. A contained admission fenced to its parent's project would be fenced to the one
+    // project the child must not reach, so it carries its own.
+    var home = identities.containedHome(child, parent.scope());
+    require(parent);
+    var contained =
+        new Admission(
+            UUID.randomUUID(),
+            parent.executor(),
+            parent.account(),
+            child.id(),
+            home,
+            parent.source(),
+            parent.support().stream().filter(item -> actions.contains(item.action())).toList(),
+            // Global knowledge is outside every containment subtree and is never carried across.
+            false);
+    records.retainChild(contained, parent.id());
+    return contained;
+  }
+
+  /**
+   * Refuses a hop whose resulting container chain would exceed the configured depth. Depth is the
+   * length of that chain: the child sits one hop below its parent, so the parent's own chain is
+   * walked and the child counted on top of it.
+   *
+   * <p>The walk also refuses a chain that revisits a scope. A cycle is unconstructible — a scope
+   * cannot contain itself, a container must already exist when a contained scope is inserted, and
+   * V196 forbids repointing an existing one — but a walk that would loop forever if the data were
+   * wrong is not a walk worth trusting, so it refuses instead of looping.
+   */
+  private void requireDepth(Admission parent, AuthorityScope.Contained child) {
+    int depth = 1;
+    var seen = new HashSet<AuthorityIds.ScopeId>();
+    seen.add(child.id());
+    // The relation is walked through the read that answers "contained, or nothing", not through
+    // the general scope read. That read refuses a CONTAINED row by design, so a walk built on it
+    // could only ever observe an uncontained parent and compute depth 1 -- stricter than
+    // configured, but it also made a configured depth above 1 unreachable and left this record's
+    // claim that authority narrows transitively at depth unexercised by anything that runs.
+    var enclosing = identities.contained(parent.scope());
+    while (enclosing.isPresent()) {
+      if (++depth > bounds.maxDepth() || !seen.add(enclosing.get().id())) throw denied();
+      enclosing = identities.contained(enclosing.get().container());
+    }
+    if (depth > bounds.maxDepth()) throw denied();
+  }
+
   @Override
   public void require(Admission admission) {
     var visited = new HashSet<UUID>();
     for (int depth = 0; ; depth++) {
       if (depth >= 64 || !visited.add(admission.id())) throw denied();
-      requireOwn(admission);
+      var containment = requireOwn(admission);
       for (var resource : records.targets(admission.id())) {
         var targets = resources.projects(resource);
         if (targets.size() != 1 || !admission.home().project().equals(targets.getFirst()))
           throw denied();
       }
       var parent = records.parent(admission.id());
-      if (parent.isEmpty()) return;
+      if (parent.isEmpty()) {
+        // A contained admission comes into being only through a hop, so an ancestry edge is not
+        // optional for one: with no retained parent there is no evidence that any container ever
+        // narrowed to it, and a hand-built value must not be accepted for want of a parent.
+        if (containment.isPresent()) throw denied();
+        return;
+      }
       var ancestor = records.find(parent.get()).orElseThrow(PinnedOperationAuthority::denied);
+      // GATE TWO. A narrowing that holds scope fixed -- what derive produces -- must still present
+      // an ancestor with the identical scope and home. A hop changes both by design, so for a
+      // contained admission the equality is replaced by the containment edge itself: the child's
+      // own stored row must name this ancestor's scope as its container. Nothing else is relaxed.
+      // The admission's home is not taken on trust here either; requireOwn has already proved it
+      // is the home that child row resolves to.
+      boolean hop =
+          containment.isPresent() && containment.get().container().equals(ancestor.scope());
       if (!ancestor.executor().equals(admission.executor())
           || !ancestor.account().equals(admission.account())
-          || !ancestor.scope().equals(admission.scope())
-          || !ancestor.home().equals(admission.home())
+          || !hop
+              && (!ancestor.scope().equals(admission.scope())
+                  || !ancestor.home().equals(admission.home()))
           || !ancestor.source().equals(admission.source())
           || !ancestor.support().containsAll(admission.support())
           || admission.globalRead() && !ancestor.globalRead()) throw denied();
@@ -193,21 +361,77 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     }
   }
 
-  private void requireOwn(Admission admission) {
+  /**
+   * GATE ONE. An admission's own live authority, and the scope its retained grants are checked
+   * against.
+   *
+   * @return the containment row when this admission is contained, so the ancestry walk above can
+   *     ask the same question without a second read
+   */
+  private Optional<AuthorityScope.Contained> requireOwn(Admission admission) {
     if (admission.globalRead()
         && !knowledge.allows(admission.executor(), BuiltInIdentities.GLOBAL, AuthorityAction.READ))
       throw denied();
     var executor = identities.account(admission.executor());
     if (executor.kind() == IdentityRepository.AccountKind.BUILTIN
         || !executor.id().equals(admission.account())) throw denied();
-    // One read resolves the scope AND proves the two retained columns still agree: the admission's
-    // project name must still map to the admission's scope id. Resolving by scope id instead would
-    // be a read of the same size that cannot see a disagreement -- and the role ceiling below is
-    // keyed by project name either way, so a project that was renamed, or dropped and recreated
-    // under the same name, would have its new members' roles checked against the old scope's
-    // retained grants. A stale admission must die here instead.
-    var scope = identities.project(admission.home().project());
-    if (!scope.id().equals(admission.scope())) throw denied();
+    // The dispatch is the admission's own retained home, not a read. This method runs on every
+    // authority recheck for every operation in the server, and the containment read is empty for
+    // every ordinary admission, so asking the database first made containment a platform-wide
+    // cost. The reserved prefix is a sound discriminator in exactly one direction, which is the
+    // direction needed: ProjectStore.ordinary reserves it case-insensitively, so an ordinary
+    // project cannot bear it and an ordinary admission therefore cannot take the contained branch.
+    // The converse is not assumed -- a contained scope whose admission carries an ordinary home is
+    // not admitted by skipping the read, because the ordinary branch below then proves the name
+    // resolves to THIS admission's scope id, and a contained scope is not what an ordinary
+    // project's name resolves to. Both gates still agree on the containment edge: the row the
+    // contained branch reads is the row the ancestry walk is handed.
+    Optional<AuthorityScope.Contained> containment =
+        io.aeyer.plowshare.protocol.ContainedProjects.name(admission.home().project())
+            ? identities.contained(admission.scope())
+            : Optional.empty();
+    String project;
+    AuthorityScope scope;
+    if (containment.isEmpty()) {
+      // A reserved home with no stored containment row reaches here, and must not be admitted by
+      // the ordinary proof: project(String) refuses to resolve a contained name, so the refusal
+      // below is a resolution failure rather than a fall-through. It is stated rather than left to
+      // that refusal, because this branch must not depend on another method's behaviour to deny.
+      if (io.aeyer.plowshare.protocol.ContainedProjects.name(admission.home().project()))
+        throw denied();
+      // Unchanged, and this is still the path every pre-existing admission takes. One read
+      // resolves the scope AND proves the two retained columns still agree: the admission's
+      // project name must still map to the admission's scope id. Resolving by scope id instead
+      // would be a read of the same size that cannot see a disagreement -- and the role ceiling
+      // below is keyed by project name either way, so a project that was renamed, or dropped and
+      // recreated under the same name, would have its new members' roles checked against the old
+      // scope's retained grants. A stale admission must die here instead.
+      scope = identities.project(admission.home().project());
+      if (!scope.id().equals(admission.scope())) throw denied();
+      project = admission.home().project();
+    } else {
+      // The same agreement proof in the only direction containment permits. project(String) still
+      // refuses to resolve a contained scope from a project name -- so nothing travels from a
+      // child's name back to its scope -- and the proof therefore runs the other way: the stored
+      // child row must still resolve to the exact home this admission retained. A renamed, dropped
+      // or recreated child project makes the two disagree and kills the admission here, which is
+      // what the replaced check bought and what this must not lose.
+      if (!bounds.configured()) throw denied();
+      // Global knowledge sits outside every containment subtree and contain drops it
+      // unconditionally, so a contained admission claiming it was not produced by a hop.
+      if (admission.globalRead()) throw denied();
+      var child = containment.get();
+      if (!identities.containedHome(child, child.container()).equals(admission.home()))
+        throw denied();
+      // A child's authority is a projection of its container's: contain copies the container's own
+      // grant rows rather than issuing any, and a grant against a contained scope is excluded from
+      // issuance and from coverage by design. So the live check walks to the nearest enclosing
+      // uncontained scope and asks there -- which is the same question the hop answered, asked
+      // again now. The two extra reads are the cost of authority that genuinely lives in another
+      // row; a contained admission cannot reuse a project name it does not have.
+      scope = mediating(child);
+      project = identities.home(scope).project();
+    }
     var source =
         members
             .authorityAccount(admission.executor())
@@ -215,13 +439,32 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     if (!GrantRecipient.account(identities.account(source).id()).equals(admission.source()))
       throw denied();
     var role =
-        members
-            .role(admission.home().project(), admission.executor())
-            .orElseThrow(PinnedOperationAuthority::denied);
+        members.role(project, admission.executor()).orElseThrow(PinnedOperationAuthority::denied);
     for (var item : admission.support()) {
       if (!ceiling(role, item.action())
           || !authority.allowsUsing(admission.source(), scope, item.action(), item.grant()))
         throw denied();
+    }
+    return containment;
+  }
+
+  /**
+   * The nearest enclosing uncontained scope: the one whose live grants a hop was projected from.
+   *
+   * <p>Bounded by the configured depth and by a visited set, for the same reason {@code
+   * requireDepth} is: a fence that depends on a walk terminating cannot also be what proves it
+   * terminates. A chain longer than the configured depth refuses rather than being followed, so a
+   * depth bound lowered after a child was created closes over that child on its next live check.
+   */
+  private AuthorityScope mediating(AuthorityScope.Contained child) {
+    var seen = new HashSet<AuthorityIds.ScopeId>();
+    seen.add(child.id());
+    var enclosing = child.container();
+    for (int depth = 1; ; depth++) {
+      if (depth > bounds.maxDepth() || !seen.add(enclosing)) throw denied();
+      var contained = identities.contained(enclosing);
+      if (contained.isEmpty()) return identities.scope(enclosing);
+      enclosing = contained.get().container();
     }
   }
 

@@ -1,0 +1,63 @@
+package io.aeyer.plowshare.server.applications;
+
+import io.aeyer.plowshare.server.access.AuthorityScope;
+import io.aeyer.plowshare.server.access.IdentityRepository;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+/**
+ * Specialist repository for {@code contained_principals}. Mutations join the caller's transaction,
+ * so a principal is created or retired atomically with the scope work around it.
+ */
+@Repository
+public class JdbcContainedPrincipalRepository implements ContainedPrincipals {
+  private final JdbcTemplate jdbc;
+
+  public JdbcContainedPrincipalRepository(JdbcTemplate jdbc) {
+    this.jdbc = jdbc;
+  }
+
+  @Override
+  public ContainedPrincipal issue(AuthorityScope.Contained scope) {
+    // Insert only against a stored CONTAINED row matching project and container, so the claim
+    // the caller holds is checked against the authority record rather than trusted. The UNIQUE
+    // scope_id makes concurrent issues converge on one row.
+    jdbc.update(
+        "INSERT INTO contained_principals(scope_id) SELECT s.id FROM authority_scopes s"
+            + " WHERE s.id=? AND s.kind='CONTAINED' AND s.project_id=? AND s.container=?"
+            + " ON CONFLICT (scope_id) DO NOTHING",
+        scope.id().value(),
+        scope.projectId(),
+        scope.container().value());
+    return jdbc
+        .query(
+            "SELECT p.id FROM contained_principals p JOIN authority_scopes s ON s.id=p.scope_id"
+                + " WHERE p.scope_id=? AND s.project_id=? AND s.container=?",
+            (row, n) -> new ContainedPrincipal(row.getObject(1, UUID.class), scope.id()),
+            scope.id().value(),
+            scope.projectId(),
+            scope.container().value())
+        .stream()
+        .findFirst()
+        .orElseThrow(() -> new CallerFault(IdentityRepository.UNRESOLVED));
+  }
+
+  /**
+   * Deletes only against a stored {@code CONTAINED} row matching this scope's project <em>and</em>
+   * container, which is {@link #issue}'s predicate verbatim. The asymmetry this closes mattered
+   * because removing nothing is not an error: a caller holding a mis-described scope would have
+   * removed another Application's principal and seen the same silent success.
+   */
+  @Override
+  public void revoke(AuthorityScope.Contained scope) {
+    jdbc.update(
+        "DELETE FROM contained_principals p USING authority_scopes s"
+            + " WHERE s.id=p.scope_id AND p.scope_id=? AND s.kind='CONTAINED'"
+            + " AND s.project_id=? AND s.container=?",
+        scope.id().value(),
+        scope.projectId(),
+        scope.container().value());
+  }
+}

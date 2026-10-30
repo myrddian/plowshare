@@ -96,6 +96,41 @@ class ContractsTest(unittest.TestCase):
             )
         )
 
+    def test_contained_replies_must_be_about_the_child_asked_of(self) -> None:
+        child = "11111111-1111-1111-1111-111111111111"
+        foreign = "33333333-3333-3333-3333-333333333333"
+        asked = {"conversation": "c", "child": child}
+        ceiling = decode_reply("application.child.ceiling", {"child": child})
+        self.assertTrue(deployment_matches("application.child.ceiling", asked, ceiling))
+        self.assertFalse(
+            deployment_matches(
+                "application.child.ceiling", {**asked, "child": foreign}, ceiling
+            )
+        )
+        for collected, sources, expected in (
+            ([foreign, child], 2, True),
+            ([foreign], 1, False),
+            ([child], 2, False),
+        ):
+            destroyed = decode_reply(
+                "application.child.destroy",
+                {"child": child, "collected": collected, "sources": sources},
+            )
+            self.assertIs(
+                deployment_matches("application.child.destroy", asked, destroyed),
+                expected,
+            )
+        self.assertFalse(
+            deployment_matches(
+                "application.child.destroy",
+                {**asked, "child": foreign},
+                decode_reply(
+                    "application.child.destroy",
+                    {"child": child, "collected": [child], "sources": 1},
+                ),
+            )
+        )
+
     def test_application_credential_is_redacted_and_correlated(self) -> None:
         receipt = {
             "project": "app",

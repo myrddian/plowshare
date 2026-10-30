@@ -75,6 +75,20 @@ internal static class Codec
     {
         if(operation.StartsWith("tool.scope.host.",StringComparison.Ordinal)||operation.StartsWith("tool.scope.worker.",StringComparison.Ordinal)){if(!HostedMatches(operation,request,result))throw Invalid();return;}
         static string? IdentityText(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (operation is "application.child.ceiling" or "application.child.destroy") {
+            // A contained reply must be about the child the caller named; a destruction accounts
+            // for it and cannot have removed more source areas than records.
+            var askedChild=IdentityText(request,"child");
+            if(askedChild is null || !string.Equals(askedChild,IdentityText(result,"child"),StringComparison.OrdinalIgnoreCase)) throw Invalid();
+            if(operation=="application.child.destroy") {
+                // "sources" must be a JSON number: TryGetInt64 throws InvalidOperationException on any
+                // other kind, which would escape this gate as something other than a refusal. Guarding
+                // the kind keeps a non-numeric count a plain refusal, as the other SDKs treat it.
+                if(!result.TryGetProperty("collected",out var collected) || collected.ValueKind!=JsonValueKind.Array || !result.TryGetProperty("sources",out var sources) || sources.ValueKind!=JsonValueKind.Number || !sources.TryGetInt64(out var removed)
+                    || removed>collected.GetArrayLength() || !collected.EnumerateArray().Any(entry=>entry.ValueKind==JsonValueKind.String && string.Equals(entry.GetString(),askedChild,StringComparison.OrdinalIgnoreCase))) throw Invalid();
+            }
+            return;
+        }
         if (operation is "application.identity.status" or "application.token.issue" or "application.token.receipt") {
             if(operation == "application.identity.status") {
                 if(IdentityText(request,"project") != IdentityText(result,"project")) throw Invalid();

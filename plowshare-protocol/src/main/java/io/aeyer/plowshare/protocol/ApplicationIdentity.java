@@ -99,7 +99,10 @@ public final class ApplicationIdentity {
         || value.codePoints().anyMatch(Character::isISOControl)
         || value.startsWith("personal:")
         || value.startsWith("Personal:")
-        || value.startsWith("client:"))
+        || value.startsWith("client:")
+        // ADR 0042, list (c): an Application identity and its credential are an externally
+        // addressable principal for a project. A child is addressed only through its container.
+        || ContainedProjects.name(value))
       throw new IllegalArgumentException("Choose an ordinary Application project");
   }
 }
