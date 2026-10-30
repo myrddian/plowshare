@@ -141,16 +141,21 @@ public final class JdbcProcRepository implements ProcRepository {
    * turning a small audit page into repeated full-table scans. Call facts are then loaded once for
    * that page and reused by totals, activity and repetition groups. The direct conversation index
    * keeps this selection independent of retained calls in unrelated conversations. Counts cover the
-   * entire authorized selection.
+   * entire authorized selection. Materialize that narrow selection once for both count and page;
+   * retain a count-only row when the cursor is beyond its end, without enriching off-page rows.
    */
   static String conversationPageSql(boolean active) {
     String filter = WHERE + (active ? " AND " + ACTIVE : "");
     return TREE
-        + ", page AS MATERIALIZED (SELECT c.*,t.root AS audit_root,t.lifecycle AS audit_lifecycle,p.name AS audit_project"
+        + ", authorized AS MATERIALIZED (SELECT c.id,t.root AS audit_root,t.lifecycle AS audit_lifecycle,p.name AS audit_project"
         + JOIN
         + " WHERE "
         + filter
-        + " AND (CAST(:after AS text) IS NULL OR c.id>:after) ORDER BY c.id LIMIT :limit)"
+        + "), totals AS (SELECT count(*) AS audit_total FROM authorized)"
+        + ", page_selection AS MATERIALIZED (SELECT * FROM authorized"
+        + " WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT :limit)"
+        + ", page AS MATERIALIZED (SELECT c.*,a.audit_root,a.audit_lifecycle,a.audit_project"
+        + " FROM page_selection a JOIN conversations c ON c.id=a.id)"
         + """
           , page_calls AS MATERIALIZED (
             SELECT call.conversation_id,call.attempt_count,call.ended_at,call.attribution_status,
@@ -168,7 +173,7 @@ public final class JdbcProcRepository implements ProcRepository {
               SELECT conversation_id,agent_name,operation,pool,wire_model,count(*) AS n
               FROM page_calls GROUP BY conversation_id,agent_name,operation,pool,wire_model
             ) repetition GROUP BY conversation_id
-          )
+          ), enriched AS (
           SELECT c.id,c.audit_root AS root,c.parent_id,c.origin,c.audit_lifecycle AS lifecycle,c.audit_project AS project,c.owner_handle,
             acting.application,acting.actor,acting.subject AS acting_subject,c.agent,c.opened_by_call,source.resource,source.revision,c.relay_causation->>'rootId' AS causation_root,
             c.relay_causation->>'parentId' AS causation_parent,
@@ -208,7 +213,8 @@ public final class JdbcProcRepository implements ProcRepository {
             WHERE r.processing_log=c.id AND r.availability='active' AND NOT r.excluded) ps ON true
           LEFT JOIN call_totals ic ON ic.conversation_id=c.id
           LEFT JOIN call_repetitions repetition ON repetition.conversation_id=c.id
-          ORDER BY c.id
+          ) SELECT totals.audit_total,enriched.* FROM totals LEFT JOIN enriched ON true
+          ORDER BY enriched.id
           """;
   }
 
@@ -223,52 +229,57 @@ public final class JdbcProcRepository implements ProcRepository {
                       live.runningConversations().isEmpty()
                           ? List.of("")
                           : live.runningConversations());
-          String filter = WHERE + (Boolean.TRUE.equals(q.active()) ? " AND " + ACTIVE : "");
-          long total =
-              Objects.requireNonNull(
-                  jdbc.queryForObject(
-                      TREE + "SELECT count(*)" + JOIN + " WHERE " + filter, args, Long.class));
           String sql = conversationPageSql(Boolean.TRUE.equals(q.active()));
-          var rows =
-              jdbc.query(
-                  sql,
-                  args,
-                  (r, n) ->
-                      new ProcViews.Conversation(
-                          r.getString("id"),
-                          r.getString("root"),
-                          r.getString("parent_id"),
-                          r.getString("origin"),
-                          r.getString("lifecycle"),
-                          r.getString("project"),
-                          r.getString("owner_handle"),
-                          r.getString("application"),
-                          r.getString("actor"),
-                          r.getString("acting_subject"),
-                          r.getString("agent"),
-                          r.getString("principal"),
-                          r.getString("opened_by_call"),
-                          r.getString("resource"),
-                          r.getString("revision"),
-                          r.getString("causation_root"),
-                          r.getString("causation_parent"),
-                          r.getObject("causation_depth", Integer.class),
-                          instant(r, "created_at"),
-                          instant(r, "last_turn_at"),
-                          r.getString("state"),
-                          r.getString("evidence"),
-                          r.getString("latest_job"),
-                          r.getString("ending"),
-                          r.getLong("children"),
-                          r.getLong("calls"),
-                          r.getLong("attempts"),
-                          r.getLong("active_calls"),
-                          r.getLong("repeated")));
-          boolean more = rows.size() > q.limit();
-          var page = rows.stream().limit(q.limit()).toList();
-          return new ProcViews.Conversations(
-              Instant.now(), q, page, total, more ? page.getLast().id() : null, COVERAGE);
+          return jdbc.query(
+              sql,
+              args,
+              result -> {
+                long total = 0;
+                var rows = new ArrayList<ProcViews.Conversation>();
+                while (result.next()) {
+                  total = result.getLong("audit_total");
+                  // The LEFT JOIN preserves the selection total on an empty cursor page.
+                  if (result.getString("id") != null) rows.add(conversation(result));
+                }
+                boolean more = rows.size() > q.limit();
+                var page = rows.stream().limit(q.limit()).toList();
+                return new ProcViews.Conversations(
+                    Instant.now(), q, page, total, more ? page.getLast().id() : null, COVERAGE);
+              });
         });
+  }
+
+  private static ProcViews.Conversation conversation(ResultSet r) throws SQLException {
+    return new ProcViews.Conversation(
+        r.getString("id"),
+        r.getString("root"),
+        r.getString("parent_id"),
+        r.getString("origin"),
+        r.getString("lifecycle"),
+        r.getString("project"),
+        r.getString("owner_handle"),
+        r.getString("application"),
+        r.getString("actor"),
+        r.getString("acting_subject"),
+        r.getString("agent"),
+        r.getString("principal"),
+        r.getString("opened_by_call"),
+        r.getString("resource"),
+        r.getString("revision"),
+        r.getString("causation_root"),
+        r.getString("causation_parent"),
+        r.getObject("causation_depth", Integer.class),
+        instant(r, "created_at"),
+        instant(r, "last_turn_at"),
+        r.getString("state"),
+        r.getString("evidence"),
+        r.getString("latest_job"),
+        r.getString("ending"),
+        r.getLong("children"),
+        r.getLong("calls"),
+        r.getLong("attempts"),
+        r.getLong("active_calls"),
+        r.getLong("repeated"));
   }
 
   private static String revisionSelection() {
