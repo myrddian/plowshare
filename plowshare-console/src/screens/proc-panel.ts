@@ -30,7 +30,8 @@ function node<K extends keyof HTMLElementTagNameMap>(
 
 /**
  * The same read-only audit UI runs in Console and Desktop. Every poll replaces an authoritative
- * page; epochs discard old account/filter/detail responses. Failures retain visibly stale evidence.
+ * page; epochs discard old account/filter/detail responses. Periodic reads wait until the previous
+ * refresh completes, without queuing timer catch-up work. Failures retain visibly stale evidence.
  */
 export function mountProcPanel(
   root: HTMLElement,
@@ -133,6 +134,49 @@ export function mountProcPanel(
     after: string | undefined;
   let scope: Pick<ProcQuery, 'conversation' | 'root' | 'causation'> = {};
   let selected: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let inspectionRead:
+    { key: string; result: Promise<ProcInspection> } | undefined;
+
+  function cancelPoll() {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  }
+  function schedulePoll() {
+    cancelPoll();
+    if (!closed)
+      timer = setTimeout(() => {
+        timer = undefined;
+        run(refreshPage);
+      }, options.interval ?? 5000);
+  }
+
+  /** Join only overlapping reads of the exact selection; never retain an authorization result. */
+  function readInspection(selection: ProcQuery): Promise<ProcInspection> {
+    const key = JSON.stringify([
+      selection.visibility,
+      selection.project,
+      selection.conversation,
+      selection.root,
+      selection.causation,
+      selection.active,
+      selection.after,
+      selection.limit,
+    ]);
+    if (inspectionRead?.key === key) return inspectionRead.result;
+    cancelPoll();
+    const flight = {
+      key,
+      result: reader.read('proc.inspect', selection).finally(() => {
+        if (inspectionRead === flight) {
+          inspectionRead = undefined;
+          if (!reading) schedulePoll();
+        }
+      }),
+    };
+    inspectionRead = flight;
+    return flight.result;
+  }
 
   function query(): ProcQuery {
     return {
@@ -399,7 +443,7 @@ export function mountProcPanel(
     selected = id;
     detail.replaceChildren(node('p', `Reading ${id}…`));
     const { after: _after, ...selection } = query();
-    const value = await reader.read('proc.inspect', {
+    const value = await readInspection({
       ...selection,
       active: false,
       conversation: id,
@@ -414,6 +458,7 @@ export function mountProcPanel(
       pending = true;
       return;
     }
+    cancelPoll();
     reading = true;
     const stamp = epoch;
     refresh.disabled = true;
@@ -519,10 +564,11 @@ export function mountProcPanel(
       if (selected) {
         const id = selected;
         const { after: _after, ...detailQuery } = query();
-        const inspectedValue = await reader.read('proc.inspect', {
+        const inspectedValue = await readInspection({
           ...detailQuery,
           active: false,
           conversation: id,
+          limit: 50,
         });
         if (!closed && stamp === epoch && selected === id)
           inspected(inspectedValue, id);
@@ -536,7 +582,7 @@ export function mountProcPanel(
       if (pending && !closed) {
         pending = false;
         run(refreshPage);
-      }
+      } else if (!inspectionRead) schedulePoll();
     }
   }
   refresh.addEventListener('click', () => run(refreshPage));
@@ -557,14 +603,14 @@ export function mountProcPanel(
       reset();
       run(refreshPage);
     });
-  const timer = setInterval(() => run(refreshPage), options.interval ?? 5000);
+  schedulePoll();
   return {
     refresh: refreshPage,
     destroy() {
       if (closed) return;
       closed = true;
       ++epoch;
-      clearInterval(timer);
+      cancelPoll();
       panel.remove();
     },
   };

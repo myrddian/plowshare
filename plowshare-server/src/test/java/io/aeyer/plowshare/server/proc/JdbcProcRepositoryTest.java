@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.proc;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -133,6 +135,33 @@ class JdbcProcRepositoryTest {
   }
 
   @Test
+  void countAndEmptyCursorPageShareOneAuthorizedTreeRead() {
+    var trace = mock(io.aeyer.plowshare.server.pool.JdbcExecutionTrace.class);
+    when(trace.begin(anyString(), anyString()))
+        .thenReturn(mock(io.aeyer.plowshare.server.pool.JdbcExecutionTrace.Span.class));
+    var traced = new io.aeyer.plowshare.server.pool.TracedDataSource(data, trace);
+    var measured =
+        new JdbcProcRepository(new JdbcTemplate(traced), new DataSourceTransactionManager(traced));
+
+    var page = measured.conversations("alice", query("mine", null, "zzzz", 1), live());
+    assertEquals(2, page.total(), "the total covers the selection before the cursor");
+    assertTrue(page.conversations().isEmpty());
+    assertNull(page.cursor());
+    verify(trace, times(1)).begin(startsWith("WITH RECURSIVE tree"), eq("executeQuery"));
+    verify(trace, times(1)).begin(startsWith("SELECT 1 FROM admins"), eq("executeQuery"));
+
+    // Reuse is confined to a statement: a later request must observe lost membership.
+    jdbc.update("DELETE FROM project_members WHERE handle='alice'");
+    var revoked = measured.conversations("alice", query("mine", null, null, 1), live());
+    assertEquals(0, revoked.total());
+    assertTrue(revoked.conversations().isEmpty());
+    assertNull(revoked.cursor());
+    assertThrows(
+        CallerFault.class,
+        () -> measured.conversations("bob", query("server", null, null, 1), live()));
+  }
+
+  @Test
   void onlyTheAuthorizedPageIsEnrichedEvenWhenThePlannerSorts() throws Exception {
     for (int i = 0; i < 80; i++) {
       conversations.open(Home.of("research"), Budget.of(20), TurnCap.none(), "alice");
@@ -166,6 +195,7 @@ class JdbcProcRepositoryTest {
                       String.class);
             });
     var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE authorized"));
     assertTrue(checkJobScanLoops(plan) > 0, "the plan must exercise job enrichment");
     var first = repository.conversations("alice", query("mine", null, null, 1), live());
     assertEquals(82, first.total());

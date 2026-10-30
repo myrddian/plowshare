@@ -107,6 +107,142 @@ const button = (root: HTMLElement, label: string) => {
 };
 afterEach(() => vi.useRealTimers());
 describe('PROC audit panel', () => {
+  it('waits after a slow periodic read instead of immediately catching up missed ticks', async () => {
+    vi.useFakeTimers();
+    let complete: (() => void) | undefined;
+    const asked: string[] = [];
+    const reader: ProcReader = {
+      async read(type) {
+        asked.push(type);
+        if (asked.length === 1)
+          await new Promise<void>((resolve) => {
+            complete = resolve;
+          });
+        return replies[type];
+      },
+    };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
+    const loading = panel.refresh();
+    await vi.advanceTimersByTimeAsync(14000);
+    expect(asked).toEqual(['proc.list']);
+    if (!complete) throw new Error('Missing pending read');
+    complete();
+    await loading;
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(asked).toEqual(['proc.list']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual(['proc.list', 'proc.list']);
+    panel.destroy();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('joins overlapping inspections but performs a fresh read after completion', async () => {
+    let complete: (() => void) | undefined;
+    const asked: string[] = [];
+    const reader: ProcReader = {
+      async read(type) {
+        asked.push(type);
+        if (type === 'proc.inspect' && !complete)
+          await new Promise<void>((resolve) => {
+            complete = resolve;
+          });
+        return replies[type];
+      },
+    };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
+    await panel.refresh();
+    button(root, 'information_tagger').click();
+    button(root, 'information_tagger').click();
+    await tick();
+    expect(asked.filter((type) => type === 'proc.inspect')).toHaveLength(1);
+    if (!complete) throw new Error('Missing pending inspection');
+    complete();
+    await tick();
+    await tick();
+    expect(root.textContent).toContain('Recorded cause: call-source');
+    button(root, 'information_tagger').click();
+    await tick();
+    expect(asked.filter((type) => type === 'proc.inspect')).toHaveLength(2);
+    panel.destroy();
+  });
+
+  it('does not poll another page while the selected inspection is still loading', async () => {
+    vi.useFakeTimers();
+    let complete: (() => void) | undefined;
+    const asked: string[] = [];
+    const reader: ProcReader = {
+      async read(type) {
+        asked.push(type);
+        if (type === 'proc.inspect' && !complete)
+          await new Promise<void>((resolve) => {
+            complete = resolve;
+          });
+        return replies[type];
+      },
+    };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
+    await panel.refresh();
+    button(root, 'information_tagger').click();
+    await vi.advanceTimersByTimeAsync(14000);
+    expect(asked).toEqual(['proc.list', 'proc.inspect']);
+    if (!complete) throw new Error('Missing pending inspection');
+    complete();
+    await tick();
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(asked).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual([
+      'proc.list',
+      'proc.inspect',
+      'proc.list',
+      'proc.inspect',
+    ]);
+    panel.destroy();
+  });
+
+  it('does not share inspections across visibility changes or disclose the late result', async () => {
+    let complete: (() => void) | undefined;
+    const inspected: string[] = [];
+    const reader: ProcReader = {
+      async read(type, query) {
+        if (type === 'proc.inspect') {
+          inspected.push(query.visibility ?? 'mine');
+          if (query.visibility === 'mine')
+            await new Promise<void>((resolve) => {
+              complete = resolve;
+            });
+          else throw new Error('Fleet permission denied');
+        }
+        return replies[type];
+      },
+    };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
+    await panel.refresh();
+    button(root, 'information_tagger').click();
+    const visibility = root.querySelector<HTMLSelectElement>(
+      '[aria-label="Audit visibility"]',
+    );
+    if (!visibility || !complete)
+      throw new Error('Missing pending inspection or visibility');
+    visibility.value = 'server';
+    visibility.dispatchEvent(new Event('change'));
+    await tick();
+    button(root, 'information_tagger').click();
+    await tick();
+    expect(inspected).toEqual(['mine', 'server']);
+    complete();
+    await tick();
+    await tick();
+    expect(root.textContent).toContain('Fleet permission denied');
+    expect(root.textContent).not.toContain('Recorded cause: call-source');
+    panel.destroy();
+  });
+
   it('keeps whole-selection queue totals separate from resource pages and unknown occupancy', async () => {
     const checkpoint = {
       id: 'revision:paragraphs',
