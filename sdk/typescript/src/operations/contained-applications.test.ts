@@ -27,6 +27,7 @@ const OPERATIONS = [
   'application.child.ceiling',
   'application.child.destroy',
   'application.child.list',
+  'application.child.resources',
   'application.child.trajectory',
 ] as const;
 const valid = {
@@ -34,8 +35,10 @@ const valid = {
   'application.child.ceiling': { conversation, child: id, calls: 2 },
   'application.child.destroy': { conversation, child: id },
   'application.child.list': { conversation },
+  'application.child.resources': { conversation, child: id },
   'application.child.trajectory': { conversation, child: id },
 } as const;
+const resource = { path: 'plowshare.json', kind: 'manifest', revision, bytes: 12 };
 
 describe('contained Application operations', () => {
   it('accepts exactly the payload the server accepts', () => {
@@ -87,6 +90,13 @@ describe('contained Application operations', () => {
       ['application.child.ceiling', { calls: null }, shape],
       ['application.child.ceiling', { calls: 1.5 }, count],
       ['application.child.destroy', { child: 'nope' }, /child must be a UUID/],
+      ['application.child.resources', { child: 'nope' }, /child must be a UUID/],
+      ['application.child.resources', { child: 7 }, shape],
+      [
+        'application.child.resources',
+        { conversation: ' ' },
+        /container conversation/,
+      ],
       [
         'application.child.trajectory',
         { child: 'nope' },
@@ -108,6 +118,7 @@ describe('contained Application operations', () => {
     expect(isMutation('application.child.ceiling')).toBe(true);
     expect(isMutation('application.child.destroy')).toBe(true);
     expect(isMutation('application.child.list')).toBe(false);
+    expect(isMutation('application.child.resources')).toBe(false);
     expect(isMutation('application.child.trajectory')).toBe(false);
   });
 
@@ -121,6 +132,7 @@ describe('contained Application operations', () => {
         sources: 1,
       },
       'application.child.list': { children: [child] },
+      'application.child.resources': { resources: [resource] },
       'application.child.trajectory': {
         steps: [
           {
@@ -154,6 +166,22 @@ describe('contained Application operations', () => {
     ])
       expect(
         resultOf(asked, { code: 'OK', payload: { children: [bad] } }).kind,
+      ).toBe('invalid-response');
+  });
+
+  it('refuses a resource listing that has an unknown kind, an impossible size or no revision', () => {
+    const asked = request(
+      'application.child.resources',
+      valid['application.child.resources'],
+    );
+    for (const bad of [
+      { ...resource, kind: 'directory' },
+      { ...resource, bytes: -1 },
+      { ...resource, bytes: 1.5 },
+      { path: resource.path, kind: resource.kind, revision },
+    ])
+      expect(
+        resultOf(asked, { code: 'OK', payload: { resources: [bad] } }).kind,
       ).toBe('invalid-response');
   });
 

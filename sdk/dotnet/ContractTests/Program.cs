@@ -65,6 +65,24 @@ if(!foreignCredentialRefused)throw new Exception("Foreign credential receipt acc
         if (admitted != accepted) throw new Exception($"Contained reply correlation wrong for {operation} {reply}");
     }
 }
+{
+    // application.child.resources describes a child's source files and never carries their content.
+    const string child = "11111111-1111-1111-1111-111111111111", revision = "44444444-4444-4444-4444-444444444444";
+    var asked = Codec.Input("application.child.resources", new ApplicationChildResourcesRequest { Conversation = "c", Child = child });
+    if (asked.GetProperty("conversation").GetString() != "c" || asked.GetProperty("child").GetString() != child) throw new Exception("Resources request lost a field");
+    using var listing = JsonDocument.Parse($$"""{"resources":[{"path":"plowshare.json","kind":"manifest","revision":"{{revision}}","bytes":12}]}""");
+    var resources = Codec.Result<ContainedApplicationResourcesDto>("application.child.resources", listing.RootElement).Resources;
+    if (resources.Count != 1 || resources[0].Path != "plowshare.json" || resources[0].Kind != "manifest" || resources[0].Revision != revision || resources[0].Bytes != 12) throw new Exception("Resources reply decoded wrongly");
+    // The generated schema types bytes as a plain number, so only the TypeScript SDK bounds it to a
+    // non-negative integer; this pins what the .NET schema expresses.
+    foreach (var bad in new[] { "\"kind\":\"directory\",\"bytes\":12", "\"kind\":\"file\"" })
+    {
+        using var refusedListing = JsonDocument.Parse("{\"resources\":[{\"path\":\"plowshare.json\",\"revision\":\"" + revision + "\"," + bad + "}]}");
+        bool refused = false;
+        try { Codec.Result<ContainedApplicationResourcesDto>("application.child.resources", refusedListing.RootElement); } catch (JsonException) { refused = true; }
+        if (!refused) throw new Exception("Malformed resources reply accepted: " + bad);
+    }
+}
 const int maximumRelayBytes = 50 * 1024 * 1024;
 foreach (var text in new[] { new string('x', maximumRelayBytes), new string('é', maximumRelayBytes / 2) })
 {

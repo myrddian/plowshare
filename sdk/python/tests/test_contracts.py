@@ -131,6 +131,43 @@ class ContractsTest(unittest.TestCase):
             )
         )
 
+    def test_contained_resources_round_trip_metadata_only(self) -> None:
+        child = "11111111-1111-1111-1111-111111111111"
+        revision = "44444444-4444-4444-4444-444444444444"
+        operation, wire = encode_request(
+            contracts.ApplicationChildResourcesRequest(conversation="c", child=child)
+        )
+        self.assertEqual(operation, "application.child.resources")
+        self.assertEqual(wire, {"conversation": "c", "child": child})
+        row = {"path": "plowshare.json", "kind": "manifest", "revision": revision}
+        decoded = cast(
+            contracts.ContainedApplicationResourcesDto,
+            decode_reply(
+                "application.child.resources",
+                {"resources": [{**row, "bytes": 12}]},
+            ),
+        )
+        self.assertEqual(
+            decoded.resources,
+            (
+                contracts.ContainedApplicationResourceDto(
+                    path="plowshare.json", kind="manifest", revision=revision, bytes=12
+                ),
+            ),
+        )
+        # The generated schema types bytes as a plain number, so only the TypeScript SDK
+        # bounds it to a non-negative integer; this pins what the Python schema expresses.
+        # The listing describes a child's files and has no field that could carry them.
+        self.assertNotIn(
+            "text", contracts.ContainedApplicationResourceDto.__dataclass_fields__
+        )
+        for bad in (
+            {**row, "kind": "directory", "bytes": 12},
+            row,
+        ):
+            with self.assertRaises(ValueError):
+                decode_reply("application.child.resources", {"resources": [bad]})
+
     def test_application_credential_is_redacted_and_correlated(self) -> None:
         receipt = {
             "project": "app",
