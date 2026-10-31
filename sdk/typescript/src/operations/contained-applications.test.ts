@@ -38,7 +38,12 @@ const valid = {
   'application.child.resources': { conversation, child: id },
   'application.child.trajectory': { conversation, child: id },
 } as const;
-const resource = { path: 'plowshare.json', kind: 'manifest', revision, bytes: 12 };
+const resource = {
+  path: 'plowshare.json',
+  kind: 'manifest',
+  revision,
+  bytes: 12,
+};
 
 describe('contained Application operations', () => {
   it('accepts exactly the payload the server accepts', () => {
@@ -90,7 +95,11 @@ describe('contained Application operations', () => {
       ['application.child.ceiling', { calls: null }, shape],
       ['application.child.ceiling', { calls: 1.5 }, count],
       ['application.child.destroy', { child: 'nope' }, /child must be a UUID/],
-      ['application.child.resources', { child: 'nope' }, /child must be a UUID/],
+      [
+        'application.child.resources',
+        { child: 'nope' },
+        /child must be a UUID/,
+      ],
       ['application.child.resources', { child: 7 }, shape],
       [
         'application.child.resources',
