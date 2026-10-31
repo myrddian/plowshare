@@ -86,6 +86,10 @@ class ContainedKnowledgeReadSchemaTest {
         HOLDER);
     serviceToken();
 
+    // The container's own project is a home too: the ceiling tests below place documents in it and
+    // ask what a descendant's ceiling admits of them.
+    homes.put(parentScope, new Home(parentProject, "parent"));
+
     childScope = contained(parentScope);
     grandchildScope = contained(childScope);
     siblingScope = contained(parentScope);
@@ -136,6 +140,19 @@ class ContainedKnowledgeReadSchemaTest {
   private long project(String name) {
     jdbc.update("INSERT INTO projects(name) VALUES (?)", name);
     return jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, name);
+  }
+
+  /**
+   * A fresh ordinary project outside the containment subtree, registered as a home so {@link
+   * #retained} can place a document in it. Its PROJECT scope is the one the project trigger mints.
+   */
+  private UUID unrelatedProject(String name) {
+    var project = project(name);
+    var scope =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_scopes WHERE project_id=?", UUID.class, project);
+    homes.put(scope, new Home(project, name));
+    return scope;
   }
 
   /** The contained project behind a contained scope, kept so a boundary home can name it. */
@@ -217,6 +234,70 @@ class ContainedKnowledgeReadSchemaTest {
         revision,
         actor,
         home);
+  }
+
+  /**
+   * The same ceiling asked with the general-read flag on. Only the global arm differs, so this is
+   * the positive control for the refusals that turn on that flag being off.
+   */
+  private boolean inBoundaryWithGeneralRead(String actor, UUID revision, String home) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(knowledge_document_in_boundary(?,?,?,TRUE),FALSE)",
+        Boolean.class,
+        revision,
+        actor,
+        home);
+  }
+
+  /** Whether a revision is generally readable at all, independently of any ceiling. */
+  private boolean generallyReadable(UUID revision) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(knowledge_general_readable(?),FALSE)", Boolean.class, revision);
+  }
+
+  /**
+   * Publish a retained document to the general audience, so the global arm has something to find.
+   */
+  private void publish(UUID revision) {
+    assertEquals(
+        1,
+        jdbc.update(
+            "UPDATE information_resource_policies SET version=version+1,audience='GLOBAL_READ',"
+                + "private_only=FALSE,reason='AUDIENCE',changed_at=now(),"
+                + "actor=(SELECT id FROM authority_accounts WHERE legacy_handle=?)"
+                + " WHERE resource_id=(SELECT resource_id FROM information_revisions WHERE id=?)",
+            ADMINISTRATOR,
+            revision));
+  }
+
+  /** A consumed input, so a closure can be made to leave the subtree it was written in. */
+  private void input(UUID derived, UUID from) {
+    jdbc.update(
+        "INSERT INTO information_inputs(derived_revision,input_revision) VALUES (?,?)",
+        derived,
+        from);
+  }
+
+  /**
+   * The ceiling as the live discovery path decides it. {@code knowledge_readable_candidates} owns
+   * an independent {@code in_boundary} body, so a widening applied only to the exact-target
+   * predicate above would leave discovery refusing what an exact read admits.
+   */
+  private boolean selectedUnderCeiling(
+      String actor, UUID revision, String selectedProject, String home) {
+    return jdbc.queryForList(
+            "SELECT revision FROM knowledge_readable_selection("
+                + "?,'project',?,FALSE,?,FALSE,NULL,NULL,FALSE,NULL,NULL,NULL)",
+            UUID.class,
+            actor,
+            selectedProject,
+            home)
+        .contains(revision);
+  }
+
+  /** The boundary home a request names when it selects a contained scope's own project. */
+  private String home(UUID scope) {
+    return homes.get(scope).name();
   }
 
   private boolean projectReadable(String actor, UUID scope) {
@@ -380,10 +461,11 @@ class ContainedKnowledgeReadSchemaTest {
    * one success and three different principals who still get nothing is what makes the widening
    * directional rather than general.
    *
-   * <p>The ceiling's own term is an equality on the selected project's name, so the cross-boundary
-   * case — an ancestor reading this document while addressing its <em>own</em> project as the
-   * boundary home — is still refused. That refusal is asserted last, because it is the line between
-   * what this task opens and what a later one does.
+   * <p>The cross-boundary case — an ancestor reading this document while addressing its
+   * <em>own</em> project as the boundary home — is asserted last. The ceiling's term was once an
+   * equality on the selected project's name and refused it; it now tests containment beside that
+   * equality, so the same pair is admitted. {@link #aContainersCeilingAdmitsAChildsResource()} owns
+   * that capability and its direction.
    */
   @Test
   void anAncestorReadsADescendantsDocumentWithinThatDescendantsBoundary() {
@@ -417,9 +499,139 @@ class ContainedKnowledgeReadSchemaTest {
     assertFalse(revisionReadable(ADMINISTRATOR, document));
     assertFalse(revisionReadable(TOKEN_PRINCIPAL, document));
 
-    // Cross-boundary: readable, but outside the ceiling the request named. Still refused here.
+    // Cross-boundary, which this migration now admits as well: the ancestor addresses its OWN
+    // project as the boundary home and still reaches the descendant's document, because the ceiling
+    // term tests containment beside the home equality. This assertion was a refusal when scope
+    // admission was all that had been widened; aContainersCeilingAdmitsAChildsResource is where
+    // that capability is covered in its own right, and the refusals around it -- the sibling, the
+    // descendant reading upward, the stranger -- are unchanged by it.
     assertTrue(revisionReadable(HOLDER, document));
-    assertFalse(inBoundary(HOLDER, document, "parent"));
+    assertTrue(inBoundary(HOLDER, document, "parent"));
+  }
+
+  /**
+   * The capability this task adds: a container executing under its <em>own</em> project as the
+   * retained ceiling reaches a resource whose home is a descendant. Equality on the home project's
+   * name refused that before, however readable the descendant's scope already was.
+   *
+   * <p>Both chokepoints are asserted, because the exact-target predicate and {@code
+   * knowledge_readable_candidates} decide the ceiling in independent bodies.
+   */
+  @Test
+  void aContainersCeilingAdmitsAChildsResource() {
+    var childDocument = retained(childScope);
+    var grandchildDocument = retained(grandchildScope);
+
+    assertTrue(inBoundary(HOLDER, childDocument, "parent"), "a child's resource, one link down");
+    assertTrue(
+        inBoundary(HOLDER, grandchildDocument, "parent"),
+        "a grandchild's resource, reached through the chain");
+    // An intermediate container is an ancestor like any other: the chain is walked, not the depth.
+    assertTrue(inBoundary(HOLDER, grandchildDocument, home(childScope)));
+    assertTrue(
+        selectedUnderCeiling(HOLDER, childDocument, home(childScope), "parent"),
+        "discovery decides in_boundary in its own body and must agree");
+  }
+
+  /**
+   * The same pair inverted, which is the assertion that makes the widening directional. A
+   * descendant cannot reach its container's resource, and the role holder cannot either while
+   * executing under the descendant's home — so what refuses is the ceiling and not scope admission,
+   * which the holder demonstrably has on both ends.
+   */
+  @Test
+  void aChildsCeilingDoesNotAdmitItsContainersResource() {
+    var containerDocument = retained(parentScope);
+
+    assertTrue(readable(HOLDER, parentScope), "the holder is admitted to the container's scope");
+    assertFalse(inBoundary(HOLDER, containerDocument, home(childScope)));
+    assertFalse(inBoundary(childPrincipal, containerDocument, home(childScope)));
+    // One more link up, through a contained intermediate rather than the PROJECT root.
+    assertFalse(inBoundary(HOLDER, retained(childScope), home(grandchildScope)));
+    assertTrue(
+        selectedUnderCeiling(HOLDER, containerDocument, "parent", "parent"),
+        "the same row is selected under the container's own ceiling");
+    assertFalse(
+        selectedUnderCeiling(HOLDER, containerDocument, "parent", home(childScope)),
+        "discovery refuses the upward direction too");
+  }
+
+  @Test
+  void aChildsCeilingAdmitsItsOwnResource() {
+    var own = retained(childScope);
+    assertTrue(inBoundary(childPrincipal, own, home(childScope)));
+    assertTrue(inBoundary(HOLDER, own, home(childScope)));
+  }
+
+  /**
+   * Sideways is not downward. Neither subtree is on the other's container chain, so a ceiling
+   * naming one admits nothing of the other — asserted in both directions, and once with the
+   * container's role holder as the actor so that the refusal cannot be a missing admission.
+   */
+  @Test
+  void aCeilingDoesNotAdmitASiblingsResource() {
+    var siblingDocument = retained(siblingScope);
+    var childDocument = retained(childScope);
+
+    assertFalse(inBoundary(childPrincipal, siblingDocument, home(childScope)));
+    assertFalse(inBoundary(siblingPrincipal, childDocument, home(siblingScope)));
+    assertTrue(readable(HOLDER, childScope), "the holder is admitted to both subtrees");
+    assertTrue(readable(HOLDER, siblingScope));
+    assertFalse(inBoundary(HOLDER, childDocument, home(siblingScope)));
+    assertFalse(inBoundary(HOLDER, siblingDocument, home(grandchildScope)));
+  }
+
+  /**
+   * The ceiling is {@code bool_and} over the whole consumed closure, so one input outside it
+   * refuses the derived revision entirely. Widening the ceiling downward moves which inputs are
+   * inside it; it does not weaken the conjunction, which is what the third pair asserts: under the
+   * container's own ceiling the child input is now inside and the closure is admitted, while a
+   * closure reaching a project outside the subtree altogether is still refused.
+   */
+  @Test
+  void aClosureLeavingTheSubtreeRefusesTheWholeRead() {
+    var inside = retained(childScope);
+    var container = retained(parentScope);
+    var outside = retained(unrelatedProject("elsewhere"));
+    var fromInside = retained(childScope);
+    var fromContainer = retained(childScope);
+    var fromOutside = retained(childScope);
+    input(fromInside, inside);
+    input(fromContainer, container);
+    input(fromOutside, outside);
+
+    assertTrue(inBoundary(HOLDER, fromInside, home(childScope)));
+    assertFalse(
+        inBoundary(HOLDER, fromContainer, home(childScope)),
+        "an input above the child's home leaves the child's ceiling");
+    assertTrue(
+        inBoundary(HOLDER, fromContainer, "parent"),
+        "the same closure is wholly inside the container's ceiling");
+    assertFalse(
+        inBoundary(HOLDER, fromOutside, "parent"),
+        "a closure reaching outside the subtree refuses the whole read");
+    assertFalse(inBoundary(HOLDER, fromOutside, home(childScope)));
+  }
+
+  /**
+   * The global arm stays shut for a ceiling that does not carry general read, which is the shape
+   * {@code contain} always produces for a child. The published row is outside the subtree and the
+   * child never named it; the only route to it is the general arm, and the flag closes that.
+   *
+   * <p>The last assertion is the positive control: with the flag on, the same row under the same
+   * ceiling is admitted for an account that is a general-read member, so the refusals above are the
+   * flag's work and not a row that was never generally readable to begin with.
+   */
+  @Test
+  void aChildReceivesNoGenerallyReadableRowItNeverNamed() {
+    var published = retained(unrelatedProject("published"));
+    publish(published);
+
+    assertTrue(generallyReadable(published), "the row really is generally readable");
+    assertFalse(inBoundary(childPrincipal, published, home(childScope)));
+    assertFalse(inBoundary(HOLDER, published, home(childScope)));
+    assertFalse(inBoundary(HOLDER, published, "parent"));
+    assertTrue(inBoundaryWithGeneralRead(HOLDER, published, home(childScope)));
   }
 
   /**
