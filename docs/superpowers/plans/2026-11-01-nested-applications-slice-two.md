@@ -110,10 +110,12 @@ managed to walk (`aChainBeyondTheWalkSentinelRefuses`, Task 1).
   with `container` frozen after insert by V209; `contained_principals` (V210) for
   the child-self arm; `knowledge_scope_readable(actor TEXT, scope UUID)` from V172
   and `knowledge_read_authority(actor TEXT)` from V178.
-- Produces: `contained_scope_within(descendant UUID, ancestor UUID) RETURNS BOOLEAN`,
-  used by Task 2 and by nothing in Java. Both widened predicates keep their exact
-  existing signatures, because PostgreSQL retains function signatures on replace
-  and every existing caller must keep resolving.
+- Produces: `contained_scope_ancestors(descendant UUID) RETURNS SETOF UUID`, the
+  upward chain resolved once, which Task 2 joins. (This task first produced a
+  boolean `contained_scope_within(descendant, ancestor)`; Task 2 found a better
+  shape, nothing called the boolean, and it was removed by ruling.) Both widened
+  predicates keep their exact existing signatures, because PostgreSQL retains
+  function signatures on replace and every existing caller must keep resolving.
 
 **The two chokepoints, and why both.** `knowledge_scope_readable` is the
 exact-target predicate. `knowledge_read_authority` returns the materialized
