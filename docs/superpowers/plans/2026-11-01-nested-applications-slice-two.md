@@ -199,13 +199,27 @@ git commit -m "Admit a contained scope to its own and its ancestors' reads"
 - Produces: no new signature. `knowledge_document_in_boundary(revision, actor, home_project, global_read)`
   and `knowledge_readable_candidates`'s `in_boundary` term keep theirs.
 
-**Why this is a second task.** Task 1 decides *whether a scope is readable at
-all*. This decides *whether a readable scope is inside the retained ceiling the
-caller is executing under*. They are different gates and a reader will conflate
-them: both currently compare a project name to the boundary home with
-`f.project_name=$5`, which is an equality and therefore excludes a descendant
-even once Task 1 admits it. A parent executing under its own home must see a
-child's resource as in-boundary; the reverse must stay refused.
+**Why this is a second task, and what Task 1 already opened.** Task 1 decides
+*whether a scope is readable at all*. This decides *whether a readable scope is
+inside the retained ceiling the caller is executing under*. They are different
+gates, and Task 1's review established exactly where the line falls — correcting
+this plan's earlier claim, which said a descendant stays out of every ceiling
+until this task.
+
+The boundary home (`$3` in `knowledge_document_in_boundary`, `$2` in
+`knowledge_readable_scopes`, `$5` in `knowledge_readable_candidates`) is the
+*request's selected project*, not a value derived from the actor. So an ancestor
+that addresses the child's own `contained:…` project as its boundary home
+already satisfies the equality, and Task 1 alone opens document-level reads of a
+descendant's home. **That case is Task 1's blast radius and Task 1's tests own
+it.**
+
+What remains for this task is the **cross-boundary** case: an ancestor executing
+under *its own* project as boundary home, reading a resource whose home is a
+descendant. Equality refuses that today. The reverse — a descendant reaching an
+ancestor's resource — must stay refused, and a child cannot reach it anyway
+because `KnowledgeReadScope` is server-owned and `contain` pins a child's home to
+its own.
 
 - [ ] **Step 1: Write the failing tests**
 
