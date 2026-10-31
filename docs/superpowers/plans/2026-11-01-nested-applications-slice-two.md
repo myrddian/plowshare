@@ -299,6 +299,20 @@ git commit -m "Extend a retained read ceiling to its contained descendants"
   add one: the existing records are declared on this interface.
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/applications/SourceContainedApplications.java`
 - Modify: `plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/FrameTypes.java`
+- Modify: `sdk/typescript/src/operations/catalog.ts` — the request/reply types and
+  the spoken-name alias, beside the other `application.child.*` entries
+- Regenerate: `test-support/contracts/client-capabilities.json`, via
+  `python3 test-support/contracts/build_manifest.py`
+
+**Why the TypeScript declaration is in this task and not in Task 4.** The
+capability manifest is generated from `FrameTypes.java` and the routing areas,
+but `build_manifest.py:275` also asserts `typed_frames == set(areas)` — the
+TypeScript catalogs must declare exactly the registered WS surface, or the
+generator refuses to run at all. So registering a frame server-side without
+declaring it in `catalog.ts` leaves three `FrameRouterTest` consistency tests
+red and the manifest unbuildable. The declaration is part of registering an
+operation, not part of testing the SDKs, and a task that cannot leave the branch
+green is bounded in the wrong place.
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/applications/ContainedResourceReadTest.java`
 
 **Interfaces:**
@@ -374,11 +388,12 @@ git add -A && git commit -m "Add application.child.resources behind the ancestor
 **Interfaces:**
 - Consumes: `APPLICATION_CHILD_RESOURCES` and the `Resource` DTO from Task 3.
 
-- [ ] **Step 1: Add the operation to the TypeScript contracts**
+- [ ] **Step 1: Confirm the catalog declaration Task 3 added**
 
-Add the request/reply types beside the other `application.child.*` entries in
-`catalog.ts`, plus its spoken-name alias in the same file. That is the only hand
-edit: the generated catalogs are rendered from it.
+Task 3 added the `catalog.ts` entry and its spoken-name alias, because
+`build_manifest.py` refuses to generate the capability manifest unless the
+TypeScript catalogs declare exactly the registered WS surface. Verify it is
+present and shaped like its neighbours; do not add a second one.
 
 **Add no validation branch.** `payload-validation.ts` routes on
 `type.startsWith('application.child.')`, and `containedProblem`'s
