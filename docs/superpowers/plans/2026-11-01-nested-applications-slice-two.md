@@ -208,9 +208,18 @@ git commit -m "Admit a contained scope to its own and its ancestors' reads"
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java` (extend)
 
 **Interfaces:**
-- Consumes: `contained_scope_within` from Task 1.
-- Produces: no new signature. `knowledge_document_in_boundary(revision, actor, home_project, global_read)`
-  and `knowledge_readable_candidates`'s `in_boundary` term keep theirs.
+- Consumes: `contained_scope_ancestors(descendant)` from Task 1. (Task 1 also
+  produced `contained_scope_within(descendant, ancestor)` as this task's declared
+  interface; the task found a better shape joining the SETOF once, nothing called
+  the boolean, and it was removed by ruling.)
+- Produces: no new signature.
+- **Three bodies, not two.** `knowledge_document_in_boundary` (V172) has no
+  caller in `src/main` outside migrations; `InformationSql.java:79` calls
+  `knowledge_readable_scopes` (V184), and `knowledge_readable_candidates` (V198)
+  carries the discovery `in_boundary` term. All three are widened, because two of
+  them would not have reached production and V184 documents an "identical
+  admitted sets" invariant with V172 that a contained descendant would otherwise
+  violate.
 
 **Why this is a second task, and what Task 1 already opened.** Task 1 decides
 *whether a scope is readable at all*. This decides *whether a readable scope is
