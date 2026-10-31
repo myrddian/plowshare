@@ -64,7 +64,12 @@ CREATE FUNCTION contained_scope_readable(actor TEXT, scope UUID) RETURNS BOOLEAN
    OR (information_global_read_member($1) AND EXISTS(
      SELECT 1 FROM authority_scopes ancestor
      JOIN projects ancestor_project ON ancestor_project.id=ancestor.project_id
-     WHERE contained_scope_within(s.id,ancestor.id)
+     -- The kind restriction mirrors authority_project_role's own fence rather than adding one:
+     -- that function resolves a role only on a PROJECT or PERSONAL grant scope, so an ancestor of
+     -- any other kind -- a CONTAINED intermediate on the chain, or a RESTRICTED root -- already
+     -- answered NULL. Stating it here keeps the role lookup off every link of a deep chain.
+     WHERE ancestor.kind IN ('PROJECT','PERSONAL')
+       AND contained_scope_within(s.id,ancestor.id)
        AND authority_project_role(ancestor_project.name,$1) IS NOT NULL))));
 $$;
 
@@ -137,7 +142,10 @@ BEGIN
      JOIN project_reads owner_read ON owner_read.subject_account=owner_account.id AND owner_read.scope_id=s.id
      WHERE token.principal_handle=$1 AND token_scope.project_id=s.project_id
       AND p.personal_owner IS NULL AND p.name NOT LIKE 'client:%' AND p.name NOT LIKE 'personal:%')))))
-   OR contained_scope_readable($1,s.id)
+   -- The kind test is redundant with the rule's own body and is stated here anyway: this relation
+   -- is evaluated across every authority scope, and without it the containment walk would be
+   -- called once per scope row rather than once per contained one.
+   OR (s.kind='CONTAINED' AND contained_scope_readable($1,s.id))
  )
  SELECT a.id,a.member,s.id FROM actor_fact a LEFT JOIN readable_scopes s ON true;
 END $$;
