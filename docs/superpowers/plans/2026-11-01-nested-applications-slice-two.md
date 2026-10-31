@@ -149,9 +149,11 @@ scope) pair above, assert that `scope_id` appearing in
 - [ ] **Step 2: Run it to verify every assertion fails closed**
 
 Run: `./gradlew :plowshare-server:test -PfullDb --tests 'io.aeyer.plowshare.server.access.ContainedKnowledgeReadSchemaTest'`
-Expected: the six refusal tests PASS already (slice one fails closed); the four
-admission tests and the agreement test FAIL. Record which in the commit message
-— a test that was green before the implementation proves nothing about it.
+Expected: the **seven** refusal tests PASS already (slice one fails closed); the
+**three** admission tests and the agreement test FAIL. Record which in the commit
+message — a test that was green before the implementation proves nothing about
+it, and slice one shipped a task whose whole suite passed with the
+implementation removed.
 
 - [ ] **Step 3: Write V215**
 
@@ -223,7 +225,10 @@ The last one asserts the predicate with `global_read => false` against a
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `./gradlew :plowshare-server:test -PfullDb --tests 'io.aeyer.plowshare.server.access.ContainedKnowledgeReadSchemaTest'`
-Expected: the four refusals PASS, the two admissions FAIL.
+Expected: the four refusals PASS, and so does
+`aChildsCeilingAdmitsItsOwnResource` — `in_boundary` already compares the project
+name by equality, so Task 1 alone makes a child's own resource in-boundary. The
+one genuine red is `aContainersCeilingAdmitsAChildsResource`.
 
 - [ ] **Step 3: Replace the boundary comparison in both places**
 
@@ -270,19 +275,17 @@ git commit -m "Extend a retained read ceiling to its contained descendants"
   ```
   on `ContainedApplications`, and `APPLICATION_CHILD_RESOURCES = "application.child.resources"`.
 
-**The sendability trap.** Slice one shipped all five child operations
-unsendable, because the generic `application.*` file check in `decodeRequest`
-demanded a `project` field no child request carries, and nothing caught it until
-a set-level audit. That check lives in
-`sdk/typescript/src/operations/application-deployments.ts`, which already
-special-cases `application.child.create`, `.list` and `.ceiling` by name — so
-the new operation needs its own branch there or it ships unsendable the same
-way. Step 1's first test is that check, at the frame, not in the service.
+**The sendability trap, and who owns it.** Slice one shipped all five child
+operations unsendable, because the generic `application.*` file check demanded a
+`project` field no child request carries, and nothing caught it until a
+set-level audit. That check is `containedProblem` in
+`sdk/typescript/src/operations/application-deployments.ts`, routed from
+`payload-validation.ts`. **It is TypeScript, so a Java test cannot reach it, and
+Task 4 owns its test.** This task's tests are the server-side ones only.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```java
-@Test void theOperationIsSendableWithoutAProjectField()   // decodeRequest accepts the frame
 @Test void aContainerListsItsChildsResources()
 @Test void aGrandparentListsThroughTheChain()
 @Test void aChildCannotListItsContainersResources()
@@ -324,8 +327,9 @@ git add -A && git commit -m "Add application.child.resources behind the ancestor
 
 **Files:**
 - Modify: `sdk/typescript/src/operations/catalog.ts` (the request/reply type map
-  and the spoken-name alias), `sdk/typescript/src/operations/application-deployments.ts`
-  (the validation branch named in Task 3)
+  and the spoken-name alias) — and *only* that file by hand
+- Test: `sdk/typescript/test/` for the sendability test this task inherits from
+  Task 3
 - Regenerate: every path listed in `.gitattributes`
 - Test: `sdk/typescript/test/`, `sdk/python/tests/`, `sdk/go/`, `sdk/dotnet/ContractTests/`
 
@@ -335,9 +339,20 @@ git add -A && git commit -m "Add application.child.resources behind the ancestor
 - [ ] **Step 1: Add the operation to the TypeScript contracts**
 
 Add the request/reply types beside the other `application.child.*` entries in
-`catalog.ts`, its spoken-name alias in the same file, and its validation branch
-in `application-deployments.ts`. The generated catalogs are rendered from these,
-so these are the only hand edits.
+`catalog.ts`, plus its spoken-name alias in the same file. That is the only hand
+edit: the generated catalogs are rendered from it.
+
+**Add no validation branch.** `payload-validation.ts` routes on
+`type.startsWith('application.child.')`, and `containedProblem`'s
+non-`create` branch already requires `conversation` plus a UUID `child`, which
+is this operation's exact shape. A second branch saying the same thing is
+duplication, not safety.
+
+- [ ] **Step 1a: Write the sendability test (inherited from Task 3)**
+
+In the TypeScript suite, assert that `application.child.resources` validates
+with a `conversation` and a UUID `child`, and is rejected without them — the
+check slice one shipped broken for all five child operations.
 
 - [ ] **Step 2: Regenerate and verify the catalogs**
 
