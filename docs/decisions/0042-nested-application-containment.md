@@ -10,6 +10,16 @@ repository's decision form and does not add to them. The recursive
 harness-improvement workflow that motivated the capability is a separate design
 and is not authorized here.
 
+**Migration numbering.** The seven migrations below are V208-V214. They were
+authored as V195-V201, when V194 was the highest shipped version, and were
+renumbered after `main` independently took V195-V207; Flyway refuses to start
+on a duplicate version, so the collision was a hard failure rather than a
+cosmetic one. Git history before the renumber names the old versions. The
+renumber is safe to read as pure renaming because none of the migrations `main`
+added in that range creates or replaces any function these do — the five
+`CREATE OR REPLACE` targets in V208 are untouched by V195-V207 — so no
+definition changed hands by running later.
+
 ## Platform need
 
 An Application can be deployed, validated, versioned and activated as a file
@@ -322,12 +332,12 @@ a decision about it. The exclusion is usually fail-safe, and in the Java
 authority path it was: a contained scope is inadmissible, uncoverable and
 unactable-upon there. It was not fail-safe in the database. V156 declares its own
 `RESTRICTED`-only predicates, and three live ones admitted a contained scope until
-V195 closed them — `authority_live_grants()`, which would have reported a grant
+V208 closed them — `authority_live_grants()`, which would have reported a grant
 against a contained scope as live; `authority_grant_insert()`, the database's own
 grant admission check; and `authority_membership_changed()`, which minted a
 `MEMBERSHIP` grant against a contained scope from a row trigger on
 `project_members`, with no application code involved and so beyond the reach of
-any Java predicate. So the statement that holds is the narrow one: *after* V195
+any Java predicate. So the statement that holds is the narrow one: *after* V208
 and the repository exclusion, a contained scope is inadmissible, uncoverable and
 unactable-upon. Nothing about the sealed interface made that true, and the
 compiler reported none of the three.
@@ -352,7 +362,7 @@ nested-trigger update that leaves `project_id` unchanged — any later update of
 that project row would convert an existing contained scope back into an ordinary
 one. That is not an escape hatch but retroactive, silent loss of containment, and
 it is the clearest example of the server making a project addressable without
-anyone naming it. V195 closes it: a contained project carries a reserved
+anyone naming it. V208 closes it: a contained project carries a reserved
 `contained:` name prefix and is excluded from the mapping by name, exactly as
 `personal:%` and `client:%` already are, and `authority_scope_shape` gains a
 `CONTAINED` branch requiring such a project and an existing container while its
@@ -366,7 +376,7 @@ untouched.
 row for a child project minted a `MEMBERSHIP` grant against that project's scope
 from inside an `AFTER INSERT OR UPDATE OR DELETE` row trigger, so a child could
 have acquired real authority with no application call to refuse and nothing named
-in a manifest. V195 makes the trigger resolve nothing for a contained scope, as
+in a manifest. V208 makes the trigger resolve nothing for a contained scope, as
 it already did for a restricted one. It is the clearest case of a confinement
 decision living in SQL rather than in Java, and it is why this inventory cannot
 be the proof.
@@ -470,14 +480,14 @@ walking two containment edges to the nearest enclosing uncontained scope, and by
 a ceiling change against a contained container — not by inference from the
 one-hop case.
 
-V196 freezes `authority_scopes.container` after insert, so containment ancestry
+V209 freezes `authority_scopes.container` after insert, so containment ancestry
 cannot be repointed and the relation is acyclic by construction: an insert can
 only name an existing container, so the only way to close a cycle is to move an
 existing node. V155's `authority_scope_locked` already refused a direct UPDATE of
 a scope row; what was open, and is verified to have been open, is the one UPDATE
 route that lock deliberately permits — `pg_trigger_depth()>=2`, the nested-trigger
 path that exists for the mapping upsert recorded above. Nothing takes that route
-today, so V196 closes a route reachable in principle rather than a live hole, and
+today, so V209 closes a route reachable in principle rather than a live hole, and
 it makes the invariant local to containment instead of a side effect of a lock
 about scope identity. It matters because the depth bound walks the container
 chain: a cycle would make that walk loop rather than refuse, and a fence that
@@ -580,11 +590,11 @@ scope and is verified to, with the verification named.
 | `plowshare-server/.../archive/JdbcProjectMembers.java:136`, `role` | the role every call site asks for | **Fenced by kind.** `authority_project_role` requires a live grant whose scope is `PROJECT` or `PERSONAL`; `service_project_role` requires its owner's. Both answer null for a `CONTAINED` scope. `mayWork:200`, `mayManage:204`, `mayUse:422`, `access:239` and `isMember:50` are all built on it and are each asserted. |
 | `plowshare-server/.../archive/JdbcProjectMembers.java:215`, `mayAdminister` | `project.access`, `project.member.*` | **Fenced by kind.** `authority_project_management_grant` admits either a live grant on the target scope — excluded — or `ORDINARY_PROJECT_CONTROL` coverage against `target.kind='PROJECT'`, which `CONTAINED` is not. |
 | `plowshare-server/.../archive/JdbcProjectMembers.java:164`, `readableProjects` | batched candidate admission | **Fenced by kind.** Its SQL `ELSE` branch is `authority_project_role`; the `personal:`/`client:` `LIKE` arms are not reached. |
-| `plowshare-server/.../archive/JdbcProjectMembers.java:84`, `ordinary` | `project.member.add` / `remove` | **Refused.** A membership row against a child mints nothing — V195 makes `authority_membership_changed` resolve no scope for a `CONTAINED` one — so the row would be authority-free, but it would still make a child look like a shared project to every membership listing. |
+| `plowshare-server/.../archive/JdbcProjectMembers.java:84`, `ordinary` | `project.member.add` / `remove` | **Refused.** A membership row against a child mints nothing — V208 makes `authority_membership_changed` resolve no scope for a `CONTAINED` one — so the row would be authority-free, but it would still make a child look like a shared project to every membership listing. |
 | `plowshare-server/.../archive/JdbcProjectMembers.java:64`, `members` | member hydration | **Deliberately unchanged, and recorded.** It has no prefix test and no authority test; its callers authorize first. It discloses nothing for a child because the write side above refuses, so no row can exist. A check here would be dead code; the honest statement is that this read is fenced by the write refusal and by nothing else. |
-| `V195` `authority_membership_changed` | a grant minted inside the database | **Refused** (Task 2). Re-verified here against a real `project_members` insert made underneath the repository refusal, with the parent as the control. |
-| `V195` `authority_map_project`, `authority_scope_shape` | the auto-mapping to an addressable `PROJECT` scope | **Refused** (Task 2). Re-verified: a child project acquires no scope, and `authority_scope_shape`'s `PROJECT` branch excludes the prefix. |
-| `V195` `authority_live_grants`, `authority_grant_insert` | grant admission and liveness | **Refused** (Task 2). Covered by `ContainedScopeSchemaTest`. The `authority_live_grants` exclusion is a backstop with no reachable route, because `authority_grant_insert` refuses first; that test reaches it only by disabling the insert trigger, and it is recorded as defence in depth rather than as a live fence. |
+| `V208` `authority_membership_changed` | a grant minted inside the database | **Refused** (Task 2). Re-verified here against a real `project_members` insert made underneath the repository refusal, with the parent as the control. |
+| `V208` `authority_map_project`, `authority_scope_shape` | the auto-mapping to an addressable `PROJECT` scope | **Refused** (Task 2). Re-verified: a child project acquires no scope, and `authority_scope_shape`'s `PROJECT` branch excludes the prefix. |
+| `V208` `authority_live_grants`, `authority_grant_insert` | grant admission and liveness | **Refused** (Task 2). Covered by `ContainedScopeSchemaTest`. The `authority_live_grants` exclusion is a backstop with no reachable route, because `authority_grant_insert` refuses first; that test reaches it only by disabling the insert trigger, and it is recorded as defence in depth rather than as a live fence. |
 | `V172:9` `knowledge_scope_readable`, `V172:19` `information_project_readable` | information and knowledge read admission | **Fenced by kind** (`s.kind IN ('PROJECT','PERSONAL')`). This is also the known limitation named below: a child cannot read its own home back. The superseded definitions at `V110:21`, `V111:41` and `V156:324`, whose `a.server_admin AND name NOT LIKE 'client:%'` arms *would* have admitted a child, are dead. |
 | `V178:45` | batched knowledge read authority | **Fenced by kind** (`s.kind IN ('PROJECT','PERSONAL')` guards the whole branch; the `LIKE` arms sit inside it). |
 | `plowshare-server/.../board/ProjectMessageRouting.java:85` | messaging `from_project` and `to_project` | **Refused**, in both directions. Messaging is a narrowing of the existing Relay and Application scoping and not a forwarding surface. **The ordering is a finding, not a style choice:** `require` returns early when source equals destination, so with the check after that return a child addressing *its own* project was admitted with no policy consulted at all. A contained project is not a messaging endpoint in this slice, its own included, because nothing executes a child yet. The check also precedes the route policy, so the refusal names containment rather than an absent route. |
@@ -739,13 +749,13 @@ carry one.
 This record claimed collection was observable before anything made it so, which
 was a claim no operator could check: a destroyed child's rows are removed by the
 two-hop cascade — `projects` to `authority_scopes` (V155) to
-`contained_applications` and `contained_principals` (V197, V198) — so after a
+`contained_applications` and `contained_principals` (V210, V211) — so after a
 destruction there was nothing left to read, and the staged-source removal that
 follows the transaction was silent. The claim now stands because two things were
 added rather than because it was softened.
 
-**A collection record, V199's `contained_collections`, with V200's `scope` and
-V201's `root`.** One row per collected source area, written inside the destroying
+**A collection record, V212's `contained_collections`, with V213's `scope` and
+V214's `root`.** One row per collected source area, written inside the destroying
 transaction before the rows go; the two added columns are what make a retry's
 answer identical to the original's, and are explained under delivery uncertainty
 below. It is
@@ -937,10 +947,10 @@ the three answers are **distinguished**:
   away.
 - **A record that matches** — success, replaying the *same* answer. Two columns
   are what make "the same" true rather than nearly true, and this claim is the
-  reason a request-UUID receipt was not added, so neither is optional. V200
+  reason a request-UUID receipt was not added, so neither is optional. V213
   records the destroyed child's own `scope`, which links a parent's collection row
   to its descendants': without it a retry could only answer about the one record
-  it named, a *different* answer from the original and worse than a refusal. V201
+  it named, a *different* answer from the original and worse than a refusal. V214
   records the `root` — the child a single `destroy` named, written on every record
   that destruction wrote. A containment edge says which rows are *beneath* a
   scope, not which destruction collected them, so a rebuild walking the edges

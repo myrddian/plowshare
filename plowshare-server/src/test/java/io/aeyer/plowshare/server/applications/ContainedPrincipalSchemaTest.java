@@ -16,7 +16,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
 /**
- * Real PostgreSQL is required because the assertions are the V197 migration applying over the
+ * Real PostgreSQL is required because the assertions are the V210 migration applying over the
  * shipped schema, the {@code ON DELETE CASCADE} from {@code authority_scopes} collecting the
  * principal, the repository's insert-select guard against a stored CONTAINED row, and the table's
  * actual column set. A mock cannot evaluate a foreign-key cascade or inspect a schema.

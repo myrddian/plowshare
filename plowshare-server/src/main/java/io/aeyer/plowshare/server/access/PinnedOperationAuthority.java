@@ -301,7 +301,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
    *
    * <p>The walk also refuses a chain that revisits a scope. A cycle is unconstructible — a scope
    * cannot contain itself, a container must already exist when a contained scope is inserted, and
-   * V196 forbids repointing an existing one — but a walk that would loop forever if the data were
+   * V209 forbids repointing an existing one — but a walk that would loop forever if the data were
    * wrong is not a walk worth trusting, so it refuses instead of looping.
    */
   private void requireDepth(Admission parent, AuthorityScope.Contained child) {

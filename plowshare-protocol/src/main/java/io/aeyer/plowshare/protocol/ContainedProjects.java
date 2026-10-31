@@ -4,7 +4,7 @@ package io.aeyer.plowshare.protocol;
  * The one definition of the reserved project-name prefix that marks containment.
  *
  * <p><a href="../../../../../../../docs/decisions/0042-nested-application-containment.md">ADR
- * 0042</a> makes this prefix load-bearing: V195 excludes {@code contained:%} from {@code
+ * 0042</a> makes this prefix load-bearing: V208 excludes {@code contained:%} from {@code
  * authority_map_project}, so a project carrying it acquires no addressable {@code PROJECT} scope,
  * and is instead an eligible host for an explicitly inserted {@code CONTAINED} one. Every surface
  * that already excludes {@code personal:} and {@code client:} by name therefore has to decide what

@@ -14,7 +14,7 @@ import java.util.UUID;
  *
  * <p>It exists because no other repository may create one of these. {@code ProjectStore.ordinary}
  * reserves the {@code contained:} prefix case-insensitively, precisely so that a project with no
- * authority scope cannot be made through an ordinary path, and V195 excludes that prefix from
+ * authority scope cannot be made through an ordinary path, and V208 excludes that prefix from
  * {@code authority_map_project} so a child never auto-acquires an addressable {@code PROJECT}
  * scope. The explicit {@code CONTAINED} insert therefore has exactly one home, and this is it.
  *
@@ -198,7 +198,7 @@ public interface ContainedApplicationRepository {
    * scope's own record.
    *
    * <p>The order is the contract and not a convenience. {@code authority_scopes.container} is
-   * {@code ON DELETE RESTRICT} (V195), so a container's rows cannot be removed while a descendant
+   * {@code ON DELETE RESTRICT} (V208), so a container's rows cannot be removed while a descendant
    * still references them: destroying in any other order is refused by the schema. Live and
    * destroyed alike are returned, because a record that is still present is still a row that must
    * go before its container's.
@@ -210,7 +210,7 @@ public interface ContainedApplicationRepository {
    *
    * <p>One statement, and the two-hop cascade does the rest: {@code authority_scopes.project_id} is
    * {@code ON DELETE CASCADE} (V155), and {@code contained_principals.scope_id} and {@code
-   * contained_applications.scope_id} cascade from the scope (V197, V198). So the project, the
+   * contained_applications.scope_id} cascade from the scope (V210, V211). So the project, the
    * contained scope, the principal and this record either all go or none do, with no second code
    * path to forget one of them.
    *

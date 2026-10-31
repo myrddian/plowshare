@@ -17,7 +17,7 @@ import org.testcontainers.junit.jupiter.*;
 
 /**
  * Real PostgreSQL is required and nothing here could be asserted otherwise: the assertions are the
- * V198 migration applying over the shipped schema, the {@code UNIQUE (container, request_id)} that
+ * V211 migration applying over the shipped schema, the {@code UNIQUE (container, request_id)} that
  * makes a retried create read its receipt rather than make a second child, the agreement trigger
  * that keeps the denormalised container from drifting from {@code authority_scopes}, the recursive
  * subtree count that the breadth bound reads, and the {@code ON DELETE CASCADE} from {@code
@@ -82,7 +82,7 @@ class ContainedApplicationSchemaTest {
     assertTrue(retained.project().startsWith("contained:"));
     assertEquals(container, retained.container());
     assertTrue(retained.live());
-    // The project acquired no addressable PROJECT scope: V195 excludes the reserved prefix from
+    // The project acquired no addressable PROJECT scope: V208 excludes the reserved prefix from
     // authority_map_project, so the only scope over this project is the explicit CONTAINED one.
     assertEquals(
         "CONTAINED",
