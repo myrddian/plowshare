@@ -71,6 +71,11 @@ public final class SourceContainedApplications implements ContainedApplications 
 
   private static final String PREFIX = io.aeyer.plowshare.protocol.ContainedProjects.PREFIX;
 
+  /** The package limits creation enforces, restated as the bound on a listing. */
+  private static final int MAX_RESOURCES = 128;
+
+  private static final int MAX_RESOURCE_DEPTH = 17;
+
   private final ContainedApplicationRepository records;
   private final ProjectWorkspaces projects;
   private final ApplicationPackageValidator validator;
@@ -498,6 +503,52 @@ public final class SourceContainedApplications implements ContainedApplications 
                     envelope.budget().value(),
                     envelope.capabilities()))
         .toList();
+  }
+
+  /**
+   * A live child's staged source as metadata, after the same ancestor gate {@code trajectory} uses.
+   *
+   * <p>The order is the contract: the child is found, the caller's live authority is proved, the
+   * chain must reach the caller, and only then is liveness checked and the directory opened. The
+   * directory is derived from the child's project name under the configured root, never from a
+   * stored path. Links are neither followed nor listed, and the walk is bounded by the package
+   * limits ({@link #MAX_RESOURCES} files, {@link #MAX_RESOURCE_DEPTH} levels) so an area that grew
+   * past what creation permits refuses rather than being enumerated without end.
+   */
+  @Override
+  public List<Resource> resources(String account, String conversation, UUID child) {
+    var retained =
+        records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
+    var parent = parent(account, conversation);
+    requireAncestor(parent.admission().scope(), retained);
+    if (!retained.live()) throw new CallerFault("That contained Application has been destroyed");
+    if (!config.configured()) throw new CallerFault("Containment is not configured");
+    Path staged =
+        workspace(retained.project()).resolve("revisions").resolve(retained.revision().toString());
+    if (!Files.isDirectory(staged, LinkOption.NOFOLLOW_LINKS)) return List.of();
+    var found = new ArrayList<Resource>();
+    try (var entries = Files.walk(staged, MAX_RESOURCE_DEPTH)) {
+      for (Path path : entries.sorted().toList()) {
+        var attributes =
+            Files.readAttributes(
+                path, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile()) continue;
+        if (found.size() >= MAX_RESOURCES)
+          throw new CallerFault("That contained Application's source exceeds the package limit");
+        String relative =
+            staged.relativize(path).toString().replace(java.io.File.separatorChar, '/');
+        found.add(
+            new Resource(
+                relative,
+                relative.equals(WorkspaceApplicationPolicy.FILE) ? "manifest" : "file",
+                retained.revision(),
+                attributes.size()));
+      }
+    } catch (IOException unreadable) {
+      throw new java.io.UncheckedIOException(
+          "Could not list a contained Application's source", unreadable);
+    }
+    return List.copyOf(found);
   }
 
   /**

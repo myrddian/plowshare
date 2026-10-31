@@ -119,6 +119,30 @@ public interface ContainedApplications {
     }
   }
 
+  /**
+   * One source resource of a contained Application, described and never delivered.
+   *
+   * <p>A boundary DTO, so every component is a plain wire value. There is deliberately no content
+   * component: a child's writes are untrusted input to its container and a prompt-injection surface
+   * by construction, so this listing carries only what lets a container decide what to ask about.
+   * Child bytes cannot reach a container's prompt through it.
+   *
+   * @param path the resource's portable relative path within the child's source package
+   * @param kind {@code manifest} for the Application manifest, otherwise {@code file}
+   * @param revision the child's retained revision this resource belongs to
+   * @param bytes the resource's size on disk
+   */
+  record Resource(String path, String kind, UUID revision, long bytes) {
+    public Resource {
+      Objects.requireNonNull(revision);
+      if (path == null || path.isBlank() || path.length() > 1024)
+        throw new IllegalArgumentException("A resource names its path");
+      if (!kind.equals("manifest") && !kind.equals("file"))
+        throw new IllegalArgumentException("A resource is a manifest or a file");
+      if (bytes < 0) throw new IllegalArgumentException("A resource has a non-negative size");
+    }
+  }
+
   /** Validates, allocates and admits a child, or refuses leaving nothing behind. */
   Child create(String account, Create request);
 
@@ -153,6 +177,18 @@ public interface ContainedApplications {
    * is refused before any envelope is read.
    */
   List<Step> trajectory(String account, String conversation, UUID child);
+
+  /**
+   * The source resources of one live contained Application, by path, as metadata only.
+   *
+   * <p>Authorized exactly as {@link #trajectory} is, through the same ancestor gate, and refused
+   * before the child's source area is touched: a child naming its container, a sibling and an
+   * unrelated scope never cause a directory to be read. A destroyed child is refused rather than
+   * answered from whatever source survives, because history is not a resource.
+   *
+   * <p>No content is returned, by decision: see {@link Resource}.
+   */
+  List<Resource> resources(String account, String conversation, UUID child);
 
   /**
    * Lowers or raises a child's own ceiling under its container's authority. Zero disables the

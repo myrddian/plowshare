@@ -42,7 +42,28 @@ public final class ContainedApplicationFrames implements FrameArea {
         FrameTypes.APPLICATION_CHILD_LIST,
         this::list,
         FrameTypes.APPLICATION_CHILD_TRAJECTORY,
-        this::trajectory);
+        this::trajectory,
+        FrameTypes.APPLICATION_CHILD_RESOURCES,
+        this::resources);
+  }
+
+  /**
+   * A child's source resources, as metadata. Keyed and authorized exactly as {@code trajectory} is;
+   * the answer carries paths, kinds, revision and sizes and never file content.
+   */
+  private Outcome resources(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation", "child"));
+    return Outcome.ok(
+        Map.of(
+            "resources",
+            children.resources(
+                asking.requireHandle(FrameTypes.APPLICATION_CHILD_RESOURCES),
+                Payloads.required(
+                    payload,
+                    "conversation",
+                    FrameTypes.APPLICATION_CHILD_RESOURCES,
+                    "the container's conversation"),
+                uuid(payload, "child"))));
   }
 
   /**

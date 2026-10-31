@@ -98,6 +98,10 @@ public final class FrameTypes {
   public static final String APPLICATION_CHILD_LIST = "application.child.list";
 
   public static final String APPLICATION_CHILD_TRAJECTORY = "application.child.trajectory";
+
+  /** A child's source resources as metadata, to an ancestor only; never file content. */
+  public static final String APPLICATION_CHILD_RESOURCES = "application.child.resources";
+
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";

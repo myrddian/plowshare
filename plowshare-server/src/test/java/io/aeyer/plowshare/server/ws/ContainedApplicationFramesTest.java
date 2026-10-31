@@ -62,7 +62,9 @@ class ContainedApplicationFramesTest {
       }
       case FrameTypes.APPLICATION_CHILD_CEILING ->
           new HashMap<>(Map.of("conversation", "c", "child", CHILD, "calls", 1));
-      case FrameTypes.APPLICATION_CHILD_DESTROY, FrameTypes.APPLICATION_CHILD_TRAJECTORY ->
+      case FrameTypes.APPLICATION_CHILD_DESTROY,
+              FrameTypes.APPLICATION_CHILD_TRAJECTORY,
+              FrameTypes.APPLICATION_CHILD_RESOURCES ->
           new HashMap<>(Map.of("conversation", "c", "child", CHILD));
       case FrameTypes.APPLICATION_CHILD_LIST -> new HashMap<>(Map.of("conversation", "c"));
       default -> throw new AssertionError("no fixture for " + type);
@@ -72,7 +74,7 @@ class ContainedApplicationFramesTest {
   @Test
   void everyContainedFrameIsRegistered() throws Exception {
     var declared = declared();
-    assertEquals(5, declared.size(), "a new application.child.* constant needs a contract audit");
+    assertEquals(6, declared.size(), "a new application.child.* constant needs a contract audit");
     assertEquals(new TreeSet<>(declared), new TreeSet<>(frames.keySet()));
     // And exactly once across the whole table, as the router would assemble it.
     var all =
