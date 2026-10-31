@@ -515,6 +515,11 @@ public final class SourceContainedApplications implements ContainedApplications 
    * limits ({@link #MAX_RESOURCES} files, {@link #MAX_RESOURCE_DEPTH} levels) so an area that grew
    * past what creation permits refuses rather than being enumerated without end.
    */
+  // Unlike trajectory, this refuses a destroyed child. Not an inconsistency: trajectory reads
+  // retained conversation lineage, which is history and deliberately survives destruction, whereas
+  // this reads the source area, which destruction collects. There is nothing to return, and
+  // answering from a surviving directory would make a destroyed child's source look readable.
+  // Do not harmonise the two.
   @Override
   public List<Resource> resources(String account, String conversation, UUID child) {
     var retained =
