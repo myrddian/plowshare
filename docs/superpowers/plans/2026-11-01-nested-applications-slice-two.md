@@ -303,16 +303,27 @@ git commit -m "Extend a retained read ceiling to its contained descendants"
   the spoken-name alias, beside the other `application.child.*` entries
 - Regenerate: `test-support/contracts/client-capabilities.json`, via
   `python3 test-support/contracts/build_manifest.py`
+- Regenerate: every path listed in `.gitattributes`, via
+  `./gradlew :plowshare-client-ts:clientBuild` then
+  `node scripts/generate-sdk-contracts.mjs`
 
-**Why the TypeScript declaration is in this task and not in Task 4.** The
-capability manifest is generated from `FrameTypes.java` and the routing areas,
-but `build_manifest.py:275` also asserts `typed_frames == set(areas)` — the
-TypeScript catalogs must declare exactly the registered WS surface, or the
-generator refuses to run at all. So registering a frame server-side without
-declaring it in `catalog.ts` leaves three `FrameRouterTest` consistency tests
-red and the manifest unbuildable. The declaration is part of registering an
-operation, not part of testing the SDKs, and a task that cannot leave the branch
-green is bounded in the wrong place.
+**Why the whole declaration chain is in this task.** Registering a frame
+server-side cannot leave the branch green on its own, and the plan originally
+split this the wrong way — twice. Two separate consistency gates reach past the
+Java change:
+
+- `build_manifest.py:275` asserts `typed_frames == set(areas)`: the TypeScript
+  catalogs must declare exactly the registered WS surface, or the capability
+  manifest will not generate at all. Its conversation-operation count is pinned
+  too, and must be raised.
+- `FrameRouterTest.declaredFrames()` reads `test-support/contracts/sdk-protocol.json`,
+  which only `scripts/generate-sdk-contracts.mjs` writes — in the same run as
+  every other generated catalog.
+
+So declaring the operation, regenerating the manifest and regenerating the
+contract catalogs are one indivisible unit with the Java registration. Task 4
+keeps what is genuinely separable: the sendability test, the per-language
+round-trip tests and `sdkCheck`.
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/applications/ContainedResourceReadTest.java`
 
 **Interfaces:**
@@ -407,15 +418,14 @@ In the TypeScript suite, assert that `application.child.resources` validates
 with a `conversation` and a UUID `child`, and is rejected without them — the
 check slice one shipped broken for all five child operations.
 
-- [ ] **Step 2: Regenerate and verify the catalogs**
+- [ ] **Step 2: Confirm the catalogs Task 3 regenerated**
 
-```bash
-./gradlew :plowshare-client-ts:clientBuild
-node scripts/generate-sdk-contracts.mjs
-```
-Expected: `SDK contracts verified: <N> operations, <M> outcome codes` with N one
-higher than before. Never hand-edit a generated catalog; if a merge conflicted
-one, re-render it (see "Regenerate catalogs" in `docs/sdks.md`).
+Task 3 ran `./gradlew :plowshare-client-ts:clientBuild` and
+`node scripts/generate-sdk-contracts.mjs`, because
+`FrameRouterTest.declaredFrames()` reads `sdk-protocol.json` and only that run
+writes it. Re-run `node scripts/generate-sdk-contracts.mjs --check` and expect
+it to pass with no diff. Never hand-edit a generated catalog; if a merge
+conflicted one, re-render it (see "Regenerate catalogs" in `docs/sdks.md`).
 
 - [ ] **Step 3: Write and run a per-language round-trip test**
 
