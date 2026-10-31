@@ -772,8 +772,8 @@ directional refusals are real refusals of real principals; what is absent is a
 child that was executing when they were asked.
 
 **`SourceContainedApplications` answers whether an arbitrary child UUID exists
-before it checks containment.** Both `trajectory` (lookup at `:499`) and
-`resources` (`:538`) open with `records.find(child).orElseThrow(new
+before it checks containment.** Both `trajectory` (lookup at `:500`) and
+`resources` (`:539`) open with `records.find(child).orElseThrow(new
 CallerFault("No such contained Application"))` and only then prove the caller's
 authority through `parent(account, conversation)` and walk the chain in
 `requireAncestor`, so a caller that contains nothing can distinguish a child UUID
@@ -781,7 +781,7 @@ that exists on the installation from one that does not — a one-bit existence
 oracle on a scope it may not name. It is inherited verbatim from `trajectory`,
 which slice one shipped, and it **contradicts that method's own documented
 claim**: the Javadoc at `SourceContainedApplications.java:495` says a refused
-read learns "not even that its conversations exist", and the lookup at `:499`
+read learns "not even that its conversations exist", and the lookup at `:500`
 leaks exactly that. The existence bit is precisely what the comment says is not
 learned, so the contradiction is flat and is recorded without qualification.
 Recorded as affecting both methods. Closing it means proving the caller's
