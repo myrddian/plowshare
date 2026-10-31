@@ -138,9 +138,15 @@ class ContainedKnowledgeReadSchemaTest {
     return jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, name);
   }
 
+  /** The contained project behind a contained scope, kept so a boundary home can name it. */
+  private record Home(long project, String name) {}
+
+  private final java.util.Map<UUID, Home> homes = new java.util.HashMap<>();
+
   /** A contained scope over a fresh contained project; ancestry is the column, not the name. */
   private UUID contained(UUID container) {
-    var project = project("contained:" + UUID.randomUUID());
+    var name = "contained:" + UUID.randomUUID();
+    var project = project(name);
     var scope = UUID.randomUUID();
     assertEquals(
         1,
@@ -149,6 +155,7 @@ class ContainedKnowledgeReadSchemaTest {
             scope,
             project,
             container));
+    homes.put(scope, new Home(project, name));
     return scope;
   }
 
@@ -162,6 +169,62 @@ class ContainedKnowledgeReadSchemaTest {
 
   private boolean readable(String actor, UUID scope) {
     return jdbc.queryForObject("SELECT knowledge_scope_readable(?,?)", Boolean.class, actor, scope);
+  }
+
+  /**
+   * A retained document whose home is {@code scope}. The home is resolved by the shipped mapping
+   * from the project and the {@code project:}-prefixed namespace, so nothing here asserts a home
+   * the schema would not have chosen; the initial policy row the insert trigger writes is HOME.
+   *
+   * <p>The owner is deliberately the stranger, so that the stranger's refusals below also establish
+   * that ownership is not a route into a contained home.
+   */
+  private UUID retained(UUID scope) {
+    var home = homes.get(scope);
+    var resource = UUID.randomUUID();
+    var revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind,tags)"
+            + " VALUES (?,?,?,?,?,'source','[]')",
+        resource,
+        "project:" + home.name(),
+        resource + ".txt",
+        STRANGER,
+        home.project());
+    assertEquals(
+        scope,
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM information_resources WHERE id=?", UUID.class, resource));
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,"
+            + "byte_size,extracted_text) VALUES (?,?,1,'Child output','text/plain',?,1,'output')",
+        revision,
+        resource,
+        revision.toString());
+    return revision;
+  }
+
+  private boolean revisionReadable(String actor, UUID revision) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(knowledge_revision_readable(?,?),FALSE)", Boolean.class, revision, actor);
+  }
+
+  /** The retained read ceiling, asked about one boundary home by name. */
+  private boolean inBoundary(String actor, UUID revision, String home) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(knowledge_document_in_boundary(?,?,?,FALSE),FALSE)",
+        Boolean.class,
+        revision,
+        actor,
+        home);
+  }
+
+  private boolean projectReadable(String actor, UUID scope) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(information_project_readable(?,?),FALSE)",
+        Boolean.class,
+        homes.get(scope).project(),
+        actor);
   }
 
   /** Whether {@code scope} appears in the readable-scope set the batched relation materializes. */
@@ -217,6 +280,15 @@ class ContainedKnowledgeReadSchemaTest {
     assertTrue(jdbc.queryForObject("SELECT account_active(?)", Boolean.class, STRANGER));
     assertFalse(readable(STRANGER, childScope));
     assertFalse(readable(STRANGER, grandchildScope));
+
+    // The self arm matches a bare UUID and sits outside every account-based check, and
+    // admins.handle is unconstrained TEXT, so an account named after a contained principal would
+    // otherwise inherit that principal's read with no account_active or enabled test applied. The
+    // account is created here rather than in the fixture precisely because it suppresses the
+    // principal's own read, which is the refusal being asserted.
+    user(childPrincipal, false);
+    assertFalse(readable(childPrincipal, childScope));
+    assertFalse(inReadAuthority(childPrincipal, childScope));
   }
 
   @Test
@@ -296,6 +368,58 @@ class ContainedKnowledgeReadSchemaTest {
     assertFalse(readable(HOLDER, chain.get(64)), "distance 65 is beyond it and fails closed");
     // The deepest scope still reads its own home: the sentinel bounds the walk, not the self arm.
     assertTrue(readable(principal(chain.get(64)), chain.get(64)));
+  }
+
+  /**
+   * The blast radius, at the level a caller actually reads documents. Widening scope admission is
+   * not confined to the two predicates it edits: {@code knowledge_revision_readable}, {@code
+   * information_project_readable} and the retained ceiling in {@code
+   * knowledge_document_in_boundary} all resolve through {@code knowledge_scope_readable}, so a
+   * descendant's document becomes readable to an ancestor <em>within the descendant's own
+   * boundary</em> here rather than in a later task. The refusals are the assertions that matter:
+   * one success and three different principals who still get nothing is what makes the widening
+   * directional rather than general.
+   *
+   * <p>The ceiling's own term is an equality on the selected project's name, so the cross-boundary
+   * case — an ancestor reading this document while addressing its <em>own</em> project as the
+   * boundary home — is still refused. That refusal is asserted last, because it is the line between
+   * what this task opens and what a later one does.
+   */
+  @Test
+  void anAncestorReadsADescendantsDocumentWithinThatDescendantsBoundary() {
+    var document = retained(childScope);
+    var home = homes.get(childScope).name();
+
+    assertTrue(revisionReadable(HOLDER, document));
+    assertTrue(inBoundary(HOLDER, document, home));
+    assertTrue(projectReadable(HOLDER, childScope));
+    // The other half of the limitation is only half lifted, and this records exactly where it
+    // stops. The child's own scope is admitted -- aChildReadsItsOwnHome proves that -- but
+    // knowledge_revision_readable opens with information_global_read_member, which is false for a
+    // bare-UUID principal that has no admins row to be a member through. Scope admission cannot
+    // reach that gate, and lifting a baseline gate on every knowledge read is not this task's to
+    // make. The ceiling is demonstrably not what refuses: it admits the same document for the same
+    // principal, which is what a ceiling that grants nothing should do.
+    assertFalse(revisionReadable(childPrincipal, document));
+    assertTrue(inBoundary(childPrincipal, document, home));
+
+    // An unrelated account, which also happens to own the resource.
+    assertFalse(revisionReadable(STRANGER, document));
+    assertFalse(inBoundary(STRANGER, document, home));
+    assertFalse(projectReadable(STRANGER, childScope));
+    // A sibling subtree.
+    assertFalse(revisionReadable(siblingPrincipal, document));
+    assertFalse(inBoundary(siblingPrincipal, document, home));
+    // A descendant reading upward.
+    assertFalse(revisionReadable(grandchildPrincipal, document));
+    assertFalse(inBoundary(grandchildPrincipal, document, home));
+    // A server administrator and a service credential on the container.
+    assertFalse(revisionReadable(ADMINISTRATOR, document));
+    assertFalse(revisionReadable(TOKEN_PRINCIPAL, document));
+
+    // Cross-boundary: readable, but outside the ceiling the request named. Still refused here.
+    assertTrue(revisionReadable(HOLDER, document));
+    assertFalse(inBoundary(HOLDER, document, "parent"));
   }
 
   /**
