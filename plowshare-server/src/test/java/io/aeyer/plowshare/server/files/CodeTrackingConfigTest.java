@@ -22,6 +22,15 @@ class CodeTrackingConfigTest {
         .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
         .withBean(UnitOfWork.class, () -> UnitOfWork.NONE)
         .withBean(JobRuntime.class, () -> runtime)
+        .withBean(
+            io.aeyer.plowshare.server.reads.ReadAdmission.class,
+            io.aeyer.plowshare.server.reads.ReadAdmission::direct)
+        .withBean(
+            io.aeyer.plowshare.server.session.SessionRegistry.class,
+            () -> mock(io.aeyer.plowshare.server.session.SessionRegistry.class))
+        .withBean(
+            io.aeyer.plowshare.server.session.PresenceRegistry.class,
+            () -> mock(io.aeyer.plowshare.server.session.PresenceRegistry.class))
         .withPropertyValues(
             "plowshare.code-tracking.interval=10s",
             "plowshare.code-tracking.capacity=2",
@@ -66,6 +75,9 @@ class CodeTrackingConfigTest {
                 store,
                 beans.getBeanProvider(Callers.class),
                 beans.getBeanProvider(RunProviders.class),
+                io.aeyer.plowshare.server.reads.ReadAdmission.direct(),
+                mock(io.aeyer.plowshare.server.session.SessionRegistry.class),
+                mock(io.aeyer.plowshare.server.session.PresenceRegistry.class),
                 true)) {
       var observe = monitor.observations("coder", "s", "alice");
       assertNotNull(observe.begin(home, "**"));

@@ -24,6 +24,11 @@ export const SESSION_PARAM = 'session';
 export const PROJECT_PARAM = 'project';
 export const MACHINE_PARAM = 'machine';
 export const ROOT_PARAM = 'root';
+/** Sent only after a ready frame advertises fileChanges=true. A hint, never indexing authority. */
+export const WORKSPACE_CHANGED = 'workspace.changed';
+export interface FileChangeHint {
+  readonly type: typeof WORKSPACE_CHANGED;
+}
 
 export const ROOTS = 'roots';
 export const READ = 'read';

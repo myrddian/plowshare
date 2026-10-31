@@ -31,48 +31,71 @@ public class CodeTrackingConfig {
       CodeWorkspaceStore store,
       ObjectProvider<Callers> callers,
       ObjectProvider<RunProviders> files,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission,
+      io.aeyer.plowshare.server.session.SessionRegistry sessions,
+      io.aeyer.plowshare.server.session.PresenceRegistry presences,
       @Value("${plowshare.code-tracking.enabled:true}") boolean enabled) {
     return new CodeWorkspaceMonitor(
-        store,
-        scope -> {
-          var access = callers.getObject();
-          if (!scope.home().isGlobal())
-            access.requireProject(scope.home().project(), scope.owner());
-          else {
-            if (scope.session() == null)
-              throw new WorkspaceRefusedException(
-                  "global code tracking needs an owned live session");
-            access.requireSession(scope.session(), scope.owner());
-          }
-          var definition =
-              access.readAgent(
-                  scope.agent(),
-                  access.callerFor(
-                      scope.home().isGlobal() ? null : scope.home().project(), scope.session()));
-          if (!definition.tools().contains(CodeMapTool.NAME)
-              || definition.scopes().stream().noneMatch(grant -> grant.allows(Mode.READ)))
-            throw new WorkspaceRefusedException(
-                "code tracking's current definition has no code-map read grant");
-          // Definition scopes never survive as stored authority. Resolve them again at each routing
-          // call too.
-          return new ProviderRouter(
-              home -> {
-                if (!home.equals(scope.home()))
-                  throw new WorkspaceRefusedException("code tracking scope changed");
-                if (!home.isGlobal()) access.requireProject(home.project(), scope.owner());
-                else access.requireSession(scope.session(), scope.owner());
-                var current =
-                    access.readAgent(
-                        scope.agent(),
-                        access.callerFor(home.isGlobal() ? null : home.project(), scope.session()));
-                if (!current.tools().contains(CodeMapTool.NAME))
-                  throw new WorkspaceRefusedException("code map is no longer granted");
-                return files
-                    .getObject()
-                    .forRun(home, current.scopes(), scope.session(), scope.owner());
-              });
-        },
-        enabled);
+            store,
+            scope -> {
+              var access = callers.getObject();
+              if (!scope.home().isGlobal())
+                access.requireProject(scope.home().project(), scope.owner());
+              else {
+                if (scope.session() == null)
+                  throw new WorkspaceRefusedException(
+                      "global code tracking needs an owned live session");
+                access.requireSession(scope.session(), scope.owner());
+              }
+              var definition =
+                  access.readAgent(
+                      scope.agent(),
+                      access.callerFor(
+                          scope.home().isGlobal() ? null : scope.home().project(),
+                          scope.session()));
+              if (!definition.tools().contains(CodeMapTool.NAME)
+                  || definition.scopes().stream().noneMatch(grant -> grant.allows(Mode.READ)))
+                throw new WorkspaceRefusedException(
+                    "code tracking's current definition has no code-map read grant");
+              // Definition scopes never survive as stored authority. Resolve them again at each
+              // routing
+              // call too.
+              return new ProviderRouter(
+                  home -> {
+                    if (!home.equals(scope.home()))
+                      throw new WorkspaceRefusedException("code tracking scope changed");
+                    if (!home.isGlobal()) access.requireProject(home.project(), scope.owner());
+                    else access.requireSession(scope.session(), scope.owner());
+                    var current =
+                        access.readAgent(
+                            scope.agent(),
+                            access.callerFor(
+                                home.isGlobal() ? null : home.project(), scope.session()));
+                    if (!current.tools().contains(CodeMapTool.NAME))
+                      throw new WorkspaceRefusedException("code map is no longer granted");
+                    return files
+                        .getObject()
+                        .forRun(home, current.scopes(), scope.session(), scope.owner());
+                  });
+            },
+            enabled)
+        .changes(
+            change -> {
+              if (sessions.accountOf(change.session()).filter(change.owner()::equals).isEmpty()
+                  || presences
+                      .rootedBy(change.session())
+                      .filter(
+                          rooted ->
+                              !change.home().isGlobal()
+                                  && rooted.project().equals(change.home().project()))
+                      .isEmpty())
+                throw new WorkspaceRefusedException("file change session is no longer rooted");
+              var access = callers.getObject();
+              access.requireSession(change.session(), change.owner());
+              if (!change.home().isGlobal())
+                access.requireProject(change.home().project(), change.owner());
+            },
+            admission);
   }
 
   @Bean

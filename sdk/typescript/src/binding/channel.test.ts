@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closingIn, serve } from './channel.ts';
+import { closingIn, serve, readyIn } from './channel.ts';
 import type { Closing } from './channel.ts';
 import type { Arrival, Socket } from './connection.ts';
 import type { FileReply, FileRequest } from './files.ts';
@@ -134,4 +134,41 @@ describe('a client serving its files', () => {
     expect(closingIn(undefined)).toEqual({});
     expect(closingIn({ code: 1000, reason: '' })).toEqual({ code: 1000 });
   });
+});
+
+it('file-change hints require explicit server capability negotiation', () => {
+  expect(readyIn('{"ready":true,"project":"project"}')).toEqual({
+    project: 'project',
+  });
+  expect(
+    readyIn('{"ready":true,"project":"project","fileChanges":true}'),
+  ).toEqual({ project: 'project', fileChanges: true });
+  expect(
+    readyIn('{"ready":true,"project":"project","fileChanges":"true"}'),
+  ).toEqual({ project: 'project' });
+});
+
+it('closed file serving cannot restart a watcher or execute a late filesystem request', async () => {
+  const socket = new FakeSocket();
+  let ready = 0;
+  let answered = 0;
+  const serving = serve({
+    socket,
+    onReady: () => {
+      ready++;
+    },
+    answer: (request) => {
+      answered++;
+      return Promise.resolve({ id: request.id, outcome: 'ok' });
+    },
+  });
+  serving.close();
+  socket.deliver('{"ready":true,"project":"project","fileChanges":true}');
+  socket.deliver(
+    '{"id":"late","op":"write","path":"/workspace/file","content":"late"}',
+  );
+  await settle();
+  expect(ready).toBe(0);
+  expect(answered).toBe(0);
+  expect(socket.sent).toEqual([]);
 });

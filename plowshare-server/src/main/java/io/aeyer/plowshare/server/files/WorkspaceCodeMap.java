@@ -92,6 +92,12 @@ public final class WorkspaceCodeMap {
         Instant observedAt) {
       this(key, provider, root, path, fingerprint, language, text, outline, observedAt, null);
     }
+
+    /** Retention key omits connection identity; live reads continue to use {@link #key()}. */
+    public CodeWorkspaceStore.IndexSource indexSource() {
+      return new CodeWorkspaceStore.IndexSource(
+          key, WorkspaceValues.retainedKey(provider, root, path), fingerprint);
+    }
   }
 
   private record Provider(FileProvider files, List<Path> roots, String key) {}
@@ -227,7 +233,11 @@ public final class WorkspaceCodeMap {
             pageBytes += metadata.size();
             if (pageBytes > MAX_TOTAL_BYTES) break;
             requests.add(
-                new CodeWorkspaceStore.IndexSource(provider.key() + "\n" + path, metadata));
+                new CodeWorkspaceStore.IndexSource(
+                    provider.key() + "\n" + path,
+                    WorkspaceValues.retainedKey(
+                        provider.files().name(), root(provider, path), path),
+                    metadata));
             if (requests.size() == 100) {
               indexed.putAll(observations.indexes(home, List.copyOf(requests)));
               requests.clear();
@@ -261,18 +271,19 @@ public final class WorkspaceCodeMap {
               break outer;
             }
             Entry old = previous.get(key);
-            Path root =
-                provider.roots().stream()
-                    .filter(path::startsWith)
-                    .max(Comparator.comparingInt(Path::getNameCount))
-                    .orElseThrow(
-                        () -> new WorkspaceRefusedException("file is outside advertised roots"));
+            Path root = root(provider, path);
             String language = DocumentType.classify(path.toString(), null).subtype();
             CodeProjection cached = null;
             var indexState = indexed.get(key);
             if (syntax && !metadataOnly && metadata.size() <= MAX_FILE_BYTES) {
               try {
-                cached = observations.cached(home, key, metadata);
+                cached =
+                    observations.cached(
+                        home,
+                        new CodeWorkspaceStore.IndexSource(
+                            key,
+                            WorkspaceValues.retainedKey(provider.files().name(), root, path),
+                            metadata));
               } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
                 // Capacity cannot turn a cached read into source hydration and a new intake.
                 throw capacity;
@@ -524,6 +535,13 @@ public final class WorkspaceCodeMap {
     if (!entry.key().equals(key) || !entry.fingerprint().equals(provider.fingerprint(entry.path())))
       throw new WorkspaceRefusedException(
           "code source or workspace changed; refresh outline/symbols");
+  }
+
+  private static Path root(Provider provider, Path path) {
+    return provider.roots().stream()
+        .filter(path::startsWith)
+        .max(Comparator.comparingInt(Path::getNameCount))
+        .orElseThrow(() -> new WorkspaceRefusedException("file is outside advertised roots"));
   }
 
   private List<Provider> providers(Home home) {
