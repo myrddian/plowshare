@@ -52,10 +52,25 @@ final class WorkspaceValues {
   }
 
   static String sourceKey(String key) {
+    return FileContents.sha256(checkedKey(key).getBytes(StandardCharsets.UTF_8));
+  }
+
+  static String checkedKey(String key) {
     // Cache identities encode provider, ordered roots and path with newlines. They are never a
     // filesystem path or SQL identifier; hashing must preserve the historical bytes verbatim.
     if (key == null || key.isBlank() || key.length() > 3 * 1024 * 1024 || key.indexOf('\0') >= 0)
       throw new IllegalArgumentException("invalid code tracking source key");
-    return FileContents.sha256(key.getBytes(StandardCharsets.UTF_8));
+    return key;
+  }
+
+  /** Immutable-source reuse is separate from the session identity used to authorize live I/O. */
+  static String retainedKey(String provider, java.nio.file.Path root, java.nio.file.Path path) {
+    identity(provider, "provider");
+    path(root.toString(), "root");
+    path(path.toString(), "source path");
+    if (!root.isAbsolute() || !path.isAbsolute() || !path.startsWith(root))
+      throw new IllegalArgumentException("code source must be inside its absolute root");
+    // Keep this encoding in sync with the migration that aliases previously retained sources.
+    return "workspace-source-v1\n" + provider + "\n" + root + "\n" + path;
   }
 }

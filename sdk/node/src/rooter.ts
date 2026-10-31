@@ -26,6 +26,8 @@
  * check before committing to a move: it goes `undefined` the instant a close this
  * client did not ask for arrives, and `onLost` says why.
  */
+import { WORKSPACE_CHANGED } from 'plowshare-client-ts/binding/files';
+import { watchWorkspace, type WorkspaceWatch } from './workspace-watch.ts';
 import type { Claim } from 'plowshare-client-ts/binding/auth';
 import { serve } from 'plowshare-client-ts/binding/channel';
 import type {
@@ -109,13 +111,17 @@ export function rooter(options: RooterOptions): Rooter {
       await release();
       const socket = await options.open(claim);
       let closed: () => void = () => undefined;
+      let watcher: WorkspaceWatch | undefined;
       const entry: Held = {
         claim,
         leaving: false,
         closed: new Promise<void>((done) => {
           closed = done;
         }),
-        stop: () => answer.close?.(),
+        stop: () => {
+          watcher?.close();
+          answer.close?.();
+        },
       };
       const answer = options.answering(claim.root) as Answering & {
         close?: () => void;
@@ -135,8 +141,27 @@ export function rooter(options: RooterOptions): Rooter {
       });
       entry.serving = serve({
         socket,
-        answer,
-        onReady: (project) =>
+        answer: async (request) => {
+          const reply = await answer(request);
+          watcher?.observed(request, reply);
+          return reply;
+        },
+        onReady: (project, fileChanges) => {
+          if (
+            project === claim.project &&
+            fileChanges === true &&
+            held === entry &&
+            !entry.leaving
+          )
+            watcher = watchWorkspace(claim.root, answer, () => {
+              if (held === entry && !entry.leaving)
+                try {
+                  socket.send(JSON.stringify({ type: WORKSPACE_CHANGED }));
+                } catch {
+                  // A lost hint never replays work; server reconciliation recovers it.
+                  watcher?.close();
+                }
+            });
           landed(
             project === claim.project
               ? undefined
@@ -145,7 +170,8 @@ export function rooter(options: RooterOptions): Rooter {
                   reason:
                     'the server did not acknowledge the requested project; nothing was rooted',
                 },
-          ),
+          );
+        },
         onClose: (closing) => {
           entry.stop();
           closed();

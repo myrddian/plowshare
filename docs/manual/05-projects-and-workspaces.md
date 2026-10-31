@@ -129,6 +129,26 @@ views. `code_map` is navigation over retained syntax; abbreviated signatures and
 symbol matches are not resolved semantic references or substitute evidence for
 the exact file text.
 
+A code-map scan enrolls an account/agent workspace subscription until `unwatch`.
+The Desktop and Node file-serving clients watch the attached directory when the
+server advertises file-change support. They coalesce events and compare SHA-256
+metadata before sending a workspace hint; duplicate events with unchanged bytes
+send nothing. Directory changes, missing event names and watcher failures request
+reconciliation. Disconnect or folder replacement closes that watch.
+
+Hints are untrusted wakeups, not requests to index. The server coalesces them
+across sockets into a bounded maintenance batch, rechecks live session ownership
+and project access, and limits how often scans can start. Periodic reconciliation
+covers missed events and older clients. Every scan compares live source hashes
+with retained provider/root/path/hash/parser references before transferring bytes
+or rebuilding syntax. Reconnect changes the live access fence, not the retained
+source identity. Unchanged sources reuse their authorized immutable revision.
+
+Workspace code intake permits only extraction and syntax derivation. Tagging,
+grouping and embeddings remain disabled until explicitly selected through the
+information processing controls; background sweeps cannot revive those skipped
+stages. Historical content and inference/uncertain-attempt receipts remain retained.
+
 Edits, deletion and moves require write grants, valid containment and current
 preconditions. Symlinks and traversal cannot widen the root. Private server
 configuration and data remain excluded from agent workspace access. Reading

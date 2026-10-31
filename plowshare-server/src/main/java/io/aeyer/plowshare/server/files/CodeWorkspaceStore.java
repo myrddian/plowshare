@@ -57,15 +57,21 @@ public interface CodeWorkspaceStore {
 
   void invalidate(Scope scope);
 
+  /** At most 64 coalesced, freshly authorized hints; dirty work is not rescheduled repeatedly. */
+  void changed(List<WorkspaceChanges.Change> changes);
+
   CodeTrackingStatus status(Scope scope);
 
   void forget(Scope scope);
 
   UUID indexed(Scope scope, String key, String hash, String parser);
 
-  record IndexSource(String key, io.aeyer.plowshare.protocol.FileSource source) {
+  /** Live manifest key plus stable retained-source key; neither is an authorization lease. */
+  record IndexSource(
+      String key, String retainedKey, io.aeyer.plowshare.protocol.FileSource source) {
     public IndexSource {
-      Objects.requireNonNull(key);
+      WorkspaceValues.checkedKey(key);
+      WorkspaceValues.checkedKey(retainedKey);
       Objects.requireNonNull(source);
     }
   }

@@ -1176,6 +1176,18 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                       && List.of("summarise", "summary_embed").contains(stage))
               ? "skipped"
               : "pending");
+    if (syntaxOnly) {
+      // Skipping stages once is insufficient: automatic sweeps may revive skipped work. Retain
+      // explicit-only policy and exactly the deterministic authorizations in this transaction.
+      for (String stage : List.of("extract", "derive"))
+        jdbc.update(
+            "INSERT INTO information_stage_authorizations(revision_id,generation,stage,actor,request_id)"
+                + " VALUES(?,1,?,?,?)",
+            revision,
+            stage,
+            context.account(),
+            request);
+    }
     for (UUID input : inputs)
       jdbc.update("INSERT INTO information_inputs VALUES(?,?)", revision, input);
     jdbc.update(

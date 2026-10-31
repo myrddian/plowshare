@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.files;
 
 import io.aeyer.plowshare.protocol.CodeTrackingStatus;
-import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.documents.CodeProjection;
 
@@ -22,7 +21,7 @@ public interface CodeMapObservations {
     return false;
   }
 
-  default CodeProjection cached(Home home, String key, FileSource source) {
+  default CodeProjection cached(Home home, CodeWorkspaceStore.IndexSource source) {
     return null;
   }
 

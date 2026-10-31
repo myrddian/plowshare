@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.files;
 
-import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.server.documents.CodeOutline;
 import io.aeyer.plowshare.server.documents.CodeProjection;
 import io.aeyer.plowshare.server.information.*;
@@ -30,22 +29,28 @@ public final class CodeWorkspaceIndex implements CodeIndexes {
 
   private InformationContext context(CodeWorkspaceStore.Scope scope) {
     return new InformationContext(
-        scope.owner(),
-        scope.home().isGlobal()
-            ? InformationContext.Selection.personal()
-            : InformationContext.Selection.project(scope.home().project()),
-        InformationContext.Corpus.CODE);
+            scope.owner(),
+            scope.home().isGlobal()
+                ? InformationContext.Selection.personal()
+                : InformationContext.Selection.project(scope.home().project()),
+            InformationContext.Corpus.CODE)
+        // This consumer understands explicit-only syntax revisions. Supporting that view does
+        // not admit READ: catalogue projections still check current selection and dependencies.
+        .withView(true);
   }
 
-  public CodeProjection cached(CodeWorkspaceStore.Scope scope, String key, FileSource source) {
+  public CodeProjection cached(
+      CodeWorkspaceStore.Scope scope, CodeWorkspaceStore.IndexSource source) {
     return admission.read(
         scope.owner(),
         io.aeyer.plowshare.server.reads.ReadAdmission.Work.AUTHORITY,
         () -> {
-          UUID revision = store.indexed(scope, key, source.sha256(), CodeOutline.VERSION);
+          UUID revision =
+              store.indexed(
+                  scope, source.retainedKey(), source.source().sha256(), CodeOutline.VERSION);
           return revision == null
               ? null
-              : catalogue.codeProjection(context(scope), revision, source.sha256());
+              : catalogue.codeProjection(context(scope), revision, source.source().sha256());
         });
   }
 
@@ -83,7 +88,20 @@ public final class CodeWorkspaceIndex implements CodeIndexes {
     if (bytes.length != file.fingerprint().size()
         || !FileContents.sha256(bytes).equals(file.fingerprint().sha256()))
       throw new WorkspaceRefusedException("retained code differs from verified snapshot");
-    String identity = scope.id() + ":" + CodeWorkspaceStore.sourceKey(file.key());
+    // Another scan/socket may have published since the initial lookup. In particular a legacy
+    // alias must not turn withdrawal/denial into a new active resource under the stable name.
+    UUID existing =
+        store.indexed(
+            scope,
+            file.indexSource().retainedKey(),
+            file.fingerprint().sha256(),
+            CodeOutline.VERSION);
+    if (existing != null) {
+      var cached = catalogue.codeProjection(context(scope), existing, file.fingerprint().sha256());
+      return cached != null ? cached : syntax(scope, existing, file.fingerprint().sha256());
+    }
+    String identity =
+        scope.id() + ":" + CodeWorkspaceStore.sourceKey(file.indexSource().retainedKey());
     String name = "workspace-code/" + identity + "/" + file.path().getFileName();
     UUID request =
         UUID.nameUUIDFromBytes(
@@ -93,12 +111,18 @@ public final class CodeWorkspaceIndex implements CodeIndexes {
         catalogue.admitCodeSnapshot(
             context(scope), request, name, bytes, "workspace-code:" + identity, scope.session());
     store.index(
-        scope, file.key(), file.fingerprint().sha256(), CodeOutline.VERSION, admitted.revision());
+        scope,
+        file.indexSource().retainedKey(),
+        file.fingerprint().sha256(),
+        CodeOutline.VERSION,
+        admitted.revision());
+    return syntax(scope, admitted.revision(), file.fingerprint().sha256());
+  }
+
+  private CodeProjection syntax(CodeWorkspaceStore.Scope scope, UUID revision, String hash) {
     // Exactly the two deterministic stages. Contended leases remain queued; blocked gates stay
     // blocked.
-    for (int stage = 0; stage < 2; stage++)
-      if (!lifecycle.drainCodeSyntax(admitted.revision())) break;
-    return catalogue.codeProjection(
-        context(scope), admitted.revision(), file.fingerprint().sha256());
+    for (int stage = 0; stage < 2; stage++) if (!lifecycle.drainCodeSyntax(revision)) break;
+    return catalogue.codeProjection(context(scope), revision, hash);
   }
 }

@@ -8,7 +8,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Background reconciliation and gated syntax indexing of durable subscriptions. */
-public final class CodeWorkspaceMonitor implements AutoCloseable {
+public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChanges {
   @FunctionalInterface
   public interface Access {
     ProviderRouter router(CodeWorkspaceStore.Scope scope);
@@ -42,6 +42,85 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
   private final AtomicInteger running = new AtomicInteger();
   private volatile boolean closed;
   private boolean started;
+  private io.aeyer.plowshare.server.reads.ReadAdmission admission =
+      io.aeyer.plowshare.server.reads.ReadAdmission.direct();
+  private java.util.function.Consumer<Change> changeAuthority;
+
+  private record ChangeKey(Home home, String owner, String personalSession) {}
+
+  private final ConcurrentMap<ChangeKey, Change> changes = new ConcurrentHashMap<>();
+  private final Object changeAdmission = new Object();
+
+  /**
+   * Composition supplies live session/project checks; hints never retain those checks as grants.
+   */
+  public CodeWorkspaceMonitor changes(
+      java.util.function.Consumer<Change> authority,
+      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+    this.changeAuthority = Objects.requireNonNull(authority);
+    this.admission = Objects.requireNonNull(admission);
+    return this;
+  }
+
+  @Override
+  public boolean enabled() {
+    return enabled && !closed && changeAuthority != null;
+  }
+
+  @Override
+  public void changed(Change change) {
+    Objects.requireNonNull(change);
+    if (!enabled()) return;
+    var key =
+        new ChangeKey(
+            change.home(), change.owner(), change.home().isGlobal() ? change.session() : null);
+    synchronized (changeAdmission) {
+      // Keep the latest live socket for this principal/workspace. Overflow is recovered by the
+      // existing periodic hash scan; a hostile client cannot create an unbounded hint queue.
+      if (changes.containsKey(key) || changes.size() < 64) changes.put(key, change);
+    }
+  }
+
+  private void flushChanges() {
+    if (!enabled() || changes.isEmpty()) return;
+    var batch = new ArrayList<Change>();
+    synchronized (changeAdmission) {
+      for (var entry : changes.entrySet()) {
+        if (changes.remove(entry.getKey(), entry.getValue())) batch.add(entry.getValue());
+      }
+    }
+    try {
+      admission.read(
+          "code-change-hints",
+          io.aeyer.plowshare.server.reads.ReadAdmission.Work.MAINTENANCE,
+          () -> {
+            var authorized = new ArrayList<Change>();
+            for (var change : batch) {
+              try {
+                changeAuthority.accept(change);
+                authorized.add(change);
+              } catch (io.aeyer.plowshare.server.faults.CallerFault
+                  | WorkspaceRefusedException denied) {
+                // Revoked or departed sessions cannot wake retained registrations.
+              }
+            }
+            if (!authorized.isEmpty()) store.changed(List.copyOf(authorized));
+            return null;
+          });
+    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
+      synchronized (changeAdmission) {
+        for (var change : batch) {
+          var key =
+              new ChangeKey(
+                  change.home(),
+                  change.owner(),
+                  change.home().isGlobal() ? change.session() : null);
+          // A reconnect arriving during admission supersedes this batch's socket identity.
+          if (changes.size() < 64) changes.putIfAbsent(key, change);
+        }
+      }
+    }
+  }
 
   public CodeWorkspaceMonitor(CodeWorkspaceStore store, Access access, boolean enabled) {
     this.store = Objects.requireNonNull(store);
@@ -57,6 +136,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
 
   private void tick() {
     try {
+      flushChanges();
       while (!closed && running.get() < 2) {
         var scan = store.claim();
         if (scan.isEmpty()) return;
@@ -87,6 +167,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
   /** Deterministic one-scan entry point, also useful to a maintenance caller. */
   public boolean pollOnce() {
     if (closed || !enabled) return false;
+    flushChanges();
     var scan = store.claim();
     if (scan.isEmpty()) return false;
     reconcile(scan.get());
@@ -138,12 +219,11 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
         return attributed && watching && !closed && indexes.get() != null;
       }
 
-      public CodeProjection cached(
-          Home home, String key, io.aeyer.plowshare.protocol.FileSource source) {
+      public CodeProjection cached(Home home, CodeWorkspaceStore.IndexSource source) {
         if (!attributed || !watching || closed || failure != null) return null;
         access.router(scope(home));
         var index = indexes.get();
-        return index == null ? null : index.cached(scope(home), key, source);
+        return index == null ? null : index.cached(scope(home), source);
       }
 
       public CodeProjection retain(Home home, WorkspaceCodeMap.Entry file, byte[] source) {
@@ -254,10 +334,9 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
         return CodeTrackingStatus.state("background");
       }
 
-      public CodeProjection cached(
-          Home home, String key, io.aeyer.plowshare.protocol.FileSource source) {
+      public CodeProjection cached(Home home, CodeWorkspaceStore.IndexSource source) {
         access.router(scope);
-        return index.cached(scope, key, source);
+        return index.cached(scope, source);
       }
 
       public CodeProjection retain(Home home, WorkspaceCodeMap.Entry file, byte[] source) {
@@ -273,6 +352,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
   @Override
   public void close() {
     closed = true;
+    changes.clear();
     scheduler.shutdownNow();
     workers.shutdownNow();
   }

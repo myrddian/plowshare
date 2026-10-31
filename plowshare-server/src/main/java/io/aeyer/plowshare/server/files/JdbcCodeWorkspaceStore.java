@@ -84,11 +84,12 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
               jdbc.queryForObject(
                   """
                     UPDATE code_workspaces SET pattern = ?, generation = generation + 1, state = 'checking',
-                        issues = '[]'::jsonb, lease_until = ?, next_poll = ? WHERE id = ? RETURNING generation
+                        issues = '[]'::jsonb, lease_until = ?, scan_started_at=?, next_poll = ? WHERE id = ? RETURNING generation
                     """,
                   Long.class,
                   pattern,
                   at(now.plusSeconds(120)),
+                  at(now),
                   at(now.plus(interval)),
                   scope.id());
           return new CodeMapObservations.Ticket(scope.id(), generation);
@@ -130,11 +131,12 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
           Long generation =
               jdbc.queryForObject(
                   """
-                    UPDATE code_workspaces SET generation = generation + 1, state = 'checking', lease_until = ?, next_poll = ?
+                    UPDATE code_workspaces SET generation = generation + 1, state = 'checking', lease_until = ?, scan_started_at=?, next_poll = ?
                     WHERE id = ? RETURNING generation
                     """,
                   Long.class,
                   at(now.plusSeconds(120)),
+                  at(now),
                   at(now.plus(interval)),
                   selected.ticket().workspace());
           return Optional.of(
@@ -302,6 +304,34 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
           scope.home().project());
   }
 
+  @Override
+  public void changed(List<WorkspaceChanges.Change> changes) {
+    if (changes == null || changes.size() > 64)
+      throw new IllegalArgumentException("At most 64 workspace change hints");
+    if (changes.isEmpty()) return;
+    var args = new ArrayList<Object>();
+    for (var change : changes) {
+      Objects.requireNonNull(change);
+      args.add(change.home().isGlobal() ? null : change.home().project());
+      args.add(change.owner());
+      args.add(change.session());
+    }
+    args.add(at(clock.instant()));
+    // Five seconds is a minimum reconciliation cadence, not a trailing debounce: constant
+    // events cannot keep moving the deadline. A dirty workspace needs no repeated row rewrite.
+    jdbc.update(
+        "WITH hints(project,owner,session) AS (VALUES "
+            + String.join(",", Collections.nCopies(changes.size(), "(?::text,?::text,?::text)"))
+            + ") UPDATE code_workspaces w SET generation=generation+1,state='dirty',"
+            + "issues='[\"workspace_changed\"]'::jsonb,lease_until=NULL,"
+            + "next_poll=GREATEST(coalesce(scan_started_at,checked_at,'-infinity'::timestamptz)+INTERVAL '5 seconds',?)"
+            + " WHERE w.state<>'dirty' AND EXISTS(SELECT 1 FROM hints h LEFT JOIN projects p ON p.name=h.project"
+            + " WHERE (h.project IS NOT NULL AND w.project_id=p.id) OR"
+            + " (h.project IS NULL AND w.project_id IS NULL AND w.owner_handle=h.owner"
+            + " AND w.session_id IS NOT DISTINCT FROM h.session))",
+        args.toArray());
+  }
+
   public CodeTrackingStatus status(Scope scope) {
     var rows =
         jdbc.query(
@@ -358,11 +388,16 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
       throw new IllegalArgumentException("Code index page must have at most 100 sources");
     if (sources.isEmpty()) return Map.of();
     var arguments = new ArrayList<Object>();
-    var originals = new HashMap<String, String>();
+    record Identity(String key, String hash) {}
+    var originals = new HashMap<Identity, List<String>>();
+    var liveKeys = new HashSet<String>();
     for (var source : sources) {
-      String key = sourceKey(source.key());
-      if (originals.put(key, source.key()) != null)
-        throw new IllegalArgumentException("Duplicate code source");
+      String key = sourceKey(source.retainedKey());
+      if (!liveKeys.add(source.key())) throw new IllegalArgumentException("Duplicate code source");
+      originals
+          .computeIfAbsent(
+              new Identity(key, source.source().sha256()), ignored -> new ArrayList<>())
+          .add(source.key());
       arguments.add(key);
       arguments.add(source.source().sha256());
     }
@@ -372,10 +407,15 @@ public final class JdbcCodeWorkspaceStore implements CodeWorkspaceStore {
     jdbc.query(
         "WITH requested(source_key,source_hash) AS (VALUES "
             + String.join(",", Collections.nCopies(sources.size(), "(?::text,?::text)"))
-            + ") SELECT i.source_key,i.revision_id FROM requested r JOIN code_workspace_indexes i"
+            + ") SELECT i.source_key,i.source_hash,i.revision_id FROM requested r JOIN code_workspace_indexes i"
             + " ON i.source_key=r.source_key AND i.source_hash=r.source_hash WHERE i.workspace_id=? AND i.parser_version=?",
         (org.springframework.jdbc.core.RowCallbackHandler)
-            row -> result.put(originals.get(row.getString(1)), row.getObject(2, UUID.class)),
+            row -> {
+              UUID revision = row.getObject(3, UUID.class);
+              originals
+                  .get(new Identity(row.getString(1), row.getString(2)))
+                  .forEach(key -> result.put(key, revision));
+            },
         arguments.toArray());
     return Map.copyOf(result);
   }

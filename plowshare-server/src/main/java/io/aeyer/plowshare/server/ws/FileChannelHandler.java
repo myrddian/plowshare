@@ -2,14 +2,17 @@ package io.aeyer.plowshare.server.ws;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.FileChangeHint;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.files.SessionGoneException;
+import io.aeyer.plowshare.server.files.WorkspaceChanges;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.session.Presence;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
@@ -389,6 +392,29 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   // --- the socket ----------------------------------------------------------
 
   private SocketAuthorization socketAuthorization;
+  private WorkspaceChanges workspaceChanges;
+
+  /** File serving remains usable without the optional code-tracking capability. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void useWorkspaceChanges(WorkspaceChanges changes) {
+    this.workspaceChanges = Objects.requireNonNull(changes);
+  }
+
+  private void changed(WebSocketSession socket) {
+    Live live = live(named(socket));
+    if (live == null
+        || live.handle == null
+        || live.socket != socket
+        || workspaceChanges == null
+        || !workspaceChanges.enabled()) return;
+    presences
+        .rootedBy(named(socket))
+        .ifPresent(
+            rooted ->
+                workspaceChanges.changed(
+                    new WorkspaceChanges.Change(
+                        Home.of(rooted.project()), live.handle, named(socket))));
+  }
 
   @org.springframework.beans.factory.annotation.Autowired
   public void useSocketAuthorization(SocketAuthorization authorization) {
@@ -520,6 +546,8 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   private void ready(Live live, String id) {
     Map<String, Object> said = new LinkedHashMap<>();
     said.put("ready", true);
+    if (live.handle != null && workspaceChanges != null && workspaceChanges.enabled())
+      said.put("fileChanges", true);
     presences.rootedBy(id).ifPresent(rooted -> said.put("project", rooted.project()));
     live.sending.lock();
     try {
@@ -536,7 +564,19 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
     if (socketAuthorization != null && !socketAuthorization.current(socket)) return;
     FileReply reply;
     try {
-      reply = json.readValue(message.getPayload(), FileReply.class);
+      var frame = json.readTree(message.getPayload());
+      if (frame != null
+          && frame.isObject()
+          && FileChangeHint.TYPE.equals(frame.path("type").asText())) {
+        // The socket supplies identity. Reject extra fields rather than accepting client-selected
+        // projects, paths or claims of changed hashes. Admission only queues a coalesced hint.
+        if (frame.size() == 1) {
+          json.treeToValue(frame, FileChangeHint.class);
+          changed(socket);
+        }
+        return;
+      }
+      reply = json.treeToValue(frame, FileReply.class);
     } catch (IOException notAReply) {
       // Logged and dropped: there is no id, so there is nothing to fail
       // and nobody to tell. The request it was meant for runs out its
