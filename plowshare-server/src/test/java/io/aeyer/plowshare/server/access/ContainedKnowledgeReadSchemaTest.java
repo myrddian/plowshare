@@ -677,10 +677,18 @@ class ContainedKnowledgeReadSchemaTest {
     var childDocument = retained(childScope);
     var containerDocument = retained(parentScope);
 
+    var unrelatedScope = unrelatedProject("unrelated");
     assertTrue(
         listingScopes(HOLDER, "parent")
             .containsAll(List.of(parentScope, childScope, grandchildScope, siblingScope)),
         "the container's own ceiling resolves its whole readable subtree");
+    // containsAll alone would tolerate a leak into the set, so the set is also bounded: a project
+    // outside the containment subtree is not in a ceiling that never named it.
+    assertFalse(listingScopes(HOLDER, "parent").contains(unrelatedScope));
+    assertEquals(
+        4,
+        listingScopes(HOLDER, "parent").size(),
+        "the subtree and nothing else, counted so nothing can slip in unnoticed");
     assertTrue(admittedByListing(HOLDER, childDocument, "parent"));
     assertTrue(admittedByListing(HOLDER, containerDocument, "parent"));
 

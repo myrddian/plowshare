@@ -237,12 +237,18 @@ END $$;
 -- knowledge_scope_readable stays conjoined to the widened term rather than beside it. The ceiling
 -- grants nothing: a scope the actor cannot read is outside it whether or not it is contained.
 --
+-- The kind test is restated here as it is in the other two bodies, which the rule's own header
+-- asks of a caller that evaluates it per row -- this one does, once per node of the dependency
+-- closure. It is exactly redundant with contained_scope_in_home's body, so it changes no answer;
+-- stating it uniformly in all three is what keeps the convention checkable by reading.
+--
 -- The argument names are reproduced exactly, which V172 and V184 both warn is load-bearing: this
 -- is CREATE OR REPLACE, and PostgreSQL refuses a replacement that renames a parameter.
 CREATE OR REPLACE FUNCTION knowledge_document_in_boundary(revision UUID, actor TEXT, home_project TEXT, global_read BOOLEAN)
  RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
  SELECT count(*)<=1024 AND coalesce(bool_and(coalesce(
-   ((p.name=$3 OR contained_scope_in_home(s.id,$3)) AND knowledge_scope_readable($2,s.id))
+   ((p.name=$3 OR (s.kind='CONTAINED' AND contained_scope_in_home(s.id,$3)))
+     AND knowledge_scope_readable($2,s.id))
    OR (s.kind='ACCOUNT_KNOWLEDGE' AND s.builtin IS NULL AND a.legacy_handle=$2
      AND EXISTS(SELECT 1 FROM projects personal WHERE personal.name=$3 AND personal.personal_owner=$2))
    OR ($4 AND information_global_read_member($2) AND knowledge_general_readable(r.id)),false)),false)
@@ -262,16 +268,19 @@ $$;
 -- V184's guarantee is that this set and the V172 predicate admit identical documents, so the two
 -- bodies move together or the guarantee becomes false. The personal-home arm is untouched.
 --
--- This body is evaluated once per query over every authority scope, not per row, so the
--- containment call sits beside the pre-existing per-scope knowledge_scope_readable call and adds
--- one walk per CONTAINED scope -- the kind test inside contained_scope_in_home is what keeps it
--- off the ordinary ones.
+-- This body is evaluated once per query, not per row, but it scans every authority scope, so the
+-- kind test is RESTATED in the WHERE clause rather than left to contained_scope_in_home's own
+-- body. The rule's header states that convention and the candidates body below follows it: without
+-- it the function CALL is made for every scope row whose project is not the home -- cheap per call,
+-- but on the very listing path V184's header exists because of. Restated, the call is made only for
+-- a CONTAINED scope, and it then costs one walk.
 CREATE OR REPLACE FUNCTION knowledge_readable_scopes(actor text, home_project text) RETURNS SETOF uuid
   LANGUAGE sql STABLE AS $$
   SELECT s.id FROM authority_scopes s
   LEFT JOIN projects p ON p.id = s.project_id
   LEFT JOIN authority_accounts a ON a.id = s.account_id
-  WHERE ((p.name = $2 OR contained_scope_in_home(s.id, $2)) AND knowledge_scope_readable($1, s.id))
+  WHERE ((p.name = $2 OR (s.kind = 'CONTAINED' AND contained_scope_in_home(s.id, $2)))
+          AND knowledge_scope_readable($1, s.id))
      OR (s.kind = 'ACCOUNT_KNOWLEDGE' AND s.builtin IS NULL AND a.legacy_handle = $1
          AND EXISTS(SELECT 1 FROM projects own
                     WHERE own.name = $2 AND own.personal_owner = $1));

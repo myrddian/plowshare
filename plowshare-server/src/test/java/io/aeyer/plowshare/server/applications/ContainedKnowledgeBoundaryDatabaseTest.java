@@ -175,6 +175,9 @@ class ContainedKnowledgeBoundaryDatabaseTest {
     // The container's own home reaches down the chain, which is what a retained ceiling widened
     // downward means on the listing path.
     assertEquals(Set.of(parentScope, childScope), new HashSet<>(readableScopes("parent")));
+    // A set comparison would tolerate the same scope arriving twice from the hoisted array, which
+    // the predicate's ANY() would hide; the size keeps the old exact-list strength.
+    assertEquals(2, readableScopes("parent").size(), "each scope exactly once");
     assertFalse(readableScopes("parent").contains(globalScope));
     // A live account with no role on any ancestor resolves nothing at either home. Containment
     // carries a role down; it does not manufacture one.
