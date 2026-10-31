@@ -441,11 +441,26 @@ first: Review Focus 3's test is its evidence.
 - [ ] **Step 3: Amend the ADR**
 
 Update the inventory rows, replace the knowledge-read limitation with what now
-holds, and record the two decisions this slice took that the spec left open: the
-64-level structural sentinel as distinct from the policy depth bound, and
-`resources` returning metadata without content. State plainly what still does
-not ship — nothing executes a contained child, so these reads are proved against
-inserted rows rather than against a running one.
+holds, and record the three decisions this slice took that the spec left open:
+the 64-level structural sentinel as distinct from the policy depth bound,
+`resources` returning metadata without content, and the one below.
+
+**The limitation this slice only half lifts, which the ADR must state exactly.**
+A contained scope is now admitted to the read predicates, and an ancestor reads
+a descendant's documents within the descendant's boundary. But a child reading
+its **own documents** back is still refused, and not by the kind fence this
+slice removed: `knowledge_revision_readable` opens with
+`information_global_read_member(actor)`, which requires an `admins` row, and a
+contained principal holds no credential material by design (V210). Scope
+admission cannot reach that gate. Granting a credential-less principal
+general-read membership is an authority decision, it belongs with the slice that
+makes a child execute, and nothing in this slice reads as the child — so it has
+no consumer here. Task 1 pins the refusal with a test that identifies the gate.
+Record it as a named prerequisite of the execution slice, not as an oversight.
+
+State plainly what still does not ship — nothing executes a contained child, so
+every read here is proved against inserted rows rather than against a running
+one.
 
 - [ ] **Step 4: Commit**
 
