@@ -2,9 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make a contained Application able to read its own knowledge home, and
-its ancestors able to read into it, so that a container can see what it confined
-produced.
+**Goal:** Make a contained Application's knowledge home readable by its
+ancestors, so that a container can see what it confined produced, and admit the
+child's own scope to the read predicates.
+
+**What this goal does not include, decided during Task 1.** A child reading its
+own *documents* back is **not** in this slice. Scope admission is only the first
+of two gates: `knowledge_revision_readable` opens with
+`information_global_read_member(actor)`, which requires an `admins` row, and a
+contained principal deliberately holds no credential material (V210). Granting a
+credential-less principal general-read membership is the authority question
+[ADR 0042](../../decisions/0042-nested-application-containment.md) scoped out,
+and it belongs with the slice that makes a child execute — because nothing
+executes a contained child yet, **nothing in this slice reads as the child**, so
+the capability has no consumer here. It fails closed. Task 1 pins the refusal
+with a test that identifies that gate rather than guessing at it, and Task 5
+records it.
 
 **Architecture:** Slice one made every read predicate refuse a `CONTAINED` scope
 by kind, which fails closed and leaves a child unable to read even itself. This
