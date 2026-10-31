@@ -137,7 +137,7 @@ public interface ContainedApplications {
       Objects.requireNonNull(revision);
       if (path == null || path.isBlank() || path.length() > 1024)
         throw new IllegalArgumentException("A resource names its path");
-      if (!kind.equals("manifest") && !kind.equals("file"))
+      if (!"manifest".equals(kind) && !"file".equals(kind))
         throw new IllegalArgumentException("A resource is a manifest or a file");
       if (bytes < 0) throw new IllegalArgumentException("A resource has a non-negative size");
     }

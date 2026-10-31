@@ -71,10 +71,17 @@ public final class SourceContainedApplications implements ContainedApplications 
 
   private static final String PREFIX = io.aeyer.plowshare.protocol.ContainedProjects.PREFIX;
 
-  /** The package limits creation enforces, restated as the bound on a listing. */
-  private static final int MAX_RESOURCES = 128;
+  /** The package's file limit, referenced rather than restated so the two cannot drift. */
+  private static final int MAX_RESOURCES = SourceApplicationDeployments.MAX_FILES;
 
+  /** The package's 16 directory levels under the staged revision, plus the files themselves. */
   private static final int MAX_RESOURCE_DEPTH = 17;
+
+  /**
+   * Directory entries one listing may visit: the package's files and directories with generous
+   * headroom, so a hand-planted tree cannot make a listing walk without end.
+   */
+  private static final long MAX_RESOURCE_ENTRIES = MAX_RESOURCES * 32L;
 
   private final ContainedApplicationRepository records;
   private final ProjectWorkspaces projects;
@@ -511,9 +518,15 @@ public final class SourceContainedApplications implements ContainedApplications 
    * <p>The order is the contract: the child is found, the caller's live authority is proved, the
    * chain must reach the caller, and only then is liveness checked and the directory opened. The
    * directory is derived from the child's project name under the configured root, never from a
-   * stored path. Links are neither followed nor listed, and the walk is bounded by the package
-   * limits ({@link #MAX_RESOURCES} files, {@link #MAX_RESOURCE_DEPTH} levels) so an area that grew
-   * past what creation permits refuses rather than being enumerated without end.
+   * stored path. Links are neither followed nor listed.
+   *
+   * <p>The walk itself is bounded, not just the answer: it is lazy, stops at {@link
+   * #MAX_RESOURCE_ENTRIES} visited entries or {@link #MAX_RESOURCES} files, and sorts only what it
+   * kept. An area past either bound, or a live child whose area is not a real directory, is a
+   * server-side inconsistency and not something the container did, so both raise {@link
+   * IllegalStateException} rather than a caller fault, and neither is ever an empty success: a
+   * valid package always contains its manifest, so "no resources" would be a wrong answer a parent
+   * agent acts on.
    */
   // Unlike trajectory, this refuses a destroyed child. Not an inconsistency: trajectory reads
   // retained conversation lineage, which is history and deliberately survives destruction, whereas
@@ -525,21 +538,28 @@ public final class SourceContainedApplications implements ContainedApplications 
     var retained =
         records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
     var parent = parent(account, conversation);
+    if (!config.configured()) throw new CallerFault("Containment is not configured");
     requireAncestor(parent.admission().scope(), retained);
     if (!retained.live()) throw new CallerFault("That contained Application has been destroyed");
-    if (!config.configured()) throw new CallerFault("Containment is not configured");
     Path staged =
         workspace(retained.project()).resolve("revisions").resolve(retained.revision().toString());
-    if (!Files.isDirectory(staged, LinkOption.NOFOLLOW_LINKS)) return List.of();
+    if (!Files.isDirectory(staged, LinkOption.NOFOLLOW_LINKS))
+      throw new IllegalStateException(
+          "A live contained Application's source area is missing or is not a directory");
     var found = new ArrayList<Resource>();
-    try (var entries = Files.walk(staged, MAX_RESOURCE_DEPTH)) {
-      for (Path path : entries.sorted().toList()) {
+    try (var entries = Files.walk(staged, MAX_RESOURCE_DEPTH).limit(MAX_RESOURCE_ENTRIES + 1)) {
+      long visited = 0;
+      for (Path path : (Iterable<Path>) entries::iterator) {
+        if (++visited > MAX_RESOURCE_ENTRIES)
+          throw new IllegalStateException(
+              "A contained Application's source area exceeds the package limits");
         var attributes =
             Files.readAttributes(
                 path, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (!attributes.isRegularFile()) continue;
         if (found.size() >= MAX_RESOURCES)
-          throw new CallerFault("That contained Application's source exceeds the package limit");
+          throw new IllegalStateException(
+              "A contained Application's source area exceeds the package limits");
         String relative =
             staged.relativize(path).toString().replace(java.io.File.separatorChar, '/');
         found.add(
@@ -553,6 +573,7 @@ public final class SourceContainedApplications implements ContainedApplications 
       throw new java.io.UncheckedIOException(
           "Could not list a contained Application's source", unreadable);
     }
+    found.sort(java.util.Comparator.comparing(Resource::path));
     return List.copyOf(found);
   }
 

@@ -205,8 +205,37 @@ class ContainedResourceReadTest {
     conversation("c-parent", parentScope, "parent");
     var first = child(firstScope, parentScope, true);
 
+    // The configuration guard is what fires, not the ancestor gate's depth bound.
+    assertEquals(
+        "Containment is not configured",
+        assertThrows(
+                CallerFault.class,
+                () -> unconfigured.resources("@service/parent", "c-parent", first.id()))
+            .getMessage());
+  }
+
+  @Test
+  void aSourceAreaPastThePackageLimitRefusesRatherThanBeingListed() throws Exception {
+    conversation("c-parent", parentScope, "parent");
+    var first = child(firstScope, parentScope, true);
+    for (int n = 0; n < 128; n++) stage(first, "f" + n + ".txt", "x");
+    assertEquals(128, service.resources("@service/parent", "c-parent", first.id()).size());
+
+    stage(first, "one-too-many.txt", "x");
+
     assertThrows(
-        CallerFault.class, () -> unconfigured.resources("@service/parent", "c-parent", first.id()));
+        IllegalStateException.class,
+        () -> service.resources("@service/parent", "c-parent", first.id()));
+  }
+
+  @Test
+  void aLiveChildWithNoSourceAreaRefusesRatherThanAnsweringEmpty() {
+    conversation("c-parent", parentScope, "parent");
+    var first = child(firstScope, parentScope, true);
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> service.resources("@service/parent", "c-parent", first.id()));
   }
 
   @Test

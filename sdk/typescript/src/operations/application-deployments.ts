@@ -1,7 +1,7 @@
 import { utf8Length } from '../binding/files.ts';
 import { isList } from '../binding/values.ts';
 import { fileStoreReference } from '../binding/filestores.ts';
-import { record, list, named, nullable } from './wire-checks.ts';
+import { record, list, named, nullable, count } from './wire-checks.ts';
 
 /** Source packages contain portable UTF-8 text; runtime data is admitted separately. */
 export interface ApplicationSourceFile {
@@ -284,8 +284,7 @@ export const containedResourceCheck = record({
   kind: (value: unknown): value is 'manifest' | 'file' =>
     value === 'manifest' || value === 'file',
   revision: deploymentUuid,
-  bytes: (value: unknown): value is number =>
-    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+  bytes: count,
 });
 export const containedResourcesCheck = record({
   resources: list(containedResourceCheck),
