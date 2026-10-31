@@ -233,6 +233,13 @@ export interface ExtendedPayloads
     readonly conversation: string;
     readonly child: string;
   };
+  // A child's source resources as metadata only, to an ancestor only. Keyed and proved exactly as
+  // the trajectory read is. The reply never carries file content: a child's writes are untrusted
+  // input to its container.
+  'application.child.resources': {
+    readonly conversation: string;
+    readonly child: string;
+  };
   'filestore.list': Record<string, never>;
   'application.deployment.status': { readonly project: string };
   'application.deployment.receipt': {
@@ -499,6 +506,7 @@ export const CLI_OPERATIONS = {
   'application child destroy': 'application.child.destroy',
   'application child list': 'application.child.list',
   'application child trajectory': 'application.child.trajectory',
+  'application child resources': 'application.child.resources',
   'filestore list': 'filestore.list',
   'application deployment status': 'application.deployment.status',
   'application deployment receipt': 'application.deployment.receipt',

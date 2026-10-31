@@ -29,6 +29,7 @@ import {
   containedDestructionCheck,
   containedChildrenCheck,
   containedTrajectoryCheck,
+  containedResourcesCheck,
   deploymentStatusCheck,
   type ApplicationDeploymentReceipt,
   type ContainedApplicationChild,
@@ -36,6 +37,7 @@ import {
   type ContainedApplicationDestruction,
   type ContainedApplicationChildren,
   type ContainedApplicationTrajectory,
+  type ContainedApplicationResources,
   type ApplicationDeploymentStatus,
 } from './application-deployments.ts';
 import {
@@ -463,6 +465,7 @@ export interface ConversationReplies {
   'application.child.destroy': ContainedApplicationDestruction;
   'application.child.list': ContainedApplicationChildren;
   'application.child.trajectory': ContainedApplicationTrajectory;
+  'application.child.resources': ContainedApplicationResources;
   'filestore.list': FileStoreCatalog;
   'application.deployment.status': ApplicationDeploymentStatus;
   'application.create': ProjectView;
@@ -945,6 +948,7 @@ const readers = {
   'application.child.destroy': containedDestructionCheck,
   'application.child.list': containedChildrenCheck,
   'application.child.trajectory': containedTrajectoryCheck,
+  'application.child.resources': containedResourcesCheck,
   'filestore.list': fileStoreCatalogCheck,
   'application.deployment.status': deploymentStatusCheck,
   'application.create': project,

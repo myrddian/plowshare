@@ -252,6 +252,19 @@ export interface ContainedApplicationStep {
 export interface ContainedApplicationTrajectory {
   readonly steps: readonly ContainedApplicationStep[];
 }
+/**
+ * One source resource of a contained Application, described and never delivered: there is no
+ * content field, because a child's writes are untrusted input to its container.
+ */
+export interface ContainedApplicationResource {
+  readonly path: string;
+  readonly kind: 'manifest' | 'file';
+  readonly revision: string;
+  readonly bytes: number;
+}
+export interface ContainedApplicationResources {
+  readonly resources: readonly ContainedApplicationResource[];
+}
 export const containedChildrenCheck = record({
   children: list(containedChildCheck),
 });
@@ -265,6 +278,17 @@ export const containedStepCheck = record({
 });
 export const containedTrajectoryCheck = record({
   steps: list(containedStepCheck),
+});
+export const containedResourceCheck = record({
+  path: named,
+  kind: (value: unknown): value is 'manifest' | 'file' =>
+    value === 'manifest' || value === 'file',
+  revision: deploymentUuid,
+  bytes: (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+});
+export const containedResourcesCheck = record({
+  resources: list(containedResourceCheck),
 });
 export const deploymentStatusCheck = record({
   project: named,

@@ -838,6 +838,7 @@ export const SHAPES: Record<
   'application.child.destroy': [['conversation', 'child'], []],
   'application.child.list': [['conversation'], []],
   'application.child.trajectory': [['conversation', 'child'], []],
+  'application.child.resources': [['conversation', 'child'], []],
   'filestore.list': [[], []],
   'application.deployment.status': [['project'], []],
   'application.deployment.receipt': [['project', 'requestId'], []],
