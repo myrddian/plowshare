@@ -39,10 +39,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *   <li>the two project listings' {@code name NOT LIKE 'contained:%'} predicates, which are what
  *       keep a child out of {@code project.list} and out of the catalogue that Relay worker
  *       enrollment iterates;
- *   <li>{@code authority_project_role}, {@code authority_project_management_grant} and {@code
- *       information_project_readable}, which exclude a contained scope by <em>kind</em> rather than
- *       by name — the reason most Java call sites need no check of their own, and therefore the
- *       claim most worth proving against a real row;
+ *   <li>{@code authority_project_role} and {@code authority_project_management_grant}, which
+ *       exclude a contained scope by <em>kind</em> rather than by name — the reason most Java call
+ *       sites need no check of their own, and therefore the claim most worth proving against a real
+ *       row;
+ *   <li>{@code information_project_readable}, which <strong>no longer</strong> excludes a contained
+ *       scope by kind. V215 widened {@code knowledge_scope_readable}, which this predicate
+ *       composes, so a contained project is readable to an actor holding a project role on a scope
+ *       that transitively contains it, and to nobody else. That is slice two's capability rather
+ *       than a hole, and it is why the assertion here is directional: an ancestor is admitted, a
+ *       global-read member that is not an ancestor is refused. The opened behaviour is covered in
+ *       its own right — the self arm, the chain walk, siblings, the walk sentinel and a broken
+ *       chain — by {@code io.aeyer.plowshare.server.access.ContainedKnowledgeReadSchemaTest}; what
+ *       belongs here is the confinement half, because this class is the addressability inventory's
+ *       evidence;
  *   <li>{@code authority_membership_changed}, a row trigger that mints a grant inside the database
  *       where no Java predicate can see it;
  *   <li>the union's {@code project_type = 'STANDARD'} filter, which is why a child acquires no
@@ -159,8 +169,14 @@ class ContainedAddressabilityDatabaseTest {
         handle);
   }
 
+  /**
+   * The role and management predicates, which V215 did not touch and which still refuse a contained
+   * scope by kind. {@code information_project_readable} is deliberately <em>not</em> asserted here
+   * any more: it no longer refuses, so an assertion about it under this name would make the name
+   * false. {@link #informationReadabilityAdmitsAnAncestorAndRefusesEveryoneElse()} owns it.
+   */
   @Test
-  void everyAuthorityPredicateRefusesAContainedProject() {
+  void everyRoleAndManagementPredicateRefusesAContainedProject() {
     holdsParent("alice");
     // No live grant can name a contained scope, so the role function answers nothing even for the
     // container's own MANAGER -- which is why most Java call sites need no prefix check of their
@@ -172,17 +188,14 @@ class ContainedAddressabilityDatabaseTest {
     assertNull(
         jdbc.queryForObject(
             "SELECT authority_project_management_grant(?,?)", UUID.class, child, "alice"));
-    assertFalse(
-        jdbc.queryForObject(
-            "SELECT information_project_readable(?,?)", Boolean.class, childId, "alice"));
     // The control: the same predicates do answer for the container itself, so a predicate that
     // refused everything would fail here rather than pass as a fence.
     assertEquals(
         "MANAGER",
         jdbc.queryForObject("SELECT authority_project_role(?,?)", String.class, "parent", "alice"));
-    assertTrue(
+    assertNotNull(
         jdbc.queryForObject(
-            "SELECT information_project_readable(?,?)", Boolean.class, parentId, "alice"));
+            "SELECT authority_project_management_grant(?,?)", UUID.class, "parent", "alice"));
 
     // And the repository reads built on them, which is what every call site actually asks.
     assertTrue(members.role(child, "alice").isEmpty());
@@ -193,6 +206,52 @@ class ContainedAddressabilityDatabaseTest {
     assertFalse(members.isMember(child, "alice"));
     assertEquals(Set.of(), members.readableProjects(List.of(child), "alice"));
     assertEquals(Set.of("parent"), members.readableProjects(List.of(child, "parent"), "alice"));
+  }
+
+  /**
+   * {@code information_project_readable} after V215, in both directions in one test, so it fails
+   * whichever way the containment arm breaks.
+   *
+   * <p>The refusal half needs a principal that clears the <em>baseline</em> gate and fails only on
+   * ancestry, or it would prove nothing about containment. {@code information_global_read_member}
+   * is asserted directly for both principals first, because it requires an {@code admins} row and
+   * the seeded {@code GLOBAL_READ} role definition and no grant at all — so every ordinary account
+   * here satisfies it, and a reader who assumes otherwise will mis-explain why this test passes.
+   * The non-ancestor is the server administrator, the widest principal this fixture has, and its
+   * lack of a project role on the container is asserted rather than assumed.
+   */
+  @Test
+  void informationReadabilityAdmitsAnAncestorAndRefusesEveryoneElse() {
+    holdsParent("alice");
+    // Both principals clear the baseline gate, so what follows turns on ancestry alone.
+    assertTrue(
+        jdbc.queryForObject("SELECT information_global_read_member(?)", Boolean.class, "alice"));
+    assertTrue(
+        jdbc.queryForObject("SELECT information_global_read_member(?)", Boolean.class, "admin"));
+
+    // Admitted: alice holds MANAGER on the project of the scope that contains the child, which is
+    // exactly the ancestor arm V215 added. This was a refusal before V215 and is the capability.
+    assertEquals(
+        "MANAGER",
+        jdbc.queryForObject("SELECT authority_project_role(?,?)", String.class, "parent", "alice"));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT information_project_readable(?,?)", Boolean.class, childId, "alice"));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT information_project_readable(?,?)", Boolean.class, parentId, "alice"));
+
+    // Refused: a server administrator is a global-read member and holds no role on the container,
+    // so it is on no chain to the child. server_admin alone mints no grant here, which is the
+    // reason holdsParent exists, and is asserted rather than relied upon.
+    assertNull(
+        jdbc.queryForObject("SELECT authority_project_role(?,?)", String.class, "parent", "admin"));
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_project_readable(?,?)", Boolean.class, childId, "admin"));
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_project_readable(?,?)", Boolean.class, parentId, "admin"));
   }
 
   @Test
