@@ -166,7 +166,10 @@ const asked = (type: ConversationOperation): Request => {
       child: '33333333-3333-3333-3333-333333333333',
       calls: 1,
     });
-  if (type === 'application.child.destroy')
+  if (
+    type === 'application.child.destroy' ||
+    type === 'application.child.resources'
+  )
     return request(type, {
       conversation: 'c',
       child: '33333333-3333-3333-3333-333333333333',

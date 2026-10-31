@@ -980,6 +980,19 @@
       ]
     }
   },
+  "application.child.resources": {
+    "code": "OK",
+    "payload": {
+      "resources": [
+        {
+          "path": "plowshare.json",
+          "kind": "manifest",
+          "revision": "22222222-2222-2222-2222-222222222222",
+          "bytes": 12
+        }
+      ]
+    }
+  },
   "application.deployment.receipt": {
     "code": "OK",
     "payload": {
