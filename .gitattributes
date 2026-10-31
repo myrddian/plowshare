@@ -1,0 +1,38 @@
+# Generated contract catalogs. Every path below is rendered wholesale by a
+# generator and must never be merged textually: the renderings are positional,
+# so one added operation or DTO field renumbers shapes across all of them.
+#
+# The plowshare-generated driver resolves such a conflict to our side and
+# leaves the output stale; sdkContractCheck then fails until the catalogs are
+# regenerated from the merged sources. Register the driver once per clone with
+# `sh scripts/git-merge-generated.sh --install`. Without registration Git warns
+# about the unknown driver and falls back to the ordinary text merge, which is
+# the behavior these paths have today.
+#
+# Owning generators:
+#   sdk/typescript/scripts/generate-operation-schemas.mjs
+#   scripts/generate-tool-schema-contracts.mjs
+#   scripts/generate-native-sdk-contracts.mjs
+#   scripts/generate-sdk-contracts.mjs
+
+sdk/typescript/src/operations/operation-schemas.ts  merge=plowshare-generated
+sdk/typescript/src/operations/schema-definition.ts  merge=plowshare-generated
+plowshare-console/src/transport-schemas.ts          merge=plowshare-generated
+plowshare-desktop/src/request-schemas.ts            merge=plowshare-generated
+
+sdk/python/src/plowshare/_protocol.py               merge=plowshare-generated
+sdk/python/src/plowshare/_schemas.json              merge=plowshare-generated
+sdk/python/src/plowshare/contracts.py               merge=plowshare-generated
+sdk/python/src/plowshare/schema_definition.py       merge=plowshare-generated
+
+sdk/go/protocol_generated.go                        merge=plowshare-generated
+sdk/go/schemas.json                                 merge=plowshare-generated
+sdk/go/contracts_generated.go                       merge=plowshare-generated
+sdk/go/schema_definition_generated.go               merge=plowshare-generated
+
+sdk/dotnet/Plowshare.Sdk/Protocol.g.cs              merge=plowshare-generated
+sdk/dotnet/Plowshare.Sdk/Schemas.json               merge=plowshare-generated
+sdk/dotnet/Plowshare.Sdk/Contracts.g.cs             merge=plowshare-generated
+sdk/dotnet/Plowshare.Sdk/SchemaDefinition.g.cs      merge=plowshare-generated
+
+test-support/contracts/sdk-protocol.json            merge=plowshare-generated
