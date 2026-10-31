@@ -2,7 +2,9 @@ package io.aeyer.plowshare.server.applications;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
@@ -114,15 +116,13 @@ class ContainedKnowledgeBoundaryDatabaseTest {
    * non-revision arguments. The scope array is built in SQL for the same reason the repository
    * builds it in SQL: the predicate takes {@code uuid[]} and the driver has no binding for one.
    *
-   * <p><strong>The array is supplied by hand, and for a contained scope that is
-   * counterfactual.</strong> {@link #aContainedHomeResolvesAnEmptyReadableSet()} shows production
-   * cannot build an array holding a contained scope at all, because {@code
-   * knowledge_scope_readable} admits no {@code CONTAINED} kind. So every assertion below that
-   * passes {@code childScope} asks what the closure predicate <em>would</em> decide if that scope
-   * were ever readable — which is the right question for pinning closure semantics, and is not
-   * evidence that any caller can obtain that answer today. The widening that would make it
-   * producible is ADR 0042's recorded gap and is not this slice's. Reality is therefore stricter
-   * than these tests, never looser, which is why the fence conclusions hold regardless.
+   * <p><strong>The array is supplied by hand so that one ceiling can be posed at a time.</strong>
+   * It is no longer counterfactual: V215 admits a contained scope to its own principal and to its
+   * ancestors, and {@link #aContainedHomeResolvesTheSubtreeAndNothingAbove()} shows {@code
+   * knowledge_readable_scopes} really does build an array holding {@code childScope}. What stays
+   * hand-supplied is the <em>pairing</em> of a ceiling with a revision, because these tests are
+   * about the closure predicate's {@code bool_and} and want each ceiling named explicitly rather
+   * than derived from an actor.
    */
   private boolean admittedUnderHandSuppliedCeiling(
       UUID revision, boolean globalRead, UUID... readable) {
@@ -143,25 +143,50 @@ class ContainedKnowledgeBoundaryDatabaseTest {
   }
 
   /**
-   * Where the array the predicate takes comes from, and what a contained home resolves to:
-   * <b>nothing at all</b>, which is the opposite of what a reader might expect and is why this test
-   * is named for the empty set rather than for the child's own scope.
+   * Where the array the predicate takes comes from, restated for what V215 now admits. This test
+   * asserted an empty set while slice one refused a {@code CONTAINED} scope by kind: a reader under
+   * a contained home resolved nothing, not even the child's own scope. That limitation is the one
+   * this slice lifts, so the empty-set claim is obsolete by design and the new contract is stated
+   * here in its place.
    *
-   * <p>{@code knowledge_scope_readable} admits {@code ACCOUNT_KNOWLEDGE}, the {@code
-   * GLOBAL_KNOWLEDGE} builtin, {@code PROJECT} and {@code PERSONAL}, and a contained scope is none
-   * of those — the SQL-side closure this slice already shipped. So a reader under a contained home
-   * resolves an empty readable set: neither its container's scope nor the Global tier, which is the
-   * fence, and <em>not its own scope either</em>, which is ADR 0042's recorded gap and is what
-   * makes every hand-supplied {@code childScope} array in this class counterfactual.
+   * <p>The actor is {@code READER}, a human account holding MANAGER on {@code parent} — an
+   * <em>ancestor</em> of the child's scope, which is the whole reason anything resolves. Under the
+   * child's own home it resolves exactly the child's scope; under the container's home it resolves
+   * the container's scope and the child's, because the ceiling now reaches down the containment
+   * chain. Neither home resolves the Global tier, and the child's home never resolves its
+   * container's scope: the direction is one-way and the refusal is what pins it.
+   *
+   * <p>Two gates sit outside this set and are deliberately untouched. An actor with no role on any
+   * ancestor resolves nothing, however live its account — that is {@code authority_project_role}'s,
+   * asserted below. And the child's <em>own</em> principal cannot read its documents back even
+   * though this set would hold its scope, because {@code knowledge_revision_readable} opens with
+   * {@code information_global_read_member} and a bare-UUID contained principal has no {@code
+   * admins} row to be a member through; that refusal is pinned in {@code
+   * ContainedKnowledgeReadSchemaTest} and is out of this slice by ruling.
    */
   @Test
-  void aContainedHomeResolvesAnEmptyReadableSet() {
-    assertEquals(List.of(), readableScopes(childProject));
-    assertFalse(readableScopes(childProject).contains(parentScope));
+  void aContainedHomeResolvesTheSubtreeAndNothingAbove() {
+    assertEquals(
+        List.of(childScope),
+        readableScopes(childProject),
+        "an ancestor's role resolves the child's own scope under the child's home");
+    assertFalse(readableScopes(childProject).contains(parentScope), "and never its container's");
     assertFalse(readableScopes(childProject).contains(globalScope));
-    // The container's own home still resolves to the container's own scope and to nothing of the
-    // child's, so the fence is a fence and not a general refusal of every home.
-    assertEquals(List.of(parentScope), readableScopes("parent"));
+    // The container's own home reaches down the chain, which is what a retained ceiling widened
+    // downward means on the listing path.
+    assertEquals(Set.of(parentScope, childScope), new HashSet<>(readableScopes("parent")));
+    assertFalse(readableScopes("parent").contains(globalScope));
+    // A live account with no role on any ancestor resolves nothing at either home. Containment
+    // carries a role down; it does not manufacture one.
+    jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('outsider','fixture')");
+    assertTrue(jdbc.queryForObject("SELECT account_active('outsider')", Boolean.class));
+    assertEquals(
+        List.of(),
+        jdbc.queryForList(
+            "SELECT knowledge_readable_scopes('outsider',?)", UUID.class, childProject));
+    assertEquals(
+        List.of(),
+        jdbc.queryForList("SELECT knowledge_readable_scopes('outsider','parent')", UUID.class));
   }
 
   @Test
@@ -177,8 +202,10 @@ class ContainedKnowledgeBoundaryDatabaseTest {
     assertFalse(
         admittedUnderHandSuppliedCeiling(own, false, globalScope),
         "and the Global tier is not its home either");
-    // The container, reading under its own ceiling, sees its own home and not the child's. A
-    // parent reaches a child through application.child.* and never by widening its read home.
+    // The predicate is a membership test over the array it is handed and nothing more, which the
+    // pair below is here to keep explicit: handed only the container's scope it admits only the
+    // container's row, even though the container's real ceiling now resolves the child's scope too
+    // -- aContainedHomeResolvesTheSubtreeAndNothingAbove is where that array is asserted.
     assertTrue(admittedUnderHandSuppliedCeiling(above, false, parentScope));
     assertFalse(admittedUnderHandSuppliedCeiling(own, false, parentScope));
   }
@@ -198,7 +225,7 @@ class ContainedKnowledgeBoundaryDatabaseTest {
 
     assertTrue(
         admittedUnderHandSuppliedCeiling(derivedFromInside, false, childScope),
-        "a closure wholly inside the subtree would be admitted, were the subtree readable");
+        "a closure wholly inside the subtree is admitted");
     assertFalse(
         admittedUnderHandSuppliedCeiling(derivedFromOutside, false, childScope),
         "a closure that leaves the subtree refuses the derived revision entirely");
@@ -213,10 +240,11 @@ class ContainedKnowledgeBoundaryDatabaseTest {
    *
    * <p>This is the whole of the decision that a contained Application has its own writable
    * knowledge home: V157's identity trigger resolves {@code home_scope_id} to the contained scope,
-   * so the row is the child's and is in no other home. It deliberately stops there. The child
-   * <em>cannot</em> read that row back — {@link #aContainedHomeResolvesAnEmptyReadableSet()} is why
-   * — and the trailing assertion says only what the closure predicate would decide if the subtree
-   * were readable, which no caller can ask today.
+   * so the row is the child's and is in no other home. It deliberately stops there. The child still
+   * <em>cannot</em> read that row back, but the reason is no longer scope admission: {@link
+   * #aContainedHomeResolvesTheSubtreeAndNothingAbove()} shows the scope resolves. It is {@code
+   * knowledge_revision_readable}'s {@code information_global_read_member} gate, which a bare-UUID
+   * principal cannot satisfy, and which this slice deliberately does not weaken.
    */
   @Test
   void aChildWritesKnowledgeInsideItsOwnHome() {
@@ -229,7 +257,7 @@ class ContainedKnowledgeBoundaryDatabaseTest {
             UUID.class,
             written),
         "the write is in the child's own home and in no other");
-    // Counterfactual, as the helper's name says: production cannot build this array.
+    // Production builds exactly this array for the child's own home; see the helper's note.
     assertTrue(admittedUnderHandSuppliedCeiling(written, false, childScope));
   }
 

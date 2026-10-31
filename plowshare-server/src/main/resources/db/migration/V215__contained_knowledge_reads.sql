@@ -30,12 +30,14 @@
 -- ceiling's own readability conjunct is untouched, so the widened term can admit nothing that
 -- scope admission has not already admitted, and it still only ever narrows the read.
 --
--- One boundary chokepoint is deliberately NOT widened: knowledge_readable_scopes (V184), the
--- hoisted form of the exact-target ceiling that InformationSql.boundary pairs with
--- knowledge_document_admitted. Widening it is outside this task's authorized scope, so the hoist
--- and the reference predicate it was introduced to be equivalent to now disagree about a contained
--- descendant, and the legacy listing path still refuses cross-boundary what discovery and exact
--- target reads admit. That divergence is reported as a gap rather than closed here.
+-- Three bodies decide that ceiling and all three are widened together, because each is reached by
+-- a different caller and a half-widening would be a silent disagreement rather than a narrower
+-- capability: knowledge_document_in_boundary (V172), the exact-target reference predicate;
+-- knowledge_readable_scopes (V184), the hoisted form of it that InformationSql.boundary pairs with
+-- knowledge_document_admitted on the listing path; and knowledge_readable_candidates (V198), which
+-- discovery and exact-target selection resolve through. V184's documented guarantee is that its
+-- hoist and the V172 predicate admit identical sets, which is why widening one without the other
+-- would leave a false invariant behind rather than merely less capability.
 
 -- The container chain above a scope, resolved ONCE, nearest first.
 --
@@ -66,14 +68,6 @@ CREATE FUNCTION contained_scope_ancestors(descendant UUID) RETURNS SETOF UUID
  ) SELECT id FROM chain;
 $$;
 
--- Is `ancestor` on `descendant`'s container chain, exclusive of `descendant` itself? Expressed over
--- the walk above so there is one definition of ancestry; the signature is unchanged because callers
--- outside this migration resolve it.
-CREATE FUNCTION contained_scope_within(descendant UUID, ancestor UUID) RETURNS BOOLEAN
- LANGUAGE SQL STABLE AS $$
- SELECT EXISTS(SELECT 1 FROM contained_scope_ancestors($1) AS chain(id) WHERE chain.id=$2);
-$$;
-
 -- The containment half of the retained read ceiling, declared once and consulted by both boundary
 -- bodies below for the same reason the admission rule above is shared: they decide the same
 -- question in independent SQL and must not drift.
@@ -84,10 +78,11 @@ $$;
 -- its container, and a sibling's never contains a sibling's, because neither appears on the
 -- other's chain. A NULL home_project matches nothing, which is the refusing direction.
 --
--- Ancestry comes from contained_scope_ancestors, resolved once per scope asked about, rather than
--- from contained_scope_within called once per candidate ancestor project. The kind test is what
--- keeps the walk off the overwhelming majority of scopes, which are not contained at all; callers
--- on a hot path restate it so the call itself is never made per ordinary row.
+-- Ancestry comes from one join over contained_scope_ancestors, resolved once per scope asked
+-- about, rather than from a per-candidate-ancestor boolean test that would re-walk the chain for
+-- every scope the boundary project owns. The kind test is what keeps the walk off the overwhelming
+-- majority of scopes, which are not contained at all; callers on a hot path restate it so the call
+-- itself is never made per ordinary row.
 CREATE FUNCTION contained_scope_in_home(scope UUID, home_project TEXT) RETURNS BOOLEAN
  LANGUAGE SQL STABLE AS $$
  SELECT EXISTS(SELECT 1 FROM authority_scopes s WHERE s.id=$1 AND s.kind='CONTAINED'
@@ -232,7 +227,7 @@ BEGIN
  SELECT a.id,a.member,s.id FROM actor_fact a LEFT JOIN readable_scopes s ON true;
 END $$;
 
--- Ceiling chokepoint 1 of 2: the exact-target retained ceiling. Reproduced verbatim from V172:96
+-- Ceiling chokepoint 1 of 3: the exact-target retained ceiling. Reproduced verbatim from V172:96
 -- with one change, in the first arm only: the resource's home project may be the boundary home OR
 -- inside the containment subtree rooted at it. The account-knowledge and global arms, the 1024
 -- closure sentinel and the bool_and over knowledge_dependency_revisions are untouched, so a
@@ -257,7 +252,32 @@ CREATE OR REPLACE FUNCTION knowledge_document_in_boundary(revision UUID, actor T
  LEFT JOIN authority_accounts a ON a.id=s.account_id;
 $$;
 
--- Ceiling chokepoint 2 of 2: the ceiling discovery and exact-target selection actually decide.
+-- Ceiling chokepoint 2 of 3: the hoisted form of the predicate above, which is what the listing
+-- path actually evaluates -- InformationSql.boundary pairs it with knowledge_document_admitted,
+-- resolving it once per query into an InitPlan. Reproduced verbatim from V184:26 with the same
+-- one change the predicate took, in the same arm: the scope's project may be the boundary home OR
+-- the scope may be contained inside the subtree rooted at it, and knowledge_scope_readable stays
+-- conjoined so the set can hold nothing scope admission has not already admitted.
+--
+-- V184's guarantee is that this set and the V172 predicate admit identical documents, so the two
+-- bodies move together or the guarantee becomes false. The personal-home arm is untouched.
+--
+-- This body is evaluated once per query over every authority scope, not per row, so the
+-- containment call sits beside the pre-existing per-scope knowledge_scope_readable call and adds
+-- one walk per CONTAINED scope -- the kind test inside contained_scope_in_home is what keeps it
+-- off the ordinary ones.
+CREATE OR REPLACE FUNCTION knowledge_readable_scopes(actor text, home_project text) RETURNS SETOF uuid
+  LANGUAGE sql STABLE AS $$
+  SELECT s.id FROM authority_scopes s
+  LEFT JOIN projects p ON p.id = s.project_id
+  LEFT JOIN authority_accounts a ON a.id = s.account_id
+  WHERE ((p.name = $2 OR contained_scope_in_home(s.id, $2)) AND knowledge_scope_readable($1, s.id))
+     OR (s.kind = 'ACCOUNT_KNOWLEDGE' AND s.builtin IS NULL AND a.legacy_handle = $1
+         AND EXISTS(SELECT 1 FROM projects own
+                    WHERE own.name = $2 AND own.personal_owner = $1));
+$$;
+
+-- Ceiling chokepoint 3 of 3: the ceiling discovery and exact-target selection actually decide.
 -- Reproduced verbatim from V198:5 with two changes and no others: the boundary_descendants CTE
 -- below, and the in_boundary term's first arm, which gains the same containment disjunct the
 -- predicate above gained. The readable, selected and general arms, the per-root bool_and in

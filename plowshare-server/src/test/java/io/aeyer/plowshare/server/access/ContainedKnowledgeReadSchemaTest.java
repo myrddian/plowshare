@@ -295,6 +295,33 @@ class ContainedKnowledgeReadSchemaTest {
         .contains(revision);
   }
 
+  /**
+   * The scope set the listing path hoists once per query, as {@code InformationSql.boundary} builds
+   * it. This is the production form of the ceiling: {@code knowledge_document_in_boundary} has no
+   * caller in main source outside the migrations.
+   */
+  private List<UUID> listingScopes(String actor, String home) {
+    return jdbc.queryForList("SELECT knowledge_readable_scopes(?,?)", UUID.class, actor, home);
+  }
+
+  /**
+   * Exactly {@code InformationSql.boundary}'s predicate, with the ceiling hoisted into its two
+   * non-revision arguments. General read is false because that is the flag a contained admission's
+   * {@code KnowledgeReadScope} always carries, which {@code ContainedVisibilityTest} pins with
+   * mocks; the array is built in SQL because the predicate takes {@code uuid[]} and the driver has
+   * no binding for one.
+   */
+  private boolean admittedByListing(String actor, UUID revision, String home) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT knowledge_document_admitted(?,FALSE,"
+                + "ARRAY(SELECT knowledge_readable_scopes(?::text,?::text)))",
+            Boolean.class,
+            revision,
+            actor,
+            home));
+  }
+
   /** The boundary home a request names when it selects a contained scope's own project. */
   private String home(UUID scope) {
     return homes.get(scope).name();
@@ -632,6 +659,63 @@ class ContainedKnowledgeReadSchemaTest {
     assertFalse(inBoundary(HOLDER, published, home(childScope)));
     assertFalse(inBoundary(HOLDER, published, "parent"));
     assertTrue(inBoundaryWithGeneralRead(HOLDER, published, home(childScope)));
+  }
+
+  /**
+   * The same widening on the path production actually evaluates. {@code InformationSql.boundary}
+   * hoists {@code knowledge_readable_scopes} once per query and pairs it with {@code
+   * knowledge_document_admitted}, so a ceiling widened only in the exact-target predicate would
+   * leave every listing refusing what an exact read admits — and would leave V184's documented
+   * guarantee that the two admit identical sets false.
+   *
+   * <p>The refusals are what make it directional: a reader with no role in the subtree resolves no
+   * scope at all, a sibling's ceiling reaches nothing of the child's, and no ceiling anywhere
+   * reaches upward.
+   */
+  @Test
+  void aContainersListingCeilingAdmitsItsDescendantsScopes() {
+    var childDocument = retained(childScope);
+    var containerDocument = retained(parentScope);
+
+    assertTrue(
+        listingScopes(HOLDER, "parent")
+            .containsAll(List.of(parentScope, childScope, grandchildScope, siblingScope)),
+        "the container's own ceiling resolves its whole readable subtree");
+    assertTrue(admittedByListing(HOLDER, childDocument, "parent"));
+    assertTrue(admittedByListing(HOLDER, containerDocument, "parent"));
+
+    // No role in the subtree: a live global-read member still resolves nothing to read.
+    assertEquals(List.of(), listingScopes(STRANGER, "parent"));
+    assertFalse(admittedByListing(STRANGER, childDocument, "parent"));
+    // Sideways.
+    assertFalse(listingScopes(siblingPrincipal, home(siblingScope)).contains(childScope));
+    assertFalse(admittedByListing(siblingPrincipal, childDocument, home(siblingScope)));
+    assertFalse(admittedByListing(HOLDER, childDocument, home(siblingScope)));
+    // Upward, for the descendant's own principal and for the role holder alike: a descendant's
+    // ceiling never resolves its container's scope, so what refuses is the ceiling and not the
+    // absence of a role.
+    assertFalse(listingScopes(grandchildPrincipal, home(grandchildScope)).contains(childScope));
+    assertFalse(listingScopes(HOLDER, home(childScope)).contains(parentScope));
+    assertFalse(admittedByListing(grandchildPrincipal, containerDocument, home(grandchildScope)));
+    assertFalse(admittedByListing(HOLDER, containerDocument, home(childScope)));
+  }
+
+  /**
+   * Direct coverage of the walk itself, which every containment rule in this migration is expressed
+   * over: nearest ancestor first, exclusive of the scope asked about, and empty for a scope that is
+   * contained in nothing.
+   */
+  @Test
+  void theContainerChainResolvesNearestAncestorFirst() {
+    assertEquals(
+        List.of(childScope, parentScope),
+        jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, grandchildScope));
+    assertEquals(
+        List.of(parentScope),
+        jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, childScope));
+    assertEquals(
+        List.of(),
+        jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, parentScope));
   }
 
   /**
