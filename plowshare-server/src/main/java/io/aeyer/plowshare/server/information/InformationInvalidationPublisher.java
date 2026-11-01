@@ -48,6 +48,7 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
             Set.of(
                 Domain.DOCUMENTS,
                 Domain.KNOWLEDGE_ACCESS,
+                Domain.KNOWLEDGE_REVOCATIONS,
                 Domain.AUTHORITY,
                 Domain.PROGRESS,
                 Domain.TYPES,
@@ -66,10 +67,11 @@ public final class InformationInvalidationPublisher implements AutoCloseable {
 
               @Override
               public void changed(Set<Domain> domains) {
-                if (domains.contains(Domain.KNOWLEDGE_ACCESS)
+                if (domains.contains(Domain.KNOWLEDGE_REVOCATIONS)
                     || domains.contains(Domain.AUTHORITY)) {
                   publish();
-                } else if (domains.contains(Domain.DOCUMENTS)
+                } else if (domains.contains(Domain.KNOWLEDGE_ACCESS)
+                    || domains.contains(Domain.DOCUMENTS)
                     || domains.contains(Domain.TYPES)
                     || domains.contains(Domain.EXTRACTIONS)) {
                   soft(true);

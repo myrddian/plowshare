@@ -15,7 +15,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
-  private final EmbeddingSpaceRepository spaces;
   private io.aeyer.plowshare.server.reads.ReadAdmission admission =
       io.aeyer.plowshare.server.reads.ReadAdmission.direct();
 
@@ -25,11 +24,9 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
     return this;
   }
 
-  public JdbcEmbeddingWorkRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, EmbeddingSpaceRepository spaces) {
+  public JdbcEmbeddingWorkRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.transactions = Objects.requireNonNull(transactions);
-    this.spaces = Objects.requireNonNull(spaces);
   }
 
   private static String table(Store store) {
@@ -170,27 +167,33 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
 
   private Optional<EmbeddingProfile> profile(EmbeddingSlot slot, String pointer) {
     return jdbc.query(
-            "SELECT "
+            "SELECT descriptor.*,slot.slot,slot.version,slot."
                 + pointer
                 + "_space_id AS space_id,"
+                + "slot."
                 + pointer
-                + "_mode AS mode,"
+                + "_mode AS mode,slot."
                 + pointer
-                + "_distance AS distance,version"
-                + " FROM embedding_slots WHERE slot=?",
+                + "_distance AS distance"
+                + " FROM embedding_slots slot LEFT JOIN embedding_spaces descriptor ON descriptor.id=slot."
+                + pointer
+                + "_space_id WHERE slot.slot=?",
             (r, n) ->
                 r.getString("space_id") == null
                     ? Optional.<EmbeddingProfile>empty()
-                    : Optional.of(
-                        new EmbeddingProfile(
-                            slot,
-                            spaces.find(r.getString("space_id")).orElseThrow(),
-                            new EmbeddingSearchPolicy(
-                                EmbeddingSearchPolicy.Mode.fromConfiguration(r.getString("mode")),
-                                EmbeddingSearchPolicy.Distance.valueOf(r.getString("distance"))),
-                            r.getLong("version"))),
+                    : Optional.of(profile(r)),
             slot.stored())
         .getFirst();
+  }
+
+  private static EmbeddingProfile profile(java.sql.ResultSet row) throws java.sql.SQLException {
+    return new EmbeddingProfile(
+        EmbeddingSlot.valueOf(row.getString("slot").toUpperCase(java.util.Locale.ROOT)),
+        JdbcEmbeddingSpaceRepository.read(row, 0),
+        new EmbeddingSearchPolicy(
+            EmbeddingSearchPolicy.Mode.fromConfiguration(row.getString("mode")),
+            EmbeddingSearchPolicy.Distance.valueOf(row.getString("distance"))),
+        row.getLong("version"));
   }
 
   @Override
@@ -299,6 +302,81 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   private record ScanPage(int count, String type, String id, Integer position) {}
 
   private record ScanCursor(String type, String id, Integer position) {}
+
+  @Override
+  public MaintenancePlan maintenancePlan(boolean auditIndexes) {
+    // A single statement observes slot pointers, immutable descriptors and due scheduling facts.
+    // Never turn one due row into a probe of all stores. This snapshot cannot authorize dispatch:
+    // a subsequent claim checks its slot version under a lock and publication retains its fences.
+    return admission.read(
+        "embedding-repair",
+        io.aeyer.plowshare.server.reads.ReadAdmission.Work.MAINTENANCE,
+        () ->
+            jdbc.query(
+                """
+            WITH wake AS MATERIALIZED (
+              SELECT EXISTS(SELECT 1 FROM embedding_repair_work WHERE available_at<=CURRENT_TIMESTAMP)
+                OR EXISTS(SELECT 1 FROM embedding_repair_scans WHERE next_at<=CURRENT_TIMESTAMP) AS due
+            ), pointers AS MATERIALIZED (
+              SELECT slot,version,active_space_id AS space_id,active_mode AS mode,active_distance AS distance,0 AS generation_order
+                FROM embedding_slots WHERE active_space_id IS NOT NULL
+              UNION
+              SELECT slot,version,target_space_id,target_mode,target_distance,1
+                FROM embedding_slots WHERE target_space_id IS NOT NULL
+                  AND active_space_id IS DISTINCT FROM target_space_id
+            ), selected AS (
+              SELECT p.*,d.store,false AS activate FROM pointers p
+                CROSS JOIN (VALUES ('memories'),('digests'),('documents'),('chunks'),('retrieval_passages')) d(store)
+                WHERE (SELECT due FROM wake) AND (EXISTS(SELECT 1 FROM embedding_repair_work w
+                  WHERE w.slot=p.slot AND w.space_id=p.space_id AND w.store=d.store
+                    AND w.available_at<=CURRENT_TIMESTAMP)
+                  OR EXISTS(SELECT 1 FROM embedding_repair_scans scan
+                    WHERE scan.slot=p.slot AND scan.space_id=p.space_id AND scan.store=d.store
+                      AND scan.next_at<=CURRENT_TIMESTAMP))
+              UNION ALL
+              SELECT s.slot,s.version,s.target_space_id,s.target_mode,s.target_distance,1,NULL::text,true
+              FROM embedding_slots s WHERE s.target_space_id IS NOT NULL AND (
+                (ROW(s.active_space_id,s.active_mode,s.active_distance)
+                  IS NOT DISTINCT FROM ROW(s.target_space_id,s.target_mode,s.target_distance) AND ?)
+                OR (ROW(s.active_space_id,s.active_mode,s.active_distance)
+                  IS DISTINCT FROM ROW(s.target_space_id,s.target_mode,s.target_distance)
+                  AND NOT EXISTS(SELECT 1 FROM embedding_repair_scans r
+                    WHERE r.slot=s.slot AND r.space_id=s.target_space_id AND NOT r.enumerated)
+                  AND NOT EXISTS(SELECT 1 FROM embedding_repair_work w
+                    WHERE w.slot=s.slot AND w.space_id=s.target_space_id)))
+            ) SELECT descriptor.*,selected.* FROM selected
+              JOIN embedding_spaces descriptor ON descriptor.id=selected.space_id
+              ORDER BY selected.slot,selected.activate,selected.generation_order,
+                CASE selected.store WHEN 'memories' THEN 0 WHEN 'digests' THEN 1
+                  WHEN 'documents' THEN 2 WHEN 'chunks' THEN 3 ELSE 4 END
+            """,
+                result -> {
+                  var repairs = new ArrayList<RepairWork>();
+                  var activations = new ArrayList<EmbeddingProfile>();
+                  while (result.next()) {
+                    var profile = profile(result);
+                    if (result.getBoolean("activate")) activations.add(profile);
+                    else {
+                      String store = result.getString("store");
+                      repairs.add(
+                          new RepairWork(
+                              profile,
+                              switch (store) {
+                                case "memories" -> Store.MEMORIES;
+                                case "digests" -> Store.DIGESTS;
+                                case "documents" -> Store.DOCUMENTS;
+                                case "chunks" -> Store.CHUNKS;
+                                case "retrieval_passages" -> Store.PASSAGES;
+                                default ->
+                                    throw new IllegalStateException(
+                                        "Unsupported embedding scheduling store");
+                              }));
+                    }
+                  }
+                  return new MaintenancePlan(repairs, activations);
+                },
+                auditIndexes));
+  }
 
   @Override
   public boolean discoveryDue() {
@@ -465,6 +543,21 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
           // run outside this transaction. Global planner configuration stays unchanged.
           return discovery(
               () -> {
+                if (claim
+                    && jdbc.queryForList(
+                            "SELECT version FROM embedding_slots WHERE slot=? AND version=? AND "
+                                + "((active_space_id=? AND active_mode=? AND active_distance=?) OR "
+                                + "(target_space_id=? AND target_mode=? AND target_distance=?)) FOR SHARE",
+                            Long.class,
+                            target.slot().stored(),
+                            target.version(),
+                            target.space().id(),
+                            target.search().mode().configurationName(),
+                            target.search().distance().name(),
+                            target.space().id(),
+                            target.search().mode().configurationName(),
+                            target.search().distance().name())
+                        .isEmpty()) return List.of();
                 // Match source DDL/TRUNCATE order before taking cursor or queue row locks.
                 // ACCESS SHARE permits normal source writers and holds no provider connection.
                 jdbc.execute("LOCK TABLE " + table(store) + " IN ACCESS SHARE MODE");
@@ -560,10 +653,11 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   private <T> T discovery(Supplier<T> action) {
     String[] settings =
         jdbc.queryForObject(
-            "SELECT current_setting('jit'),current_setting('statement_timeout')",
+            "WITH previous AS MATERIALIZED (SELECT current_setting('jit') AS jit,"
+                + "current_setting('statement_timeout') AS timeout)"
+                + " SELECT previous.jit,previous.timeout,set_config('jit','off',true),"
+                + "set_config('statement_timeout','2s',true) FROM previous",
             (row, n) -> new String[] {row.getString(1), row.getString(2)});
-    jdbc.execute("SET LOCAL jit=off");
-    jdbc.execute("SET LOCAL statement_timeout='2s'");
     // Restore on success even inside an existing caller transaction. On failure the owning unit
     // rolls back the transaction (including LOCAL settings); do not mask an aborted-TX error with
     // a second statement. Neither a pooled lease nor an enclosing activation inherits this policy.
@@ -770,6 +864,205 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
                   expected.revision(),
                   category));
           return true;
+        });
+  }
+
+  @Override
+  public Optional<EmbeddingRepair.Attempt> beginRepairAttempt(
+      EmbeddingProfile profile, Source source) {
+    return transactions.inTransaction(
+        () -> {
+          if (!beginRepair(profile, source)) return Optional.empty();
+          var attempt = new EmbeddingRepair.Attempt(UUID.randomUUID(), profile, source);
+          requireRepairWrite(
+              jdbc.update(
+                  "INSERT INTO embedding_repair_attempts"
+                      + "(id,slot,space_id,store,source_type,source_id,position,source_revision,profile_version,phase,reason,prepared_at)"
+                      + " VALUES(?,?,?,?,?,?,?,?,?,'PREPARED','NONE',CURRENT_TIMESTAMP)",
+                  attempt.id(),
+                  profile.slot().stored(),
+                  profile.space().id(),
+                  table(source.key().store()),
+                  source.key().sourceType() == null ? "" : source.key().sourceType(),
+                  source.key().id(),
+                  source.key().position(),
+                  source.revision(),
+                  profile.version()));
+          return Optional.of(attempt);
+        });
+  }
+
+  private static void requireRepairWrite(int affected) {
+    if (affected != 1) throw new IllegalStateException("Repair transition lost its locked attempt");
+  }
+
+  private record RepairRow(
+      EmbeddingRepair.Phase phase, UUID call, boolean providerStarted, Integer status) {}
+
+  private RepairRow repairRow(EmbeddingRepair.Attempt attempt) {
+    return jdbc.queryForObject(
+        "SELECT phase,call_id,provider_started_at IS NOT NULL AS provider_started,"
+            + "http_status FROM embedding_repair_attempts WHERE id=? AND slot=? AND space_id=?"
+            + " AND store=? AND source_type=? AND source_id=? AND position=? AND source_revision=?"
+            + " AND profile_version IS NOT DISTINCT FROM ? FOR UPDATE",
+        (r, n) ->
+            new RepairRow(
+                EmbeddingRepair.Phase.valueOf(r.getString("phase")),
+                (UUID) r.getObject("call_id"),
+                r.getBoolean("provider_started"),
+                r.getObject("http_status", Integer.class)),
+        attempt.id(),
+        attempt.profile().slot().stored(),
+        attempt.profile().space().id(),
+        table(attempt.source().key().store()),
+        attempt.source().key().sourceType() == null ? "" : attempt.source().key().sourceType(),
+        attempt.source().key().id(),
+        attempt.source().key().position(),
+        attempt.source().revision(),
+        attempt.profile().version());
+  }
+
+  @Override
+  public void repairProgress(EmbeddingRepair.Attempt attempt, EmbeddingRepair.Progress progress) {
+    Objects.requireNonNull(attempt);
+    Objects.requireNonNull(progress);
+    transactions.inTransaction(
+        () -> {
+          var row = Objects.requireNonNull(repairRow(attempt));
+          if (row.call() != null
+              && progress.callId() != null
+              && !row.call().equals(progress.callId()))
+            throw new IllegalStateException("Repair attempt cannot change its accounting call");
+          if ((row.phase().terminal()
+                  || row.phase() == EmbeddingRepair.Phase.RESULT_VALIDATED
+                  || row.phase() == EmbeddingRepair.Phase.PUBLISHING)
+              && progress.phase() == EmbeddingRepair.Phase.ATTEMPT_STARTED)
+            throw new IllegalStateException(
+                "A settled repair cannot start a late provider attempt");
+          // Late terminal accounting may add evidence after interruption, but never reopen a replay
+          // fence or turn an unknown result into permission to publish. Each provider retry resets
+          // response evidence; its UUID is linked to the canonical accounting attempt history.
+          var phase =
+              row.phase().terminal() || progress.phase() == EmbeddingRepair.Phase.EXECUTION_FINISHED
+                  ? row.phase()
+                  : progress.phase();
+          requireRepairWrite(
+              jdbc.update(
+                  "UPDATE embedding_repair_attempts SET phase=?,call_id=coalesce(call_id,?),"
+                      + "wire_attempt_id=coalesce(?,wire_attempt_id),http_status=CASE WHEN ? THEN NULL ELSE coalesce(?,http_status) END,"
+                      + "dispatch_outcome=coalesce(?,dispatch_outcome),updated_at=CURRENT_TIMESTAMP,"
+                      + "provider_started_at=CASE WHEN ? THEN coalesce(provider_started_at,CURRENT_TIMESTAMP) ELSE provider_started_at END,"
+                      + "result_received_at=CASE WHEN ? THEN coalesce(result_received_at,CURRENT_TIMESTAMP) ELSE result_received_at END WHERE id=?",
+                  phase.name(),
+                  progress.callId(),
+                  progress.wireAttemptId(),
+                  progress.phase() == EmbeddingRepair.Phase.ATTEMPT_STARTED,
+                  progress.httpStatus(),
+                  progress.outcome() == null ? null : progress.outcome().name(),
+                  progress.phase() == EmbeddingRepair.Phase.ATTEMPT_STARTED,
+                  progress.phase() == EmbeddingRepair.Phase.RESULT_VALIDATED
+                      || progress.phase() == EmbeddingRepair.Phase.PUBLISHING,
+                  attempt.id()));
+          return true;
+        });
+  }
+
+  @Override
+  public void repairFailed(
+      EmbeddingRepair.Attempt attempt,
+      EmbeddingRepair.Progress evidence,
+      EmbeddingRepair.Reason reason,
+      String failureType) {
+    Objects.requireNonNull(attempt);
+    Objects.requireNonNull(evidence);
+    if (evidence.phase() != EmbeddingRepair.Phase.EXECUTION_FINISHED)
+      throw new IllegalArgumentException("Terminal evidence snapshot required");
+    Objects.requireNonNull(reason);
+    if (reason == EmbeddingRepair.Reason.NONE
+        || failureType == null
+        || !failureType.matches("[A-Za-z0-9_.$]{1,256}"))
+      throw new IllegalArgumentException("Bounded repair failure evidence required");
+    // Never join an already-aborted owner transaction or borrow a REQUIRES_NEW connection while
+    // retaining its lease. The maintenance caller invokes this only after publish/IO has unwound.
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+        .isActualTransactionActive())
+      throw new IllegalStateException("Repair failure must be recorded after owner rollback");
+    transactions.inTransaction(
+        () -> {
+          var row = Objects.requireNonNull(repairRow(attempt));
+          if (row.phase().terminal()) return false;
+          if (row.call() != null
+              && evidence.callId() != null
+              && !row.call().equals(evidence.callId()))
+            throw new IllegalStateException("Repair failure cannot change accounting call");
+          Integer status = evidence.httpStatus() != null ? evidence.httpStatus() : row.status();
+          EmbeddingRepair.Phase terminal;
+          boolean same =
+              source(attempt.source().key()).filter(attempt.source()::equals).isPresent()
+                  && (target(attempt.profile().slot()).filter(attempt.profile()::equals).isPresent()
+                      || active(attempt.profile().slot())
+                          .filter(attempt.profile()::equals)
+                          .isPresent());
+          var actualReason = reason;
+          if (!same) {
+            terminal = EmbeddingRepair.Phase.SUPERSEDED;
+            actualReason = EmbeddingRepair.Reason.SOURCE_OR_PROFILE_CHANGED;
+          } else if (!row.providerStarted()
+              && row.phase() != EmbeddingRepair.Phase.RESULT_VALIDATED
+              && row.phase() != EmbeddingRepair.Phase.PUBLISHING
+              && reason != EmbeddingRepair.Reason.PUBLICATION_FAILED
+              && reason != EmbeddingRepair.Reason.INVALID_RESULT) {
+            terminal = EmbeddingRepair.Phase.NOT_DISPATCHED;
+            failed(attempt.profile(), attempt.source(), reason.name().replace("_", ""));
+          } else if (reason == EmbeddingRepair.Reason.AUTHORIZATION_REJECTED) {
+            terminal = EmbeddingRepair.Phase.BLOCKED;
+          } else if (row.phase() == EmbeddingRepair.Phase.PUBLISHING
+              || reason == EmbeddingRepair.Reason.PUBLICATION_FAILED) {
+            terminal = EmbeddingRepair.Phase.FAILED;
+            actualReason = EmbeddingRepair.Reason.PUBLICATION_FAILED;
+          } else if (reason == EmbeddingRepair.Reason.INVALID_RESULT) {
+            terminal = EmbeddingRepair.Phase.FAILED;
+          } else if (status != null && status >= 400 && status < 500) {
+            terminal = EmbeddingRepair.Phase.FAILED;
+            actualReason = EmbeddingRepair.Reason.PROVIDER_REFUSED;
+          } else {
+            terminal = EmbeddingRepair.Phase.OUTCOME_UNKNOWN;
+            if (reason == EmbeddingRepair.Reason.DISPATCH_FAILED)
+              actualReason = EmbeddingRepair.Reason.TRANSPORT_OUTCOME_UNKNOWN;
+          }
+          requireRepairWrite(
+              jdbc.update(
+                  "UPDATE embedding_repair_attempts SET failure_phase=phase,phase=?,reason=?,"
+                      + "failure_type=?,call_id=coalesce(call_id,?),wire_attempt_id=coalesce(?,wire_attempt_id),"
+                      + "http_status=coalesce(?,http_status),dispatch_outcome=coalesce(?,dispatch_outcome),"
+                      + "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                  terminal.name(),
+                  actualReason.name(),
+                  failureType,
+                  evidence.callId(),
+                  evidence.wireAttemptId(),
+                  evidence.httpStatus(),
+                  evidence.outcome() == null ? null : evidence.outcome().name(),
+                  attempt.id()));
+          return true;
+        });
+  }
+
+  @Override
+  public boolean publishRepair(EmbeddingRepair.Attempt attempt, float[] vector, Runnable fence) {
+    return transactions.inTransaction(
+        () -> {
+          var row = Objects.requireNonNull(repairRow(attempt));
+          if (row.phase() != EmbeddingRepair.Phase.PUBLISHING)
+            throw new IllegalStateException("Repair attempt is not prepared for publication");
+          boolean published = publish(attempt.profile(), attempt.source(), vector, fence);
+          requireRepairWrite(
+              jdbc.update(
+                  "UPDATE embedding_repair_attempts SET phase=?,reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                  published ? "PUBLISHED" : "SUPERSEDED",
+                  published ? "NONE" : "SOURCE_OR_PROFILE_CHANGED",
+                  attempt.id()));
+          return published;
         });
   }
 

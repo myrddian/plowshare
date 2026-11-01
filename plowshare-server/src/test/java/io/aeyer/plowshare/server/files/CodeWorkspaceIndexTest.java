@@ -10,6 +10,7 @@ import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.documents.*;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.*;
 import io.aeyer.plowshare.server.information.*;
@@ -231,6 +232,113 @@ class CodeWorkspaceIndexTest {
   }
 
   @Test
+  void reconnectAndSingleChangedFileRetainsOnlyThatFile() throws Exception {
+    Path changed = source("A.java", "class Before {}");
+    source("B.py", "def unchanged(): pass");
+    doReturn("remote:before").when(provider).identity();
+    var before = map().reconcile(HOME, "**");
+    doReturn("remote:after").when(provider).identity();
+    Files.writeString(changed, "class After {}");
+    clearInvocations(provider);
+    var after = map().reconcile(HOME, "**");
+    assertEquals(3, revisions());
+    assertEquals(1, after.measurements().get("snapshot_reads"));
+    verify(provider).snapshot(eq(changed), any(), anyInt());
+    assertEquals(
+        before.files().stream()
+            .filter(f -> !f.path().equals(changed))
+            .findFirst()
+            .orElseThrow()
+            .revision(),
+        after.files().stream()
+            .filter(f -> !f.path().equals(changed))
+            .findFirst()
+            .orElseThrow()
+            .revision());
+  }
+
+  @Test
+  void stableSourceIntakeUsesTheExistingGatedSyntaxPipeline() throws Exception {
+    Path path = source("A.java", "class A {}");
+    var scope = new CodeWorkspaceStore.Scope(HOME, "alice", "coder", "session");
+    store.begin(scope, "**");
+    var file =
+        new WorkspaceCodeMap.Entry(
+            "live-key",
+            provider.name(),
+            temp.toRealPath(),
+            path,
+            provider.fingerprint(path),
+            "java",
+            "class A {}",
+            null,
+            CLOCK.instant());
+    assertNotNull(
+        new CodeWorkspaceIndex(store, catalogue, lifecycle)
+            .retain(scope, file, "class A {}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+  }
+
+  @Test
+  void syntaxIntakeRetainsOnlyDeterministicStageAuthorizations() {
+    var admitted =
+        catalogue.admitCodeSnapshot(
+            context,
+            UUID.randomUUID(),
+            "A.java",
+            "class A {}".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            "workspace-code:fixture",
+            "session");
+    assertEquals(
+        "explicit_only",
+        jdbc.queryForObject(
+            "SELECT processing_policy FROM information_revisions WHERE id=?",
+            String.class,
+            admitted.revision()));
+    assertTrue(
+        lifecycle.drainCodeSyntax(admitted.revision()),
+        () ->
+            jdbc.queryForList(
+                    "SELECT * FROM information_steps WHERE revision_id=?", admitted.revision())
+                .toString());
+    assertTrue(lifecycle.drainCodeSyntax(admitted.revision()));
+    assertNotNull(
+        catalogue.codeProjection(
+            context,
+            admitted.revision(),
+            FileContents.sha256("class A {}".getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void syntaxOnlyPolicySurvivesLaterAutomaticTaggingAndGroupingSweeps() throws Exception {
+    source("A.java", "class A {}");
+    UUID revision = map().reconcile(HOME, "**").files().getFirst().revision();
+    assertEquals(
+        "explicit_only",
+        jdbc.queryForObject(
+            "SELECT processing_policy FROM information_revisions WHERE id=?",
+            String.class,
+            revision));
+    assertEquals(
+        List.of("derive", "extract"),
+        jdbc.queryForList(
+            "SELECT stage FROM information_stage_authorizations WHERE revision_id=? ORDER BY stage",
+            String.class,
+            revision));
+    assertEquals(0, lifecycle.sweepUntagged());
+    jdbc.update(
+        "UPDATE information_resources SET tags='[\"code\"]'::jsonb WHERE id=(SELECT resource_id FROM information_revisions WHERE id=?)",
+        revision);
+    assertEquals(0, lifecycle.sweepTagGroups());
+    assertFalse(lifecycle.drainOne(revision));
+    assertEquals(
+        List.of("skipped", "skipped", "skipped"),
+        jdbc.queryForList(
+            "SELECT state FROM information_steps WHERE revision_id=? AND stage IN ('embed','autoTag','tagGroups') ORDER BY stage",
+            String.class,
+            revision));
+  }
+
+  @Test
   void one_changed_file_creates_one_revision_and_deletion_preserves_history() throws Exception {
     Path a = source("A.java", "class A {}"), b = source("B.py", "def before(): pass");
     var first = map().reconcile(HOME, "**");
@@ -279,6 +387,234 @@ class CodeWorkspaceIndexTest {
                 instanceof List<?> rows
             ? ((Map<?, ?>) rows.getFirst()).get("name")
             : null);
+  }
+
+  @Test
+  void syntaxChunksAreNotAutomaticEmbeddingRepairCandidatesInEitherSlot() throws Exception {
+    source("A.java", "class A {}");
+    UUID revision = map().reconcile(HOME, "**").files().getFirst().revision();
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT count(*)>0 FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?",
+            Boolean.class,
+            revision));
+    var repairs = new JdbcEmbeddingWorkRepository(jdbc, work);
+    var spaces = new JdbcEmbeddingSpaceRepository(jdbc);
+    for (var slot : EmbeddingSlot.values()) {
+      var space =
+          spaces.register(
+              new EmbeddingSpace.Definition(
+                  "fixture-" + slot.stored(),
+                  "weights",
+                  4,
+                  "",
+                  "",
+                  "cls",
+                  EmbeddingSpace.Normalization.NONE,
+                  "none"));
+      repairs.inputLimit(space, 1000);
+      var target =
+          repairs.configure(
+              slot,
+              space,
+              new EmbeddingSearchPolicy(
+                  EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+      assertTrue(
+          repairs.claimPending(target, EmbeddingWorkRepository.Store.CHUNKS, 100).isEmpty(),
+          "Skipped syntax embeddings must not be revived by global maintenance in " + slot);
+    }
+  }
+
+  @Test
+  void legacyRepairAliasesTheAcceptedSourceAndFencesUnrequestedPaidWork() throws Exception {
+    source("A.java", "class A {}");
+    var file =
+        new WorkspaceCodeMap(new ProviderRouter(home -> List.of(provider)), () -> false)
+            .reconcile(HOME, "**")
+            .files()
+            .getFirst();
+    var scope = new CodeWorkspaceStore.Scope(HOME, "alice", "coder", "session");
+    var ticket = store.begin(scope, "**");
+    String identity = scope.id() + ":" + CodeWorkspaceStore.sourceKey(file.key());
+    byte[] bytes = "class A {}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    UUID legacy =
+        catalogue
+            .admit(
+                context,
+                UUID.randomUUID(),
+                "workspace-code/" + identity + "/A.java",
+                bytes,
+                "text/plain",
+                "workspace-code:" + identity)
+            .revision();
+    lifecycle.drainCodeSyntax(legacy);
+    lifecycle.drainCodeSyntax(legacy);
+    store.index(scope, file.key(), file.fingerprint().sha256(), CodeOutline.VERSION, legacy);
+    var retained =
+        new WorkspaceCodeMap.Entry(
+            file.key(),
+            file.provider(),
+            file.root(),
+            file.path(),
+            file.fingerprint(),
+            file.language(),
+            file.text(),
+            file.outline(),
+            file.observedAt(),
+            legacy);
+    assertTrue(
+        store.publish(
+            ticket,
+            new WorkspaceCodeMap.View(
+                "observed", 1, "**", CLOCK.instant(), List.of(), List.of(retained))));
+    UUID unrelated =
+        catalogue
+            .admit(
+                context,
+                UUID.randomUUID(),
+                "workspace-code/unrelated/A.java",
+                bytes,
+                "text/plain",
+                "workspace-code:unrelated")
+            .revision();
+    var manualScope = new CodeWorkspaceStore.Scope(HOME, "alice", "manual", "session");
+    store.begin(manualScope, "**");
+    String manualIdentity = manualScope.id() + ":" + CodeWorkspaceStore.sourceKey(file.key());
+    UUID explicitlyRetried =
+        catalogue
+            .admit(
+                context,
+                UUID.randomUUID(),
+                "workspace-code/" + manualIdentity + "/A.java",
+                bytes,
+                "text/plain",
+                "workspace-code:" + manualIdentity)
+            .revision();
+    store.index(
+        manualScope,
+        file.key(),
+        file.fingerprint().sha256(),
+        CodeOutline.VERSION,
+        explicitlyRetried);
+    catalogue.retry(context, explicitlyRetried);
+    // This fixture records events in memory. Materialize the historical Relay projection that
+    // the migration reads; broker publication itself has separate persistence coverage.
+    jdbc.update(
+        "INSERT INTO information_revision_events(revision_id,relay_project,relay_position,generation,actor_handle,stage,action) SELECT ?,id,1,1,'alice','processing','retry' FROM projects WHERE name=?",
+        explicitlyRetried,
+        HOME.project());
+    UUID token = UUID.randomUUID();
+    var processing =
+        new JdbcInformationProcessingRepository(jdbc, CLOCK, new JdbcProjectMembers(jdbc));
+    var lease =
+        new InformationLifecycle.Lease(
+            legacy,
+            jdbc.queryForObject(
+                "SELECT resource_id FROM information_revisions WHERE id=?", UUID.class, legacy),
+            1,
+            "autoTag",
+            1,
+            token,
+            "alice",
+            jdbc.queryForObject(
+                "SELECT id FROM projects WHERE name=?", Long.class, HOME.project()));
+    work.inTransaction(
+        () -> {
+          jdbc.update(
+              "UPDATE information_steps SET state='running',lease_token=?,lease_until=? WHERE revision_id=? AND stage='autoTag'",
+              token,
+              java.sql.Timestamp.from(CLOCK.instant().plusSeconds(300)),
+              legacy);
+          assertTrue(processing.renew(lease), "Fixture lease is valid before policy repair");
+          jdbc.execute(
+              (org.springframework.jdbc.core.ConnectionCallback<Void>)
+                  connection -> {
+                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(
+                        connection,
+                        new org.springframework.core.io.ClassPathResource(
+                            "db/migration/V210__workspace_source_reuse_and_syntax_policy.sql"));
+                    return null;
+                  });
+          return null;
+        });
+    assertFalse(processing.renew(lease), "Late worker completion cannot retain the repaired lease");
+    assertEquals(
+        legacy,
+        store.indexed(
+            scope,
+            file.indexSource().retainedKey(),
+            file.fingerprint().sha256(),
+            CodeOutline.VERSION));
+    assertEquals(
+        "explicit_only",
+        jdbc.queryForObject(
+            "SELECT processing_policy FROM information_revisions WHERE id=?",
+            String.class,
+            legacy));
+    assertEquals(
+        "automatic",
+        jdbc.queryForObject(
+            "SELECT processing_policy FROM information_revisions WHERE id=?",
+            String.class,
+            unrelated));
+    assertEquals(
+        "skipped",
+        jdbc.queryForObject(
+            "SELECT state FROM information_steps WHERE revision_id=? AND stage='autoTag'",
+            String.class,
+            legacy));
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT lease_token FROM information_steps WHERE revision_id=? AND stage='autoTag'",
+            UUID.class,
+            legacy));
+    assertEquals(
+        "automatic",
+        jdbc.queryForObject(
+            "SELECT processing_policy FROM information_revisions WHERE id=?",
+            String.class,
+            explicitlyRetried),
+        "An older generic retry has ambiguous paid-stage intent and must not be rewritten");
+    assertEquals(3, revisions());
+    assertThrows(
+        org.springframework.dao.DataAccessException.class,
+        () ->
+            jdbc.update(
+                "UPDATE information_revisions SET processing_policy='automatic' WHERE id=?",
+                legacy));
+    catalogue.availability(context, legacy, "withdrawn");
+    var withdrawn = map().reconcile(HOME, "**");
+    assertNull(withdrawn.files().getFirst().revision());
+    assertEquals(
+        3, revisions(), "A legacy alias must not resurrect withdrawn bytes under a new name");
+  }
+
+  @Test
+  void repeatedHintsDoNotRewriteDirtyRowsAndInFlightScansKeepAMinimumCadence() throws Exception {
+    source("A.java", "class A {}");
+    map().reconcile(HOME, "**");
+    var hint = new WorkspaceChanges.Change(HOME, "alice", "session");
+    store.changed(List.of(hint));
+    long generation = jdbc.queryForObject("SELECT generation FROM code_workspaces", Long.class);
+    var deadline =
+        jdbc.queryForObject("SELECT next_poll FROM code_workspaces", java.sql.Timestamp.class);
+    store.changed(List.of(hint, hint));
+    assertEquals(
+        generation, jdbc.queryForObject("SELECT generation FROM code_workspaces", Long.class));
+    assertEquals(
+        deadline,
+        jdbc.queryForObject("SELECT next_poll FROM code_workspaces", java.sql.Timestamp.class));
+    due();
+    var inFlight = store.claim().orElseThrow();
+    store.changed(List.of(hint));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT next_poll>=scan_started_at+INTERVAL '5 seconds' FROM code_workspaces",
+            Boolean.class));
+    assertFalse(
+        store.publish(
+            inFlight.ticket(),
+            new WorkspaceCodeMap.View("observed", 1, "**", CLOCK.instant(), List.of(), List.of())));
   }
 
   @Test
@@ -481,7 +817,8 @@ class CodeWorkspaceIndexTest {
             .getFirst();
     var scope = new CodeWorkspaceStore.Scope(HOME, "alice", "coder", "session");
     store.begin(scope, "**");
-    String identity = scope.id() + ":" + CodeWorkspaceStore.sourceKey(file.key());
+    String identity =
+        scope.id() + ":" + CodeWorkspaceStore.sourceKey(file.indexSource().retainedKey());
     var old =
         catalogue.admitCodeSnapshot(
             context,
@@ -496,7 +833,12 @@ class CodeWorkspaceIndexTest {
     lifecycle.drainCodeSyntax(old.revision());
     jdbc.update(
         "UPDATE code_outlines SET parser_version='old-parser' WHERE document_id=?", old.revision());
-    store.index(scope, file.key(), file.fingerprint().sha256(), "old-parser", old.revision());
+    store.index(
+        scope,
+        file.indexSource().retainedKey(),
+        file.fingerprint().sha256(),
+        "old-parser",
+        old.revision());
     var current = map().reconcile(HOME, "**").files().getFirst();
     assertNotEquals(old.revision(), current.revision());
     assertEquals(2, revisions());

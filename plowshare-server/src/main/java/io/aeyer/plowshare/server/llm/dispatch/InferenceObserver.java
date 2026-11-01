@@ -84,6 +84,102 @@ public interface InferenceObserver {
     };
   }
 
+  /** Add operation persistence without replacing accounting or the worker authorization fence. */
+  static InferenceObserver progress(InferenceObserver delegate, InferenceProgress progress) {
+    java.util.Objects.requireNonNull(delegate);
+    java.util.Objects.requireNonNull(progress);
+    if (progress == InferenceProgress.NONE) return delegate;
+    checkpoint(() -> progress.accounted(delegate.capture()), delegate);
+    return new InferenceObserver() {
+      public boolean enabled() {
+        return delegate.enabled();
+      }
+
+      public void preflight(io.aeyer.plowshare.server.llm.counting.PromptCount value) {
+        delegate.preflight(value);
+      }
+
+      public void queued() {
+        checkpoint(progress::queued, delegate);
+        delegate.queued();
+      }
+
+      public void started() {
+        delegate.started();
+      }
+
+      public void beforeDispatch() {
+        delegate.beforeDispatch();
+        progress.started();
+      }
+
+      public InferenceCapture capture() {
+        return delegate.capture();
+      }
+
+      public void finished(CallLifecycle value) {
+        delegate.finished(value);
+        progress.finished(value);
+      }
+
+      public Attempt attempt() {
+        var attempt = delegate.attempt();
+        try {
+          progress.attempting(attempt.id());
+        } catch (RuntimeException | Error failure) {
+          try {
+            // Accounting has already committed an AttemptStarted receipt. Its attempt must close
+            // as FAILED; NOT_DISPATCHED is reserved for calls that never created any attempt.
+            // The operation's own pre-wire fence still proves that transport was prevented.
+            attempt.finished(CallLifecycle.FAILED);
+          } catch (RuntimeException | Error terminal) {
+            if (terminal != failure) failure.addSuppressed(terminal);
+          }
+          throw failure;
+        }
+        return new Attempt() {
+          public java.util.UUID id() {
+            return attempt.id();
+          }
+
+          public void response(Integer status, String requestId) {
+            attempt.response(status, requestId);
+            progress.response(status);
+          }
+
+          public void usage(TokenUsage value) {
+            attempt.usage(value);
+          }
+
+          public void reason(String value) {
+            attempt.reason(value);
+          }
+
+          public void output() {
+            attempt.output();
+          }
+
+          public void finished(CallLifecycle value) {
+            attempt.finished(value);
+          }
+        };
+      }
+    };
+  }
+
+  private static void checkpoint(Runnable action, InferenceObserver delegate) {
+    try {
+      action.run();
+    } catch (RuntimeException | Error failure) {
+      try {
+        delegate.finished(CallLifecycle.NOT_DISPATCHED);
+      } catch (RuntimeException | Error terminal) {
+        if (terminal != failure) failure.addSuppressed(terminal);
+      }
+      throw failure;
+    }
+  }
+
   default void preflight(io.aeyer.plowshare.server.llm.counting.PromptCount count) {}
 
   boolean enabled();
@@ -99,6 +195,11 @@ public interface InferenceObserver {
   InferenceCapture capture();
 
   interface Attempt {
+    /** Durable accounting attempt identity, absent when accounting is disabled. */
+    default java.util.UUID id() {
+      return null;
+    }
+
     Attempt NONE =
         new Attempt() {
           @Override

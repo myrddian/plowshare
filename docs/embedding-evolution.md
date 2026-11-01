@@ -565,3 +565,76 @@ architecture enforcement, publication of the pending cleanup and restored-data
 verification are separate follow-up tasks. This proposal does not claim they
 are implemented. ADR 0001 records the integration/core boundary now; future
 platform changes should record their own decisions and consequences.
+
+
+### Background discovery and retained attempts
+
+The maintenance pass reads a bounded typed scheduling snapshot of due slot/store
+pairs, including the exact slot version and immutable encoder descriptor. An indexed
+global due check inside that same statement skips store probes while idle. A due
+recovery cursor does not probe the other stores. The snapshot is a scheduling
+hint: claims revalidate the slot under a shared lock; source eligibility, explicit
+Information policy, retained submissions and publication authority retain their
+independent current checks. Provider I/O holds no discovery transaction or lease.
+
+A matching active profile needs only periodic index-health auditing, at startup
+and every five minutes after a successful audit. A rejected or failed activation
+leaves its audit due. Actual target transitions remain independently discoverable.
+Reconciliation retains its bounded keyset pages, five-minute recovery interval,
+transactional source triggers and cross-process claims. SQL policy setup saves
+and changes JIT/timeout in one materialized control statement, then restores the
+caller's settings on success; failure rolls back the owning transaction.
+
+`RepairInFlight` with an infinite retry deadline is a durable pre-submission fence.
+It prevents automatic replay when an attempt's outcome has become uncertain,
+including across restart. It is not an expiring discovery reservation. Legacy
+rows contain the source/slot/encoder version and category, but no durable attempt
+identifier or original timestamp. An absent result does not prove that submission
+never occurred, so performance tuning must not reset these rows. Clearing such a
+fence requires outcome reconciliation with retained provider/accounting evidence;
+a later source revision is a distinct operation and remains discoverable.
+
+### Transactional repair outcomes
+
+New retained repairs commit a UUID attempt and the exact source/profile replay
+fence together before dispatch. Short checkpoint transactions associate that
+attempt with the canonical inference call and wire attempt, then finish before
+provider I/O. Accounting remains the owner of provider attempt receipts; the
+repair record does not grant authority or replace current authorization.
+
+The repair record follows `PREPARED`, `ACCOUNTED`, `ATTEMPT_STARTED`, `PUBLISHING`,
+then `PUBLISHED`. Queue and running transitions belong to the linked canonical
+accounting history; they do not cause duplicate PostgreSQL checkpoints. Validation
+and its response evidence share the `PUBLISHING` checkpoint. A transport checkpoint
+only proves that dispatch was about to run, never that the provider accepted the
+request. Response status and terminal accounting evidence accompany
+the next owner checkpoint; callbacks after a provider effect do not introduce a
+second database failure that could discard usable output.
+
+Vector/staging publication, deletion of the failure fence and `PUBLISHED` commit
+in one transaction under the existing source/profile and publication-authority
+checks. If that transaction rolls back, the caller first releases it, then records
+the last committed repair phase, bounded reason, exception class and receipt IDs in a separate
+short transaction. No provider response body, exception message or source text is
+stored in this metadata. A late failure cannot overwrite a committed success.
+
+| Terminal phase | Meaning and retry rule |
+| --- | --- |
+| `NOT_DISPATCHED` | No wire-start checkpoint committed and transport could not have run. The reason and finite backoff commit together. New work still requires fresh authority. |
+| `BLOCKED` | Authorization rejected after a wire checkpoint. Retain the fence and do not publish. |
+| `FAILED` | Known invalid result, provider refusal or publication failure; preserve the reason and fence rather than automatically resubmit. |
+| `SUPERSEDED` | Source revision or profile changed. Never publish under the stale operation. |
+| `OUTCOME_UNKNOWN` | Transport may have run without a reconciled outcome. No timed replay. |
+| `PUBLISHED` | The vector and success receipt committed together. |
+
+The new migration imports old infinite `RepairInFlight` markers as
+`OUTCOME_UNKNOWN / LEGACY_UNCORRELATED`. Import time is explicitly distinct from
+submission time: old call IDs, preparation and provider-start timestamps remain
+null. Existing markers are neither reset nor replayed.
+
+A database outage or abrupt process termination can prevent the final reason
+transaction. The last committed phase and linked canonical accounting history
+remain the evidence; an incomplete phase is not success or proof of non-dispatch.
+This change does not guess a dead process from an elapsed timeout, replay unknown
+operations on restart, or claim to reconstruct missing historical receipts. It
+adds no background polling query to the idle maintenance path.

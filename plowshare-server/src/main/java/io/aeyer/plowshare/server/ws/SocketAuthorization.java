@@ -50,6 +50,7 @@ public class SocketAuthorization {
       if (previous != null) lease.close();
       return current(socket);
     } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException busy) {
+      detach(socket);
       try {
         socket.close(CloseStatus.POLICY_VIOLATION.withReason("Socket capacity is busy"));
       } catch (java.io.IOException ignored) {
@@ -92,7 +93,14 @@ public class SocketAuthorization {
       if (version instanceof Long v && handle instanceof String h)
         selected.put(socket, new SessionAuthority.Session(h, v));
     }
-    var current = accounts.currentSessions(new java.util.HashSet<>(selected.values()));
+    java.util.Set<SessionAuthority.Session> current;
+    try {
+      current = accounts.currentSessions(new java.util.HashSet<>(selected.values()));
+    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException busy) {
+      // Capacity or a timed-out chunk is not a negative account fact. Existing sockets remain
+      // subject to their fresh execution/disclosure checks and the next bounded sweep.
+      return;
+    }
     selected.forEach(
         (socket, session) -> {
           if (!current.contains(session)) {

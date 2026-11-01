@@ -26,6 +26,26 @@ against the total database capacity when running multiple server processes.
 | `subscriptions` / `subscriptions-per-principal` | 512 / 32 | Usage subscriptions across sockets |
 
 Environment overrides use `PLOWSHARE_READ_CAPACITY_` plus the property in upper snake case.
+
+Socket session checks have a separate bounded intake before any session SQL, shared by event and
+file sockets and their execution/disclosure fences. `plowshare.socket-sessions.pending` (256)
+and `pending-per-principal` (32) include queued and physically executing checks. One physical
+reader gathers up to `batch` (128) checks for at most `gather-millis` (2), then queries distinct
+account/session versions together. `wait-millis` (2000, maximum 5000) bounds callers' wait.
+Queueing owns no database connection; the existing database throttle still bounds the reader.
+Excess checks fail unavailable before SQL. Timeout does not release a still-running database
+check's admission. A failed/partial scheduled sweep never treats unchecked sockets as revoked.
+
+Only checks admitted before a database batch begins may share its result. Later checks wait for
+a new statement; completed allow decisions are not cached. Session revocation therefore still
+applies to an already connected socket, queued work and physical disclosure. No payload-selected
+account or socket identity can choose the principal budget. A shutdown rejects queued and
+in-flight results rather than publishing an allow after the lane closes.
+
+`plowshare.socket.sessions.pending`, `.rejected`, `.timed.out` and `.batches` expose bounded
+admission and physical-query counts without principal labels. Configure each server's bounds
+against shared database capacity; the queue is not a fleet-wide limiter.
+
 Each per-principal limit must be positive and no greater than its process limit. These are
 initial configurable defaults, not a measured fleet capacity promise. Work leases settle on
 physical completion; asynchronous routing retains a lease until its handler completes.
@@ -67,7 +87,7 @@ pass, including across sockets. At most eight groups are refreshed per one-secon
 all live groups; admission may defer them further. The map is bounded by subscription seats.
 Each socket retains its own revision, initial-reply fence and unsubscribe/disconnect tombstone.
 Every pass uses current repository authorization; no cross-principal or cross-selection reuse occurs.
-Initial subscriptions use the same background report lane. Mutation ordering is unchanged.
+Initial subscriptions use the foreground report lane and its bounded fair wait. Periodic publication alone uses the yielding background lane, so existing feeds cannot monopolize every new subscription attempt. Both lanes retain the same global/principal report limits. Mutation ordering is unchanged.
 
 Cache load/waiter exhaustion refuses the read; it must not start another uncached SQL load.
 Recovery, dirty/historical transactions and non-shareable values retain ordinary read semantics
@@ -161,6 +181,14 @@ revision-history row atomically, with independent durable subscriber positions a
 checks on read. History writes advance PROGRESS; they no longer run an audience query or emit an
 identified `information.changed` push per event. The legacy decoder remains for older servers.
 Consumers reconcile their scoped durable stream after hints, reconnects or lost notifications.
+
+Catalogue membership changes alone are soft hints. `KNOWLEDGE_REVOCATIONS` separately records
+changes that may revoke existing readers. V208 records up to 128 physical resource/revision/document
+births per relation in fixed transaction-local markers; nested initial policy writes and ordinary
+new-resource intake remain soft. Markers roll back at savepoints and clear on commit. Overflow or
+unknown provenance stays hard. New heads of existing resources stay hard because unpinned reference
+obligations can redirect existing reports. No marker bypasses authorization or cache-version checks,
+no source identity is sent in a notification, and no audience or permission graph is queried.
 
 Socket hints distinguish immediate access/recovery invalidation from nonrevoking `refreshOnly`
 content and `progressOnly` processing hints. Content dominates progress; access dominates both.

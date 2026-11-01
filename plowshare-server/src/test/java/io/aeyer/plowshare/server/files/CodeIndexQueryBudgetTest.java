@@ -28,7 +28,8 @@ class CodeIndexQueryBudgetTest {
       String key = "source-" + file;
       String hash = FileContents.sha256(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
       UUID revision = UUID.randomUUID();
-      sources.add(new CodeWorkspaceStore.IndexSource(key, new FileSource(10, hash, null, null)));
+      sources.add(
+          new CodeWorkspaceStore.IndexSource(key, key, new FileSource(10, hash, null, null)));
       revisions.put(key, revision);
       hashes.put(revision, hash);
       states.put(

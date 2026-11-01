@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.files;
 
-import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.server.documents.CodeProjection;
 import java.util.List;
 import java.util.Map;
@@ -10,7 +9,7 @@ import java.util.Map;
  */
 public interface CodeIndexes {
   /** Foreground navigation; returns null while syntax is pending, never a stale projection. */
-  CodeProjection cached(CodeWorkspaceStore.Scope scope, String key, FileSource source);
+  CodeProjection cached(CodeWorkspaceStore.Scope scope, CodeWorkspaceStore.IndexSource source);
 
   /** At most 100 current exact source/hash/parser statuses; no text or declarations are loaded. */
   Map<String, CodeMapObservations.IndexState> states(

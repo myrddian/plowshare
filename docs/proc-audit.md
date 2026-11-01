@@ -40,7 +40,13 @@ Conversation state and evidence appear together:
 - `COMPLETED`: a completed turn or job was recorded; the ending remains separate.
 - `IDLE`: no execution evidence establishes one of those states.
 
-The GUI refreshes bounded replacement snapshots every five seconds. It labels a
+The GUI waits five seconds after a refresh or selected inspection completes before
+starting its next periodic read. Slow reads do not accumulate timer catch-up work.
+Overlapping inspections share only an in-flight request for the exact same
+selection; later requests reauthorize independently. Conversation counts and pages
+reuse one statement-local authorized selection, including when a cursor page is
+empty. Every server request still checks account and fleet authority, and shared
+read admission bounds work across clients and sockets. It labels a
 failed read stale/unavailable and says current activity is unknown. Changing
 selection or account discards old responses. Closing any audit view stops only
 observation; reads never start work, contact a model, retry an effect or resume a job.

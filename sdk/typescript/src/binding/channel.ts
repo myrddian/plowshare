@@ -43,7 +43,10 @@ export interface ServeOptions {
    * declares the claim after sending it. A client that asked who answers on
    * `open` could be answered before its own definitions counted.
    */
-  readonly onReady?: (project: string | undefined) => void;
+  readonly onReady?: (
+    project: string | undefined,
+    fileChanges?: boolean,
+  ) => void;
 }
 
 export function serve(options: ServeOptions): Serving {
@@ -51,11 +54,12 @@ export function serve(options: ServeOptions): Serving {
   let open = true;
   let ready = false;
   socket.addEventListener('message', (event) => {
+    if (!open) return;
     const landed = readyIn(event.data);
     if (landed !== undefined) {
       if (!ready) {
         ready = true;
-        options.onReady?.(landed.project);
+        options.onReady?.(landed.project, landed.fileChanges);
       }
       return;
     }
@@ -115,7 +119,7 @@ export function serve(options: ServeOptions): Serving {
  */
 export function readyIn(
   data: unknown,
-): { readonly project?: string } | undefined {
+): { readonly project?: string; readonly fileChanges?: boolean } | undefined {
   if (typeof data !== 'string') {
     return undefined;
   }
@@ -133,7 +137,10 @@ export function readyIn(
     return undefined;
   }
   const project = fields['project'];
-  return typeof project === 'string' && project !== '' ? { project } : {};
+  return {
+    ...(typeof project === 'string' && project !== '' ? { project } : {}),
+    ...(fields['fileChanges'] === true ? { fileChanges: true } : {}),
+  };
 }
 
 /** `code` and a non-empty `reason` off whatever the platform's close event is. */

@@ -9,6 +9,23 @@ public interface ApplicationPolicy {
   /** Re-read on every decision so source changes and revocation apply to existing connections. */
   Boundary read(String project);
 
+  /**
+   * Resolves policy and its already-read server workspace together. A resolution belongs to one
+   * operation, never an authorization lease; subsequent decisions resolve again. Implementations
+   * without workspace facts fail closed for managed resource access.
+   */
+  default Source source(String project) {
+    return new Source(read(project), Optional.empty());
+  }
+
+  record Source(
+      Boundary boundary, Optional<io.aeyer.plowshare.server.archive.ProjectRecord> workspace) {
+    public Source {
+      java.util.Objects.requireNonNull(boundary);
+      java.util.Objects.requireNonNull(workspace);
+    }
+  }
+
   enum Kind {
     EXTERNAL,
     APPLICATION,

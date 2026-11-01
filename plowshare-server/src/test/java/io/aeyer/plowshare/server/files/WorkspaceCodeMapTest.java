@@ -56,7 +56,7 @@ class WorkspaceCodeMapTest {
           }
 
           public io.aeyer.plowshare.server.documents.CodeProjection cached(
-              Home home, String key, FileSource source) {
+              Home home, CodeWorkspaceStore.IndexSource source) {
             return fail("Background tracking must not load text or symbols");
           }
 

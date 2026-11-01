@@ -220,7 +220,7 @@ public interface InformationCatalogueRepository {
           binding,
           expectedRevision,
           typingExplicit,
-          "automatic");
+          syntaxOnly ? "explicit_only" : "automatic");
     }
 
     public AdmissionWrite(
@@ -252,12 +252,15 @@ public interface InformationCatalogueRepository {
           null,
           null,
           false,
-          "automatic");
+          syntaxOnly ? "explicit_only" : "automatic");
     }
 
     public AdmissionWrite {
       if (!Set.of("automatic", "explicit_only").contains(processingPolicy))
         throw new IllegalArgumentException("Invalid admission processing policy");
+      if (syntaxOnly && !"explicit_only".equals(processingPolicy))
+        throw new IllegalArgumentException(
+            "Syntax-only intake requires explicit processing policy");
       if (name == null
           || name.isBlank()
           || name.length() > 1024

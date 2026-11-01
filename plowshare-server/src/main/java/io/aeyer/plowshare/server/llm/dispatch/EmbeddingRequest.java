@@ -13,7 +13,21 @@ public record EmbeddingRequest(
     List<String> input,
     Duration submitTimeout,
     UsageAttribution attribution,
-    CallAuthorization authorization) {
+    CallAuthorization authorization,
+    @com.fasterxml.jackson.annotation.JsonIgnore InferenceProgress progress) {
+
+  public EmbeddingRequest(
+      String specifier,
+      List<String> input,
+      Duration submitTimeout,
+      UsageAttribution attribution,
+      CallAuthorization authorization) {
+    this(specifier, input, submitTimeout, attribution, authorization, InferenceProgress.NONE);
+  }
+
+  public EmbeddingRequest withProgress(InferenceProgress value) {
+    return new EmbeddingRequest(specifier, input, submitTimeout, attribution, authorization, value);
+  }
 
   public EmbeddingRequest(
       String specifier, List<String> input, Duration submitTimeout, UsageAttribution attribution) {
@@ -27,6 +41,7 @@ public record EmbeddingRequest(
   public EmbeddingRequest {
     java.util.Objects.requireNonNull(attribution, "attribution");
     java.util.Objects.requireNonNull(authorization, "authorization");
+    java.util.Objects.requireNonNull(progress, "inference progress");
     Specifiers.require(specifier);
     // Null and empty answered with one type and one message, ahead of the
     // copy: List.copyOf reports a null batch as NullPointerException, which
@@ -58,14 +73,14 @@ public record EmbeddingRequest(
   }
 
   public EmbeddingRequest withAuthorization(CallAuthorization check) {
-    return new EmbeddingRequest(specifier, input, submitTimeout, attribution, check);
+    return new EmbeddingRequest(specifier, input, submitTimeout, attribution, check, progress);
   }
 
   public EmbeddingRequest withBudget(Duration budget) {
-    return new EmbeddingRequest(specifier, input, budget, attribution, authorization);
+    return new EmbeddingRequest(specifier, input, budget, attribution, authorization, progress);
   }
 
   public EmbeddingRequest withAttribution(UsageAttribution owner) {
-    return new EmbeddingRequest(specifier, input, submitTimeout, owner, authorization);
+    return new EmbeddingRequest(specifier, input, submitTimeout, owner, authorization, progress);
   }
 }

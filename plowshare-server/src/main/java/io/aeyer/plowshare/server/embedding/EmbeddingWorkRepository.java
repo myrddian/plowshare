@@ -57,6 +57,36 @@ public interface EmbeddingWorkRepository {
 
   Optional<EmbeddingProfile> target(EmbeddingSlot slot);
 
+  /**
+   * Scheduling facts only: claims and publication must still recheck live source/slot authority.
+   */
+  record RepairWork(EmbeddingProfile profile, Store store) {
+    public RepairWork {
+      Objects.requireNonNull(profile);
+      Objects.requireNonNull(store);
+    }
+  }
+
+  /** A bounded operation snapshot, never a retained permission or source-content cache. */
+  record MaintenancePlan(List<RepairWork> repairs, List<EmbeddingProfile> activations) {
+    public MaintenancePlan {
+      repairs = List.copyOf(repairs);
+      activations = List.copyOf(activations);
+      if (repairs.size() > 20
+          || activations.size() > 2
+          || new java.util.HashSet<>(repairs).size() != repairs.size()
+          || new java.util.HashSet<>(activations).size() != activations.size())
+        throw new IllegalArgumentException(
+            "Embedding maintenance plan exceeds bounded slots/stores");
+    }
+  }
+
+  /**
+   * Select only due profile/store pairs. Index health audits are independent of queue activity; an
+   * actual target transition always remains eligible for its authoritative activation fence.
+   */
+  MaintenancePlan maintenancePlan(boolean auditIndexes);
+
   /** Cheap indexed wakeup hint. Claims, source and activation fences still decide actual work. */
   default boolean discoveryDue() {
     return true;
@@ -97,6 +127,24 @@ public interface EmbeddingWorkRepository {
 
   /** Store only a bounded failure category, never provider bodies, credentials or source text. */
   void failed(EmbeddingProfile target, Source expected, String category);
+
+  /** Commit the exact attempt identity and its replay fence atomically before leaving for IO. */
+  Optional<EmbeddingRepair.Attempt> beginRepairAttempt(EmbeddingProfile profile, Source source);
+
+  /** Transactional metadata checkpoint; failure prevents the next transport step. */
+  void repairProgress(EmbeddingRepair.Attempt attempt, EmbeddingRepair.Progress progress);
+
+  /**
+   * Record the failed phase and bounded reason after the failed owner transaction has rolled back.
+   */
+  void repairFailed(
+      EmbeddingRepair.Attempt attempt,
+      EmbeddingRepair.Progress evidence,
+      EmbeddingRepair.Reason reason,
+      String failureType);
+
+  /** Staging/vector publication and its success receipt commit or roll back together. */
+  boolean publishRepair(EmbeddingRepair.Attempt attempt, float[] vector, Runnable fence);
 
   /** Atomic background-attempt fence. Uncertain attempts wait for reconciliation, not a timer. */
   default boolean beginRepair(EmbeddingProfile target, Source expected) {

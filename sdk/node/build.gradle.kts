@@ -31,7 +31,7 @@ val nodeManagementTest by tasks.registering(Exec::class) {
     group = "verification"
     nodeSources()
     dependsOn(nodeBuild)
-    commandLine("node", "--experimental-strip-types", "--test", "src/provider-management.test.ts", "src/credentials.test.ts")
+    commandLine("node", "--experimental-strip-types", "--test", "src/provider-management.test.ts", "src/credentials.test.ts", "src/workspace-watch.test.ts")
 }
 tasks.named("check") { dependsOn(nodeBuild, nodeManagementTest) }
 tasks.named("jar") { dependsOn(nodeBuild) }

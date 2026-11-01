@@ -96,9 +96,10 @@ class ApplicationProjectMembersTest {
             "viewer", "worker", "manager", "external", "invalid", "removed", "broken-chain");
     when(stored.readableProjects(candidates.stream().sorted().toList(), "reader"))
         .thenReturn(java.util.Set.copyOf(candidates));
-    when(lineage.projectRole(anyString(), eq("reader"), any()))
+    when(lineage.projectRole(anyString(), eq("reader"), any(), any()))
         .thenAnswer(invocation -> invocation.<Optional<ProjectRole>>getArgument(2));
-    when(lineage.projectRole(eq("broken-chain"), eq("reader"), any())).thenReturn(Optional.empty());
+    when(lineage.projectRole(eq("broken-chain"), eq("reader"), any(), any()))
+        .thenReturn(Optional.empty());
     for (var role : ProjectRole.values()) {
       String project =
           switch (role) {
@@ -148,7 +149,7 @@ class ApplicationProjectMembersTest {
     var projects = java.util.List.of("allowed", "denied");
     when(stored.readableProjects(projects, principal)).thenReturn(java.util.Set.copyOf(projects));
     when(stored.authorityAccount(principal)).thenReturn(Optional.of("integration"));
-    when(lineage.projectRole(anyString(), eq("integration"), any()))
+    when(lineage.projectRole(anyString(), eq("integration"), any(), any()))
         .thenReturn(Optional.of(ProjectRole.VIEWER));
     when(policy.read("allowed"))
         .thenReturn(

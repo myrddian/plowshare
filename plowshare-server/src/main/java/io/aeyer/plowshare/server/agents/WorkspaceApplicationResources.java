@@ -25,17 +25,24 @@ public final class WorkspaceApplicationResources implements ApplicationResources
 
   @Override
   public Optional<Path> root(Long id) {
+    return resolved(id).map(Resolved::root);
+  }
+
+  private record Resolved(io.aeyer.plowshare.server.archive.ProjectRecord project, Path root) {}
+
+  private Optional<Resolved> resolved(Long id) {
     if (id == null) return Optional.empty();
     var name = names.nameForId(id);
     if (name.isEmpty()) return Optional.empty();
-    var boundary = applications.read(name.get());
+    var source = applications.source(name.get());
+    var boundary = source.boundary();
     if (boundary.kind() == ApplicationPolicy.Kind.EXTERNAL) return Optional.empty();
     if (boundary.kind() == ApplicationPolicy.Kind.INVALID)
       throw new WorkspaceRefusedException(
           "Application resources require a valid deployed manifest");
     var row =
-        projects
-            .find(name.get())
+        source
+            .workspace()
             .orElseThrow(() -> new WorkspaceRefusedException("Application source is unavailable"));
     if (Files.exists(row.workspace().resolve(".plowshare"), LinkOption.NOFOLLOW_LINKS))
       throw new WorkspaceRefusedException(
@@ -44,7 +51,7 @@ public final class WorkspaceApplicationResources implements ApplicationResources
         FileAccess.of(java.util.List.of(row.workspace()), projects.effectiveExclusions(row));
     if (!fence.permits(row.workspace()))
       throw new WorkspaceRefusedException("Application source is excluded");
-    return Optional.of(row.workspace());
+    return Optional.of(new Resolved(row, row.workspace()));
   }
 
   @Override
@@ -53,9 +60,10 @@ public final class WorkspaceApplicationResources implements ApplicationResources
             "", "agents", "bots", "skills", "orchestrations", "hooks", "schedules", "server")
         .contains(relative))
       throw new IllegalArgumentException("Unknown Application resource directory");
-    return root(id)
+    return resolved(id)
         .map(
-            root -> {
+            source -> {
+              Path root = source.root();
               Path directory = root.resolve(relative);
               try {
                 Path at = root;
@@ -70,7 +78,7 @@ public final class WorkspaceApplicationResources implements ApplicationResources
                     var entries = paths.limit(4097).toList();
                     if (entries.size() > 4096 || entries.stream().anyMatch(Files::isSymbolicLink))
                       throw new IOException("Linked or oversized resources");
-                    var row = projects.find(names.nameForId(id).orElseThrow()).orElseThrow();
+                    var row = source.project();
                     var fence = row.reach(projects.effectiveExclusions(row));
                     for (Path path : entries)
                       if (!fence.permits(path)) throw new IOException("Excluded resource");

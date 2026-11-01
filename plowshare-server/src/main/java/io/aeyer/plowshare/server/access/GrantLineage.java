@@ -11,4 +11,13 @@ public interface GrantLineage {
   boolean valid(UUID grant);
 
   Optional<ProjectRole> projectRole(String project, String account, Optional<ProjectRole> ceiling);
+
+  /** Reuses this decision's current target manifest, retaining live ancestor policy checks. */
+  default Optional<ProjectRole> projectRole(
+      String project,
+      String account,
+      Optional<ProjectRole> ceiling,
+      io.aeyer.plowshare.server.agents.ApplicationPolicy.Boundary boundary) {
+    return projectRole(project, account, ceiling);
+  }
 }

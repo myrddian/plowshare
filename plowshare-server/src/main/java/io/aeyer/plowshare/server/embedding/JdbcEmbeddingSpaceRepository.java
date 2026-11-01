@@ -60,7 +60,7 @@ public class JdbcEmbeddingSpaceRepository implements EmbeddingSpaceRepository {
         .findFirst();
   }
 
-  private static EmbeddingSpace read(ResultSet row, int ignored) throws SQLException {
+  static EmbeddingSpace read(ResultSet row, int ignored) throws SQLException {
     return new EmbeddingSpace(
         row.getString("id"),
         new EmbeddingSpace.Definition(
