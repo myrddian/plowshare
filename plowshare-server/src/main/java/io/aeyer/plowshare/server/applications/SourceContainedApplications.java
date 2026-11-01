@@ -492,7 +492,16 @@ public final class SourceContainedApplications implements ContainedApplications 
    * <p>The order is the contract. The caller's own live authority is proved first, then the
    * containment chain is walked from the child upwards until it reaches the caller's scope — a
    * structural resolution, not a permission denial — and only then is any envelope read. A refused
-   * read therefore learns nothing about the child, not even that its conversations exist.
+   * read therefore discloses no conversation of the child's: not a lineage, not a count, not that
+   * any particular conversation exists.
+   *
+   * <p>It does not hide the child itself, and this method does not claim it does. The lookup below
+   * runs <em>before</em> {@code parent(...)} and {@link #requireAncestor}, so a caller that
+   * contains nothing still learns whether an arbitrary UUID names a contained Application on this
+   * installation — a one-bit existence oracle, shared verbatim with {@link #resources}. Closing it
+   * means proving the caller's authority before the lookup, which changes which fault a nonexistent
+   * child raises and is therefore a contract change rather than a reordering; it is recorded as a
+   * known limitation in ADR 0042 and deliberately not fixed here.
    */
   @Override
   public List<Step> trajectory(String account, String conversation, UUID child) {
@@ -524,9 +533,15 @@ public final class SourceContainedApplications implements ContainedApplications 
    * #MAX_RESOURCE_ENTRIES} visited entries or {@link #MAX_RESOURCES} files, and sorts only what it
    * kept. An area past either bound, or a live child whose area is not a real directory, is a
    * server-side inconsistency and not something the container did, so both raise {@link
-   * IllegalStateException} rather than a caller fault, and neither is ever an empty success: a
-   * valid package always contains its manifest, so "no resources" would be a wrong answer a parent
-   * agent acts on.
+   * IllegalStateException} rather than a caller fault, and neither of those two cases is ever an
+   * empty success.
+   *
+   * <p>No manifest is required of the listing, and none is asserted. A live child whose revision
+   * directory holds no regular file — an interrupted stage — is answered with an empty list, and
+   * one holding files but no {@link WorkspaceApplicationPolicy#FILE} is answered without a {@code
+   * manifest} row. That is what the walk reports and what the tests pin; a parent agent reading
+   * this must not take a non-empty answer, or a {@code manifest} entry, as a package validity
+   * claim. Package validity is decided on the producing side, where the manifest is parsed.
    */
   // Unlike trajectory, this refuses a destroyed child. Not an inconsistency: trajectory reads
   // retained conversation lineage, which is history and deliberately survives destruction, whereas

@@ -679,6 +679,7 @@ contained scope and is verified to, with the verification named.
 | `V208` `authority_live_grants`, `authority_grant_insert` | grant admission and liveness | **Refused** (Task 2). Covered by `ContainedScopeSchemaTest`. The `authority_live_grants` exclusion is a backstop with no reachable route, because `authority_grant_insert` refuses first; that test reaches it only by disabling the insert trigger, and it is recorded as defence in depth rather than as a live fence. |
 | `V215` `knowledge_scope_readable` (was `V172:9`), and `V172:19` `information_project_readable`, which composes it | information and knowledge read admission | **Was fenced by kind; slice two deliberately opened it, one way.** The slice-one reason — `s.kind IN ('PROJECT','PERSONAL')`, so a contained scope is excluded — is **no longer true**, and this row is the capability slice two set out to add rather than a hole it left. V215 adds one arm whose admission is `contained_scope_readable`: the scope's own `contained_principals` principal, or an actor holding `authority_project_role` on the project of a scope that transitively **contains** it, resolved by walking `contained_scope_ancestors` **upward from the descendant**. Confinement is therefore the walk's direction, not a filter: a descendant reading upward, a sibling, a nephew, a stranger, a server administrator with no role on an ancestor, and a service credential on the container are each asserted to get nothing, and a broken chain refuses at the break so nothing above it is an ancestor of anything below. `information_project_readable` is `EXISTS(… knowledge_scope_readable …)` over the scopes of one project, so it moved with the predicate and now answers true for an ancestor role holder asked about a child's project. **This inventory's own evidence for that row is `ContainedAddressabilityDatabaseTest.informationReadabilityAdmitsAnAncestorAndRefusesEveryoneElse`**, which asserts both directions in one test — an ancestor admitted, a server administrator that is a global-read member but holds no role on the container refused — so it fails whichever way the arm breaks; the opened behaviour in its own right (the self arm, the chain, siblings, the walk sentinel, a broken chain) is `ContainedKnowledgeReadSchemaTest`. The slice-one assertion that this predicate *refused* a child was obsolete the moment V215 landed and is gone; `everyRoleAndManagementPredicateRefusesAContainedProject` is what remains of that test and no longer names this predicate, because the role and management predicates are the ones that still refuse by kind. **Its consumers are fenced upstream, not by kind, and the fence is a property of the argument rather than of a closed caller list:** this predicate is only ever asked about the **request's selected project**, and a `contained:…` name cannot become one — `ProjectAuthorization`'s chokepoint resolves no role for it (the row above) and `IdentityRepository.project(String)` still refuses to resolve a contained scope from a project name. Stated that way the fence survives a new consumer; stated as a caller list it would not, which matters because the list is longer than two. There are **two Java call sites** — `MemoryStore.java:76` (`pin`, the memory-home authority check), which passes the selected project *by name*, and `JdbcQueryEmbeddingRepository.java:64` (`require`), which passes `(SELECT project_id FROM authority_scopes WHERE id=?)` for the **pin scope resolved from the selected home**, so it reaches the same project by a different step rather than by its name — and **one live SQL composition**: `information_root_readable` (latest definition `V185:27`) calls `information_project_readable(linked.id,$2)` at `V185:37`, inside an `information_links` arm constrained by `linked.name=$4`, which is that statement's `selected_project`. All three therefore turn on the same selected project, and none can be handed a contained one. That is a weaker fence than a predicate that refuses by kind, and it is recorded here for the same reason the chokepoint's five exceptions are. The superseded definitions at `V110:21`, `V111:41` and `V156:324`, whose `a.server_admin AND name NOT LIKE 'client:%'` arms *would* have admitted a child, remain dead. |
 | `V215` `knowledge_read_authority` (was `V178:45`) | batched knowledge read authority | **Was fenced by kind; opened by the same rule, and by the same rule only.** The slice-one reason — `s.kind IN ('PROJECT','PERSONAL')` guarding the whole branch — is no longer the whole predicate. V215 adds `OR (s.kind='CONTAINED' AND contained_scope_readable($1,s.id,a.member))` as a disjunct beside the pre-existing `a.member AND (…)` gate, because a contained principal has no account to be a member of. Both chokepoints consult the one shared rule, and a test asserts the batched relation and the exact predicate agree scope by scope, so discovery cannot admit what an exact read refuses or the reverse. Everything else in the body — the live-grant, `project_reads`, token and Personal fences and the `MATERIALIZED` shape — is untouched, and `authority_live_grants` still honours no grant against a contained scope (V208), so no role is ever resolved *on* one; that slice-one exclusion is now load-bearing for this arm rather than only defence in depth. |
+| `V215` `information_public_policy` (was `V172:21`), and the `general_readable` column of `V215` `knowledge_readable_candidates` (was `V198:5`) | general-read publication: the audience that makes a resource addressable to every account without anyone naming it | **Refused in slice two. A new row, and the only one in this inventory that runs outward rather than inward.** Every other knowledge-read row asks who may reach *into* a contained subtree; this one asks whether a contained home can be published *out* of it. Both bodies that decide general-read publication fenced on `s.kind<>'RESTRICTED'` / `f.scope_kind<>'RESTRICTED'` alone — the only scope kind that existed to be excluded when they were written — and V208, which added `CONTAINED` as a fifth kind, did not extend either test. The consequence was concrete rather than theoretical: `knowledge_revision_readable` (`V172:38`) is `… AND (knowledge_scope_readable($2,q.home_scope_id) OR knowledge_general_readable(r.id))` and the candidates body's `facts.readable` (`V215:375`) is `… OR f.general_readable`, so a revision whose home was a contained scope, if its policy audience were `GLOBAL_READ`, would have been admitted to **every global-read member — which is every active non-bootstrap account — with no containment test taken anywhere**. It was **pre-existing from slice one and not reachable**: the policy insert trigger (`V158:88`) writes `audience='HOME'`, the navigation default makes `NOT coalesce(ownerOnly,true)` the refusing value, and nothing executes a contained child, so no contained-home resource exists to publish. That is confinement resting on a default value rather than on a structure, which is the spec's named anti-goal, so V215 adds one conjunct — `s.kind<>'CONTAINED'`, and `f.scope_kind<>'CONTAINED'` in the hoisted twin — beside each existing `RESTRICTED` test, reproducing `information_public_policy` verbatim from `V172:21` otherwise. It only ever narrows: the conjunct can refuse a general publication, never admit one. The narrow body is the one edited on purpose, because `knowledge_general_readable` (`V172:30`) and the closure predicates (`V158:183`, `V158:194`) all resolve through it, so one conjunct fences the general arm of `knowledge_revision_readable`, of `information_root_readable` and of `knowledge_document_in_boundary`'s global arm, and additionally refuses a published resource whose closure merely *reaches* a contained home. Evidence is `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree`, which asserts the baseline first — the stranger is a live general-read member and the identical publication in an ordinary home really does reach it through the general arm alone — then the refusal for the exact predicate, for discovery's own hoisted copy, for a general-read ceiling under both homes and for a closure that merely touches the subtree, and finally that the ancestor's inward read is untouched, so it fails whichever way the fence breaks. **`knowledge_revision_readable` (`V172:36`) and the candidates body's `readable` column (`V215:372`) carry the same `RESTRICTED` test and deliberately do *not* gain this conjunct:** their test governs the whole read rather than the general arm, so excluding `CONTAINED` there would refuse an ancestor's read of a descendant's home — the capability slice two exists to open — and their general arm is already fenced through `knowledge_general_readable`. |
 | `plowshare-server/.../board/ProjectMessageRouting.java:85` | messaging `from_project` and `to_project` | **Refused**, in both directions. Messaging is a narrowing of the existing Relay and Application scoping and not a forwarding surface. **The ordering is a finding, not a style choice:** `require` returns early when source equals destination, so with the check after that return a child addressing *its own* project was admitted with no policy consulted at all. A contained project is not a messaging endpoint in this slice, its own included, because nothing executes a child yet. The check also precedes the route policy, so the refusal names containment rather than an absent route. |
 | `plowshare-server/.../board/ProjectMessageRouting.java:65`, `identify` | the `routingIdentity` surface | **Fenced upstream.** It maps a project to its personal-space address or answers the name unchanged; it decides nothing, and every caller of it has already passed `require`. |
 | `plowshare-server/.../information/JdbcInformationEventRecords.java:160` | the Relay audience for an information event | **Already refused loudly by the `default` arm; this change is documentation only.** The honest statement: `audienceProject`'s `default -> null` already produced `Unaddressable` for a `CONTAINED` kind before this change, so a child's events never had a topic, and ADR 0037's rule for `ADMINISTRATION` and `RESTRICTED` — fail loudly, no fallback topic — already applied by exclusion. What was added is `case "CONTAINED" -> null` named beside `PROJECT`, `PERSONAL` and `ACCOUNT_KNOWLEDGE`, which is **behaviour-identical** and exists so the decision is visible where the next kind is added rather than being a silent default. The mutation that proves the behaviour changes the `default` arm, not the added case. It is still a load-bearing entry, because a contained scope *does* carry a project key: an implementation that reached for it would have published a child's events to a topic whose audience is the child's project. Per ADR 0039 no Relay scope kind is added. |
@@ -699,7 +700,8 @@ contained scope and is verified to, with the verification named.
 | `plowshare-server/.../applications/ContainedDeclarations.java:175`, Relay worker account | `server/relay-workers.json` | **Reduced.** The worker account is the identity that services a project's work; a child naming one its container does not declare would have its work serviced by an identity no container mediated. Enrollment separately refuses it, because `ApplicationRelayWorkerBindings` checks `members.mayWork` and a child project is now not in the catalogue at all. |
 | `plowshare-protocol/.../ContainedProjects.java` | the prefix itself | **One definition**, case-insensitive, replacing the two copies at `ProjectStore.ordinary` and `SourceContainedApplications.PREFIX`. The SQL exclusions are case-sensitive `LIKE` and the Java test is not; that asymmetry is the safety belt rather than a discrepancy, because creation refuses `Contained:x` outright while SQL would have mapped it to an ordinary scope. |
 
-Thirty-four entries. **At slice one: twenty refused or reduced here, fourteen
+Thirty-five entries, the last of which slice two added. **At slice one, thirty-four
+entries: twenty refused or reduced here, fourteen
 fenced by an existing predicate, by construction or by an upstream refusal and
 verified** (counting the prefix definition itself as a refusal, and counting as
 fenced the one read deliberately left unchanged, the session listing that is safe
@@ -709,9 +711,12 @@ inherited: `project.list` and the Relay worker enrollment pass,
 both reachable because a child project carries a workspace path and both
 excluded only `client:`.
 
-**After slice two: twenty refused or reduced, twelve still fenced, two
-deliberately opened.** The two are the knowledge-read rows above, and they are
-the whole of what the slice-two re-audit changed. Every other row was re-decided
+**After slice two: twenty-one refused or reduced, twelve still fenced, two
+deliberately opened.** The two opened are the knowledge-read rows above; the
+twenty-first refusal is the outward general-read publication row, which is the
+one entry the slice-two re-audit **added** rather than re-decided — a surface
+slice one's audit did not have, because an outward direction only becomes a
+question once an inward one is open. Every other row was re-decided
 against the code and is unchanged, because the predicate each one names is
 untouched by V215: `authority_project_role`, `service_project_role` and
 `authority_project_management_grant` still answer nothing for a `CONTAINED`
@@ -765,6 +770,31 @@ a child execute**, which is where the consumer is — nothing in either slice
 reads *as* the child — and the refusal is pinned by a test that identifies the
 gate rather than left to be rediscovered.
 
+**`information_navigation_reference_visible` carries the same unextended
+`RESTRICTED` fence and is deliberately left alone.** Slice two's outward fence
+covers the two bodies that decide general-read *publication*; the third body with
+the same shape is `information_navigation_reference_visible` (`V172:91`), whose
+`s.kind<>'RESTRICTED'` was likewise never extended to `CONTAINED`. It is a
+different capability — it discloses that a *navigation reference* to a resource
+exists, not the resource's content — and it is unreachable for the same reason
+plus one more: the navigation default for `referenceHidden` is `true` (`V147:73`),
+and `NOT coalesce(referenceHidden,true)` is therefore the refusing value, so a
+contained home would additionally need an explicit navigation policy written
+against it. It was **not** given the conjunct because, unlike the publication
+bodies, it is the *only* admission arm at one of its two call sites:
+`JdbcInformationNavigationRepository.referenceVisible` (`:617`) evaluates
+`information_navigation_reference_visible(…) AND <boundary>` with nothing beside
+it, so excluding `CONTAINED` there would refuse an **ancestor's own** reference
+visibility into its descendant — a narrowing of the capability slice two opens,
+which this slice can neither justify nor test. (At the other call site,
+`InformationSql`'s `visible` filter, it is a disjunct beside
+`own_readable AND reference_readable`, which does route through the widened
+`knowledge_scope_readable`, so the ancestor would keep its visibility there.) The
+honest statement is that one body of this class remains fenced by a default rather
+than by a structure, and that closing it needs the one-way direction worked out
+for reference visibility in its own right — which is the slice that makes a child
+execute, where the consumer is.
+
 **Nothing executes a contained child.** Every entry above, including both
 re-decided knowledge-read rows, is proved at resolution, admission, listing and
 document read against **inserted rows**, never against a running child. The
@@ -779,14 +809,21 @@ authority through `parent(account, conversation)` and walk the chain in
 `requireAncestor`, so a caller that contains nothing can distinguish a child UUID
 that exists on the installation from one that does not — a one-bit existence
 oracle on a scope it may not name. It is inherited verbatim from `trajectory`,
-which slice one shipped, and it **contradicts that method's own documented
-claim**: the Javadoc at `SourceContainedApplications.java:495` says a refused
-read learns "not even that its conversations exist", and the lookup at `:500`
-leaks exactly that. The existence bit is precisely what the comment says is not
-learned, so the contradiction is flat and is recorded without qualification.
-Recorded as affecting both methods. Closing it means proving the caller's
-authority before the lookup, which changes which fault a nonexistent child
-raises, so it is a contract change rather than a reordering.
+which slice one shipped, and it is recorded as affecting both methods. Closing it
+means proving the caller's authority before the lookup, which changes which fault
+a nonexistent child raises, so it is a contract change rather than a reordering,
+and it stays deferred.
+
+The whole-branch review found that `trajectory`'s Javadoc **contradicted** this
+entry: it claimed a refused read learns "not even that its conversations exist",
+which is precisely the bit the lookup beside it leaks. **The code was not
+changed** — closing the oracle is the contract change above — and the Javadoc
+was corrected instead: it now claims only what is true, that a refused read
+discloses no *conversation* of the child's, states plainly that it does not hide
+the child itself, and points here for the deferred fix. `resources`' Javadoc
+never made the claim and is unchanged on that point. The correction is the
+reason this limitation is no longer also a documentation defect; the oracle
+itself is unchanged and still live.
 
 **Planner cost for the widened reads is argued, not measured.** The widened
 listing path and the new `boundary_descendants` CTE are hoisted so that
@@ -1177,6 +1214,23 @@ a reachable defect** — no server reply can carry an invalid value. Fixing it
 means teaching the DTO/schema generator to emit an integer bound, which is a core
 contract change with its own decision, so it is recorded here as a **generator
 gap** rather than patched in generated output.
+
+**`child` is unenforced as a UUID in the Go, Python and .NET SDKs — the same
+generator gap, on the request side.** In `sdk/dotnet/Plowshare.Sdk/Schemas.json`
+the three request shapes that carry it — `shape56` (`application.child.destroy`),
+`shape59` (`.trajectory`) and `shape58` (`.resources`) — are structurally
+identical and each types `child` as
+`{"$ref":"#/$defs/shape1","minLength":1,"nonblank":true,"noNul":true}`, where
+`shape1` is a bare `{"type":"string"}`: no UUID pattern anywhere, so all three
+accept a non-UUID string client-side and only
+TypeScript's hand-written `containedProblem` check rejects it. The server parses
+and validates it, so again this is **defence in depth that is missing, not a
+reachable defect**, and the remedy is the same one: teaching the generator to
+emit a format constraint, not editing generated output. The two are recorded
+together because they are **one class of limitation** — a semantic constraint the
+schema generator cannot express, enforced by hand in TypeScript and by the server
+on both sides of it — and not two independent SDK bugs. Any future entry of this
+shape belongs beside these two.
 
 **One frame cost four pin bumps, and the pins prove nothing about correctness.**
 Adding `application.child.resources` required the contract generators to re-render

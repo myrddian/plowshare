@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
@@ -320,6 +321,21 @@ class ContainedKnowledgeReadSchemaTest {
             revision,
             actor,
             home));
+  }
+
+  /**
+   * Discovery's own general-read selection, with no ceiling requested at all ({@code
+   * boundary_global} NULL). {@code knowledge_readable_candidates} hoists its own copy of the
+   * general-read arm into a {@code general_readable} column, so a fence applied only to {@code
+   * information_public_policy} would leave the listing path publishing what an exact read refuses.
+   */
+  private boolean selectedAsGeneralRead(String actor, UUID revision) {
+    return jdbc.queryForList(
+            "SELECT revision FROM knowledge_readable_selection("
+                + "?,'global_read',NULL,FALSE,NULL,NULL,NULL,NULL,FALSE,NULL,NULL,NULL)",
+            UUID.class,
+            actor)
+        .contains(revision);
   }
 
   /** The boundary home a request names when it selects a contained scope's own project. */
@@ -662,6 +678,62 @@ class ContainedKnowledgeReadSchemaTest {
   }
 
   /**
+   * The other direction of the general arm, and the one that decides confinement: a contained home
+   * travelling <em>outward</em>. The test above asks whether a published row outside the subtree
+   * reaches the child; this asks whether a published row <em>inside</em> it reaches the world.
+   *
+   * <p>Both bodies that decide general-read publication fenced only on {@code RESTRICTED}, the sole
+   * scope kind that existed when they were written, so before V215 a contained-home revision with a
+   * {@code GLOBAL_READ} audience satisfied the general arm of {@code knowledge_revision_readable}
+   * and of the ceiling, and was admitted to every global-read member — which is every active
+   * non-bootstrap account — with no containment test taken anywhere. That it was unreachable rested
+   * on the insert trigger's {@code HOME} default and on nothing executing a child, which is a check
+   * rather than a structure; V215 makes it structural with one conjunct in each body.
+   *
+   * <p>The baseline is asserted first, so neither refusal can pass for want of a fixture: the
+   * stranger really is a live general-read member, and the identical publication in an ordinary
+   * home really does reach it through the general arm alone — the stranger holds no role there
+   * either. The last block asserts the inward read is untouched, so the test fails in both
+   * directions: a fence that also refused the ancestor would not pass here.
+   */
+  @Test
+  void aContainedHomeIsNeverPublishedOutsideItsSubtree() {
+    var inside = retained(childScope);
+    publish(inside);
+    var ordinary = retained(unrelatedProject("ordinary"));
+    publish(ordinary);
+
+    assertTrue(
+        jdbc.queryForObject("SELECT information_global_read_member(?)", Boolean.class, STRANGER),
+        "the stranger is a live general-read member");
+    assertTrue(generallyReadable(ordinary), "an ordinary home really does publish");
+    assertTrue(revisionReadable(STRANGER, ordinary));
+    assertTrue(selectedAsGeneralRead(STRANGER, ordinary));
+    assertFalse(readable(STRANGER, childScope), "and it holds no role inside the subtree");
+
+    assertFalse(generallyReadable(inside), "a contained home publishes to nobody");
+    assertFalse(revisionReadable(STRANGER, inside));
+    assertFalse(
+        selectedAsGeneralRead(STRANGER, inside), "discovery hoists its own copy of the same arm");
+    // A general-read ceiling does not reopen it either, under the subtree's home or the
+    // container's.
+    assertFalse(inBoundaryWithGeneralRead(STRANGER, inside, home(childScope)));
+    assertFalse(inBoundaryWithGeneralRead(STRANGER, inside, "parent"));
+    // A closure that merely reaches a contained home cannot be published outward either.
+    var derived = retained(unrelatedProject("derived"));
+    publish(derived);
+    input(derived, inside);
+    assertFalse(generallyReadable(derived));
+    assertFalse(revisionReadable(STRANGER, derived));
+
+    // The inward read the slice exists to open is untouched by the fence.
+    assertTrue(revisionReadable(HOLDER, inside));
+    assertTrue(inBoundary(HOLDER, inside, "parent"));
+    assertTrue(inBoundary(HOLDER, inside, home(childScope)));
+    assertTrue(selectedUnderCeiling(HOLDER, inside, home(childScope), "parent"));
+  }
+
+  /**
    * The same widening on the path production actually evaluates. {@code InformationSql.boundary}
    * hoists {@code knowledge_readable_scopes} once per query and pairs it with {@code
    * knowledge_document_admitted}, so a ceiling widened only in the exact-target predicate would
@@ -710,20 +782,30 @@ class ContainedKnowledgeReadSchemaTest {
 
   /**
    * Direct coverage of the walk itself, which every containment rule in this migration is expressed
-   * over: nearest ancestor first, exclusive of the scope asked about, and empty for a scope that is
-   * contained in nothing.
+   * over: every ancestor and nothing else, exclusive of the scope asked about, and empty for a
+   * scope that is contained in nothing.
+   *
+   * <p>Membership is asserted, not row order. The walk is a {@code UNION ALL} recursive CTE with no
+   * {@code ORDER BY}, so PostgreSQL promises no order for it, and no consumer wants one: every rule
+   * in V215 tests the relation with {@code EXISTS} or a join. Asserting the order a plan happens to
+   * produce would make this fail on a plan change rather than on a regression, and adding an {@code
+   * ORDER BY} to the function would be an ordering guarantee nobody asked for. The sets are
+   * compared exactly, so a leaked or missing ancestor still fails.
    */
   @Test
-  void theContainerChainResolvesNearestAncestorFirst() {
+  void theContainerChainResolvesEveryAncestorAndNothingElse() {
     assertEquals(
-        List.of(childScope, parentScope),
-        jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, grandchildScope));
+        Set.of(childScope, parentScope),
+        Set.copyOf(
+            jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, grandchildScope)));
     assertEquals(
-        List.of(parentScope),
-        jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, childScope));
+        Set.of(parentScope),
+        Set.copyOf(
+            jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, childScope)));
     assertEquals(
-        List.of(),
-        jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, parentScope));
+        Set.of(),
+        Set.copyOf(
+            jdbc.queryForList("SELECT contained_scope_ancestors(?)", UUID.class, parentScope)));
   }
 
   /**

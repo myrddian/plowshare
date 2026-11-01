@@ -38,8 +38,39 @@
 -- discovery and exact-target selection resolve through. V184's documented guarantee is that its
 -- hoist and the V172 predicate admit identical sets, which is why widening one without the other
 -- would leave a false invariant behind rather than merely less capability.
+--
+-- THE OUTWARD FENCE, which this migration also closes. Everything above widens the inward
+-- direction. The general-read publication arm is the one place a contained resource could travel
+-- the OTHER way, and it was never fenced on containment at all: information_public_policy (V172:22)
+-- and its hoisted twin in knowledge_readable_candidates (the general_readable column below) each
+-- excluded only `RESTRICTED`, the single scope kind that existed to be excluded when they were
+-- written. V208 added CONTAINED as a fifth kind and did not extend either test. So a revision whose
+-- home is a contained scope, published with a GLOBAL_READ audience, satisfied the general arm of
+-- knowledge_revision_readable and of the ceiling, and would have been admitted to every global-read
+-- member with no containment test taken anywhere -- which is the one direction confinement must
+-- never allow.
+--
+-- It is not reachable today: the policy insert trigger (V158:88) writes audience='HOME', the
+-- navigation default makes `NOT coalesce(ownerOnly,true)` the refusing value, and nothing executes
+-- a contained child, so no contained-home resource exists to publish. That is a fence resting on a
+-- default rather than on a structure, which is precisely the anti-goal the spec names, so both
+-- bodies gain `s.kind<>'CONTAINED'` beside their existing RESTRICTED test. It only ever narrows:
+-- the conjunct can refuse a general publication, never admit one.
+--
+-- knowledge_revision_readable (V172:36) carries the same RESTRICTED test and deliberately does NOT
+-- gain this conjunct. Its test governs the whole read, not the general arm, so excluding CONTAINED
+-- there would refuse an ancestor's read of a descendant's home -- the capability this migration
+-- exists to open. Its general arm is `knowledge_general_readable(r.id)`, which resolves through
+-- information_public_policy, so the fence below reaches it without touching its kind test. The same
+-- reasoning applies to the hoisted `readable` column in knowledge_readable_candidates below.
 
--- The container chain above a scope, resolved ONCE, nearest first.
+-- The container chain above a scope, resolved ONCE.
+--
+-- It returns a SET and promises no row order: the walk is a UNION ALL recursive CTE with no
+-- ORDER BY, so a plan change may reorder it, and every consumer below tests it with EXISTS or a
+-- join. The `distance` column exists for the sentinel and for nothing else. Do not add an ORDER BY
+-- to make a reader's expectation true -- that would be an ordering guarantee no caller needs; and
+-- do not start relying on the order a plan happens to produce.
 --
 -- This exists so that "is any scope the actor holds a role on an ancestor of this one?" costs one
 -- walk per contained scope rather than one walk per candidate ancestor. V184's header is the
@@ -227,6 +258,31 @@ BEGIN
  SELECT a.id,a.member,s.id FROM actor_fact a LEFT JOIN readable_scopes s ON true;
 END $$;
 
+-- The outward fence, body 1 of 2: general-read publication. Reproduced verbatim from V172:21 with
+-- exactly one added conjunct, `s.kind<>'CONTAINED'`, placed beside the pre-existing
+-- `s.kind<>'RESTRICTED'` so that a mechanical diff against V172 shows that one insertion and
+-- nothing else. The audience, private_only, ownerOnly and availability terms, the joins and the
+-- coalesce default are untouched.
+--
+-- This is the narrow body rather than the broad one on purpose. knowledge_general_readable (V172:30)
+-- is `information_public_policy AND information_public_dependencies`, and the dependency closure
+-- predicates (V158:183, V158:194) also resolve through this function, so one conjunct here fences
+-- the general arm of knowledge_revision_readable, of information_root_readable and of
+-- knowledge_document_in_boundary's global arm, and additionally refuses a published resource whose
+-- closure merely *reaches* a contained home. Every one of those movements is a refusal; the
+-- function appears in no WRITE or publication-authorizing body, so nothing is granted by it.
+--
+-- The argument name is reproduced exactly: this is CREATE OR REPLACE, and PostgreSQL refuses a
+-- replacement that renames a parameter.
+CREATE OR REPLACE FUNCTION information_public_policy(revision UUID) RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+ SELECT coalesce(p.audience='GLOBAL_READ' AND s.kind<>'RESTRICTED' AND s.kind<>'CONTAINED' AND NOT p.private_only
+   AND NOT coalesce((information_navigation_policy(q.id)->>'ownerOnly')::boolean,true)
+   AND r.availability='active',false)
+ FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id
+ JOIN authority_scopes s ON s.id=q.home_scope_id
+ JOIN information_resource_policies p ON p.resource_id=q.id WHERE r.id=$1;
+$$;
+
 -- Ceiling chokepoint 1 of 3: the exact-target retained ceiling. Reproduced verbatim from V172:96
 -- with one change, in the first arm only: the resource's home project may be the boundary home OR
 -- inside the containment subtree rooted at it. The account-knowledge and global arms, the 1024
@@ -287,10 +343,11 @@ CREATE OR REPLACE FUNCTION knowledge_readable_scopes(actor text, home_project te
 $$;
 
 -- Ceiling chokepoint 3 of 3: the ceiling discovery and exact-target selection actually decide.
--- Reproduced verbatim from V198:5 with two changes and no others: the boundary_descendants CTE
--- below, and the in_boundary term's first arm, which gains the same containment disjunct the
--- predicate above gained. The readable, selected and general arms, the per-root bool_and in
--- `accepted` and its 1024 sentinel are unchanged.
+-- Reproduced verbatim from V198:5 with three changes and no others: the boundary_descendants CTE
+-- below; the in_boundary term's first arm, which gains the same containment disjunct the predicate
+-- above gained; and the general_readable column, which gains the outward fence's single conjunct.
+-- The readable and selected arms, the per-root bool_and in `accepted` and its 1024 sentinel are
+-- unchanged.
 --
 -- The containment test is hoisted into a CTE rather than called from the in_boundary term, which
 -- is evaluated once per closure node: V184's header is the measurement that forbids the per-row
@@ -360,8 +417,12 @@ CREATE OR REPLACE FUNCTION knowledge_readable_candidates(actor TEXT,selected_sco
   JOIN information_resource_policies policy ON policy.resource_id=q.id
   LEFT JOIN projects p ON p.id=s.project_id
  ),
+ -- The outward fence, body 2 of 2: this column is information_public_policy hoisted over the
+ -- closure, so it takes the same single added conjunct. Without it, discovery would publish a
+ -- contained home outward even though the exact-target predicate now refuses to.
  public_facts AS MATERIALIZED (
-  SELECT f.*,coalesce(f.audience='GLOBAL_READ' AND f.scope_kind<>'RESTRICTED' AND NOT f.private_only
+  SELECT f.*,coalesce(f.audience='GLOBAL_READ' AND f.scope_kind<>'RESTRICTED'
+   AND f.scope_kind<>'CONTAINED' AND NOT f.private_only
    AND NOT coalesce((f.navigation->>'ownerOnly')::boolean,true) AND f.availability='active'
    AND information_public_dependencies(f.id),false) AS general_readable
   FROM base_facts f
