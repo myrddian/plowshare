@@ -71,6 +71,7 @@ class ContainedActorReadSchemaTest {
         "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,'CONTRIBUTOR')",
         parentProject,
         HOLDER);
+    serviceToken();
     homes.put(parentScope, new Home(parentProject, "parent"));
 
     childScope = contained(parentScope);
@@ -167,10 +168,6 @@ class ContainedActorReadSchemaTest {
         .toString();
   }
 
-  private boolean readable(String actor, UUID scope) {
-    return jdbc.queryForObject("SELECT knowledge_scope_readable(?,?)", Boolean.class, actor, scope);
-  }
-
   /**
    * A retained document whose home is {@code scope}. The home is resolved by the shipped mapping
    * from the project and the {@code project:}-prefixed namespace, so nothing here asserts a home
@@ -207,29 +204,6 @@ class ContainedActorReadSchemaTest {
   private boolean revisionReadable(String actor, UUID revision) {
     return jdbc.queryForObject(
         "SELECT coalesce(knowledge_revision_readable(?,?),FALSE)", Boolean.class, revision, actor);
-  }
-
-  /** The retained read ceiling, asked about one boundary home by name. */
-  private boolean inBoundary(String actor, UUID revision, String home) {
-    return jdbc.queryForObject(
-        "SELECT coalesce(knowledge_document_in_boundary(?,?,?,FALSE),FALSE)",
-        Boolean.class,
-        revision,
-        actor,
-        home);
-  }
-
-  /**
-   * The same ceiling asked with the general-read flag on. Only the global arm differs, so this is
-   * the positive control for the refusals that turn on that flag being off.
-   */
-  private boolean inBoundaryWithGeneralRead(String actor, UUID revision, String home) {
-    return jdbc.queryForObject(
-        "SELECT coalesce(knowledge_document_in_boundary(?,?,?,TRUE),FALSE)",
-        Boolean.class,
-        revision,
-        actor,
-        home);
   }
 
   /** Whether a revision is generally readable at all, independently of any ceiling. */
@@ -316,6 +290,9 @@ class ContainedActorReadSchemaTest {
     assertFalse(revisionReadable(STRANGER, document));
     assertFalse(revisionReadable(ADMINISTRATOR, document));
     assertFalse(revisionReadable(TOKEN_PRINCIPAL, document));
+    // Control: the token really does read the container's own scope, so the refusal above is the
+    // arm excluding service roles and not an empty fixture.
+    assertTrue(revisionReadable(TOKEN_PRINCIPAL, retained(parentScope)));
   }
 
   @Test
@@ -413,11 +390,11 @@ class ContainedActorReadSchemaTest {
     var outside = unrelatedProject("outside");
     var uncontained = retained(outside);
 
+    assertNotNull(container);
+    assertNotNull(sibling);
+    assertNotNull(uncontained);
     for (var home : List.of(parentScope, siblingScope, outside, grandchildScope)) {
-      var found = inProject(childPrincipal, home);
-      assertFalse(found.contains(container), home(home));
-      assertFalse(found.contains(sibling), home(home));
-      assertFalse(found.contains(uncontained), home(home));
+      assertEquals(List.of(), inProject(childPrincipal, home), home(home));
     }
     assertTrue(inProject(childPrincipal, childScope).contains(own));
     assertEquals(List.of(), inProject(grandchildPrincipal, childScope));
@@ -492,5 +469,38 @@ class ContainedActorReadSchemaTest {
         resourceOf(from),
         resourceOf(to),
         ADMINISTRATOR);
+  }
+
+  @Test
+  void aChildIsRefusedGeneralReadThroughTheBoundaryCeiling() {
+    var outside = unrelatedProject("ceiling");
+    var row = retained(outside);
+    publish(row);
+    assertTrue(generallyReadable(row));
+    var own = retained(childScope);
+
+    assertTrue(inBoundaryWithGeneralRead(HOLDER, row, "parent"), "a general-read member passes");
+    assertFalse(inBoundaryWithGeneralRead(childPrincipal, row, home(childScope)));
+
+    var viaDiscovery =
+        "SELECT revision FROM knowledge_readable_selection("
+            + "?,'project',?,TRUE,?,TRUE,NULL,NULL,FALSE,NULL,NULL,NULL)";
+    assertTrue(
+        jdbc.queryForList(viaDiscovery, UUID.class, HOLDER, "parent", "parent").contains(row));
+    // Only the child's own document: the published row is not drawn in by the global ceiling arm.
+    assertEquals(
+        List.of(own),
+        jdbc.queryForList(
+            viaDiscovery, UUID.class, childPrincipal, home(childScope), home(childScope)));
+  }
+
+  /** The global arm of the exact ceiling, asked with the general-read flag on. */
+  private boolean inBoundaryWithGeneralRead(String actor, UUID revision, String home) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(knowledge_document_in_boundary(?,?,?,TRUE),FALSE)",
+        Boolean.class,
+        revision,
+        actor,
+        home);
   }
 }

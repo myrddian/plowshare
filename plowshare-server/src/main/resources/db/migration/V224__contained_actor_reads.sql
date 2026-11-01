@@ -18,6 +18,11 @@
 -- of this statement under which a contained actor reaches the general arm. Do not simplify that
 -- conjunct away. The arm is also one-way: knowledge_scope_readable admits only a principal's own
 -- scope, so it never admits an ancestor's or a sibling's.
+--
+-- Containment dominates membership: a principal that is both a live contained_principals row and a
+-- real GLOBAL_READ member loses the general arm entirely, because `contained` sits on the closing
+-- side of both knowledge_revision_readable and knowledge_read_authority. That is fail-closed and
+-- consistent with a read ceiling only ever narrowing.
 
 -- True only for a TEXT that parses as a UUID present in contained_principals. Every knowledge read
 -- on the server evaluates this with a handle such as 'alice', so the cast is guarded: CASE
