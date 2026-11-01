@@ -25,10 +25,10 @@ class WorkspaceApplicationResourcesTest {
     when(names.nameForId(7)).thenReturn(Optional.of("app"));
     when(policy.read("app"))
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()));
-    when(projects.find("app"))
-        .thenReturn(
-            Optional.of(
-                new ProjectRecord("app", root, List.of(), List.of(), "MANAGED", List.of())));
+    var row = new ProjectRecord("app", root, List.of(), List.of(), "MANAGED", List.of());
+    when(policy.source("app"))
+        .thenAnswer(
+            invocation -> new ApplicationPolicy.Source(policy.read("app"), Optional.of(row)));
     when(projects.effectiveExclusions(any())).thenReturn(List.of());
     resources = new WorkspaceApplicationResources(projects, names, policy);
   }
@@ -52,6 +52,39 @@ class WorkspaceApplicationResourcesTest {
     for (String name :
         List.of("", "agents", "bots", "skills", "orchestrations", "hooks", "schedules", "server"))
       assertEquals(Optional.of(root.resolve(name)), resources.directory(7L, name));
+  }
+
+  @Test
+  void real_policy_and_resource_loading_fetch_one_project_and_recheck_a_replaced_manifest()
+      throws Exception {
+    var row = new ProjectRecord("app", root, List.of(), List.of(), "MANAGED", List.of());
+    var registrations = mock(ApplicationRegistrations.class);
+    when(registrations.required("app")).thenReturn(true);
+    when(projects.find("app")).thenReturn(Optional.of(row));
+    Files.createDirectory(root.resolve("agents"));
+    Files.writeString(root.resolve("agents/reader.json"), "{}");
+    Path manifest =
+        Files.writeString(root.resolve("plowshare.json"), "{\"version\":1,\"name\":\"app\"}");
+    var resolved =
+        new WorkspaceApplicationResources(
+            projects, names, new WorkspaceApplicationPolicy(projects, registrations));
+    assertEquals(Optional.of(root.resolve("agents")), resolved.directory(7L, "agents"));
+    verify(projects, times(1)).find("app");
+    verify(names, times(1)).nameForId(7L);
+    Files.writeString(manifest, "invalid");
+    assertThrows(WorkspaceRefusedException.class, () -> resolved.directory(7L, "agents"));
+    verify(projects, times(2)).find("app");
+  }
+
+  @Test
+  void an_existing_directory_reuses_the_policy_resolution_without_refetching_its_project()
+      throws Exception {
+    Files.createDirectory(root.resolve("agents"));
+    Files.writeString(root.resolve("agents/reader.json"), "{}");
+    assertEquals(Optional.of(root.resolve("agents")), resources.directory(7L, "agents"));
+    verify(names, times(1)).nameForId(7L);
+    verify(policy, times(1)).source("app");
+    verify(projects, never()).find(anyString());
   }
 
   @Test

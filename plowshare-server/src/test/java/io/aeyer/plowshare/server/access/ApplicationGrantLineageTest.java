@@ -17,6 +17,23 @@ class ApplicationGrantLineageTest {
   private final GrantLineage lineage = new ApplicationGrantLineage(grants, applications);
 
   @Test
+  void membership_and_lineage_share_one_current_target_policy_and_recheck_on_next_decision() {
+    var stored = mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
+    var membership =
+        new io.aeyer.plowshare.server.archive.ApplicationProjectMembers(
+            stored, applications, lineage);
+    when(stored.role("app", "reader")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(grants.projectLineages("app", "reader"))
+        .thenReturn(List.of(List.of(binding("reader", StandardRole.MANAGER))));
+    boundary(Map.of("reader", ProjectRole.VIEWER));
+    assertEquals(Optional.of(ProjectRole.VIEWER), membership.role("app", "reader"));
+    verify(applications, times(1)).read("app");
+    boundary(Map.of());
+    assertTrue(membership.role("app", "reader").isEmpty());
+    verify(applications, times(2)).read("app");
+  }
+
+  @Test
   void a_narrowed_or_invalid_issuer_manifest_invalidates_dependent_grants_live() {
     var child = binding("reader", StandardRole.CONTRIBUTOR);
     var parent = binding("issuer", StandardRole.MANAGER);
@@ -72,6 +89,10 @@ class ApplicationGrantLineageTest {
   }
 
   private Binding binding(String handle, StandardRole role) {
+    return binding(handle, role, "app");
+  }
+
+  private Binding binding(String handle, StandardRole role, String project) {
     var recipient = GrantRecipient.account(new AccountId(UUID.randomUUID()));
     return new Binding(
         UUID.randomUUID(),
@@ -92,6 +113,32 @@ class ApplicationGrantLineageTest {
         Optional.empty(),
         Set.of(AuthorityAction.READ),
         handle,
-        Optional.of("app"));
+        Optional.of(project));
+  }
+
+  @Test
+  void sharing_the_target_policy_does_not_skip_another_projects_issuer_boundary() {
+    var stored = mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
+    var membership =
+        new io.aeyer.plowshare.server.archive.ApplicationProjectMembers(
+            stored, applications, lineage);
+    when(stored.role("app", "reader")).thenReturn(Optional.of(ProjectRole.MANAGER));
+    when(grants.projectLineages("app", "reader"))
+        .thenReturn(
+            List.of(
+                List.of(
+                    binding("reader", StandardRole.CONTRIBUTOR),
+                    binding("issuer", StandardRole.MANAGER, "issuer-app"))));
+    boundary(Map.of("reader", ProjectRole.MANAGER));
+    when(applications.read("issuer-app"))
+        .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.INVALID, Map.of()));
+    assertTrue(membership.role("app", "reader").isEmpty());
+    verify(applications, times(1)).read("app");
+    verify(applications, times(1)).read("issuer-app");
+    when(applications.read("issuer-app"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("issuer", ProjectRole.MANAGER)));
+    assertEquals(Optional.of(ProjectRole.CONTRIBUTOR), membership.role("app", "reader"));
   }
 }

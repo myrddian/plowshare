@@ -43,19 +43,29 @@ public final class WorkspaceApplicationPolicy implements ApplicationPolicy {
 
   @Override
   public Boundary read(String project) {
+    return source(project).boundary();
+  }
+
+  @Override
+  public Source source(String project) {
     if (project == null
         || project.startsWith("personal:")
-        || ClientProjects.privateProject(project)) return EXTERNAL;
+        || ClientProjects.privateProject(project))
+      return new Source(EXTERNAL, java.util.Optional.empty());
     boolean required = registrations.required(project);
     java.util.Optional<io.aeyer.plowshare.server.archive.ProjectRecord> recorded;
     try {
       recorded = projects.find(project);
     } catch (io.aeyer.plowshare.server.files.WorkspaceRefusedException unavailable) {
-      return INVALID;
+      return new Source(INVALID, java.util.Optional.empty());
     }
-    if (recorded.isEmpty())
-      return required ? INVALID : EXTERNAL; // find never returns another machine's workspace.
+    if (recorded.isEmpty()) return new Source(required ? INVALID : EXTERNAL, recorded);
     var row = recorded.orElseThrow();
+    return new Source(boundary(project, required, row), recorded);
+  }
+
+  private Boundary boundary(
+      String project, boolean required, io.aeyer.plowshare.server.archive.ProjectRecord row) {
     // Plowshare owns MANAGED sources: they must never become legacy external projects.
     // Earlier registrations without an adopted boundary also need a valid manifest and grants.
     if (row.type().equals("MANAGED") && !required) {
