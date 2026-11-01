@@ -1,6 +1,6 @@
 -- Containment ancestry is fixed when a contained scope is created, and never afterwards.
 --
--- V208 refuses only the row-local self-reference, container<>id, which leaves a deeper cycle --
+-- V216 refuses only the row-local self-reference, container<>id, which leaves a deeper cycle --
 -- A contains B contains A -- to be refused by something else. A cycle is not merely wrong data:
 -- the authority path walks the container chain to bound containment depth, so a cycle makes that
 -- walk loop or overflow instead of refuse, and a fence that depends on the walk terminating cannot
@@ -10,7 +10,7 @@
 -- constructible from application SQL, and that was verified before this migration was written.
 -- What was open is the one UPDATE route that lock deliberately permits: pg_trigger_depth()>=2,
 -- the nested-trigger path that exists for the project-to-scope mapping upsert. Reached that way, a
--- repoint of container succeeded. Today nothing takes it -- V208 excludes contained projects from
+-- repoint of container succeeded. Today nothing takes it -- V216 excludes contained projects from
 -- authority_map_project -- so this closes a reachable-in-principle route rather than a live one,
 -- and it makes the invariant local to containment instead of a side effect of a lock about scope
 -- identity. The ADR already names that upsert as the surface through which containment could be
@@ -18,7 +18,7 @@
 --
 -- With the repoint refused, the relation is acyclic by construction rather than by inspection. An
 -- INSERT can only name a container that already exists (the self-reference CHECK, the foreign key
--- and V208's shape trigger, which requires an existing container row), so every new node points
+-- and V216's shape trigger, which requires an existing container row), so every new node points
 -- only at an older one and each node has at most one container: a forest ordered by insertion. The
 -- only way to close a cycle is to repoint an existing node. No walk can therefore revisit a scope.
 --

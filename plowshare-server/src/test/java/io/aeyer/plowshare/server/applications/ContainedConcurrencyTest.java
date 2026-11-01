@@ -335,10 +335,10 @@ class ContainedConcurrencyTest {
   }
 
   /**
-   * V213's {@code scope} column is what makes a collection record a receipt, and the walk it
+   * V221's {@code scope} column is what makes a collection record a receipt, and the walk it
    * enables is SQL: the destroyed subtree is rebuilt by descending {@code container} to {@code
    * scope} over rows whose referents no longer exist. The partial unique index on {@code scope} and
-   * the replaced shape constraint are engine behaviour, so the migration applying over V212 and
+   * the replaced shape constraint are engine behaviour, so the migration applying over V220 and
    * refusing a half-described row are assertions only PostgreSQL can make.
    */
   @Test
@@ -427,7 +427,7 @@ class ContainedConcurrencyTest {
                 UUID.randomUUID(),
                 "/srv/containment/x"));
     // The same constraint governs the destruction root: a DESTROYED row with no root would be a
-    // row the rebuild could never attribute, and V214 refuses it rather than leaving it off chain.
+    // row the rebuild could never attribute, and V222 refuses it rather than leaving it off chain.
     assertThrows(
         Exception.class,
         () ->

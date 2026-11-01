@@ -80,7 +80,7 @@ class ContainedKnowledgeReadSchemaTest {
         jdbc.queryForObject(
             "SELECT id FROM authority_scopes WHERE project_id=?", UUID.class, parentProject);
     // A membership row is what mints the container role holder's live SELF grant; the trigger that
-    // mints it is the same one V208 taught to resolve nothing for a contained scope.
+    // mints it is the same one V216 taught to resolve nothing for a contained scope.
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,'CONTRIBUTOR')",
         parentProject,
@@ -442,7 +442,7 @@ class ContainedKnowledgeReadSchemaTest {
 
   /**
    * The walk must fail closed on a chain it cannot complete. A dangling container is unreachable
-   * through application SQL — V208's foreign key and its shape trigger each refuse it — so both are
+   * through application SQL — V216's foreign key and its shape trigger each refuse it — so both are
    * taken out of the way to place the row. The question is what the predicate answers about data
    * that should be impossible, not whether it is constructible; this schema is this test's own, so
    * neither fence is restored.
@@ -683,12 +683,12 @@ class ContainedKnowledgeReadSchemaTest {
    * reaches the child; this asks whether a published row <em>inside</em> it reaches the world.
    *
    * <p>Both bodies that decide general-read publication fenced only on {@code RESTRICTED}, the sole
-   * scope kind that existed when they were written, so before V215 a contained-home revision with a
+   * scope kind that existed when they were written, so before V223 a contained-home revision with a
    * {@code GLOBAL_READ} audience satisfied the general arm of {@code knowledge_revision_readable}
    * and of the ceiling, and was admitted to every global-read member — which is every active
    * non-bootstrap account — with no containment test taken anywhere. That it was unreachable rested
    * on the insert trigger's {@code HOME} default and on nothing executing a child, which is a check
-   * rather than a structure; V215 makes it structural with one conjunct in each body.
+   * rather than a structure; V223 makes it structural with one conjunct in each body.
    *
    * <p>The baseline is asserted first, so neither refusal can pass for want of a fixture: the
    * stranger really is a live general-read member, and the identical publication in an ordinary
@@ -787,7 +787,7 @@ class ContainedKnowledgeReadSchemaTest {
    *
    * <p>Membership is asserted, not row order. The walk is a {@code UNION ALL} recursive CTE with no
    * {@code ORDER BY}, so PostgreSQL promises no order for it, and no consumer wants one: every rule
-   * in V215 tests the relation with {@code EXISTS} or a join. Asserting the order a plan happens to
+   * in V223 tests the relation with {@code EXISTS} or a join. Asserting the order a plan happens to
    * produce would make this fail on a plan change rather than on a regression, and adding an {@code
    * ORDER BY} to the function would be an ordering guarantee nobody asked for. The sets are
    * compared exactly, so a leaked or missing ancestor still fails.

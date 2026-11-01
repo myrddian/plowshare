@@ -12,7 +12,7 @@
 --
 -- ON DELETE CASCADE from authority_scopes makes the principal die with its scope through the
 -- same path that removes the scope, with no second code path to forget. This is safe despite
--- V208's RESTRICT on container: the cascade runs from the scope to its principal, not between
+-- V216's RESTRICT on container: the cascade runs from the scope to its principal, not between
 -- scopes.
 CREATE TABLE contained_principals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

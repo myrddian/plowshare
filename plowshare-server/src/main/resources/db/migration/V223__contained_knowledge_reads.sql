@@ -1,6 +1,6 @@
 -- Containment ancestry in SQL, and the two scope-admission arms that need it.
 --
--- V208 made containment a fifth authority scope kind and every knowledge-read predicate refused a
+-- V216 made containment a fifth authority scope kind and every knowledge-read predicate refused a
 -- CONTAINED scope by kind. That fails closed, which is why it shipped, but it also left a child
 -- unable to read its own writable home and a container unable to read the home of the child it
 -- created -- the known limitation ADR 0042 records beside its V172 and V178 inventory rows. This
@@ -44,7 +44,7 @@
 -- the OTHER way, and it was never fenced on containment at all: information_public_policy (V172:22)
 -- and its hoisted twin in knowledge_readable_candidates (the general_readable column below) each
 -- excluded only `RESTRICTED`, the single scope kind that existed to be excluded when they were
--- written. V208 added CONTAINED as a fifth kind and did not extend either test. So a revision whose
+-- written. V216 added CONTAINED as a fifth kind and did not extend either test. So a revision whose
 -- home is a contained scope, published with a GLOBAL_READ audience, satisfied the general arm of
 -- knowledge_revision_readable and of the ceiling, and would have been admitted to every global-read
 -- member with no containment test taken anywhere -- which is the one direction confinement must
@@ -83,7 +83,7 @@
 -- is created, and it is deliberately not reachable from SQL: duplicating it here as a literal would
 -- make a policy change silently disagree with the predicate that enforces it. The sentinel exists
 -- for the same reason knowledge_dependency_revisions carries LIMIT 1025 -- so that data which
--- should be impossible fails closed instead of running unbounded. V209 makes the relation acyclic
+-- should be impossible fails closed instead of running unbounded. V217 makes the relation acyclic
 -- by construction, so the sentinel is not a cycle guard either.
 --
 -- A chain that cannot be completed -- a container pointing at a scope that is not there -- stops at
@@ -128,7 +128,7 @@ $$;
 -- CONTAINED scope is readable when either:
 --
 -- (a) the actor IS that scope's own principal. A contained principal's identifier is a bare UUID
---     (V210) with no row in admins, authority_accounts or service_tokens, so it holds no account
+--     (V218) with no row in admins, authority_accounts or service_tokens, so it holds no account
 --     for general-read membership to be true of; requiring that membership here would make this arm
 --     dead rather than narrow. It admits exactly one scope, the principal's own, and never walks the
 --     chain, so it cannot reach anything above it. Because that leaves the arm outside every

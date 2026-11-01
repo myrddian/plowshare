@@ -317,7 +317,7 @@ class ContainedScopeSchemaTest {
   }
 
   /**
-   * V209. Containment ancestry is fixed at insert. V155's lock already refuses a direct UPDATE of a
+   * V217. Containment ancestry is fixed at insert. V155's lock already refuses a direct UPDATE of a
    * scope row, so this asserts the refusal a caller actually meets and that it names containment —
    * the nested-trigger route the lock deliberately permits is covered separately below.
    */
@@ -340,7 +340,7 @@ class ContainedScopeSchemaTest {
   }
 
   /**
-   * The route V209 actually adds. V155's lock permits an UPDATE of a scope row from inside a nested
+   * The route V217 actually adds. V155's lock permits an UPDATE of a scope row from inside a nested
    * trigger — {@code pg_trigger_depth()>=2}, which today is the project-to-scope mapping upsert —
    * and that route must not be able to carry a container change either. A fixture trigger is the
    * only way to reach it, since the shipped mapping excludes contained projects entirely.

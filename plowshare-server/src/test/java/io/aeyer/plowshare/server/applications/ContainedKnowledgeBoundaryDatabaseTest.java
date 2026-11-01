@@ -117,7 +117,7 @@ class ContainedKnowledgeBoundaryDatabaseTest {
    * builds it in SQL: the predicate takes {@code uuid[]} and the driver has no binding for one.
    *
    * <p><strong>The array is supplied by hand so that one ceiling can be posed at a time.</strong>
-   * It is no longer counterfactual: V215 admits a contained scope to its own principal and to its
+   * It is no longer counterfactual: V223 admits a contained scope to its own principal and to its
    * ancestors, and {@link #aContainedHomeResolvesTheSubtreeAndNothingAbove()} shows {@code
    * knowledge_readable_scopes} really does build an array holding {@code childScope}. What stays
    * hand-supplied is the <em>pairing</em> of a ceiling with a revision, because these tests are
@@ -143,7 +143,7 @@ class ContainedKnowledgeBoundaryDatabaseTest {
   }
 
   /**
-   * Where the array the predicate takes comes from, restated for what V215 now admits. This test
+   * Where the array the predicate takes comes from, restated for what V223 now admits. This test
    * asserted an empty set while slice one refused a {@code CONTAINED} scope by kind: a reader under
    * a contained home resolved nothing, not even the child's own scope. That limitation is the one
    * this slice lifts, so the empty-set claim is obsolete by design and the new contract is stated

@@ -44,7 +44,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *       sites need no check of their own, and therefore the claim most worth proving against a real
  *       row;
  *   <li>{@code information_project_readable}, which <strong>no longer</strong> excludes a contained
- *       scope by kind. V215 widened {@code knowledge_scope_readable}, which this predicate
+ *       scope by kind. V223 widened {@code knowledge_scope_readable}, which this predicate
  *       composes, so a contained project is readable to an actor holding a project role on a scope
  *       that transitively contains it, and to nobody else. That is slice two's capability rather
  *       than a hole, and it is why the assertion here is directional: an ancestor is admitted, a
@@ -170,7 +170,7 @@ class ContainedAddressabilityDatabaseTest {
   }
 
   /**
-   * The role and management predicates, which V215 did not touch and which still refuse a contained
+   * The role and management predicates, which V223 did not touch and which still refuse a contained
    * scope by kind. {@code information_project_readable} is deliberately <em>not</em> asserted here
    * any more: it no longer refuses, so an assertion about it under this name would make the name
    * false. {@link #informationReadabilityAdmitsAnAncestorAndRefusesEveryoneElse()} owns it.
@@ -209,7 +209,7 @@ class ContainedAddressabilityDatabaseTest {
   }
 
   /**
-   * {@code information_project_readable} after V215, in both directions in one test, so it fails
+   * {@code information_project_readable} after V223, in both directions in one test, so it fails
    * whichever way the containment arm breaks.
    *
    * <p>The refusal half needs a principal that clears the <em>baseline</em> gate and fails only on
@@ -230,7 +230,7 @@ class ContainedAddressabilityDatabaseTest {
         jdbc.queryForObject("SELECT information_global_read_member(?)", Boolean.class, "admin"));
 
     // Admitted: alice holds MANAGER on the project of the scope that contains the child, which is
-    // exactly the ancestor arm V215 added. This was a refusal before V215 and is the capability.
+    // exactly the ancestor arm V223 added. This was a refusal before V223 and is the capability.
     assertEquals(
         "MANAGER",
         jdbc.queryForObject("SELECT authority_project_role(?,?)", String.class, "parent", "alice"));

@@ -45,7 +45,7 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
    * Live descendants anywhere beneath this container. The recursive term walks {@code
    * authority_scopes.container}, which is the relation itself, so the count is the subtree's and
    * not merely the immediate children's: depth and breadth each multiply a container's budget, so
-   * the aggregate is what the breadth bound limits. The walk terminates because V209 freezes {@code
+   * the aggregate is what the breadth bound limits. The walk terminates because V217 freezes {@code
    * container} after insert and an insert can only name an existing container, which makes the
    * relation acyclic by construction.
    */
@@ -67,7 +67,7 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
   @Override
   public Retained create(Creation creation) {
     try {
-      // The project first: authority_scopes.project_id needs it, and V208 excludes the reserved
+      // The project first: authority_scopes.project_id needs it, and V216 excludes the reserved
       // contained: prefix from authority_map_project, so this insert acquires no PROJECT scope
       // that no caller named. ProjectStore.ordinary refuses this prefix precisely so that the
       // explicit CONTAINED insert below has exactly one home, which is here.
@@ -85,7 +85,7 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
           scope,
           project,
           creation.container().value());
-      // The agreement trigger in V211 rechecks that these three columns say what the scope row
+      // The agreement trigger in V219 rechecks that these three columns say what the scope row
       // says, so the denormalised container cannot drift from the authority record.
       jdbc.update(
           "INSERT INTO contained_applications"
@@ -256,7 +256,7 @@ public class JdbcContainedApplicationRepository implements ContainedApplicationR
   /**
    * One recorded containment edge downwards.
    *
-   * <p>A swept stage is off this chain already and not by a predicate here: V213's shape constraint
+   * <p>A swept stage is off this chain already and not by a predicate here: V221's shape constraint
    * makes {@code cause='SWEPT'} imply a null {@code container}, so {@code container=?} cannot match
    * one. {@code cause='DESTROYED'} is kept because it states the intent in the statement; a {@code
    * scope IS NOT NULL} test was removed, because the same constraint makes {@code

@@ -10,7 +10,7 @@ child's own scope to the read predicates.
 own *documents* back is **not** in this slice. Scope admission is only the first
 of two gates: `knowledge_revision_readable` opens with
 `information_global_read_member(actor)`, which requires an `admins` row, and a
-contained principal deliberately holds no credential material (V210). Granting a
+contained principal deliberately holds no credential material (V218). Granting a
 credential-less principal general-read membership is the authority question
 [ADR 0042](../../decisions/0042-nested-application-containment.md) scoped out,
 and it belongs with the slice that makes a child execute — because nothing
@@ -50,7 +50,7 @@ inventory before Task 1; Task 5 amends both.
   instruction. Nothing in this slice may compose child content into a
   server-side decision.
 - **New Flyway migration only; never edit a shipped one.** The next free version
-  is **V215** — the highest shipped is V214. Verify with
+  is **V223** — the highest shipped is V222. Verify with
   `ls plowshare-server/src/main/resources/db/migration | sed -n 's/^V\([0-9]*\)__.*/\1/p' | sort -n | tail -1`
   before creating it, because `main` advances this number independently and a
   duplicate version makes Flyway refuse to start.
@@ -102,12 +102,12 @@ managed to walk (`aChainBeyondTheWalkSentinelRefuses`, Task 1).
 ### Task 1: Containment ancestry in SQL, and the two scope-admission arms
 
 **Files:**
-- Create: `plowshare-server/src/main/resources/db/migration/V215__contained_knowledge_reads.sql`
+- Create: `plowshare-server/src/main/resources/db/migration/V223__contained_knowledge_reads.sql`
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java`
 
 **Interfaces:**
-- Consumes: `authority_scopes(id, kind, project_id, container)` as V208 defines it,
-  with `container` frozen after insert by V209; `contained_principals` (V210) for
+- Consumes: `authority_scopes(id, kind, project_id, container)` as V216 defines it,
+  with `container` frozen after insert by V217; `contained_principals` (V218) for
   the child-self arm; `knowledge_scope_readable(actor TEXT, scope UUID)` from V172
   and `knowledge_read_authority(actor TEXT)` from V178.
 - Produces: `contained_scope_ancestors(descendant UUID) RETURNS SETOF UUID`, the
@@ -170,7 +170,7 @@ message — a test that was green before the implementation proves nothing about
 it, and slice one shipped a task whose whole suite passed with the
 implementation removed.
 
-- [ ] **Step 3: Write V215**
+- [ ] **Step 3: Write V223**
 
 `contained_scope_within(descendant, ancestor)` walks `container` upward from
 `descendant` with the 64-level sentinel and returns whether `ancestor` is on the
@@ -197,7 +197,7 @@ narrows, so a failure here means the widening went too far.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add plowshare-server/src/main/resources/db/migration/V215__contained_knowledge_reads.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java
+git add plowshare-server/src/main/resources/db/migration/V223__contained_knowledge_reads.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java
 git commit -m "Admit a contained scope to its own and its ancestors' reads"
 ```
 
@@ -206,7 +206,7 @@ git commit -m "Admit a contained scope to its own and its ancestors' reads"
 ### Task 2: The retained ceiling, widened downward only
 
 **Files:**
-- Modify: `plowshare-server/src/main/resources/db/migration/V215__contained_knowledge_reads.sql` (same migration, still unshipped)
+- Modify: `plowshare-server/src/main/resources/db/migration/V223__contained_knowledge_reads.sql` (same migration, still unshipped)
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java` (extend)
 
 **Interfaces:**
@@ -284,7 +284,7 @@ Run: the command from Step 2. Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plowshare-server/src/main/resources/db/migration/V215__contained_knowledge_reads.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java
+git add plowshare-server/src/main/resources/db/migration/V223__contained_knowledge_reads.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java
 git commit -m "Extend a retained read ceiling to its contained descendants"
 ```
 
@@ -487,7 +487,7 @@ a descendant's documents within the descendant's boundary. But a child reading
 its **own documents** back is still refused, and not by the kind fence this
 slice removed: `knowledge_revision_readable` opens with
 `information_global_read_member(actor)`, which requires an `admins` row, and a
-contained principal holds no credential material by design (V210). Scope
+contained principal holds no credential material by design (V218). Scope
 admission cannot reach that gate. Granting a credential-less principal
 general-read membership is an authority decision, it belongs with the slice that
 makes a child execute, and nothing in this slice reads as the child — so it has

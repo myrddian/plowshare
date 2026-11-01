@@ -1,6 +1,6 @@
 -- The containment relation's own record: one row per contained Application.
 --
--- Containment itself lives in authority_scopes.container (V208, frozen after insert by V209) and
+-- Containment itself lives in authority_scopes.container (V216, frozen after insert by V217) and
 -- this table adds no second authority. What it holds is the Application-level facts that relation
 -- cannot: the request UUID that makes a retry idempotent, the fingerprint of exactly what was
 -- submitted under it, the allocated source area and revision, the ceiling the container set, and
@@ -13,13 +13,13 @@ CREATE TABLE contained_applications (
 
     -- The child's own CONTAINED scope. UNIQUE, because a scope is one Application and not a
     -- family of them. ON DELETE CASCADE from the scope: destroying the scope collects this record
-    -- through the same path that removes the scope, with no second code path to forget. V208's
+    -- through the same path that removes the scope, with no second code path to forget. V216's
     -- RESTRICT on authority_scopes.container still orders child destruction before the parent's,
     -- so this cascade cannot be used to outrun that ordering.
     scope_id UUID NOT NULL UNIQUE REFERENCES authority_scopes(id) ON DELETE CASCADE,
 
     -- Denormalised from authority_scopes.container so that the breadth count and the idempotency
-    -- key can be indexed and constrained here. It is RESTRICT for the same reason V208's column
+    -- key can be indexed and constrained here. It is RESTRICT for the same reason V216's column
     -- is: a container's rows must be collected by the capability that owns their lifecycle --
     -- projects, principals, source areas and allowances -- and never silently by the schema.
     container UUID NOT NULL REFERENCES authority_scopes(id) ON DELETE RESTRICT,
