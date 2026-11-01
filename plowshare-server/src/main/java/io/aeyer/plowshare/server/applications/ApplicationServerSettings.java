@@ -87,13 +87,25 @@ public record ApplicationServerSettings(
       int timeoutSeconds,
       @com.fasterxml.jackson.annotation.JsonInclude(
               com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-          SchemaDefinition inputSchema) {
+          SchemaDefinition inputSchema,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String resultProfile) {
     public Declaration(
         String name,
         String description,
         List<RelayToolDefinition.Parameter> parameters,
         int timeoutSeconds) {
-      this(name, description, parameters, timeoutSeconds, null);
+      this(name, description, parameters, timeoutSeconds, null, null);
+    }
+
+    public Declaration(
+        String name,
+        String description,
+        List<RelayToolDefinition.Parameter> parameters,
+        int timeoutSeconds,
+        SchemaDefinition inputSchema) {
+      this(name, description, parameters, timeoutSeconds, inputSchema, null);
     }
 
     public Declaration {
@@ -105,7 +117,8 @@ public record ApplicationServerSettings(
           description,
           parameters,
           timeoutSeconds,
-          inputSchema);
+          inputSchema,
+          resultProfile);
       parameters = parameters == null && inputSchema != null ? List.of() : List.copyOf(parameters);
     }
 
@@ -118,7 +131,8 @@ public record ApplicationServerSettings(
           description,
           parameters,
           timeoutSeconds,
-          inputSchema);
+          inputSchema,
+          resultProfile);
     }
   }
 
@@ -131,7 +145,10 @@ public record ApplicationServerSettings(
       int timeoutSeconds,
       @com.fasterxml.jackson.annotation.JsonInclude(
               com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-          SchemaDefinition inputSchema) {
+          SchemaDefinition inputSchema,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String resultProfile) {
     public Tool(
         String provider,
         String account,
@@ -139,7 +156,18 @@ public record ApplicationServerSettings(
         String description,
         List<RelayToolDefinition.Parameter> parameters,
         int timeoutSeconds) {
-      this(provider, account, name, description, parameters, timeoutSeconds, null);
+      this(provider, account, name, description, parameters, timeoutSeconds, null, null);
+    }
+
+    public Tool(
+        String provider,
+        String account,
+        String name,
+        String description,
+        List<RelayToolDefinition.Parameter> parameters,
+        int timeoutSeconds,
+        SchemaDefinition inputSchema) {
+      this(provider, account, name, description, parameters, timeoutSeconds, inputSchema, null);
     }
 
     public Tool {
@@ -151,13 +179,22 @@ public record ApplicationServerSettings(
           description,
           parameters,
           timeoutSeconds,
-          inputSchema);
+          inputSchema,
+          resultProfile);
       parameters = parameters == null && inputSchema != null ? List.of() : List.copyOf(parameters);
     }
 
     public RelayToolDefinition bind(String project) {
       return new RelayToolDefinition(
-          project, provider, account, name, description, parameters, timeoutSeconds, inputSchema);
+          project,
+          provider,
+          account,
+          name,
+          description,
+          parameters,
+          timeoutSeconds,
+          inputSchema,
+          resultProfile);
     }
   }
 
@@ -192,12 +229,16 @@ public record ApplicationServerSettings(
   public record Catalogue(String version, List<Declaration> tools) {
     public Catalogue {
       if (!"plowshare-tool-catalog/1".equals(version)
-          && !"plowshare-tool-catalog/2".equals(version))
+          && !"plowshare-tool-catalog/2".equals(version)
+          && !"plowshare-tool-catalog/3".equals(version))
         throw new IllegalArgumentException("Unsupported tool catalogue version");
       tools = List.copyOf(tools);
       if ("plowshare-tool-catalog/1".equals(version)
           && tools.stream().anyMatch(value -> value.inputSchema() != null))
         throw new IllegalArgumentException("v1 catalogue cannot contain nested declarations");
+      if (!"plowshare-tool-catalog/3".equals(version)
+          && tools.stream().anyMatch(t -> t.resultProfile() != null))
+        throw new IllegalArgumentException("Content results require catalogue v3");
       if (tools.size() > 128
           || tools.stream().map(Declaration::name).distinct().count() != tools.size())
         throw new IllegalArgumentException("Invalid tool catalogue");

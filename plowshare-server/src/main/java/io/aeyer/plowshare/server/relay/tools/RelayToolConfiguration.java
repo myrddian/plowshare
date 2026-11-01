@@ -187,8 +187,12 @@ public class RelayToolConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayToolRepository relayToolRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, HostedToolScopes hosting) {
-    return new JdbcRelayToolRepository(jdbc, transactions, relay, hosting);
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      HostedToolScopes hosting,
+      io.aeyer.plowshare.server.images.ArtifactRepository artifacts) {
+    return new JdbcRelayToolRepository(jdbc, transactions, relay, hosting, artifacts);
   }
 
   @Bean

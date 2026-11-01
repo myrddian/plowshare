@@ -1,13 +1,20 @@
 package io.aeyer.plowshare.server.relay.tools;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.mock;
 
 import io.aeyer.plowshare.server.agents.ApplicationResources;
-import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectNames;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.providers.ProviderCredentialGrants;
-import io.aeyer.plowshare.server.relay.*;
+import io.aeyer.plowshare.server.relay.Relay;
+import io.aeyer.plowshare.server.relay.RelayLogRepository;
+import io.aeyer.plowshare.server.relay.RelayPortRepository;
+import io.aeyer.plowshare.server.relay.RelayProperties;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -30,6 +37,9 @@ class HostedScopeCompositionTest {
       context.registerBean(Relay.class, () -> mock(Relay.class));
       context.registerBean(SessionRegistry.class, () -> mock(SessionRegistry.class));
       context.registerBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class));
+      context.registerBean(
+          io.aeyer.plowshare.server.images.ArtifactRepository.class,
+          () -> mock(io.aeyer.plowshare.server.images.ArtifactRepository.class));
       context.registerBean(UnitOfWork.class, () -> UnitOfWork.NONE);
       context.registerBean(RelayProperties.class, RelayProperties::new);
       context.registerBean(

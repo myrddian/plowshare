@@ -1,3 +1,18 @@
+export {
+  FileToolJournal,
+  admitToolPng,
+  admitToolImage,
+  imageToolResult,
+  toolImagePart,
+  pngToolResult,
+  toolTextPart,
+  toolPngPart,
+} from './tool-content.ts';
+export type {
+  ToolContentBody,
+  ToolContentPart,
+  ToolImageUse,
+} from './tool-content.ts';
 export type {
   HostedToolDefinition,
   HostedToolBinding,
@@ -15,6 +30,17 @@ export type {
   HostedToolReconciliation,
 } from 'plowshare-client-ts';
 import WebSocket from 'ws';
+export { publishRelayBlob, readRelayBlob } from './relay-blobs.ts';
+export type {
+  RelayBlobDescriptor,
+  RelayBlobPublish,
+  RelayBlobPublished,
+  RelayBlobRead,
+} from './relay-blobs.ts';
+export {
+  admitInvocationImage,
+  invocationImageRequest,
+} from './image-admissions.ts';
 import { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';
 import { legacySocket } from 'plowshare-client-ts/binding/packets';
 import { randomUUID } from 'node:crypto';

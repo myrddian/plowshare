@@ -647,6 +647,7 @@ class InvariantsTest {
           Map.entry("OrchestrationRecordController.java", 0),
           Map.entry("ProjectController.java", 0),
           Map.entry("ProposalController.java", 0),
+          Map.entry("RelayBlobController.java", 0),
           Map.entry("RetentionController.java", 0),
           Map.entry("SearchController.java", 0),
           Map.entry("SearchProviderController.java", 0));
@@ -680,13 +681,15 @@ class InvariantsTest {
   /**
    * How many endpoints {@code api/}'s controllers declare between them.
    *
-   * <p>Measured from the source at HEAD, not inherited: fifty-seven mapping annotations, of which
-   * fifty-four are answered by a frame type and three are not, each of those three with a ruling
-   * written out in {@code Capabilities}. A pin on the total is what makes a fifty-eighth endpoint a
-   * decision somebody takes rather than a line nobody notices.
+   * <p>The count includes separate multipart profiles at the same {@code POST /v1/images} URI. Both
+   * ordinary upload and invocation-bound admission stay on HTTP because they transfer binary bytes;
+   * producer reconciliation uses {@code artifact.admission.status}. A pin makes any further mapping
+   * addition a decision somebody reviews rather than a line nobody notices.
    */
-  // Board top-up adds one route with a declared board.topup frame and capability.
-  private static final int API_ENDPOINTS = 57;
+  // Invocation image admission adds one explicitly selected binary-upload profile, not a gallery.
+  // Relay binary publish/download are explicit HTTP boundaries; text ports remain WebSocket
+  // operations.
+  private static final int API_ENDPOINTS = 60;
 
   /**
    * Every spelling an endpoint can be declared with.

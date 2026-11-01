@@ -56,7 +56,7 @@ public final class RelayInvocationReadTool implements AgentTool {
       io.aeyer.plowshare.protocol.RelayPort.uuid(text.value());
       var result =
           invocations.read(home.project(), owner.accountHandle(), UUID.fromString(text.value()));
-      return "Invocation " + result.id() + ": " + result.state() + "\n" + result.text();
+      return "Invocation " + result.id() + ": " + result.state() + "\n" + result.displayText();
     } catch (CallerFault | IllegalArgumentException invalid) {
       return "Relay invocation read refused: " + invalid.getMessage();
     }

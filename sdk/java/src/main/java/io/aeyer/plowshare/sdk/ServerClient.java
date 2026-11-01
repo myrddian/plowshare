@@ -11,6 +11,19 @@ import java.util.List;
 import java.util.UUID;
 
 public interface ServerClient {
+  /** Explicit binary HTTP publication; never redirect or replay uncertain writes. */
+  default io.aeyer.plowshare.protocol.RelayBlob.Published publishRelayBlob(
+      io.aeyer.plowshare.protocol.RelayBlob.Publish request, byte[] bytes) throws IOException {
+    throw new UnsupportedOperationException("Relay binary transfer is unavailable");
+  }
+
+  /** Verify bytes against a consumed descriptor under current publication read authority. */
+  default byte[] readRelayBlob(
+      io.aeyer.plowshare.protocol.RelayBlob.Read request,
+      io.aeyer.plowshare.protocol.RelayBlob.Descriptor expected)
+      throws IOException {
+    throw new UnsupportedOperationException("Relay binary transfer is unavailable");
+  }
 
   record Navigation(String level, List<String> ids, String text, boolean complete, int modelCalls) {
     public Navigation {
@@ -316,6 +329,26 @@ public interface ServerClient {
 
   /** Upload into an explicit project; no implicit Personal destination. */
   UploadedImage uploadImage(String project, String filename, byte[] bytes) throws IOException;
+
+  /**
+   * Opt-in producer upload; reconcile its stable slot after uncertain delivery, never recapture.
+   */
+  default io.aeyer.plowshare.protocol.ImageAdmissions.Receipt admitImage(
+      io.aeyer.plowshare.protocol.ImageAdmissions.Request request, String filename, byte[] bytes)
+      throws IOException {
+    throw new UnsupportedOperationException("invocation image admission is unavailable");
+  }
+
+  /** Owner-scoped retained read; never submits or repeats a tool invocation. */
+  default io.aeyer.plowshare.protocol.ToolResults.Receipt readToolInvocation(
+      io.aeyer.plowshare.protocol.ToolResults.Read request) throws IOException {
+    throw new UnsupportedOperationException("Tool invocation reads are unsupported by this client");
+  }
+
+  default io.aeyer.plowshare.protocol.ImageAdmissions.Status imageAdmissionStatus(
+      io.aeyer.plowshare.protocol.ImageAdmissions.Request request) throws IOException {
+    throw new UnsupportedOperationException("invocation image admission is unavailable");
+  }
 
   /** Create in an explicit project; a missing project is refused before submission. */
   Conversation openConversation(String project, Integer maxModelCalls) throws IOException;

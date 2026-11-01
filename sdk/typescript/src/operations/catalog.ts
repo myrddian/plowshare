@@ -1,4 +1,6 @@
+import type { ToolInvocationRead } from './tool-results.ts';
 import type { HostedToolPayloads } from './hosted-tool-scopes.ts';
+import type { ImageAdmissionRequest } from './image-admissions.ts';
 import type { ProcPayloads } from './proc.ts';
 import type { ProviderCredentialPayloads } from './provider-credentials.ts';
 import type { ToolScopePayloads } from './tool-scopes.ts';
@@ -28,6 +30,8 @@ export interface ExtendedPayloads
     AdministrativePayloads,
     InformationPayloads,
     Omit<UsagePayloads, 'usage.subscribe' | 'usage.unsubscribe'> {
+  'artifact.admission.status': ImageAdmissionRequest;
+  'tool.invocation.read': ToolInvocationRead;
   'conversation.open': Tier & Turns & Budget & { readonly noBudget?: boolean };
   'conversation.list': Tier & { readonly lifecycle?: string };
   'conversation.latest': Tier & { readonly agent: string };
@@ -345,6 +349,8 @@ export const CLI_OPERATIONS = {
   'tool scope disconnect': 'tool.scope.disconnect',
   'relay topics': 'relay.topics',
   'relay log': 'relay.log',
+  'tool invocation read': 'tool.invocation.read',
+  'artifact admission status': 'artifact.admission.status',
   'relay operate': 'relay.operate',
   'relay process': 'relay.process',
   'relay publish': 'relay.publish',

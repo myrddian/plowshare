@@ -35,6 +35,7 @@ public final class JdbcRelayRepository implements RelayRepository {
   private final UnitOfWork transactions;
   private final RelayPayloadStore payloads;
   private final RelayTextLimit textLimit;
+  private final Optional<io.aeyer.plowshare.server.blobs.BlobRepository> blobs;
 
   public JdbcRelayRepository(
       JdbcTemplate jdbc, UnitOfWork transactions, RelayPayloadStore payloads) {
@@ -46,10 +47,29 @@ public final class JdbcRelayRepository implements RelayRepository {
       UnitOfWork transactions,
       RelayPayloadStore payloads,
       RelayTextLimit textLimit) {
+    this(jdbc, transactions, payloads, textLimit, Optional.empty());
+  }
+
+  public JdbcRelayRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayPayloadStore payloads,
+      RelayTextLimit textLimit,
+      io.aeyer.plowshare.server.blobs.BlobRepository blobs) {
+    this(jdbc, transactions, payloads, textLimit, Optional.of(blobs));
+  }
+
+  private JdbcRelayRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      RelayPayloadStore payloads,
+      RelayTextLimit textLimit,
+      Optional<io.aeyer.plowshare.server.blobs.BlobRepository> blobs) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.payloads = Objects.requireNonNull(payloads, "payloads");
     this.textLimit = Objects.requireNonNull(textLimit, "textLimit");
+    this.blobs = Objects.requireNonNull(blobs, "blobs");
   }
 
   @Override
@@ -188,6 +208,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             Relay.Publication original = retained.getFirst();
             if (!original.event().equals(draft))
               throw new IllegalArgumentException("Relay event ID conflicts with retained content");
+            claimBlob(original);
             return original;
           }
           // The probe saw a retained event that pruning removed before the topic lock was taken, so
@@ -224,7 +245,9 @@ public final class JdbcRelayRepository implements RelayRepository {
                   draft.causationId(),
                   RelayCausationCodec.write(draft.causation()),
                   digestToWrite));
-          return new Relay.Publication(key, position, admittedAt, draft);
+          var publication = new Relay.Publication(key, position, admittedAt, draft);
+          claimBlob(publication);
+          return publication;
         });
   }
 
@@ -282,6 +305,46 @@ public final class JdbcRelayRepository implements RelayRepository {
               .stream()
               .findFirst();
         });
+  }
+
+  private void claimBlob(Relay.Publication publication) {
+    if (!(publication.event().payload() instanceof RelayPayload.Blob binary)) return;
+    var repository =
+        blobs.orElseThrow(() -> new IllegalStateException("Relay blob storage is not configured"));
+    String scope = RelayBlobClaims.scope(publication.topic());
+    var claim = RelayBlobClaims.claim(publication.topic(), publication.position());
+    repository.acquire(
+        new io.aeyer.plowshare.server.blobs.BlobKey(scope, binary.blob().sha256()),
+        claim,
+        binary.blob().byteLength());
+    int inserted =
+        jdbc.update(
+            """
+        INSERT INTO relay_blob_publications(scope_key,topic,position,blob_scope,sha256,claim_owner)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(scope_key,topic,position) DO NOTHING
+        """,
+            RelayScopeCodec.write(publication.topic()),
+            publication.topic().name(),
+            publication.position(),
+            scope,
+            binary.blob().sha256(),
+            claim.owner());
+    if (inserted == 0
+        && !Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                """
+        SELECT blob_scope=? AND sha256=? AND claim_owner=? FROM relay_blob_publications
+        WHERE scope_key=? AND topic=? AND position=?
+        """,
+                Boolean.class,
+                scope,
+                binary.blob().sha256(),
+                claim.owner(),
+                RelayScopeCodec.write(publication.topic()),
+                publication.topic().name(),
+                publication.position()))) {
+      throw new IllegalStateException("Relay blob publication binding conflicts");
+    }
   }
 
   @Override

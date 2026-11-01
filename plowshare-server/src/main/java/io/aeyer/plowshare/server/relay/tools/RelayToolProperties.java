@@ -7,6 +7,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /** Explicit deployment authority. SDK declarations are installed by an operator, never a model. */
 @ConfigurationProperties(value = "plowshare.relay.tools", ignoreUnknownFields = false)
 public final class RelayToolProperties implements RelayToolAuthority {
+  @Override
+  public boolean permitsArtifact(RelayToolDefinition binding) {
+    return bindings.contains(binding);
+  }
+
   private List<RelayToolDefinition> bindings = List.of();
 
   public List<RelayToolDefinition> getBindings() {
@@ -46,7 +51,9 @@ public final class RelayToolProperties implements RelayToolAuthority {
     var b = binding.get();
     var result = RelayToolCodec.result(request.text());
     var invocation = java.util.UUID.fromString(result.invocationId());
-    if (!b.requests().equals(request.parentTopic())
+    if (!java.util.Objects.equals(
+            b.resultProfile(), result.content() == null ? null : result.content().version())
+        || !b.requests().equals(request.parentTopic())
         || !result.invocationId().equals(request.parentEventId())
         || !result.invocationId().equals(request.correlationId())
         || !RelayToolCodec.resultRequestId(invocation).toString().equals(request.requestId())

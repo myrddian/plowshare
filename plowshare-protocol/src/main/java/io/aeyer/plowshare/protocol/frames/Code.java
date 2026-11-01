@@ -158,6 +158,8 @@ public enum Code {
    * UnstorableImageException}'s three statuses.
    */
   IMAGE_NOT_STORED_TOO_LARGE(413, "image_not_stored"),
+  MEDIA_INSPECTION_UNAVAILABLE(503, "media_inspection_unavailable"),
+  BLOB_UNAVAILABLE(503, "blob_unavailable"),
 
   /**
    * A well-formed request whose content fails a domain rule a 400 does not quite name. {@code

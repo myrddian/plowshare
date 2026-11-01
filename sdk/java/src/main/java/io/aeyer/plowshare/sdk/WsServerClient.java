@@ -1432,4 +1432,236 @@ public class WsServerClient implements ServerClient, AsyncServerClient, AutoClos
           return result;
         });
   }
+
+  @Override
+  public ImageAdmissions.Receipt admitImage(
+      ImageAdmissions.Request request, String filename, byte[] bytes) throws IOException {
+    return Plowshare.await(admitImageAsync(request, filename, bytes));
+  }
+
+  @Override
+  public io.aeyer.plowshare.protocol.RelayBlob.Published publishRelayBlob(
+      io.aeyer.plowshare.protocol.RelayBlob.Publish request, byte[] bytes) throws IOException {
+    return Plowshare.await(publishRelayBlobAsync(request, bytes));
+  }
+
+  @Override
+  public java.util.concurrent.CompletionStage<io.aeyer.plowshare.protocol.RelayBlob.Published>
+      publishRelayBlobAsync(io.aeyer.plowshare.protocol.RelayBlob.Publish request, byte[] bytes) {
+    Objects.requireNonNull(request);
+    Objects.requireNonNull(bytes);
+    if (bytes.length < 1 || bytes.length > io.aeyer.plowshare.protocol.RelayBlob.MAX_BYTES)
+      throw new IllegalArgumentException("Relay binary upload exceeds bound");
+    byte[] snapshot = bytes.clone();
+    String digest = relayBlobDigest(snapshot);
+    var body =
+        new MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("requestId", request.requestId())
+            .addFormDataPart("project", request.project())
+            .addFormDataPart("topic", request.topic())
+            .addFormDataPart("occurredAt", request.occurredAt().toString())
+            .addFormDataPart("mediaType", request.mediaType())
+            .addFormDataPart(
+                "file",
+                "blob.bin",
+                RequestBody.create(snapshot, MediaType.get("application/octet-stream")));
+    if (request.correlationId() != null)
+      body.addFormDataPart("correlationId", request.correlationId());
+    if (request.parentTopic() != null) {
+      body.addFormDataPart("parentTopic", request.parentTopic());
+      body.addFormDataPart("parentEventId", request.parentEventId());
+    }
+    var upload =
+        relayBlobRequest(HttpUrl.get(origin).newBuilder().addPathSegments("v1/relay/blobs").build())
+            .post(body.build())
+            .build();
+    return HttpAsync.call(
+        uploads.newCall(upload),
+        response -> {
+          if (!response.isSuccessful())
+            throw new ServerError(
+                response.code(),
+                "Relay binary publication refused; reconcile the original request");
+          if (response.body() == null)
+            throw new IOException("Relay binary publication has no receipt");
+          byte[] bounded = response.body().byteStream().readNBytes(16385);
+          if (bounded.length > 16384) throw new IOException("Relay binary receipt exceeds bound");
+          var result =
+              SdkJson.decode(
+                  JSON,
+                  JSON.readTree(bounded),
+                  io.aeyer.plowshare.protocol.RelayBlob.Published.class);
+          if (!result.publication().requestId().equals(request.requestId())
+              || !result.publication().project().equals(request.project())
+              || !result.publication().topic().equals(request.topic())
+              || !result.blob().sha256().equals(digest)
+              || result.blob().byteLength() != snapshot.length
+              || !result.blob().mediaType().equals(request.mediaType()))
+            throw new IOException("Relay binary publication returned a different receipt");
+          return result;
+        });
+  }
+
+  @Override
+  public byte[] readRelayBlob(
+      io.aeyer.plowshare.protocol.RelayBlob.Read request,
+      io.aeyer.plowshare.protocol.RelayBlob.Descriptor expected)
+      throws IOException {
+    return Plowshare.await(readRelayBlobAsync(request, expected));
+  }
+
+  @Override
+  public java.util.concurrent.CompletionStage<byte[]> readRelayBlobAsync(
+      io.aeyer.plowshare.protocol.RelayBlob.Read request,
+      io.aeyer.plowshare.protocol.RelayBlob.Descriptor expected) {
+    Objects.requireNonNull(request);
+    Objects.requireNonNull(expected);
+    var url =
+        HttpUrl.get(origin)
+            .newBuilder()
+            .addPathSegments("v1/relay/blobs")
+            .addQueryParameter("project", request.project())
+            .addQueryParameter("topic", request.topic())
+            .addQueryParameter("group", request.group())
+            .addQueryParameter("eventId", request.eventId())
+            .build();
+    return HttpAsync.call(
+        uploads.newCall(relayBlobRequest(url).get().build()),
+        response -> {
+          if (!response.isSuccessful())
+            throw new ServerError(response.code(), "Relay binary download refused");
+          if (response.body() == null) throw new IOException("Relay binary download has no body");
+          String length = response.header("Content-Length"),
+              hash = response.header("X-Plowshare-Blob-Sha256"),
+              media = response.header("X-Plowshare-Blob-Media-Type");
+          if (!"application/octet-stream".equals(response.header("Content-Type"))
+              || length != null && !length.equals(Long.toString(expected.byteLength()))
+              || hash != null && !hash.equals(expected.sha256())
+              || media != null && !media.equals(expected.mediaType()))
+            throw new IOException("Relay binary headers differ from the descriptor");
+          byte[] bounded =
+              response.body().byteStream().readNBytes(Math.toIntExact(expected.byteLength()) + 1);
+          if (bounded.length != expected.byteLength()
+              || !relayBlobDigest(bounded).equals(expected.sha256()))
+            throw new IOException("Relay binary download failed integrity verification");
+          return bounded;
+        });
+  }
+
+  private Request.Builder relayBlobRequest(HttpUrl url) {
+    if (bearer == null || bearer.isBlank())
+      throw new IllegalStateException("Relay binary transfer requires an authenticated client");
+    return new Request.Builder()
+        .url(url)
+        .header("Authorization", "Bearer " + bearer)
+        .tag(
+            java.util.concurrent.atomic.AtomicBoolean.class,
+            new java.util.concurrent.atomic.AtomicBoolean());
+  }
+
+  private static String relayBlobDigest(byte[] bytes) {
+    try {
+      return java.util.HexFormat.of()
+          .formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
+  }
+
+  @Override
+  public java.util.concurrent.CompletionStage<ImageAdmissions.Receipt> admitImageAsync(
+      ImageAdmissions.Request admission, String filename, byte[] bytes) {
+    Objects.requireNonNull(admission);
+    Objects.requireNonNull(bytes);
+    if (bytes.length == 0) throw new IllegalArgumentException("image bytes must not be empty");
+    if (filename != null) ContractChecks.identity(filename, "filename");
+    var parts =
+        new MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("profile", ImageAdmissions.PROFILE)
+            .addFormDataPart("invocation", admission.invocation().toString())
+            .addFormDataPart("ordinal", Integer.toString(admission.ordinal()))
+            .addFormDataPart("requestId", admission.requestId().toString())
+            .addFormDataPart(
+                "file",
+                "image.png",
+                RequestBody.create(bytes, MediaType.get("application/octet-stream")));
+    if (filename != null) parts.addFormDataPart("name", filename);
+    var upload =
+        new Request.Builder()
+            .url(HttpUrl.get(origin).newBuilder().addPathSegments("v1/images").build())
+            .post(parts.build())
+            .tag(
+                java.util.concurrent.atomic.AtomicBoolean.class,
+                new java.util.concurrent.atomic.AtomicBoolean());
+    if (bearer != null && !bearer.isBlank()) upload.header("Authorization", "Bearer " + bearer);
+    return HttpAsync.call(
+        uploads.newCall(upload.build()),
+        response -> {
+          if (!response.isSuccessful())
+            throw new ServerError(response.code(), "invocation image admission refused");
+          if (response.body() == null) throw new IOException("image admission returned no receipt");
+          if (response.body().contentLength() > 16384)
+            throw new IOException("image admission receipt exceeds bound");
+          byte[] bounded = response.body().byteStream().readNBytes(16385);
+          if (bounded.length > 16384)
+            throw new IOException("image admission receipt exceeds bound");
+          var receipt = SdkJson.decode(JSON, JSON.readTree(bounded), ImageAdmissions.Receipt.class);
+          if (!admission.equals(receipt.request()))
+            throw new IOException("image admission returned a different slot");
+          return receipt;
+        });
+  }
+
+  @Override
+  public io.aeyer.plowshare.protocol.ToolResults.Receipt readToolInvocation(
+      io.aeyer.plowshare.protocol.ToolResults.Read request) throws IOException {
+    return Plowshare.await(readToolInvocationAsync(request));
+  }
+
+  @Override
+  public java.util.concurrent.CompletionStage<io.aeyer.plowshare.protocol.ToolResults.Receipt>
+      readToolInvocationAsync(io.aeyer.plowshare.protocol.ToolResults.Read request) {
+    return askAsync(
+            "tool.invocation.read",
+            Map.of("project", request.project(), "invocation", request.invocation()),
+            io.aeyer.plowshare.protocol.ToolResults.Receipt.class,
+            null)
+        .thenApply(
+            result -> {
+              if (!result.id().equals(request.invocation()))
+                throw new IllegalArgumentException("Tool result returned a different invocation");
+              return result;
+            });
+  }
+
+  @Override
+  public ImageAdmissions.Status imageAdmissionStatus(ImageAdmissions.Request request)
+      throws IOException {
+    return Plowshare.await(imageAdmissionStatusAsync(request));
+  }
+
+  @Override
+  public java.util.concurrent.CompletionStage<ImageAdmissions.Status> imageAdmissionStatusAsync(
+      ImageAdmissions.Request request) {
+    return askAsync(
+            "artifact.admission.status",
+            Map.of(
+                "invocation",
+                request.invocation(),
+                "ordinal",
+                request.ordinal(),
+                "requestId",
+                request.requestId()),
+            ImageAdmissions.Status.class,
+            null)
+        .thenApply(
+            status -> {
+              if (status.receipt() != null && !request.equals(status.receipt().request()))
+                throw new IllegalArgumentException(
+                    "image admission status returned a different slot");
+              return status;
+            });
+  }
 }

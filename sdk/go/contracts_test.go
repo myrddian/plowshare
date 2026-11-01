@@ -223,3 +223,13 @@ func TestHostedCoordinatesAndSecretDiagnostics(t *testing.T) {
 		}
 	}
 }
+
+func TestInvocationReadCoordinates(t *testing.T) {
+	asked := []byte(`{"project":"atlas","invocation":"11111111-1111-1111-1111-111111111111"}`)
+	for _, id := range []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"} {
+		valid := deploymentMatches("tool.invocation.read", asked, []byte(`{"id":"`+id+`","state":"COMPLETED","text":"original"}`))
+		if valid != (id == "11111111-1111-1111-1111-111111111111") {
+			t.Fatal("invocation correlation was not enforced")
+		}
+	}
+}

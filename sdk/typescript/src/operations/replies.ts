@@ -1,4 +1,6 @@
+import type { ToolInvocationResult } from './tool-results.ts';
 import type { ToolScopeReplies } from './tool-scopes.ts';
+import type { ImageAdmissionStatus } from './image-admissions.ts';
 import type { ProcReplies } from './proc.ts';
 import type { RelayReplies } from './relay.ts';
 import type { IncomingSource, IncomingCommand, AgentCard } from './external.ts';
@@ -73,6 +75,8 @@ export interface Replies
     AdministrativeReplies,
     ConversationReplies,
     InspectionReplies {
+  'artifact.admission.status': ImageAdmissionStatus;
+  'tool.invocation.read': ToolInvocationResult;
   'acting.context.open': {
     readonly context: string;
     readonly subject: string;

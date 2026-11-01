@@ -478,6 +478,8 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
 
   private ApplicationServerSettings.Catalogue checkedCatalogue(Binding b, String text) {
     var catalogue = ApplicationServerSettings.catalogue(text);
+    if (catalogue.tools().stream().anyMatch(t -> t.resultProfile() != null))
+      throw new CallerFault("Hosted content results are not supported by this worker protocol");
     for (var t : catalogue.tools())
       if (!t.name().startsWith(b.definition().prefix()) || builtins.get().contains(t.name()))
         throw new CallerFault("Hosted catalogue exceeds its reserved prefix");
@@ -602,6 +604,34 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
         m.subject(),
         m.generation(),
         agent);
+  }
+
+  @Override
+  public void authorizeArtifact(String actor, RelayToolRepository.Intent intent) {
+    var selected = intent.hosted();
+    if (selected == null || !selected.executor().equals(actor))
+      throw new CallerFault("Artifact has no retained hosted executor");
+    // Existing lock order: binding, connection, credential; the receipt repository locks the
+    // invocation afterwards. No credential secret is released for artifact admission/status.
+    var b = find(selected.binding(), true);
+    executor(b, actor);
+    var current = grant(b);
+    // Worker socket/lease availability is an execution fence, not the lifetime of already captured
+    // output. Retained invocation identity and current durable grants survive server restart.
+    if (b.generation() != selected.generation()
+        || !b.owner().equals(selected.owner())
+        || !b.project().equals(intent.binding().project())
+        || !current.connection().project().equals(selected.credentialProject())
+        || !current.connection().connection().equals(selected.connection())
+        || !current.connection().revision().equals(selected.connectionRevision())
+        || !current.credential().subject().equals(selected.subject())
+        || !current.credential().generation().equals(selected.credentialGeneration())
+        || !b.definition().agents().contains(selected.agent())
+        || !definitions.acceptsDynamic(
+            projects.id(b.project()), b.owner(), selected.agent(), null)) {
+      throw new CallerFault(
+          "Hosted artifact generation, credential or Application authority changed");
+    }
   }
 
   public Credential credential(

@@ -4,8 +4,9 @@
 # it does not mean touching a profile, and two models that want the same numbers
 # point at one file rather than duplicating it.
 #
-# Copy this directory to PLOWSHARE_SAMPLING_DIR (default: ./sampling) and edit it
-# there. A `models.yaml` or `models.json` in that directory is MERGED over this
+# Set plowshare.llm.sampling-directory (default: ./sampling) to your deployment's
+# profile directory and edit files there. See docs/model-profiles.md for version 2
+# media declarations. A `models.yaml` or `models.json` there is MERGED over this
 # one key by key, so you add and override without re-stating what already works;
 # a profile file of the same name in that directory REPLACES the shipped one
 # whole, because a profile is a table and half a table is not a profile.

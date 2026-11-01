@@ -1,4 +1,5 @@
 import { interchangeProblem } from './interchange-validation.ts';
+import { decodeImageAdmissionRequest } from './image-admissions.ts';
 import { procProblem } from './proc.ts';
 import { isNavigationOperation } from './information-navigation.ts';
 import { navigationPayloadProblem } from './navigation-validation.ts';
@@ -25,6 +26,32 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (type === 'tool.invocation.read') {
+    if (
+      Object.keys(payload).length !== 2 ||
+      typeof payload['project'] !== 'string' ||
+      !payload['project'].trim() ||
+      payload['project'].length > 256 ||
+      payload['project'].trim() !== payload['project'] ||
+      Array.from(payload['project']).some((c) => {
+        const n = c.codePointAt(0) ?? 0;
+        return n < 32 || (n >= 127 && n <= 159) || n === 0x2028 || n === 0x2029;
+      }) ||
+      typeof payload['invocation'] !== 'string' ||
+      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(
+        payload['invocation'],
+      )
+    )
+      return 'Invalid tool invocation read';
+  }
+  if (type === 'artifact.admission.status') {
+    try {
+      decodeImageAdmissionRequest(payload);
+      return undefined;
+    } catch {
+      return 'Invalid image admission status identity';
+    }
+  }
   if (type.startsWith('proc.')) return procProblem(type, payload);
   if (type === 'acting.turn.start' || type === 'acting.turn.receipt') {
     if (
@@ -347,6 +374,8 @@ export const SHAPES: Record<
   'relay.process': [['project'], ['limit']],
   'relay.topics': [[], ['project', 'system', 'limit']],
   'relay.log': [['topic'], ['project', 'system', 'after', 'limit']],
+  'tool.invocation.read': [['project', 'invocation'], []],
+  'artifact.admission.status': [['invocation', 'ordinal', 'requestId'], []],
   'admin.pricing.list': [[], []],
   'admin.pricing.set': [
     ['billingRoute', 'model', 'expectedVersion', 'mode'],
@@ -1049,6 +1078,8 @@ export function commandProblem(
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
   if (type.startsWith('proc.')) return procProblem(type, body);
+  if (type === 'artifact.admission.status' || type === 'tool.invocation.read')
+    return problem(type, body);
   if (type.startsWith('information.interchange.'))
     return interchangeProblem(type, body);
   if (isNavigationOperation(type))

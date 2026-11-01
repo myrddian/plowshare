@@ -51,6 +51,19 @@ final class RelayPayloadCodec {
     try {
       JsonNode value = JSON.readTree(source);
       return switch (kind) {
+        case BLOB -> {
+          fields(value, Set.of("blob"));
+          JsonNode blob = value.get("blob");
+          fields(blob, Set.of("sha256", "byteLength", "mediaType"));
+          if (!blob.path("byteLength").isIntegralNumber()
+              || !blob.path("byteLength").canConvertToLong())
+            throw new IllegalArgumentException("invalid blob length");
+          yield new RelayPayload.Blob(
+              new io.aeyer.plowshare.protocol.RelayBlob.Descriptor(
+                  text(blob, "sha256"),
+                  blob.get("byteLength").longValue(),
+                  text(blob, "mediaType")));
+        }
         case EMPTY -> {
           fields(value, Set.of());
           yield new RelayPayload.Empty();

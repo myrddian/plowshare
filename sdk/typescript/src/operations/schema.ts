@@ -1,6 +1,8 @@
 import { validateInformationTagVersions } from './information-validation.ts';
 import { interchangeProblem } from './interchange-validation.ts';
 import { validateNavigationMetadata } from './navigation-validation.ts';
+import { validateToolInvocationResult } from './tool-results.ts';
+import { validateImageAdmissionReply } from './image-admissions.ts';
 import { validateProcReply } from './proc.ts';
 import { validateHostedReply } from './hosted-tool-scopes.ts';
 import { validateProviderCredentialReply } from './provider-credentials.ts';
@@ -269,6 +271,8 @@ export function decodeReply<K extends keyof Replies>(
   const portableFailure = interchangeProblem(type, decoded, true);
   if (portableFailure) throw new Error(portableFailure);
   validateHostedReply(type, decoded);
+  validateImageAdmissionReply(type, decoded);
+  if (type === 'tool.invocation.read') validateToolInvocationResult(decoded);
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);
   validateDeploymentReply(type, decoded);

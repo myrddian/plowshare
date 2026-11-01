@@ -180,6 +180,10 @@ def decode_push(value: object) -> contracts.ServerPush:
 
 def deployment_matches(operation: str, request: object, result: object) -> bool:
     """A structural reply cannot certify a different project's retained receipt."""
+    if operation == "tool.invocation.read":
+        return isinstance(
+            result, contracts.ToolInvocationResultDto
+        ) and result.id == _object(_wire(request)).get("invocation")
     if operation.startswith(("tool.scope.host.", "tool.scope.worker.")):
         return hosted_matches(operation, request, result)
     if operation in {"application.child.ceiling", "application.child.destroy"}:

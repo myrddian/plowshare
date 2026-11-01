@@ -57,8 +57,9 @@ public class RelayConfiguration {
       JdbcTemplate jdbc,
       UnitOfWork transactions,
       RelayPayloadStore payloads,
-      RelayProperties properties) {
-    return new JdbcRelayRepository(jdbc, transactions, payloads, properties.textLimit());
+      RelayProperties properties,
+      io.aeyer.plowshare.server.blobs.BlobRepository blobs) {
+    return new JdbcRelayRepository(jdbc, transactions, payloads, properties.textLimit(), blobs);
   }
 
   @Bean

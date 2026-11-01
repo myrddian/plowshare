@@ -33,7 +33,8 @@ import java.util.stream.Stream;
  *       projects/
  *           &lt;project-id&gt;/
  *               exports/           ejected conversation payloads
- *               images/            images a model may be shown, by UID
+ *               images/            image sidecars and legacy image bytes, by UID
+ *               blobs/             generic immutable byte objects, by full digest
  *               agents/            agent definitions for this project's tier
  *               bots/              bot definitions for this project's tier
  *               orchestrations/    orchestration definitions for this project's tier
@@ -162,6 +163,10 @@ public final class DataLayout {
   /**
    * The shape of the tree this server writes and expects.
    *
+   * <p><b>7 reserves {@code blobs/} at both tiers for immutable generic byte delivery.</b> Existing
+   * image files stay in place; only new canonical objects use the new directory. Layout 6 refuses
+   * pre-existing paths there before adopting the new layout.
+   *
    * <p><b>6 reserves {@code accounting/} for the durable inference journal.</b> Layout 5 never
    * owned that name, so migration refuses an existing path there. Project or transcript retention
    * cannot remove this server-level history.
@@ -198,7 +203,7 @@ public final class DataLayout {
    * <p>Not a build number and not tied to a release: two servers whose trees are identical must
    * agree here whatever else differs between them, or every upgrade becomes a migration of nothing.
    */
-  static final int VERSION = 6;
+  static final int VERSION = 7;
 
   /**
    * A deployment that keeps no data directory.
@@ -594,7 +599,8 @@ public final class DataLayout {
               // environment.yml under a project decides whether commands run, so one
               // already there was made by somebody else -- hooks/' reasoning.
               4, DataLayout::noEnvironmentYet,
-              5, DataLayout::noAccountingYet));
+              5, DataLayout::noAccountingYet,
+              6, DataLayout::noBlobsYet));
 
   private static final Map<Integer, String> ADDED =
       Map.of(
@@ -602,7 +608,31 @@ public final class DataLayout {
           2, "added hooks/ under a project",
           3, "added orchestrations/ at both tiers",
           4, "added environment.yml under a project",
-          5, "reserved accounting/ for the durable inference journal");
+          5, "reserved accounting/ for the durable inference journal",
+          6, "reserved blobs/ at both tiers for immutable binary delivery");
+
+  private static void noBlobsYet(Path root) {
+    if (Files.exists(
+        root.resolve(GLOBAL).resolve("blobs"), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      throw new IllegalStateException(
+          "data layout 6 did not own global/blobs; move that existing path before upgrading");
+    }
+    Path projects = root.resolve("projects");
+    if (!Files.isDirectory(projects)) return;
+    try (Stream<Path> paths = Files.list(projects)) {
+      if (paths
+          .filter(Files::isDirectory)
+          .anyMatch(
+              path ->
+                  Files.exists(path.resolve("blobs"), java.nio.file.LinkOption.NOFOLLOW_LINKS))) {
+        throw new IllegalStateException(
+            "data layout 6 did not own project blobs directories; move existing paths before upgrading");
+      }
+    } catch (IOException failure) {
+      throw new UncheckedIOException(
+          "cannot inspect data layout before reserving blob storage", failure);
+    }
+  }
 
   private static void noAccountingYet(Path root) {
     if (Files.exists(root.resolve("accounting"), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
@@ -849,7 +879,7 @@ public final class DataLayout {
                 # freely. Deleting `%s` makes this server refuse to start
                 # rather than guess.
                 #
-                # The tree:  projects/<project-id>/{exports,images,agents,bots,hooks,orchestrations}/
+                # The tree:  projects/<project-id>/{exports,images,blobs,agents,bots,hooks,orchestrations}/
                 # and environment.yml, and the same under global/, which has no hooks/ and no
                 # environment.yml
                 # A project is named here by its id and never by its name, because a

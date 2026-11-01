@@ -30,7 +30,11 @@ import java.util.Objects;
  * out of a directory named by a project id, addressed by a UID that matched a hexadecimal pattern.
  * There is no path from a caller's string to an outbound connection.
  *
- * <h2>KNOWN GAP: an image is not counted</h2>
+ * <h2>Legacy opening images and typed tool observations</h2>
+ *
+ * <p>Typed tool images use {@link StoredImage} until dispatch. Their complete effective prompt
+ * requires a verified image-aware count and context admission before inference. The historical
+ * limitation below still describes legacy opening attachments.
  *
  * <p>{@link Image#text()} is the empty string, so every character count in this server counts a
  * picture as nothing. That is right for what those counts are for — they are counting words, and a
@@ -57,6 +61,27 @@ import java.util.Objects;
  * not an index.
  */
 public sealed interface Content {
+
+  /**
+   * A retained trajectory slot, resolved only for its authorized owning conversation at dispatch.
+   */
+  record StoredImage(String conversation, int entry, int slot, String uid) implements Content {
+    public StoredImage {
+      if (conversation == null
+          || !conversation.matches("cnv_[0-9A-Fa-f]{16}")
+          || entry < 1
+          || slot < 0
+          || slot > 15
+          || uid == null
+          || !uid.matches("img_[0-9a-f]{32}"))
+        throw new IllegalArgumentException("Invalid trajectory image address");
+    }
+
+    @Override
+    public String text() {
+      return "";
+    }
+  }
 
   /**
    * What this part contributes to {@link ChatMessage#content()}, which is the harness's view of a

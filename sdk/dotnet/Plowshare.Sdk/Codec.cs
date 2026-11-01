@@ -89,6 +89,10 @@ internal static class Codec
             }
             return;
         }
+        if (operation == "tool.invocation.read") {
+            var invocation=IdentityText(request,"invocation");
+            if(invocation is null || invocation != IdentityText(result,"id"))throw Invalid();return;
+        }
         if (operation is "application.identity.status" or "application.token.issue" or "application.token.receipt") {
             if(operation == "application.identity.status") {
                 if(IdentityText(request,"project") != IdentityText(result,"project")) throw Invalid();

@@ -5,6 +5,8 @@ import {
   validateRelayPortReply,
 } from './relay-ports.ts';
 import type { RelayPortPayloads, RelayPortReplies } from './relay-ports.ts';
+import { decodeRelayBlobDescriptor } from './relay-blobs.ts';
+import type { RelayBlobDescriptor } from './relay-blobs.ts';
 /** Read-only broker records; positions are decimal strings, never JavaScript numbers. */
 export type RelayScope =
   | { readonly project: string; readonly system?: false }
@@ -62,7 +64,7 @@ export interface RelayTopic {
   readonly name: string;
   readonly generation?: string | null;
   readonly kind:
-    'EMPTY' | 'TEXT' | 'SCHEDULE_DUE' | 'LIFECYCLE' | 'WAKE_REQUESTED';
+    'EMPTY' | 'TEXT' | 'BLOB' | 'SCHEDULE_DUE' | 'LIFECYCLE' | 'WAKE_REQUESTED';
   readonly retentionSeconds: string;
   readonly maxRecords: string | null;
   readonly through: string;
@@ -87,7 +89,12 @@ export interface RelayEvent {
   readonly causation?: RelayCausation | null;
   readonly payload: {
     readonly kind:
-      'EMPTY' | 'TEXT' | 'SCHEDULE_DUE' | 'LIFECYCLE' | 'WAKE_REQUESTED';
+      | 'EMPTY'
+      | 'TEXT'
+      | 'BLOB'
+      | 'SCHEDULE_DUE'
+      | 'LIFECYCLE'
+      | 'WAKE_REQUESTED';
     readonly text: string | null;
     readonly schedule: string | null;
     readonly emits: string | null;
@@ -104,6 +111,7 @@ export interface RelayEvent {
       readonly target: string;
       readonly type: 'MESSAGE' | 'BOARD';
     } | null;
+    readonly blob?: RelayBlobDescriptor | null;
   };
 }
 export interface RelayBranch {
@@ -424,6 +432,7 @@ export function validateRelayReply(type: string, value: unknown): void {
       ![
         'EMPTY',
         'TEXT',
+        'BLOB',
         'SCHEDULE_DUE',
         'LIFECYCLE',
         'WAKE_REQUESTED',
@@ -612,9 +621,14 @@ export function validateRelayEvent(value: unknown, kind: unknown): bigint {
     return fail();
   const fields = value as Record<string, unknown>;
   if (
-    !['EMPTY', 'TEXT', 'SCHEDULE_DUE', 'LIFECYCLE', 'WAKE_REQUESTED'].includes(
-      String(kind),
-    )
+    ![
+      'EMPTY',
+      'TEXT',
+      'BLOB',
+      'SCHEDULE_DUE',
+      'LIFECYCLE',
+      'WAKE_REQUESTED',
+    ].includes(String(kind))
   )
     return fail();
   identity(fields['eventId']);
@@ -647,6 +661,8 @@ export function validateRelayEvent(value: unknown, kind: unknown): bigint {
     fail();
   const body = payload as Record<string, unknown>;
   if (body['kind'] !== kind) fail();
+  if (kind === 'BLOB') decodeRelayBlobDescriptor(body['blob']);
+  else if (body['blob'] != null) fail();
   if (
     body['kind'] === 'TEXT'
       ? typeof body['text'] !== 'string'

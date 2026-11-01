@@ -127,13 +127,29 @@ public final class RelayLog {
       String emits,
       Instant fireAt,
       Lifecycle lifecycle,
-      Wake wake) {
+      Wake wake,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          RelayBlob.Descriptor blob) {
+    public Payload(
+        String kind,
+        String text,
+        String schedule,
+        String emits,
+        Instant fireAt,
+        Lifecycle lifecycle,
+        Wake wake) {
+      this(kind, text, schedule, emits, fireAt, lifecycle, wake, null);
+    }
+
     public Payload(String kind, String text, String schedule, String emits, Instant fireAt) {
       this(kind, text, schedule, emits, fireAt, null, null);
     }
 
     public Payload {
       RelayLog.kind(kind);
+      if (kind.equals("BLOB") != (blob != null))
+        throw new IllegalArgumentException("Invalid Relay blob payload");
       if (kind.equals("TEXT")) RelayPort.text(text);
       else if (text != null) throw new IllegalArgumentException("Invalid Relay text payload");
       if (kind.equals("LIFECYCLE") != (lifecycle != null)
@@ -370,8 +386,8 @@ public final class RelayLog {
 
   private static void kind(String value) {
     if (value == null
-        || !Set.of("EMPTY", "TEXT", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED").contains(value))
-      throw new IllegalArgumentException("Invalid Relay payload kind");
+        || !Set.of("EMPTY", "TEXT", "BLOB", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED")
+            .contains(value)) throw new IllegalArgumentException("Invalid Relay payload kind");
   }
 
   private static void hash(String value) {

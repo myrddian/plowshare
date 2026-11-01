@@ -31,6 +31,35 @@ import org.junit.jupiter.api.io.TempDir;
  * migration act on it.
  */
 class DataLayoutTest {
+  @Test
+  void layout_six_upgrade_reserves_blob_directories_without_moving_images(@TempDir Path root)
+      throws Exception {
+    Files.createDirectories(root.resolve("projects/7/images"));
+    Files.write(root.resolve("projects/7/images/held.bin"), new byte[] {1, 2, 3});
+    Files.writeString(
+        root.resolve("layout.properties"), "layout-version=6\noperator-note=preserve\n");
+    new DataLayout(root).initialise();
+    assertTrue(Files.readString(root.resolve("layout.properties")).contains("layout-version=7"));
+    assertTrue(
+        Files.readString(root.resolve("layout.properties")).contains("operator-note=preserve"));
+    assertArrayEquals(
+        new byte[] {1, 2, 3}, Files.readAllBytes(root.resolve("projects/7/images/held.bin")));
+    assertFalse(Files.exists(root.resolve("projects/7/blobs")));
+  }
+
+  @Test
+  void layout_six_refuses_preexisting_project_or_global_blob_paths(@TempDir Path root)
+      throws Exception {
+    for (String relative : new String[] {"projects/7/blobs", "global/blobs"}) {
+      Path fixture =
+          root.resolve(relative.startsWith("global") ? "global-fixture" : "project-fixture");
+      Files.createDirectories(fixture.resolve(relative));
+      Files.writeString(fixture.resolve("layout.properties"), "layout-version=6\n");
+      assertThrows(IllegalStateException.class, () -> new DataLayout(fixture).initialise());
+      assertTrue(
+          Files.readString(fixture.resolve("layout.properties")).contains("layout-version=6"));
+    }
+  }
 
   @Test
   void deployment_definitions_and_private_exports_keep_their_bytes_across_restart(@TempDir Path tmp)
@@ -375,9 +404,9 @@ class DataLayoutTest {
       marker.load(in);
     }
     assertEquals(
-        "6",
+        "7",
         marker.getProperty("layout-version"),
-        "accounting/ is a name layout 5 never reserved, as environment.yml under a project is a name layout 4 never reserved, as"
+        "blobs/ is a name layout 6 never reserved, as accounting/ is a name layout 5 never reserved, as environment.yml under a project is a name layout 4 never reserved, as"
             + " orchestrations/ at both tiers was a name layout 3 never reserved, as hooks/"
             + " was a name layout 2 never reserved and bots/ and global/agents/ were"
             + " names layout 1 never reserved -- see DataLayout.VERSION for why that"

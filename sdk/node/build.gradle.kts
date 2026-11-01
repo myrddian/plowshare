@@ -34,4 +34,12 @@ val nodeManagementTest by tasks.registering(Exec::class) {
     commandLine("node", "--experimental-strip-types", "--test", "src/provider-management.test.ts", "src/credentials.test.ts", "src/workspace-watch.test.ts")
 }
 tasks.named("check") { dependsOn(nodeBuild, nodeManagementTest) }
+val nodeBinaryTransferTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Checks explicit binary HTTP helpers, receipt integrity and single-attempt delivery."
+    nodeSources()
+    dependsOn(nodeBuild)
+    commandLine("node", "--experimental-strip-types", "--test", "src/image-admissions.test.ts", "src/relay-blobs.test.ts", "src/tool-content.test.ts")
+}
+tasks.named("check") { dependsOn(nodeBinaryTransferTest) }
 tasks.named("jar") { dependsOn(nodeBuild) }

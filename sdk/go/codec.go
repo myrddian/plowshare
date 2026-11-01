@@ -284,6 +284,15 @@ func decodePush(data []byte) (ServerPush, error) {
 
 // Transport boundary correlation supplements schema validation for retained deployment receipts.
 func deploymentMatches(operation string, request, reply []byte) bool {
+	if operation == "tool.invocation.read" {
+		var asked struct {
+			Invocation string `json:"invocation"`
+		}
+		var answered struct {
+			ID string `json:"id"`
+		}
+		return json.Unmarshal(request, &asked) == nil && json.Unmarshal(reply, &answered) == nil && asked.Invocation != "" && asked.Invocation == answered.ID
+	}
 	if strings.HasPrefix(operation, "tool.scope.host.") || strings.HasPrefix(operation, "tool.scope.worker.") {
 		return hostedMatches(operation, request, reply)
 	}

@@ -1431,10 +1431,9 @@ public final class JobRuntime {
    * a second time in a place nothing accounts for. A resumption replays what was recorded, and what
    * was recorded is what was said.
    *
-   * <p>That is a real limitation and the remedy is a design rather than a patch: an entry would
-   * have to carry the UID (not the bytes) and the resumption would have to re-attach from the
-   * store. Nothing has asked for it, and inventing it here would be building the folding machinery
-   * the design explicitly deferred.
+   * <p>This limitation applies to these opening attachments. Typed Relay tool results instead
+   * retain invocation provenance and independent entry claims; their effective image observations
+   * are reconstructed from those entries without repeating a tool execution.
    *
    * @param images what the model is shown this turn, resolved already. Never null; empty is the
    *     ordinary run and produces the message this method produced before images existed, byte for
@@ -3370,15 +3369,25 @@ public final class JobRuntime {
               .naming(salientsOf(asked))
               .took(modelCallTook)
               .by(asking);
-      if (suspendedRunCalls != null
-          && transcript.conversationId() != null
-          && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name()))) {
+      boolean typedResults =
+          asked.stream()
+              .anyMatch(
+                  wanted -> {
+                    AgentTool tool = offered.get(wanted.name());
+                    return tool instanceof AgentTool.ContentTool typed && typed.typedResults(home);
+                  });
+      if (typedResults
+          || (suspendedRunCalls != null
+              && transcript.conversationId() != null
+              && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name())))) {
         try {
           transcript.recordDurably(requestedCall);
         } catch (RuntimeException unrecorded) {
           return stopped(
               Ending.UNAVAILABLE,
-              "The command request could not be retained durably; no command was dispatched.",
+              typedResults
+                  ? "The typed tool request could not be retained durably; no tool was dispatched."
+                  : "The command request could not be retained durably; no command was dispatched.",
               trail,
               steps - 1,
               modelCalls,
@@ -3402,6 +3411,7 @@ public final class JobRuntime {
       // Each result's outcome as the record line tells it, for step.post: a hook's denial or
       // a name no tool answers to is known here and not readable off the result's text.
       List<String> outcomes = new ArrayList<>(asked.size());
+      List<Content.StoredImage> pictures = new ArrayList<>();
       for (ToolCall wanted : asked) {
         admittedAuthority.run();
         if (operation != null) operations.require(operation);
@@ -3432,6 +3442,7 @@ public final class JobRuntime {
           return stopped(Ending.STUCK, repeats.futility(), trail, steps - 1, modelCalls, "");
         }
         AgentTool tool = offered.get(wanted.name());
+        ToolObservation observation = null;
         // THE RECORD'S TOOL LINE (spec 2026-09-28, the orchestration record §2): told as
         // the call starts, so a call still running is the current activity, and told its
         // outcome in a word on every way out below. Here and not earlier, so a call the
@@ -3655,13 +3666,23 @@ public final class JobRuntime {
               tool.calledAs(wanted.id());
               // Internal grants come from the admitted definition. External provider proxies
               // recheck their additional authority inside run, alongside tool-owned access checks.
-              result =
-                  usable(
-                      transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                          ? tool.run(preTool.arguments(), home)
-                          : tool.run(
-                              preTool.arguments(), home, usageFor(transcript, definition, steps)),
-                      wanted.name());
+              if (tool instanceof AgentTool.ContentTool typed && typed.typedResults(home)) {
+                AgentTool.Result returned =
+                    typed.runResult(
+                        preTool.arguments(), home, usageFor(transcript, definition, steps));
+                result = usable(returned.text(), wanted.name());
+                observation =
+                    returned.observation() == null ? null : returned.observation().afterHook(false);
+              } else {
+                result =
+                    usable(
+                        transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                            ? tool.run(preTool.arguments(), home)
+                            : tool.run(
+                                preTool.arguments(), home, usageFor(transcript, definition, steps)),
+                        wanted.name());
+              }
+              String providerText = result;
               admittedAuthority.run();
               if (operation != null) operations.require(operation);
               if (confined)
@@ -3679,6 +3700,9 @@ public final class JobRuntime {
               // must not hand the model the blank result usable
               // exists to replace.
               result = usable(postTool.result(), wanted.name());
+              if (observation != null)
+                observation =
+                    observation.afterHook(!withheld(postTool) && result.equals(providerText));
               // A result a tool.post hook withheld is an error whatever it read;
               // a delegate's call is its ending; anything else is read off what
               // the model is shown, a redaction included.
@@ -3796,7 +3820,25 @@ public final class JobRuntime {
         // history in: a declared call with nothing answering it. That is
         // not a gap to be repaired here. It is the fact, and
         // `Projection` is what a later request reads it through.
-        transcript.record(LoggedEntry.toolResult(wanted.id(), result).told(told).took(toolTook));
+        LoggedEntry toolEntry =
+            LoggedEntry.toolResult(wanted.id(), result)
+                .observing(observation)
+                .told(told)
+                .took(toolTook);
+        if (observation == null) transcript.record(toolEntry);
+        else {
+          try {
+            pictures.addAll(transcript.recordToolResult(toolEntry));
+          } catch (RuntimeException unrecorded) {
+            return stopped(
+                Ending.UNAVAILABLE,
+                "The tool observation could not be retained durably. Its invocation remains the recovery source; no image was sent to the model.",
+                trail,
+                steps - 1,
+                modelCalls,
+                describe(unrecorded));
+          }
+        }
         // A command that did not end ok is recorded with the end of what it answered,
         // from this result -- the harness's own, never the model's words about it -- so the
         // delegation facts footer can say how it failed (ToolLines.tail).
@@ -3805,6 +3847,7 @@ public final class JobRuntime {
         withParked(toolRecords, runHooks)
             .forEach(record -> transcript.record(LoggedEntry.hook(record)));
       }
+      if (!pictures.isEmpty()) history.add(Projection.images(pictures));
       // STEP.POST, AFTER THE WHOLE BATCH'S RESULTS AND BEFORE THE NOTES ARE
       // SENT, so a hook's note goes where Repeats' does: never between two
       // tool results, which the contract does not allow.
@@ -5053,13 +5096,7 @@ public final class JobRuntime {
    * the confident-empty-answer shape, arriving through a tool's bug instead of an endpoint's.
    */
   private static String usable(String result, String tool) {
-    if (result == null || result.isBlank()) {
-      return "the tool '"
-          + tool
-          + "' returned nothing at all, which is a fault in the"
-          + " tool. Nothing can be concluded from it.";
-    }
-    return result;
+    return AgentTool.usableText(result, tool);
   }
 
   // --- a run that repeats itself ------------------------------------------------

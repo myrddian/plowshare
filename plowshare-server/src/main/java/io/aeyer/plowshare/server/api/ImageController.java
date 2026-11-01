@@ -70,9 +70,17 @@ import org.springframework.web.multipart.MultipartFile;
 public class ImageController {
 
   private final ImageStore images;
+  private final io.aeyer.plowshare.server.images.ArtifactAdmissions admissions;
 
   public ImageController(ImageStore images) {
+    this(images, null);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public ImageController(
+      ImageStore images, io.aeyer.plowshare.server.images.ArtifactAdmissions admissions) {
     this.images = images;
+    this.admissions = admissions;
   }
 
   /**
@@ -103,7 +111,7 @@ public class ImageController {
     return upload(file, project, name, null);
   }
 
-  @PostMapping("/v1/images")
+  @PostMapping(value = "/v1/images", params = "!profile")
   public ResponseEntity<StoredImageView> upload(
       @RequestParam("file") MultipartFile file,
       @RequestParam(value = "project", required = false) String project,
@@ -117,6 +125,65 @@ public class ImageController {
     Home home = personal == null ? RequestedHome.in(project) : personal.home(project, account);
     StoredImage stored = images.store(home, declared, read(file));
     return ResponseEntity.status(HttpStatus.CREATED).body(StoredImageView.of(stored));
+  }
+
+  /**
+   * Opt-in invocation profile. Home and producer are derived from retained/authenticated identity.
+   */
+  @PostMapping(value = "/v1/images", params = "profile")
+  public ResponseEntity<io.aeyer.plowshare.protocol.ImageAdmissions.Receipt> admit(
+      @RequestParam("file") MultipartFile file,
+      @RequestParam("profile") String profile,
+      @RequestParam("invocation") String invocation,
+      @RequestParam("ordinal") int ordinal,
+      @RequestParam("requestId") String requestId,
+      @RequestParam(value = "name", required = false) String name,
+      @org.springframework.web.bind.annotation.RequestAttribute(
+              name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE,
+              required = false)
+          String account,
+      jakarta.servlet.http.HttpServletRequest servlet) {
+    var allowed = java.util.Set.of("profile", "invocation", "ordinal", "requestId", "name");
+    if (!io.aeyer.plowshare.protocol.ImageAdmissions.PROFILE.equals(profile)
+        || servlet.getParameterMap().entrySet().stream()
+            .anyMatch(e -> !allowed.contains(e.getKey()) || e.getValue().length != 1)) {
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "invalid invocation image upload fields");
+    }
+    if (servlet instanceof org.springframework.web.multipart.MultipartHttpServletRequest multipart
+        && (multipart.getMultiFileMap().size() != 1 || multipart.getFiles("file").size() != 1)) {
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "invocation image upload requires exactly one file");
+    }
+    io.aeyer.plowshare.protocol.ImageAdmissions.Request request;
+    try {
+      if (!invocation.matches("[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+          || !requestId.matches("[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"))
+        throw new IllegalArgumentException();
+      request =
+          new io.aeyer.plowshare.protocol.ImageAdmissions.Request(
+              java.util.UUID.fromString(invocation), ordinal, java.util.UUID.fromString(requestId));
+    } catch (IllegalArgumentException invalid) {
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "invalid invocation image upload identity");
+    }
+    if (file.getSize() > images.maxBytes())
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "artifact exceeds the image byte limit");
+    String declared = RequestedImageName.in(name, file.getOriginalFilename());
+    // Bound the copy even when a multipart implementation reports a false size. Ordinary uploads
+    // deliberately keep their existing read/response behavior.
+    byte[] bytes;
+    try (var input = file.getInputStream()) {
+      bytes = input.readNBytes(images.maxBytes());
+      if (input.read() != -1)
+        throw new io.aeyer.plowshare.server.faults.CallerFault(
+            "artifact exceeds the image byte limit");
+    } catch (IOException failure) {
+      throw new UncheckedIOException("invocation image upload could not be read", failure);
+    }
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(admissions.admit(account, request, declared, bytes));
   }
 
   /**

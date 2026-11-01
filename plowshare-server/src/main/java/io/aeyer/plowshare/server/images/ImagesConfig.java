@@ -6,7 +6,11 @@ import io.aeyer.plowshare.server.archive.ImageDirectories;
 import io.aeyer.plowshare.server.archive.ProjectDirectories;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.blobs.BinaryBlobStorage;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.media.MediaInspection;
+import io.aeyer.plowshare.server.media.MediaInspectionProperties;
+import io.aeyer.plowshare.server.media.TikaMediaInspection;
 import java.nio.file.Path;
 import java.util.Optional;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -28,18 +32,33 @@ import org.springframework.context.annotation.Configuration;
  * lives is worth refusing.
  */
 @Configuration
-@EnableConfigurationProperties(ImagesProperties.class)
+@EnableConfigurationProperties({ImagesProperties.class, MediaInspectionProperties.class})
 public class ImagesConfig {
+
+  /** Reuses the existing raw image byte ceiling without changing legacy upload semantics. */
+  @Bean
+  public MediaInspection mediaInspection(
+      ImagesProperties images, MediaInspectionProperties inspection) {
+    return new TikaMediaInspection(
+        images.getMaxBytes(),
+        inspection.getMaxPixels(),
+        inspection.getMaxDimension(),
+        inspection.getMaxConcurrent());
+  }
 
   @Bean
   public ImageStore imageStore(
       DataLayout data,
       ProjectDirectories directories,
       ImagesProperties props,
-      ProjectStore projects) {
+      ProjectStore projects,
+      BinaryBlobStorage blobs) {
     return data.keepsAnything()
         ? new ImageStore(
-            ImageDirectories.under(data, directories), props.getMaxBytes(), fenceOver(projects))
+            ImageDirectories.under(data, directories),
+            props.getMaxBytes(),
+            fenceOver(projects),
+            new DiskImageBlobAccess(data.root(), blobs))
         : ImageStore.NONE;
   }
 

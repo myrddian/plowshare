@@ -10,9 +10,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
@@ -43,6 +45,10 @@ import org.yaml.snakeyaml.error.YAMLException;
  * which is not — so the three families this project has actually measured against ship live, and
  * the directory is where a person extends and overrides them.
  *
+ * <p>Version 2 files may also declare native input formats and output combinations. Those values
+ * are configuration only: routing and transport support are not enabled by loading them.
+ * Unversioned sampling profiles continue to resolve with no declared media capability.
+ *
  * <h2>Resolution</h2>
  *
  * <ol>
@@ -68,7 +74,7 @@ import org.yaml.snakeyaml.error.YAMLException;
  * <em>not</em> a failure is a model nobody mapped, because that is a state the world produces on
  * its own.
  */
-public final class SamplingProfiles {
+public final class SamplingProfiles implements ModelMediaProfiles {
 
   private static final Logger log = LoggerFactory.getLogger(SamplingProfiles.class);
 
@@ -84,6 +90,9 @@ public final class SamplingProfiles {
 
   private static final String MAPPING = "models";
 
+  private static final int MAX_DOCUMENT_BYTES = 262144;
+  private static final int MAX_MODES = 32;
+
   /**
    * What an unstated {@code mode:} selects, and the fallback for a mode a profile does not carry.
    * §8.3: <i>"the default profile could provide a fall back"</i>.
@@ -93,10 +102,16 @@ public final class SamplingProfiles {
   /** Mapping keys, longest first, so the first match is the most specific. */
   private final List<Map.Entry<String, Mapped>> mapping;
 
-  private final Map<String, Map<String, Map<Sampling.Intent, Sampling>>> profiles;
+  private final Map<String, Profile> profiles;
+
+  /** YAML is converted completely at the loader boundary, before resolution can inspect it. */
+  private record Profile(
+      int version,
+      Map<String, Map<Sampling.Intent, Sampling>> modes,
+      Optional<ModelMediaCapabilities> media) {}
 
   /** One mapping row: which profile, and which of its modes. */
-  private record Mapped(String profile, String mode) {}
+  private record Mapped(String profile, String mode, String source) {}
 
   /**
    * What a wire model and an intent came to.
@@ -106,8 +121,21 @@ public final class SamplingProfiles {
    *     would put a fiction in a log line
    * @param mode which of the profile's entries applied, or {@code null} with no profile
    * @param sampling what to send; {@link Sampling#NONE} means send nothing
+   * @param media native format declaration, empty for legacy/unmapped profiles; not transport
+   *     support
    */
-  public record Resolved(String profile, String mode, Sampling sampling) {
+  public record Resolved(
+      String profile, String mode, Sampling sampling, Optional<ModelMediaCapabilities> media) {
+
+    public Resolved {
+      java.util.Objects.requireNonNull(sampling);
+      java.util.Objects.requireNonNull(media);
+    }
+
+    /** Compatibility construction for callers carrying only sampling values. */
+    public Resolved(String profile, String mode, Sampling sampling) {
+      this(profile, mode, sampling, Optional.empty());
+    }
 
     /** Whether a profile answered at all. */
     public boolean matched() {
@@ -117,9 +145,7 @@ public final class SamplingProfiles {
     static final Resolved DEFAULT = new Resolved(null, null, Sampling.NONE);
   }
 
-  private SamplingProfiles(
-      List<Map.Entry<String, Mapped>> mapping,
-      Map<String, Map<String, Map<Sampling.Intent, Sampling>>> profiles) {
+  private SamplingProfiles(List<Map.Entry<String, Mapped>> mapping, Map<String, Profile> profiles) {
     this.mapping = List.copyOf(mapping);
     this.profiles = Map.copyOf(profiles);
   }
@@ -134,7 +160,7 @@ public final class SamplingProfiles {
    *     fine, present and wrong is not.
    */
   public static SamplingProfiles read(Path directory) {
-    Map<String, Map<String, Map<Sampling.Intent, Sampling>>> profiles = new LinkedHashMap<>();
+    Map<String, Profile> profiles = new LinkedHashMap<>();
     for (String name : SHIPPED) {
       profiles.put(name, profile(BUILT_IN + name + ".yaml", builtIn(name + ".yaml")));
     }
@@ -145,9 +171,11 @@ public final class SamplingProfiles {
     }
 
     for (Map.Entry<String, Mapped> entry : mapped.entrySet()) {
-      if (!profiles.containsKey(entry.getValue().profile())) {
+      Profile profile = profiles.get(entry.getValue().profile());
+      if (profile == null) {
         throw new IllegalStateException(
-            "the sampling mapping sends '"
+            entry.getValue().source()
+                + ": the sampling mapping sends '"
                 + entry.getKey()
                 + "' to the profile '"
                 + entry.getValue().profile()
@@ -157,6 +185,18 @@ public final class SamplingProfiles {
                 + ".yaml in the"
                 + " sampling directory, or point that line at one of "
                 + profiles.keySet());
+      }
+      String mode = entry.getValue().mode();
+      if (profile.version() == 2 && mode != null && !profile.modes().containsKey(mode)) {
+        throw new IllegalStateException(
+            entry.getValue().source()
+                + ": the sampling mapping for '"
+                + entry.getKey()
+                + "' names missing mode '"
+                + mode
+                + "' in version 2 profile '"
+                + entry.getValue().profile()
+                + "'");
       }
     }
 
@@ -177,9 +217,8 @@ public final class SamplingProfiles {
    * model has no business re-stating the others.
    */
   private static void overlay(
-      Path directory,
-      Map<String, Map<String, Map<Sampling.Intent, Sampling>>> profiles,
-      Map<String, Mapped> mapped) {
+      Path directory, Map<String, Profile> profiles, Map<String, Mapped> mapped) {
+    Set<String> stems = new LinkedHashSet<>();
     try (Stream<Path> files = Files.list(directory)) {
       for (Path file : files.sorted().toList()) {
         String name = file.getFileName().toString();
@@ -192,7 +231,24 @@ public final class SamplingProfiles {
           continue;
         }
         String stem = name.substring(0, dot);
-        String text = Files.readString(file, StandardCharsets.UTF_8);
+        if (!stems.add(stem)) {
+          throw new IllegalStateException(
+              directory + " contains duplicate profile/mapping " + stem);
+        }
+        // Bound before decoding, including a file changed concurrently with the read. Do not load
+        // an unbounded document merely to let the YAML parser reject it afterwards.
+        String text;
+        try (InputStream input = Files.newInputStream(file)) {
+          byte[] bytes = input.readNBytes(MAX_DOCUMENT_BYTES + 1);
+          if (bytes.length > MAX_DOCUMENT_BYTES) {
+            throw new IllegalStateException(file + " exceeds the 256 KiB profile file limit");
+          }
+          text =
+              StandardCharsets.UTF_8
+                  .newDecoder()
+                  .decode(java.nio.ByteBuffer.wrap(bytes))
+                  .toString();
+        }
         if (stem.equals(MAPPING)) {
           mapped.putAll(mapping(file.toString(), text));
         } else {
@@ -228,6 +284,8 @@ public final class SamplingProfiles {
 
   private static Map<String, Object> document(String where, String text) {
     LoaderOptions options = new LoaderOptions();
+    options.setAllowDuplicateKeys(false);
+    options.setCodePointLimit(MAX_DOCUMENT_BYTES);
     // SafeConstructor for AgentRegistry's reason exactly: a profile is a
     // file on disk and a YAML loader that can instantiate arbitrary classes
     // turns "an operator edited a config file" into "an operator ran code".
@@ -251,13 +309,18 @@ public final class SamplingProfiles {
     }
     Map<String, Object> keyed = new LinkedHashMap<>();
     for (Map.Entry<?, ?> entry : map.entrySet()) {
-      keyed.put(String.valueOf(entry.getKey()), entry.getValue());
+      if (!(entry.getKey() instanceof String key)) {
+        throw new IllegalStateException(where + " contains a non-text field name");
+      }
+      keyed.put(key, entry.getValue());
     }
     return keyed;
   }
 
   private static Map<String, Mapped> mapping(String where, String text) {
-    Object models = document(where, text).get(MAPPING);
+    Map<String, Object> document = document(where, text);
+    knownFields(where, document, Set.of(MAPPING));
+    Object models = document.get(MAPPING);
     if (models == null) {
       return new LinkedHashMap<>();
     }
@@ -271,7 +334,15 @@ public final class SamplingProfiles {
     }
     Map<String, Mapped> mapped = new LinkedHashMap<>();
     for (Map.Entry<?, ?> row : rows.entrySet()) {
-      String model = String.valueOf(row.getKey()).toLowerCase(Locale.ROOT);
+      if (!(row.getKey() instanceof String modelName)
+          || modelName.isBlank()
+          || modelName.length() > 512
+          || modelName
+              .chars()
+              .anyMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c))) {
+        throw new IllegalStateException(where + " contains an invalid model mapping key");
+      }
+      String model = modelName.toLowerCase(Locale.ROOT);
       if (!(row.getValue() instanceof Map<?, ?> fields)) {
         throw new IllegalStateException(
             where
@@ -283,6 +354,7 @@ public final class SamplingProfiles {
                 + " block. Write it as 'profile: <name>', optionally with"
                 + " 'mode: <name>' underneath");
       }
+      knownFields(where + " models/" + model, fields, Set.of("profile", "mode"));
       Object profile = fields.get("profile");
       if (!(profile instanceof String named) || named.isBlank()) {
         throw new IllegalStateException(
@@ -297,13 +369,28 @@ public final class SamplingProfiles {
         throw new IllegalStateException(
             where + " gives '" + model + "' the mode " + mode + ", which is not a" + " name");
       }
-      mapped.put(model, new Mapped(named.strip(), mode == null ? null : ((String) mode).strip()));
+      if (mapped.putIfAbsent(
+              model,
+              new Mapped(named.strip(), mode == null ? null : ((String) mode).strip(), where))
+          != null) {
+        throw new IllegalStateException(where + " contains a duplicate normalized model mapping");
+      }
     }
     return mapped;
   }
 
-  private static Map<String, Map<Sampling.Intent, Sampling>> profile(String where, String text) {
-    Object modes = document(where, text).get("modes");
+  private static Profile profile(String where, String text) {
+    Map<String, Object> document = document(where, text);
+    boolean versioned = document.containsKey("version");
+    if (versioned && !Integer.valueOf(2).equals(document.get("version"))) {
+      throw new IllegalStateException(where + " must declare integer version: 2 or omit version");
+    }
+    if (versioned) {
+      knownFields(where, document, Set.of("version", "modes", "media"));
+    } else if (document.containsKey("media")) {
+      throw new IllegalStateException(where + " requires version: 2 for media declarations");
+    }
+    Object modes = document.get("modes");
     if (!(modes instanceof Map<?, ?> rows) || rows.isEmpty()) {
       throw new IllegalStateException(
           where
@@ -312,11 +399,22 @@ public final class SamplingProfiles {
               + " writes it as 'modes: { default: … }' so that the family that"
               + " grows a second one is not a different shape of file");
     }
+    if (versioned && (rows.size() > MAX_MODES || !rows.containsKey(DEFAULT_MODE))) {
+      throw new IllegalStateException(where + " requires a default mode and at most 32 modes");
+    }
     Map<String, Map<Sampling.Intent, Sampling>> profile = new LinkedHashMap<>();
     for (Map.Entry<?, ?> row : rows.entrySet()) {
       String mode = String.valueOf(row.getKey());
+      if (versioned
+          && (!(row.getKey() instanceof String) || !mode.matches("[a-z][a-z0-9_-]{0,63}"))) {
+        throw new IllegalStateException(where + " contains an invalid mode name");
+      }
       if (!(row.getValue() instanceof Map<?, ?> intents)) {
         throw new IllegalStateException(where + "'s mode '" + mode + "' is not a block of intents");
+      }
+      if (versioned) {
+        knownFields(
+            where + " modes/" + mode, intents, Set.of("precise", "balanced", "exploratory"));
       }
       Map<Sampling.Intent, Sampling> table = new EnumMap<>(Sampling.Intent.class);
       for (Sampling.Intent intent : Sampling.Intent.values()) {
@@ -351,9 +449,72 @@ public final class SamplingProfiles {
         }
         table.put(intent, sampling(where, mode + "/" + intent.declared(), fields));
       }
-      profile.put(mode, table);
+      profile.put(mode, Map.copyOf(table));
     }
-    return profile;
+    Optional<ModelMediaCapabilities> media =
+        document.containsKey("media")
+            ? Optional.of(media(where, document.get("media")))
+            : Optional.empty();
+    return new Profile(versioned ? 2 : 1, Map.copyOf(profile), media);
+  }
+
+  private static ModelMediaCapabilities media(String where, Object value) {
+    try {
+      Map<?, ?> media = block(where + " media", value);
+      knownFields(where + " media", media, Set.of("inputs", "outputs"));
+      Set<String> inputs = formats(where + " media/inputs", media.get("inputs"));
+      Map<?, ?> outputs = block(where + " media/outputs", media.get("outputs"));
+      if (outputs.isEmpty() || outputs.size() > ModelMediaCapabilities.MAX_OUTPUT_MODES) {
+        throw new IllegalStateException(where + " media/outputs must contain 1..32 modes");
+      }
+      Map<String, ModelMediaCapabilities.OutputMode> modes = new LinkedHashMap<>();
+      for (Map.Entry<?, ?> entry : outputs.entrySet()) {
+        if (!(entry.getKey() instanceof String name)) {
+          throw new IllegalStateException(where + " media/outputs has a non-text mode name");
+        }
+        Map<?, ?> mode = block(where + " media/outputs/" + name, entry.getValue());
+        knownFields(where + " media/outputs/" + name, mode, Set.of("formats"));
+        modes.put(
+            name,
+            new ModelMediaCapabilities.OutputMode(
+                formats(where + " media/outputs/" + name + "/formats", mode.get("formats"))));
+      }
+      return new ModelMediaCapabilities(inputs, modes);
+    } catch (IllegalArgumentException invalid) {
+      throw new IllegalStateException(
+          where + " has an invalid media declaration: " + invalid.getMessage(), invalid);
+    }
+  }
+
+  private static Map<?, ?> block(String where, Object value) {
+    if (value instanceof Map<?, ?> fields) return fields;
+    throw new IllegalStateException(where + " must be a mapping");
+  }
+
+  private static Set<String> formats(String where, Object value) {
+    if (!(value instanceof List<?> values)
+        || values.isEmpty()
+        || values.size() > ModelMediaCapabilities.MAX_FORMATS) {
+      throw new IllegalStateException(where + " must contain 1..32 exact MIME types");
+    }
+    Set<String> formats = new LinkedHashSet<>();
+    for (Object format : values) {
+      if (!(format instanceof String text)) {
+        throw new IllegalStateException(where + " must contain only MIME strings");
+      }
+      if (!formats.add(ModelMediaCapabilities.mediaType(text))) {
+        throw new IllegalStateException(where + " contains a duplicate normalized MIME type");
+      }
+    }
+    return formats;
+  }
+
+  private static void knownFields(String where, Map<?, ?> fields, Set<String> allowed) {
+    for (Object key : fields.keySet()) {
+      if (!(key instanceof String) || !allowed.contains(key)) {
+        throw new IllegalStateException(where + " contains an unknown field; expected " + allowed);
+      }
+    }
   }
 
   private static Sampling sampling(String where, String at, Map<?, ?> fields) {
@@ -444,12 +605,15 @@ public final class SamplingProfiles {
   /**
    * What {@code wireModel} should be sent at {@code intent}.
    *
-   * <p>Never null and never throws: a model nothing matches resolves to {@link Resolved#DEFAULT},
-   * which carries {@link Sampling#NONE}.
+   * <p>Never null. A model nothing matches resolves to {@link Resolved#DEFAULT}, which carries
+   * {@link Sampling#NONE} and no media declaration. Resolution only reads the immutable startup
+   * snapshot; profile edits take effect when a new snapshot is loaded.
    *
    * @param wireModel the model name as the endpoint knows it, not a class
+   * @param intent declared sampling intent, never null
    */
   public Resolved resolve(String wireModel, Sampling.Intent intent) {
+    java.util.Objects.requireNonNull(intent, "intent");
     if (wireModel == null) {
       return Resolved.DEFAULT;
     }
@@ -463,7 +627,8 @@ public final class SamplingProfiles {
         continue;
       }
       Mapped hit = candidate.getValue();
-      Map<String, Map<Sampling.Intent, Sampling>> profile = profiles.get(hit.profile());
+      Profile loaded = profiles.get(hit.profile());
+      Map<String, Map<Sampling.Intent, Sampling>> profile = loaded.modes();
       String mode = hit.mode();
       if (mode == null || !profile.containsKey(mode)) {
         if (mode != null) {
@@ -491,9 +656,15 @@ public final class SamplingProfiles {
             wireModel);
         return Resolved.DEFAULT;
       }
-      return new Resolved(hit.profile(), mode, table.get(intent));
+      return new Resolved(hit.profile(), mode, table.get(intent), loaded.media());
     }
     return Resolved.DEFAULT;
+  }
+
+  /** Native declaration for the resolved model and mode, independent of sampling intent. */
+  @Override
+  public Optional<ModelMediaCapabilities> mediaFor(String wireModel) {
+    return resolve(wireModel, Sampling.Intent.BALANCED).media();
   }
 
   /** The profile names loaded, for a boot line. */

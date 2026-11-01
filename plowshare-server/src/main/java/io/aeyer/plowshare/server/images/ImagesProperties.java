@@ -11,6 +11,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "plowshare.images")
 public class ImagesProperties {
+  private boolean invocationAdmissionEnabled;
+
+  /** Explicit opt-in while durable content consumers are delivered in later slices. */
+  public boolean isInvocationAdmissionEnabled() {
+    return invocationAdmissionEnabled;
+  }
+
+  public void setInvocationAdmissionEnabled(boolean enabled) {
+    invocationAdmissionEnabled = enabled;
+  }
 
   /**
    * The largest image this deployment will hold, in <b>raw</b> bytes.

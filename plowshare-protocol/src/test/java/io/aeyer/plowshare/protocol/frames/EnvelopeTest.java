@@ -154,6 +154,8 @@ class EnvelopeTest {
     rows.add(Map.entry(400, "image_not_stored")); // row 10, EMPTY
     rows.add(Map.entry(415, "image_not_stored")); // row 10, UNRECOGNISED
     rows.add(Map.entry(413, "image_not_stored")); // row 10, TOO_LARGE
+    rows.add(Map.entry(503, "media_inspection_unavailable")); // bounded inspection capacity
+    rows.add(Map.entry(503, "blob_unavailable")); // retained bytes unavailable or corrupt
     rows.add(Map.entry(422, "validation_failed")); // row 11
     rows.add(Map.entry(503, "archive_unavailable")); // row 12
     rows.add(Map.entry(503, "embedding_unavailable")); // row 13

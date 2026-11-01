@@ -89,6 +89,19 @@ import org.slf4j.LoggerFactory;
  */
 public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
 
+  private static final io.aeyer.plowshare.server.llm.ModelMediaCapabilities MEDIA =
+      new io.aeyer.plowshare.server.llm.ModelMediaCapabilities(
+          Set.of("text/plain", "image/png", "image/jpeg", "image/gif", "image/webp"),
+          java.util.Map.of(
+              "text",
+              new io.aeyer.plowshare.server.llm.ModelMediaCapabilities.OutputMode(
+                  Set.of("text/plain"))));
+
+  @Override
+  public io.aeyer.plowshare.server.llm.ModelMediaCapabilities mediaCapabilities(String wireModel) {
+    return MEDIA;
+  }
+
   private static final Logger log = LoggerFactory.getLogger(OpenAiTransport.class);
   private static final MediaType JSON = MediaType.get("application/json");
 
@@ -1386,7 +1399,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
     if (props.getCounting().getUrl() == null)
       return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
           poolName(), model, "unsupported_counter");
-    if (request.messages().stream().anyMatch(ChatMessage::carriesAnImage))
+    if (request.messages().stream().anyMatch(ChatMessage::carriesAnImage)
+        && !props.getCounting().isImageTokensIncluded())
       return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
           poolName(), model, "unsupported_images");
     if (request.toolChoice() != null && !request.tools().isEmpty()
@@ -1740,6 +1754,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
     }
     List<Map<String, Object>> parts = new ArrayList<>(message.parts().size());
     for (Content part : message.parts()) {
+      if (part instanceof Content.StoredImage)
+        throw new IllegalStateException("Trajectory images must be resolved before serialization");
       if (part instanceof Content.Image image) {
         Map<String, Object> url = new LinkedHashMap<>(1);
         url.put("url", image.dataUri());

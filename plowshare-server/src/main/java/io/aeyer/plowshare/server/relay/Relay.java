@@ -166,6 +166,8 @@ public interface Relay {
     public Topic {
       Objects.requireNonNull(key, "key");
       Objects.requireNonNull(kind, "kind");
+      if (kind == RelayPayload.Kind.BLOB && key.scope() == SystemScope.SERVER)
+        throw new IllegalArgumentException("Relay blobs require a project scope");
       Objects.requireNonNull(policy, "policy");
       if (expiredThrough < 0 || lastPosition < expiredThrough)
         throw new IllegalArgumentException("invalid topic positions");

@@ -30,6 +30,18 @@ import org.springframework.transaction.support.TransactionTemplate;
 @EnableConfigurationProperties(ArchiveProperties.class)
 public class ArchiveConfig {
 
+  @Bean
+  public TrajectoryArtifacts trajectoryArtifacts(
+      JdbcTemplate jdbc, io.aeyer.plowshare.server.blobs.BlobRepository blobs) {
+    return new JdbcTrajectoryArtifacts(jdbc, blobs);
+  }
+
+  @Bean
+  public io.aeyer.plowshare.server.llm.dispatch.PromptImages trajectoryPromptImages(
+      TrajectoryArtifacts artifacts, io.aeyer.plowshare.server.blobs.BinaryBlobStorage blobs) {
+    return new TrajectoryPromptImages(artifacts, blobs);
+  }
+
   /**
    * Where the account of each write goes; see {@link ReasonLog}. Wired here rather than annotated,
    * matching {@link ProposalStore} below: it is the archive's, not a bean anything else asks for.
@@ -146,8 +158,9 @@ public class ArchiveConfig {
       UnitOfWork transactions,
       org.springframework.beans.factory.ObjectProvider<ConversationSearch> retrieval,
       io.aeyer.plowshare.server.cache.ProjectionCaches caches,
-      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
-    return new EntryStore(jdbc, transactions)
+      io.aeyer.plowshare.server.information.InformationLogVisibility visibility,
+      TrajectoryArtifacts artifacts) {
+    return new EntryStore(jdbc, transactions, artifacts)
         .useVisibility(visibility)
         .retrieving(retrieval::getObject)
         .useTranscriptCache(

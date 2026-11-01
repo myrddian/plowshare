@@ -62,6 +62,19 @@ import java.util.UUID;
  */
 public interface Transcript {
 
+  /**
+   * Commit typed results before returning their durable image addresses. Text keeps legacy
+   * semantics.
+   */
+  default List<io.aeyer.plowshare.server.llm.dispatch.Content.StoredImage> recordToolResult(
+      LoggedEntry entry) {
+    if (entry.observation() != null)
+      throw new IllegalStateException(
+          "Image observations require a durable conversation transcript");
+    record(entry);
+    return List.of();
+  }
+
   /** Binds the owning job before its runtime can append entries. Not an accounting run ID. */
   default void startedAs(String job) {}
 

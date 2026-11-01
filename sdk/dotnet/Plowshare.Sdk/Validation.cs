@@ -55,10 +55,29 @@ internal static class Validation
         => !value.Contains('\\') && !value.Contains(':')
         && !value.Any(c => c < 32 || c >= 127 && c <= 159)
         && (value.Length == 0 || value.Split('/').All(part => part.Length > 0 && part != "." && part != ".." && !part.Equals(".git", StringComparison.OrdinalIgnoreCase)));
+    private static bool ToolResult(JsonElement value) {
+        var text=Get(value,"text"); if(text.ValueKind!=JsonValueKind.String) return false;
+        var words=text.GetString()!; if(words.Length>16384 || words.Contains('\0'))return false;
+        var body=Get(value,"content"); if(body.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)return !string.IsNullOrWhiteSpace(words);
+        if(Get(body,"version").ToString()!="content/1")return false;
+        var parts=Get(body,"parts"); if(parts.ValueKind!=JsonValueKind.Array || parts.GetArrayLength()<1 || parts.GetArrayLength()>16)return false;
+        var slots=new HashSet<int>();var projection=new System.Text.StringBuilder();
+        foreach(var part in parts.EnumerateArray()) {
+            bool Absent(string key)=>Get(part,key).ValueKind is JsonValueKind.Null or JsonValueKind.Undefined;
+            switch(Get(part,"kind").ToString()) {
+            case "TEXT": var word=Get(part,"text");if(word.ValueKind!=JsonValueKind.String || !Absent("imageId") || !Absent("ordinal") || !Absent("use"))return false;projection.Append(word.GetString());break;
+            case "IMAGE": var slot=Get(part,"ordinal");var image=Get(part,"imageId");var use=Get(part,"use").ToString();if(slot.ValueKind!=JsonValueKind.Number || !slot.TryGetInt32(out var ordinal) || ordinal<0 || ordinal>15 || !slots.Add(ordinal) || image.ValueKind!=JsonValueKind.String || !Regex.IsMatch(image.GetString()!,"^img_[0-9a-f]{32}$") || !Absent("text") || use is not ("OBSERVATION" or "OUTPUT" or "BOTH"))return false;break;
+            default:return false;
+            }
+        }
+        return projection.ToString()==words && slots.Count<=4 && (slots.Count==0 || Get(value,"state").ToString()=="COMPLETED") && (slots.Count>0 || !string.IsNullOrWhiteSpace(words));
+    }
+
     internal static void Check(JsonElement schema, JsonElement value)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
         if (schema.TryGetProperty("maxJsonBytes", out var jsonByteLimit) && System.Text.Encoding.UTF8.GetByteCount(value.GetRawText()) > jsonByteLimit.GetInt32()) throw new JsonException("JSON value exceeds byte bound");
+        if (Flag(schema,"toolResult") && !ToolResult(value)) throw new JsonException("Invalid typed tool result");
         if (Flag(schema,"portablePath") && (value.ValueKind != JsonValueKind.String || !InterchangeValidation.Path(value.GetString()!))) throw new JsonException("Unsafe portable path");
         if (schema.TryGetProperty("portableGraph",out var portableKind)) InterchangeValidation.Check(portableKind.GetString()!,value);
         try

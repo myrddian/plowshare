@@ -4,6 +4,23 @@ import io.aeyer.plowshare.protocol.RelayPort;
 
 /** Authenticated topic ingress/egress. Implementations recheck deployment grants on every call. */
 public interface RelayPorts {
+  /** Binary ports require explicit deployment grants, never dynamic tool-provider privileges. */
+  default Relay.TopicKey authorizeBlob(
+      String account,
+      String project,
+      String topic,
+      RelayPortProperties.Direction direction,
+      String group) {
+    throw new io.aeyer.plowshare.server.faults.CallerFault("Relay binary ports are unavailable");
+  }
+
+  /** Reuse the existing parent inspection and effect-depth policy for either payload family. */
+  default io.aeyer.plowshare.protocol.RelayCausation ancestry(
+      String account, String project, String requestId, String parentTopic, String parentEventId) {
+    throw new io.aeyer.plowshare.server.faults.CallerFault(
+        "Relay publication ancestry is unavailable");
+  }
+
   RelayPort.Published publish(String account, RelayPort.Publish request);
 
   default RelayPort.Batch consume(String account, RelayPort.Consume request) {

@@ -21,7 +21,10 @@ public record RelayToolDefinition(
     int timeoutSeconds,
     @com.fasterxml.jackson.annotation.JsonInclude(
             com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-        SchemaDefinition inputSchema) {
+        SchemaDefinition inputSchema,
+    @com.fasterxml.jackson.annotation.JsonInclude(
+            com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        String resultProfile) {
   public RelayToolDefinition(
       String project,
       String provider,
@@ -30,11 +33,35 @@ public record RelayToolDefinition(
       String description,
       List<Parameter> parameters,
       int timeoutSeconds) {
-    this(project, provider, account, name, description, parameters, timeoutSeconds, null);
+    this(project, provider, account, name, description, parameters, timeoutSeconds, null, null);
+  }
+
+  public RelayToolDefinition(
+      String project,
+      String provider,
+      String account,
+      String name,
+      String description,
+      List<Parameter> parameters,
+      int timeoutSeconds,
+      SchemaDefinition inputSchema) {
+    this(
+        project,
+        provider,
+        account,
+        name,
+        description,
+        parameters,
+        timeoutSeconds,
+        inputSchema,
+        null);
   }
 
   @org.springframework.boot.context.properties.bind.ConstructorBinding
   public RelayToolDefinition {
+    if (resultProfile != null
+        && !io.aeyer.plowshare.protocol.ToolContent.PROFILE.equals(resultProfile))
+      throw new IllegalArgumentException("Unsupported tool result profile");
     RelayPort.identity(project);
     RelayPort.identity(account);
     if (provider == null

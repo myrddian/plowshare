@@ -79,6 +79,42 @@ class PromptCountingTest {
   }
 
   @Test
+  void image_counting_requires_explicit_verified_capability_and_preserves_native_wire_parts()
+      throws Exception {
+    try (var server = new MockWebServer()) {
+      server.start();
+      var properties = settings(server);
+      var image = new Content.Image("img_" + "a".repeat(32), "data:image/png;base64,iVBORw0KGgo=");
+      var request = request().withMessages(List.of(ChatMessage.user("inspect", List.of(image))));
+      try (var transport = new OpenAiTransport(properties, JSON)) {
+        assertEquals(PromptCount.Basis.UNKNOWN, transport.countChat("model", request).basis());
+        assertEquals(0, server.getRequestCount());
+        properties.getCounting().setImageTokensIncluded(true);
+        server.enqueue(count(512));
+        var counted = transport.countChat("model", request);
+        assertEquals(512L, counted.tokens());
+        assertTrue(counted.gaps().isEmpty());
+        assertEquals(
+            image.dataUri(),
+            JSON.readTree(server.takeRequest().getBody().readUtf8())
+                .path("messages")
+                .get(0)
+                .path("content")
+                .get(1)
+                .path("image_url")
+                .path("url")
+                .asText());
+        properties.getCounting().setRevision(null);
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> properties.getCounting().validate(properties.getBaseUrl()));
+        assertEquals(PromptCount.Basis.UNKNOWN, transport.countChat("model", request).basis());
+        assertEquals(1, server.getRequestCount());
+      }
+    }
+  }
+
+  @Test
   void cache_separates_accounts_models_inputs_and_revisions() throws Exception {
     try (var server = new MockWebServer()) {
       server.start();

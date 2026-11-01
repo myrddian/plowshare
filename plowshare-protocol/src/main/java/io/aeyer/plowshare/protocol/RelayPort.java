@@ -47,19 +47,32 @@ public final class RelayPort {
       String parentTopic,
       String parentEventId) {
     public Publish {
-      uuid(requestId);
-      identity(project);
-      RelayPort.topic(topic);
+      validatePublication(
+          requestId, project, topic, occurredAt, correlationId, parentTopic, parentEventId);
       RelayPort.text(text);
-      Objects.requireNonNull(occurredAt);
-      if (occurredAt.isBefore(Instant.parse("0001-01-01T00:00:00Z"))
-          || occurredAt.isAfter(Instant.parse("9999-12-31T23:59:59.999999Z"))) throw invalid();
-      if (correlationId != null) identity(correlationId);
-      if ((parentTopic == null) != (parentEventId == null)) throw invalid();
-      if (parentTopic != null) {
-        RelayPort.topic(parentTopic);
-        identity(parentEventId);
-      }
+    }
+  }
+
+  /** Shared metadata checks for text and binary publication boundaries. */
+  public static void validatePublication(
+      String requestId,
+      String project,
+      String topic,
+      Instant occurredAt,
+      String correlationId,
+      String parentTopic,
+      String parentEventId) {
+    uuid(requestId);
+    identity(project);
+    RelayPort.topic(topic);
+    Objects.requireNonNull(occurredAt);
+    if (occurredAt.isBefore(Instant.parse("0001-01-01T00:00:00Z"))
+        || occurredAt.isAfter(Instant.parse("9999-12-31T23:59:59.999999Z"))) throw invalid();
+    if (correlationId != null) identity(correlationId);
+    if ((parentTopic == null) != (parentEventId == null)) throw invalid();
+    if (parentTopic != null) {
+      RelayPort.topic(parentTopic);
+      identity(parentEventId);
     }
   }
 

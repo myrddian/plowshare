@@ -86,12 +86,22 @@ public final class ProjectRelayPorts implements RelayPorts {
       String topic,
       RelayPortProperties.Direction direction,
       String group) {
+    return require(account, project, topic, direction, group, true);
+  }
+
+  private Relay.TopicKey require(
+      String account,
+      String project,
+      String topic,
+      RelayPortProperties.Direction direction,
+      String group,
+      boolean allowTools) {
     RelayPort.identity(account);
     var owner = projects.personalOwner(project);
     if (owner.isPresent() && !owner.get().equals(account)
         || !members.mayWork(project, account)
         || !(properties.permits(account, project, topic, direction, group)
-            || tools.permits(account, project, topic, direction, group)))
+            || allowTools && tools.permits(account, project, topic, direction, group)))
       throw new CallerFault("Relay port is unavailable to this account");
     Long id = projects.id(project);
     if (id == null) throw new CallerFault("Relay project unavailable");
@@ -104,6 +114,34 @@ public final class ProjectRelayPorts implements RelayPorts {
   }
 
   @Override
+  public Relay.TopicKey authorizeBlob(
+      String account,
+      String project,
+      String topic,
+      RelayPortProperties.Direction direction,
+      String group) {
+    if (topic.startsWith("tool."))
+      throw new CallerFault("Relay tool topics require their text protocol");
+    return require(account, project, topic, direction, group, false);
+  }
+
+  @Override
+  public RelayCausation ancestry(
+      String account, String project, String requestId, String parentTopic, String parentEventId) {
+    if (parentTopic == null) return new RelayCausation(requestId, null, 0);
+    var parent =
+        relay
+            .retained(
+                require(account, project, parentTopic, RelayPortProperties.Direction.EGRESS, null),
+                parentEventId)
+            .orElseThrow(() -> new CallerFault("Relay parent is unavailable"));
+    var ancestry = parent.event().causation();
+    if (ancestry == null || ancestry.depth() < 0 || ancestry.depth() >= maxDepth)
+      throw new CallerFault("Relay parent has no remaining effect budget");
+    return new RelayCausation(ancestry.rootId(), parent.event().eventId(), ancestry.depth() + 1);
+  }
+
+  @Override
   public RelayPort.Published publish(String account, RelayPort.Publish request) {
     var topic =
         require(
@@ -113,25 +151,13 @@ public final class ProjectRelayPorts implements RelayPorts {
             RelayPortProperties.Direction.INGRESS,
             null);
     tools.validateResult(account, request);
-    RelayCausation causation = new RelayCausation(request.requestId(), null, 0);
-    if (request.parentTopic() != null) {
-      var parentTopic =
-          require(
-              account,
-              request.project(),
-              request.parentTopic(),
-              RelayPortProperties.Direction.EGRESS,
-              null);
-      var parent =
-          relay
-              .retained(parentTopic, request.parentEventId())
-              .orElseThrow(() -> new CallerFault("Relay parent is unavailable"));
-      var ancestry = parent.event().causation();
-      if (ancestry == null || ancestry.depth() < 0 || ancestry.depth() >= maxDepth)
-        throw new CallerFault("Relay parent has no remaining effect budget");
-      causation =
-          new RelayCausation(ancestry.rootId(), parent.event().eventId(), ancestry.depth() + 1);
-    }
+    RelayCausation causation =
+        ancestry(
+            account,
+            request.project(),
+            request.requestId(),
+            request.parentTopic(),
+            request.parentEventId());
     // Parent/source inspection may involve IO. Recheck both live WRITE eligibility and the exact
     // project identity before either publishing mutation; later grants cannot retarget this call.
     var current =

@@ -250,6 +250,8 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'relay.process',
   'relay.topics',
   'relay.log',
+  'tool.invocation.read',
+  'artifact.admission.status',
   'orchestration.record',
   'orchestration.start',
   'orchestration.receipt',
@@ -696,6 +698,22 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     return { kind: 'invalid-response', outcome };
   if (!hostedReplyMatches(asked.type, asked.payload, outcome.payload))
     return { kind: 'invalid-response', outcome };
+  if (asked.type === 'tool.invocation.read') {
+    const read = decodeReply('tool.invocation.read', outcome.payload);
+    if (read.id !== asked.payload.invocation)
+      return { kind: 'invalid-response', outcome };
+  }
+  if (asked.type === 'artifact.admission.status') {
+    const status = decodeReply('artifact.admission.status', outcome.payload);
+    const retained = status.receipt?.request;
+    if (
+      retained !== undefined &&
+      (retained.invocation !== asked.payload.invocation ||
+        retained.ordinal !== asked.payload.ordinal ||
+        retained.requestId !== asked.payload.requestId)
+    )
+      return { kind: 'invalid-response', outcome };
+  }
   if (!providerReplyMatches(asked.type, asked.payload, outcome.payload))
     return { kind: 'invalid-response', outcome };
   if (

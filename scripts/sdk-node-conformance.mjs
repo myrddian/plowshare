@@ -100,6 +100,16 @@ const parked = capacity.request('project.list',{});
 const raced = await Promise.race([parked.then(() => 'settled', () => 'settled'),
     new Promise(resolve => setTimeout(() => resolve(pending), 250))]);
 assert.equal(raced, pending, 'the 65th request must wait for a slot, not fail fast');
+// A second parked caller can cancel without becoming a 65th transmitted request.
+const queuedAbort = new AbortController();
+let queuedSettled = false;
+const queued = capacity.request('project.list',{}, {signal:queuedAbort.signal}).then(
+    () => {queuedSettled = true; throw new Error('Queued capacity call unexpectedly succeeded')},
+    error => {queuedSettled = true; return error});
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(queuedSettled,false,'capacity exhaustion must wait for admission');
+queuedAbort.abort();
+assert.equal((await queued).delivery,'NOT_SUBMITTED');
 capacity.close();
 assert.equal((await parked.then(() => null, error => error.delivery)), 'NOT_SUBMITTED');
 assert.ok((await Promise.all(calls)).every(error => error.delivery==='UNKNOWN'));

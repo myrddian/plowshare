@@ -16,8 +16,13 @@ val graalPolyglotVersion: String by project
 val swc4jVersion: String by project
 
 val huggingFaceTokenizersVersion: String by project
+val tikaVersion: String by project
+val twelveMonkeysVersion: String by project
 
 dependencies {
+    // Byte-only media detection. No auto-discovered parsers, OCR, or document pipeline.
+    implementation("org.apache.tika:tika-core:$tikaVersion")
+    implementation("com.twelvemonkeys.imageio:imageio-webp:$twelveMonkeysVersion")
     // Only the tokenizer runtime; model files are explicit local, checksum-pinned configuration.
     implementation("ai.djl.huggingface:tokenizers:$huggingFaceTokenizersVersion")
     testImplementation(project(":plowshare-a2a"))

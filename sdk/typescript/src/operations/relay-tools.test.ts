@@ -1,3 +1,10 @@
+import {
+  toolTextPart,
+  toolPngPart,
+  decodeToolContent,
+  toolContentText,
+} from './tool-content.ts';
+import { imageAdmissionRequest } from './image-admissions.ts';
 import type { HostedToolRegistration } from './hosted-tool-scopes.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -9,6 +16,7 @@ import { fieldsOf } from './response.ts';
 import { decodeToolSchema, canonicalToolSchema } from './tool-schemas.ts';
 import {
   decodeToolCall,
+  decodeToolResult,
   toolResultRequestId,
   toolDeploymentConfig,
   validateToolArguments,
@@ -572,4 +580,133 @@ it('retains full 256-character declarations and their topic names without aliase
   expect(() =>
     toolDeploymentConfig(binding, [{ ...long, name: name + 'a' }]),
   ).toThrow();
+});
+
+describe('Negotiated PNG provider results', () => {
+  it('refuses explicit null content rather than replacing malformed input with text', () => {
+    const call = decodeToolCall(
+      JSON.stringify({
+        ...decodeToolCall(source()),
+        schema: 'plowshare-tool/3',
+        resultProfile: 'content/1',
+      }),
+    );
+    expect(() =>
+      decodeToolResult(
+        { state: 'COMPLETED', text: 'words', content: null },
+        call,
+      ),
+    ).toThrow();
+  });
+  it('retains ordered refs and receipt evidence, then reconciles a lost publication without recapture', async () => {
+    const tool: ToolDeclaration = {
+      ...declaration,
+      resultProfile: 'content/1',
+    };
+    const original = decodeToolCall(source());
+    const call = {
+      ...original,
+      schema: 'plowshare-tool/3',
+      resultProfile: 'content/1',
+      deadline: '2099-01-01T00:00:00Z',
+    };
+    const wire = new Wire(JSON.stringify(call));
+    wire.loseReply = true;
+    const journal = new Journal(tool);
+    let captures = 0;
+    const handler = async () => {
+      captures++;
+      const receipt = {
+        request: await imageAdmissionRequest(host, original.invocationId, 0),
+        project: binding.project,
+        owner: original.account,
+        producer: binding.account,
+        imageId: 'img_' + 'a'.repeat(32),
+        mimeType: 'image/png' as const,
+        width: 3,
+        height: 2,
+        byteLength: 77,
+        sha256: 'a'.repeat(64),
+        admittedAt: '2026-10-23T00:00:00Z',
+      };
+      const content = decodeToolContent({
+        version: 'content/1',
+        parts: [
+          toolTextPart('before'),
+          toolPngPart(receipt, 'OBSERVATION'),
+          toolTextPart('after'),
+        ],
+      });
+      return {
+        state: 'COMPLETED' as const,
+        text: toolContentText(content),
+        content,
+        admissions: [receipt],
+      };
+    };
+    const client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
+    const provider = await ToolProvider.create(
+      client,
+      binding,
+      [{ declaration: tool, handler }],
+      journal,
+      host,
+    );
+    await expect(provider.poll()).rejects.toThrow();
+    expect(captures).toBe(1);
+    expect(journal.rows.get(original.invocationId)?.phase).toBe('publishing');
+    expect(
+      journal.rows.get(original.invocationId)?.result?.admissions,
+    ).toHaveLength(1);
+    const encoded = wire.published['text'];
+    expect(typeof encoded).toBe('string');
+    if (typeof encoded !== 'string')
+      throw new Error('Missing content envelope');
+    const value = fieldsOf(JSON.parse(encoded));
+    expect(value['schema']).toBe('plowshare-tool/3');
+    expect(encoded).not.toContain('admittedAt');
+    const recoveredWire = new Wire(JSON.stringify(call));
+    recoveredWire.published = wire.published;
+    const recoveredClient = new Plowshare({
+      dispatchMode: 'ordered',
+      socket: recoveredWire,
+    });
+    const recovered = await ToolProvider.create(
+      recoveredClient,
+      binding,
+      [{ declaration: tool, handler }],
+      journal,
+      host,
+    );
+    expect(await recovered.reconcile()).toBe(1);
+    expect(captures).toBe(1);
+    expect(recoveredWire.publications).toBe(0);
+    expect(journal.rows.get(original.invocationId)?.phase).toBe('done');
+    client.close();
+    recoveredClient.close();
+  });
+  it('refuses profile mismatch before execution and refuses images without the exact receipt', async () => {
+    const wire = new Wire(source()),
+      journal = new Journal({ ...declaration, resultProfile: 'content/1' });
+    const client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
+    let calls = 0;
+    const provider = await ToolProvider.create(
+      client,
+      binding,
+      [
+        {
+          declaration: { ...declaration, resultProfile: 'content/1' },
+          handler: async () => {
+            calls++;
+            return { state: 'COMPLETED', text: 'unused' };
+          },
+        },
+      ],
+      journal,
+      host,
+    );
+    await expect(provider.poll()).rejects.toThrow('profile');
+    expect(calls).toBe(0);
+    client.close();
+  });
 });

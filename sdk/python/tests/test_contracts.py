@@ -21,6 +21,30 @@ from plowshare._codec import (
 
 
 class ContractsTest(unittest.TestCase):
+    def test_invocation_result_belongs_to_the_exact_read(self) -> None:
+        invocation = "11111111-1111-1111-1111-111111111111"
+        result = decode_reply(
+            "tool.invocation.read",
+            {"id": invocation, "state": "COMPLETED", "text": "original"},
+        )
+        self.assertTrue(
+            deployment_matches(
+                "tool.invocation.read",
+                {"project": "atlas", "invocation": invocation},
+                result,
+            )
+        )
+        self.assertFalse(
+            deployment_matches(
+                "tool.invocation.read",
+                {
+                    "project": "atlas",
+                    "invocation": "22222222-2222-2222-2222-222222222222",
+                },
+                result,
+            )
+        )
+
     def test_hosted_coordinates_and_secret_diagnostics(self) -> None:
         path = Path(os.environ["PLOWSHARE_SDK_DTO_FIXTURES"]).with_name(
             "hosted-scope-correlations.json"
