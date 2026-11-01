@@ -25,12 +25,6 @@ public final class WorkspaceApplicationResources implements ApplicationResources
 
   @Override
   public Optional<Path> root(Long id) {
-    return resolved(id).map(Resolved::root);
-  }
-
-  private record Resolved(io.aeyer.plowshare.server.archive.ProjectRecord project, Path root) {}
-
-  private Optional<Resolved> resolved(Long id) {
     if (id == null) return Optional.empty();
     var name = names.nameForId(id);
     if (name.isEmpty()) return Optional.empty();
@@ -51,7 +45,7 @@ public final class WorkspaceApplicationResources implements ApplicationResources
         FileAccess.of(java.util.List.of(row.workspace()), projects.effectiveExclusions(row));
     if (!fence.permits(row.workspace()))
       throw new WorkspaceRefusedException("Application source is excluded");
-    return Optional.of(new Resolved(row, row.workspace()));
+    return Optional.of(row.workspace());
   }
 
   @Override
@@ -60,10 +54,9 @@ public final class WorkspaceApplicationResources implements ApplicationResources
             "", "agents", "bots", "skills", "orchestrations", "hooks", "schedules", "server")
         .contains(relative))
       throw new IllegalArgumentException("Unknown Application resource directory");
-    return resolved(id)
+    return root(id)
         .map(
-            source -> {
-              Path root = source.root();
+            root -> {
               Path directory = root.resolve(relative);
               try {
                 Path at = root;
@@ -78,7 +71,23 @@ public final class WorkspaceApplicationResources implements ApplicationResources
                     var entries = paths.limit(4097).toList();
                     if (entries.size() > 4096 || entries.stream().anyMatch(Files::isSymbolicLink))
                       throw new IOException("Linked or oversized resources");
-                    var row = source.project();
+                    // Discovery performs filesystem IO. A workspace move or exclusion change
+                    // during that IO must still fence the discovered paths. Reuse the initial
+                    // policy/project resolution above, but retain this distinct current check.
+                    var currentName =
+                        names
+                            .nameForId(id)
+                            .orElseThrow(
+                                () ->
+                                    new WorkspaceRefusedException(
+                                        "Application project is unavailable"));
+                    var row =
+                        projects
+                            .find(currentName)
+                            .orElseThrow(
+                                () ->
+                                    new WorkspaceRefusedException(
+                                        "Application source is unavailable"));
                     var fence = row.reach(projects.effectiveExclusions(row));
                     for (Path path : entries)
                       if (!fence.permits(path)) throw new IOException("Excluded resource");

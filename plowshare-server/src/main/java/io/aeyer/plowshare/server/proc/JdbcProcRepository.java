@@ -49,6 +49,22 @@ public final class JdbcProcRepository implements ProcRepository {
       )
       """;
 
+  // Inventory reads need every retained root for their exact total. Share the narrow child-link
+  // snapshot across recursion levels instead of rescanning roots and wide conversation rows at
+  // each level. Targeted reads keep TREE's indexed subtree walk and do not load unrelated links.
+  private static final String INVENTORY_TREE =
+      """
+      WITH RECURSIVE edges AS MATERIALIZED (
+        SELECT id,parent_id FROM conversations WHERE parent_id IS NOT NULL
+      ), tree(id,root,lifecycle,ancestors) AS (
+        SELECT id,id,lifecycle,ARRAY[]::text[] FROM conversations WHERE parent_id IS NULL
+        UNION ALL
+        SELECT c.id,t.root,t.lifecycle,t.ancestors || t.id
+        FROM edges c JOIN tree t ON c.parent_id=t.id
+        WHERE NOT c.id=ANY(t.ancestors)
+      )
+      """;
+
   private static final String JOIN =
       " FROM tree t JOIN conversations c ON c.id=t.id LEFT JOIN projects p ON p.id=c.project_id ";
 
@@ -73,6 +89,17 @@ public final class JdbcProcRepository implements ProcRepository {
           .replace(":conversation IS NULL", "CAST(:conversation AS text) IS NULL")
           .replace(":root IS NULL", "CAST(:root AS text) IS NULL")
           .replace(":causation IS NULL", "CAST(:causation AS text) IS NULL");
+
+  // These selectors are absent only on the inventory path selected by conversations(). Keeping
+  // nullable root/subtree predicates in that SQL makes a generic prepared plan estimate a tiny
+  // subtree, then perform one conversation/project lookup per retained row at runtime. This
+  // specialization removes no account, membership, lifecycle, project or causation restriction.
+  private static final String INVENTORY_WHERE =
+      WHERE
+          .replace(
+              "AND (CAST(:conversation AS text) IS NULL OR c.id=:conversation OR :conversation=ANY(t.ancestors))",
+              "")
+          .replace("AND (CAST(:root AS text) IS NULL OR t.root=:root)", "");
 
   private static final String ACTIVE =
       "(c.id IN (:live) OR EXISTS(SELECT 1 FROM inference_calls ic"
@@ -143,21 +170,51 @@ public final class JdbcProcRepository implements ProcRepository {
    * keeps this selection independent of retained calls in unrelated conversations. Counts cover the
    * entire authorized selection. Materialize that narrow selection once for both count and page;
    * retain a count-only row when the cursor is beyond its end, without enriching off-page rows.
+   * Source metadata and processing states share one narrow revision selection for distinct page
+   * roots/IDs; neither may rescan every revision once per page row.
    */
   static String conversationPageSql(boolean active) {
-    String filter = WHERE + (active ? " AND " + ACTIVE : "");
-    return TREE
+    return conversationPageSql(active, false);
+  }
+
+  static String conversationPageSql(boolean active, boolean targeted) {
+    String filter = (targeted ? WHERE : INVENTORY_WHERE) + (active ? " AND " + ACTIVE : "");
+    return (targeted ? TREE : INVENTORY_TREE)
         + ", authorized AS MATERIALIZED (SELECT c.id,t.root AS audit_root,t.lifecycle AS audit_lifecycle,p.name AS audit_project"
         + JOIN
         + " WHERE "
         + filter
         + "), totals AS (SELECT count(*) AS audit_total FROM authorized)"
-        + ", page_selection AS MATERIALIZED (SELECT * FROM authorized"
-        + " WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT :limit)"
+        // A bound parameter alone gives a generic plan no page-size ceiling. Expose the
+        // validated maximum before its dynamic limit so enrichment never plans a corpus-sized
+        // page. The final limit/order retains the exact requested page and cursor semantics.
+        + ", page_selection AS MATERIALIZED (SELECT * FROM (SELECT * FROM authorized"
+        + " WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT "
+        + (ProcQuery.MAX_LIMIT + 1)
+        + ") bounded ORDER BY id LIMIT :limit)"
         + ", page AS MATERIALIZED (SELECT c.*,a.audit_root,a.audit_lifecycle,a.audit_project"
         + " FROM page_selection a JOIN conversations c ON c.id=a.id)"
         + """
-          , page_calls AS MATERIALIZED (
+          , page_revision_logs AS MATERIALIZED (
+            SELECT id AS log FROM page UNION SELECT audit_root FROM page
+          ), page_revisions AS MATERIALIZED (
+            SELECT r.id,r.resource_id,r.processing_log,r.generation,r.created_at
+            FROM information_revisions r JOIN page_revision_logs selected ON selected.log=r.processing_log
+            WHERE r.availability='active' AND NOT r.excluded
+          ), page_sources AS MATERIALIZED (
+            SELECT DISTINCT ON (r.processing_log) r.processing_log,q.source_name AS resource,r.id::text AS revision
+            FROM page_revisions r JOIN information_resources q ON q.id=r.resource_id
+            WHERE EXISTS(SELECT 1 FROM page selected WHERE selected.audit_root=r.processing_log)
+            ORDER BY r.processing_log,r.created_at DESC,r.id DESC
+          ), page_processing AS MATERIALIZED (
+            SELECT r.processing_log,
+              count(*) FILTER(WHERE s.state='running' AND s.lease_until>now()) AS running,
+              count(*) FILTER(WHERE s.state='pending' OR (s.state='running' AND (s.lease_until IS NULL OR s.lease_until<=now()))) AS pending,
+              count(*) FILTER(WHERE s.state='blocked') AS blocked
+            FROM page_revisions r JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation
+            WHERE EXISTS(SELECT 1 FROM page selected WHERE selected.id=r.processing_log)
+            GROUP BY r.processing_log
+          ), page_calls AS MATERIALIZED (
             SELECT call.conversation_id,call.attempt_count,call.ended_at,call.attribution_status,
               call.account_handle,call.agent_name,call.operation,call.pool,call.wire_model
             FROM inference_calls call JOIN page selected ON selected.id=call.conversation_id
@@ -200,17 +257,10 @@ public final class JdbcProcRepository implements ProcRepository {
         + " FROM page c "
         + """
           LEFT JOIN acting_work_conversations acting ON acting.conversation=c.audit_root
-          LEFT JOIN LATERAL(SELECT q.source_name AS resource,r.id::text AS revision
-            FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id
-            WHERE r.processing_log=c.audit_root AND r.availability='active' AND NOT r.excluded
-            ORDER BY r.created_at DESC,r.id DESC LIMIT 1) source ON true
+          LEFT JOIN page_sources source ON source.processing_log=c.audit_root
           LEFT JOIN LATERAL(SELECT id,ending,ended_at FROM jobs WHERE conversation_id=c.id
             ORDER BY started_at DESC,id DESC LIMIT 1) j ON true
-          LEFT JOIN LATERAL(SELECT count(*) FILTER(WHERE s.state='running' AND s.lease_until>now()) AS running,
-            count(*) FILTER(WHERE s.state='pending' OR (s.state='running' AND (s.lease_until IS NULL OR s.lease_until<=now()))) AS pending,
-            count(*) FILTER(WHERE s.state='blocked') AS blocked
-            FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation
-            WHERE r.processing_log=c.id AND r.availability='active' AND NOT r.excluded) ps ON true
+          LEFT JOIN page_processing ps ON ps.processing_log=c.id
           LEFT JOIN call_totals ic ON ic.conversation_id=c.id
           LEFT JOIN call_repetitions repetition ON repetition.conversation_id=c.id
           ) SELECT totals.audit_total,enriched.* FROM totals LEFT JOIN enriched ON true
@@ -229,7 +279,9 @@ public final class JdbcProcRepository implements ProcRepository {
                       live.runningConversations().isEmpty()
                           ? List.of("")
                           : live.runningConversations());
-          String sql = conversationPageSql(Boolean.TRUE.equals(q.active()));
+          String sql =
+              conversationPageSql(
+                  Boolean.TRUE.equals(q.active()), q.conversation() != null || q.root() != null);
           return jdbc.query(
               sql,
               args,
@@ -440,39 +492,103 @@ public final class JdbcProcRepository implements ProcRepository {
   }
 
   /**
-   * Materialize current authority once, and join it to attributed calls outside an OR predicate.
-   * The former IN-subplan beneath that OR could rescan a materialized conversation selection for
-   * every retained call when PostgreSQL estimated it would not fit a hashed subplan. Keep orphan
-   * calls in a separate disjoint branch with their own current account/project authorization.
+   * Select the first bounded page from each disjoint branch before hydrating calls/attempts. Calls
+   * have no full-inventory total: walking every conversation and sorting every retained call is
+   * unnecessary. The attributed branch checks owner/membership first and resolves the current root
+   * through cycle-safe primary-key parent reads for eligible candidates, stopping at the page
+   * boundary. The lateral one-row fence keeps calls as the ordered driving relation even when the
+   * planner estimates few distinct conversations; otherwise it may rescan all calls per owner. The
+   * ordered candidate subquery fences cursor/active filtering before any ancestry work, so
+   * exhausted cursors and terminal calls cannot invoke that work only to discard its result. The
+   * ancestor path preserves subtree/root/archive selectors, including hidden parents;
+   * caller-supplied or accounting-recorded roots never authorize a call. Both branch limits are
+   * safe because any row after a branch's first limit rows cannot enter the merged first limit
+   * rows.
    */
   static String callsPageSql(boolean active) {
+    return callsPageSql(active, false);
+  }
+
+  static String callsPageSql(boolean active, boolean selectedTree) {
     String cursor =
         " AND (CAST(:after AS text) IS NULL OR ic.call_id::text>:after)"
             + (active ? " AND ic.ended_at IS NULL" : "");
-    return TREE
-        + ", selected AS MATERIALIZED (SELECT c.id"
-        + JOIN
-        + " WHERE "
-        + WHERE
-        + ")"
-        + ", matched AS (SELECT ic.call_id FROM selected s JOIN inference_calls ic ON ic.conversation_id=s.id WHERE true"
+    if (selectedTree) {
+      // Explicit roots/subtrees provide a narrow indexed selection. Cursor-bearing reads also use
+      // this path: an arbitrary text cursor cannot seek the UUID primary key, so an ordered call
+      // walk could revisit the entire call corpus just to discard off-cursor rows. Select current
+      // conversation facts once and seek their direct call index instead. Keep the disjoint orphan
+      // branch for inventory cursors; bound selectors make it unavailable without probing rows.
+      return TREE
+          + ", selected AS MATERIALIZED (SELECT c.id"
+          + JOIN
+          + " WHERE "
+          + WHERE
+          + "), matched AS (SELECT ic.call_id FROM selected s"
+          + " JOIN inference_calls ic ON ic.conversation_id=s.id WHERE true"
+          + cursor
+          + " UNION ALL ("
+          + orphanCallIds(cursor)
+          + ")), page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
+          + callPageProjection();
+    }
+    return """
+        WITH RECURSIVE matched AS (
+          (SELECT ic.call_id FROM inference_calls ic
+          CROSS JOIN LATERAL (SELECT 1 FROM conversations c
+          LEFT JOIN projects p ON p.id=c.project_id
+          WHERE c.id=ic.conversation_id AND (:fleet OR (c.owner_handle=:account AND (c.project_id IS NULL OR EXISTS(
+            SELECT 1 FROM project_members m WHERE m.project_id=c.project_id AND m.handle=:account))))
+          AND (CAST(:project AS text) IS NULL OR p.name=:project)
+          AND (CAST(:causation AS text) IS NULL OR c.relay_causation->>'rootId'=:causation)
+          AND CASE WHEN true
+        """
         + cursor
-        + " UNION ALL SELECT ic.call_id FROM inference_calls ic LEFT JOIN projects p ON p.id::text=ic.project_id"
-        + " WHERE ic.conversation_id IS NULL AND CAST(:conversation AS text) IS NULL"
-        + " AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL"
-        + " AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS("
-        + "SELECT 1 FROM project_members m WHERE m.project_id::text=ic.project_id AND m.handle=:account))))"
-        + " AND (CAST(:project AS text) IS NULL OR p.name=:project)"
+        + """
+          THEN EXISTS(
+            WITH RECURSIVE parents(id,parent_id,lifecycle,visited) AS (
+              SELECT c.id,c.parent_id,c.lifecycle,ARRAY[c.id]
+              UNION ALL SELECT parent.id,parent.parent_id,parent.lifecycle,chain.visited||parent.id
+              FROM conversations parent JOIN parents chain ON parent.id=chain.parent_id
+              WHERE NOT parent.id=ANY(chain.visited)
+            ) SELECT 1 FROM parents WHERE parent_id IS NULL AND lifecycle<>'archived'
+              AND (CAST(:root AS text) IS NULL OR id=:root)
+              AND (CAST(:conversation AS text) IS NULL OR :conversation=ANY(visited)))
+          ELSE false END LIMIT 1) permitted WHERE ic.conversation_id IS NOT NULL
+        """
         + cursor
-        + ")"
-        + ", page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
-        + " SELECT ic.call_id,ic.conversation_id,ic.root_conversation_id,ic.run_id,ic.attribution_status,"
-        + "ic.account_handle,ic.agent_name,ic.operation,ic.pool,ic.wire_model,ic.lane,ic.billing_route,"
-        + "ic.instance_id,ic.lifecycle,ic.created_at,ic.ended_at,ic.attempt_count,"
-        + "p.name AS project,c.owner_handle AS owner FROM page selected"
-        + " JOIN inference_calls ic ON ic.call_id=selected.call_id"
-        + " LEFT JOIN conversations c ON c.id=ic.conversation_id"
-        + " LEFT JOIN projects p ON p.id::text=ic.project_id ORDER BY ic.call_id";
+        + """
+          ORDER BY ic.call_id LIMIT :limit)
+          UNION ALL (
+        """
+        + orphanCallIds(cursor)
+        + " ORDER BY ic.call_id LIMIT :limit"
+        + ")), page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
+        + callPageProjection();
+  }
+
+  private static String orphanCallIds(String cursor) {
+    return """
+        SELECT ic.call_id FROM inference_calls ic LEFT JOIN projects p ON p.id::text=ic.project_id
+        WHERE ic.conversation_id IS NULL AND CAST(:conversation AS text) IS NULL
+          AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL
+          AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS(
+            SELECT 1 FROM project_members m WHERE m.project_id::text=ic.project_id AND m.handle=:account))))
+          AND (CAST(:project AS text) IS NULL OR p.name=:project)
+        """
+        + cursor;
+  }
+
+  private static String callPageProjection() {
+    return """
+        SELECT ic.call_id,ic.conversation_id,ic.root_conversation_id,ic.run_id,ic.attribution_status,
+          ic.account_handle,ic.agent_name,ic.operation,ic.pool,ic.wire_model,ic.lane,ic.billing_route,
+          ic.instance_id,ic.lifecycle,ic.created_at,ic.ended_at,ic.attempt_count,
+          p.name AS project,c.owner_handle AS owner FROM page selected
+          JOIN inference_calls ic ON ic.call_id=selected.call_id
+          LEFT JOIN conversations c ON c.id=ic.conversation_id
+          LEFT JOIN projects p ON p.id::text=ic.project_id ORDER BY ic.call_id
+        """;
   }
 
   @Override
@@ -480,7 +596,10 @@ public final class JdbcProcRepository implements ProcRepository {
     return read(
         () -> {
           var args = parameters(account, q);
-          String sql = callsPageSql(Boolean.TRUE.equals(q.active()));
+          String sql =
+              callsPageSql(
+                  Boolean.TRUE.equals(q.active()),
+                  q.conversation() != null || q.root() != null || q.after() != null);
           var rows =
               jdbc.query(
                   sql,

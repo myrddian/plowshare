@@ -15,6 +15,9 @@ public record ProcQuery(
     Boolean active,
     String after,
     Integer limit) {
+  /** Repositories may reserve one additional row to establish a continuation cursor. */
+  static final int MAX_LIMIT = 100;
+
   public ProcQuery {
     visibility = visibility == null ? "mine" : visibility;
     if (!Set.of("mine", "server").contains(visibility))
@@ -27,7 +30,7 @@ public record ProcQuery(
               || value.codePoints().anyMatch(Character::isISOControl)))
         throw new CallerFault("PROC selectors must be bounded nonblank identifiers");
     limit = limit == null ? 50 : limit;
-    if (limit < 1 || limit > 100) throw new CallerFault("PROC limit must be 1–100");
+    if (limit < 1 || limit > MAX_LIMIT) throw new CallerFault("PROC limit must be 1–100");
   }
 
   public boolean fleet() {

@@ -147,7 +147,7 @@ class JdbcProcRepositoryTest {
     assertEquals(2, page.total(), "the total covers the selection before the cursor");
     assertTrue(page.conversations().isEmpty());
     assertNull(page.cursor());
-    verify(trace, times(1)).begin(startsWith("WITH RECURSIVE tree"), eq("executeQuery"));
+    verify(trace, times(1)).begin(startsWith("WITH RECURSIVE"), eq("executeQuery"));
     verify(trace, times(1)).begin(startsWith("SELECT 1 FROM admins"), eq("executeQuery"));
 
     // Reuse is confined to a statement: a later request must observe lost membership.
@@ -163,6 +163,15 @@ class JdbcProcRepositoryTest {
 
   @Test
   void onlyTheAuthorizedPageIsEnrichedEvenWhenThePlannerSorts() throws Exception {
+    UUID resource = UUID.randomUUID(), revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ?,'proc-plan','source.md','alice',id,'source' FROM projects WHERE name='research'",
+        resource);
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,processing_log) VALUES (?,?,1,'Source','text/plain','fixture',1,?)",
+        revision,
+        resource,
+        root);
     for (int i = 0; i < 80; i++) {
       conversations.open(Home.of("research"), Budget.of(20), TurnCap.none(), "alice");
     }
@@ -196,12 +205,113 @@ class JdbcProcRepositoryTest {
             });
     var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
     assertEquals(1, checkSharedQueueWork(plan, "CTE authorized"));
+    assertSingleRevisionScan(plan);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE edges"));
+    assertEquals(1, checkSharedQueueWork(plan, "CTE page_revisions"));
     assertTrue(checkJobScanLoops(plan) > 0, "the plan must exercise job enrichment");
     var first = repository.conversations("alice", query("mine", null, null, 1), live());
     assertEquals(82, first.total());
     assertEquals(1, first.conversations().size());
     assertNotNull(first.cursor());
     assertEquals("alice", first.conversations().getFirst().owner());
+  }
+
+  @Test
+  void genericInventoryPlanSharesConversationFactsAndKeepsPageEstimatesBounded() throws Exception {
+    jdbc.update(
+        "INSERT INTO conversations(id,owner_handle,created_at,origin,budget_total,budget_spent) SELECT 'generic-'||n,'alice',now(),'turn',20,0 FROM generate_series(1,1000) n");
+    jdbc.execute("ANALYZE conversations; ANALYZE projects; ANALYZE project_members");
+    // Explicit PREPARE/EXECUTE exercises a generic server plan independently of the JDBC
+    // driver's prepare threshold. Nullable selector parameters must not masquerade as a tiny
+    // subtree when the validated request is the full inventory.
+    var names = new java.util.LinkedHashMap<String, Integer>();
+    var matcher =
+        java.util.regex.Pattern.compile("(?<!:):([a-z]+)")
+            .matcher(JdbcProcRepository.conversationPageSql(false));
+    var sql = new StringBuilder();
+    while (matcher.find()) {
+      names.computeIfAbsent(matcher.group(1), ignored -> names.size() + 1);
+      matcher.appendReplacement(
+          sql, java.util.regex.Matcher.quoteReplacement("$" + names.get(matcher.group(1))));
+    }
+    matcher.appendTail(sql);
+    var types =
+        names.keySet().stream()
+            .map(
+                name ->
+                    switch (name) {
+                      case "fleet" -> "boolean";
+                      case "limit" -> "integer";
+                      default -> "text";
+                    })
+            .toList();
+    var values =
+        names.keySet().stream()
+            .map(
+                name ->
+                    switch (name) {
+                      case "account" -> "'alice'";
+                      case "fleet" -> "false";
+                      case "limit" -> "2";
+                      case "live" -> "''";
+                      default -> "NULL";
+                    })
+            .toList();
+    var tx =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new DataSourceTransactionManager(data));
+    tx.setReadOnly(true);
+    String explained =
+        tx.execute(
+            ignored -> {
+              jdbc.execute("SET LOCAL jit=off; SET LOCAL plan_cache_mode=force_generic_plan");
+              jdbc.execute(
+                  "PREPARE proc_inventory_generic(" + String.join(",", types) + ") AS " + sql);
+              return jdbc.queryForObject(
+                  "EXPLAIN (ANALYZE,FORMAT JSON) EXECUTE proc_inventory_generic("
+                      + String.join(",", values)
+                      + ")",
+                  String.class);
+            });
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE authorized"));
+    assertEquals(1, checkSharedQueueWork(plan, "CTE page_selection"));
+    assertGenericInventoryWork(plan);
+    var page = repository.conversations("alice", query("mine", null, null, 1), live());
+    assertEquals(1002, page.total());
+    assertEquals(1, page.conversations().size());
+    assertNotNull(page.cursor());
+    jdbc.update("DELETE FROM project_members WHERE handle='alice'");
+    assertEquals(
+        1000,
+        repository.conversations("alice", query("mine", null, null, 1), live()).total(),
+        "global custody remains; project conversations are revoked");
+  }
+
+  private void assertGenericInventoryWork(com.fasterxml.jackson.databind.JsonNode plan) {
+    if ("conversations_pkey".equals(plan.path("Index Name").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 2,
+          "only the page may hydrate conversations by ID: " + plan);
+    if ("projects".equals(plan.path("Relation Name").asText())
+        && "Seq Scan".equals(plan.path("Node Type").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "inventory project facts must not rescan per conversation: " + plan);
+    if ("CTE page_selection".equals(plan.path("Subplan Name").asText()))
+      assertTrue(
+          plan.path("Plan Rows").asLong() <= ProcQuery.MAX_LIMIT + 1,
+          "the generic plan must know the validated page ceiling: " + plan);
+    for (var child : plan) assertGenericInventoryWork(child);
+  }
+
+  private void assertSingleRevisionScan(com.fasterxml.jackson.databind.JsonNode plan) {
+    if ("information_revisions".equals(plan.path("Relation Name").asText())
+        && "Seq Scan".equals(plan.path("Node Type").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "page sources and processing must not scan the entire revision corpus per row: " + plan);
+    for (var child : plan) assertSingleRevisionScan(child);
   }
 
   private int checkJobScanLoops(com.fasterxml.jackson.databind.JsonNode plan) {
@@ -328,11 +438,25 @@ class JdbcProcRepositoryTest {
     String explained =
         new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
             .queryForObject(
-                "EXPLAIN (ANALYZE, FORMAT JSON) " + JdbcProcRepository.conversationPageSql(false),
+                "EXPLAIN (ANALYZE, FORMAT JSON) "
+                    + JdbcProcRepository.conversationPageSql(false, true),
                 args,
                 String.class);
     var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
     assertEquals(1, checkTargetedTree(plan));
+    UUID instance = callInstance();
+    addCall(instance, UUID.randomUUID(), child, null, "research", true);
+    var callPlan =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+                    .queryForObject(
+                        "EXPLAIN (ANALYZE,FORMAT JSON) "
+                            + JdbcProcRepository.callsPageSql(false, true),
+                        args,
+                        String.class));
+    assertEquals(1, checkTargetedTree(callPlan));
+    assertEquals(1, repository.calls("alice", query("mine", child, null, 2)).calls().size());
     assertEquals(
         List.of(child),
         repository
@@ -389,7 +513,7 @@ class JdbcProcRepositoryTest {
         && "Seq Scan".equals(plan.path("Node Type").asText()))
       assertTrue(
           plan.path("Actual Loops").asLong() <= 1,
-          "A page must not rescan all retained calls per conversation");
+          "A page must not rescan all retained calls per conversation: " + plan);
     for (var childPlan : plan) checkCallScans(childPlan);
   }
 
@@ -440,8 +564,7 @@ class JdbcProcRepositoryTest {
   }
 
   @Test
-  void modelCallAuthorityIsMaterializedOnceUnderLowWorkMemoryAndPagesDoNotOverlap()
-      throws Exception {
+  void modelCallPageBoundsRootChecksUnderLowWorkMemoryAndPagesDoNotOverlap() throws Exception {
     UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
@@ -488,8 +611,34 @@ class JdbcProcRepositoryTest {
                       String.class);
             });
     var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
-    assertEquals(1, checkSharedQueueWork(plan, "CTE selected"));
+    assertTrue(checkBoundedCallParents(plan) > 0, "calls must check their actual current roots");
     checkCallScans(plan);
+    var named = new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc);
+    args.addValue("after", "zzzz");
+    var exhaustedPlan =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                named.queryForObject(
+                    "EXPLAIN (ANALYZE,FORMAT JSON) " + JdbcProcRepository.callsPageSql(false),
+                    args,
+                    String.class));
+    assertEquals(
+        0,
+        parentExecutions(exhaustedPlan),
+        "an exhausted cursor must not check off-cursor ancestry");
+    args.addValue("after", null);
+    var terminalPlan =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                named.queryForObject(
+                    "EXPLAIN (ANALYZE,FORMAT JSON) " + JdbcProcRepository.callsPageSql(true),
+                    args,
+                    String.class));
+    assertEquals(
+        0,
+        parentExecutions(terminalPlan),
+        "an active-only page must not check terminal calls' ancestry");
+
     var first = repository.calls("alice", query("mine", null, null, 50));
     var next = repository.calls("alice", query("mine", null, first.cursor(), 50));
     assertEquals(50, first.calls().size());
@@ -515,6 +664,181 @@ class JdbcProcRepositoryTest {
     assertFalse(
         repository.calls("alice", query("server", null, null, 50)).calls().isEmpty(),
         "explicit administrator metadata scope remains available");
+  }
+
+  private long parentExecutions(com.fasterxml.jackson.databind.JsonNode plan) {
+    long total =
+        "CTE parents".equals(plan.path("Subplan Name").asText())
+            ? plan.path("Actual Loops").asLong()
+            : 0;
+    for (var child : plan) total += parentExecutions(child);
+    return total;
+  }
+
+  private int checkBoundedCallParents(com.fasterxml.jackson.databind.JsonNode plan) {
+    assertNotEquals(
+        "CTE tree", plan.path("Subplan Name").asText(), "calls must not build the full inventory");
+    int found = 0;
+    if ("CTE parents".equals(plan.path("Subplan Name").asText())) {
+      found++;
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 51,
+          "root checks stop at the requested page plus its cursor row: " + plan);
+    }
+    for (var child : plan) found += checkBoundedCallParents(child);
+    return found;
+  }
+
+  @Test
+  void pageRevisionSnapshotKeepsLatestRootSourceAndCurrentProcessingState() {
+    UUID resource = UUID.randomUUID(), older = UUID.randomUUID(), latest = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ?,'proc-page','source.md','alice',id,'source' FROM projects WHERE name='research'",
+        resource);
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,processing_log,created_at) VALUES (?,?,1,'Older','text/plain','old',1,?,now()-interval '1 day'),(?,?,2,'Latest','text/plain','new',1,?,now())",
+        older,
+        resource,
+        root,
+        latest,
+        resource,
+        root);
+    jdbc.update(
+        "INSERT INTO information_steps(revision_id,generation,stage,state) VALUES (?,1,'extract','pending'),(?,2,'extract','failed')",
+        latest,
+        latest);
+    var page = repository.conversations("alice", query("mine", null, null, 100), live());
+    assertEquals(2, page.total());
+    for (var row : page.conversations()) {
+      assertEquals("source.md", row.resource());
+      assertEquals(latest.toString(), row.revision());
+      assertEquals(row.id().equals(root) ? "QUEUED" : "IDLE", row.state());
+    }
+    // Exclusion/lifecycle changes are observed on the next read, without a shared allow cache.
+    jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", latest);
+    page = repository.conversations("alice", query("mine", null, null, 100), live());
+    for (var row : page.conversations()) {
+      assertEquals(older.toString(), row.revision());
+      assertEquals("IDLE", row.state());
+    }
+    jdbc.update("UPDATE conversations SET lifecycle='archived' WHERE id=?", root);
+    assertEquals(
+        0, repository.conversations("alice", query("mine", null, null, 100), live()).total());
+  }
+
+  @Test
+  void boundedCallBranchesPreserveOwnerRootSelectorsOrphansAndRevocation() {
+    UUID instance = callInstance();
+    UUID owned = UUID.fromString("00000000-0000-0000-0000-000000000010");
+    UUID orphan = UUID.fromString("00000000-0000-0000-0000-000000000020");
+    UUID hidden = UUID.fromString("00000000-0000-0000-0000-000000000030");
+    addCall(instance, owned, child, null, "research", true);
+    addCall(instance, orphan, null, "alice", "research", false);
+    // Accounting principal/root provenance cannot substitute for conversation custody.
+    addCall(instance, hidden, foreign, "alice", "research", true);
+    var first = repository.calls("alice", query("mine", null, null, 1));
+    assertEquals(owned.toString(), first.calls().getFirst().id());
+    assertNotNull(first.cursor());
+    var next = repository.calls("alice", query("mine", null, first.cursor(), 1));
+    assertEquals(orphan.toString(), next.calls().getFirst().id());
+    assertNull(next.cursor());
+    assertTrue(repository.calls("alice", query("mine", null, "zzzz", 100)).calls().isEmpty());
+    assertEquals(1, repository.calls("alice", query("mine", root, null, 100)).calls().size());
+    assertEquals(1, repository.calls("alice", query("mine", child, null, 100)).calls().size());
+    assertTrue(repository.calls("alice", query("mine", foreign, null, 100)).calls().isEmpty());
+    assertEquals(
+        1,
+        repository
+            .calls("alice", new ProcQuery("mine", "research", null, root, null, true, null, 100))
+            .calls()
+            .size());
+    assertTrue(
+        repository
+            .calls("alice", new ProcQuery("mine", "other", null, null, null, null, null, 100))
+            .calls()
+            .isEmpty());
+    jdbc.update(
+        "UPDATE conversations SET relay_causation=jsonb_build_object('rootId','fixture-cause','parentId',NULL,'depth',0) WHERE id=?",
+        child);
+    assertEquals(
+        1,
+        repository
+            .calls(
+                "alice", new ProcQuery("mine", null, null, null, "fixture-cause", null, null, 100))
+            .calls()
+            .size());
+    jdbc.update("UPDATE conversations SET lifecycle='archived' WHERE id=?", root);
+    assertEquals(
+        List.of(orphan.toString()),
+        repository.calls("alice", query("mine", null, null, 100)).calls().stream()
+            .map(ProcViews.Call::id)
+            .toList());
+    jdbc.update("DELETE FROM project_members WHERE handle='alice'");
+    assertTrue(repository.calls("alice", query("mine", null, null, 100)).calls().isEmpty());
+    assertEquals(2, repository.calls("alice", query("server", null, null, 100)).calls().size());
+    jdbc.update("UPDATE admins SET server_admin=false WHERE handle='alice'");
+    assertThrows(
+        CallerFault.class, () -> repository.calls("alice", query("server", null, null, 100)));
+    jdbc.update("UPDATE admins SET enabled=false WHERE handle='alice'");
+    assertThrows(
+        CallerFault.class, () -> repository.calls("alice", query("mine", null, null, 100)));
+  }
+
+  @Test
+  void callsNeverTrustRecordedRootsOrAdmitCycles() {
+    UUID instance = callInstance();
+    addCall(instance, UUID.randomUUID(), child, null, "research", true);
+    String descendant =
+        conversations
+            .log(Origin.DELEGATION, Home.of("research"), "fixture", child, null, "alice", null)
+            .id();
+    jdbc.update("UPDATE conversations SET parent_id=? WHERE id=?", descendant, child);
+    assertTrue(repository.calls("alice", query("server", null, null, 100)).calls().isEmpty());
+    // Restore a rooted chain, then archive its actual root. The call's recorded root is foreign.
+    jdbc.update("UPDATE conversations SET parent_id=? WHERE id=?", root, child);
+    jdbc.update("UPDATE conversations SET lifecycle='archived' WHERE id=?", root);
+    assertTrue(repository.calls("alice", query("server", null, null, 100)).calls().isEmpty());
+  }
+
+  private UUID callInstance() {
+    UUID journal = UUID.randomUUID(), instance = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO inference_accounting_journals(journal_id,tracking_started_at) VALUES (?,now())",
+        journal);
+    jdbc.update(
+        "INSERT INTO inference_accounting_instances(instance_id,journal_id,started_at) VALUES (?,?,now())",
+        instance,
+        journal);
+    return instance;
+  }
+
+  private void addCall(
+      UUID instance,
+      UUID call,
+      String conversation,
+      String account,
+      String project,
+      boolean active) {
+    jdbc.update(
+        """
+        INSERT INTO inference_calls(call_id,instance_id,attribution,project_id,scope,conversation_id,
+          root_conversation_id,ancestor_conversation_ids,ancestor_run_ids,ancestor_orchestration_ids,
+          account_handle,agent_name,operation,attribution_status,specifier,pool,wire_model,billing_route,lane,
+          created_at,last_event_at,ended_at,lifecycle,attempt_count,last_call_sequence)
+        SELECT ?,?,'{}',p.id::text,'PROJECT',?,?,ARRAY[]::text[],ARRAY[]::text[],ARRAY[]::text[],
+          ?,'fixture','DOCUMENT_SUMMARY',?,'fast','fixture-pool','fixture-model','fixture-pool','CHAT',now(),now(),
+          CASE WHEN ? THEN NULL ELSE now() END,CASE WHEN ? THEN 'RUNNING' ELSE 'SUCCEEDED' END,0,1
+        FROM projects p WHERE name=?
+        """,
+        call,
+        instance,
+        conversation,
+        foreign,
+        account,
+        account == null ? "SYSTEM" : "ATTRIBUTED",
+        active,
+        active,
+        project);
   }
 
   @Test
