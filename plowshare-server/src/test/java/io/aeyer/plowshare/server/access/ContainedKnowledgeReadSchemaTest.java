@@ -518,14 +518,9 @@ class ContainedKnowledgeReadSchemaTest {
     assertTrue(revisionReadable(HOLDER, document));
     assertTrue(inBoundary(HOLDER, document, home));
     assertTrue(projectReadable(HOLDER, childScope));
-    // The other half of the limitation is only half lifted, and this records exactly where it
-    // stops. The child's own scope is admitted -- aChildReadsItsOwnHome proves that -- but
-    // knowledge_revision_readable opens with information_global_read_member, which is false for a
-    // bare-UUID principal that has no admins row to be a member through. Scope admission cannot
-    // reach that gate, and lifting a baseline gate on every knowledge read is not this task's to
-    // make. The ceiling is demonstrably not what refuses: it admits the same document for the same
-    // principal, which is what a ceiling that grants nothing should do.
-    assertFalse(revisionReadable(childPrincipal, document));
+    // V224 admits the child to its own document; ContainedActorReadSchemaTest covers the direction
+    // and the general-arm closure.
+    assertTrue(revisionReadable(childPrincipal, document));
     assertTrue(inBoundary(childPrincipal, document, home));
 
     // An unrelated account, which also happens to own the resource.
