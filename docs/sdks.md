@@ -94,9 +94,10 @@ connection's default for that call. `nonBlocking` selects the explicit fail-fast
 form of the dispatch backpressure contract — a full window rejects with
 `NOT_SUBMITTED` without writing anything, and a `CAPACITY_EXHAUSTED` refusal is
 returned as the request's own outcome instead of being absorbed and resubmitted;
-the waiting default is what every other request gets. Java, Python, Go and Node
-spell the same choice in their own idiom, per call rather than per connection;
-.NET is pending and still has only the fail-fast form. Neutral TypeScript
+the waiting default is what every other request gets. Java, Python, Go, Node and .NET
+spell the same choice in their own idiom, per call rather than per connection.
+.NET uses `RequestOptions.WaitForCapacity = false` for the explicit fail-fast form
+and `RequestOptions.Timeout` for a transmit-time reply budget. Neutral TypeScript
 compositions supply a deadline scheduler and await `ready()` when selecting
 concurrent mode. Python accepts an optional per-request timeout and task
 cancellation; .NET uses cancellation tokens, and Go uses contexts. Admission

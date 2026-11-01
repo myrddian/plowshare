@@ -396,13 +396,13 @@ try {
         // would show three frames with two distinct ids; one that queued for the slot would
         // show three distinct ids.
         //
-        // Guarded by language because only `node` drives it today. Go and Python do have a
+        // Guarded by language because Node and .NET drive it today. Go and Python have a
         // non-blocking form (`WithoutCapacityWait`, `wait_for_capacity=False`) and their
         // drivers are free to adopt this case; until they do, asserting it for them would
         // fail on an undriven scenario rather than on a missing behaviour. The guard is
         // deliberately a language list and not "assert only what was observed", which is
         // the vacuous pass the handshake case exists to rule out.
-        if (language === 'node') {
+        if (language === 'node' || language === 'dotnet') {
             const explicit = observed('capacity-non-blocking')
             assert.equal(explicit.order.length, 2,
                 language+' did not submit the non-blocking refusal exactly once and the held request exactly once')
