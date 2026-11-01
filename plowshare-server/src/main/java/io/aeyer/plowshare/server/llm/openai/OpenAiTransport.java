@@ -1403,8 +1403,10 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
         && !props.getCounting().isImageTokensIncluded())
       return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
           poolName(), model, "unsupported_images");
-    if (request.toolChoice() != null && !request.tools().isEmpty()
-        || request.sampling().reasoningEffort().isPresent())
+    var protocol = props.getCounting().getChatProtocol();
+    if (protocol == io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol.VLLM_TOKENIZE
+        && (request.toolChoice() != null && !request.tools().isEmpty()
+            || request.sampling().reasoningEffort().isPresent()))
       return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
           poolName(), model, "unsupported_template_fields");
     Map<String, Object> wire =
@@ -1415,6 +1417,16 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             false,
             request.tools(),
             request.toolChoice());
+    // llama.cpp's count-only endpoint accepts the actual chat-completion body. Do not
+    // approximate its image expansion, flatten tools/history, or issue a zero-token completion.
+    if (protocol
+        == io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol.LLAMA_CPP_INPUT_TOKENS)
+      return counted(
+          model,
+          List.of(wire),
+          request.attribution(),
+          protocol,
+          request.messages().stream().anyMatch(ChatMessage::carriesAnImage));
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("model", model);
     body.put("messages", wire.get("messages"));
@@ -1452,6 +1464,20 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       String model,
       List<Map<String, Object>> bodies,
       io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
+    return counted(
+        model,
+        bodies,
+        owner,
+        io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol.VLLM_TOKENIZE,
+        false);
+  }
+
+  private io.aeyer.plowshare.server.llm.counting.PromptCount counted(
+      String model,
+      List<Map<String, Object>> bodies,
+      io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner,
+      io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol protocol,
+      boolean images) {
     var settings = props.getCounting();
     if (settings.getUrl() == null)
       return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
@@ -1481,10 +1507,13 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
               inputDigests, configurationDigest),
           owner,
           settings,
+          protocol,
           (input, remaining) -> {
             byte[] encoded = mapper.writeValueAsBytes(bodies.get(input));
-            if (encoded.length > 1024 * 1024)
-              throw new java.io.IOException("counter request bound");
+            // Keep the legacy 1 MiB text bound. Native image requests may carry bounded
+            // data URIs, matching the retained prompt's existing image/byte admission.
+            int maxBytes = images ? 32 * 1024 * 1024 : 1024 * 1024;
+            if (encoded.length > maxBytes) throw new java.io.IOException("counter request bound");
             var client =
                 chatHttp
                     .newBuilder()
@@ -1507,15 +1536,23 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
               if (bytes.length > 4 * 1024 * 1024)
                 throw new java.io.IOException("counter response bound");
               JsonNode reply = mapper.readTree(bytes);
+              String countField = protocol.countField();
               if (reply == null
                   || !reply.isObject()
-                  || !reply.path("count").isIntegralNumber()
-                  || !reply.path("count").canConvertToLong()
-                  || reply.path("count").longValue() < 0
-                  || reply.has("model") && !reply.get("model").isTextual())
+                  || !reply.path(countField).isIntegralNumber()
+                  || !reply.path(countField).canConvertToLong()
+                  || reply.path(countField).longValue() < 0
+                  || reply.has("model") && !reply.get("model").isTextual()
+                  || protocol
+                          == io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol
+                              .LLAMA_CPP_INPUT_TOKENS
+                      && (!"response.input_tokens".equals(reply.path("object").asText())
+                          || reply.has("error")
+                          || reply.has("truncated") && !reply.path("truncated").isBoolean()
+                          || reply.path("truncated").asBoolean()))
                 throw new java.io.IOException("counter_invalid_response");
               return new io.aeyer.plowshare.server.llm.counting.VllmPromptCounter.Observation(
-                  reply.get("count").longValue(),
+                  reply.get(countField).longValue(),
                   reply.has("model") ? reply.get("model").textValue() : null);
             }
           });

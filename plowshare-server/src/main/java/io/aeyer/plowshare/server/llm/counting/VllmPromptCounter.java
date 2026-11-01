@@ -11,7 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 
-/** Bounded ephemeral cache. Only a hash of input is retained; no hash is written to accounting. */
+/**
+ * Shared bounded full-prompt counter cache, retaining its existing vLLM owner and lifecycle. Only
+ * input/configuration hashes are retained; no prompt or image bytes enter accounting.
+ */
 public final class VllmPromptCounter {
   @FunctionalInterface
   public interface Exchange {
@@ -64,19 +67,22 @@ public final class VllmPromptCounter {
     configuration = null;
   }
 
+  /** Both protocols share admission, cache bounds, attribution fences and one total deadline. */
   public PromptCount count(
       String pool,
       String model,
       Inputs inputs,
       UsageAttribution owner,
       CountingProperties settings,
+      CountingProperties.ChatProtocol protocol,
       Exchange exchange) {
     long start = System.nanoTime();
     try {
       String fingerprint = inputs.configurationDigest();
       String key =
           digest(
-              mapper.writeValueAsBytes(List.of(fingerprint, pool, model, owner, inputs.digests())));
+              mapper.writeValueAsBytes(
+                  List.of(fingerprint, protocol, pool, model, owner, inputs.digests())));
       synchronized (this) {
         if (!fingerprint.equals(configuration)) {
           cache.clear();
@@ -101,7 +107,7 @@ public final class VllmPromptCounter {
             new PromptCount(
                 count,
                 PromptCount.Basis.MEASURED,
-                "VLLM_TOKENIZE_0_15_1",
+                protocol.source(),
                 pool,
                 model,
                 settings.getRevision(),

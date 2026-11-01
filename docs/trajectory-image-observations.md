@@ -95,7 +95,10 @@ its configured counter counts the complete native image prompt, including image
 encoder/context tokens. This opt-in requires an explicit counting URL and pinned
 `counting.revision`. The request sends the same image parts as generation. A MIME
 profile, PNG geometry or text tokenizer count cannot establish this capability.
-No new deployment backend is selected or enabled by this change.
+The [explicit llama.cpp count-only protocol](model-usage-accounting.md#complete-image-counting-for-llamacpp-and-compatible-lm-studio-deployments)
+reuses that counter and the native generation serializer. LM Studio must actually
+expose the configured endpoint; embedding llama.cpp alone is insufficient.
+No deployment backend is selected or enabled by this change.
 
 Transient reconstruction is bounded to 16 image occurrences and 20 MiB of unique
 retained image bytes per prompt. Repeated addresses reuse their materialized

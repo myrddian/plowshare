@@ -4,7 +4,7 @@ The server reads model sampling profiles at startup, and version 2 profiles may
 also declare native input formats and output combinations. The existing dispatcher
 now enforces these declarations on profiled image calls and explicit internal
 format contracts. See [Decision 0043](decisions/0043-disk-model-media-profiles.md)
-and [routing Decision 0043](decisions/0044-profile-aware-media-routing.md).
+and [routing Decision 0044](decisions/0044-profile-aware-media-routing.md).
 
 ## Load profiles from disk
 
@@ -150,7 +150,9 @@ This matches the configured vendor-prefixed wire name under the existing matchin
 rules. It restricts this deployment profile to the documented LM Studio encoding
 set; it does not add media declarations to every Gemma version. No resource rebuild
 is required. Keep the prefill harness restriction and verified image-aware counter
-gate; installing this profile alone cannot enable screenshot consumption.
+gate; installing this profile alone cannot enable screenshot consumption. See
+[complete native image counting](model-usage-accounting.md#complete-image-counting-for-llamacpp-and-compatible-lm-studio-deployments)
+for the explicit llama.cpp count-only protocol and LM Studio exposure requirements.
 
 ## Routing behavior
 

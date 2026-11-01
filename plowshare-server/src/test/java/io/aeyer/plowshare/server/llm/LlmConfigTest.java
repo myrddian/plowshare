@@ -346,6 +346,30 @@ class LlmConfigTest {
   }
 
   @Test
+  void llama_cpp_count_only_protocol_binds_without_changing_default_text_counting() {
+    runner
+        .withPropertyValues(
+            onePoolPlus(
+                "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+                "plowshare.llm.pools[0].counting.url=http://localhost:1234/proxy/v1/chat/completions/input_tokens",
+                "plowshare.llm.pools[0].counting.revision=fixture-model-projector-template-v1",
+                "plowshare.llm.pools[0].counting.image-tokens-included=true"))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              var counting =
+                  context.getBean(LlmProperties.class).getPools().getFirst().getCounting();
+              assertEquals(
+                  CountingProperties.ChatProtocol.LLAMA_CPP_INPUT_TOKENS,
+                  counting.getChatProtocol());
+              assertTrue(counting.isImageTokensIncluded());
+              assertEquals(
+                  CountingProperties.ChatProtocol.VLLM_TOKENIZE,
+                  new CountingProperties().getChatProtocol());
+            });
+  }
+
+  @Test
   void azure_cloud_bindings_keep_deployment_identity_separate_from_family_capabilities() {
     runner
         .withPropertyValues(
@@ -379,6 +403,23 @@ class LlmConfigTest {
         List.of(
             new String[] {"plowshare.llm.pools[0].counting.url=https://other.example/tokenize"},
             new String[] {"plowshare.llm.pools[0].counting.automatic=true"},
+            new String[] {"plowshare.llm.pools[0].counting.chat-protocol=unknown"},
+            new String[] {"plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens"},
+            new String[] {
+              "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+              "plowshare.llm.pools[0].counting.url=http://localhost:1234/v1/chat/completions",
+              "plowshare.llm.pools[0].counting.revision=fixture-v1"
+            },
+            new String[] {
+              "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+              "plowshare.llm.pools[0].counting.url=http://localhost:1234/v1/chat/completions/input_tokens"
+            },
+            new String[] {
+              "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+              "plowshare.llm.pools[0].counting.url=http://localhost:1234/v1/chat/completions/input_tokens",
+              "plowshare.llm.pools[0].counting.revision=fixture-v1",
+              "plowshare.llm.pools[0].counting.embeddings=true"
+            },
             new String[] {"plowshare.llm.pools[0].counting.cache-ttl=61s"},
             new String[] {
               "plowshare.llm.pools[0].request-style=cloud",
