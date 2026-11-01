@@ -48,7 +48,10 @@ reuse one statement-local authorized selection, including when a cursor page is
 empty. The conversation page shares one narrow revision selection for its distinct
 roots and conversation IDs; source metadata and processing state never rescan the
 revision corpus per row. Inventory recursion shares a narrow child-link snapshot;
-explicit root/subtree reads retain their indexed walk.
+explicit root/subtree reads retain their indexed walk. Inventory SQL omits absent
+root/subtree selectors and exposes the validated 101-row page ceiling to PostgreSQL,
+so generic prepared plans do not mistake an inventory for a tiny subtree or plan
+corpus-wide enrichment.
 
 Call inventory pages do not need a full conversation count. They use ordered call
 candidates with current owner/membership and cycle-safe parent checks, then merge
