@@ -164,6 +164,8 @@ class ContainedRunTest {
     when(identities.containedHome(any(), any())).thenReturn(Home.of(childProject));
     when(principals.issue(any()))
         .thenReturn(new ContainedPrincipals.ContainedPrincipal(childPrincipal, childScope));
+    // The nearest enclosing uncontained home above this child: its container's own project.
+    when(authority.mediatingHome(any())).thenReturn(Home.of("parent"));
     when(runs.start(any(), any())).thenReturn(new Runs.Started("job-1", "worker", "child-conv"));
     // The child's own package, staged where the service derives it from the project name. The
     // agent is a file in it, which is what makes the "undeclared agent" refusal below non-vacuous.
@@ -246,13 +248,27 @@ class ContainedRunTest {
     assertEquals("worker", ask.agent());
     assertEquals("Summarise the notes", ask.task());
     assertEquals(3, ask.maxTurns());
-    // The child is the executor: the harness speaks for it by name, and the caller identity is the
-    // contained principal. The container's own handle appears nowhere on the run.
+    // Two axes, and this asserts both, because they are deliberately different identities.
+    //
+    // ACCOUNT: the container's. A hop keeps the parent's executor and account unchanged, so the
+    // run's caller identity is the container's executor and NOT the contained principal. This
+    // reverses what an earlier draft asserted: the principal is not an authority_accounts subject
+    // and a run whose caller was one would have had to make it one.
+    assertEquals("@service/parent", ask.callerHandle());
+    assertNotEquals(childPrincipal.toString(), ask.callerHandle());
+    // AUTHOR: the child's. The harness speaks for the child by name, which survives into the log
+    // and is what lets a container tell its child's writing from its own now that the account is
+    // shared -- child output being untrusted input to its container.
     assertEquals(Speaker.Kind.HARNESS, ask.speaker().kind());
     assertEquals("contained " + childId, ask.speaker().name());
-    assertEquals(childPrincipal.toString(), ask.callerHandle());
-    assertNotEquals("@service/parent", ask.callerHandle());
     assertFalse(ask.speaker().name().contains("parent"));
+    // WORK AUTHORITY: asked about the nearest enclosing uncontained project, never about the
+    // child's own project name, which carries no role for anybody.
+    assertEquals("parent", ask.workProject());
+    assertNotEquals(childProject, ask.workProject());
+    verify(authority).mediatingHome(any());
+    // The principal is still issued: Tasks 4 and 5 key cancellation and revocation off it.
+    verify(principals).issue(any());
     // And the live authority of the container really was proved, not merely retained.
     verify(authority).require(parentAdmission);
   }
@@ -524,6 +540,50 @@ class ContainedRunTest {
                             "c-child", UUID.randomUUID(), 1, null, List.of(), files())))
             .getMessage());
     assertTrue(work.rolledBack, "a refused hop rolls the child's own creation back");
+  }
+
+  /**
+   * The safety claim {@code Runs.Ask.workProject} rests on, asserted rather than described: no wire
+   * shape can set it.
+   *
+   * <p>The field asks the work question about a project other than the one the run answers from,
+   * which is exactly what a caller would want to forge — prove authority against a project it
+   * holds, then run somewhere else. It is safe because the only populated caller is this service,
+   * which has already proved the admission it derives the value from. Two things keep that true and
+   * both are pinned here: {@code api.RunAgentRequest} (the HTTP body and the frame payload Jackson
+   * binds) has no such component, and the pre-existing {@code Ask} constructor leaves it null, so
+   * every caller that is not this one asks the question it always asked.
+   *
+   * <p>It lives in this class because this task introduced the field; if the run surface grows its
+   * own test for it, move it there.
+   */
+  @Test
+  void noWireShapeCanSupplyTheWorkAuthorityProject() {
+    var wireFields =
+        java.util.Arrays.stream(
+                io.aeyer.plowshare.server.api.RunAgentRequest.class.getRecordComponents())
+            .map(java.lang.reflect.RecordComponent::getName)
+            .toList();
+    assertFalse(wireFields.contains("workProject"), wireFields.toString());
+    // And the body really does carry the fields a run names, so the absence above is a decision
+    // about this one field and not an empty reflection result.
+    assertTrue(wireFields.contains("task"), wireFields.toString());
+    assertTrue(wireFields.contains("project"), wireFields.toString());
+
+    var ordinary =
+        new Runs.Ask(
+            "worker",
+            "do it",
+            "parent",
+            null,
+            null,
+            null,
+            null,
+            List.of(),
+            null,
+            "@service/parent",
+            null);
+    assertNull(ordinary.workProject(), "an ordinary caller asks about the run's own project");
   }
 
   List<File> files() {

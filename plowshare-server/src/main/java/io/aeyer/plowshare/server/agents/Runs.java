@@ -114,6 +114,21 @@ public final class Runs {
    * @param newConversation whether to open a fresh conversation for this first turn
    * @param callerHandle the authenticated account submitting the run, also when the harness speaks
    *     an approval reply on its behalf
+   * @param workProject the project this caller's <em>work authority</em> is proved against, when
+   *     that is not the project the run itself answers from. {@code null} for every ordinary
+   *     caller, which asks the question about the run's own project exactly as before.
+   *     <p>It exists for one case: a run inside a contained Application (ADR 0042). A contained
+   *     project carries no {@code PROJECT} scope and therefore no role for anybody, so asking the
+   *     work question about it answers "no role" whoever asks, while the question that genuinely
+   *     decides a child's work authority is the container's account against the nearest enclosing
+   *     uncontained scope — a child's authority being a projection of its container's. Supplying
+   *     that project here asks the <em>right</em> question through the existing predicate instead
+   *     of widening the predicate.
+   *     <p><strong>Server-side only, and that is what keeps it safe.</strong> {@code
+   *     api.RunAgentRequest} has no such field, so no HTTP body and no frame payload can set it;
+   *     the only caller that supplies one is the contained-run service, which has already proved
+   *     the admission it derives the value from. A wire-settable version of this field would let a
+   *     caller prove work authority against a project it holds and then run somewhere else.
    */
   public record Ask(
       String agent,
@@ -126,11 +141,39 @@ public final class Runs {
       List<String> images,
       Speaker speaker,
       String callerHandle,
-      Boolean newConversation) {
+      Boolean newConversation,
+      String workProject) {
 
     /** Never null, for {@code api.RunAgentRequest}'s own reason. */
     public Ask {
       images = images == null ? List.of() : List.copyOf(images);
+    }
+
+    public Ask(
+        String agent,
+        String task,
+        String project,
+        String session,
+        String conversation,
+        Integer maxTurns,
+        Boolean noTurnCap,
+        List<String> images,
+        Speaker speaker,
+        String callerHandle,
+        Boolean newConversation) {
+      this(
+          agent,
+          task,
+          project,
+          session,
+          conversation,
+          maxTurns,
+          noTurnCap,
+          images,
+          speaker,
+          callerHandle,
+          newConversation,
+          null);
     }
 
     public Ask(
@@ -277,7 +320,11 @@ public final class Runs {
     TurnCap turnCap = RequestedTurnCap.in(ask.maxTurns(), ask.noTurnCap(), "this run");
     if (ask.conversation() == null) {
       Home home = RequestedHome.in(runProject);
-      callers.requireWork(home.project(), ask.callerHandle());
+      // The project the work question is asked about is not always the one the run answers from.
+      // Ask.workProject explains the one case where they differ and why it cannot be set from the
+      // wire; null -- every ordinary caller -- asks about the run's own project as it always has.
+      callers.requireWork(
+          ask.workProject() == null ? home.project() : ask.workProject(), ask.callerHandle());
       if (Boolean.TRUE.equals(ask.newConversation())) {
         if (!ask.images().isEmpty())
           throw new CallerFault("a new conversation cannot carry images; use a standalone run");

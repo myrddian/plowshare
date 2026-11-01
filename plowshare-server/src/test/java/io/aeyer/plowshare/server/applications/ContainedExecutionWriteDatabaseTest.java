@@ -43,34 +43,29 @@ import org.testcontainers.junit.jupiter.*;
  * PostgreSQL's own — a column constraint and a trigger-resolved home — so neither can be made
  * against a mock.
  *
- * <h2>What it found</h2>
+ * <h2>What it found, after the account ruling</h2>
  *
- * <p><strong>The knowledge write path does not work as a child, and this test pins why.</strong>
- * {@code admit} writes {@code owner_handle} from {@code context.account()} and {@code created_by}
- * from {@code (SELECT id FROM authority_accounts WHERE legacy_handle=?)} on the same value, with
- * {@code creator_evidence='authenticated_admission'} alongside. For a bare-UUID principal the first
- * violates a foreign key into {@code admins} and the second resolves NULL, which V157's {@code
- * CHECK ((created_by IS NULL)=(creator_evidence='unknown'))} then refuses. The gate V224 widened is
- * reached and admits; what refuses is the provenance the insert writes afterwards. That is an
- * authority decision about how a credential-less principal is attributed, not a read decision, and
- * it is recorded as a gap for the slice to rule on rather than worked around here.
+ * <p>The ruling is that a contained principal is never an {@code authority_accounts} subject:
+ * anything needing an <strong>account</strong> takes the container's, and anything needing an
+ * <strong>author</strong> records the principal. Measured against PostgreSQL, the knowledge write
+ * path cannot express that split, because {@code InformationContext.account()} is one field serving
+ * both: the destination gate is asked about it and {@code owner_handle} / {@code created_by} are
+ * written from it. The principal passes the gate (V224's arm, scope-bound only) and fails the row's
+ * provenance; the container's account passes the provenance and fails the gate, because a contained
+ * project carries no {@code PROJECT} scope and so no role for anybody. Both halves are asserted
+ * actor by actor, with the container's contributor writing in its own home as the control.
  *
- * <p>There are in fact <strong>two</strong> knowledge refusals and they are different facts. The
- * selection every ordinary caller builds — {@code InformationContext.Selection.project} — sets
- * {@code includeGlobal}, and the widened gate does not admit a contained actor through the global
- * arm, so the write is refused at the destination before a row is attempted. With the global arm
- * off the gate admits, and then the provenance above refuses. A fix has to answer both.
+ * <p>The work-authority question is settled rather than open: the container's account against the
+ * nearest enclosing uncontained scope resolves {@code CONTRIBUTOR}, which is the question {@code
+ * requireOwn} already asks and the one {@code application.child.run} now asks through {@code
+ * Runs.Ask.workProject}. The two questions round one asked both answer nothing and are asserted to
+ * keep answering nothing, since a grant arm keyed on a contained principal would be one more
+ * confinement surface to prove shut.
  *
- * <p><strong>A third gap decides whether a started run can begin at all</strong>, and is asserted
- * here for the same reason: {@code Runs.start} requires a project role for its caller, and {@code
- * authority_project_role} resolves none for a bare-UUID principal. It is the same absence of an
- * {@code authority_accounts} row, met by a different gate.
- *
- * <p><strong>The memory write path does work as a child</strong>, which is the other half of ADR
- * 0042's writable home and was untested in slice two. {@code memories.formed_by} is free text with
- * no foreign key, and V157's {@code memory_knowledge_home} trigger resolves the home from the
- * project, so a memory formed by the principal in the child's own project lands on the child's
- * contained scope and on nothing else.
+ * <p><strong>The memory write works</strong>, which is the other half of ADR 0042's writable home
+ * and was untested in slice two, and it is also where the account ruling's one real hazard is
+ * tested: with the account shared, {@code formed_by} is what lets a container tell its child's
+ * writing from its own. That gets a test rather than an argument.
  */
 @Tag("full-db")
 @Testcontainers
@@ -192,23 +187,23 @@ class ContainedExecutionWriteDatabaseTest {
   }
 
   /**
-   * The carried requirement: a knowledge write through the real Java path, as the child.
+   * The ruled design, measured: a child's knowledge write needs <strong>two different
+   * identities</strong>, and {@code InformationContext} has one field for both.
    *
-   * <p>The control comes first, so neither refusal below can be read as a broken fixture: the
-   * container's own contributor admits a document through the identical call and the identical
-   * repository, and its {@code owner_handle} and {@code created_by} are asserted so that what the
-   * path <em>does</em> write is on the record beside what it cannot.
+   * <p>The rule is that anything needing an account takes the container's and anything needing an
+   * author records the contained principal. {@code admit} derives <em>both</em> from {@code
+   * context.account()} — the destination gate is asked about it, and {@code owner_handle} and
+   * {@code created_by} are written from it — so a single value has to satisfy two requirements that
+   * no one value satisfies. This test is the measurement of that, actor by actor, with the
+   * container's own contributor writing successfully in its own home as the control.
    *
-   * <p>Two distinct refusals follow, and they are different facts. The first is the selection every
-   * ordinary caller presents — {@code InformationContext.Selection.project} sets {@code
-   * includeGlobal} — which the widened gate does not admit for a contained actor, so the write is
-   * refused before any row is attempted. The second is with the global arm off, which the gate does
-   * admit: there the insert's own provenance columns refuse, because a contained principal has no
-   * {@code admins} row for {@code owner_handle} and no {@code authority_accounts} row for {@code
-   * created_by}.
+   * <p>It is not a defect in V224, which is why the gate assertions come first: V224's arm admits
+   * exactly the actor it was built for.
    */
   @Test
-  void theJavaKnowledgeWritePathCannotYetWriteAsAChild() {
+  void aChildsKnowledgeWriteNeedsTwoDifferentIdentities() {
+    // Control: the container's contributor writes in the container's own home, through the
+    // identical call and repository, so every refusal below is measured against a working path.
     var admitted = work.inTransaction(() -> admit(context(HOLDER, "parent"), "notes.md"));
     assertEquals(
         HOLDER,
@@ -216,7 +211,7 @@ class ContainedExecutionWriteDatabaseTest {
             "SELECT owner_handle FROM information_resources WHERE id=?",
             String.class,
             admitted.resource()),
-        "the control writes the caller's own handle as owner_handle");
+        "owner_handle is the caller's own handle, and its FK targets admins");
     assertEquals(
         jdbc.queryForObject(
             "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, HOLDER),
@@ -224,68 +219,130 @@ class ContainedExecutionWriteDatabaseTest {
             "SELECT created_by FROM information_resources WHERE id=?",
             UUID.class,
             admitted.resource()),
-        "and created_by resolved from the same value through authority_accounts");
+        "created_by resolves from the same value through authority_accounts");
 
-    // Finding one: the ordinary selection carries the global arm, and the widened write gate does
-    // not admit a contained actor through it. Asserted on the gate itself first, so the Java
-    // refusal below is located rather than merely observed.
-    assertFalse(
-        jdbc.queryForObject(
-            "SELECT information_lock_destination(?,'project',?,TRUE)",
-            Boolean.class,
-            childPrincipal,
-            childProject),
-        "the global arm stays closed to a contained actor, as V224 intends");
-    assertThrows(
-        io.aeyer.plowshare.server.faults.NotFoundFault.class,
-        () ->
-            work.inTransaction(() -> admit(context(childPrincipal, childProject), "global-arm.md")),
-        "so the selection an ordinary caller builds is refused at the destination gate");
-
-    // Finding two: with the global arm off the gate admits, and the insert's provenance refuses.
+    // AXIS ONE, the gate. Only the contained principal is admitted to the child's home, and only
+    // with the global arm off. That is V224's write arm doing exactly its job.
     assertTrue(
         jdbc.queryForObject(
             "SELECT information_lock_destination(?,'project',?,FALSE)",
             Boolean.class,
             childPrincipal,
             childProject),
-        "the scope-bound destination is admitted, which is what V224 opened");
+        "the principal may land in its own home");
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_lock_destination(?,'project',?,TRUE)",
+            Boolean.class,
+            childPrincipal,
+            childProject),
+        "but not through the global arm, which stays closed to a contained actor");
+    // And the container's account is NOT admitted there, in either arm: a contained project
+    // carries no PROJECT scope, so no role exists in it for anybody. This is the assertion that
+    // makes the split real rather than rhetorical.
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_lock_destination(?,'project',?,FALSE)",
+            Boolean.class,
+            HOLDER,
+            childProject),
+        "the container's own account holds no role in a contained home");
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_lock_destination(?,'project',?,TRUE)",
+            Boolean.class,
+            HOLDER,
+            childProject));
+
+    // AXIS TWO, the provenance. With the container's account the write is refused at the gate,
+    // before any row is attempted.
+    assertThrows(
+        io.aeyer.plowshare.server.faults.NotFoundFault.class,
+        () -> work.inTransaction(() -> admit(scopeBound(HOLDER, childProject), "by-container.md")),
+        "the container's account cannot land a document in its child's home");
+    // With the principal the gate admits and the row's provenance refuses: created_by resolves
+    // NULL because a contained principal has no authority_accounts row (V218), and V157's
+    // CHECK ((created_by IS NULL)=(creator_evidence='unknown')) refuses it beside
+    // 'authenticated_admission'. The owner_handle FK into admins is the second refusal behind it.
     var refused =
         assertThrows(
             DataAccessException.class,
             () ->
                 work.inTransaction(
-                    () -> admit(scopeBound(childPrincipal, childProject), "child-notes.md")));
+                    () -> admit(scopeBound(childPrincipal, childProject), "by-child.md")));
     var cause = refused.getMostSpecificCause().getMessage();
-    // V157's CHECK ((created_by IS NULL)=(creator_evidence='unknown')) on information_resources.
-    // It fires first because PostgreSQL evaluates a CHECK before the foreign key, and the row it
-    // names shows exactly why: created_by is NULL -- the subselect on authority_accounts found no
-    // row for the bare UUID -- while the insert wrote 'authenticated_admission' beside it. The
-    // owner_handle foreign key into admins is the second refusal behind it and is not reached.
     assertTrue(cause.contains("information_resources_check"), cause);
     assertTrue(cause.contains("authenticated_admission"), cause);
-    assertTrue(
-        cause.contains(childPrincipal), "and owner_handle carried the bare principal: " + cause);
+    assertTrue(cause.contains(childPrincipal), "owner_handle carried the bare principal: " + cause);
+
     assertEquals(
         0,
         (int)
             jdbc.queryForObject(
                 "SELECT count(*) FROM information_resources WHERE source_name IN"
-                    + " ('child-notes.md','global-arm.md')",
+                    + " ('by-child.md','by-container.md')",
                 Integer.class),
         "and nothing half-written survives either refusal");
   }
 
   /**
-   * The other carried requirement, and the half that works: a child forms a memory in its own home.
-   * {@code memories} has no actor-keyed SQL gate, so what is asserted is the home the shipped
-   * trigger resolves — the child's contained scope, from the child's own project, with the
-   * principal recorded as the former.
+   * The ruled replacement for the question I asked in round one. A contained principal holds no
+   * project role and must not be given one; the question that decides a child's work authority is
+   * the container's account against the <strong>nearest enclosing uncontained scope</strong>, which
+   * is the rule {@code requireOwn} already applies. Asserted here against real grants, because the
+   * whole point is that this question resolves where the other one could not.
+   */
+  @Test
+  void aChildsWorkAuthorityResolvesOnTheNearestEnclosingUncontainedScope() {
+    // The question that decides it, and it resolves.
+    assertEquals(
+        "CONTRIBUTOR",
+        jdbc.queryForObject("SELECT authority_project_role('parent',?)", String.class, HOLDER),
+        "the container's account against the enclosing uncontained scope");
+    // The two questions round one asked, both of which answer nothing -- and must keep answering
+    // nothing, because a grant arm keyed on a contained principal would be one more confinement
+    // surface to prove shut.
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT authority_project_role(?,?)", String.class, childProject, childPrincipal),
+        "a contained principal holds no project role, by design");
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT authority_project_role(?,?)", String.class, childProject, HOLDER),
+        "and neither does its container IN the contained project: there is no PROJECT scope there");
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT service_project_role(?,?)", String.class, childProject, childPrincipal));
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM authority_accounts WHERE legacy_handle=?",
+                Integer.class,
+                childPrincipal),
+        "V218 is unchanged: no authority account is created for a contained principal");
+    // The enclosing scope really is uncontained, which is what makes the first question askable:
+    // a project-keyed role question needs a PROJECT scope, and only this one has it.
+    assertEquals(
+        "PROJECT",
+        jdbc.queryForObject(
+            "SELECT kind FROM authority_scopes WHERE id=?", String.class, parentScope));
+    assertEquals(
+        "CONTAINED",
+        jdbc.queryForObject(
+            "SELECT kind FROM authority_scopes WHERE id=?", String.class, childScope));
+  }
+
+  /**
+   * The other carried requirement, and the half that works: a child forms a memory in its own home,
+   * through the real {@code MemoryStore}. {@code memories} has no actor-keyed SQL gate, so what is
+   * asserted is the home the shipped trigger resolves — the child's contained scope, from the
+   * child's own project — and the author the row keeps.
    */
   @Test
   void aChildWritesAMemoryInItsOwnHome() {
     String id = "mem-" + UUID.randomUUID();
-    memories.save(memory(id, Home.of(childProject)));
+    memories.save(memory(id, Home.of(childProject), childPrincipal));
 
     assertEquals(
         childScope,
@@ -302,11 +359,11 @@ class ContainedExecutionWriteDatabaseTest {
             String.class,
             id));
 
-    // Control: the same store, the same former, a memory in the container's project lands on the
-    // container's scope — so the assertion above is about the home the trigger chose and not about
+    // Control: the same store and the same call, writing into the container's project, lands on
+    // the container's scope -- so the assertion above is about the home the trigger chose and not
     // the only home it could have chosen.
     String outside = "mem-" + UUID.randomUUID();
-    memories.save(memory(outside, Home.of("parent")));
+    memories.save(memory(outside, Home.of("parent"), HOLDER));
     assertEquals(
         parentScope,
         jdbc.queryForObject("SELECT home_scope_id FROM memories WHERE id=?", UUID.class, outside));
@@ -314,48 +371,81 @@ class ContainedExecutionWriteDatabaseTest {
   }
 
   /**
-   * The third gap this slice has to rule on, and the one that decides whether a started run can
-   * actually begin: {@code Runs.start} calls {@code CallerAccess.requireWork(project, handle)},
-   * which resolves a project role for the caller. For a contained principal there is none, because
-   * {@code authority_project_role} (V156) joins {@code authority_accounts} on {@code legacy_handle}
-   * and a bare UUID has no row there — the same absence that refuses the knowledge write's {@code
-   * created_by} above.
+   * The hard requirement that comes with sharing the account: a container must be able to tell its
+   * child's writing from its own.
    *
-   * <p>Asserted here rather than described, with the container's own contributor as the control, so
-   * that the gap is evidence and not a reading of Java source. {@code application.child.run}
-   * decides everything up to the start; what the live run service then does with this caller is
-   * this fact.
+   * <p>This is not a nicety. Child output is untrusted input to its container and a
+   * prompt-injection surface by construction, so a container that read its child's words back and
+   * saw itself as their author could compose them as its own writing. With the <em>account</em>
+   * axis now the container's by ruling, the <em>author</em> axis is the only thing that carries the
+   * distinction, and for memory that is {@code formed_by} — the existing mechanism, not a new one.
+   *
+   * <p>Both rows below are reachable by the same container through the same store. The assertions
+   * are the two fields that differ, named explicitly so a later change that collapses either one
+   * has to delete this test to do it: {@code formed_by} (the author) and {@code home_scope_id} (the
+   * home, which a container's own writing never carries).
    */
   @Test
-  void aContainedPrincipalResolvesNoProjectRoleForItsOwnHome() {
+  void aContainerCanTellItsChildsWritingFromItsOwn() {
+    String mine = "mem-" + UUID.randomUUID();
+    String childs = "mem-" + UUID.randomUUID();
+    memories.save(memory(mine, Home.of("parent"), HOLDER));
+    memories.save(memory(childs, Home.of(childProject), childPrincipal));
+
+    // THE AUTHOR FIELD: formed_by. The child's row names the contained principal; the container's
+    // names the container's account. They are never the same string.
     assertEquals(
-        "CONTRIBUTOR",
-        jdbc.queryForObject("SELECT authority_project_role('parent',?)", String.class, HOLDER),
-        "control: an ordinary member does resolve a role, so the null below is not a dead fixture");
-    assertNull(
-        jdbc.queryForObject(
-            "SELECT authority_project_role(?,?)", String.class, childProject, childPrincipal),
-        "a contained principal holds no project role in its own home");
-    assertNull(
-        jdbc.queryForObject(
-            "SELECT service_project_role(?,?)", String.class, childProject, childPrincipal),
-        "and none as a service token either: its identifier is not an @service/ handle");
+        HOLDER,
+        jdbc.queryForObject("SELECT formed_by FROM memories WHERE id=?", String.class, mine));
+    assertEquals(
+        childPrincipal,
+        jdbc.queryForObject("SELECT formed_by FROM memories WHERE id=?", String.class, childs));
+    assertNotEquals(
+        jdbc.queryForObject("SELECT formed_by FROM memories WHERE id=?", String.class, mine),
+        jdbc.queryForObject("SELECT formed_by FROM memories WHERE id=?", String.class, childs),
+        "the author distinguishes the two, which is what keeps child output identifiable");
+    // And the principal is a value no account can impersonate by holding it: it is not a handle in
+    // admins and not a legacy_handle in authority_accounts, so nothing can sign in as it.
     assertEquals(
         0,
         (int)
             jdbc.queryForObject(
-                "SELECT count(*) FROM authority_accounts WHERE legacy_handle=?",
-                Integer.class,
-                childPrincipal),
-        "because it has no authority account at all, which is V218's design");
+                "SELECT count(*) FROM admins WHERE handle=?", Integer.class, childPrincipal));
+
+    // THE HOME FIELD: home_scope_id. A second, structural distinction that the trigger enforces
+    // rather than the writer choosing, so it holds even for a writer that lies about its author.
+    assertEquals(
+        parentScope,
+        jdbc.queryForObject("SELECT home_scope_id FROM memories WHERE id=?", UUID.class, mine));
+    assertEquals(
+        childScope,
+        jdbc.queryForObject("SELECT home_scope_id FROM memories WHERE id=?", UUID.class, childs));
+    assertEquals(
+        "CONTAINED",
+        jdbc.queryForObject(
+            "SELECT s.kind FROM memories m JOIN authority_scopes s ON s.id=m.home_scope_id"
+                + " WHERE m.id=?",
+            String.class,
+            childs),
+        "a container's own writing never lands on a CONTAINED scope");
+
+    // The negative control that makes this a distinction and not a coincidence: a row claiming the
+    // child's home while the writer names the container's project is refused the child's scope --
+    // the trigger resolves the home from the project and does not take the writer's word for it.
+    String confused = "mem-" + UUID.randomUUID();
+    memories.save(memory(confused, Home.of("parent"), childPrincipal));
+    assertEquals(
+        parentScope,
+        jdbc.queryForObject("SELECT home_scope_id FROM memories WHERE id=?", UUID.class, confused),
+        "the home follows the project, so an author string cannot move a row into a child's home");
   }
 
-  private Memory memory(String id, Home home) {
+  private Memory memory(String id, Home home, String formedBy) {
     return new Memory(
         id,
         "what the child learned",
         "deployment",
-        new Provenance(Instant.now(), childPrincipal, "contained run"),
+        new Provenance(Instant.now(), formedBy, "contained run"),
         MemoryState.ACTIVE,
         false,
         0,

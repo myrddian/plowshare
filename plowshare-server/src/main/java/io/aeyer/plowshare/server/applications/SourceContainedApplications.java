@@ -333,6 +333,24 @@ public final class SourceContainedApplications implements ContainedApplications 
    * idempotently — it already exists for any child created by this service, and issuing is how its
    * identifier is read back rather than a second source of it — and everything the run itself
    * persists is {@link Runs}' own.
+   *
+   * <p><strong>The account is the container's and the author is the child's.</strong> A hop keeps
+   * the parent's executor and account unchanged, so the run's caller identity, its work authority
+   * and its accounting account are all the container's; the contained principal is never made an
+   * {@code authority_accounts} subject and is recorded as the <em>author</em> instead, through
+   * {@link Speaker#contained}. A container must be able to tell its child's writing from its own,
+   * because child output is untrusted input to it, and with the account shared the author is what
+   * carries that.
+   *
+   * <p><strong>Known gate, and it is not this method's.</strong> {@link Runs} reaches {@code
+   * ConversationStore}, which resolves a run's home to a scope through {@code
+   * OperationAuthority.scope(Home)} for both of its doors — {@code open} for a fresh conversation
+   * and {@code log} for a submission. That resolution refuses a contained project by design ({@code
+   * JdbcIdentityRepository} maps a {@code CONTAINED} row to a refusal), and {@code admit} refuses a
+   * contained scope as a target besides, correctly: a contained admission comes into being only
+   * through {@code contain}. So a live contained run is still refused below this method, at a gate
+   * whose opening is an authority decision rather than a defect here. The decision above it is
+   * complete and tested; see the task report.
    */
   @Override
   public Running run(String account, Run request) {
@@ -360,11 +378,28 @@ public final class SourceContainedApplications implements ContainedApplications 
     // such field. The general scope read refuses a CONTAINED row by design, so this is the one read
     // that can answer, and it binds the scope, the kind, the container and the project together.
     Home home = identities.containedHome(scope, retained.container());
+    // The work question, asked where a child's work authority actually lives. A contained project
+    // carries no PROJECT scope and so no role for anybody, so asking about the child's own project
+    // name answers "no role" whoever asks; the deciding question is the container's account against
+    // the nearest enclosing uncontained scope, which is the same question the hop answered.
+    Home mediating = authority.mediatingHome(scope);
     String agent = declared(retained, request.agent());
-    // The executor is the child, not its container: the caller identity is the child's own
-    // ephemeral principal and the speaker is the harness naming the child, which is the documented
-    // idiom beside "orchestration <id>" and "approval <id>". The container's handle reaches the run
-    // nowhere.
+    // Two axes, and they are deliberately different identities.
+    //
+    // ACCOUNT: the container's. A hop keeps the parent's executor and account unchanged, and a
+    // child's authority is a projection of its container's, so everything that needs an account --
+    // the work check above, the run's caller identity, and the accounting account -- takes the
+    // container's. That is also what keeps ADR 0025's immutable attribution and its rule that
+    // delegation cannot change the accounting account intact: nothing here invents a second
+    // accounting subject.
+    //
+    // AUTHOR: the contained principal's. It is not an authority_accounts subject and never becomes
+    // one -- V218 is unchanged and nothing here creates a row for it -- so what it is recorded as
+    // is the provenance of the work: Speaker.contained(child) travels into the log as the
+    // utterance's speaker and survives the write. That distinction is load-bearing rather than
+    // cosmetic: child output is untrusted input to its container, so a container reading work back
+    // must be able to tell its child's writing from its own, and with the account now shared the
+    // author field is the only thing that says so.
     var principal = principals.issue(scope);
     var started =
         runs.start(
@@ -378,9 +413,14 @@ public final class SourceContainedApplications implements ContainedApplications 
                 null,
                 List.of(),
                 Speaker.contained(retained.id()),
-                principal.id().toString(),
-                true),
+                parent.admission().executor(),
+                true,
+                mediating.project()),
             NO_PICTURES);
+    // Issued, and deliberately not passed as the caller: see the two axes above. Reading it back
+    // here is what proves the principal exists for a child this operation is about to start, which
+    // Tasks 4 and 5 key cancellation and revocation off.
+    Objects.requireNonNull(principal.id(), "a started child has its own principal");
     return new Running(retained.id(), started.id(), started.conversation(), started.agent());
   }
 
