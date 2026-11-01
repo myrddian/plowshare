@@ -102,6 +102,15 @@ public final class FrameTypes {
   /** A child's source resources as metadata, to an ancestor only; never file content. */
   public static final String APPLICATION_CHILD_RESOURCES = "application.child.resources";
 
+  /**
+   * Starting work inside a child, as that child. Behind the <em>direct container</em> rule {@code
+   * create} and {@code ceiling} use rather than the ancestor gate the two reads use, because
+   * starting work spends the child's allowance and occupies its direct container's breadth
+   * accounting. It answers {@code ACCEPTED} with a job handle, for {@code agent.run}'s reason: a
+   * run is minutes, and {@code OK} would tell a client its work had finished.
+   */
+  public static final String APPLICATION_CHILD_RUN = "application.child.run";
+
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";

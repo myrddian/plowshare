@@ -96,7 +96,17 @@ class ContainedRecoveryTest {
     config = new ContainmentConfig(root.toString(), 2, 4, null);
     service =
         new SourceContainedApplications(
-            records, projects, validator, authority, principals, allowances, work, config, staging);
+            records,
+            projects,
+            validator,
+            authority,
+            mock(io.aeyer.plowshare.server.access.IdentityRepository.class),
+            principals,
+            allowances,
+            work,
+            config,
+            staging,
+            mock(io.aeyer.plowshare.server.agents.Runs.class));
     // Duration.ZERO grace in the tests that are not about the grace, so every other assertion is
     // about what the sweep decides rather than about a clock.
     collector = new ContainedSourceCollector(records, work, config, staging, Duration.ZERO);

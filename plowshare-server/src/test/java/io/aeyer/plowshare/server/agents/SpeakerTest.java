@@ -16,6 +16,16 @@ class SpeakerTest {
     assertEquals("orchestration orc_1", Speaker.orchestration("orc_1").name());
     assertEquals("approval apr_1", Speaker.approval("apr_1").name());
     assertEquals("event nightly", Speaker.event("nightly").name());
+    var child = java.util.UUID.randomUUID();
+    assertEquals("contained " + child, Speaker.contained(child).name());
+    assertEquals(Speaker.Kind.HARNESS, Speaker.contained(child).kind());
+    // No third kind: a contained run is the harness with its own source, read back as one.
+    assertEquals(
+        Speaker.contained(child),
+        Speaker.read(EntryKind.UTTERANCE, "harness", "contained " + child));
+    // NullPointerException, as Speaker.relay and Speaker.orchestration refuse a null id: the
+    // source is required, and a missing one is a programming error rather than a caller's input.
+    assertThrows(NullPointerException.class, () -> Speaker.contained(null));
     assertEquals("harness", Speaker.harness().name());
     assertEquals("harness", Speaker.harness().kind().wireName());
     assertEquals("person", Speaker.person("enzo").kind().wireName());

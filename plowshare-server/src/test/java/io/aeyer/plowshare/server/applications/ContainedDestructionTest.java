@@ -174,11 +174,13 @@ class ContainedDestructionTest {
             projects,
             validator,
             authority,
+            mock(io.aeyer.plowshare.server.access.IdentityRepository.class),
             principals,
             allowances,
             work,
             new ContainmentConfig(root.toString(), 3, 4, null),
-            new InProcessContainedStaging());
+            new InProcessContainedStaging(),
+            mock(io.aeyer.plowshare.server.agents.Runs.class));
   }
 
   /** A retained child whose staged source really exists under the containment root. */
@@ -257,11 +259,13 @@ class ContainedDestructionTest {
         projects,
         validator,
         authority,
+        mock(io.aeyer.plowshare.server.access.IdentityRepository.class),
         principals,
         allowances,
         unit,
         new ContainmentConfig(root.toString(), 3, 4, null),
-        claims);
+        claims,
+        mock(io.aeyer.plowshare.server.agents.Runs.class));
   }
 
   ContainedApplications.Create creation() {

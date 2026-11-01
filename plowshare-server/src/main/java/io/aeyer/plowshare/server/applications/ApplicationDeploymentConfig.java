@@ -131,6 +131,11 @@ public class ApplicationDeploymentConfig {
    * is no collaborator here through which either could be made. {@code ContainmentConfig} is
    * optional for the same reason its bounds are — a server that has not configured nesting is a
    * normal server, and it then refuses every creation rather than defaulting a root.
+   *
+   * <p>{@code IdentityRepository} is held for {@code containedHome} alone, which resolves the
+   * stored containment row rather than performing the general scope read that refuses a {@code
+   * CONTAINED} scope; {@code Runs} is the owning API for starting one agent on one task, reused so
+   * that a contained run is not a second submission path with its own order of refusals.
    */
   @Bean
   public ContainedApplications containedApplications(
@@ -138,20 +143,24 @@ public class ApplicationDeploymentConfig {
       ProjectWorkspaces projects,
       ApplicationPackageValidator validator,
       io.aeyer.plowshare.server.access.OperationAuthority authority,
+      io.aeyer.plowshare.server.access.IdentityRepository identities,
       ContainedPrincipals principals,
       io.aeyer.plowshare.server.allowances.AllowanceRepository allowances,
       UnitOfWork work,
       ContainedStaging staging,
-      ObjectProvider<ContainmentConfig> containment) {
+      ObjectProvider<ContainmentConfig> containment,
+      io.aeyer.plowshare.server.agents.Runs runs) {
     return new SourceContainedApplications(
         records,
         projects,
         validator,
         authority,
+        identities,
         principals,
         allowances,
         work,
         containment.getIfAvailable(ContainmentConfig::absent),
-        staging);
+        staging,
+        runs);
   }
 }

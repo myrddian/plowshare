@@ -105,6 +105,7 @@ class ContainedResourceReadTest {
         mock(ProjectWorkspaces.class),
         mock(ApplicationPackageValidator.class),
         authority,
+        mock(io.aeyer.plowshare.server.access.IdentityRepository.class),
         mock(ContainedPrincipals.class),
         mock(AllowanceRepository.class),
         new UnitOfWork() {
@@ -114,7 +115,8 @@ class ContainedResourceReadTest {
           }
         },
         config,
-        new InProcessContainedStaging());
+        new InProcessContainedStaging(),
+        mock(io.aeyer.plowshare.server.agents.Runs.class));
   }
 
   @BeforeEach

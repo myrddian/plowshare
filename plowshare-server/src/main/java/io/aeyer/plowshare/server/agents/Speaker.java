@@ -10,7 +10,8 @@ import java.util.Objects;
  *
  * @param kind who
  * @param name the person's handle, or null when nobody knows it; for the harness, its source —
- *     {@code orchestration <id>}, {@code approval <id>}, {@code event <id>} or {@code harness}
+ *     {@code orchestration <id>}, {@code approval <id>}, {@code event <id>}, {@code contained
+ *     <uuid>} or {@code harness}
  */
 public record Speaker(Kind kind, String name) {
 
@@ -77,6 +78,19 @@ public record Speaker(Kind kind, String name) {
   /** An approval's question or answer, spoken to a run. */
   public static Speaker approval(String approval) {
     return new Speaker(Kind.HARNESS, "approval " + Objects.requireNonNull(approval, "approval"));
+  }
+
+  /**
+   * Work a container started inside one contained Application (ADR 0042), spoken as that child.
+   *
+   * <p>Deliberately a named factory and not a general {@code harness(String)}: a free-form source
+   * would let a caller spell {@code "orchestration orc_1"} and have a contained child's turn read
+   * back as an orchestration's delivery. {@link Kind} is untouched — a third kind would change a
+   * shipped wire enum across five SDKs — so what identifies a contained run is the source alone,
+   * exactly as it is for an orchestration, an approval and an event.
+   */
+  public static Speaker contained(java.util.UUID child) {
+    return new Speaker(Kind.HARNESS, "contained " + Objects.requireNonNull(child, "child"));
   }
 
   /** An event trigger's task. */

@@ -43,6 +43,9 @@ class ContainedVisibilityTest {
   ApplicationPackageValidator validator = mock(ApplicationPackageValidator.class);
   OperationAuthority authority = mock(OperationAuthority.class);
   ContainedPrincipals principals = mock(ContainedPrincipals.class);
+  io.aeyer.plowshare.server.access.IdentityRepository identities =
+      mock(io.aeyer.plowshare.server.access.IdentityRepository.class);
+  io.aeyer.plowshare.server.agents.Runs runs = mock(io.aeyer.plowshare.server.agents.Runs.class);
   AllowanceRepository allowances = mock(AllowanceRepository.class);
 
   AccountId account = new AccountId(UUID.randomUUID());
@@ -108,6 +111,7 @@ class ContainedVisibilityTest {
             projects,
             validator,
             authority,
+            identities,
             principals,
             allowances,
             new UnitOfWork() {
@@ -117,7 +121,8 @@ class ContainedVisibilityTest {
               }
             },
             new ContainmentConfig(root.toString(), 3, 4, null),
-            new InProcessContainedStaging());
+            new InProcessContainedStaging(),
+            runs);
   }
 
   @Test
@@ -306,14 +311,25 @@ class ContainedVisibilityTest {
   // can, and does, in
   // ContainedKnowledgeBoundaryDatabaseTest.aChildWritesKnowledgeInsideItsOwnHome.
 
-  /** Still no collaborator through which either read could resolve a scope. */
+  /**
+   * Neither read resolves a scope, which since {@code run} arrived is a statement about behaviour
+   * rather than about the constructor: the class does hold an {@code IdentityRepository} now, used
+   * by {@code run} for {@code containedHome} alone. Both reads leave it untouched, so neither
+   * depends on the general scope read that refuses a contained row.
+   */
   @Test
-  void theReadingPathHoldsNoIdentityCollaborator() {
-    var held =
-        java.util.Arrays.stream(SourceContainedApplications.class.getConstructors())
-            .flatMap(one -> java.util.Arrays.stream(one.getParameterTypes()))
-            .map(Class::getSimpleName)
-            .collect(java.util.stream.Collectors.toSet());
-    assertFalse(held.contains("IdentityRepository"), held.toString());
+  void neitherReadResolvesAScopeThroughAnIdentityCollaborator() {
+    var parent = conversation("c-parent", parentScope, "parent");
+    var first = child(firstScope, parentScope);
+    when(records.find(first.id())).thenReturn(Optional.of(first));
+    when(records.children(parentScope)).thenReturn(List.of(first));
+    when(authority.conversationsIn(firstScope)).thenReturn(List.of());
+
+    assertEquals(1, service.list("@service/parent", "c-parent").size());
+    assertEquals(0, service.trajectory("@service/parent", "c-parent", first.id()).size());
+    assertNotNull(parent);
+
+    verifyNoInteractions(identities);
+    verifyNoInteractions(runs);
   }
 }
