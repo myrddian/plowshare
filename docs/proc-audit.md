@@ -45,7 +45,21 @@ starting its next periodic read. Slow reads do not accumulate timer catch-up wor
 Overlapping inspections share only an in-flight request for the exact same
 selection; later requests reauthorize independently. Conversation counts and pages
 reuse one statement-local authorized selection, including when a cursor page is
-empty. Every server request still checks account and fleet authority, and shared
+empty. The conversation page shares one narrow revision selection for its distinct
+roots and conversation IDs; source metadata and processing state never rescan the
+revision corpus per row. Inventory recursion shares a narrow child-link snapshot;
+explicit root/subtree reads retain their indexed walk.
+
+Call inventory pages do not need a full conversation count. They use ordered call
+candidates with current owner/membership and cycle-safe parent checks, then merge
+bounded attributed and orphan branches. Explicit root/subtree selectors use the
+indexed subtree instead. Cursor-bearing call pages select authorized conversations
+once and seek their direct call index, preserving arbitrary text cursor semantics
+without walking the entire UUID call index past off-cursor rows. Recorded accounting roots never authorize a call; the
+current conversation root controls archive visibility. Attempts are hydrated only
+for the authorized page and keep their independent per-call cap.
+
+Every server request still checks account and fleet authority, and shared
 read admission bounds work across clients and sockets. It labels a
 failed read stale/unavailable and says current activity is unknown. Changing
 selection or account discards old responses. Closing any audit view stops only
