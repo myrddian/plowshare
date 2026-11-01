@@ -62,9 +62,13 @@ public final class ApplicationProjectMembers implements ProjectMembers {
         io.aeyer.plowshare.server.auth.ServiceCredentials.principal(handle)
             ? stored.authorityAccount(handle).orElse(null)
             : handle;
-    return applications
-        .read(project)
-        .limit(account, lineage.projectRole(project, account, stored.role(project, handle)));
+    return limit(project, account, stored.role(project, handle));
+  }
+
+  private Optional<ProjectRole> limit(
+      String project, String account, Optional<ProjectRole> ceiling) {
+    var boundary = applications.read(project);
+    return boundary.limit(account, lineage.projectRole(project, account, ceiling, boundary));
   }
 
   @Override
@@ -81,9 +85,7 @@ public final class ApplicationProjectMembers implements ProjectMembers {
     var result = new java.util.LinkedHashMap<String, ProjectRole>();
     storedRoles.forEach(
         (project, role) ->
-            applications
-                .read(project)
-                .limit(account, lineage.projectRole(project, account, Optional.of(role)))
+            limit(project, account, Optional.of(role))
                 .ifPresent(value -> result.put(project, value)));
     return java.util.Map.copyOf(result);
   }
@@ -111,14 +113,7 @@ public final class ApplicationProjectMembers implements ProjectMembers {
     // filesystem and lineage decisions deliberately remain per project; no authorization is cached.
     return selection.projects().stream()
         .filter(admitted::contains)
-        .filter(
-            project ->
-                applications
-                    .read(project)
-                    .limit(
-                        account,
-                        lineage.projectRole(project, account, Optional.of(ProjectRole.VIEWER)))
-                    .isPresent())
+        .filter(project -> limit(project, account, Optional.of(ProjectRole.VIEWER)).isPresent())
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 

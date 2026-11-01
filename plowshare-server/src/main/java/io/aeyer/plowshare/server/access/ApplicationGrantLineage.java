@@ -46,10 +46,30 @@ public final class ApplicationGrantLineage implements GrantLineage {
   public Optional<ProjectRole> projectRole(
       String project, String account, Optional<ProjectRole> ceiling) {
     if (ceiling.isEmpty() || ClientProjects.privateProject(project)) return ceiling;
+    return projectRole(project, account, ceiling, new java.util.HashMap<>());
+  }
+
+  @Override
+  public Optional<ProjectRole> projectRole(
+      String project,
+      String account,
+      Optional<ProjectRole> ceiling,
+      ApplicationPolicy.Boundary boundary) {
+    java.util.Objects.requireNonNull(boundary);
+    if (ceiling.isEmpty() || ClientProjects.privateProject(project)) return ceiling;
+    var policies = new java.util.HashMap<String, ApplicationPolicy.Boundary>();
+    policies.put(project, boundary);
+    return projectRole(project, account, ceiling, policies);
+  }
+
+  private Optional<ProjectRole> projectRole(
+      String project,
+      String account,
+      Optional<ProjectRole> ceiling,
+      java.util.Map<String, ApplicationPolicy.Boundary> policies) {
     Optional<ProjectRole> result = Optional.empty();
     // One current database statement supplies the live bindings and all ancestor facts. Filesystem
     // manifests are read once per project within this invocation, never retained as an allow lease.
-    var policies = new java.util.HashMap<String, ApplicationPolicy.Boundary>();
     for (var chain : grants.projectLineages(project, account)) {
       if (chain.isEmpty()) continue;
       var grant = chain.getFirst();

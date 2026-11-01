@@ -26,6 +26,26 @@ against the total database capacity when running multiple server processes.
 | `subscriptions` / `subscriptions-per-principal` | 512 / 32 | Usage subscriptions across sockets |
 
 Environment overrides use `PLOWSHARE_READ_CAPACITY_` plus the property in upper snake case.
+
+Socket session checks have a separate bounded intake before any session SQL, shared by event and
+file sockets and their execution/disclosure fences. `plowshare.socket-sessions.pending` (256)
+and `pending-per-principal` (32) include queued and physically executing checks. One physical
+reader gathers up to `batch` (128) checks for at most `gather-millis` (2), then queries distinct
+account/session versions together. `wait-millis` (2000, maximum 5000) bounds callers' wait.
+Queueing owns no database connection; the existing database throttle still bounds the reader.
+Excess checks fail unavailable before SQL. Timeout does not release a still-running database
+check's admission. A failed/partial scheduled sweep never treats unchecked sockets as revoked.
+
+Only checks admitted before a database batch begins may share its result. Later checks wait for
+a new statement; completed allow decisions are not cached. Session revocation therefore still
+applies to an already connected socket, queued work and physical disclosure. No payload-selected
+account or socket identity can choose the principal budget. A shutdown rejects queued and
+in-flight results rather than publishing an allow after the lane closes.
+
+`plowshare.socket.sessions.pending`, `.rejected`, `.timed.out` and `.batches` expose bounded
+admission and physical-query counts without principal labels. Configure each server's bounds
+against shared database capacity; the queue is not a fleet-wide limiter.
+
 Each per-principal limit must be positive and no greater than its process limit. These are
 initial configurable defaults, not a measured fleet capacity promise. Work leases settle on
 physical completion; asynchronous routing retains a lease until its handler completes.
