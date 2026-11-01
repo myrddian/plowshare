@@ -53,11 +53,17 @@ public final class JdbcProcRepository implements ProcRepository {
   // snapshot across recursion levels instead of rescanning roots and wide conversation rows at
   // each level. Targeted reads keep TREE's indexed subtree walk and do not load unrelated links.
   private static final String INVENTORY_TREE =
-      TREE.replace(
-              "WITH RECURSIVE tree",
-              "WITH RECURSIVE edges AS MATERIALIZED (SELECT id,parent_id FROM conversations"
-                  + " WHERE parent_id IS NOT NULL), tree")
-          .replace("FROM conversations c JOIN tree t", "FROM edges c JOIN tree t");
+      """
+      WITH RECURSIVE edges AS MATERIALIZED (
+        SELECT id,parent_id FROM conversations WHERE parent_id IS NOT NULL
+      ), tree(id,root,lifecycle,ancestors) AS (
+        SELECT id,id,lifecycle,ARRAY[]::text[] FROM conversations WHERE parent_id IS NULL
+        UNION ALL
+        SELECT c.id,t.root,t.lifecycle,t.ancestors || t.id
+        FROM edges c JOIN tree t ON c.parent_id=t.id
+        WHERE NOT c.id=ANY(t.ancestors)
+      )
+      """;
 
   private static final String JOIN =
       " FROM tree t JOIN conversations c ON c.id=t.id LEFT JOIN projects p ON p.id=c.project_id ";
@@ -83,6 +89,17 @@ public final class JdbcProcRepository implements ProcRepository {
           .replace(":conversation IS NULL", "CAST(:conversation AS text) IS NULL")
           .replace(":root IS NULL", "CAST(:root AS text) IS NULL")
           .replace(":causation IS NULL", "CAST(:causation AS text) IS NULL");
+
+  // These selectors are absent only on the inventory path selected by conversations(). Keeping
+  // nullable root/subtree predicates in that SQL makes a generic prepared plan estimate a tiny
+  // subtree, then perform one conversation/project lookup per retained row at runtime. This
+  // specialization removes no account, membership, lifecycle, project or causation restriction.
+  private static final String INVENTORY_WHERE =
+      WHERE
+          .replace(
+              "AND (CAST(:conversation AS text) IS NULL OR c.id=:conversation OR :conversation=ANY(t.ancestors))",
+              "")
+          .replace("AND (CAST(:root AS text) IS NULL OR t.root=:root)", "");
 
   private static final String ACTIVE =
       "(c.id IN (:live) OR EXISTS(SELECT 1 FROM inference_calls ic"
@@ -161,15 +178,20 @@ public final class JdbcProcRepository implements ProcRepository {
   }
 
   static String conversationPageSql(boolean active, boolean targeted) {
-    String filter = WHERE + (active ? " AND " + ACTIVE : "");
+    String filter = (targeted ? WHERE : INVENTORY_WHERE) + (active ? " AND " + ACTIVE : "");
     return (targeted ? TREE : INVENTORY_TREE)
         + ", authorized AS MATERIALIZED (SELECT c.id,t.root AS audit_root,t.lifecycle AS audit_lifecycle,p.name AS audit_project"
         + JOIN
         + " WHERE "
         + filter
         + "), totals AS (SELECT count(*) AS audit_total FROM authorized)"
-        + ", page_selection AS MATERIALIZED (SELECT * FROM authorized"
-        + " WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT :limit)"
+        // A bound parameter alone gives a generic plan no page-size ceiling. Expose the
+        // validated maximum before its dynamic limit so enrichment never plans a corpus-sized
+        // page. The final limit/order retains the exact requested page and cursor semantics.
+        + ", page_selection AS MATERIALIZED (SELECT * FROM (SELECT * FROM authorized"
+        + " WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT "
+        + (ProcQuery.MAX_LIMIT + 1)
+        + ") bounded ORDER BY id LIMIT :limit)"
         + ", page AS MATERIALIZED (SELECT c.*,a.audit_root,a.audit_lifecycle,a.audit_project"
         + " FROM page_selection a JOIN conversations c ON c.id=a.id)"
         + """

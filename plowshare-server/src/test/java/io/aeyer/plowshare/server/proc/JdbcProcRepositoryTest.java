@@ -216,6 +216,95 @@ class JdbcProcRepositoryTest {
     assertEquals("alice", first.conversations().getFirst().owner());
   }
 
+  @Test
+  void genericInventoryPlanSharesConversationFactsAndKeepsPageEstimatesBounded() throws Exception {
+    jdbc.update(
+        "INSERT INTO conversations(id,owner_handle,created_at,origin,budget_total,budget_spent) SELECT 'generic-'||n,'alice',now(),'turn',20,0 FROM generate_series(1,1000) n");
+    jdbc.execute("ANALYZE conversations; ANALYZE projects; ANALYZE project_members");
+    // Explicit PREPARE/EXECUTE exercises a generic server plan independently of the JDBC
+    // driver's prepare threshold. Nullable selector parameters must not masquerade as a tiny
+    // subtree when the validated request is the full inventory.
+    var names = new java.util.LinkedHashMap<String, Integer>();
+    var matcher =
+        java.util.regex.Pattern.compile("(?<!:):([a-z]+)")
+            .matcher(JdbcProcRepository.conversationPageSql(false));
+    var sql = new StringBuilder();
+    while (matcher.find()) {
+      names.computeIfAbsent(matcher.group(1), ignored -> names.size() + 1);
+      matcher.appendReplacement(
+          sql, java.util.regex.Matcher.quoteReplacement("$" + names.get(matcher.group(1))));
+    }
+    matcher.appendTail(sql);
+    var types =
+        names.keySet().stream()
+            .map(
+                name ->
+                    switch (name) {
+                      case "fleet" -> "boolean";
+                      case "limit" -> "integer";
+                      default -> "text";
+                    })
+            .toList();
+    var values =
+        names.keySet().stream()
+            .map(
+                name ->
+                    switch (name) {
+                      case "account" -> "'alice'";
+                      case "fleet" -> "false";
+                      case "limit" -> "2";
+                      case "live" -> "''";
+                      default -> "NULL";
+                    })
+            .toList();
+    var tx =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new DataSourceTransactionManager(data));
+    tx.setReadOnly(true);
+    String explained =
+        tx.execute(
+            ignored -> {
+              jdbc.execute("SET LOCAL jit=off; SET LOCAL plan_cache_mode=force_generic_plan");
+              jdbc.execute(
+                  "PREPARE proc_inventory_generic(" + String.join(",", types) + ") AS " + sql);
+              return jdbc.queryForObject(
+                  "EXPLAIN (ANALYZE,FORMAT JSON) EXECUTE proc_inventory_generic("
+                      + String.join(",", values)
+                      + ")",
+                  String.class);
+            });
+    var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(explained);
+    assertEquals(1, checkSharedQueueWork(plan, "CTE authorized"));
+    assertEquals(1, checkSharedQueueWork(plan, "CTE page_selection"));
+    assertGenericInventoryWork(plan);
+    var page = repository.conversations("alice", query("mine", null, null, 1), live());
+    assertEquals(1002, page.total());
+    assertEquals(1, page.conversations().size());
+    assertNotNull(page.cursor());
+    jdbc.update("DELETE FROM project_members WHERE handle='alice'");
+    assertEquals(
+        1000,
+        repository.conversations("alice", query("mine", null, null, 1), live()).total(),
+        "global custody remains; project conversations are revoked");
+  }
+
+  private void assertGenericInventoryWork(com.fasterxml.jackson.databind.JsonNode plan) {
+    if ("conversations_pkey".equals(plan.path("Index Name").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 2,
+          "only the page may hydrate conversations by ID: " + plan);
+    if ("projects".equals(plan.path("Relation Name").asText())
+        && "Seq Scan".equals(plan.path("Node Type").asText()))
+      assertTrue(
+          plan.path("Actual Loops").asLong() <= 1,
+          "inventory project facts must not rescan per conversation: " + plan);
+    if ("CTE page_selection".equals(plan.path("Subplan Name").asText()))
+      assertTrue(
+          plan.path("Plan Rows").asLong() <= ProcQuery.MAX_LIMIT + 1,
+          "the generic plan must know the validated page ceiling: " + plan);
+    for (var child : plan) assertGenericInventoryWork(child);
+  }
+
   private void assertSingleRevisionScan(com.fasterxml.jackson.databind.JsonNode plan) {
     if ("information_revisions".equals(plan.path("Relation Name").asText())
         && "Seq Scan".equals(plan.path("Node Type").asText()))
