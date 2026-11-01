@@ -370,4 +370,127 @@ class ContainedActorReadSchemaTest {
         rows.stream().anyMatch(row -> parentScope.equals(row.get("scope_id"))),
         "never the container's scope");
   }
+
+  private String home(UUID scope) {
+    return homes.get(scope).name();
+  }
+
+  /** Discovery through the production selection relation, with no retained ceiling requested. */
+  private List<UUID> selected(
+      String actor, String scope, String project, boolean includeGlobal, UUID related) {
+    return jdbc.queryForList(
+        "SELECT revision FROM knowledge_readable_selection("
+            + "?,?,?,?,NULL,NULL,NULL,NULL,FALSE,?::uuid,NULL,'links')",
+        UUID.class,
+        actor,
+        scope,
+        project,
+        includeGlobal,
+        related);
+  }
+
+  private List<UUID> inProject(String actor, UUID scope) {
+    return selected(actor, "project", home(scope), false, null);
+  }
+
+  private UUID resourceOf(UUID revision) {
+    return jdbc.queryForObject(
+        "SELECT resource_id FROM information_revisions WHERE id=?", UUID.class, revision);
+  }
+
+  @Test
+  void aChildDiscoversItsOwnHome() {
+    var document = retained(childScope);
+
+    assertTrue(inProject(childPrincipal, childScope).contains(document));
+  }
+
+  @Test
+  void aChildDiscoversNothingOutsideItsSubtree() {
+    var own = retained(childScope);
+    var container = retained(parentScope);
+    var sibling = retained(siblingScope);
+    var outside = unrelatedProject("outside");
+    var uncontained = retained(outside);
+
+    for (var home : List.of(parentScope, siblingScope, outside, grandchildScope)) {
+      var found = inProject(childPrincipal, home);
+      assertFalse(found.contains(container), home(home));
+      assertFalse(found.contains(sibling), home(home));
+      assertFalse(found.contains(uncontained), home(home));
+    }
+    assertTrue(inProject(childPrincipal, childScope).contains(own));
+    assertEquals(List.of(), inProject(grandchildPrincipal, childScope));
+  }
+
+  @Test
+  void aChildCannotDiscoverGenerallyReadableRows() {
+    var outside = unrelatedProject("published");
+    var row = retained(outside);
+    publish(row);
+    assertTrue(generallyReadable(row));
+    retained(childScope);
+
+    assertTrue(selected(HOLDER, "global_read", null, false, null).contains(row));
+    assertTrue(selected(HOLDER, "project", "parent", true, null).contains(row));
+
+    assertFalse(selected(childPrincipal, "global_read", null, false, null).contains(row));
+    assertFalse(selected(childPrincipal, "project", home(childScope), true, null).contains(row));
+    assertFalse(selected(childPrincipal, "account", null, false, null).contains(row));
+    assertEquals(List.of(), selected(childPrincipal, "global_read", null, false, null));
+  }
+
+  @Test
+  void aContainerStillDiscoversItsDescendantsHome() {
+    var document = retained(childScope);
+
+    assertTrue(inProject(HOLDER, childScope).contains(document));
+  }
+
+  /**
+   * The related-resource path ({@code related_resource} non-null) skips the candidates baseline, so
+   * it is pinned separately. It passes without any further migration change: every closure node
+   * must still be readable from the actor's own subtree and the parent must itself be readable and
+   * selected, so a neighbour reached from a parent in the container's or a sibling's home is
+   * refused downstream. A link also records a reference obligation, so a child document that links
+   * outward has a closure leaving the subtree and is unreadable to the child as a parent too.
+   */
+  @Test
+  void aChildCannotReachOutsideItsSubtreeThroughARelatedResource() {
+    var parent = retained(childScope);
+    var neighbour = retained(childScope);
+    link(parent, neighbour);
+    var found = selected(childPrincipal, "project", home(childScope), false, resourceOf(parent));
+    assertEquals(List.of(neighbour), found, "control: the in-subtree neighbour is reachable");
+
+    var container = retained(parentScope);
+    var sibling = retained(siblingScope);
+    var ownTarget = retained(childScope);
+    link(container, ownTarget);
+    link(sibling, ownTarget);
+    for (var outsideParent : List.of(container, sibling)) {
+      for (var project : List.of(parentScope, siblingScope, childScope)) {
+        assertEquals(
+            List.of(),
+            selected(childPrincipal, "project", home(project), false, resourceOf(outsideParent)),
+            "an outside parent offers the child nothing");
+      }
+    }
+
+    var linksOut = retained(childScope);
+    link(linksOut, container);
+    assertEquals(
+        List.of(),
+        selected(childPrincipal, "project", home(childScope), false, resourceOf(linksOut)));
+  }
+
+  private void link(UUID from, UUID to) {
+    jdbc.update(
+        "INSERT INTO information_relationships(id,source,target,relation,actor)"
+            + " VALUES (?,?,?,'related',?)",
+        UUID.randomUUID(),
+        resourceOf(from),
+        resourceOf(to),
+        ADMINISTRATOR);
+  }
 }
