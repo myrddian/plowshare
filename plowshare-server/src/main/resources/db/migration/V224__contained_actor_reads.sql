@@ -226,3 +226,64 @@ CREATE OR REPLACE FUNCTION knowledge_readable_candidates(actor TEXT,selected_sco
    SELECT 1 FROM accepted parent JOIN facts parent_fact ON parent_fact.id=parent.root
    WHERE parent.root=information_navigation_head($10) AND parent.readable AND parent.in_boundary AND parent_fact.selected)));
 $$;
+
+-- ==================================================================================================
+-- THE WRITE ARM. Distinct from every read arm above: nothing in this section reads.
+--
+-- A contained principal writes inside its own home and nowhere else. Slice-three characterization
+-- (ContainedActorWriteSchemaTest) found two gates that refuse it before any write begins, each
+-- keyed on a human or service `admins` row and a PROJECT/PERSONAL scope kind, neither of which a
+-- contained principal has by design (V218): information_lock_destination (where a new document may
+-- land) and information_home_allows (whether an existing document may be written). Each is widened
+-- below by exactly one arm, keyed on a live contained_principals row and on that row's own scope.
+-- No admins, authority_accounts, authority_roles or service_tokens row is created or consulted.
+--
+-- SET_AUDIENCE is deliberately NOT admitted: a child never changes who may read its output, and in
+-- particular can never publish it generally readable. Only WRITE reaches the new arm.
+-- ==================================================================================================
+
+-- The scope a contained actor owns, if and only if `project` names that scope's own project. Not
+-- an ancestor's, a sibling's or a descendant's: the match is the principal's single scope_id row.
+-- NULL for a non-contained actor, a null/foreign project, or a revoked principal.
+CREATE FUNCTION contained_own_home(actor TEXT, project TEXT) RETURNS UUID LANGUAGE SQL STABLE AS $$
+ SELECT CASE WHEN contained_knowledge_actor($1) THEN
+  (SELECT s.id FROM contained_principals c JOIN authority_scopes s ON s.id=c.scope_id AND s.kind='CONTAINED'
+   JOIN projects p ON p.id=s.project_id WHERE c.id=$1::uuid AND p.name=$2) END;
+$$;
+
+-- Reproduced from V163:31 with one added early branch and no other edits. Signature unchanged. The
+-- shared advisory lock and scope lock match the ordinary path so a concurrent scope deletion
+-- serializes with the write.
+CREATE OR REPLACE FUNCTION information_lock_destination(account TEXT, selected_scope TEXT, selected_project TEXT, include_shared BOOLEAN)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE own UUID;
+BEGIN
+ IF contained_knowledge_actor($1) THEN
+  own:=contained_own_home($1,$3);
+  IF $2<>'project' OR $4 OR own IS NULL THEN RETURN false; END IF;
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0));
+  PERFORM information_lock_scope($1,own);
+  RETURN contained_knowledge_actor($1);
+ END IF;
+ IF $2<>'account' THEN RETURN information_pre_account_lock_destination($1,$2,$3,$4); END IF;
+ IF $3 IS NOT NULL OR $4 THEN RETURN false; END IF;
+ PERFORM pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0));
+ PERFORM information_lock_scope($1,'00000000-0000-0000-0000-000000000005');
+ RETURN information_account_action($1,'WRITE');
+END $$;
+
+-- Reproduced from V163:23 with one added leading arm and no other edits. Signature unchanged. The
+-- arm admits WRITE only (reads are the V224 read arms above), and only for a resource whose home_scope_id is the principal's
+-- own scope (the scope is resolved from the selected project, then compared to the resource's
+-- home, so naming one's own project never reaches another home). SET_AUDIENCE falls through to
+-- `false`, and is not delegated to the ordinary path either: a contained actor holds no role there.
+CREATE OR REPLACE FUNCTION information_home_allows(resource UUID, account TEXT, selected_scope TEXT,
+ selected_project TEXT, action TEXT) RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+ SELECT CASE WHEN contained_knowledge_actor($2) THEN coalesce($3='project' AND $5='WRITE'
+   AND EXISTS(SELECT 1 FROM information_resources q WHERE q.id=$1
+     AND q.home_scope_id=contained_own_home($2,$4)),false)
+ WHEN $3='account' THEN coalesce($4 IS NULL AND information_account_action($2,$5)
+   AND $5 IN ('READ','WRITE','SET_AUDIENCE') AND EXISTS(SELECT 1 FROM information_resources
+     WHERE id=$1 AND home_scope_id='00000000-0000-0000-0000-000000000005'),false)
+ ELSE information_pre_account_home_allows($1,$2,$3,$4,$5) END;
+$$;
