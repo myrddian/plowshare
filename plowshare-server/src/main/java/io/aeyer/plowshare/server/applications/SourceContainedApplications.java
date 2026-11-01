@@ -384,6 +384,21 @@ public final class SourceContainedApplications implements ContainedApplications 
     // the nearest enclosing uncontained scope, which is the same question the hop answered.
     Home mediating = authority.mediatingHome(scope);
     String agent = declared(retained, request.agent());
+    // The hop, run again for this operation: contain is the only way a contained admission comes
+    // into being, and each started run is its own operation with its own admission -- the same
+    // shape JobRuntime uses for a delegated child, where derive stands where contain stands here.
+    // It proves the stored containment row, the depth bound and the container's live grants, so a
+    // revoked container starts nothing.
+    var admission = authority.contain(parent.admission(), scope, narrowed(parent.admission()));
+    // The child's own allowance, restored rather than minted: the conversation points at the pool
+    // its container already set a ceiling on, so the run spends the child's allowance while the
+    // admission above keeps the container's account. No counter is shared.
+    var pool =
+        allowances
+            .find(retained.allowance())
+            .map(found -> allowances.restore(found.id()))
+            .orElseThrow(
+                () -> new CallerFault("That contained Application's allowance is unavailable"));
     // Two axes, and they are deliberately different identities.
     //
     // ACCOUNT: the container's. A hop keeps the parent's executor and account unchanged, and a
@@ -415,7 +430,7 @@ public final class SourceContainedApplications implements ContainedApplications 
                 Speaker.contained(retained.id()),
                 parent.admission().executor(),
                 true,
-                mediating.project()),
+                new Runs.Ask.Contained(admission, pool, mediating.project())),
             NO_PICTURES);
     // Issued, and deliberately not passed as the caller: see the two axes above. Reading it back
     // here is what proves the principal exists for a child this operation is about to start, which

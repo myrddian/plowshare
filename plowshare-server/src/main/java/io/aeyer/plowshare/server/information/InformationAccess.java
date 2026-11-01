@@ -136,6 +136,34 @@ public final class InformationAccess {
   }
 
   /**
+   * The context a run inside a contained Application writes under, with both axes named once.
+   *
+   * <p>It is the only place a {@link InformationContext} is built with its two axes differing, and
+   * it exists so that no caller assembles the combination by hand: the acting principal is the
+   * child's own ephemeral principal, which is what V224's gates admit, and the accounting account
+   * is its container's, which is what the provenance columns' foreign keys require.
+   *
+   * <p><strong>{@code includeGlobal} is false, deliberately.</strong> {@link
+   * InformationContext.Selection#project} sets it true, which every ordinary caller wants and which
+   * V224 correctly leaves closed to a contained actor — the global arm of the destination gate
+   * requires a credentialed general-read membership a contained principal does not have. A child's
+   * write is scope-bound or it is nothing, so this builds the scope-bound selection rather than
+   * letting the ordinary helper's default refuse it at the gate.
+   *
+   * @param principal the contained principal, acting
+   * @param container the container's account, accountable
+   * @param project the child's own contained project
+   */
+  public static InformationContext contained(String principal, String container, String project) {
+    if (!io.aeyer.plowshare.protocol.ContainedProjects.name(project))
+      throw new CallerFault("A contained write names the child's own contained project");
+    return new InformationContext(
+            principal,
+            new InformationContext.Selection(InformationContext.Scope.PROJECT, project, false))
+        .accountedTo(container);
+  }
+
+  /**
    * The execution home a selection's own pipeline work is admitted against.
    *
    * <p>This is the exact inverse of {@link #forRun}, which reads a PERSONAL selection back out of a

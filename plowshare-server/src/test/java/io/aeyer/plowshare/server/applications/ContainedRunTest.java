@@ -164,6 +164,22 @@ class ContainedRunTest {
     when(identities.containedHome(any(), any())).thenReturn(Home.of(childProject));
     when(principals.issue(any()))
         .thenReturn(new ContainedPrincipals.ContainedPrincipal(childPrincipal, childScope));
+    // The hop, as PinnedOperationAuthority performs it: the child's scope and home, and the
+    // container's executor and account carried through unchanged, which is what makes the
+    // accounting account the container's.
+    when(authority.contain(any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              AuthorityScope.Contained child = call.getArgument(1);
+              return new OperationAuthority.Admission(
+                  UUID.randomUUID(),
+                  parentAdmission.executor(),
+                  parentAdmission.account(),
+                  child.id(),
+                  Home.of(childProject),
+                  parentAdmission.source(),
+                  parentAdmission.support());
+            });
     // The nearest enclosing uncontained home above this child: its container's own project.
     when(authority.mediatingHome(any())).thenReturn(Home.of("parent"));
     when(runs.start(any(), any())).thenReturn(new Runs.Started("job-1", "worker", "child-conv"));
@@ -264,9 +280,17 @@ class ContainedRunTest {
     assertFalse(ask.speaker().name().contains("parent"));
     // WORK AUTHORITY: asked about the nearest enclosing uncontained project, never about the
     // child's own project name, which carries no role for anybody.
-    assertEquals("parent", ask.workProject());
-    assertNotEquals(childProject, ask.workProject());
+    assertEquals("parent", ask.contained().workProject());
+    assertNotEquals(childProject, ask.contained().workProject());
     verify(authority).mediatingHome(any());
+    // THE POOL: the child's own allowance, under the ceiling its container set -- not this
+    // server's default conversation budget and not a second pool minted for the run.
+    assertEquals(childAllowance.value(), ask.contained().budget().identity());
+    assertEquals(5, ask.contained().budget().limit());
+    // THE ACCOUNTING ACCOUNT: the container's, carried by the admission the hop produced. ADR
+    // 0025's rule that delegation cannot change the accounting account is untouched.
+    assertEquals(account, ask.contained().admission().account());
+    assertEquals("@service/parent", ask.contained().admission().executor());
     // The principal is still issued: Tasks 4 and 5 key cancellation and revocation off it.
     verify(principals).issue(any());
     // And the live authority of the container really was proved, not merely retained.
@@ -527,8 +551,11 @@ class ContainedRunTest {
             call ->
                 new ContainedPrincipals.ContainedPrincipal(
                     UUID.randomUUID(), ((AuthorityScope.Contained) call.getArgument(0)).id()));
-    when(authority.contain(any(), any(), any()))
-        .thenThrow(new CallerFault("This containment chain exceeds the configured depth"));
+    // doThrow and not when(...).thenThrow: when() would invoke the stubbed method with nulls to
+    // record the new behaviour, which runs setup's answer and dies reading a null scope.
+    doThrow(new CallerFault("This containment chain exceeds the configured depth"))
+        .when(authority)
+        .contain(any(), any(), any());
     assertEquals(
         "This containment chain exceeds the configured depth",
         assertThrows(
@@ -564,6 +591,7 @@ class ContainedRunTest {
                 io.aeyer.plowshare.server.api.RunAgentRequest.class.getRecordComponents())
             .map(java.lang.reflect.RecordComponent::getName)
             .toList();
+    assertFalse(wireFields.contains("contained"), wireFields.toString());
     assertFalse(wireFields.contains("workProject"), wireFields.toString());
     // And the body really does carry the fields a run names, so the absence above is a decision
     // about this one field and not an empty reflection result.
@@ -583,7 +611,7 @@ class ContainedRunTest {
             null,
             "@service/parent",
             null);
-    assertNull(ordinary.workProject(), "an ordinary caller asks about the run's own project");
+    assertNull(ordinary.contained(), "an ordinary caller carries no contained authority");
   }
 
   List<File> files() {

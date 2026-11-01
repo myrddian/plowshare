@@ -114,21 +114,10 @@ public final class Runs {
    * @param newConversation whether to open a fresh conversation for this first turn
    * @param callerHandle the authenticated account submitting the run, also when the harness speaks
    *     an approval reply on its behalf
-   * @param workProject the project this caller's <em>work authority</em> is proved against, when
-   *     that is not the project the run itself answers from. {@code null} for every ordinary
-   *     caller, which asks the question about the run's own project exactly as before.
-   *     <p>It exists for one case: a run inside a contained Application (ADR 0042). A contained
-   *     project carries no {@code PROJECT} scope and therefore no role for anybody, so asking the
-   *     work question about it answers "no role" whoever asks, while the question that genuinely
-   *     decides a child's work authority is the container's account against the nearest enclosing
-   *     uncontained scope — a child's authority being a projection of its container's. Supplying
-   *     that project here asks the <em>right</em> question through the existing predicate instead
-   *     of widening the predicate.
-   *     <p><strong>Server-side only, and that is what keeps it safe.</strong> {@code
-   *     api.RunAgentRequest} has no such field, so no HTTP body and no frame payload can set it;
-   *     the only caller that supplies one is the contained-run service, which has already proved
-   *     the admission it derives the value from. A wire-settable version of this field would let a
-   *     caller prove work authority against a project it holds and then run somewhere else.
+   * @param contained what a run inside a confined child Application brings with it, or {@code null}
+   *     for every other run — which is every run that is not {@code application.child.run}. See
+   *     {@link Contained}; the three facts travel together because they come from one proved
+   *     admission and are meaningless apart.
    */
   public record Ask(
       String agent,
@@ -142,7 +131,49 @@ public final class Runs {
       Speaker speaker,
       String callerHandle,
       Boolean newConversation,
-      String workProject) {
+      Contained contained) {
+
+    /**
+     * The authority a contained run carries, proved before it was built (ADR 0042).
+     *
+     * <p>One record and not three nullable fields on {@link Ask}, because the three are one fact: a
+     * containment hop produced an admission, and this is that admission, the pool the run spends
+     * and the project its work authority was proved against. A caller holding any of them holds all
+     * of them.
+     *
+     * <p><strong>Server-side only, and that is what keeps it safe.</strong> {@code
+     * api.RunAgentRequest} — the record Jackson binds for the HTTP body and for the frame payload —
+     * has no component of this type, so no wire shape can supply one; the only caller that does is
+     * the contained-run service, which proved the admission first. {@code ContainedRunTest} pins
+     * that by reflection. A wire-settable version would let a caller prove work authority against a
+     * project it holds and then run somewhere else.
+     *
+     * @param admission the child's admission, whose account is its <em>container's</em>: a hop
+     *     keeps the parent's executor and account unchanged, so nothing here invents a second
+     *     accounting subject and ADR 0025's immutable attribution is untouched
+     * @param budget the child's <em>own</em> allowance, under the ceiling its container set.
+     *     Restored from the existing allowance rather than minted, so the conversation points at
+     *     the pool the container already bounded and no counter is shared
+     * @param workProject the project this run's work authority is proved against: the nearest
+     *     enclosing <em>uncontained</em> scope's home. A contained project carries no {@code
+     *     PROJECT} scope and therefore no role for anybody — not for the child's principal and not
+     *     for its container — so asking the work question about the child's own project name
+     *     answers "no role" whoever asks. Supplying the enclosing project here asks the question
+     *     that genuinely decides a child's work authority, through the existing predicate, instead
+     *     of widening the predicate
+     */
+    public record Contained(
+        io.aeyer.plowshare.server.access.OperationAuthority.Admission admission,
+        Budget budget,
+        String workProject) {
+      public Contained {
+        java.util.Objects.requireNonNull(admission, "admission");
+        java.util.Objects.requireNonNull(budget, "budget");
+        if (workProject == null || workProject.isBlank())
+          throw new IllegalArgumentException(
+              "A contained run names the project its work authority is proved against");
+      }
+    }
 
     /** Never null, for {@code api.RunAgentRequest}'s own reason. */
     public Ask {
@@ -324,18 +355,35 @@ public final class Runs {
       // Ask.workProject explains the one case where they differ and why it cannot be set from the
       // wire; null -- every ordinary caller -- asks about the run's own project as it always has.
       callers.requireWork(
-          ask.workProject() == null ? home.project() : ask.workProject(), ask.callerHandle());
+          ask.contained() == null ? home.project() : ask.contained().workProject(),
+          ask.callerHandle());
       if (Boolean.TRUE.equals(ask.newConversation())) {
         if (!ask.images().isEmpty())
           throw new CallerFault("a new conversation cannot carry images; use a standalone run");
         if (conversations == null) throw new CallerFault("new conversations are unavailable");
+        // Two doors, and which one is not a detail: a contained home's scope is never resolved
+        // from its project name and its admission comes from a containment hop rather than from
+        // admitting a scope, so openContained takes the proved admission and binds it. The pool is
+        // the child's own allowance, not this server's default conversation budget.
         var opened =
-            conversations.open(
-                home,
-                io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
-                    conversationProperties.defaultBudgetLimit()),
-                turnCap,
-                ask.callerHandle());
+            ask.contained() == null
+                ? conversations.open(
+                    home,
+                    io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+                        conversationProperties.defaultBudgetLimit()),
+                    turnCap,
+                    ask.callerHandle())
+                : conversations.openContained(
+                    home,
+                    ask.contained().budget(),
+                    turnCap,
+                    ask.callerHandle(),
+                    ask.contained().admission(),
+                    definition.name(),
+                    // Computed here and not carried on the Ask: the fingerprint is a property of
+                    // the resolved definition, which is resolved here, and a caller-supplied one
+                    // could claim capabilities the agent does not have.
+                    OperationExecution.fingerprint(definition));
         logStages.getObject().opened(LogStages.LogOpened.ofConversation(opened, session));
         String id =
             turns.speak(

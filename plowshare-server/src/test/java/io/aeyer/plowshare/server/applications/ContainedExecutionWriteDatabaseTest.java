@@ -19,7 +19,6 @@ import java.util.Properties;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -81,6 +80,7 @@ class ContainedExecutionWriteDatabaseTest {
   private JdbcTemplate jdbc;
   private UnitOfWork work;
   private JdbcInformationCatalogueRepository records;
+  private RecordedInformationEvents events;
   private MemoryStore memories;
 
   private long parentProject;
@@ -103,9 +103,8 @@ class ContainedExecutionWriteDatabaseTest {
     Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).load().migrate();
     jdbc = new JdbcTemplate(source);
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
-    records =
-        new JdbcInformationCatalogueRepository(
-            jdbc, Clock.systemUTC(), new RecordedInformationEvents());
+    events = new RecordedInformationEvents();
+    records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), events);
     memories = new MemoryStore(jdbc);
 
     jdbc.update(
@@ -187,31 +186,33 @@ class ContainedExecutionWriteDatabaseTest {
   }
 
   /**
-   * The ruled design, measured: a child's knowledge write needs <strong>two different
-   * identities</strong>, and {@code InformationContext} has one field for both.
+   * The ruled design, working: a child's knowledge write through the real Java path, with the two
+   * axes separated.
    *
-   * <p>The rule is that anything needing an account takes the container's and anything needing an
-   * author records the contained principal. {@code admit} derives <em>both</em> from {@code
-   * context.account()} — the destination gate is asked about it, and {@code owner_handle} and
-   * {@code created_by} are written from it — so a single value has to satisfy two requirements that
-   * no one value satisfies. This test is the measurement of that, actor by actor, with the
-   * container's own contributor writing successfully in its own home as the control.
-   *
-   * <p>It is not a defect in V224, which is why the gate assertions come first: V224's arm admits
-   * exactly the actor it was built for.
+   * <p>{@code InformationAccess.contained} is the one place the combination is built — the child's
+   * principal acting, its container's account accountable, and the scope-bound selection V224
+   * admits. The assertions are what the row actually holds afterwards, because that is the thing
+   * round one could not produce at all.
    */
   @Test
-  void aChildsKnowledgeWriteNeedsTwoDifferentIdentities() {
-    // Control: the container's contributor writes in the container's own home, through the
-    // identical call and repository, so every refusal below is measured against a working path.
-    var admitted = work.inTransaction(() -> admit(context(HOLDER, "parent"), "notes.md"));
+  void aChildWritesKnowledgeAsItselfAccountedToItsContainer() {
+    var admitted =
+        work.inTransaction(
+            () ->
+                admit(
+                    InformationAccess.contained(childPrincipal, HOLDER, childProject)
+                        .withView(true),
+                    "child-notes.md"));
+
+    // PROVENANCE: the container's account, which is what satisfies owner_handle's foreign key into
+    // admins and created_by's into authority_accounts.
     assertEquals(
         HOLDER,
         jdbc.queryForObject(
             "SELECT owner_handle FROM information_resources WHERE id=?",
             String.class,
             admitted.resource()),
-        "owner_handle is the caller's own handle, and its FK targets admins");
+        "owner_handle is the container's account, never the bare principal");
     assertEquals(
         jdbc.queryForObject(
             "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, HOLDER),
@@ -219,70 +220,128 @@ class ContainedExecutionWriteDatabaseTest {
             "SELECT created_by FROM information_resources WHERE id=?",
             UUID.class,
             admitted.resource()),
-        "created_by resolves from the same value through authority_accounts");
+        "created_by resolves through authority_accounts and is no longer NULL");
+    assertEquals(
+        "authenticated_admission",
+        jdbc.queryForObject(
+            "SELECT creator_evidence FROM information_resources WHERE id=?",
+            String.class,
+            admitted.resource()),
+        "and the CHECK passes honestly rather than by declaring the creator unknown");
+    assertEquals(
+        jdbc.queryForObject(
+            "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, HOLDER),
+        jdbc.queryForObject(
+            "SELECT created_by FROM information_revisions WHERE id=?",
+            UUID.class,
+            admitted.revision()));
 
-    // AXIS ONE, the gate. Only the contained principal is admitted to the child's home, and only
-    // with the global arm off. That is V224's write arm doing exactly its job.
+    // HOME: the child's own contained scope. This is the write landing where V224's arm admits it
+    // and nowhere else, and it is the field a container distinguishes the writing by.
+    assertEquals(
+        childScope,
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM information_resources WHERE id=?",
+            UUID.class,
+            admitted.resource()),
+        "a child's document lands in the child's own home");
+
+    // THE BARE PRINCIPAL REACHES NO FK-BEARING COLUMN. The ruling says it must stop appearing
+    // verbatim, and these are every column in this write that could have carried it.
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_resources WHERE owner_handle=?",
+                Integer.class,
+                childPrincipal));
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_requests WHERE account=?",
+                Integer.class,
+                childPrincipal));
+    // The intake event's actor too, read off the recording publisher this test composes: that
+    // column is keyed to a credentialed identity like the rest, which is exactly why knowledge has
+    // no field that can hold a contained principal as author. See the task report.
+    assertEquals(
+        List.of(HOLDER),
+        events.announced().stream().map(InformationEvents.Occurrence::actor).distinct().toList());
+    assertEquals(
+        HOLDER,
+        jdbc.queryForObject(
+            "SELECT account FROM information_requests WHERE revision_id=?",
+            String.class,
+            admitted.revision()),
+        "the idempotency receipt is the container's namespace, as its FK requires");
+
+    // THE GATE WAS STILL THE CHILD'S. The container's account is not admitted to this home, so the
+    // write above cannot have been admitted as the container -- which is the whole point of the
+    // split and the one thing a single-axis fix would have got wrong.
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_lock_destination(?,'project',?,FALSE)",
+            Boolean.class,
+            HOLDER,
+            childProject),
+        "the container holds no write authority inside its child's home, and none was granted");
     assertTrue(
         jdbc.queryForObject(
             "SELECT information_lock_destination(?,'project',?,FALSE)",
             Boolean.class,
             childPrincipal,
             childProject),
-        "the principal may land in its own home");
+        "the principal does, which is the actor the gate was asked about");
+    // And the global arm stays shut, which is why the contained selection is scope-bound.
     assertFalse(
         jdbc.queryForObject(
             "SELECT information_lock_destination(?,'project',?,TRUE)",
             Boolean.class,
             childPrincipal,
-            childProject),
-        "but not through the global arm, which stays closed to a contained actor");
-    // And the container's account is NOT admitted there, in either arm: a contained project
-    // carries no PROJECT scope, so no role exists in it for anybody. This is the assertion that
-    // makes the split real rather than rhetorical.
-    assertFalse(
-        jdbc.queryForObject(
-            "SELECT information_lock_destination(?,'project',?,FALSE)",
-            Boolean.class,
-            HOLDER,
-            childProject),
-        "the container's own account holds no role in a contained home");
-    assertFalse(
-        jdbc.queryForObject(
-            "SELECT information_lock_destination(?,'project',?,TRUE)",
-            Boolean.class,
-            HOLDER,
             childProject));
+    assertFalse(
+        InformationAccess.contained(childPrincipal, HOLDER, childProject)
+            .selection()
+            .includeGlobal(),
+        "so the contained selection does not ask for it");
+  }
 
-    // AXIS TWO, the provenance. With the container's account the write is refused at the gate,
-    // before any row is attempted.
-    assertThrows(
-        io.aeyer.plowshare.server.faults.NotFoundFault.class,
-        () -> work.inTransaction(() -> admit(scopeBound(HOLDER, childProject), "by-container.md")),
-        "the container's account cannot land a document in its child's home");
-    // With the principal the gate admits and the row's provenance refuses: created_by resolves
-    // NULL because a contained principal has no authority_accounts row (V218), and V157's
-    // CHECK ((created_by IS NULL)=(creator_evidence='unknown')) refuses it beside
-    // 'authenticated_admission'. The owner_handle FK into admins is the second refusal behind it.
-    var refused =
-        assertThrows(
-            DataAccessException.class,
-            () ->
-                work.inTransaction(
-                    () -> admit(scopeBound(childPrincipal, childProject), "by-child.md")));
-    var cause = refused.getMostSpecificCause().getMessage();
-    assertTrue(cause.contains("information_resources_check"), cause);
-    assertTrue(cause.contains("authenticated_admission"), cause);
-    assertTrue(cause.contains(childPrincipal), "owner_handle carried the bare principal: " + cause);
-
+  /**
+   * The ordinary path is unchanged by the split, which is the other half of ruling one: this is a
+   * widening of expressiveness and not a behavioural change.
+   *
+   * <p>Asserted rather than asserted-by-absence: for a context built any pre-existing way the two
+   * axes hold the same value, so every provenance column that now reads {@code attribution()}
+   * receives exactly what it received when it read {@code account()}.
+   */
+  @Test
+  void anOrdinaryWriteIsUnchangedBecauseBothAxesHoldOneValue() {
+    var ordinary = context(HOLDER, "parent");
+    assertEquals(ordinary.account(), ordinary.attribution());
+    assertEquals(ordinary.account(), ordinary.acting());
+    assertEquals(ordinary.attribution(), ordinary.withView(true).attribution());
     assertEquals(
-        0,
-        (int)
-            jdbc.queryForObject(
-                "SELECT count(*) FROM information_resources WHERE source_name IN"
-                    + " ('by-child.md','by-container.md')",
-                Integer.class),
-        "and nothing half-written survives either refusal");
+        ordinary.attribution(), ordinary.withCorpus(InformationContext.Corpus.CODE).attribution());
+
+    var admitted = work.inTransaction(() -> admit(ordinary.withView(true), "ordinary.md"));
+    assertEquals(
+        HOLDER,
+        jdbc.queryForObject(
+            "SELECT owner_handle FROM information_resources WHERE id=?",
+            String.class,
+            admitted.resource()));
+    assertEquals(
+        parentScope,
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM information_resources WHERE id=?",
+            UUID.class,
+            admitted.resource()));
+    // And a contained context differs on exactly one axis, never on the acting one.
+    var child = InformationAccess.contained(childPrincipal, HOLDER, childProject);
+    assertEquals(childPrincipal, child.acting());
+    assertEquals(childPrincipal, child.account());
+    assertEquals(HOLDER, child.attribution());
   }
 
   /**

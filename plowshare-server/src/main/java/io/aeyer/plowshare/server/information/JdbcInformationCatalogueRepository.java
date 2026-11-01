@@ -1049,12 +1049,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
         Boolean.class,
-        context.account() + ":" + request);
+        // The accounting account, because information_requests.account below has a foreign key
+        // into admins: the lock has to serialise the same namespace the row is written in.
+        context.attribution() + ":" + request);
     List<Map<String, Object>> prior =
         jdbc.queryForList(
             "SELECT fingerprint,revision_id FROM information_requests"
                 + " WHERE account=? AND request_id=?",
-            context.account(),
+            context.attribution(),
             request);
     if (!prior.isEmpty()) {
       if (!fingerprint.equals(prior.getFirst().get("fingerprint")))
@@ -1066,7 +1068,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         && jdbc.queryForObject(
                 "SELECT count(*) FROM information_acquisitions WHERE account=? AND request_id=?",
                 Integer.class,
-                context.account(),
+                context.attribution(),
                 request)
             != 0) throw new CallerFault("requestId was already used for URL acquisition");
     for (UUID input : inputs) if (!readable(context, input)) throw absent();
@@ -1102,10 +1104,13 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                   "SELECT legacy_handle FROM authority_accounts WHERE id=?",
                   String.class,
                   context.selection().account())
-              : context.account(),
+              // The accounting account. owner_handle's foreign key targets admins and created_by's
+              // targets authority_accounts, and a contained principal is a subject of neither by
+              // design, so provenance is the container's while every gate above stays the child's.
+              : context.attribution(),
           project,
           kind,
-          context.account());
+          context.attribution());
     } else {
 
       if (!kind.equals(resources.getFirst().get("kind")))
@@ -1152,9 +1157,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         documentType.type(),
         documentType.subtype(),
         write.expectedRevision(),
-        write.typingExplicit() ? context.account() : null,
+        // Both provenance, both foreign-keyed: revised_by into admins, created_by into
+        // authority_accounts. See the resource insert above.
+        write.typingExplicit() ? context.attribution() : null,
         write.processingPolicy(),
-        context.account());
+        context.attribution());
     if (write.binding() != null) {
       var binding = write.binding();
       jdbc.update(
@@ -1185,18 +1192,24 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                 + " VALUES(?,1,?,?,?)",
             revision,
             stage,
-            context.account(),
+            // actor carries a foreign key into admins, so it is the accounting account.
+            context.attribution(),
             request);
     }
     for (UUID input : inputs)
       jdbc.update("INSERT INTO information_inputs VALUES(?,?)", revision, input);
     jdbc.update(
         "INSERT INTO information_requests VALUES(?,?,?,?)",
-        context.account(),
+        // account carries a foreign key into admins; the lookup and the lock above use the same
+        // value, so one request UUID means one thing throughout this method.
+        context.attribution(),
         request,
         fingerprint,
         revision);
-    event(revision, 1, context.account(), "intake", "retained", "");
+    // actor_handle carries a foreign key into admins as well, so the audit actor is the accounting
+    // account. This is why knowledge has no column that can hold a contained principal as author:
+    // every actor column in this family is keyed to a credentialed identity. See the task report.
+    event(revision, 1, context.attribution(), "intake", "retained", "");
     return new Admission(revision, resource, true);
   }
 

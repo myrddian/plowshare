@@ -294,6 +294,10 @@ public final class ConversationStore {
    */
   public ConversationRecord open(Home home, Budget budget, TurnCap turnCap, String owner) {
     Objects.requireNonNull(budget, "budget");
+    // A contained home is refused here and answered by openContained, rather than being allowed to
+    // reach the resolution below and fail there. Both doors of this class carry this branch; see
+    // openContained for what the other door does and why the two differ.
+    requireUncontained(home, "open");
     if (operations != null)
       operations.admit(
           owner,
@@ -302,6 +306,109 @@ public final class ConversationStore {
           operations.scope(home),
           java.util.Set.of(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE));
     return write(Origin.TURN, home, null, null, budget, turnCap, owner, null);
+  }
+
+  /**
+   * The contained door: a conversation in a confined child's own home (ADR 0042).
+   *
+   * <h2>Why a second door and not a branch inside {@link #open}</h2>
+   *
+   * <p>{@link #open} resolves the request's project name to a scope and <em>admits</em> it. Neither
+   * step can happen here, and both refusals are correct rather than obstacles. {@code
+   * OperationAuthority.scope(Home)} resolves through {@code IdentityRepository.project(String)},
+   * which refuses a {@code CONTAINED} row by design — nothing travels from a child's project name
+   * back to its scope. And {@code admit} refuses a contained target outright, also by design: a
+   * contained admission comes into being only through a containment hop, never by admitting a
+   * scope. So this door takes the admission the hop already produced and <em>binds</em> it, which
+   * is the same shape {@code JobRuntime} uses for a delegated child's conversation: {@code derive}
+   * there, {@code contain} here, then {@code bind} in both.
+   *
+   * <h2>What this opens, and what it deliberately does not</h2>
+   *
+   * <p>It opens for a <em>contained home with a proved contained admission for that same home</em>
+   * and nothing else. An uncontained home is refused here, a null admission is refused, and an
+   * admission whose own retained home is not this one is refused — so this cannot be used to open a
+   * conversation in a child on the strength of an admission for a different child. The admission's
+   * live authority is rechecked <em>before</em> the row is written, so a refusal leaves no
+   * conversation behind, and {@code bind} rechecks it again on the far side.
+   *
+   * <h2>Not yet reachable, and the reason is below this class</h2>
+   *
+   * <p>This door is correct and tested, and nothing can get to it yet: {@code contain} cannot
+   * record a contained admission's lineage, because {@code operation_parent_valid} (V162:35-36)
+   * requires a child admission to carry its parent's scope and project name and a containment hop
+   * changes both by design. A second gate sits behind that one — {@code
+   * operation_conversation_valid} (V162:62) requires the conversation row's {@code agent} to equal
+   * the bound envelope's, while {@code conversations_a_person_s_conversation_names_no_agent}
+   * (V17:212) forbids an agent on the {@code Origin.TURN} row this door writes. Both are shipped
+   * migrations, so opening them is a new migration and a separate decision; {@code
+   * ContainedConversationDoorDatabaseTest} pins the first with its exact message and names the
+   * second. Do not read this door as working end to end until those are settled.
+   *
+   * <p>The other door, {@link #logInternal}, carries the same branch but as a <em>refusal</em>, and
+   * that asymmetry is deliberate: a contained submission or event has no consumer in this slice, so
+   * opening it would be authority granted to nothing. What that door must not do is reach the
+   * resolution and fail with a message about scopes, which is what made this gate invisible.
+   *
+   * @param child the admission a containment hop produced for this child, already proved
+   * @param agent the agent whose run this conversation is, recorded on the bound envelope
+   * @param capabilities the agent's capability fingerprint, as a delegated child's envelope carries
+   * @param budget the child's <em>own</em> allowance, restored rather than minted: the row points
+   *     at the allowance its container set a ceiling on, so a run spends the child's pool while the
+   *     admission keeps the container's account. No counter is shared and no second pool exists
+   */
+  public ConversationRecord openContained(
+      Home home,
+      Budget budget,
+      TurnCap turnCap,
+      String owner,
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission child,
+      String agent,
+      String capabilities) {
+    Objects.requireNonNull(budget, "budget");
+    Objects.requireNonNull(child, "child");
+    if (!io.aeyer.plowshare.protocol.ContainedProjects.name(home.project()))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "openContained opens a conversation in a contained Application's own home; use open");
+    if (!child.home().equals(home))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "This admission was not retained for that contained Application's home");
+    if (operations == null)
+      throw new IllegalStateException("A contained conversation needs the authority substrate");
+    // Before the row, so a refused admission leaves nothing behind. bind() rechecks it afterwards;
+    // this is the check that makes the refusal total rather than the check that makes it safe.
+    operations.require(child);
+    var opened = write(Origin.TURN, home, null, null, budget, turnCap, owner, null);
+    // The envelope application.child.trajectory reads back: the child's allowance as the budget,
+    // and an admission whose account is the container's. bind proves the conversation belongs to
+    // the admission's own home before it writes.
+    operations.bind(
+        new io.aeyer.plowshare.server.access.OperationAuthority.Conversation(
+            opened.id(),
+            agent,
+            child,
+            null,
+            new io.aeyer.plowshare.server.allowances.AllowanceId(budget.identity()),
+            capabilities));
+    return opened;
+  }
+
+  /**
+   * Refuses a contained home at a door that cannot serve one.
+   *
+   * <p>Named rather than inlined because both doors say it, and because the message has to name the
+   * door that <em>can</em>: the failure this replaces was a scope-resolution refusal three layers
+   * down, which read as a defect in containment rather than as a door that was never built.
+   */
+  private static void requireUncontained(Home home, String door) {
+    if (home != null
+        && !home.isGlobal()
+        && io.aeyer.plowshare.protocol.ContainedProjects.name(home.project()))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "A contained Application's conversation is opened through openContained, not "
+              + door
+              + ": its scope is never resolved from its project name, and its admission comes from"
+              + " a containment hop rather than from admitting a scope");
   }
 
   /**
@@ -457,6 +564,10 @@ public final class ConversationStore {
     // about their own turns; one agent's run is capped by TurnCap.from(its
     // definition), resolved where the run is started, and a column here
     // would be a second answer to a question that already has one.
+    // The other door's branch. A contained home is refused rather than resolved, for the reason
+    // openContained states; this slice has no contained submission or event to serve, so this is
+    // the half of the pair that stays shut, explicitly and with a message that names the open one.
+    if (origin == Origin.SUBMISSION || origin == Origin.EVENT) requireUncontained(home, "log");
     if (system == null
         && operations != null
         && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
