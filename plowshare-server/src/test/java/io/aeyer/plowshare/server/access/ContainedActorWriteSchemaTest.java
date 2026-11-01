@@ -14,7 +14,8 @@ import org.testcontainers.junit.jupiter.*;
 /**
  * Real PostgreSQL, because the assertions are the behaviour of the write gates a contained
  * principal meets: {@code information_lock_destination} (where a new document may land) and {@code
- * information_lock_knowledge} (whether an existing one may be written or have its audience set).
+ * information_lock_knowledge}, via {@code information_home_allows} (whether an existing one may be
+ * written or have its audience set).
  *
  * <p>CHARACTERIZATION (run before any widening): the first assertion failed, so the write side did
  * need widening. Two gates refused a contained principal, in this order. First {@code
@@ -216,11 +217,6 @@ class ContainedActorWriteSchemaTest {
     return revision;
   }
 
-  private boolean revisionReadable(String actor, UUID revision) {
-    return jdbc.queryForObject(
-        "SELECT coalesce(knowledge_revision_readable(?,?),FALSE)", Boolean.class, revision, actor);
-  }
-
   private String home(UUID scope) {
     return homes.get(scope).name();
   }
@@ -269,6 +265,8 @@ class ContainedActorWriteSchemaTest {
     assertTrue(
         mayWrite(siblingPrincipal, siblingScope, document), "control: the sibling's own home");
     assertFalse(mayLand(childPrincipal, siblingScope));
+    assertFalse(
+        mayLand(childPrincipal, unrelatedProject("outside")), "an ordinary uncontained home");
     assertFalse(mayWrite(childPrincipal, siblingScope, document));
   }
 
@@ -358,6 +356,9 @@ class ContainedActorWriteSchemaTest {
     assertFalse(mayLand(HOLDER, childScope), "an ordinary member has no role in a contained home");
     assertFalse(mayLand(STRANGER, parentScope));
     assertFalse(mayLand(TOKEN_PRINCIPAL, childScope));
+    // Control: the token really can land in the container, so the refusal above is not a broken
+    // fixture.
+    assertTrue(mayLand(TOKEN_PRINCIPAL, parentScope));
   }
 
   private UUID resourceOf(UUID revision) {

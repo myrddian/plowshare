@@ -263,6 +263,9 @@ BEGIN
   IF $2<>'project' OR $4 OR own IS NULL THEN RETURN false; END IF;
   PERFORM pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0));
   PERFORM information_lock_scope($1,own);
+  -- Post-lock recheck, not a tautology: the scope lock above can wait on a concurrent deletion that
+  -- cascades to contained_principals (V218), and this re-evaluates on a fresh snapshot so a principal
+  -- revoked meanwhile gets false. Mirrors the account_active recheck at V157:191. Do not simplify.
   RETURN contained_knowledge_actor($1);
  END IF;
  IF $2<>'account' THEN RETURN information_pre_account_lock_destination($1,$2,$3,$4); END IF;
