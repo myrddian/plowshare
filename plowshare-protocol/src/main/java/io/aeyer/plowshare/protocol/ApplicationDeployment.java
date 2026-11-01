@@ -116,7 +116,10 @@ public final class ApplicationDeployment {
         || project.isBlank()
         || !project.equals(project.strip())
         || project.length() > 512
-        || project.codePoints().anyMatch(Character::isISOControl))
+        || project.codePoints().anyMatch(Character::isISOControl)
+        // ADR 0042, list (c): a deployment request naming a contained project cannot even be
+        // constructed, so the refusal does not depend on reaching the server-side check.
+        || ContainedProjects.name(project))
       throw new IllegalArgumentException("Invalid Application project identity");
   }
 }

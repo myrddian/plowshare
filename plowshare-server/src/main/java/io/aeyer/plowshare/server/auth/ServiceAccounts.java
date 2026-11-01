@@ -136,7 +136,11 @@ public class ServiceAccounts {
           || !names.add(project)
           || project.startsWith("personal:")
           || project.startsWith("Personal:")
-          || project.startsWith("client:"))
+          || project.startsWith("client:")
+          // ADR 0042, list (c): a service token scope is an external principal's standing reach
+          // into a project. A child is reached only through its container, which must hold the
+          // permission it mediates, so no credential may be scoped to one.
+          || io.aeyer.plowshare.protocol.ContainedProjects.name(project))
         throw new CallerFault("Token scopes must name distinct ordinary server projects and roles");
       if (!repository.lockOrdinaryProject(project))
         throw new CallerFault("No ordinary server project has that name");

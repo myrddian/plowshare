@@ -77,6 +77,31 @@ public final class FrameTypes {
   public static final String APPLICATION_DEPLOYMENT_STATUS = "application.deployment.status";
   public static final String FILESTORE_LIST = "filestore.list";
   public static final String APPLICATION_DEPLOYMENT_RECEIPT = "application.deployment.receipt";
+
+  /** A container's own typed operations over the Applications confined inside it (ADR 0042). */
+  public static final String APPLICATION_CHILD_CREATE = "application.child.create";
+
+  public static final String APPLICATION_CHILD_CEILING = "application.child.ceiling";
+
+  /**
+   * Destruction, which for a contained Application is the normal path rather than an exception. It
+   * answers with what it collected — the named child and its descendants — because a destruction
+   * that reported nothing would be indistinguishable from one that removed nothing.
+   */
+  public static final String APPLICATION_CHILD_DESTROY = "application.child.destroy";
+
+  /**
+   * One-way visibility. Neither names a container: the scope read is the scope the caller's own
+   * retained conversation is admitted as, so there is no field through which a sibling, a parent or
+   * an unrelated Application could be asked about.
+   */
+  public static final String APPLICATION_CHILD_LIST = "application.child.list";
+
+  public static final String APPLICATION_CHILD_TRAJECTORY = "application.child.trajectory";
+
+  /** A child's source resources as metadata, to an ancestor only; never file content. */
+  public static final String APPLICATION_CHILD_RESOURCES = "application.child.resources";
+
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";

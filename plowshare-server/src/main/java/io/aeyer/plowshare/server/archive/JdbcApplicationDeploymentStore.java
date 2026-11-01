@@ -22,6 +22,14 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
 
   private final io.aeyer.plowshare.server.acting.ActingRepository acting;
 
+  /**
+   * ADR 0042's live-child fence. <strong>Required</strong>, unlike {@code identities} and {@code
+   * acting}: a store without it would activate a new revision over live contained Applications --
+   * which is the orphan the fence exists to prevent -- and would do it silently. A caller with no
+   * containment relation passes {@code ContainmentFence.unfenced()} and says so.
+   */
+  private final io.aeyer.plowshare.server.applications.ContainmentFence containment;
+
   public JdbcApplicationDeploymentStore(
       JdbcTemplate jdbc,
       UnitOfWork work,
@@ -46,6 +54,25 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
       io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
       io.aeyer.plowshare.server.acting.ActingRepository acting) {
+    this(
+        jdbc,
+        work,
+        projects,
+        schedules,
+        identities,
+        acting,
+        io.aeyer.plowshare.server.applications.ContainmentFence.unfenced());
+  }
+
+  public JdbcApplicationDeploymentStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ServerProjects projects,
+      io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
+      io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
+      io.aeyer.plowshare.server.acting.ActingRepository acting,
+      io.aeyer.plowshare.server.applications.ContainmentFence containment) {
+    this.containment = Objects.requireNonNull(containment, "containment fence");
     this.acting = acting;
     this.identities = identities;
     this.jdbc = jdbc;
@@ -111,6 +138,12 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
           if (identities != null) identities.lockActivation(account, mutation.project());
           Long id = ProjectIds.toWrite(jdbc, Home.of(mutation.project()));
           jdbc.queryForObject("SELECT id FROM projects WHERE id = ? FOR UPDATE", Long.class, id);
+          // Under the lock, and immediately after it. A parent revision change refuses while any
+          // contained Application beneath this project is live (ADR 0042): letting children
+          // survive the change and destroying them silently were both rejected, because each
+          // produces an orphan. Creation takes this same project row lock, so the count cannot be
+          // taken a moment before a child row lands.
+          containment.requireNoLiveChildren(mutation.project());
           var prior =
               receipt(account, mutation.project(), mutation.requestId(), mutation.fingerprint());
           if (prior.isPresent()) return prior.get();

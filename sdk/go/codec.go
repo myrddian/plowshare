@@ -287,6 +287,25 @@ func deploymentMatches(operation string, request, reply []byte) bool {
 	if strings.HasPrefix(operation, "tool.scope.host.") || strings.HasPrefix(operation, "tool.scope.worker.") {
 		return hostedMatches(operation, request, reply)
 	}
+	if operation == "application.child.ceiling" || operation == "application.child.destroy" {
+		// A contained reply must be about the child the caller named; a destruction accounts
+		// for it and cannot have removed more source areas than records.
+		var asked struct {
+			Child string `json:"child"`
+		}
+		var answered struct {
+			Child     string   `json:"child"`
+			Collected []string `json:"collected"`
+			Sources   int      `json:"sources"`
+		}
+		if json.Unmarshal(request, &asked) != nil || json.Unmarshal(reply, &answered) != nil || !strings.EqualFold(asked.Child, answered.Child) {
+			return false
+		}
+		if operation == "application.child.ceiling" {
+			return true
+		}
+		return answered.Sources <= len(answered.Collected) && slices.ContainsFunc(answered.Collected, func(entry string) bool { return strings.EqualFold(entry, asked.Child) })
+	}
 	if slices.Contains([]string{"application.identity.status", "application.token.issue", "application.token.receipt"}, operation) {
 		type identityCoordinates struct {
 			Project   string `json:"project"`

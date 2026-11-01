@@ -35,7 +35,8 @@ public class JdbcScheduleStore implements ScheduleStore {
               AND ((s.project_id IS NULL AND a.server_admin) OR EXISTS (
                 SELECT 1 FROM projects p WHERE p.id=s.project_id AND (
                   p.personal_owner=a.handle OR (p.personal_owner IS NULL AND (
-                    (a.server_admin AND p.name NOT LIKE 'client:%' AND p.name NOT LIKE 'personal:%')
+                    (a.server_admin AND p.name NOT LIKE 'client:%' AND p.name NOT LIKE 'personal:%'
+                      AND p.name NOT LIKE 'contained:%')
                     OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id=p.id
                       AND m.handle=a.handle AND m.role IN ('CONTRIBUTOR','MANAGER'))
                   ))

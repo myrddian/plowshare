@@ -1,7 +1,7 @@
 import { utf8Length } from '../binding/files.ts';
 import { isList } from '../binding/values.ts';
 import { fileStoreReference } from '../binding/filestores.ts';
-import { record, list, named, nullable } from './wire-checks.ts';
+import { record, list, named, nullable, count } from './wire-checks.ts';
 
 /** Source packages contain portable UTF-8 text; runtime data is admitted separately. */
 export interface ApplicationSourceFile {
@@ -89,6 +89,51 @@ export function applicationFilesProblem(value: unknown): string | undefined {
         return 'Application package has a file/directory collision';
   return undefined;
 }
+/** Largest call count the server accepts: it is bound as a Java int. */
+const MAX_CALLS = 2147483647;
+const callCount = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= 0 &&
+  value <= MAX_CALLS;
+/**
+ * The request checks the server applies to a contained-Application frame, run before anything is
+ * sent. Every child operation addresses a container by its own retained `conversation` and a child
+ * by UUID; none names a project, which is why these never reach the generic Application file
+ * checks. A call count is explicit: absent would mean unlimited, which a confined child never is.
+ */
+export function containedProblem(
+  type: string,
+  body: Record<string, unknown>,
+): string | undefined {
+  const container = body['conversation'];
+  if (
+    typeof container !== 'string' ||
+    !container.trim() ||
+    (type === 'application.child.create' && container.length > 1024)
+  )
+    return 'Name the container conversation the operation acts within';
+  if (type === 'application.child.list') return undefined;
+  if (type !== 'application.child.create') {
+    if (!deploymentUuid(body['child'])) return 'child must be a UUID';
+    if (type === 'application.child.ceiling' && !callCount(body['calls']))
+      return 'calls must be an explicit non-negative call count; zero disables calls';
+    return undefined;
+  }
+  if (!deploymentUuid(body['requestId']))
+    return 'Retain a UUID requestId for create recovery';
+  if (!callCount(body['ceiling']))
+    return 'ceiling must be an explicit non-negative call count; zero disables calls';
+  const destination = body['destination'],
+    areas = body['writableAreas'];
+  if (
+    (destination !== null && !fileStoreReference(destination)) ||
+    !isList(areas) ||
+    !areas.every(fileStoreReference)
+  )
+    return 'Use a FileStore destination or null, and a list of writableAreas';
+  return applicationFilesProblem(body['files']);
+}
 export function deploymentProblem(
   type: string,
   body: Record<string, unknown>,
@@ -143,6 +188,106 @@ export const deploymentReceiptCheck = record({
   requestId: deploymentUuid,
   project: named,
   release: releaseCheck,
+});
+/**
+ * A contained Application as its container addresses it afterwards. `scope` is the authority
+ * scope's identifier as a plain UUID: a child is addressed by its scope and never by a readable
+ * containment path, and the server's internal scope value object does not travel out here.
+ */
+export interface ContainedApplicationChild {
+  readonly id: string;
+  readonly scope: string;
+  readonly project: string;
+  readonly revision: string;
+}
+export interface ContainedApplicationCeiling {
+  readonly child: string;
+}
+/** The reserved classification prefix, constant at any depth; ancestry is never in the name. */
+export const containedProject = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.startsWith('contained:') &&
+  deploymentUuid(value.slice('contained:'.length));
+export const containedChildCheck = record({
+  id: deploymentUuid,
+  scope: deploymentUuid,
+  project: containedProject,
+  revision: deploymentUuid,
+});
+export const containedCeilingCheck = record({ child: deploymentUuid });
+/**
+ * What a destruction collected: the named child and its descendants, deepest first. `sources` is
+ * how many of those source areas were removed from disk before the answer was given, and it may be
+ * fewer than `collected` -- the filesystem cannot join the server's transaction, so an interrupted
+ * removal leaves recorded work the server's own collector finishes. Fewer is recoverable, not lost.
+ */
+export interface ContainedApplicationDestruction {
+  readonly child: string;
+  readonly collected: readonly string[];
+  readonly sources: number;
+}
+export const containedDestructionCheck = record({
+  child: deploymentUuid,
+  collected: list(deploymentUuid),
+  sources: (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+});
+/** What a container holds, as its own listing returns it: live direct children, oldest first. */
+export interface ContainedApplicationChildren {
+  readonly children: readonly ContainedApplicationChild[];
+}
+/**
+ * One retained conversation envelope of a contained Application. `parent` is its delegation
+ * parent and is null for a root; `budget` is the allowance its spend was attributed to. The
+ * admission itself never crosses: it carries the container's own grant identifiers, not the
+ * child's behaviour.
+ */
+export interface ContainedApplicationStep {
+  readonly conversation: string;
+  readonly agent: string;
+  readonly parent: string | null;
+  readonly budget: string;
+  readonly capabilities: string;
+}
+export interface ContainedApplicationTrajectory {
+  readonly steps: readonly ContainedApplicationStep[];
+}
+/**
+ * One source resource of a contained Application, described and never delivered: there is no
+ * content field, because a child's writes are untrusted input to its container.
+ */
+export interface ContainedApplicationResource {
+  readonly path: string;
+  readonly kind: 'manifest' | 'file';
+  readonly revision: string;
+  readonly bytes: number;
+}
+export interface ContainedApplicationResources {
+  readonly resources: readonly ContainedApplicationResource[];
+}
+export const containedChildrenCheck = record({
+  children: list(containedChildCheck),
+});
+export const containedStepCheck = record({
+  conversation: named,
+  agent: named,
+  parent: nullable(named),
+  budget: deploymentUuid,
+  capabilities: (value: unknown): value is string =>
+    typeof value === 'string' && /^[0-9a-f]{64}$/.test(value),
+});
+export const containedTrajectoryCheck = record({
+  steps: list(containedStepCheck),
+});
+export const containedResourceCheck = record({
+  path: named,
+  kind: (value: unknown): value is 'manifest' | 'file' =>
+    value === 'manifest' || value === 'file',
+  revision: deploymentUuid,
+  bytes: count,
+});
+export const containedResourcesCheck = record({
+  resources: list(containedResourceCheck),
 });
 export const deploymentStatusCheck = record({
   project: named,

@@ -86,11 +86,50 @@ public interface OperationAuthority {
   /** Reads immutable evidence only; callers must still recheck live authority. */
   Optional<Conversation> conversation(String id);
 
+  /**
+   * The retained conversation envelopes of one scope, oldest first, for a reader that has already
+   * proved its authority over that scope by other means.
+   *
+   * <p>Exactly {@link #conversation}'s contract, in the plural and keyed by scope: immutable
+   * evidence only, never a live permission, and never transitive — one scope's envelopes and
+   * nothing beneath it, because the relation between scopes is not this interface's to walk. This
+   * resolves nothing and grants nothing; a caller that cannot name the scope from evidence it
+   * already holds has no business reading them.
+   */
+  List<Conversation> conversationsIn(ScopeId scope);
+
   /** Attaches an existing conversation exactly once; a different binding is never substituted. */
   void bind(Conversation conversation);
 
   /** Narrows a retained parent, preserving exact supporting grants and immutable ancestry. */
   Admission derive(Admission parent, Set<AuthorityAction> actions);
+
+  /**
+   * Narrows a retained parent across one containment hop into a confined child.
+   *
+   * <p>{@link #derive} narrows actions while holding scope, account and home fixed, so it cannot
+   * express this hop. {@code contain} is its sibling and the only way a contained admission comes
+   * into being. It issues no authority: the child's support is exactly the parent's own grant rows
+   * for the narrowed actions, so a child's authority is a projection of its parent's. The account,
+   * executor and grant source never change, Global knowledge READ is dropped unconditionally
+   * because it sits outside every containment subtree, and the requested actions must be a subset
+   * of what the parent retains. There is therefore no sequence of calls that yields an admission
+   * holding an action its parent does not hold: every hop only ever drops.
+   *
+   * <p>{@code child} must be recorded as contained by this parent's scope. It is a caller-supplied
+   * value and not evidence — the record is freely constructible and no repository path returns one
+   * — so the stored containment row is resolved rather than its fields believed. A child reaching
+   * above or beside itself, at a grandparent, a sibling subtree or an uncontained scope, therefore
+   * fails to resolve: a resolution failure refused before any authority is resolved, not a
+   * permission later denied. Chain depth is bounded by injected server configuration rather than by
+   * any argument of this call, and an absent or non-positive bound refuses rather than defaulting
+   * to unlimited.
+   *
+   * <p>Resolving the child's own home is the one outward-facing act of the hop, and it is the same
+   * read that resolves the child; it is why {@link IdentityRepository#containedHome} exists and why
+   * {@link IdentityRepository#home(AuthorityScope)} keeps refusing a contained scope.
+   */
+  Admission contain(Admission parent, AuthorityScope.Contained child, Set<AuthorityAction> actions);
 
   /**
    * The explicit authority scope a legacy project home names.

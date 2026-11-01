@@ -287,6 +287,28 @@ Regenerate catalogs after changing server operations/outcome codes:
 node scripts/generate-sdk-contracts.mjs
 ```
 
+The generated catalogs listed in `.gitattributes` are rendered wholesale and
+positionally: adding one operation or DTO field renumbers shapes across every
+output. Two branches that both changed protocol DTOs therefore produce
+overlapping rewrites of all of them, and a textual three-way merge of two
+renderings is meaningless even when it succeeds. Register the merge driver once
+per clone so those conflicts resolve deterministically:
+
+```sh
+sh scripts/git-merge-generated.sh --install
+```
+
+The driver keeps our side and names each stale file on stderr. It cannot
+re-render, because regeneration needs a TypeScript build and the working tree is
+not yet in its merged state while a driver runs, so run the regeneration above
+afterwards. `sdkContractCheck`, part of `./gradlew check`, fails on a stale
+catalog, so staleness cannot reach a build unnoticed. The driver engages only
+when both sides changed the same catalog; a one-sided change still takes the
+other side. Worktrees share the configuration, a fresh clone needs it again, and
+merges performed by the forge rather than locally run without it. Where the
+driver is not registered Git falls back to the ordinary text merge, which is the
+behavior these paths have today.
+
 Local npm archives, Python wheel/sdist, NuGet package/symbols and the Go source
 archive are written to `build/distributions`. Java's jar, sources and javadoc are
 under `sdk/java/build/libs`; its Maven POM is under

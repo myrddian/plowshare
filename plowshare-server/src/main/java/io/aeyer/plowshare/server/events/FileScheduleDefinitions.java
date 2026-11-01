@@ -81,7 +81,12 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
         || project.codePoints().anyMatch(Character::isISOControl)
         || project.startsWith("personal:")
         || project.startsWith("Personal:")
-        || io.aeyer.plowshare.server.archive.ClientProjects.privateProject(project))
+        || io.aeyer.plowshare.server.archive.ClientProjects.privateProject(project)
+        // ADR 0042, list (c): ADR 0020 gives a schedule operational authority over the server's
+        // own scheduler, and nothing in this slice mediates that for a child. Task 5 refuses a
+        // child declaring one; this refuses the inspection surface that would name a child's
+        // project as a schedule source, so the two halves of the surface agree.
+        || io.aeyer.plowshare.protocol.ContainedProjects.name(project))
       throw new CallerFault("Choose an ordinary project for schedule inspection");
     members.requireRole(project, account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
   }

@@ -82,6 +82,70 @@ func TestDeploymentReceiptCoordinates(t *testing.T) {
 	}
 }
 
+func TestContainedRepliesAreAboutTheChildAsked(t *testing.T) {
+	const child, foreign = "11111111-1111-1111-1111-111111111111", "33333333-3333-3333-3333-333333333333"
+	asked := []byte(`{"conversation":"c","child":"` + child + `"}`)
+	for operation, cases := range map[string]map[string]bool{
+		"application.child.ceiling": {
+			`{"child":"` + child + `"}`:   true,
+			`{"child":"` + foreign + `"}`: false,
+		},
+		"application.child.destroy": {
+			`{"child":"` + child + `","collected":["` + foreign + `","` + child + `"],"sources":2}`: true,
+			`{"child":"` + foreign + `","collected":["` + foreign + `"],"sources":1}`:               false,
+			`{"child":"` + child + `","collected":["` + foreign + `"],"sources":1}`:                 false,
+			`{"child":"` + child + `","collected":["` + child + `"],"sources":2}`:                   false,
+		},
+	} {
+		for reply, want := range cases {
+			if got := deploymentMatches(operation, asked, []byte(reply)); got != want {
+				t.Fatalf("%s %s: got %v want %v", operation, reply, got, want)
+			}
+		}
+	}
+}
+
+// The generated schema types bytes as a plain number, so the non-negative integer bound is
+// enforced by the TypeScript SDK alone; this test pins only what the Go schema does express.
+func TestContainedResourcesRoundTripMetadataOnly(t *testing.T) {
+	const child, revision = "11111111-1111-1111-1111-111111111111", "44444444-4444-4444-4444-444444444444"
+	data, err := json.Marshal(ApplicationChildResourcesRequest{Conversation: "c", Child: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"child":"`+child+`","conversation":"c"}` {
+		t.Fatalf("request encoded as %s", data)
+	}
+	if _, err = project(catalog.Inputs["application.child.resources"], data, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, missing := range []string{`{"conversation":"c"}`, `{"child":"` + child + `"}`, `{"conversation":"c","child":"` + child + `","extra":1}`} {
+		if _, err = project(catalog.Inputs["application.child.resources"], []byte(missing), true); err == nil {
+			t.Fatalf("accepted %s", missing)
+		}
+	}
+	row := func(fields string) []byte {
+		return []byte(`{"resources":[{"path":"plowshare.json","revision":"` + revision + `",` + fields + `}]}`)
+	}
+	projected, err := project(catalog.Results["application.child.resources"], row(`"kind":"manifest","bytes":12`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ContainedApplicationResourcesDto
+	if err = json.Unmarshal(projected, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	want := ContainedApplicationResourceDto{Path: "plowshare.json", Kind: "manifest", Revision: revision, Bytes: 12}
+	if len(decoded.Resources) != 1 || decoded.Resources[0] != want {
+		t.Fatalf("decoded %+v", decoded)
+	}
+	for _, bad := range []string{`"kind":"directory","bytes":12`, `"kind":"file"`} {
+		if _, err = project(catalog.Results["application.child.resources"], row(bad), false); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+}
+
 func TestRelayPublishRawUtf8Limit(t *testing.T) {
 	const maximum = 50 * 1024 * 1024
 	for _, text := range []string{strings.Repeat("x", maximum), strings.Repeat("é", maximum/2)} {
