@@ -81,6 +81,7 @@ class ContainedConversationDoorDatabaseTest {
   private String childProject;
   private String siblingProject;
   private AllowanceId childAllowance;
+  private AllowanceId siblingAllowance;
 
   @BeforeEach
   void migrate() {
@@ -142,6 +143,11 @@ class ContainedConversationDoorDatabaseTest {
 
     childAllowance = new AllowanceId(UUID.randomUUID());
     allowances.retain(new AllowanceSnapshot(childAllowance, 5, 0));
+    // The sibling's own pool. A child's conversation carries the allowance of its OWN home, so a
+    // control that opened the sibling's conversation on this child's pool would pair a home with a
+    // pool that every other assertion in this slice forbids pairing.
+    siblingAllowance = new AllowanceId(UUID.randomUUID());
+    allowances.retain(new AllowanceSnapshot(siblingAllowance, 2, 0));
   }
 
   /** A contained scope over a fresh contained project; ancestry is the column, not the name. */
@@ -399,19 +405,25 @@ class ContainedConversationDoorDatabaseTest {
                 "worker",
                 "0".repeat(64)),
         "a sibling's admission does not open this child, though one container holds both");
-    // CONTROL: the sibling's own admission opens the sibling's own conversation, so the refusal is
-    // about which child the admission names and not about the hop or the door being broken.
-    assertNotNull(
-        conversations
-            .openContained(
-                Home.of(siblingProject),
-                allowances.restore(childAllowance),
-                null,
-                HOLDER,
-                sibling,
-                "worker",
-                "0".repeat(64))
-            .id());
+    // CONTROL: the sibling's own admission opens the sibling's own conversation, on the sibling's
+    // OWN allowance -- a real sibling run -- so the refusal above is about which child the
+    // admission names and not about the hop or the door being broken.
+    var opened =
+        conversations.openContained(
+            Home.of(siblingProject),
+            allowances.restore(siblingAllowance),
+            null,
+            HOLDER,
+            sibling,
+            "worker",
+            "0".repeat(64));
+    assertNotNull(opened.id());
+    assertEquals(
+        siblingAllowance.value(),
+        jdbc.queryForObject(
+            "SELECT budget_id FROM conversations WHERE id=?", UUID.class, opened.id()),
+        "and it spends its own pool, not the other child's");
+    assertEquals(siblingAllowance, policy.conversation(opened.id()).orElseThrow().budget());
 
     var elsewhere =
         policy.admit(

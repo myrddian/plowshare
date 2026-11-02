@@ -1277,18 +1277,21 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * <p>One of them would fail on integrity rather than on authority: {@code link} writes {@code
    * information_links.actor_handle}, whose foreign key targets {@code admins} (V83:77) and which a
    * contained principal has no row in by design (V218), so unguarded it raises an FK error — a
-   * server fault for something a caller did. The rest hand the actor to the event publisher, which
-   * is Relay and not a table with a foreign key, so they would have <em>succeeded</em>. That is the
-   * more dangerous half, and the reason this is an authority check rather than an integrity patch:
+   * server fault for something a caller did. The other eight hand the actor to the event publisher,
+   * which is Relay and not a keyed column: the delivery table that once held that foreign key was
+   * dropped when events moved onto Relay (V188:96). It cannot be named here, even in a comment
+   * about its removal — {@code InformationEventFenceRemovedTest} refuses any reference to it from
+   * server source, including inside the migration's own filename — which is how a stale citation of
+   * it in this javadoc was caught. So those eight would have <em>succeeded</em>. That is the more
+   * dangerous half, and the reason this is an authority check rather than an integrity patch:
    * whatever made {@code link} work would have silently granted the other eight.
    *
    * <p>Extending {@code attribution()} across them would have granted each of those capabilities by
    * implementation accident and attributed the act to an account that did not ask — against this
-   * capability's own rule that refusing a surface is an acceptable first slice while refusing a
-   * surface is an acceptable slice while honouring one nobody authorized is not. Several are
-   * pipeline-lifecycle operations over documents a contained home's are already declined from. What
-   * a running child may reach is a decision that belongs to the task that defines it, so this fails
-   * closed and keeps that decision open.
+   * capability's own rule that refusing a surface is an acceptable first slice while honouring one
+   * nobody authorized is not. Several are pipeline-lifecycle operations over documents a contained
+   * home's are already declined from. What a running child may reach is a decision that belongs to
+   * the task that defines it, so this fails closed and keeps that decision open.
    *
    * <p>The child's own write path does not come through here. {@code admit} is the one operation a
    * confined Application is authorized to perform, it calls none of these, and it carries the
