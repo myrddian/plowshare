@@ -139,7 +139,13 @@ public record RetentionPolicy(Duration curator, Duration submission, Duration jo
     return switch (origin) {
       case CURATOR, MEMORY -> curator;
       case SUBMISSION, EVENT -> submission;
-      case TURN, DELEGATION, ORCHESTRATION, BOARD -> null;
+      // CONTAINED has no age, with DELEGATION rather than with SUBMISSION, and the reason is a
+      // decision rather than a resemblance: a contained child's retained conversation lineage is
+      // the evidence its container reads through application.child.trajectory, and ADR 0042 makes
+      // that lineage survive the child's destruction deliberately -- which is why trajectory
+      // answers for a destroyed child where resources refuses. An age here would eject the one
+      // record of what a destroyed child did.
+      case TURN, DELEGATION, ORCHESTRATION, BOARD, CONTAINED -> null;
     };
   }
 }

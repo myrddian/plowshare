@@ -981,17 +981,46 @@ grandparent, a sibling subtree and an unrelated scope are each refused at the
 trigger as well as in Java, because a Java check is a check and the trigger is
 the fence.
 
-**What V225 deliberately does not settle.** `operation_conversation_valid` (V162)
-requires a conversation row's `agent` to equal its bound envelope's, while
+**A contained run's conversation carries its own origin, `contained`, and the
+reason is the allowance.** `operation_conversation_valid` (V162) requires a
+conversation row's `agent` to equal its bound envelope's, while
 `conversations_a_person_s_conversation_names_no_agent` (V17) forbids an agent on
-an `origin='turn'` row. A contained run's envelope always names an agent, so its
-conversation cannot be a `turn`, and no existing origin describes harness-started
-work inside a child honestly — `submission` means a caller's own parentless run,
-`delegation` shares its parent's allowance by reference and so cannot carry the
-child's own pool, `memory` is digest construction and `orchestration` is a
-conductor with its own machinery. Which origin a contained run carries is
-therefore an open decision recorded here rather than one taken in a migration,
-because an origin kind reaches listings, retention and lifecycle.
+an `origin='turn'` row — so a contained run's conversation, whose envelope always
+names an agent, cannot be a turn. None of the eight existing kinds describes
+harness-started work inside a confined child: `submission` is V17's caller's-own
+parentless run and would make a contained run indistinguishable from an external
+one in every listing, `memory` is digest construction, `event` is a trigger
+answering a tick, and `orchestration` brings lifecycle special-cases a contained
+run has no use for.
+
+The kind that decided it is `delegation`, and it fails on **design** rather than
+on taste: a delegation shares its parent's allowance by reference and its row
+therefore holds no budget at all, so a contained conversation carried on it would
+spend its **container's** pool. That contradicts this record's own requirement
+that a child allocates its own allowance under a ceiling its parent sets — spend
+is attributed to the child, never shared — so reusing the nearest existing kind
+would have reintroduced the exact defect a separate kind exists to prevent. V225
+therefore adds `contained` to the **owned** side of
+`conversations_an_allowance_is_owned_or_shared`, which is the line that makes
+"allocated, never shared" true of a running child, and a test asserts that a
+budget-less contained row is refused rather than trusting the service to supply
+one. The agent pairing needs no new constraint: V17's rule is an equality, so it
+already requires a `contained` row to name its agent, and both directions are
+asserted instead of restated.
+
+The contract cost is one hand-written line and no generated one. The generated
+SDKs type a conversation's `origin` as a plain string rather than a union of
+literals, so a new value changes no generated type — but the hooks contract,
+`plowshare-hooks/index.ts`, does carry a literal union, and
+`HookContractMirrorTest.the_origins_are_the_servers` fails until it is updated.
+That test is the mechanism working as designed, and the earlier claim that the
+kind had no contract reach at all was too strong by exactly that one declaration.
+Both constraints the kind needs an arm on have been restated by later migrations
+already (V74 and V169), so restating them is this table's ordinary maintenance. The retention question the sealed switch over
+`Origin` forces is answered with `DELEGATION`'s answer and not `SUBMISSION`'s: a
+contained conversation has no ejection age, because its retained lineage is the
+evidence a container reads through `application.child.trajectory` and this record
+makes that lineage survive the child's destruction deliberately.
 
 **On the misclassification risk recorded for the contained principal.** A
 contained principal's identifier is a bare UUID, so

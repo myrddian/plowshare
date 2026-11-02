@@ -83,3 +83,58 @@ BEGIN
  END IF;
  RETURN NEW;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- 2. the origin a contained run's conversation carries
+-- ---------------------------------------------------------------------------
+--
+-- A SEPARATE DECISION FROM THE EDIT ABOVE, carried in the same migration because this one is
+-- unshipped until its branch merges and one coherent migration beats two that must be read
+-- together. Section 1 is the lineage trigger and has nothing to do with this; nothing below
+-- touches operation_parent_valid.
+--
+-- WHY A NEW KIND RATHER THAN AN EXISTING ONE. A contained run's authority envelope always names an
+-- agent, and `conversations_a_person_s_conversation_names_no_agent` (V17:212) requires
+-- `(origin='turn') = (agent IS NULL)`, so a contained conversation cannot be a turn. Of the kinds
+-- that may carry a budget at all, none describes harness-started work inside a confined child:
+--
+--   * `submission` is V17's caller's-own parentless run -- a script, a CI job, curl -- so a
+--     contained run would be indistinguishable from an external submission in every listing;
+--   * `memory` is system-owned digest construction;
+--   * `event` is a trigger answering a tick, and the trigger machinery keys off it;
+--   * `orchestration` is a conductor with its own lifecycle special-cases, a cost with no benefit;
+--   * `delegation` fails on DESIGN and not on taste, which is what settled this: a delegation
+--     shares its parent's allowance by reference and its row therefore holds no budget, so a
+--     contained conversation carried on it would spend its CONTAINER's pool. ADR 0042 requires a
+--     child to allocate its own allowance under a ceiling its container sets, never to share one.
+--     Reusing the nearest existing kind would reintroduce exactly the defect a separate kind
+--     exists to avoid.
+--
+-- The wire contract is unaffected: the SDKs type a conversation's `origin` as a plain string, not a
+-- union of literals, so a new value changes no generated type. Both constraints below have been
+-- restated by later migrations already (V74 for the known set, V169 for the allowance), so
+-- restating them is this table's normal maintenance and not a novel operation.
+
+ALTER TABLE conversations DROP CONSTRAINT conversations_origin_is_known;
+ALTER TABLE conversations ADD CONSTRAINT conversations_origin_is_known
+    CHECK (origin IN ('turn', 'delegation', 'curator', 'submission', 'memory', 'event',
+                      'orchestration', 'board', 'contained'));
+
+-- THE OWNED SIDE, AND THAT IS THE WHOLE POINT. `contained` joins the list whose rows MUST carry a
+-- budget, so a contained conversation cannot be budget-less and therefore cannot share the pool of
+-- anything above it. Putting it on the shared side -- or leaving it off this list, which has the
+-- same effect -- would hand a child its container's allowance by reference and reintroduce the
+-- `delegation` defect described above under a different name. ADR 0042's "allocated, never shared"
+-- is this line. `ContainedConversationDoorDatabaseTest` asserts a budget-less contained row is
+-- refused, because the one way this decision goes wrong is a permissive sharing arm.
+ALTER TABLE conversations DROP CONSTRAINT conversations_an_allowance_is_owned_or_shared;
+ALTER TABLE conversations ADD CONSTRAINT conversations_an_allowance_is_owned_or_shared CHECK (
+  CASE WHEN origin='orchestration' THEN true
+       ELSE (origin IN ('turn','submission','memory','event','contained'))
+            = (budget_total IS NOT NULL OR budget_lifted) END);
+
+-- The agent pairing needs no new constraint and deliberately gets none: V17:212 is an equality, so
+-- it already fences both directions -- a turn row may not name an agent, and a row of any other
+-- origin, `contained` included, MUST name one. Asserted in both directions by
+-- ContainedConversationDoorDatabaseTest rather than restated here, since a second constraint
+-- saying the same thing is a second thing to keep in agreement.

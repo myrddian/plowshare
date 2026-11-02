@@ -378,7 +378,12 @@ public final class ConversationStore {
     // Before the row, so a refused admission leaves nothing behind. bind() rechecks it afterwards;
     // this is the check that makes the refusal total rather than the check that makes it safe.
     operations.require(child);
-    var opened = write(Origin.TURN, home, null, null, budget, turnCap, owner, null);
+    // Origin.CONTAINED, and the choice is load-bearing twice over. The row must name its agent,
+    // because the envelope bound below names one and operation_conversation_valid compares them,
+    // and V17's equality forbids an agent on a turn row. And CONTAINED owns its allowance, so the
+    // row carries the child's own pool rather than sharing anything above it -- which is why
+    // DELEGATION, the nearest existing kind, could not be reused. See Origin.CONTAINED.
+    var opened = write(Origin.CONTAINED, home, agent, null, budget, turnCap, owner, null);
     // The envelope application.child.trajectory reads back: the child's allowance as the budget,
     // and an admission whose account is the container's. bind proves the conversation belongs to
     // the admission's own home before it writes.
@@ -564,9 +569,14 @@ public final class ConversationStore {
     // about their own turns; one agent's run is capped by TurnCap.from(its
     // definition), resolved where the run is started, and a column here
     // would be a second answer to a question that already has one.
-    // The other door's branch. A contained home is refused rather than resolved, for the reason
-    // openContained states; this slice has no contained submission or event to serve, so this is
-    // the half of the pair that stays shut, explicitly and with a message that names the open one.
+    // This branch is REACHABLE and is not symmetry for its own sake: the information pipeline logs
+    // its processing conversation with Origin.SUBMISSION in the home of the document it is
+    // processing (InformationStageHooks, InformationWriteGates), and a child's documents now live
+    // in a contained home. So a child's document entering the pipeline arrives here. It is refused
+    // rather than resolved, because the resolution below cannot answer for a contained home and
+    // because whether a child's document is processed at all -- and under whose authority -- is a
+    // decision nobody has taken. Refusing clearly beats failing three layers down with a message
+    // about scopes, which is how this gate stayed invisible. See the task report.
     if (origin == Origin.SUBMISSION || origin == Origin.EVENT) requireUncontained(home, "log");
     if (system == null
         && operations != null

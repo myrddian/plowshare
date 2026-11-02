@@ -219,6 +219,10 @@ class ContainedRunTest {
   }
 
   SourceContainedApplications service(ContainmentConfig config) {
+    return service(config, runs);
+  }
+
+  SourceContainedApplications service(ContainmentConfig config, Runs started) {
     return new SourceContainedApplications(
         records,
         projects,
@@ -230,7 +234,7 @@ class ContainedRunTest {
         work,
         config,
         new InProcessContainedStaging(),
-        runs);
+        started);
   }
 
   static void manifest(Path workspace, String text) throws Exception {
@@ -612,6 +616,133 @@ class ContainedRunTest {
             "@service/parent",
             null);
     assertNull(ordinary.contained(), "an ordinary caller carries no contained authority");
+  }
+
+  /**
+   * {@code Runs} UN-MOCKED: the real run service deciding a contained start.
+   *
+   * <p>Every other test in this class mocks {@code Runs} and measures what this operation
+   * <em>asks</em> for. This one measures what the real {@code Runs.start} then <em>does</em> with
+   * it, which is the half that was unverifiable until the lineage gate opened: which conversation
+   * door it chooses, which project it proves work authority against, and which pool and admission
+   * it hands to that door.
+   *
+   * <p>Only the two collaborators below {@code Runs} are stubbed — the conversation store, so the
+   * call can be captured, and {@code Turn}, so no model is called. {@code Runs}, {@code Callers},
+   * {@code CallerAccess} and {@code DefinitionResolver} are all real.
+   *
+   * <p><strong>The work question is load-bearing here and the fixture makes it so.</strong> The
+   * membership fake answers {@code mayWork} for the container's project and for nothing else, so if
+   * the real {@code Runs} asked about the child's contained project — as it did before this slice —
+   * this test would fail with the CONTRIBUTOR refusal rather than pass. The persisted counterpart
+   * of these assertions is {@code ContainedConversationDoorDatabaseTest}, which drives the real
+   * door against real PostgreSQL.
+   */
+  @Test
+  void theRealRunServiceOpensTheContainedDoorWithTheChildsPool() {
+    var members = mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
+    // The container's project and nothing else. The child's contained project answers false,
+    // which is what it answers in production: a contained project carries no PROJECT scope.
+    when(members.mayWork("parent", "@service/parent")).thenReturn(true);
+    when(members.role(eq("parent"), eq("@service/parent")))
+        .thenReturn(
+            java.util.Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR));
+    var store = mock(io.aeyer.plowshare.server.archive.ProjectStore.class);
+    when(store.id(childProject)).thenReturn(42L);
+    var turn = mock(io.aeyer.plowshare.server.agents.Turn.class);
+    var conversations = mock(io.aeyer.plowshare.server.archive.ConversationStore.class);
+    var opened = mock(io.aeyer.plowshare.server.archive.ConversationRecord.class);
+    when(opened.id()).thenReturn("child-conv");
+    when(opened.home()).thenReturn(Home.of(childProject));
+    when(conversations.openContained(any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(opened);
+    when(turn.speak(anyString(), any(), anyString(), any(), any(), any(Speaker.class), any()))
+        .thenReturn("job-real");
+
+    var definition =
+        new io.aeyer.plowshare.server.agents.AgentDefinition(
+            "worker",
+            "a fixture",
+            "fast",
+            List.of(),
+            List.of(),
+            List.of(),
+            2,
+            4,
+            "Do it.",
+            true,
+            true);
+    var resolver =
+        new io.aeyer.plowshare.server.agents.DefinitionResolver(
+            new io.aeyer.plowshare.server.agents.AgentRegistry(Map.of("worker", definition)),
+            io.aeyer.plowshare.server.data.DataLayout.NONE,
+            id -> true,
+            Set.of(),
+            Set.of(),
+            mock(io.aeyer.plowshare.server.files.SessionChannel.class),
+            session -> true,
+            io.aeyer.plowshare.server.agents.DefinitionChecks.NONE);
+    var real =
+        new Runs(
+            new io.aeyer.plowshare.server.agents.Callers(
+                resolver,
+                store,
+                turn,
+                new io.aeyer.plowshare.server.agents.CallerAccess(
+                    new io.aeyer.plowshare.server.session.SessionRegistry(), members)),
+            mock(io.aeyer.plowshare.server.agents.JobStore.class),
+            turn);
+    @SuppressWarnings("unchecked")
+    var stages =
+        (org.springframework.beans.factory.ObjectProvider<
+                io.aeyer.plowshare.server.agents.LogStages>)
+            mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(stages.getObject()).thenReturn(mock(io.aeyer.plowshare.server.agents.LogStages.class));
+    real.useConversations(
+        conversations, new io.aeyer.plowshare.server.api.ConversationsProperties(), stages);
+
+    var running =
+        service(new ContainmentConfig(root.toString(), 2, 4, null), real)
+            .run("@service/parent", request());
+
+    assertEquals("job-real", running.job());
+    assertEquals("child-conv", running.conversation());
+    assertEquals(childId, running.child());
+
+    // THE DOOR: the contained one, never the ordinary one.
+    var home = ArgumentCaptor.forClass(Home.class);
+    var pool = ArgumentCaptor.forClass(io.aeyer.plowshare.server.agents.Budget.class);
+    var admitted = ArgumentCaptor.forClass(OperationAuthority.Admission.class);
+    var agent = ArgumentCaptor.forClass(String.class);
+    verify(conversations)
+        .openContained(
+            home.capture(),
+            pool.capture(),
+            any(),
+            eq("@service/parent"),
+            admitted.capture(),
+            agent.capture(),
+            any());
+    verify(conversations, never()).open(any(), any(), any(), any());
+    assertEquals(Home.of(childProject), home.getValue(), "opened in the child's own home");
+    // THE POOL: the child's own allowance, with its container's ceiling.
+    assertEquals(childAllowance.value(), pool.getValue().identity());
+    assertEquals(5, pool.getValue().limit());
+    // THE ACCOUNT: the container's, carried by the admission the hop produced.
+    assertEquals(account, admitted.getValue().account());
+    assertEquals("@service/parent", admitted.getValue().executor());
+    assertEquals(childScope, admitted.getValue().scope());
+    assertEquals("worker", agent.getValue());
+    // And the turn is spoken into the conversation that door opened.
+    verify(turn)
+        .speak(
+            eq("child-conv"),
+            eq(definition),
+            eq("Summarise the notes"),
+            any(),
+            any(),
+            eq(Speaker.contained(childId)),
+            any());
   }
 
   List<File> files() {

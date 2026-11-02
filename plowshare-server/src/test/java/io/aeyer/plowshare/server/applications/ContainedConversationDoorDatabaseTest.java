@@ -174,76 +174,152 @@ class ContainedConversationDoorDatabaseTest {
   }
 
   /**
-   * The hop now persists (V225), so the door is reached — and stops at gate six, which is pinned
-   * here with its exact refusal because the decision it needs has not been taken.
+   * THE SLICE'S GOAL, met: a contained conversation opened through the real door on a real hop,
+   * with the two facts the ruling names.
    *
-   * <p>{@code operation_conversation_valid} (V162:62) requires the conversation row's {@code agent}
-   * to equal the bound envelope's, and {@code conversations_a_person_s_conversation_names_no_agent}
-   * (V17:213) forbids an agent on an {@code origin='turn'} row. {@code openContained} writes an
-   * {@code Origin.TURN} row, so its agent is NULL while the envelope always names one, and the
-   * binding is refused. The fix is a choice about which {@code Origin} a contained run carries, not
-   * another predicate: an origin kind reaches listings, retention and lifecycle, so it is reported
-   * for decision rather than taken in a migration.
-   *
-   * <p>What this test proves today, which is more than the version it replaces: the hop is
-   * recorded, the admission is live, and the remaining blocker is the conversation row's origin and
-   * nothing else. When the origin is chosen, this becomes the envelope assertion in the test below
-   * it.
+   * <p>Everything in this test is the production path — {@code admit}, {@code contain}, {@code
+   * openContained}, {@code bind} and the real allowance repository — so what it asserts is what a
+   * started child actually gets: an envelope whose <strong>budget is the child's own
+   * allowance</strong> under the ceiling its container set, and whose <strong>admission account is
+   * the container's</strong>, unchanged across the hop.
    */
   @Test
-  void theHopPersistsAndTheDoorStopsAtTheConversationOrigin() {
+  void aContainedRunGetsAnEnvelopeOnItsOwnPoolAndItsContainersAccount() {
     var child = hop(childScope, childProject);
-
-    // The hop itself: recorded, and live. Before V225 neither was true.
+    // The hop is recorded and live, which V225 made possible and which nothing before it was.
     assertEquals(
         1,
         (int)
             jdbc.queryForObject(
                 "SELECT count(*) FROM operation_admission_parents WHERE child=?",
                 Integer.class,
-                child.id()),
-        "the hop records its lineage, which V225 made possible");
-    assertDoesNotThrow(() -> policy.require(child), "and the contained admission is live");
-    assertEquals(Home.of(childProject), child.home());
+                child.id()));
+    assertDoesNotThrow(() -> policy.require(child));
 
+    var opened =
+        conversations.openContained(
+            Home.of(childProject),
+            allowances.restore(childAllowance),
+            null,
+            HOLDER,
+            child,
+            "worker",
+            "0".repeat(64));
+
+    // THE ROW: the child's own project, its own origin, naming its agent, carrying its own pool.
+    assertEquals(
+        childProject,
+        jdbc.queryForObject(
+            "SELECT p.name FROM conversations c JOIN projects p ON p.id=c.project_id WHERE c.id=?",
+            String.class,
+            opened.id()));
+    assertEquals(
+        "contained",
+        jdbc.queryForObject(
+            "SELECT origin FROM conversations WHERE id=?", String.class, opened.id()));
+    assertEquals(
+        "worker",
+        jdbc.queryForObject(
+            "SELECT agent FROM conversations WHERE id=?", String.class, opened.id()));
+    assertEquals(
+        childAllowance.value(),
+        jdbc.queryForObject(
+            "SELECT budget_id FROM conversations WHERE id=?", UUID.class, opened.id()),
+        "the row points at the child's own allowance, not a pool minted for the run");
+
+    // THE ENVELOPE application.child.trajectory reads back. These are the ruling's two facts.
+    var envelope = policy.conversation(opened.id()).orElseThrow();
+    assertEquals(
+        childAllowance,
+        envelope.budget(),
+        "the envelope's budget is the child's allowance, under the ceiling its container set");
+    assertEquals(
+        jdbc.queryForObject(
+            "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, HOLDER),
+        envelope.admission().account().value(),
+        "and its accounting account is the container's, unchanged across the hop");
+    assertEquals(HOLDER, envelope.admission().executor(), "as is its executor");
+    assertEquals(childScope, envelope.admission().scope(), "while the scope is the child's own");
+    assertEquals("worker", envelope.agent());
+    // The ceiling really is the container's 5 calls, so "its own pool" is a bounded pool.
+    assertEquals(5, allowances.find(childAllowance).orElseThrow().ceiling());
+    // And the container's trajectory read finds exactly this envelope, keyed on the child's scope.
+    assertEquals(1, policy.conversationsIn(childScope).size());
+  }
+
+  /**
+   * The one way the {@code Origin.CONTAINED} decision goes wrong: a permissive sharing arm.
+   *
+   * <p>Sharing an allowance by reference is precisely what disqualified {@code delegation} — a
+   * contained conversation carried on it would spend its container's pool, against ADR 0042's
+   * "allocated, never shared". So V225 puts {@code contained} on the <em>owned</em> side of {@code
+   * conversations_an_allowance_is_owned_or_shared}, and this asserts the fence rather than trusting
+   * the service to pass a budget: a budget-less contained row is refused by PostgreSQL.
+   */
+  @Test
+  void aContainedConversationCannotShareItsContainersPool() {
     var refused =
         assertThrows(
             org.springframework.dao.DataAccessException.class,
-            () ->
-                conversations.openContained(
-                    Home.of(childProject),
-                    allowances.restore(childAllowance),
-                    null,
-                    HOLDER,
-                    child,
-                    "worker",
-                    "0".repeat(64)));
-    var cause = refused.getMostSpecificCause().getMessage();
-    // Case-insensitive: V162 spells it lower case and a later migration re-raises it capitalised,
-    // so pinning either spelling exactly would break on the other.
+            () -> insertRow("contained", "worker", null),
+            "a contained conversation with no allowance of its own is refused");
     assertTrue(
-        cause
-            .toLowerCase(java.util.Locale.ROOT)
-            .contains("conversation does not match retained execution"),
-        cause);
-    assertTrue(cause.contains("operation_conversation_valid"), cause);
+        refused.getMostSpecificCause().getMessage().contains("owned_or_shared"),
+        refused.getMostSpecificCause().getMessage());
+    // CONTROL: the same row with its own allowance is accepted, so the refusal is the missing
+    // budget and not the origin being unknown.
+    assertDoesNotThrow(() -> insertRow("contained", "worker", 5));
+    // And the shared-side kinds are unchanged: a delegation still may not carry one, which is the
+    // property that made it the wrong kind to reuse.
+    assertThrows(
+        org.springframework.dao.DataAccessException.class,
+        () -> insertRow("delegation", "worker", 5),
+        "a delegation still shares by reference and holds no budget of its own");
+  }
 
-    // And the reason is the agent column, which the origin decides: the row this door writes is a
-    // TURN row, so its agent is NULL while the envelope names one.
-    assertNull(
-        jdbc.queryForObject(
-            "SELECT agent FROM conversations WHERE project_id="
-                + "(SELECT id FROM projects WHERE name=?)",
-            String.class,
-            childProject),
-        "the row was written with no agent, because an origin='turn' row may not name one");
-    assertEquals(
-        "turn",
-        jdbc.queryForObject(
-            "SELECT origin FROM conversations WHERE project_id="
-                + "(SELECT id FROM projects WHERE name=?)",
-            String.class,
-            childProject));
+  /**
+   * The agent pairing, fenced in both directions by one equality rather than by two constraints.
+   *
+   * <p>{@code conversations_a_person_s_conversation_names_no_agent} (V17:212) is {@code
+   * (origin='turn') = (agent IS NULL)}, so it already says both things: a turn names no agent, and
+   * every other origin — {@code contained} included — must name one. V225 adds no second constraint
+   * saying the same thing; this asserts both halves instead, so the pairing is pinned where it
+   * currently fails and where it currently holds.
+   */
+  @Test
+  void aContainedConversationMustNameItsAgentAndATurnMustNot() {
+    assertThrows(
+        org.springframework.dao.DataAccessException.class,
+        () -> insertRow("contained", null, 5),
+        "a contained conversation with no agent is refused");
+    assertThrows(
+        org.springframework.dao.DataAccessException.class,
+        () -> insertRow("turn", "worker", 5),
+        "and a turn naming one is refused, which is the same equality from the other side");
+    // CONTROLS: each origin with its own correct pairing is accepted.
+    assertDoesNotThrow(() -> insertRow("contained", "worker", 5));
+    assertDoesNotThrow(() -> insertRow("turn", null, 5));
+  }
+
+  /**
+   * One conversation row written by hand, so a constraint can be asked a question the service would
+   * never pose. The project is the child's, the lifecycle is a root's, and nothing else is set,
+   * which keeps a refusal attributable to the column under test.
+   */
+  private void insertRow(String origin, String agent, Integer budget) {
+    jdbc.update(
+        "INSERT INTO conversations"
+            + " (id,project_id,origin,lifecycle,agent,created_at,budget_total,budget_spent,"
+            + " budget_lifted,turn_cap_lifted,budget_id)"
+            + " VALUES (?,(SELECT id FROM projects WHERE name=?),?,'active',?,now(),?,?,FALSE,"
+            + " FALSE,?)",
+        "c-" + UUID.randomUUID(),
+        childProject,
+        origin,
+        agent,
+        budget,
+        budget == null ? null : 0,
+        UUID.randomUUID());
   }
 
   /**
