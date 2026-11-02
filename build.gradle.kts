@@ -75,6 +75,13 @@ val deploymentConfigTest by tasks.registering(Exec::class) {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     commandLine("python3", "-B", "-m", "unittest", "discover", "-s", "deploy/docker/tests")
 }
+val mlxCountingTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Checks the count-only MLX companion without loading MLX or a model."
+    inputs.dir("extensions/mlx-counting").withPathSensitivity(PathSensitivity.RELATIVE)
+    commandLine("python3", "-B", "-m", "unittest", "discover", "-s", "extensions/mlx-counting")
+}
+tasks.named("check") { dependsOn(mlxCountingTest) }
 val clientManifestCheck by tasks.registering(Exec::class) {
     group = "verification"
     description = "Refuses stale WS, MCP and client capability inventory."

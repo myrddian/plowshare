@@ -160,6 +160,22 @@ Count refresh measures the next ordinary request projection. See [Context inspec
 
 Subscribe supports aggregate reports without pagination cursors, with at most eight per physical socket. The initial correlated snapshot has revision 0. `usage.updated` envelopes have no `id`, increasing revisions, and complete replacement reports. Replace displayed quantities instead of adding them. Updates are checked at most once per second, stay quiet while unchanged, and revalidate access. Revocation produces `usage.closed` with a safe failure code. Disconnect/replacement removes subscriptions; reconnect requires fresh reads/subscriptions. The sender keeps only the latest pending snapshot per subscription, separately from correlated replies and token deltas. Unsubscribe is idempotent on the owning socket.
 
+## Processor-only LM Studio MLX counting
+
+The opt-in `lmstudio_mlx_input_tokens` protocol reuses the existing complete chat
+projection and bounded counter. A response must echo the exact configured model
+and SHA-256 `revision`; `cache-entries: 0` is required so every exchange validates
+the live model/template/processor binding. Existing text counting remains the
+default. Disk-loaded model profiles still own MIME eligibility.
+
+The [MLX counting companion](../extensions/mlx-counting/README.md) runs with the
+model host's installed packages and tokenizer/processor files without loading
+weights. It documents explicit configuration, supported prompt options, the
+same-origin deployment route and live acceptance command. **Keep
+`image-tokens-included: false` until its count agrees with actual full image
+context usage.** The inspected LM Studio HTTP usage omitted expanded image tokens;
+that discrepancy remains a release gate, not a token-count correction rule.
+
 ## OpenAI and Azure v1 pools
 
 Azure v1 uses the same OpenAI-compatible transport. [Microsoft documents the `/openai/v1` base path and deployment-name model field](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle?tabs=key); the [v1 chat contract](https://learn.microsoft.com/en-us/rest/api/microsoft-foundry/azureopenai/chat) supports API-key headers and the existing chat/tool/SSE usage shapes.

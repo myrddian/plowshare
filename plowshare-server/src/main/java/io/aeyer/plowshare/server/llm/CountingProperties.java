@@ -8,7 +8,8 @@ public class CountingProperties {
   /** Wire protocol for complete chat prompts; embedding tokenization remains vLLM-only. */
   public enum ChatProtocol {
     VLLM_TOKENIZE("VLLM_TOKENIZE_0_15_1", "count"),
-    LLAMA_CPP_INPUT_TOKENS("LLAMA_CPP_CHAT_INPUT_TOKENS", "input_tokens");
+    LLAMA_CPP_INPUT_TOKENS("LLAMA_CPP_CHAT_INPUT_TOKENS", "input_tokens"),
+    LMSTUDIO_MLX_INPUT_TOKENS("LMSTUDIO_MLX_CHAT_INPUT_TOKENS", "input_tokens");
 
     private final String source;
     private final String countField;
@@ -134,10 +135,16 @@ public class CountingProperties {
         || cacheEntries > 10000
         || revision != null && !revision.matches("[A-Za-z0-9._:-]{1,128}"))
       throw new IllegalArgumentException("invalid pool counting bounds or revision");
-    if (chatProtocol == ChatProtocol.LLAMA_CPP_INPUT_TOKENS
+    if (chatProtocol != ChatProtocol.VLLM_TOKENIZE
         && (url == null || revision == null || embeddings))
       throw new IllegalArgumentException(
-          "llama.cpp chat counting needs an explicit url, verified revision and no embedding counting");
+          "Full-chat counting needs an explicit url, verified revision and no embedding counting");
+    // LM Studio settings can change without changing its model alias. This slice validates
+    // the live binding on every exchange; a cached count would bypass that check.
+    if (chatProtocol == ChatProtocol.LMSTUDIO_MLX_INPUT_TOKENS
+        && (cacheEntries != 0 || !revision.matches("[a-f0-9]{64}")))
+      throw new IllegalArgumentException(
+          "MLX counting needs cache-entries: 0 and the sidecar's SHA-256 revision");
     if (imageTokensIncluded && (url == null || revision == null))
       throw new IllegalArgumentException(
           "Image counting needs an explicit url and verified revision");
@@ -159,10 +166,10 @@ public class CountingProperties {
         || !url.equals(url.trim()))
       throw new IllegalArgumentException(
           "pool counting url must use the inference origin without credentials or query");
-    if (chatProtocol == ChatProtocol.LLAMA_CPP_INPUT_TOKENS
+    if (chatProtocol != ChatProtocol.VLLM_TOKENIZE
         && !target.encodedPath().endsWith("/chat/completions/input_tokens"))
       throw new IllegalArgumentException(
-          "llama.cpp counting url must name its chat-completion input-token endpoint");
+          "Full-chat counting url must name its chat-completion input-token endpoint");
   }
 
   public String fingerprint() {

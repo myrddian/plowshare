@@ -1417,10 +1417,9 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             false,
             request.tools(),
             request.toolChoice());
-    // llama.cpp's count-only endpoint accepts the actual chat-completion body. Do not
+    // Full-chat count-only endpoints accept the actual chat-completion body. Do not
     // approximate its image expansion, flatten tools/history, or issue a zero-token completion.
-    if (protocol
-        == io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol.LLAMA_CPP_INPUT_TOKENS)
+    if (protocol != io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol.VLLM_TOKENIZE)
       return counted(
           model,
           List.of(wire),
@@ -1544,12 +1543,18 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
                   || reply.path(countField).longValue() < 0
                   || reply.has("model") && !reply.get("model").isTextual()
                   || protocol
-                          == io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol
-                              .LLAMA_CPP_INPUT_TOKENS
+                          != io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol
+                              .VLLM_TOKENIZE
                       && (!"response.input_tokens".equals(reply.path("object").asText())
                           || reply.has("error")
                           || reply.has("truncated") && !reply.path("truncated").isBoolean()
-                          || reply.path("truncated").asBoolean()))
+                          || reply.path("truncated").asBoolean())
+                  || protocol
+                          == io.aeyer.plowshare.server.llm.CountingProperties.ChatProtocol
+                              .LMSTUDIO_MLX_INPUT_TOKENS
+                      && (!model.equals(reply.path("model").asText())
+                          || !reply.path("revision").isTextual()
+                          || !settings.getRevision().equals(reply.path("revision").asText())))
                 throw new java.io.IOException("counter_invalid_response");
               return new io.aeyer.plowshare.server.llm.counting.VllmPromptCounter.Observation(
                   reply.get(countField).longValue(),
