@@ -18,12 +18,12 @@ import io.aeyer.plowshare.server.events.ScheduleStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.information.AccountKnowledgePermissions;
 import io.aeyer.plowshare.server.llm.dispatch.*;
 import io.aeyer.plowshare.server.relay.*;
 import io.aeyer.plowshare.server.relay.tools.*;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import io.aeyer.plowshare.server.union.Hub;
-import io.aeyer.plowshare.server.union.Hubs;
 import io.aeyer.plowshare.server.ws.Asking;
 import io.aeyer.plowshare.server.ws.FrameTypes;
 import io.aeyer.plowshare.server.ws.ScheduleDefineHandler;
@@ -110,13 +110,34 @@ import org.mockito.ArgumentCaptor;
  * <h2>These assertions were checked against a broken fence</h2>
  *
  * <p>A test that passes because nothing was installed is this slice's recurring review finding, so
- * the controls above were not the only check. Three fences were deliberately broken in the fixture
- * and the suite re-run, to confirm each refusal is sensitive to the thing it claims to pin:
- * resolving the child's definitions from the container's resource root failed both delegation
- * tests; resolving its tool bindings from the container's root failed the binding test; and making
- * the hop keep the caller's scope and home — ADR 0011's downward inheritance, which ADR 0042
- * departs from — failed the subtree test. The breakages were reverted; they are recorded in the
+ * the controls above were not the only check. Four fences were deliberately broken and the suite
+ * re-run, to confirm each refusal is sensitive to the thing it claims to pin: resolving the child's
+ * definitions from the container's resource root failed both delegation tests; resolving its tool
+ * bindings from the container's root failed the binding test; making the hop keep the caller's
+ * scope and home — ADR 0011's downward inheritance, which ADR 0042 departs from — failed the
+ * subtree test; and changing {@code requireReadTargets} to admit a row when <em>any</em> of its
+ * projects is the admission's home — the audience mistake — failed the resource test. The last was
+ * a mutation of production rather than of a fixture. All were reverted; they are recorded in the
  * task report with their output.
+ *
+ * <h2>A measured surface that is NOT fenced, and is not this task's to close</h2>
+ *
+ * <p>{@code DefinitionResolver} merges the inherited global tier into every project's registry, so
+ * the delegation tests above prove confinement against <em>project-local</em> definitions only. A
+ * contained child's agent declaring {@code calls: [some_global_agent]} keeps that edge: measured,
+ * and the measurement is in the task report with its output. The whole global tier appears in the
+ * child's registry, {@code Callers.find} resolves a global agent from inside the contained home,
+ * and a global agent carrying its own {@code tools:} list resolves with that list — which no subset
+ * test compares against the child's package or its container's, because {@code
+ * ContainedDeclarations} compares only what the two <em>packages</em> declare.
+ *
+ * <p>Nothing here fences it, deliberately. A global agent is the server operator's own definition
+ * rather than a child's or a container's, so whether a contained subtree should inherit the tier at
+ * all is a question about the platform and not about this test, and closing it would be a core
+ * change needing its own authorization. It is reported rather than asserted, because a test
+ * asserting the current behaviour would bake in an answer nobody has given. The one existing
+ * partial fence is {@code AgentRegistry.escalatingGrant}, which refuses a callee whose
+ * <em>workspace</em> grants exceed the caller's; it says nothing about a callee's {@code tools:}.
  *
  * <h2>A door that does not exist, recorded rather than asserted</h2>
  *
@@ -154,6 +175,23 @@ class ContainedRuntimeReachTest {
 
   /** The container's own executor: the one account every hop below keeps, per ADR 0025. */
   static final String EXECUTOR = "@service/parent";
+
+  /**
+   * The built-in tools this fixture's {@link JobRuntime} genuinely serves, and therefore the whole
+   * of what the child's model is offered. {@code agent_run}, {@code result_read} and {@code
+   * result_list} are the three {@code JobRuntime.knownTools()} offers from its own wiring with no
+   * tool list at all; {@code get_date} is a real {@link GetDateTool} instance handed to it, so the
+   * set is derived from real tool objects through production's own derivation rather than named by
+   * this fixture.
+   *
+   * <p><strong>The bound on what that can prove is stated at {@link
+   * #aRunningChildCannotDefineASchedule}</strong>, because it is a real one.
+   */
+  static final List<String> SERVED_TOOLS =
+      List.of("agent_run", "get_date", "result_list", "result_read");
+
+  /** The same names as a definition's {@code tools:} list. */
+  static final String SERVED_TOOLS_DECLARATION = "[" + String.join(", ", SERVED_TOOLS) + "]";
 
   // =============================================================================================
   // Fixture A: real definition resolution and a real job runtime, for agent_run.
@@ -205,7 +243,9 @@ class ContainedRuntimeReachTest {
         definition(
             childProject,
             "worker",
-            "tools: [agent_run]\ncalls: [own_helper, container_helper, sibling_helper]\n",
+            "tools: "
+                + SERVED_TOOLS_DECLARATION
+                + "\ncalls: [own_helper, container_helper, sibling_helper]\n",
             "child worker");
         definition(childProject, "own_helper", "exported: false\n", "helper child");
 
@@ -214,7 +254,7 @@ class ContainedRuntimeReachTest {
                 boot,
                 new DataLayout(null),
                 id -> id == CONTAINER_ID || id == CHILD_ID || id == SIBLING_ID,
-                Set.of("agent_run"),
+                Set.copyOf(SERVED_TOOLS),
                 Set.of(),
                 mock(SessionChannel.class),
                 session -> false,
@@ -283,7 +323,7 @@ class ContainedRuntimeReachTest {
       var runtime =
           new JobRuntime(
               dispatcher,
-              List.of(),
+              List.of(new GetDateTool(Instant::now, java.time.ZoneId.of("UTC"))),
               () -> boot,
               null,
               Instant::now,
@@ -436,6 +476,7 @@ class ContainedRuntimeReachTest {
     final UUID grandchildRevision = UUID.randomUUID();
 
     final Path root;
+    final Path containerWorkspace;
     final SourceContainedApplications service;
 
     /**
@@ -471,7 +512,7 @@ class ContainedRuntimeReachTest {
     Containment() {
       try {
         root = Files.createDirectories(directory.resolve("containment"));
-        Path containerWorkspace = Files.createDirectories(directory.resolve("container"));
+        containerWorkspace = Files.createDirectories(directory.resolve("container"));
         Files.writeString(
             containerWorkspace.resolve("plowshare.json"),
             "{\"version\":1,\"name\":\"parent\",\"nesting\":true}");
@@ -687,7 +728,7 @@ class ContainedRuntimeReachTest {
    *   <li><b>At definition load.</b> The child's {@code worker} declares {@code calls:
    *       [container_helper]}, and the loader <em>withholds</em> that edge because nothing in the
    *       child's project defines the name. The withheld edge names its own reason, which this
-   *       asserts through {@code Callers.withheldFrom} — a declaration honoured and found
+   *       asserts through {@code DefinitionResolver.refusalsFor} — a declaration honoured and found
    *       unresolvable, not a declaration denied.
    *   <li><b>At call time.</b> The child keeps one resolvable edge, so {@code agent_run} really is
    *       offered and the model really does get to name the outward one. It is refused, and the
@@ -769,8 +810,14 @@ class ContainedRuntimeReachTest {
 
     var child = fixture.delegate(childProject, "worker", "sibling_helper");
     String refusal = child.toolResult();
-    assertFalse(refusal.startsWith("E_NO_ACCESS:"), refusal);
-    assertTrue(refusal.contains("sibling_helper"), refusal);
+    assertFalse(
+        refusal.startsWith("E_NO_ACCESS:"),
+        "a sideways reach must fail to resolve, not be denied a permission: " + refusal);
+    assertTrue(
+        refusal.contains("sibling_helper"), "the refusal names what was asked for: " + refusal);
+    assertTrue(
+        refusal.contains("own_helper"),
+        "and offers the set that did resolve, which excludes it: " + refusal);
     assertTrue(
         child.requests.stream()
             .flatMap(List::stream)
@@ -939,38 +986,233 @@ class ContainedRuntimeReachTest {
   @Test
   void aRunningChildAcquiresNoWorkingTreeOrGitHub() throws Exception {
     var fixture = new Containment();
-    Path data = Files.createDirectories(directory.resolve("data"));
-    var layout = new DataLayout(data);
-    var hubs =
-        new Hubs(
-            layout,
-            name ->
-                CONTAINER.equals(name)
-                    ? CONTAINER_ID
-                    : childProject.equals(name) ? CHILD_ID : null);
 
     fixture.service.run(
         EXECUTOR,
         new ContainedApplications.Run("c-container", fixture.childId, "worker", "Work", 2));
     verify(fixture.runs).start(any(), any());
 
-    Hub childHub = hubs.of(childProject).orElseThrow();
-    assertFalse(childHub.exists(), "a started child holds no bare hub");
-    assertFalse(Files.exists(childHub.tree()), "a started child holds no working tree");
-    // Nor under its own source area, which is the only directory this capability allocates.
-    assertFalse(Files.exists(fixture.area(childProject).resolve("sync.git")));
-    assertFalse(Files.exists(fixture.area(childProject).resolve("tree")));
+    // The child's source area: the one directory this capability allocates and the service's own
+    // path, derived exactly as the service derives it from the opaque project name.
+    Path childArea = fixture.area(childProject);
+    assertTrue(Files.isDirectory(childArea), "the service really does own this directory");
+    assertFalse(new Hub(childArea).exists(), "and holds no bare hub in it");
+    assertFalse(Files.exists(childArea.resolve("sync.git")));
+    assertFalse(Files.exists(childArea.resolve("tree")));
+    assertEquals(
+        List.of("revisions"),
+        listing(childArea),
+        "the staged revision is the whole of what a started child's area holds");
 
-    // CONTROL. The same Hub class, over the same layout, provisions both when something asks it
-    // to -- so the absence above is that nothing asked, not that provisioning cannot happen here.
-    Hub containerHub = hubs.of(CONTAINER).orElseThrow();
+    // CONTROL, over a real project workspace in the same fixture and through the same class the
+    // server provisions with. So the absence above is that nothing asked -- not that Hub cannot
+    // provision here, and not that the asserted path is the wrong one.
+    Path containerArea = fixture.containerWorkspace;
+    Hub containerHub = new Hub(containerArea);
     assertFalse(containerHub.exists());
     containerHub.create();
     assertTrue(containerHub.exists(), "provisioning is reachable in this fixture");
     assertTrue(Files.isDirectory(containerHub.tree()));
-    // And the child's is still absent after the container's was created, so one did not create
-    // the other.
-    assertFalse(childHub.exists());
+    assertTrue(Files.exists(containerArea.resolve("sync.git")));
+    // And the child's area is unchanged by it, so one did not provision the other.
+    assertEquals(List.of("revisions"), listing(childArea));
+  }
+
+  /** The immediate entries of a directory, sorted. */
+  static List<String> listing(Path directory) throws java.io.IOException {
+    try (var entries = Files.list(directory)) {
+      return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+    }
+  }
+
+  // =============================================================================================
+  // The resources a built-in read tool can name: the audience-driven reach.
+  // =============================================================================================
+
+  /**
+   * A real {@link PinnedOperationAuthority}, so the resource pin under test is production's and not
+   * a stub. Shaped on {@code ContainmentHopTest}'s fixture, which is where the hop itself is
+   * pinned.
+   */
+  final class Reads {
+    final IdentityRepository identities = mock(IdentityRepository.class);
+    final ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
+    final ScopedAuthority scoped = mock(ScopedAuthority.class);
+    final ProjectMembers members = mock(ProjectMembers.class);
+    final OperationRecords records = mock(OperationRecords.class);
+    final ResourceScopeRepository resources = mock(ResourceScopeRepository.class);
+
+    final AccountId account = new AccountId(UUID.randomUUID());
+    final GrantRecipient recipient = GrantRecipient.account(account);
+    final UUID grant = UUID.randomUUID();
+    final AuthorityScope.Project container =
+        new AuthorityScope.Project(new ScopeId(UUID.randomUUID()), 1);
+    final AuthorityScope.Contained child =
+        new AuthorityScope.Contained(new ScopeId(UUID.randomUUID()), 2, container.id());
+    final Home childHome = Home.of(childProject);
+    final PinnedOperationAuthority policy;
+
+    Reads() {
+      policy =
+          new PinnedOperationAuthority(
+              identities,
+              grants,
+              scoped,
+              members,
+              records,
+              resources,
+              AccountKnowledgePermissions.DENY,
+              new ContainmentBounds(3, 4));
+      when(identities.account("alice"))
+          .thenReturn(
+              new IdentityRepository.Account(
+                  account, "alice", IdentityRepository.AccountKind.USER, false));
+      when(identities.project(CONTAINER)).thenReturn(container);
+      when(identities.home(container)).thenReturn(Home.of(CONTAINER));
+      when(identities.scope(container.id())).thenReturn(container);
+      when(identities.containedHome(child, container.id())).thenReturn(childHome);
+      when(identities.contained(child.id())).thenReturn(Optional.of(child));
+      when(members.authorityAccount("alice")).thenReturn(Optional.of("alice"));
+      when(members.role(CONTAINER, "alice")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+      var binding = mock(ScopedGrantRepository.Binding.class);
+      when(binding.id()).thenReturn(grant);
+      when(grants.live(recipient)).thenReturn(List.of(binding));
+      for (var action :
+          List.of(
+              AuthorityAction.READ,
+              AuthorityAction.WRITE,
+              AuthorityAction.RUN_MODEL,
+              AuthorityAction.CONVERSATION_CREATE))
+        when(scoped.allowsUsing(recipient, container, action, grant)).thenReturn(true);
+    }
+
+    /**
+     * The child's own admission, produced by the hop and nothing else.
+     *
+     * <p>The ancestry edge is then wired back into {@code records}, because {@code require} walks
+     * it on every call and a contained admission with no retained parent is refused by design —
+     * there would be no evidence any container narrowed to it. {@code contain} records the edge
+     * through {@code retainChild}; this makes the fake answer what a real store would.
+     */
+    OperationAuthority.Admission contained() {
+      var parent =
+          policy.admit(
+              "alice",
+              container,
+              Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL));
+      when(records.find(parent.id())).thenReturn(Optional.of(parent));
+      var contained =
+          policy.contain(parent, child, Set.of(AuthorityAction.READ, AuthorityAction.WRITE));
+      verify(records).retainChild(contained, parent.id());
+      when(records.parent(contained.id())).thenReturn(Optional.of(parent.id()));
+      return contained;
+    }
+
+    /** Says which projects a referenced row belongs to, which is the audience question. */
+    void belongsTo(AccessRequest.Resource reference, String... projects) {
+      when(resources.projects(reference)).thenReturn(Arrays.asList(projects));
+    }
+  }
+
+  /**
+   * A built-in read tool's resource reference cannot name a row outside the child's own home, and a
+   * row that several projects can see is refused rather than admitted on the strength of one of
+   * them.
+   *
+   * <p>This is the anti-goal the spec names in as many words — "any path by which a child obtains
+   * authority its parent lacks, including through audience-driven reads the child never names". The
+   * contained run's built-in set includes {@code conversation_chat}, {@code conversation_list},
+   * {@code memory_read} and {@code result_read}; {@code RetainedToolAccess} turns their arguments
+   * into typed {@link AccessRequest.Resource} references, and {@code
+   * PinnedOperationAuthority.requireReadTargets} is what pins each one to the admission's own home.
+   * A contained admission's <em>action</em> authority is proved against the nearest enclosing
+   * uncontained scope, so that home-equality clause is the only thing standing between a child and
+   * its container's conversations and memories. It had no test; it has one now.
+   *
+   * <p>Both directions, because the write path is a separate method with a separate clause, and a
+   * child writing into its container's conversation would be worse than reading one.
+   */
+  @Test
+  void aRunningChildReachesNoResourceOutsideItsOwnHome() {
+    var fixture = new Reads();
+    var admission = fixture.contained();
+    assertEquals(fixture.childHome, admission.home(), "the hop produced the child's own home");
+
+    var ownConversation =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "c-own");
+    var containersConversation =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "c-container");
+    var containersMemory = new AccessRequest.Resource(ResourceScopeRepository.Kind.MEMORY, "mem_1");
+    var shared = new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "c-shared");
+    fixture.belongsTo(ownConversation, childProject);
+    fixture.belongsTo(containersConversation, CONTAINER);
+    fixture.belongsTo(containersMemory, CONTAINER);
+    // An audience-driven row: one the child never named, which more than one project can see --
+    // and one of those projects IS the child's own home, so admitting it on "my home is in the
+    // list" is the exact mistake this clause avoids.
+    fixture.belongsTo(shared, childProject, CONTAINER);
+
+    // CONTROL FIRST, so that nothing below can pass for want of a live admission or a stub: the
+    // child's own conversation is readable and writable through the very same calls.
+    assertDoesNotThrow(
+        () ->
+            fixture.policy.requireReadTargets(
+                admission, fixture.childHome, List.of(ownConversation)));
+    assertDoesNotThrow(
+        () ->
+            fixture.policy.requireTargets(admission, fixture.childHome, List.of(ownConversation)));
+
+    // Outward, on the read path.
+    for (var outward : List.of(containersConversation, containersMemory, shared))
+      assertEquals(
+          "Operation is outside its retained scoped authority",
+          assertThrows(
+                  CallerFault.class,
+                  () ->
+                      fixture.policy.requireReadTargets(
+                          admission, fixture.childHome, List.of(outward)))
+              .getMessage(),
+          "a contained read reached " + outward.id());
+
+    // Outward, on the write path.
+    for (var outward : List.of(containersConversation, containersMemory, shared))
+      assertThrows(
+          CallerFault.class,
+          () -> fixture.policy.requireTargets(admission, fixture.childHome, List.of(outward)),
+          "a contained write reached " + outward.id());
+
+    // A batch is not a loophole: one outward reference refuses the whole list, so a child cannot
+    // smuggle one in beside a legal one. memory_read takes up to 256 ids at once.
+    assertThrows(
+        CallerFault.class,
+        () ->
+            fixture.policy.requireReadTargets(
+                admission, fixture.childHome, List.of(ownConversation, containersMemory)));
+
+    // Nor is naming the container's home instead of its own: the home argument is compared to the
+    // admission's, so a child cannot ask the question about somewhere else.
+    assertThrows(
+        CallerFault.class,
+        () ->
+            fixture.policy.requireReadTargets(
+                admission, Home.of(CONTAINER), List.of(containersConversation)));
+    // Including for a row that really is its own -- the home is not an argument it may choose.
+    assertThrows(
+        CallerFault.class,
+        () ->
+            fixture.policy.requireReadTargets(
+                admission, Home.of(CONTAINER), List.of(ownConversation)));
+
+    // Global memory sits outside every containment subtree, and the hop drops global read
+    // unconditionally, so the one null-project escape in requireReadTargets is closed too.
+    assertFalse(admission.globalRead());
+    var globalMemory = new AccessRequest.Resource(ResourceScopeRepository.Kind.MEMORY, "mem_g");
+    when(fixture.resources.projects(globalMemory))
+        .thenReturn(java.util.Collections.singletonList(null));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            fixture.policy.requireReadTargets(admission, fixture.childHome, List.of(globalMemory)));
   }
 
   // =============================================================================================
@@ -989,10 +1231,24 @@ class ContainedRuntimeReachTest {
    *       principal is a bare UUID with no row in {@code admins}, {@code authority_accounts} or
    *       {@code service_tokens} (V218), so it cannot sign in, holds no handle and reaches no
    *       frame.
-   *   <li>No tool in the set a contained run resolves names a schedule, so there is no tool door
-   *       either. Asserted over the whole resolved set rather than against a guessed name, in the
-   *       style of {@code NothingEnumeratesImagesTest}: the day a scheduling tool arrives, this
-   *       fails rather than silently continuing to pass.
+   *   <li>No tool the child's model is <em>offered</em> defines a schedule, asserted over the
+   *       schemas the runtime actually built for it and not over the relay tool registry. That
+   *       distinction matters: {@code ApplicationToolRegistry} holds only an Application's own
+   *       relay bindings, so a built-in could never appear in it and an assertion over it would be
+   *       unfalsifiable.
+   * </ul>
+   *
+   * <p><strong>The bound on the third leg, stated rather than overclaimed.</strong> The offered set
+   * is non-empty and is derived by {@code JobRuntime.knownTools()} from real tool objects, so this
+   * is a test and not a tautology. But it is the set <em>this fixture's runtime</em> serves, not
+   * every built-in a production deployment wires, because building the real list needs the Spring
+   * context {@code AgentsConfig} assembles and {@code RetainedToolAccess.SYNCHRONOUS} is private to
+   * {@code agents}. So this leg says "nothing in a contained run's offered surface schedules
+   * anything", and it would not by itself catch a scheduling tool added to production's wiring and
+   * not to this fixture. The weight of the claim rests on the other two legs, which are a real
+   * refusal and a real frame fence; this one closes the tool-shaped door it can see. Carrying it
+   * further needs either a test in {@code agents} that can read that set or an accessor on it, and
+   * I would rather that be asked for than added.
    * </ul>
    */
   @Test
@@ -1011,13 +1267,26 @@ class ContainedRuntimeReachTest {
             .contains("cannot declare a schedule"),
         "a schedule is refused outright, even one its container declares too");
 
-    // The runtime door: there is none. Nothing in the set the child's home resolves is a
-    // scheduling tool, so no call a model can emit reaches the scheduler.
-    var bindings = new Bindings();
+    // The runtime door: there is none. Asserted over the schemas actually offered to the child's
+    // model -- the set a model could emit a call against -- and NOT over the relay tool registry,
+    // which holds only Application bindings and in which a built-in could never appear at all.
+    //
+    // The non-emptiness assertion is what makes this a test rather than a tautology: the child's
+    // agent declares every built-in a contained run can be served, the runtime really offers them,
+    // and none of them defines a schedule.
+    var offered = new Delegation().delegate(childProject, "worker", "own_helper").schemas;
+    var names =
+        offered.getFirst().stream()
+            .map(ToolSchema::name)
+            .collect(java.util.stream.Collectors.toSet());
+    assertFalse(names.isEmpty(), "the child's model really was offered tools");
+    assertEquals(
+        Set.copyOf(SERVED_TOOLS),
+        names,
+        "and was offered exactly the built-ins this runtime serves, got: " + names);
     assertTrue(
-        bindings.registry.names(CHILD_ID).stream().noneMatch(name -> name.contains("schedule")));
-    assertTrue(
-        bindings.callable(childProject).stream().noneMatch(name -> name.contains("schedule")));
+        names.stream().noneMatch(name -> name.contains("schedule")),
+        "none of which defines a schedule: " + names);
 
     // The frame door needs a handle, and refuses without one.
     var schedules = mock(ScheduleStore.class);
