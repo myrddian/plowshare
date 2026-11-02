@@ -946,6 +946,53 @@ contained admission with no retained parent edge at all, since a contained
 admission comes into being only through a hop and a freely constructible record
 must not be accepted for want of a parent.
 
+**Correction: this section's liveness claim was resting on mocked persistence,
+and that was a defect that shipped.** Both gates above were described as live
+across two slices while `contain` had never recorded a hop in any database.
+`ContainmentHopTest`, the suite that proves the hop's rules, mocks
+`OperationRecords`, so `retainChild` was asserted and never executed — and the
+first time a hop reached real PostgreSQL, `operation_parent_valid` (V162) refused
+it outright with `child authority exceeds retained parent`. Gate two's Java
+replacement was therefore correct and unreachable: no contained admission could
+exist durably for it to admit. This is stated as a defect rather than as a
+nuance because the two slices' claims about a *live* contained admission were,
+in the strict sense, untested in the one place that decides them. The lesson is
+narrow and worth keeping: a mocked repository can prove a rule and cannot prove
+that the rule is reachable. The regression test for it is the un-mocked path,
+`ContainedOperationLineageSchemaTest.aContainmentHopRecordsItsLineage`, and not
+a tighter assertion against the mock.
+
+**V225 is the SQL counterpart of gate two's replacement, not a new relaxation.**
+`operation_parent_valid` requires a child admission to carry `c.scope=p.scope AND
+c.project_name=p.project_name`, which is the identical demand gate two already
+replaced in Java — and a containment hop changes both by design. V225 replaces
+that conjunct with the same equality *or* the containment edge itself, keyed on
+the child's stored `authority_scopes` row: the row exists, it is `CONTAINED`, its
+`container` is the parent admission's own scope, and it maps to the project the
+child admission retained. Those are the four facts `containedHome` binds, bound
+again here, so the trigger admits exactly what the Java gate already admitted and
+nothing more. The non-contained path keeps the original equality untouched, which
+is asserted byte-for-byte. Everything else the trigger compares is unchanged —
+executor, executor handle, grant source, the support-subset check, the recursion
+bound and the cycle check — so a hop still cannot change who is executing or
+whose grants are spent, and ADR 0025's immutable attribution is untouched. The
+conjunct is the substrate's no-escalation invariant and the migration says so: a
+grandparent, a sibling subtree and an unrelated scope are each refused at the
+trigger as well as in Java, because a Java check is a check and the trigger is
+the fence.
+
+**What V225 deliberately does not settle.** `operation_conversation_valid` (V162)
+requires a conversation row's `agent` to equal its bound envelope's, while
+`conversations_a_person_s_conversation_names_no_agent` (V17) forbids an agent on
+an `origin='turn'` row. A contained run's envelope always names an agent, so its
+conversation cannot be a `turn`, and no existing origin describes harness-started
+work inside a child honestly — `submission` means a caller's own parentless run,
+`delegation` shares its parent's allowance by reference and so cannot carry the
+child's own pool, `memory` is digest construction and `orchestration` is a
+conductor with its own machinery. Which origin a contained run carries is
+therefore an open decision recorded here rather than one taken in a migration,
+because an origin kind reaches listings, retention and lifecycle.
+
 **On the misclassification risk recorded for the contained principal.** A
 contained principal's identifier is a bare UUID, so
 `ServiceCredentials.principal` is false for it and any path classifying a caller

@@ -174,62 +174,76 @@ class ContainedConversationDoorDatabaseTest {
   }
 
   /**
-   * CHARACTERIZATION, and the reason this slice stops here: the hop itself cannot record its
-   * lineage against real PostgreSQL, so the door below it is unreachable and the envelope's budget
-   * and account cannot yet be asserted.
+   * The hop now persists (V225), so the door is reached — and stops at gate six, which is pinned
+   * here with its exact refusal because the decision it needs has not been taken.
    *
-   * <p>{@code contain} retains the child admission's parent edge, and {@code
-   * operation_parent_valid} (V162:35-36) requires a child admission to carry {@code c.scope =
-   * p.scope AND c.project_name = p.project_name}. A containment hop changes <strong>both</strong>
-   * by design — that is what containment is — so the trigger refuses the edge. Every existing test
-   * of the hop mocks {@code OperationRecords}, which is why this has been invisible: the hop has
-   * never run against the real trigger.
+   * <p>{@code operation_conversation_valid} (V162:62) requires the conversation row's {@code agent}
+   * to equal the bound envelope's, and {@code conversations_a_person_s_conversation_names_no_agent}
+   * (V17:213) forbids an agent on an {@code origin='turn'} row. {@code openContained} writes an
+   * {@code Origin.TURN} row, so its agent is NULL while the envelope always names one, and the
+   * binding is refused. The fix is a choice about which {@code Origin} a contained run carries, not
+   * another predicate: an origin kind reaches listings, retention and lifecycle, so it is reported
+   * for decision rather than taken in a migration.
    *
-   * <p>This test exists to pin that refusal with its exact message rather than to assert that it is
-   * correct. It is not correct: it is a gate written before anything created a contained admission,
-   * exactly like {@code JdbcIdentityRepository}'s {@code CONTAINED} refusal and {@code
-   * ConversationStore}'s two doors. Opening it needs a new Flyway migration and therefore its own
-   * authorization — shipped migrations are never edited — which is why this round stops and reports
-   * instead of widening again.
-   *
-   * <p>A second gate sits behind it, read from the DDL rather than reached: {@code
-   * operation_conversation_valid} (V162:62) requires the conversation row's {@code agent} to equal
-   * the bound envelope's, while {@code conversations_a_person_s_conversation_names_no_agent}
-   * (V17:212) requires {@code (origin='turn') = (agent IS NULL)}. So an envelope that names an
-   * agent cannot sit on the {@code Origin.TURN} row this door writes, and the origins that do name
-   * one are precisely those whose door calls {@code admit}. That is an {@code Origin} decision, so
-   * it is named here and not guessed at.
+   * <p>What this test proves today, which is more than the version it replaces: the hop is
+   * recorded, the admission is live, and the remaining blocker is the conversation row's origin and
+   * nothing else. When the origin is chosen, this becomes the envelope assertion in the test below
+   * it.
    */
   @Test
-  void theHopCannotRecordItsLineageSoTheDoorBelowItIsUnreachable() {
-    var parent =
-        policy.admit(
-            HOLDER, new AuthorityScope.Project(parentScope, projectId("parent")), DERIVABLE);
-    // Control: the container's own admission is retained and sealed, so the refusal below is the
-    // hop's parent edge and not a broken fixture or an unauthorized container.
-    assertTrue(
-        jdbc.queryForObject(
-            "SELECT sealed FROM operation_admissions WHERE id=?", Boolean.class, parent.id()),
-        "the container's own admission is sealed");
+  void theHopPersistsAndTheDoorStopsAtTheConversationOrigin() {
+    var child = hop(childScope, childProject);
+
+    // The hop itself: recorded, and live. Before V225 neither was true.
     assertEquals(
-        "parent",
-        jdbc.queryForObject(
-            "SELECT project_name FROM operation_admissions WHERE id=?", String.class, parent.id()));
+        1,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM operation_admission_parents WHERE child=?",
+                Integer.class,
+                child.id()),
+        "the hop records its lineage, which V225 made possible");
+    assertDoesNotThrow(() -> policy.require(child), "and the contained admission is live");
+    assertEquals(Home.of(childProject), child.home());
 
     var refused =
         assertThrows(
             org.springframework.dao.DataAccessException.class,
-            () -> policy.contain(parent, scope(childScope, childProject), DERIVABLE));
+            () ->
+                conversations.openContained(
+                    Home.of(childProject),
+                    allowances.restore(childAllowance),
+                    null,
+                    HOLDER,
+                    child,
+                    "worker",
+                    "0".repeat(64)));
     var cause = refused.getMostSpecificCause().getMessage();
-    assertTrue(cause.contains("child authority exceeds retained parent"), cause);
-    assertTrue(cause.contains("operation_parent_valid"), cause);
+    // Case-insensitive: V162 spells it lower case and a later migration re-raises it capitalised,
+    // so pinning either spelling exactly would break on the other.
+    assertTrue(
+        cause
+            .toLowerCase(java.util.Locale.ROOT)
+            .contains("conversation does not match retained execution"),
+        cause);
+    assertTrue(cause.contains("operation_conversation_valid"), cause);
 
-    // And the two columns the trigger compares really do differ, which is what makes this a
-    // containment problem rather than a missing grant: a hop changes the scope and the project.
-    assertNotEquals(parentScope, childScope);
-    assertNotEquals("parent", childProject);
-    // So no conversation was opened either, because the door is never reached.
-    assertEquals(0, (int) jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class));
+    // And the reason is the agent column, which the origin decides: the row this door writes is a
+    // TURN row, so its agent is NULL while the envelope names one.
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT agent FROM conversations WHERE project_id="
+                + "(SELECT id FROM projects WHERE name=?)",
+            String.class,
+            childProject),
+        "the row was written with no agent, because an origin='turn' row may not name one");
+    assertEquals(
+        "turn",
+        jdbc.queryForObject(
+            "SELECT origin FROM conversations WHERE project_id="
+                + "(SELECT id FROM projects WHERE name=?)",
+            String.class,
+            childProject));
   }
 
   /**
