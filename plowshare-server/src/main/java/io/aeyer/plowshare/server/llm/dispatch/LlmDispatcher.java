@@ -46,6 +46,7 @@ public final class LlmDispatcher implements AutoCloseable {
   private final InferenceAccounting accounting;
   private final Duration promptTimeout;
   private final Duration foldTimeout;
+  private final io.aeyer.plowshare.server.llm.tokens.Tokenizer tokenizer;
   private final UnaryOperator<String> systemBinding;
 
   /** Specifiers whose context length has already been reported; see {@link #reportOnce}. */
@@ -210,6 +211,35 @@ public final class LlmDispatcher implements AutoCloseable {
       InferenceBoundary boundary,
       ModelMediaProfiles mediaProfiles,
       PromptImages promptImages) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        filtering,
+        boundary,
+        mediaProfiles,
+        promptImages,
+        new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(
+            io.aeyer.plowshare.server.llm.tokens.RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN));
+  }
+
+  /** The configured text meter is reused only for retained-image admission reservations. */
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      InferenceBoundary boundary,
+      ModelMediaProfiles mediaProfiles,
+      PromptImages promptImages,
+      io.aeyer.plowshare.server.llm.tokens.Tokenizer tokenizer) {
+    this.tokenizer = Objects.requireNonNull(tokenizer);
     this.promptImages = Objects.requireNonNull(promptImages);
     this.mediaProfiles = Objects.requireNonNull(mediaProfiles);
     this.boundary = Objects.requireNonNull(boundary);
@@ -238,31 +268,59 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   /**
-   * Typed observations require complete measured context, including image embeddings and output
-   * reserve.
+   * Format eligibility and artifact authority have already been checked. Reserve a bounded local
+   * image/text/framing budget independently of an optional exact counter. A reservation is never
+   * booked as consumed usage or labelled measured; the backend still enforces its actual window.
    */
   private io.aeyer.plowshare.server.llm.counting.PromptCount admitImages(
       Routing routing, ChatRequest request) {
-    var count = routing.pool().countChat(routing.wireModel(), request);
     var context = routing.pool().contextLength(routing.wireModel());
     var reserve = request.sampling().maxTokens();
-    if (count == null
-        || count.basis() != io.aeyer.plowshare.server.llm.counting.PromptCount.Basis.MEASURED
-        || count.tokens() == null
-        || count.tokens() < 1
-        || !count.gaps().isEmpty()
-        || count.revision() == null
-        || count.revision().isBlank()
-        || !routing.pool().name().equals(count.pool())
-        || !routing.wireModel().equals(count.model())
-        || context.isEmpty()
-        || reserve.isEmpty())
+    if (context.isEmpty() || reserve.isEmpty() || reserve.getAsInt() >= context.getAsInt())
       throw new IllegalArgumentException(
-          "Image observation needs a verified complete image counter, context length and explicit maxTokens for the selected model");
-    if (count.tokens() > (long) context.getAsInt() - reserve.getAsInt())
+          "Image observation needs a known context length and explicit bounded maxTokens for the selected model");
+    // Immutable startup lookup for the selected model's admission settings, not a second
+    // permission resolution or a registry independent of format routing.
+    var budget = mediaProfiles.mediaFor(routing.wireModel()).orElseThrow().imageContext();
+    long reservedInput = budget.reserve(request, tokenizer);
+    if (routing.pool().automaticCounting()) {
+      io.aeyer.plowshare.server.llm.counting.PromptCount measured;
+      try {
+        measured = routing.pool().countChat(routing.wireModel(), request);
+      } catch (RuntimeException unavailable) {
+        measured =
+            io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
+                routing.pool().name(), routing.wireModel(), "counter_unavailable");
+      }
+      if (measured != null
+          && measured.basis() == io.aeyer.plowshare.server.llm.counting.PromptCount.Basis.MEASURED
+          && measured.tokens() != null
+          && measured.tokens() > 0
+          && measured.gaps().isEmpty()
+          && measured.revision() != null
+          && !measured.revision().isBlank()
+          && routing.pool().name().equals(measured.pool())
+          && routing.wireModel().equals(measured.model())) {
+        if (measured.tokens() > (long) context.getAsInt() - reserve.getAsInt())
+          throw new IllegalArgumentException(
+              "Image observation exceeds the selected model context budget");
+        return measured;
+      }
+    }
+    if (reservedInput > (long) context.getAsInt() - reserve.getAsInt())
       throw new IllegalArgumentException(
           "Image observation exceeds the selected model context budget");
-    return count;
+    return new io.aeyer.plowshare.server.llm.counting.PromptCount(
+        reservedInput,
+        io.aeyer.plowshare.server.llm.counting.PromptCount.Basis.ESTIMATED,
+        "IMAGE_CONTEXT_RESERVATION",
+        routing.pool().name(),
+        routing.wireModel(),
+        budget.revision(),
+        java.time.Instant.now(),
+        0,
+        false,
+        List.of("policy_reservation_not_measured"));
   }
 
   private void preflight(

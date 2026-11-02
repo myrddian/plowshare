@@ -101,8 +101,8 @@ Model support and harness support are separate projections. A profile declares
 model input/output ability; the serving backend restricts which encodings and
 operations it accepts; the Plowshare harness restricts which paths it implements.
 The effective capability is their intersection for the selected wire model, pool,
-operation and direction. Current authority, artifact availability and verified
-image context accounting remain additional invocation gates.
+operation and direction. Current authority, artifact availability and bounded
+image context admission remain additional invocation gates.
 
 For example, LM Studio documents PNG, JPEG and WebP input, while the current typed
 Node tool admission and Trajectory observation path implements still PNG, JPEG
@@ -131,7 +131,7 @@ modes:
     balanced: {temperature: 1.0, top_p: 0.95, top_k: 64}
     exploratory: {temperature: 1.0, top_p: 0.95, top_k: 64}
 media:
-  inputs: [text/plain, image/png, image/jpeg, image/webp]
+  inputs: [text/plain, image/png, image/jpeg]
   outputs:
     text: {formats: [text/plain]}
 ```
@@ -147,12 +147,48 @@ models:
 ```
 
 This matches the configured vendor-prefixed wire name under the existing matching
-rules. It restricts this deployment profile to the documented LM Studio encoding
-set; it does not add media declarations to every Gemma version. No resource rebuild
-is required. Keep the prefill harness restriction and verified image-aware counter
-gate; installing this profile alone cannot enable screenshot consumption. See
-[complete native image counting](model-usage-accounting.md#complete-image-counting-for-llamacpp-and-compatible-lm-studio-deployments)
-for the explicit llama.cpp count-only protocol and LM Studio exposure requirements.
+rules. This example narrows the documented encoding set to PNG/JPEG: the inspected
+MLX HTTP runtime refused WebP even though its installed processor accepted it.
+Verify the serving runtime before adding formats. No resource rebuild is required;
+the socket-prefill harness restriction still applies.
+
+## Retained image context policy
+
+Format support does not require an exact counter. Retained tool images use an
+optional policy inside the same version-2 model profile, with these defaults:
+
+```yaml
+media:
+  inputs: [text/plain, image/png, image/jpeg]
+  outputs:
+    text: {formats: [text/plain]}
+  image-context:
+    tokens-per-image: 4096
+    framing-tokens: 1024
+    max-images: 16
+    max-prompt-bytes: 262144
+```
+
+The dispatcher uses the existing text tokenizer on history, tool arguments/results,
+tool declarations and response schema, retaining one-third headroom on estimated
+components. It adds framing and the per-image reservation for every occurrence,
+including repeated references. The combined input reservation and explicit output
+limit must fit the selected model's known context length. Byte and occurrence
+limits are hard admission limits; image bytes keep their existing separate bounds.
+
+Reservations are estimates, not proven model token bounds. Tune them to the
+backend/model; the backend still enforces its actual context window. Integers are
+strict: `tokens-per-image` is 1..1000000, `framing-tokens` 0..1000000, `max-images`
+1..16 and `max-prompt-bytes` 1..1048576. Omitted fields use defaults. Invalid/unknown
+fields fail profile loading. Configuration takes effect on restart.
+
+The sidecar and full-prompt counter are optional. With the existing
+`counting.automatic: true` opt-in, a verified complete measured count can refine
+the context decision. Unavailable or incomplete counts fall back to the policy;
+hard byte/image limits still apply. Reservations are recorded as estimated
+preflight and never as consumed usage. Keep counter coverage flags disabled until
+exact counting is verified. See [Decision 0053](decisions/0053-bounded-image-context-admission.md)
+and [counter configuration](model-usage-accounting.md).
 
 ## Routing behavior
 
@@ -194,5 +230,5 @@ For vision agents using a media profile, startup now requires one compatible
 image route; runtime filtering excludes the others. Without media declarations,
 the existing all-pool vision guard remains in force. Neither mode switches the
 configured wire model or grants artifact access. Audio/video transport, generated
-native media, context-budget enforcement and the durable screenshot tool path
-are not enabled by this routing slice.
+native media and audio/video remain separate capabilities. Retained tool-image
+admission uses the policy above; this does not change ordinary upload behavior.

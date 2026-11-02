@@ -74,31 +74,33 @@ Relay claims continue to retain the same canonical file.
 
 ## Native model context admission
 
-Typed observations require a model media profile admitting `image/png`, a
-compatible transport and text output, using the existing dispatcher. Before
-inference on the selected route, the dispatcher requires a complete `MEASURED`
-count, matching pool/model, nonblank verified revision, no gaps, a known context
-length and an explicit supported `max_tokens` generation reserve. It checks:
+Typed observations require a model profile admitting their detected format, a
+compatible native transport and text output. PNG, JPEG and WebP are implemented
+in the retained-image harness; a deployment profile must narrow that set to the
+formats its actual backend accepts. LM Studio socket prefill remains text-only.
+
+Before inference on the selected route, the dispatcher requires a known context
+length and an explicit supported `max_tokens` output reserve. The model profile's
+[bounded image-context policy](model-profiles.md#retained-image-context-policy)
+meters the complete non-image prompt, adds framing and a reservation for every
+image occurrence, and checks:
 
 ```text
-complete prompt tokens + generation reserve <= selected model context length
+input reservation + output reserve <= selected model context length
 ```
 
-Unknown, estimated, incompatible or over-budget observations fail before the
-model request. This is applied to blocking, streaming, folding and explicitly
-pinned-pool calls. The ordinary text admission/routing behavior is unchanged.
-Counts are reused for the existing inference preflight observation.
+The reservation is an operational estimate, not a verified token upper bound;
+the backend enforces its actual token window. Hard prompt-byte and occurrence
+limits also apply. Over-budget requests fail before inference on blocking,
+streaming, folding and pinned paths. Text admission/routing remains unchanged.
+Reservations use estimated preflight provenance and never become consumed usage.
 
-The existing OpenAI-compatible counter rejects images by default. The deployment
-may set a pool's `counting.image-tokens-included: true` only after verifying that
-its configured counter counts the complete native image prompt, including image
-encoder/context tokens. This opt-in requires an explicit counting URL and pinned
-`counting.revision`. The request sends the same image parts as generation. A MIME
-profile, PNG geometry or text tokenizer count cannot establish this capability.
-The [explicit llama.cpp count-only protocol](model-usage-accounting.md#complete-image-counting-for-llamacpp-and-compatible-lm-studio-deployments)
-reuses that counter and the native generation serializer. LM Studio must actually
-expose the configured endpoint; embedding llama.cpp alone is insufficient.
-No deployment backend is selected or enabled by this change.
+No counter endpoint or sidecar is required. With `counting.automatic: true`, a
+complete verified measured count can refine admission; counter failure or unknown
+coverage falls back to the local policy. Keep `image-tokens-included: false`
+until exact image counting has been independently verified. That flag controls
+counter coverage, not format eligibility or local reservation-based admission.
+See [Decision 0053](decisions/0053-bounded-image-context-admission.md).
 
 Transient reconstruction is bounded to 16 image occurrences and 20 MiB of unique
 retained image bytes per prompt. Repeated addresses reuse their materialized
@@ -111,7 +113,7 @@ inference authority; accounting metadata is not permission.
 Deterministic tests cover Node-style typed invocation output through the real
 agent loop/dispatcher to the next request, exact PNG bytes, batch placement,
 output/withheld exclusions, replay without another provider call, text behavior,
-and rejection when native context cannot be established. Counter HTTP tests
+and rejection when the configured context budget is exceeded. Counter HTTP tests
 verify opt-in, revision requirements and native request serialization.
 
 Focused PostgreSQL tests cover the V226-to-V227 upgrade, atomic append/claims,
@@ -121,5 +123,6 @@ entry deletion, distinct resumed-job/accounting-run identities, rejection of
 non-transactional typed appends, final-claim disk collection and corrupt-history/byte
 failures.
 These are controlled tests, not verification of a deployed vision backend or an
-actual desktop capture tool. Selecting that backend and comparing its image-aware
-count against actual context use remains a release acceptance step.
+actual desktop capture tool. End-to-end desktop screenshot acceptance remains
+separate. Exact counting additionally requires comparison with actual full context
+use; that verification is optional for reservation-based image delivery.

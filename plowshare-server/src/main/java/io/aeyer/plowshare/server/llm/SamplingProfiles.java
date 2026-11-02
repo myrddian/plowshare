@@ -461,7 +461,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
   private static ModelMediaCapabilities media(String where, Object value) {
     try {
       Map<?, ?> media = block(where + " media", value);
-      knownFields(where + " media", media, Set.of("inputs", "outputs"));
+      knownFields(where + " media", media, Set.of("inputs", "outputs", "image-context"));
       Set<String> inputs = formats(where + " media/inputs", media.get("inputs"));
       Map<?, ?> outputs = block(where + " media/outputs", media.get("outputs"));
       if (outputs.isEmpty() || outputs.size() > ModelMediaCapabilities.MAX_OUTPUT_MODES) {
@@ -479,11 +479,32 @@ public final class SamplingProfiles implements ModelMediaProfiles {
             new ModelMediaCapabilities.OutputMode(
                 formats(where + " media/outputs/" + name + "/formats", mode.get("formats"))));
       }
-      return new ModelMediaCapabilities(inputs, modes);
+      ImageContextBudget budget = ImageContextBudget.DEFAULT;
+      if (media.containsKey("image-context")) {
+        Map<?, ?> context = block(where + " media/image-context", media.get("image-context"));
+        knownFields(
+            where + " media/image-context",
+            context,
+            Set.of("tokens-per-image", "framing-tokens", "max-images", "max-prompt-bytes"));
+        budget =
+            new ImageContextBudget(
+                budgetValue(context, "tokens-per-image", budget.tokensPerImage()),
+                budgetValue(context, "framing-tokens", budget.framingTokens()),
+                budgetValue(context, "max-images", budget.maxImages()),
+                budgetValue(context, "max-prompt-bytes", budget.maxPromptBytes()));
+      }
+      return new ModelMediaCapabilities(inputs, modes, budget);
     } catch (IllegalArgumentException invalid) {
       throw new IllegalStateException(
           where + " has an invalid media declaration: " + invalid.getMessage(), invalid);
     }
+  }
+
+  private static int budgetValue(Map<?, ?> context, String key, int fallback) {
+    if (!context.containsKey(key)) return fallback;
+    if (!(context.get(key) instanceof Integer value))
+      throw new IllegalArgumentException("Image context budget values must be integers");
+    return value;
   }
 
   private static Map<?, ?> block(String where, Object value) {

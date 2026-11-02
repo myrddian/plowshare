@@ -33,8 +33,8 @@ import java.util.Objects;
  * <h2>Legacy opening images and typed tool observations</h2>
  *
  * <p>Typed tool images use {@link StoredImage} until dispatch. Their complete effective prompt
- * requires a verified image-aware count and context admission before inference. The historical
- * limitation below still describes legacy opening attachments.
+ * requires bounded context admission before inference; exact image-aware counting is optional. The
+ * historical limitation below still describes legacy opening attachments.
  *
  * <p>{@link Image#text()} is the empty string, so every character count in this server counts a
  * picture as nothing. That is right for what those counts are for — they are counting words, and a

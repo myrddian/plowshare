@@ -189,7 +189,8 @@ public class LlmConfig implements EnvironmentAware {
       ObjectProvider<io.aeyer.plowshare.server.security.ChatFiltering> filtering,
       io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary inferenceBoundary,
       ModelMediaProfiles mediaProfiles,
-      ObjectProvider<io.aeyer.plowshare.server.llm.dispatch.PromptImages> promptImages) {
+      ObjectProvider<io.aeyer.plowshare.server.llm.dispatch.PromptImages> promptImages,
+      Tokenizer tokenizer) {
     return buildDispatcher(
         props,
         mapper,
@@ -198,8 +199,8 @@ public class LlmConfig implements EnvironmentAware {
         filtering.getIfAvailable(() -> io.aeyer.plowshare.server.security.ChatFiltering.NONE),
         java.util.Objects.requireNonNull(inferenceBoundary),
         mediaProfiles,
-        promptImages.getIfAvailable(
-            () -> io.aeyer.plowshare.server.llm.dispatch.PromptImages.NONE));
+        promptImages.getIfAvailable(() -> io.aeyer.plowshare.server.llm.dispatch.PromptImages.NONE),
+        tokenizer);
   }
 
   /** Own local tokenizer resources separately from chat's explicitly estimated context meter. */
@@ -229,7 +230,9 @@ public class LlmConfig implements EnvironmentAware {
         io.aeyer.plowshare.server.security.ChatFiltering.NONE,
         io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE,
         ModelMediaProfiles.NONE,
-        io.aeyer.plowshare.server.llm.dispatch.PromptImages.NONE);
+        io.aeyer.plowshare.server.llm.dispatch.PromptImages.NONE,
+        new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(
+            io.aeyer.plowshare.server.llm.tokens.RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN));
   }
 
   private LlmDispatcher buildDispatcher(
@@ -240,7 +243,8 @@ public class LlmConfig implements EnvironmentAware {
       io.aeyer.plowshare.server.security.ChatFiltering filtering,
       io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary inferenceBoundary,
       ModelMediaProfiles mediaProfiles,
-      io.aeyer.plowshare.server.llm.dispatch.PromptImages promptImages) {
+      io.aeyer.plowshare.server.llm.dispatch.PromptImages promptImages,
+      Tokenizer tokenizer) {
 
     var dual =
         environment == null
@@ -378,7 +382,8 @@ public class LlmConfig implements EnvironmentAware {
               filtering,
               inferenceBoundary,
               mediaProfiles,
-              promptImages);
+              promptImages,
+              tokenizer);
       requireEmbeddingModelIsServed(dispatcher, props);
       if (dual != null && dual.enabled()) dispatcher.requireServed(dual.code().modelId());
       log.info(

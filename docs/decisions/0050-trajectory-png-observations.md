@@ -1,5 +1,9 @@
 # 0050: Entry-owned PNG observations for the active model loop
 
+Current admission policy: [Decision 0053](0053-bounded-image-context-admission.md)
+replaces the historical mandatory exact-count gate with bounded local reservations;
+the counter/sidecar is optional. Other lifecycle and format contracts remain intact.
+
 Status: implemented; deployment/backend acceptance remains separate.
 
 Negotiated Node tool results already retain exact admitted PNG references, but the

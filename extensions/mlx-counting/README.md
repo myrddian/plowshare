@@ -107,10 +107,11 @@ allowed. Responses must echo the exact model and configured revision.
 Counts use the existing concurrency/deadline/owner-scoping machinery. Cache entries
 must be zero for this protocol so a cached response cannot bypass the live binding
 checks. vLLM and llama.cpp counting and ordinary text generation remain unchanged.
-Image admission remains separately controlled by `image-tokens-included`; publishing
-a MIME capability or a processor count is not evidence of serving parity.
+`image-tokens-included` controls verified counter coverage, not image admission.
+Supported images can use the [bounded local policy](../../docs/model-profiles.md#retained-image-context-policy)
+without this companion. Publishing a processor count is not evidence of serving parity.
 
-## Release gate
+## Exact-count verification gate
 
 The inspected LM Studio deployment reported **15** prompt tokens for an image
 prompt whose installed processor produced **272** input IDs. Its HTTP `stats` was
@@ -122,8 +123,9 @@ or introduce a calibrated constant. Verify the target runtime again before relea
 The companion's full context count is `len(prepared.prompt_input_ids)`. The inspected
 engine's *prefill progress* reports one fewer token and separates cached prefixes;
 it is not the full context count. Do not compare against progress percentages or
-uncached work alone. Admission must remain disabled while the actual usage
-comparison fails or coverage is unknown. This change does not modify the runtime
+uncached work alone. Exact-count coverage must remain disabled while the actual
+usage comparison fails or coverage is unknown; reservation-based image delivery
+remains available independently. This change does not modify the runtime
 or reinterpret its consumed usage/accounting.
 
 ## Tests

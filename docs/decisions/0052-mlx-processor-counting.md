@@ -1,5 +1,9 @@
 # 0052: Count complete MLX prompts outside the inference runtime
 
+Current admission policy: [Decision 0053](0053-bounded-image-context-admission.md)
+replaces the historical mandatory exact-count gate with bounded local reservations;
+the counter/sidecar is optional. Other lifecycle and format contracts remain intact.
+
 Status: accepted for implementation; image admission requires deployment verification.
 
 A model can accept images while its serving API exposes only text tokenization.

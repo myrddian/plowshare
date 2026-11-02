@@ -108,6 +108,10 @@ class TypedPngObservationTest {
     final List<List<ChatMessage>> calls = new ArrayList<>();
     long tokens = 200;
     boolean unknown;
+    boolean automatic;
+    boolean unavailable;
+    int counts;
+    int context = 8192;
     ModelMediaCapabilities media = MEDIA;
 
     public Set<Sampling.Parameter> carries() {
@@ -123,10 +127,16 @@ class TypedPngObservationTest {
     }
 
     public OptionalInt contextLength(String model) {
-      return OptionalInt.of(1024);
+      return context > 0 ? OptionalInt.of(context) : OptionalInt.empty();
+    }
+
+    public boolean automaticCounting() {
+      return automatic;
     }
 
     public PromptCount countChat(String model, ChatRequest request) {
+      counts++;
+      if (unavailable) throw new IllegalStateException("counter unavailable");
       assertTrue(request.messages().stream().anyMatch(ChatMessage::carriesAnImage));
       assertFalse(PromptImages.hasStored(request));
       return unknown
@@ -175,6 +185,14 @@ class TypedPngObservationTest {
 
   static LlmDispatcher dispatcher(
       Backend backend, PromptImages images, ModelMediaProfiles profiles) {
+    return dispatcher(backend, images, profiles, InferenceAccounting.NONE);
+  }
+
+  static LlmDispatcher dispatcher(
+      Backend backend,
+      PromptImages images,
+      ModelMediaProfiles profiles,
+      InferenceAccounting accounting) {
     var pool =
         new LlmPool(
             "vision",
@@ -189,7 +207,7 @@ class TypedPngObservationTest {
         List.of(pool),
         new NoOpTokenLedger(),
         type -> "model",
-        InferenceAccounting.NONE,
+        accounting,
         null,
         null,
         ChatFiltering.NONE,
@@ -287,8 +305,9 @@ class TypedPngObservationTest {
             image.dataUri());
       }
       backend.unknown = true;
-      assertThrows(IllegalArgumentException.class, () -> models.complete(request()));
-      assertEquals(4, backend.calls.size());
+      assertNotNull(models.complete(request()));
+      assertEquals(5, backend.calls.size());
+      assertEquals(0, backend.counts);
     }
     try (var models = dispatcher(backend, resolver, model -> Optional.of(MEDIA))) {
       assertThrows(UnsupportedMediaException.class, () -> models.complete(request()));
@@ -431,30 +450,133 @@ class TypedPngObservationTest {
   }
 
   @Test
-  void unknown_or_over_budget_image_counts_refuse_every_inference_path() {
+  void image_reservations_are_estimated_preflight_and_never_consumed_usage() {
+    var backend = new Backend();
+    var observer = mock(InferenceObserver.class);
+    when(observer.attempt()).thenReturn(InferenceObserver.Attempt.NONE);
+    var artifacts = mock(TrajectoryArtifacts.class);
+    var blobs = mock(BinaryBlobStorage.class);
+    try (var models =
+        dispatcher(
+            backend,
+            resolver(artifacts, blobs),
+            model -> Optional.of(MEDIA),
+            (pool, model, specifier, lane, owner) -> observer)) {
+      var completion = models.complete(request());
+      assertEquals(TokenUsage.UNKNOWN, completion.usage());
+      var count = org.mockito.ArgumentCaptor.forClass(PromptCount.class);
+      verify(observer).preflight(count.capture());
+      assertEquals(PromptCount.Basis.ESTIMATED, count.getValue().basis());
+      assertEquals("IMAGE_CONTEXT_RESERVATION", count.getValue().source());
+      assertEquals(ImageContextBudget.DEFAULT.revision(), count.getValue().revision());
+      assertEquals(List.of("policy_reservation_not_measured"), count.getValue().gaps());
+      assertEquals(0, backend.counts);
+    }
+  }
+
+  @Test
+  void optional_counter_failure_does_not_block_any_image_inference_path() {
     var backend = new Backend();
     var artifacts = mock(TrajectoryArtifacts.class);
     var blobs = mock(BinaryBlobStorage.class);
     try (var models =
         dispatcher(backend, resolver(artifacts, blobs), model -> Optional.of(MEDIA))) {
-      for (boolean unknown : List.of(true, false)) {
-        backend.unknown = unknown;
-        backend.tokens = 1000;
-        assertThrows(IllegalArgumentException.class, () -> models.complete(request()));
-        assertThrows(
-            IllegalArgumentException.class, () -> models.stream(request(), Deltas.DISCARDING));
-        assertThrows(
-            IllegalArgumentException.class, () -> models.streamFold(request(), Deltas.DISCARDING));
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> models.streamOn("vision", request(), Deltas.DISCARDING, () -> false));
-      }
-      backend.tokens = 100;
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> models.complete(request().withSampling(Sampling.NONE)));
+      backend.unknown = true;
+      backend.unavailable = true;
+      assertImageDispatches(models);
+      assertEquals(0, backend.counts, "disabled counter must never be contacted");
+      backend.automatic = true;
+      assertImageDispatches(models);
+      backend.unavailable = false;
+      assertImageDispatches(models);
+      assertEquals(8, backend.counts);
+      assertEquals(12, backend.calls.size());
+    }
+  }
+
+  @Test
+  void local_context_budget_and_optional_measured_overflow_refuse_every_inference_path() {
+    var backend = new Backend();
+    var artifacts = mock(TrajectoryArtifacts.class);
+    var blobs = mock(BinaryBlobStorage.class);
+    try (var models =
+        dispatcher(backend, resolver(artifacts, blobs), model -> Optional.of(MEDIA))) {
+      backend.context = 1024;
+      assertImageRefused(models, request());
+      assertEquals(0, backend.counts);
+      backend.context = 8192;
+      backend.automatic = true;
+      backend.tokens = 8100;
+      assertImageRefused(models, request());
+      assertEquals(4, backend.counts);
+      backend.automatic = false;
+      backend.context = 0;
+      assertImageRefused(models, request());
+      backend.context = 8192;
+      assertImageRefused(models, request().withSampling(Sampling.NONE));
+      assertImageRefused(models, request().withSampling(Sampling.NONE.withMaxTokens(8192)));
       assertTrue(backend.calls.isEmpty());
     }
+  }
+
+  @Test
+  void selected_model_profile_can_tune_reservations_without_a_counter() {
+    var backend = new Backend();
+    backend.context = 1024;
+    var artifacts = mock(TrajectoryArtifacts.class);
+    var blobs = mock(BinaryBlobStorage.class);
+    var small =
+        new ModelMediaCapabilities(
+            MEDIA.inputs(), MEDIA.outputs(), new ImageContextBudget(256, 64, 1, 65536));
+    try (var models =
+        dispatcher(backend, resolver(artifacts, blobs), model -> Optional.of(small))) {
+      assertImageDispatches(models);
+      assertEquals(4, backend.calls.size());
+      assertEquals(0, backend.counts);
+    }
+  }
+
+  @Test
+  void a_verified_optional_count_can_refine_the_reservation_but_not_remove_hard_limits() {
+    var backend = new Backend();
+    var artifacts = mock(TrajectoryArtifacts.class);
+    var blobs = mock(BinaryBlobStorage.class);
+    try (var models =
+        dispatcher(backend, resolver(artifacts, blobs), model -> Optional.of(MEDIA))) {
+      backend.automatic = true;
+      backend.context = 1024;
+      assertImageDispatches(models);
+      assertEquals(4, backend.counts);
+      assertEquals(4, backend.calls.size());
+    }
+    var restrictive =
+        new ModelMediaCapabilities(
+            MEDIA.inputs(), MEDIA.outputs(), new ImageContextBudget(256, 64, 1, 8));
+    backend.calls.clear();
+    backend.counts = 0;
+    try (var models =
+        dispatcher(backend, resolver(artifacts, blobs), model -> Optional.of(restrictive))) {
+      assertImageRefused(models, request());
+      assertTrue(backend.calls.isEmpty());
+      assertEquals(0, backend.counts);
+    }
+  }
+
+  private static void assertImageDispatches(LlmDispatcher models) {
+    assertNotNull(models.complete(request()));
+    assertNotNull(models.stream(request(), Deltas.DISCARDING));
+    assertNotNull(models.streamFold(request(), Deltas.DISCARDING));
+    assertNotNull(models.streamOn("vision", request(), Deltas.DISCARDING, () -> false));
+  }
+
+  private static void assertImageRefused(LlmDispatcher models, ChatRequest request) {
+    assertThrows(IllegalArgumentException.class, () -> models.complete(request));
+    assertThrows(IllegalArgumentException.class, () -> models.stream(request, Deltas.DISCARDING));
+    assertThrows(
+        IllegalArgumentException.class, () -> models.streamFold(request, Deltas.DISCARDING));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> models.streamOn("vision", request, Deltas.DISCARDING, () -> false));
   }
 
   @Test

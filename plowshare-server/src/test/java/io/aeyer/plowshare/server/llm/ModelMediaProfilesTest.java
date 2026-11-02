@@ -56,6 +56,51 @@ class ModelMediaProfilesTest {
     assertEquals(Set.of("text/plain"), media.outputs().get("text").formats());
     assertEquals(Set.of("image/png"), media.outputs().get("image").formats());
     assertEquals(Set.of("text/plain", "image/png"), media.outputs().get("mixed").formats());
+    assertEquals(ImageContextBudget.DEFAULT, media.imageContext());
+  }
+
+  @Test
+  void image_budget_is_an_optional_independently_loaded_model_profile_setting() throws IOException {
+    write(
+        "version: 2\n"
+            + MODES
+            + MEDIA
+            + "  image-context: {tokens-per-image: 512, framing-tokens: 256, max-images: 8, max-prompt-bytes: 65536}\n");
+    var profiles = SamplingProfiles.read(directory);
+    var first = profiles.resolve("deployed", Sampling.Intent.BALANCED).media().orElseThrow();
+    assertEquals(new ImageContextBudget(512, 256, 8, 65536), first.imageContext());
+    write("version: 2\n" + MODES + MEDIA);
+    assertEquals(
+        first, profiles.resolve("deployed", Sampling.Intent.BALANCED).media().orElseThrow());
+    assertEquals(
+        ImageContextBudget.DEFAULT,
+        SamplingProfiles.read(directory)
+            .resolve("deployed", Sampling.Intent.BALANCED)
+            .media()
+            .orElseThrow()
+            .imageContext());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "null",
+        "[]",
+        "{tokens-per-image: 0}",
+        "{tokens-per-image: 1000001}",
+        "{framing-tokens: -1}",
+        "{max-images: 17}",
+        "{max-images: 0}",
+        "{max-prompt-bytes: 0}",
+        "{max-prompt-bytes: 1048577}",
+        "{max-images: '2'}",
+        "{max-images: 2.0}",
+        "{max-images: true}",
+        "{max-images: null}",
+        "{extra: 3}"
+      })
+  void invalid_image_budget_is_refused_at_profile_load(String budget) throws IOException {
+    refuses("version: 2\n" + MODES + MEDIA + "  image-context: " + budget + "\n");
   }
 
   @Test

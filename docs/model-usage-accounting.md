@@ -77,7 +77,7 @@ Values here illustrate configuration, not commercial rates. An overlay replaces 
 
 `counting.url` is the full tokenization URL, including any proxy prefix. It must share the inference URL's scheme, host and port; redirects, embedded credentials and URL queries are refused. It is never derived by appending a path to `/v1`. No tokenizer request runs at boot or when reading saved usage/context reports.
 
-The default adapter follows the [vLLM 0.15.1 tokenization protocol](https://docs.vllm.ai/en/v0.15.1/api/vllm/entrypoints/serve/tokenize/protocol/). It sends the same serialized messages, tools and configured `chat-template-kwargs` as generation, with the contract's generation-prompt flags. Images require explicit verified `image-tokens-included` support; explicit tool-choice constraints and `reasoning_effort` remain unsupported full-template coverage in this protocol and return `UNKNOWN`. Failed counts do not block ordinary text inference or become consumed usage. Typed image observations require a complete count before inference. Existing cheap component estimates and compaction thresholds keep their existing behavior.
+The default adapter follows the [vLLM 0.15.1 tokenization protocol](https://docs.vllm.ai/en/v0.15.1/api/vllm/entrypoints/serve/tokenize/protocol/). It sends the same serialized messages, tools and configured `chat-template-kwargs` as generation, with the contract's generation-prompt flags. Images require explicit verified `image-tokens-included` support; explicit tool-choice constraints and `reasoning_effort` remain unsupported full-template coverage in this protocol and return `UNKNOWN`. Failed counts do not block ordinary text inference or become consumed usage. Typed image observations use a bounded local reservation when no verified complete count is available; see the [image-context policy](model-profiles.md#retained-image-context-policy). Existing cheap component estimates and compaction thresholds keep their existing behavior.
 
 Counting has a two-request concurrency bound per pool, an overall deadline, request/response size bounds and an ephemeral cache. Cache identity includes owner, conversation/project, exact model, full count input and configuration fingerprint. Configuration/template/auth changes invalidate it. TTL is at most 60s; a missing declared revision is exposed as an unverified template revision. Measured means the tokenization endpoint returned a count for the supported request shape; deterministic fixtures compare it with generation input usage. No deployed vLLM version/template has been verified in this implementation.
 
@@ -116,7 +116,8 @@ whose handler applies the chat template and counts media-aware prompt chunks.
 endpoint.** Verify the exact serving build, model, projector, template and image
 preprocessing settings; compare complete counts with actual full prompt context
 usage, including cached prompts. Pin that evidence in `revision` before enabling
-image accounting. A missing LM Studio endpoint remains a deployment blocker.
+exact image accounting. A missing endpoint prevents exact counting, but does not
+block reservation-based image admission.
 
 Existing disk-loaded model profiles still declare formats; this adds no second
 model registry. The dispatcher still requires a known context length and explicit
@@ -174,7 +175,9 @@ weights. It documents explicit configuration, supported prompt options, the
 same-origin deployment route and live acceptance command. **Keep
 `image-tokens-included: false` until its count agrees with actual full image
 context usage.** The inspected LM Studio HTTP usage omitted expanded image tokens;
-that discrepancy remains a release gate, not a token-count correction rule.
+that discrepancy prevents claiming exact counting parity; it does not block
+reservation-based image delivery or justify correcting consumed usage. The sidecar
+is optional; see the [image-context policy](model-profiles.md#retained-image-context-policy).
 
 ## OpenAI and Azure v1 pools
 

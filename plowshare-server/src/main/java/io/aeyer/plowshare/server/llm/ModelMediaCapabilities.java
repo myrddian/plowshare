@@ -18,8 +18,14 @@ import java.util.regex.Pattern;
  *
  * @param inputs exact normalized MIME types accepted as native input
  * @param outputs named output combinations, in declaration order
+ * @param imageContext local admission reservations, independently of exact counter availability
  */
-public record ModelMediaCapabilities(Set<String> inputs, Map<String, OutputMode> outputs) {
+public record ModelMediaCapabilities(
+    Set<String> inputs, Map<String, OutputMode> outputs, ImageContextBudget imageContext) {
+  public ModelMediaCapabilities(Set<String> inputs, Map<String, OutputMode> outputs) {
+    this(inputs, outputs, ImageContextBudget.DEFAULT);
+  }
+
   static final int MAX_FORMATS = 32;
   static final int MAX_OUTPUT_MODES = 32;
 
@@ -33,6 +39,7 @@ public record ModelMediaCapabilities(Set<String> inputs, Map<String, OutputMode>
           Set.of("text/plain"), Map.of("text", new OutputMode(Set.of("text/plain"))));
 
   public ModelMediaCapabilities {
+    java.util.Objects.requireNonNull(imageContext, "imageContext");
     inputs = formats(inputs);
     if (outputs == null || outputs.isEmpty() || outputs.size() > MAX_OUTPUT_MODES) {
       throw new IllegalArgumentException("media outputs must contain 1..32 named modes");

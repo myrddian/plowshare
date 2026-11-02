@@ -1,5 +1,9 @@
 # Multimodal core first slice implementation plan
 
+Current admission policy: [Decision 0053](decisions/0053-bounded-image-context-admission.md)
+replaces the historical mandatory exact-count gate with bounded local reservations;
+the counter/sidecar is optional. Other lifecycle and format contracts remain intact.
+
 Status: storage foundation, Relay BLOB delivery, Node typed PNG results and bounded active-loop PNG observations implemented,
 23 October 2026. The user authorized starting
 an implementation slice. The disk-loaded model-profile configuration slice is
