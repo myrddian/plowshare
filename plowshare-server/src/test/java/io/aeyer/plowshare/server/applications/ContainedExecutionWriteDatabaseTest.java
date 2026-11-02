@@ -345,6 +345,101 @@ class ContainedExecutionWriteDatabaseTest {
   }
 
   /**
+   * The pipeline declines a contained-home document deliberately, and "blocked" does not mean
+   * "broken".
+   *
+   * <p>A child's write succeeds and enqueues <strong>no</strong> work that could fail, take a lease
+   * or retry: every stage is written {@code skipped}, which is this table's existing word for
+   * deliberate non-processing. That matters structurally rather than cosmetically — the claim
+   * scan's work list is {@code s.state='pending' OR (s.state='running' AND s.lease_until<?)}
+   * ({@code JdbcInformationProcessingRepository}), so a revision with no such row is never selected
+   * and there is nothing to lease. Declining when work was claimed instead would already have
+   * enqueued the failure.
+   *
+   * <p>The control is the half that makes this a scoped decline rather than a broken pipeline: an
+   * ordinary document in an uncontained home still enqueues exactly what it enqueues today.
+   */
+  @Test
+  void aContainedDocumentIsDeclinedByThePipelineAndAnOrdinaryOneIsNot() {
+    var child =
+        work.inTransaction(
+            () ->
+                admit(
+                    InformationAccess.contained(childPrincipal, HOLDER, childProject)
+                        .withView(true),
+                    "child-notes.md"));
+
+    // NOTHING CLAIMABLE: no pending or running step exists, which is what the claim scan needs.
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_steps WHERE revision_id=?"
+                    + " AND state IN ('pending','running')",
+                Integer.class,
+                child.revision()),
+        "a child's document enqueues no claimable work, so nothing can lease or retry it");
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_steps WHERE revision_id=?"
+                    + " AND (lease_token IS NOT NULL OR lease_until IS NOT NULL OR attempt<>0)",
+                Integer.class,
+                child.revision()),
+        "and holds no lease and has attempted nothing");
+    // DELIBERATE, not lost: every stage says skipped, and nothing says failed or blocked.
+    assertEquals(
+        List.of("skipped"),
+        jdbc.queryForList(
+            "SELECT DISTINCT state FROM information_steps WHERE revision_id=?",
+            String.class,
+            child.revision()));
+
+    // OBSERVABLE: the decline announced itself, named its reason and sits beside the intake it
+    // belongs to, so an operator can tell a skip from a loss.
+    var announced =
+        events.announced().stream()
+            .filter(occurrence -> occurrence.revision().equals(child.revision()))
+            .toList();
+    assertEquals(
+        List.of("retained", "skipped"),
+        announced.stream().map(InformationEvents.Occurrence::action).toList(),
+        "the intake is announced, then the decline");
+    var decline = announced.getLast();
+    assertEquals("intake", decline.stage());
+    assertTrue(decline.detail().contains("confined Application"), decline.detail());
+    assertTrue(decline.detail().contains("0042"), decline.detail());
+    assertEquals(
+        HOLDER, decline.actor(), "announced under the accounting account, as the FK needs");
+
+    // CONTROL: an ordinary document in an uncontained home enqueues its work exactly as before.
+    var ordinary = work.inTransaction(() -> admit(context(HOLDER, "parent"), "ordinary.md"));
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_steps WHERE revision_id=? AND state='skipped'",
+                Integer.class,
+                ordinary.revision()),
+        "nothing is skipped for an uncontained home");
+    assertTrue(
+        jdbc.queryForObject(
+                "SELECT count(*) FROM information_steps WHERE revision_id=? AND state='pending'",
+                Integer.class,
+                ordinary.revision())
+            > 0,
+        "and its stages are pending, which is the behaviour this decline must not have changed");
+    assertEquals(
+        List.of("retained"),
+        events.announced().stream()
+            .filter(occurrence -> occurrence.revision().equals(ordinary.revision()))
+            .map(InformationEvents.Occurrence::action)
+            .toList(),
+        "and an ordinary intake announces no decline");
+  }
+
+  /**
    * The ruled replacement for the question I asked in round one. A contained principal holds no
    * project role and must not be given one; the question that decides a child's work authority is
    * the container's account against the <strong>nearest enclosing uncontained scope</strong>, which

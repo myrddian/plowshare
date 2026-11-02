@@ -1173,12 +1173,37 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           binding.metadataHash(),
           io.aeyer.plowshare.protocol.SchemaCodec.compactJson(binding.metadata()));
     }
+    // A CONFINED APPLICATION'S DOCUMENTS ARE NOT PROCESSED IN THIS SLICE, and the decline happens
+    // here -- at the enqueue boundary -- rather than when work is claimed.
+    //
+    // Why declined at all: processing a document needs a conversation and a budget, and for a
+    // contained home neither has an owner. The pipeline's log belongs to neither the child nor its
+    // container and would spend a third allowance inside a confined home, which is an authority
+    // shape nothing in this capability has designed. ADR 0042 records it as a capability gap with
+    // the ownership question it defers; refusing a surface is an acceptable slice, honouring one
+    // nobody has authorized is not.
+    //
+    // Why HERE and not at the claim: a 'pending' row is the claim scan's work list
+    // (JdbcInformationProcessingRepository: "s.state='pending' OR (s.state='running' AND
+    // s.lease_until<?)"), so a document declined only when claimed would already have enqueued
+    // work that fails, takes a lease and retries. Writing the stages 'skipped' means the scan
+    // never selects the revision, so there is nothing to lease and nothing to retry -- structural
+    // rather than a check each sweep must remember.
+    //
+    // 'skipped' and not a new state: it is this table's existing word for deliberate
+    // non-processing, already used for a syntax-only intake and for a code document's prose
+    // stages, so no migration and no new vocabulary. The announcement below is what makes the
+    // decline legible to an operator rather than a document that merely never moves.
+    boolean declined =
+        context.selection().project() != null
+            && io.aeyer.plowshare.protocol.ContainedProjects.name(context.selection().project());
     for (String stage : STAGES)
       jdbc.update(
           "INSERT INTO information_steps(revision_id,generation,stage,state)" + " VALUES(?,1,?,?)",
           revision,
           stage,
-          (syntaxOnly && List.of("embed", "autoTag", "tagGroups").contains(stage))
+          declined
+                  || (syntaxOnly && List.of("embed", "autoTag", "tagGroups").contains(stage))
                   || (documentType.isCode()
                       && List.of("summarise", "summary_embed").contains(stage))
               ? "skipped"
@@ -1210,6 +1235,18 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     // account. This is why knowledge has no column that can hold a contained principal as author:
     // every actor column in this family is keyed to a credentialed identity. See the task report.
     event(revision, 1, context.attribution(), "intake", "retained", "");
+    // Observable, and that is the requirement rather than a courtesy: "blocked" must not read as
+    // "broken". A document whose stages are all 'skipped' and that announced nothing would be
+    // indistinguishable to an operator from one the pipeline lost, so the decline says so, names
+    // its reason and is retained beside the intake it belongs to.
+    if (declined)
+      event(
+          revision,
+          1,
+          context.attribution(),
+          "intake",
+          "skipped",
+          "a confined Application's documents are not processed; see ADR 0042");
     return new Admission(revision, resource, true);
   }
 

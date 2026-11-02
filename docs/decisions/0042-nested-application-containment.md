@@ -1008,7 +1008,19 @@ one. The agent pairing needs no new constraint: V17's rule is an equality, so it
 already requires a `contained` row to name its agent, and both directions are
 asserted instead of restated.
 
-The contract cost is one hand-written line and no generated one. The generated
+**A contained conversation has no ejection age, and that is a decision rather
+than a copy of `DELEGATION`'s row.** Adding the kind made `RetentionPolicy`'s
+sealed switch over `Origin` fail to compile, which is the exhaustiveness this
+record relies on elsewhere working here: the retention question had to be
+answered rather than defaulted. The answer is no age, because a contained
+child's retained conversation lineage is the evidence its container reads through
+`application.child.trajectory`, and this record makes that lineage survive the
+child's destruction deliberately — which is the same reason `trajectory` answers
+for a destroyed child where `resources` refuses one. An ejection age here would
+eject the only record of what a destroyed child did, at some point after the
+child itself was collected and with nothing left to rebuild it from.
+
+**The contract cost is one hand-written line and no generated one.** The generated
 SDKs type a conversation's `origin` as a plain string rather than a union of
 literals, so a new value changes no generated type — but the hooks contract,
 `plowshare-hooks/index.ts`, does carry a literal union, and
@@ -1021,6 +1033,29 @@ already (V74 and V169), so restating them is this table's ordinary maintenance. 
 contained conversation has no ejection age, because its retained lineage is the
 evidence a container reads through `application.child.trajectory` and this record
 makes that lineage survive the child's destruction deliberately.
+
+**A confined Application's documents are not processed, and that is a recorded
+capability gap rather than an oversight.** A child may write knowledge into its
+own home, and the processing pipeline — extraction, embedding, summarising,
+tagging — declines those documents at the enqueue boundary: every stage is
+written `skipped`, the intake announces the decline with its reason, and the
+claim scan's work list (a `pending` or expired-`running` step) therefore never
+contains them. Nothing is lost silently and nothing is retried; an operator
+reading either the steps or the event stream sees a deliberate skip.
+
+The deferred question is **ownership, and it is three-way**. Processing a
+document needs a conversation and an allowance, and for a contained home neither
+has an owner. The pipeline's own log belongs to neither the child nor its
+container: it is the pipeline's, started on a lease whose owner is a third party
+to the containment relation, and it would spend a third budget inside a confined
+home — not the child's pool, which its container bounded for the child's own
+work, and not the container's, which the child may not spend. No part of this
+capability has designed that shape, and inventing one at the edge of a slice is
+how an authority surface acquires an owner nobody chose. Nothing in the design's
+goals is lost by refusing: a container reads its child's trajectory, resources
+and deliverables, which are the child's own output, and never an enriched
+derivative of it. Refusing a surface is an acceptable first slice; honouring one
+nobody authorized is not.
 
 **On the misclassification risk recorded for the contained principal.** A
 contained principal's identifier is a bare UUID, so
