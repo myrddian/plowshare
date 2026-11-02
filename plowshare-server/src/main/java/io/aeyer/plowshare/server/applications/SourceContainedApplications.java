@@ -342,15 +342,19 @@ public final class SourceContainedApplications implements ContainedApplications 
    * because child output is untrusted input to it, and with the account shared the author is what
    * carries that.
    *
-   * <p><strong>Known gate, and it is not this method's.</strong> {@link Runs} reaches {@code
-   * ConversationStore}, which resolves a run's home to a scope through {@code
-   * OperationAuthority.scope(Home)} for both of its doors — {@code open} for a fresh conversation
-   * and {@code log} for a submission. That resolution refuses a contained project by design ({@code
-   * JdbcIdentityRepository} maps a {@code CONTAINED} row to a refusal), and {@code admit} refuses a
-   * contained scope as a target besides, correctly: a contained admission comes into being only
-   * through {@code contain}. So a live contained run is still refused below this method, at a gate
-   * whose opening is an authority decision rather than a defect here. The decision above it is
-   * complete and tested; see the task report.
+   * <p><strong>What stands below this method, now that it works.</strong> {@link Runs} reaches
+   * {@code ConversationStore}, whose ordinary doors resolve a run's home to a scope through {@code
+   * OperationAuthority.scope(Home)} — a resolution that refuses a contained project by design, and
+   * must keep refusing it. A contained run therefore goes through {@code
+   * ConversationStore.openContained} instead, which takes the admission this method's hop produced
+   * and binds it rather than admitting a scope, on an {@code Origin.CONTAINED} row carrying the
+   * child's own allowance. V225 opened the two shipped constraints that stood in front of that
+   * door. {@code ContainedConversationDoorDatabaseTest} asserts the envelope a started child gets:
+   * its budget is the child's own allowance and its admission account is its container's.
+   *
+   * <p>One thing a reader must not do here: a confined Application's documents are not processed by
+   * the information pipeline, and that is a recorded decision rather than a gap to close in passing
+   * — ADR 0042 names the three-way ownership question it defers.
    */
   @Override
   public Running run(String account, Run request) {

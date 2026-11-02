@@ -1028,11 +1028,8 @@ literals, so a new value changes no generated type — but the hooks contract,
 That test is the mechanism working as designed, and the earlier claim that the
 kind had no contract reach at all was too strong by exactly that one declaration.
 Both constraints the kind needs an arm on have been restated by later migrations
-already (V74 and V169), so restating them is this table's ordinary maintenance. The retention question the sealed switch over
-`Origin` forces is answered with `DELEGATION`'s answer and not `SUBMISSION`'s: a
-contained conversation has no ejection age, because its retained lineage is the
-evidence a container reads through `application.child.trajectory` and this record
-makes that lineage survive the child's destruction deliberately.
+already (V74 and V169), so restating them is this table's ordinary maintenance.
+The retention the kind carries is decided in its own paragraph above.
 
 **A confined Application's documents are not processed, and that is a recorded
 capability gap rather than an oversight.** A child may write knowledge into its

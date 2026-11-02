@@ -1010,6 +1010,39 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     }
   }
 
+  /**
+   * Whether this destination's documents are declined by the processing pipeline.
+   *
+   * <p><strong>A confined Application's documents are not processed in this slice</strong>, and the
+   * decline is decided here and applied at the enqueue boundary rather than when work is claimed.
+   *
+   * <p>Why declined at all: processing a document needs a conversation and a budget, and for a
+   * contained home neither has an owner. The pipeline's log belongs to neither the child nor its
+   * container and would spend a third allowance inside a confined home, which is an authority shape
+   * nothing in this capability has designed. ADR 0042 records it as a capability gap with the
+   * three-way ownership question it defers; refusing a surface is an acceptable slice, honouring
+   * one nobody has authorized is not.
+   *
+   * <p>Why at the enqueue boundary and not at the claim: a {@code pending} row is the claim scan's
+   * work list ({@code JdbcInformationProcessingRepository}: {@code s.state='pending' OR
+   * (s.state='running' AND s.lease_until<?)}), so a document declined only when claimed would
+   * already have enqueued work that fails, takes a lease and retries. Writing the stages {@code
+   * skipped} means the scan never selects the revision, so there is nothing to lease and nothing to
+   * retry — structural rather than a check each sweep must remember.
+   *
+   * <p>{@code skipped} and not a new state: it is that table's existing word for deliberate
+   * non-processing, already used for a syntax-only intake and for a code document's prose stages,
+   * so no migration and no new vocabulary. The announcement the caller makes alongside is what
+   * keeps the decline legible to an operator rather than a document that merely never moves.
+   *
+   * <p>A selection with no project — an account's own knowledge, or Personal — is never contained,
+   * which is why the null check comes first rather than being folded into the name test.
+   */
+  private static boolean declinedHome(InformationContext context) {
+    return context.selection().project() != null
+        && io.aeyer.plowshare.protocol.ContainedProjects.name(context.selection().project());
+  }
+
   /** Creation has no revision to lock yet; validate the exact destination and live role. */
   private void requireDestination(InformationContext context) {
     if (!Boolean.TRUE.equals(
@@ -1173,30 +1206,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           binding.metadataHash(),
           io.aeyer.plowshare.protocol.SchemaCodec.compactJson(binding.metadata()));
     }
-    // A CONFINED APPLICATION'S DOCUMENTS ARE NOT PROCESSED IN THIS SLICE, and the decline happens
-    // here -- at the enqueue boundary -- rather than when work is claimed.
-    //
-    // Why declined at all: processing a document needs a conversation and a budget, and for a
-    // contained home neither has an owner. The pipeline's log belongs to neither the child nor its
-    // container and would spend a third allowance inside a confined home, which is an authority
-    // shape nothing in this capability has designed. ADR 0042 records it as a capability gap with
-    // the ownership question it defers; refusing a surface is an acceptable slice, honouring one
-    // nobody has authorized is not.
-    //
-    // Why HERE and not at the claim: a 'pending' row is the claim scan's work list
-    // (JdbcInformationProcessingRepository: "s.state='pending' OR (s.state='running' AND
-    // s.lease_until<?)"), so a document declined only when claimed would already have enqueued
-    // work that fails, takes a lease and retries. Writing the stages 'skipped' means the scan
-    // never selects the revision, so there is nothing to lease and nothing to retry -- structural
-    // rather than a check each sweep must remember.
-    //
-    // 'skipped' and not a new state: it is this table's existing word for deliberate
-    // non-processing, already used for a syntax-only intake and for a code document's prose
-    // stages, so no migration and no new vocabulary. The announcement below is what makes the
-    // decline legible to an operator rather than a document that merely never moves.
-    boolean declined =
-        context.selection().project() != null
-            && io.aeyer.plowshare.protocol.ContainedProjects.name(context.selection().project());
+    boolean declined = declinedHome(context);
     for (String stage : STAGES)
       jdbc.update(
           "INSERT INTO information_steps(revision_id,generation,stage,state)" + " VALUES(?,1,?,?)",
@@ -1233,7 +1243,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         revision);
     // actor_handle carries a foreign key into admins as well, so the audit actor is the accounting
     // account. This is why knowledge has no column that can hold a contained principal as author:
-    // every actor column in this family is keyed to a credentialed identity. See the task report.
+    // every provenance column this insert writes is keyed to a credentialed identity --
+    // owner_handle
+    // and information_requests.account into admins, both created_by columns into authority_accounts
+    // -- while the announcement below goes to Relay rather than to a column. ADR 0042 records the
+    // absence of an author field for knowledge as a capability gap rather than an oversight.
     event(revision, 1, context.attribution(), "intake", "retained", "");
     // Observable, and that is the requirement rather than a courtesy: "blocked" must not read as
     // "broken". A document whose stages are all 'skipped' and that announced nothing would be
@@ -1250,11 +1264,58 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     return new Admission(revision, resource, true);
   }
 
-  public void link(InformationContext context, UUID revision, String project, boolean remove) {
+  /**
+   * Refuses an operation a confined Application has never been authorized to perform, before
+   * anything is written.
+   *
+   * <p><strong>Why a refusal and not the attribution axis.</strong> Nothing has decided that a
+   * confined Application may link a document into another project, publish one, withdraw one, retry
+   * or rebuild processing, set an allowance, cancel work, record evidence or finalise a report.
+   * V224 admits a contained principal into {@code lockResource} and the readability predicates for
+   * its own home, so it can genuinely arrive at every one of them.
+   *
+   * <p>One of them would fail on integrity rather than on authority: {@code link} writes {@code
+   * information_links.actor_handle}, whose foreign key targets {@code admins} (V83:77) and which a
+   * contained principal has no row in by design (V218), so unguarded it raises an FK error — a
+   * server fault for something a caller did. The rest hand the actor to the event publisher, which
+   * is Relay and not a table with a foreign key, so they would have <em>succeeded</em>. That is the
+   * more dangerous half, and the reason this is an authority check rather than an integrity patch:
+   * whatever made {@code link} work would have silently granted the other eight.
+   *
+   * <p>Extending {@code attribution()} across them would have granted each of those capabilities by
+   * implementation accident and attributed the act to an account that did not ask — against this
+   * capability's own rule that refusing a surface is an acceptable first slice while refusing a
+   * surface is an acceptable slice while honouring one nobody authorized is not. Several are
+   * pipeline-lifecycle operations over documents a contained home's are already declined from. What
+   * a running child may reach is a decision that belongs to the task that defines it, so this fails
+   * closed and keeps that decision open.
+   *
+   * <p>The child's own write path does not come through here. {@code admit} is the one operation a
+   * confined Application is authorized to perform, it calls none of these, and it carries the
+   * attribution axis for its own provenance columns.
+   *
+   * <p>Keyed on {@code contained_knowledge_actor}, which is the same predicate V224's arms are
+   * keyed on, so this cannot drift from the population it is about and is safe on a non-UUID actor.
+   * Do not weaken this to a comparison of the two axes: attribution is a provenance decision and
+   * this is an authority one.
+   */
+  private void requireUncontainedActor(InformationContext context, String operation) {
+    if (Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT contained_knowledge_actor(?)", Boolean.class, context.acting())))
+      throw new CallerFault("A confined Application may not " + operation);
+  }
 
+  public void link(InformationContext context, UUID revision, String project, boolean remove) {
+    requireUncontainedActor(context, "link a document into another project");
+
+    // The destination is a different project, so the selection is rebuilt -- but the accounting
+    // axis travels with it. Dropping it would silently return this context to a single-axis one
+    // and write provenance from the acting principal again.
     requireDestination(
         new InformationContext(
-            context.account(), InformationAccess.projectSelection(context.account(), project)));
+                context.acting(), InformationAccess.projectSelection(context.acting(), project))
+            .accountedTo(context.attribution()));
     lockResource(context, revision, false);
     if (remove)
       jdbc.update(
@@ -1279,6 +1340,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void share(InformationContext context, UUID revision, boolean shared) {
+    requireUncontainedActor(context, "change a document's audience");
 
     // Root policy changes serialize with navigation policy and reference changes. This lock must
     // precede the resource lock; upgrading a content writer's shared lock can deadlock publishers.
@@ -1328,6 +1390,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void availability(InformationContext context, UUID revision, String state) {
+    requireUncontainedActor(context, "change a document's availability");
     if (!Set.of("active", "excluded", "included", "withdrawn", "deleted").contains(state))
       throw new IllegalArgumentException("invalid availability");
 
@@ -1414,6 +1477,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void retry(InformationContext context, UUID revision) {
+    requireUncontainedActor(context, "retry processing");
 
     lockResource(context, revision, false);
     if (!"active".equals(row(revision).availability()))
@@ -1428,6 +1492,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void rebuild(InformationContext context, UUID revision, String from) {
+    requireUncontainedActor(context, "rebuild processing");
     int first = STAGES.indexOf(from);
     if (first < 2) throw new CallerFault("invalid rebuild stage");
 
@@ -1508,6 +1573,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void allowance(InformationContext context, UUID revision, int total) {
+    requireUncontainedActor(context, "set a processing allowance");
     if (total < 1) throw new IllegalArgumentException("allowance must be positive");
 
     lockResource(context, revision, false);
@@ -1532,6 +1598,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void cancelProcessing(InformationContext context, UUID revision) {
+    requireUncontainedActor(context, "cancel processing");
     lockResource(context, revision, false);
     long prior = generation(revision);
     jdbc.update("UPDATE information_revisions SET generation=generation+1 WHERE id=?", revision);
@@ -1706,6 +1773,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       String quote,
       String locator,
       UUID request) {
+    requireUncontainedActor(context, "record evidence on a document");
 
     if (!readable(context, revision)) throw absent();
     String text = text(revision);
@@ -1784,6 +1852,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void finalise(
       InformationContext context, UUID revision, Map<String, String> fingerprints) {
+    // Already unreachable for a child's document by arithmetic -- a final report needs five
+    // 'ready' stages and a contained home's stages are all 'skipped' -- but incidentally rather
+    // than deliberately, and an incidental refusal is one a later change can remove without
+    // noticing. This says it.
+    requireUncontainedActor(context, "finalise a report");
 
     lockResource(context, revision, false);
     if (!readable(context, revision)) throw absent();

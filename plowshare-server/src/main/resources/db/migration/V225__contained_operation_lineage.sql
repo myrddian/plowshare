@@ -1,13 +1,19 @@
 -- A containment hop may record its lineage.
 --
--- REPRODUCED FROM V162's operation_parent_valid WITH ONE EDIT AND NO OTHERS. The function's name,
--- signature, language, return type and every other condition in it are byte-identical to V162; the
--- single edit replaces the conjunct
+-- REPRODUCED FROM V162's operation_parent_valid WITH ONE SEMANTIC EDIT AND NO OTHERS. The
+-- function's name, signature, language and return type are unchanged, and so is every condition in
+-- the body. The single semantic edit replaces the conjunct
 --
 --     AND c.scope=p.scope AND c.project_name=p.project_name
 --
--- with that same equality OR a contained arm, and nothing else in the body is touched. A reviewer
--- should diff this against V162 lines 28-53 and find exactly that one difference.
+-- with that same equality OR a contained arm, and nothing else in the body changes meaning.
+--
+-- TWO NON-SEMANTIC DIFFERENCES, stated because this repository's reviewers check the convention
+-- mechanically and a claim of "byte-identical" would be false. First, `AND c.source_account=
+-- p.source_account` now sits on its own line ahead of the scope conjunct instead of sharing a line
+-- with the executor comparisons; second, the replaced conjunct is wrapped across four lines. Both
+-- are re-ordering and re-wrapping of terms under a single AND, so the predicate is unchanged by
+-- either. A reviewer normalising whitespace and term order should find exactly one difference.
 --
 -- WHY THIS IS A REPLACEMENT AND NOT A WIDENING. ADR 0042's "two live-authority gates" already made
 -- this exact replacement in Java: for a contained admission, `require`'s demand for an ancestor
@@ -45,12 +51,13 @@
 -- Authority.requireDepth enforces it, which is why a depth refusal is a CallerFault and not a
 -- trigger error.
 --
--- Gate six is NOT addressed here. operation_conversation_valid (V162:62) requires a conversation
--- row's agent to equal the bound envelope's, while conversations_a_person_s_conversation_names_no_
--- agent (V17:212) forbids an agent on an origin='turn' row, so a contained run's envelope still
--- cannot be bound to the Origin.TURN row ConversationStore.openContained writes. That is a choice
--- about which Origin a contained run carries -- a shipped enum with contract reach -- and it is
--- reported for decision rather than settled by a migration.
+-- The second constraint in front of a contained run is settled in SECTION 2 of this same file,
+-- not deferred: operation_conversation_valid (V162:62) requires a conversation row's agent to
+-- equal the bound envelope's, while conversations_a_person_s_conversation_names_no_agent (V17:212)
+-- forbids an agent on an origin='turn' row, so a contained run's conversation needed an origin of
+-- its own. Section 2 adds it. The two sections are separate decisions and the second says so; they
+-- travel together because this migration is unshipped until its branch merges and one coherent
+-- migration beats two that must be read in order.
 
 CREATE OR REPLACE FUNCTION operation_parent_valid() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

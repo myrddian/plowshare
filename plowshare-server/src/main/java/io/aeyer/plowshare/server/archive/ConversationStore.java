@@ -332,18 +332,25 @@ public final class ConversationStore {
    * live authority is rechecked <em>before</em> the row is written, so a refusal leaves no
    * conversation behind, and {@code bind} rechecks it again on the far side.
    *
-   * <h2>Not yet reachable, and the reason is below this class</h2>
+   * <h2>Reachable, and what must not be simplified to keep it so</h2>
    *
-   * <p>This door is correct and tested, and nothing can get to it yet: {@code contain} cannot
-   * record a contained admission's lineage, because {@code operation_parent_valid} (V162:35-36)
-   * requires a child admission to carry its parent's scope and project name and a containment hop
-   * changes both by design. A second gate sits behind that one — {@code
-   * operation_conversation_valid} (V162:62) requires the conversation row's {@code agent} to equal
-   * the bound envelope's, while {@code conversations_a_person_s_conversation_names_no_agent}
-   * (V17:212) forbids an agent on the {@code Origin.TURN} row this door writes. Both are shipped
-   * migrations, so opening them is a new migration and a separate decision; {@code
-   * ContainedConversationDoorDatabaseTest} pins the first with its exact message and names the
-   * second. Do not read this door as working end to end until those are settled.
+   * <p>Two shipped constraints stood in front of this door and V225 settled both. {@code
+   * operation_parent_valid} required a child admission to carry its parent's scope and project
+   * name, which a containment hop changes by design, so {@code contain} could not record its
+   * lineage at all; V225's first section replaced that conjunct with the containment edge itself.
+   * {@code operation_conversation_valid} requires the conversation row's {@code agent} to equal its
+   * bound envelope's, and {@code conversations_a_person_s_conversation_names_no_agent} forbids an
+   * agent on an {@code origin='turn'} row; V225's second section added {@code Origin.CONTAINED},
+   * which is what this door writes. {@code ContainedConversationDoorDatabaseTest} opens a
+   * conversation through here on a real hop and asserts the envelope.
+   *
+   * <p><strong>Do not simplify three things.</strong> The origin must stay {@code CONTAINED}: a
+   * {@code TURN} row may not name an agent and the envelope always does, and {@code CONTAINED} is
+   * on the <em>owned</em> side of the allowance constraint, which is what stops a child sharing its
+   * container's pool. The admission must stay the one a hop produced and be rechecked before the
+   * row is written, so a refusal leaves no conversation behind. And the {@code budget} must stay a
+   * restored allowance rather than a freshly minted one, or the run spends a pool its container
+   * never bounded.
    *
    * <p>The other door, {@link #logInternal}, carries the same branch but as a <em>refusal</em>, and
    * that asymmetry is deliberate: a contained submission or event has no consumer in this slice, so
@@ -576,7 +583,14 @@ public final class ConversationStore {
     // rather than resolved, because the resolution below cannot answer for a contained home and
     // because whether a child's document is processed at all -- and under whose authority -- is a
     // decision nobody has taken. Refusing clearly beats failing three layers down with a message
-    // about scopes, which is how this gate stayed invisible. See the task report.
+    // about scopes, which is how this gate stayed invisible. ADR 0042 records the refusal and the
+    // three-way ownership question it defers.
+    //
+    // Guarded by ORIGIN and not by home alone, deliberately: a DELEGATION row in a contained home
+    // is left alone, because a child delegating inside its own home carries its own admission and
+    // shares its own pool, so neither the scope resolution below nor an owner it does not have is
+    // needed. SUBMISSION and EVENT are the two that resolve-and-admit, and they are the two
+    // guarded.
     if (origin == Origin.SUBMISSION || origin == Origin.EVENT) requireUncontained(home, "log");
     if (system == null
         && operations != null

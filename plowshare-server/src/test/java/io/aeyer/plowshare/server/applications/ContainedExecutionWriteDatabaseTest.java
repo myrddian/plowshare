@@ -10,11 +10,13 @@ import io.aeyer.plowshare.protocol.Provenance;
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.MemoryStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.information.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
@@ -437,6 +439,123 @@ class ContainedExecutionWriteDatabaseTest {
             .map(InformationEvents.Occurrence::action)
             .toList(),
         "and an ordinary intake announces no decline");
+  }
+
+  /**
+   * Every catalogue management operation refuses a contained acting principal explicitly, before
+   * anything writes — and each refusal has an ordinary actor passing the same guard beside it.
+   *
+   * <p>V224 admits a contained principal into {@code lockResource} and the readability predicates
+   * for its own home, so it really can arrive at these; each writes an {@code actor_handle} whose
+   * foreign key targets {@code admins}, which it has no row in, so unguarded they produce an FK
+   * integrity error — a server fault for something a caller did. Extending the attribution axis
+   * here would instead have made them <em>work</em>, granting a confined Application the right to
+   * link, publish, withdraw, retry, rebuild, allowance, cancel, record evidence and finalise by
+   * implementation accident. They are refused so that what a running child may reach stays a
+   * decision rather than a side effect.
+   *
+   * <p>Each case asserts two things: the contained principal gets the guard's own {@code
+   * CallerFault}, and an ordinary actor does <strong>not</strong> — either succeeding outright, or
+   * reaching the operation's own precondition, which is what proves the guard is scoped to
+   * contained actors rather than refusing everybody. Where an ordinary actor's success would need a
+   * fabricated processing state (five {@code ready} stages, a failed step), the control asserts it
+   * got past the guard to a different refusal, and says so.
+   */
+  @Test
+  void everyCatalogueManagementOperationRefusesAContainedActor() {
+    var child =
+        work.inTransaction(
+            () ->
+                admit(
+                    InformationAccess.contained(childPrincipal, HOLDER, childProject)
+                        .withView(true),
+                    "child-notes.md"));
+    var mine = work.inTransaction(() -> admit(context(HOLDER, "parent"), "ordinary.md"));
+    var confined = InformationAccess.contained(childPrincipal, HOLDER, childProject).withView(true);
+    var ordinary = context(HOLDER, "parent").withView(true);
+
+    // One list, so a ninth management operation added without a guard shows up as a missing row
+    // here rather than as an FK error in production.
+    record Operation(String name, java.util.function.Consumer<InformationContext> on) {}
+    var operations =
+        List.of(
+            new Operation(
+                "link",
+                context ->
+                    records.link(context, revisionFor(context, child, mine), "parent", false)),
+            new Operation(
+                "share",
+                context -> records.share(context, revisionFor(context, child, mine), true)),
+            new Operation(
+                "availability",
+                context ->
+                    records.availability(context, revisionFor(context, child, mine), "excluded")),
+            new Operation(
+                "retry", context -> records.retry(context, revisionFor(context, child, mine))),
+            new Operation(
+                "rebuild",
+                context -> records.rebuild(context, revisionFor(context, child, mine), "embed")),
+            new Operation(
+                "allowance",
+                context -> records.allowance(context, revisionFor(context, child, mine), 3)),
+            new Operation(
+                "cancelProcessing",
+                context -> records.cancelProcessing(context, revisionFor(context, child, mine))),
+            new Operation(
+                "recordEvidence",
+                context ->
+                    records.recordEvidence(
+                        context,
+                        revisionFor(context, child, mine),
+                        0,
+                        4,
+                        "body",
+                        "p1",
+                        UUID.randomUUID())),
+            new Operation(
+                "finalise",
+                context -> records.finalise(context, revisionFor(context, child, mine), Map.of())));
+
+    for (var operation : operations) {
+      var refusal =
+          assertThrows(
+              CallerFault.class,
+              () ->
+                  work.inTransaction(
+                      () -> {
+                        operation.on().accept(confined);
+                        return null;
+                      }),
+              operation.name() + " must refuse a contained actor");
+      assertTrue(
+          refusal.getMessage().startsWith("A confined Application may not "),
+          operation.name() + ": " + refusal.getMessage());
+
+      // The control: the same call as an ordinary member of the container's project is not stopped
+      // by that guard. It may fail on the operation's own terms -- a report needs completed
+      // processing, a retry needs something to retry -- and that is the point: a different
+      // refusal, or none, means the guard did not fire.
+      try {
+        work.inTransaction(
+            () -> {
+              operation.on().accept(ordinary);
+              return null;
+            });
+      } catch (RuntimeException expected) {
+        assertFalse(
+            expected.getMessage() != null
+                && expected.getMessage().startsWith("A confined Application may not "),
+            operation.name() + " refused an ordinary actor with the contained guard");
+      }
+    }
+  }
+
+  /** The caller's own document: the child's for a contained context, the container's otherwise. */
+  private UUID revisionFor(
+      InformationContext context,
+      InformationCatalogue.Admission child,
+      InformationCatalogue.Admission mine) {
+    return childPrincipal.equals(context.acting()) ? child.revision() : mine.revision();
   }
 
   /**

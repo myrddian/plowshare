@@ -373,14 +373,46 @@ class ContainedConversationDoorDatabaseTest {
    * nothing else, which is checked before anything is written and therefore checkable without the
    * hop that the gate above blocks.
    *
-   * <p>The admission used here is the container's own, whose retained home is the container's
-   * project — standing in for "an admission that is not this child's", which is the whole class the
-   * check has to refuse, a sibling's included. Once the lineage gate opens, this should gain a
-   * sibling-admission case built from a real hop; it is written this way now so the door's own
-   * check is covered rather than untested.
+   * <p>Two admissions that are not this child's are used, and the <strong>sibling's is the one that
+   * matters</strong>: both children are held by the same container, so a container holding one
+   * proved contained admission must not be able to open a conversation inside the other. The
+   * container's own admission covers the uncontained case in the same shape. The sibling case is
+   * built from a real hop, which V225 made possible — before it, no second contained admission
+   * could exist to try.
    */
   @Test
   void theContainedDoorRefusesAnAdmissionRetainedForAnotherHome() {
+    // A real sibling hop: another child of the same container, with its own live admission.
+    var sibling = hop(siblingScope, siblingProject);
+    assertEquals(Home.of(siblingProject), sibling.home());
+    assertDoesNotThrow(() -> policy.require(sibling), "the sibling's own admission is live");
+
+    assertThrows(
+        CallerFault.class,
+        () ->
+            conversations.openContained(
+                Home.of(childProject),
+                allowances.restore(childAllowance),
+                null,
+                HOLDER,
+                sibling,
+                "worker",
+                "0".repeat(64)),
+        "a sibling's admission does not open this child, though one container holds both");
+    // CONTROL: the sibling's own admission opens the sibling's own conversation, so the refusal is
+    // about which child the admission names and not about the hop or the door being broken.
+    assertNotNull(
+        conversations
+            .openContained(
+                Home.of(siblingProject),
+                allowances.restore(childAllowance),
+                null,
+                HOLDER,
+                sibling,
+                "worker",
+                "0".repeat(64))
+            .id());
+
     var elsewhere =
         policy.admit(
             HOLDER, new AuthorityScope.Project(parentScope, projectId("parent")), DERIVABLE);
@@ -411,8 +443,9 @@ class ContainedConversationDoorDatabaseTest {
                 "0".repeat(64)),
         "and an uncontained home is not this door's business at all");
     assertEquals(
-        0,
+        1,
         (int) jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class),
-        "a refusal leaves no conversation behind: the admission is checked before the row");
+        "only the sibling's own conversation exists: every refusal above wrote none, because the"
+            + " admission is checked before the row");
   }
 }

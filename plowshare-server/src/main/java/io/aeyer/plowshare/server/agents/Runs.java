@@ -178,6 +178,14 @@ public final class Runs {
     /** Never null, for {@code api.RunAgentRequest}'s own reason. */
     public Ask {
       images = images == null ? List.of() : List.copyOf(images);
+      // A contained run opens its own conversation through the contained door and speaks into it.
+      // Carrying contained authority while naming an existing conversation, or without asking for
+      // a fresh one, would take the utterance branch below -- which resolves the conversation's
+      // own home and never reaches that door. It fails closed today at ConversationStore's guard,
+      // but incidentally; this is the structural statement, made where the combination is built.
+      if (contained != null && (conversation != null || !Boolean.TRUE.equals(newConversation)))
+        throw new IllegalArgumentException(
+            "A contained run opens its own conversation: it names none and asks for a fresh one");
     }
 
     public Ask(

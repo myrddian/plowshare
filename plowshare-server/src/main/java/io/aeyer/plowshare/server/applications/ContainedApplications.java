@@ -156,8 +156,9 @@ public interface ContainedApplications {
    * @param child the Application to start work inside, named by its contained record's id
    * @param agent the agent to run, resolved against the <em>child's</em> own package and nothing
    *     else, so a container cannot name an agent of its own and have it run inside the child
-   * @param task what the child is being asked to do, in prose. Never null; a blank task is the run
-   *     service's own refusal and is not pre-empted here
+   * @param task what the child is being asked to do, in prose. Never null, and never blank: the
+   *     frame refuses a blank string before this record is built, so a task that reaches here is
+   *     one the run service will accept
    * @param maxTurns how many turns this run may take, or {@code null} to decide nothing and leave
    *     the agent's own cap. Unlike a ceiling, absence here is not unlimited — the agent's cap
    *     stands — so {@code null} is representable and zero is not a cap at all
