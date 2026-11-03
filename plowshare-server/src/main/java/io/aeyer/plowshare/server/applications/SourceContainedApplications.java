@@ -120,6 +120,7 @@ public final class SourceContainedApplications implements ContainedApplications 
   private final ContainmentConfig config;
   private final ContainedStaging staging;
   private final Runs runs;
+  private final io.aeyer.plowshare.server.agents.CancellableRuns jobs;
 
   /**
    * @param identities held for {@link IdentityRepository#containedHome} alone, and that is not the
@@ -131,6 +132,10 @@ public final class SourceContainedApplications implements ContainedApplications 
    * @param runs the run service, which is the owning API for starting one agent on one task. Reused
    *     rather than re-implemented: a second submission path would decide the order of its own
    *     refusals differently from the one every other surface gets.
+   * @param jobs how a run already going is asked to stop, and the narrowest contract that can say
+   *     so: it holds one method keyed on a conversation. Deliberately not {@code JobStore} itself —
+   *     this class must not acquire the ability to submit, poll or list runs in order to stop one —
+   *     and deliberately not {@code Runs}, whose subject is starting work. See {@link #cancel}.
    */
   public SourceContainedApplications(
       ContainedApplicationRepository records,
@@ -143,7 +148,8 @@ public final class SourceContainedApplications implements ContainedApplications 
       UnitOfWork work,
       ContainmentConfig config,
       ContainedStaging staging,
-      Runs runs) {
+      Runs runs,
+      io.aeyer.plowshare.server.agents.CancellableRuns jobs) {
     this.records = Objects.requireNonNull(records);
     this.projects = Objects.requireNonNull(projects);
     this.validator = Objects.requireNonNull(validator);
@@ -155,6 +161,7 @@ public final class SourceContainedApplications implements ContainedApplications 
     this.config = Objects.requireNonNull(config);
     this.staging = Objects.requireNonNull(staging);
     this.runs = Objects.requireNonNull(runs);
+    this.jobs = Objects.requireNonNull(jobs);
   }
 
   @Override
@@ -310,6 +317,66 @@ public final class SourceContainedApplications implements ContainedApplications 
           records.ceiling(child, calls);
           return null;
         });
+  }
+
+  /**
+   * Stops the work inside one child and its descendants, under its container's authority.
+   *
+   * <p>The order is {@link #run}'s: the caller's live authority is proved <em>before</em> any
+   * lookup, so a refusal discloses nothing about whether the named UUID is a contained Application
+   * on this installation, and then the child's row must name the caller's own scope as its
+   * container.
+   *
+   * <p><strong>Three things this deliberately does not do, each of which {@code run} does.</strong>
+   * It does not require containment to be configured: the root is where a child's <em>source</em>
+   * lives, nothing here reads it, and a server reconfigured while work is in flight must not
+   * thereby lose the ability to stop that work. It does not refuse a destroyed child: stopping work
+   * inside one is exactly what a destruction asks for, and refusing would make the idempotent retry
+   * this contract promises impossible. And it does not refuse a zero ceiling: a child whose calls
+   * have been disabled may still hold a run that has not yet reached its next boundary, which is
+   * precisely the run a container wants stopped.
+   *
+   * <p>No durable write of any kind happens here, which is why there is no unit of work: the stop
+   * is a flag inside the run's own process. The subtree is therefore read without {@code
+   * lockSubtree} — a creation committing alongside this call adds a record whose run cannot have
+   * started yet, and a caller who wants it stopped asks again, which costs nothing because asking
+   * twice is the same answer.
+   */
+  @Override
+  public void cancel(String account, String conversation, UUID child) {
+    // First, and before any lookup, exactly as run does.
+    var parent = parent(account, conversation);
+    var retained =
+        records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
+    if (!parent.admission().scope().equals(retained.container()))
+      throw new CallerFault("This Application does not contain that Application");
+    stop(
+        records.subtree(retained.scope()).stream()
+            .map(ContainedApplicationRepository.Retained::scope)
+            .toList());
+  }
+
+  /**
+   * Asks every run inside these scopes to stop, in the order they are given.
+   *
+   * <p>Shared by {@link #cancel} and by both of {@link #destroy}'s halves on purpose, so there is
+   * one notion of "the work inside a subtree" rather than three that could drift. It takes scopes
+   * rather than records because the two callers hold different row types for the same subtree — a
+   * live {@code Retained} and a {@code Collection} written by a destruction — and the scope is the
+   * only thing either of them needs to contribute.
+   *
+   * <p><strong>The caller supplies the order and this method neither sorts nor reverses
+   * it.</strong> Deepest first is the destruction's contract and belongs where that contract is
+   * stated; a sort here would make the ordering two claims in two places.
+   *
+   * <p>A run is reached through the child's own retained conversation envelopes, which is the only
+   * durable key a container holds on work it did not submit. {@code conversationsIn} is immutable
+   * evidence and grants nothing — the caller proved its authority above — and it is not transitive,
+   * which is why this iterates the scopes rather than asking once about the root.
+   */
+  private void stop(List<AuthorityIds.ScopeId> ordered) {
+    for (var scope : ordered)
+      for (var envelope : authority.conversationsIn(scope)) jobs.cancelIn(envelope.id());
   }
 
   /**
@@ -515,6 +582,13 @@ public final class SourceContainedApplications implements ContainedApplications 
               destroy(held, child);
               return held;
             });
+    // BEFORE THE FIRST REMOVAL, over the same deepest-first set the cascade just walked. A run
+    // still reading its source area while that area is collected is the one failure the ordering
+    // below is otherwise careful to avoid, and the allowance zeroed inside the unit does not close
+    // it: a run mid-turn can make no further call, but it can still read files. Stopping after the
+    // commit rather than inside it is deliberate twice over -- a cancellation is a process-local
+    // flag that no rollback could take back, and the ordered set is only known under the lock.
+    stop(subtree.stream().map(ContainedApplicationRepository.Retained::scope).toList());
     int sources = 0;
     for (var held : subtree) {
       Path workspace = workspace(held.project());
@@ -620,6 +694,11 @@ public final class SourceContainedApplications implements ContainedApplications 
     // Deepest first, as the original answered. The rebuild appends a node before its children, so
     // reversing it yields children before parents at every level.
     Collections.reverse(rebuilt);
+    // The same stop, for the same reason, before this retry removes the bytes the original could
+    // not. The original destruction asked too, but a destruction interrupted between its commit
+    // and its removal may have been interrupted before that ask landed, and the directories this
+    // loop is about to collect are exactly the ones such a run would still be reading.
+    stop(rebuilt.stream().map(ContainedApplicationRepository.Collection::scope).toList());
     int sources = 0;
     for (var held : rebuilt) if (finish(held)) sources++;
     return new Destroyed(

@@ -64,7 +64,8 @@ class ContainedApplicationFramesTest {
           new HashMap<>(Map.of("conversation", "c", "child", CHILD, "calls", 1));
       case FrameTypes.APPLICATION_CHILD_DESTROY,
               FrameTypes.APPLICATION_CHILD_TRAJECTORY,
-              FrameTypes.APPLICATION_CHILD_RESOURCES ->
+              FrameTypes.APPLICATION_CHILD_RESOURCES,
+              FrameTypes.APPLICATION_CHILD_CANCEL ->
           new HashMap<>(Map.of("conversation", "c", "child", CHILD));
       case FrameTypes.APPLICATION_CHILD_LIST -> new HashMap<>(Map.of("conversation", "c"));
       case FrameTypes.APPLICATION_CHILD_RUN -> {
@@ -83,7 +84,7 @@ class ContainedApplicationFramesTest {
   @Test
   void everyContainedFrameIsRegistered() throws Exception {
     var declared = declared();
-    assertEquals(7, declared.size(), "a new application.child.* constant needs a contract audit");
+    assertEquals(8, declared.size(), "a new application.child.* constant needs a contract audit");
     assertEquals(new TreeSet<>(declared), new TreeSet<>(frames.keySet()));
     // And exactly once across the whole table, as the router would assemble it.
     var all =
@@ -148,7 +149,8 @@ class ContainedApplicationFramesTest {
         List.of(
             FrameTypes.APPLICATION_CHILD_CEILING,
             FrameTypes.APPLICATION_CHILD_DESTROY,
-            FrameTypes.APPLICATION_CHILD_TRAJECTORY)) {
+            FrameTypes.APPLICATION_CHILD_TRAJECTORY,
+            FrameTypes.APPLICATION_CHILD_CANCEL)) {
       var payload = valid(type);
       payload.put("child", "not-a-uuid");
       assertThrows(CallerFault.class, () -> frames.get(type).handle(payload, asking), type);
@@ -276,6 +278,42 @@ class ContainedApplicationFramesTest {
     nullTask.put("task", null);
     assertThrows(CallerFault.class, () -> run.handle(nullTask, asking));
     verifyNoInteractions(children);
+  }
+
+  /**
+   * A cancellation answers {@code OK}, unlike a run: there is no handle to poll, and what has
+   * completed when it answers is the asking rather than the work. The answer names the child the
+   * caller asked about, read from the payload, because the operation returns nothing there could be
+   * a server-side answer to correlate against.
+   */
+  @Test
+  void aWellFormedCancelIsOkAndNamesTheChildAsked() {
+    var outcome =
+        frames
+            .get(FrameTypes.APPLICATION_CHILD_CANCEL)
+            .handle(valid(FrameTypes.APPLICATION_CHILD_CANCEL), asking);
+
+    assertEquals(io.aeyer.plowshare.protocol.frames.Code.OK, outcome.code());
+    assertEquals(Map.of("child", CHILD), outcome.payload());
+    verify(children, times(1)).cancel("owner", "c", UUID.fromString(CHILD));
+    verifyNoMoreInteractions(children);
+  }
+
+  /**
+   * Cancelling a child that holds no live run is a success and not a refusal, which is the
+   * service's documented contract rather than this boundary's leniency: the mock above returns
+   * normally for every call, so a frame that invented a refusal of its own would fail here.
+   */
+  @Test
+  void aCancelOfAChildWithNothingRunningIsStillOk() {
+    doNothing().when(children).cancel(any(), any(), any());
+
+    var outcome =
+        frames
+            .get(FrameTypes.APPLICATION_CHILD_CANCEL)
+            .handle(valid(FrameTypes.APPLICATION_CHILD_CANCEL), asking);
+
+    assertEquals(io.aeyer.plowshare.protocol.frames.Code.OK, outcome.code());
   }
 
   @Test

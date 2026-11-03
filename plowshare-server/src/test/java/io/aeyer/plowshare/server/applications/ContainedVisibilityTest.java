@@ -122,7 +122,10 @@ class ContainedVisibilityTest {
             },
             new ContainmentConfig(root.toString(), 3, 4, null),
             new InProcessContainedStaging(),
-            runs);
+            runs,
+            // No run is going in any conversation here; stopping one is
+            // ContainedCancellationTest's.
+            conversation -> 0);
   }
 
   @Test

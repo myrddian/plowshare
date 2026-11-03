@@ -234,7 +234,9 @@ class ContainedRunTest {
         work,
         config,
         new InProcessContainedStaging(),
-        started);
+        started,
+        // No run is going in any conversation here; stopping one is ContainedCancellationTest's.
+        conversation -> 0);
   }
 
   static void manifest(Path workspace, String text) throws Exception {

@@ -72,6 +72,28 @@ class ContainedDestructionTest {
 
   ContainedApplicationRepository.Retained grandchild;
 
+  /**
+   * Every stop request, and whether both source areas were still on disk when it was made.
+   *
+   * <p>The second list is what makes the destroy/cancel claim an <em>ordering</em> assertion rather
+   * than an outcome one. Asserting that the runs were stopped and that the directories are gone
+   * would pass for either order; recording the disk at the moment of each stop cannot.
+   */
+  final class Stops implements io.aeyer.plowshare.server.agents.CancellableRuns {
+    final List<String> asked = new ArrayList<>();
+    final List<Boolean> sourcesStillPresent = new ArrayList<>();
+
+    @Override
+    public int cancelIn(String conversation) {
+      asked.add(Objects.requireNonNull(conversation, "conversation"));
+      sourcesStillPresent.add(
+          Files.isDirectory(workspace(child)) && Files.isDirectory(workspace(grandchild)));
+      return 1;
+    }
+  }
+
+  final Stops stops = new Stops();
+
   /** Ceilings are real, because "revoking stops descendant work" is asserted on them. */
   static final class Allowances implements AllowanceRepository {
     final Map<AllowanceId, AllowanceSnapshot> held = new LinkedHashMap<>();
@@ -180,7 +202,8 @@ class ContainedDestructionTest {
             work,
             new ContainmentConfig(root.toString(), 3, 4, null),
             new InProcessContainedStaging(),
-            mock(io.aeyer.plowshare.server.agents.Runs.class));
+            mock(io.aeyer.plowshare.server.agents.Runs.class),
+            stops);
   }
 
   /** A retained child whose staged source really exists under the containment root. */
@@ -265,7 +288,8 @@ class ContainedDestructionTest {
         unit,
         new ContainmentConfig(root.toString(), 3, 4, null),
         claims,
-        mock(io.aeyer.plowshare.server.agents.Runs.class));
+        mock(io.aeyer.plowshare.server.agents.Runs.class),
+        stops);
   }
 
   ContainedApplications.Create creation() {
@@ -312,6 +336,100 @@ class ContainedDestructionTest {
     order.verify(records).destroy(child.id());
     assertTrue(work.committed);
     assertFalse(work.rolledBack);
+  }
+
+  /**
+   * The second of the three ways work must stop, and the only one whose claim is an <em>order</em>:
+   * every descendant run is asked to stop before any source area is removed, so no run is left
+   * reading a directory this destruction is collecting.
+   *
+   * <p>The assertion is therefore not "the runs stopped and the directories are gone" — that holds
+   * for either order — but the state of the disk at the moment of each stop, recorded by {@link
+   * Stops}. The set the stops run over is the same deepest-first subtree the cascade walked, which
+   * is asserted by the conversations' order rather than described.
+   */
+  @Test
+  void destroyingAContainerStopsDescendantRunsBeforeCollection() {
+    when(authority.conversationsIn(child.scope())).thenReturn(List.of(envelope("cnv_CHILD")));
+    when(authority.conversationsIn(grandchild.scope()))
+        .thenReturn(List.of(envelope("cnv_GRANDCHILD")));
+
+    var destroyed = service.destroy("@service/parent", "c-1", child.id());
+
+    // Non-empty first: an ordering assertion over an empty list of stops proves nothing.
+    assertEquals(2, stops.asked.size(), "every record in the subtree was asked to stop");
+    // THE ORDER: deepest first, over the same ordered set the cascade used.
+    assertEquals(List.of("cnv_GRANDCHILD", "cnv_CHILD"), stops.asked);
+    // AND BEFORE THE FIRST REMOVAL: both source areas were still on disk at every stop.
+    assertEquals(
+        List.of(true, true),
+        stops.sourcesStillPresent,
+        "a run was asked to stop after a directory it may be reading had already been collected");
+    // The removal really did happen afterwards, so the two lists above are not both true merely
+    // because nothing was ever collected.
+    assertEquals(2, destroyed.sources());
+    assertFalse(Files.exists(workspace(child)));
+    assertFalse(Files.exists(workspace(grandchild)));
+    // The Destroyed contract is unchanged. It travels through five SDKs, so collected is still
+    // every record deepest first and no cancellation count has joined it.
+    assertEquals(List.of(grandchild.id(), child.id()), destroyed.collected());
+    assertEquals(
+        3,
+        ContainedApplications.Destroyed.class.getRecordComponents().length,
+        "a destruction's public shape is child, collected and sources");
+  }
+
+  /**
+   * History survives destruction and therefore survives the cancellation destruction performs.
+   * {@code Origin.CONTAINED} carries {@code DELEGATION}'s retention — no ejection age — for exactly
+   * this reason, so a container can still read back what it stopped.
+   *
+   * <p>It also pins the asymmetry ADR 0042 records and tells readers not to harmonise: {@code
+   * trajectory} answers for a destroyed child because it reads retained conversation lineage, and
+   * {@code resources} refuses the same child because it reads the source area destruction collects.
+   */
+  @Test
+  void aDestroyedChildsTrajectorySurvives() {
+    when(authority.conversationsIn(child.scope())).thenReturn(List.of(envelope("cnv_CHILD")));
+    // Non-empty before the destruction, so the assertion afterwards is about survival and not
+    // about an empty answer that would have been empty either way.
+    assertEquals(1, service.trajectory("@service/parent", "c-1", child.id()).size());
+
+    service.destroy("@service/parent", "c-1", child.id());
+
+    // The record as it reads after a destruction: present as history, no longer live.
+    when(records.find(child.id())).thenReturn(Optional.of(destroyedRecord()));
+    var steps = service.trajectory("@service/parent", "c-1", child.id());
+    assertEquals(1, steps.size(), "retained lineage is not what a destruction collects");
+    assertEquals("cnv_CHILD", steps.getFirst().conversation());
+    // The deliberate difference: the source area is gone and this read says so rather than
+    // answering from whatever survives.
+    assertEquals(
+        "That contained Application has been destroyed",
+        assertThrows(
+                CallerFault.class, () -> service.resources("@service/parent", "c-1", child.id()))
+            .getMessage());
+  }
+
+  /** The child's own record as it reads once its destruction has run: history, not live. */
+  ContainedApplicationRepository.Retained destroyedRecord() {
+    return new ContainedApplicationRepository.Retained(
+        child.id(),
+        child.scope(),
+        child.projectId(),
+        child.project(),
+        child.container(),
+        child.requestId(),
+        child.fingerprint(),
+        child.revision(),
+        child.allowance(),
+        child.ceiling(),
+        false);
+  }
+
+  OperationAuthority.Conversation envelope(String id) {
+    return new OperationAuthority.Conversation(
+        id, "worker", parentAdmission, null, parentBudget, "0".repeat(64));
   }
 
   @Test

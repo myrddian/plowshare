@@ -116,7 +116,9 @@ class ContainedResourceReadTest {
         },
         config,
         new InProcessContainedStaging(),
-        mock(io.aeyer.plowshare.server.agents.Runs.class));
+        mock(io.aeyer.plowshare.server.agents.Runs.class),
+        // No run is going in any conversation here; stopping one is ContainedCancellationTest's.
+        conversation -> 0);
   }
 
   @BeforeEach

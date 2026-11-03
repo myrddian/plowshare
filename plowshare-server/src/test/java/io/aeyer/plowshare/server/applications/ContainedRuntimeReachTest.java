@@ -606,7 +606,10 @@ class ContainedRuntimeReachTest {
                 new Immediate(),
                 new ContainmentConfig(root.toString(), 3, 4, null),
                 new InProcessContainedStaging(),
-                runs);
+                runs,
+                // No run is going in any conversation here; stopping one is
+                // ContainedCancellationTest's.
+                conversation -> 0);
       } catch (java.io.IOException unavailable) {
         throw new java.io.UncheckedIOException(unavailable);
       }

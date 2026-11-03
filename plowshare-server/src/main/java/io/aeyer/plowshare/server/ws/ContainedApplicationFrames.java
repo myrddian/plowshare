@@ -51,7 +51,33 @@ public final class ContainedApplicationFrames implements FrameArea {
         FrameTypes.APPLICATION_CHILD_RESOURCES,
         this::resources,
         FrameTypes.APPLICATION_CHILD_RUN,
-        this::run);
+        this::run,
+        FrameTypes.APPLICATION_CHILD_CANCEL,
+        this::cancel);
+  }
+
+  /**
+   * Stops the work inside one child and its descendants. {@code OK} and not {@code ACCEPTED}: there
+   * is no handle to poll here, and what has completed when this answers is the asking rather than
+   * the work — a run honours a cancellation at its next turn boundary.
+   *
+   * <p>Keyed and authorized exactly as a ceiling change is, and the answer names the child the
+   * <em>caller</em> asked about, read once from the payload. The operation returns nothing, so
+   * there is no server-side answer to correlate against; echoing the request's own target is what
+   * keeps a container from reading this reply as being about any other Application.
+   */
+  private Outcome cancel(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation", "child"));
+    UUID child = uuid(payload, "child");
+    children.cancel(
+        asking.requireHandle(FrameTypes.APPLICATION_CHILD_CANCEL),
+        Payloads.required(
+            payload,
+            "conversation",
+            FrameTypes.APPLICATION_CHILD_CANCEL,
+            "the container's conversation"),
+        child);
+    return Outcome.ok(Map.of("child", child.toString()));
   }
 
   /**

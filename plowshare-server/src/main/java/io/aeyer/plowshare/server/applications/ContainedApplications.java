@@ -301,6 +301,36 @@ public interface ContainedApplications {
   void ceiling(String account, String conversation, UUID child, Integer calls);
 
   /**
+   * Stops the work going on inside one contained Application and every descendant beneath it.
+   *
+   * <p><strong>Container-only, and idempotent.</strong> The rule is {@link #run}'s and {@link
+   * #ceiling}'s rather than the ancestor gate the two reads use, and for {@code run}'s reason: the
+   * allowance a descendant run is spending was lent by its <em>direct</em> container, so stopping
+   * it is that container's call and not a grandparent's. A sibling, a grandparent, a child naming
+   * its own container and an unrelated scope are all refused. Cancelling a child that holds no live
+   * run is a success and not a refusal — the idiom {@code ContainedPrincipals.revoke} already sets
+   * for removing nothing — because a caller that had to tell "nothing was running" apart from "you
+   * may not ask" could not stop work idempotently.
+   *
+   * <p><strong>The subtree, deepest first</strong>, over the same ordered set {@link #destroy}'s
+   * cascade walks. One notion of "a child's work" rather than two: a descendant's run was started
+   * under an allowance this child lent out of the one its own container lent it, so a cancellation
+   * that stopped only the named child would leave the work it set in motion running.
+   *
+   * <p><strong>Stopping, not erasing.</strong> A cancellation removes no retained conversation
+   * envelope and no source area. That is deliberate and is the same asymmetry ADR 0042 records
+   * between {@code trajectory} and {@code resources}: a container must be able to read back what it
+   * stopped, so {@code Origin.CONTAINED} carries {@code DELEGATION}'s retention and nothing here
+   * touches it.
+   *
+   * <p><strong>A request and not an interrupt.</strong> A run honours the stop at its next turn
+   * boundary, so this returns before the work has necessarily finished; what it guarantees is that
+   * no further turn will be started. The reachable runs are also this process's, which {@code
+   * CancellableRuns} states and which this operation inherits rather than improves on.
+   */
+  void cancel(String account, String conversation, UUID child);
+
+  /**
    * What a destruction collected, as its container reads the answer back.
    *
    * <p>A boundary DTO, so every component is a plain wire value and no {@link ScopeId} travels. It
@@ -340,6 +370,13 @@ public interface ContainedApplications {
    * design's: a surviving descendant of a destroyed container is the orphan this capability names
    * as failure. Each descendant's allowance is zeroed before its rows go, so work in flight cannot
    * claim another call on the way out.
+   *
+   * <p><strong>Every descendant's work is stopped before the first source area is removed</strong>,
+   * over that same deepest-first set, so no run is left reading a directory this destruction is
+   * collecting. The stop is {@link #cancel}'s and carries its terms: a request honoured at the next
+   * turn boundary, reaching this process's runs. It is not reported in {@link Destroyed} — {@code
+   * collected} and {@code sources} mean exactly what they meant before, and that shape travels
+   * through five SDKs.
    *
    * <p>A destroyed child is <strong>not</strong> promoted to a retained release. ADR 0005's release
    * history records what may be activated and a destroyed child may not be activated at all; what

@@ -106,7 +106,10 @@ class ContainedRecoveryTest {
             work,
             config,
             staging,
-            mock(io.aeyer.plowshare.server.agents.Runs.class));
+            mock(io.aeyer.plowshare.server.agents.Runs.class),
+            // No run is going in any conversation here; stopping one is
+            // ContainedCancellationTest's.
+            conversation -> 0);
     // Duration.ZERO grace in the tests that are not about the grace, so every other assertion is
     // about what the sweep decides rather than about a clock.
     collector = new ContainedSourceCollector(records, work, config, staging, Duration.ZERO);
