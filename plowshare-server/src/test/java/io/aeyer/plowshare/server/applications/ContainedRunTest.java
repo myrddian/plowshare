@@ -651,15 +651,20 @@ class ContainedRunTest {
             java.util.Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR));
     var store = mock(io.aeyer.plowshare.server.archive.ProjectStore.class);
     when(store.id(childProject)).thenReturn(42L);
-    var turn = mock(io.aeyer.plowshare.server.agents.Turn.class);
+    // A default answer rather than a stubbed method, because the method this now reaches --
+    // Turn.speakContained -- is package-private in `agents` and cannot be named from here. That is
+    // the door's narrowing working as intended; WHICH door the real Runs chooses is asserted in
+    // io.aeyer.plowshare.server.agents.ContainedStartDoorTest, which can name both.
+    var turn =
+        mock(
+            io.aeyer.plowshare.server.agents.Turn.class,
+            call -> call.getMethod().getReturnType() == String.class ? "job-real" : null);
     var conversations = mock(io.aeyer.plowshare.server.archive.ConversationStore.class);
     var opened = mock(io.aeyer.plowshare.server.archive.ConversationRecord.class);
     when(opened.id()).thenReturn("child-conv");
     when(opened.home()).thenReturn(Home.of(childProject));
     when(conversations.openContained(any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(opened);
-    when(turn.speak(anyString(), any(), anyString(), any(), any(), any(Speaker.class), any()))
-        .thenReturn("job-real");
 
     var definition =
         new io.aeyer.plowshare.server.agents.AgentDefinition(
@@ -735,16 +740,10 @@ class ContainedRunTest {
     assertEquals("@service/parent", admitted.getValue().executor());
     assertEquals(childScope, admitted.getValue().scope());
     assertEquals("worker", agent.getValue());
-    // And the turn is spoken into the conversation that door opened.
-    verify(turn)
-        .speak(
-            eq("child-conv"),
-            eq(definition),
-            eq("Summarise the notes"),
-            any(),
-            any(),
-            eq(Speaker.contained(childId)),
-            any());
+    // Which Turn door the first utterance goes through, and that it carries the child's speaker
+    // and task, is asserted in ContainedStartDoorTest: speakContained is package-private, so this
+    // package cannot name it to verify it, and verifying the ordinary speak() was NOT called would
+    // be an absence assertion with nothing positive beside it.
   }
 
   List<File> files() {

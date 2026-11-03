@@ -87,6 +87,61 @@ public final class Runs {
   }
 
   /**
+   * The key to {@link Turn}'s contained door, and the whole of that door's narrowing.
+   *
+   * <p>A contained run's conversation carries {@code Origin.CONTAINED}, which {@code
+   * Turn.requireSpeakable} refuses by design: such a row is the log of a run and not a conversation
+   * anybody speaks into, and that guard is the one a <em>caller-supplied</em> conversation id
+   * reaches from {@code POST /v1/agents/&#123;name&#125;/runs} and the {@code agent.run} frame
+   * alike. Widening it to accept {@code CONTAINED} would therefore let {@code agent.run} post an
+   * utterance into a child's log and spend the child's allowance, driven as whatever agent the
+   * caller named. So a second, narrower door exists instead — {@code requireConductor}'s and {@code
+   * requireSeat}'s shape — and this type is what makes it narrow.
+   *
+   * <p><strong>Reachability is the safety property, and it is enforced by the compiler rather than
+   * by a convention.</strong> This interface is {@code sealed} and permits exactly one
+   * implementation, which is {@code private} to {@code Runs}. No class outside {@code Runs} can
+   * implement it and none can construct the implementation, so <em>no code outside {@code Runs} can
+   * produce a value of this type at all</em> — and {@code Turn.speakContained} cannot be called
+   * without one. {@code Turn.speakContained} is itself package-private, so nothing outside {@code
+   * io.aeyer.plowshare.server.agents} can even name it.
+   *
+   * <p><strong>What must not be simplified.</strong> Replacing this with a boolean, a flag on a
+   * context object, or a public overload would make the door wide with a convention attached: any
+   * caller could then ask for the contained guard. The {@code sealed} modifier and the {@code
+   * private} implementation are the mechanism; a package-private record here would be constructible
+   * by every class in this package, which is wider than the one branch that may use it.
+   *
+   * <p><strong>The residual link, stated rather than overclaimed.</strong> "Only {@code Runs}" is
+   * compiler-enforced. The narrowing from there to "only {@link #start}'s contained branch" rests
+   * on two things a compiler cannot see and tests pin instead: this type is constructed at exactly
+   * one site, and that site is inside {@code if (ask.contained() != null)} — a branch no wire shape
+   * can reach, because {@code api.RunAgentRequest} has no component of type {@link Ask.Contained}
+   * and {@code ContainedRunTest} asserts that by reflection.
+   */
+  sealed interface ContainedStart permits ContainedOpened {
+    /**
+     * The conversation the contained door opened, which is the only one this start may speak to.
+     */
+    String conversation();
+  }
+
+  /**
+   * The one implementation, private so that {@code Runs} is the only code that can make one.
+   *
+   * <p>It carries the conversation id and nothing else on purpose: the authority a contained run
+   * holds is proved before this is built and rechecked below {@code Turn} by {@code
+   * OperationExecution.admit} against the bound envelope, so a second copy of it here would be a
+   * second source of truth for one fact.
+   */
+  private record ContainedOpened(String conversation) implements ContainedStart {
+    private ContainedOpened {
+      if (conversation == null || conversation.isBlank())
+        throw new IllegalArgumentException("A contained start names the conversation it opened");
+    }
+  }
+
+  /**
    * What one caller asked to run, in fields and never in a wire shape.
    *
    * <p>{@code api.RunAgentRequest} is the HTTP body Jackson binds and it stays on the HTTP surface;
@@ -393,15 +448,30 @@ public final class Runs {
                     // could claim capabilities the agent does not have.
                     OperationExecution.fingerprint(definition));
         logStages.getObject().opened(LogStages.LogOpened.ofConversation(opened, session));
+        // Two doors here as well, and for the same reason the two above are two: a contained run's
+        // log carries Origin.CONTAINED, which requireSpeakable refuses by design because that guard
+        // is the one a caller-supplied conversation id reaches. The contained branch therefore goes
+        // through speakContained, whose key -- ContainedStart -- no code outside this class can
+        // construct. THIS IS THE ONLY SITE THAT CONSTRUCTS ONE; see ContainedStart for what rests
+        // on that and what must not be simplified.
         String id =
-            turns.speak(
-                opened.id(),
-                definition,
-                task,
-                session,
-                turnCap,
-                ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
-                outcome -> {});
+            ask.contained() == null
+                ? turns.speak(
+                    opened.id(),
+                    definition,
+                    task,
+                    session,
+                    turnCap,
+                    ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
+                    outcome -> {})
+                : turns.speakContained(
+                    new ContainedOpened(opened.id()),
+                    definition,
+                    task,
+                    session,
+                    turnCap,
+                    ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
+                    outcome -> {});
         return new Started(id, definition.name(), opened.id());
       }
       // incoming = true: a plain submission with no conversation is a person's own words

@@ -1306,6 +1306,112 @@ breadth bounds), and the asymmetry is deliberate rather than an oversight: a
 tuning knob is not a deployment identity, and an absent bound would mean
 *unlimited* whereas an absent grace merely means *long*.
 
+## The narrow door a contained run starts through
+
+`ConversationStore.openContained` writes `Origin.CONTAINED`, and `Turn.speak`'s
+admissibility guard `requireSpeakable` accepts `Origin.TURN` and nothing else. So
+for the whole of the slice that made a child executable, `application.child.run`
+could open a child's conversation and then never spend a turn in it: the first
+utterance was refused with "conversation … is the log of a contained run". The
+guard was right and the caller was reaching the wrong door.
+
+**Widening `requireSpeakable` to accept `CONTAINED` would have been a confinement
+hole, not a fix.** That guard is the one a *caller-supplied* conversation id
+reaches, from `POST /v1/agents/{name}/runs` and the `agent.run` frame alike, and
+neither compares the row's own `agent` against the definition it was handed. A
+wider set would therefore have let `agent.run` post an utterance into a child's
+log, driven as whatever agent the caller named, and spend the child's allowance.
+`requireSpeakable`'s own record already states this trap for `Origin.ORCHESTRATION`
+and answers it the same way: not a wider guard, but a second and narrower method
+that nothing routes a caller-supplied id to. `requireConductor` and
+`requireApprovedRun` are the two precedents; `requireContainedLog` is the third.
+Making a contained run speak as `Origin.TURN` instead is not available either:
+V17's `(origin='turn') = (agent IS NULL)` requires a TURN row to name no agent,
+and a contained run's row always names one.
+
+**The safety property is the door's reachability, and it is enforced by the
+compiler rather than by a convention.** `Turn.speakContained` is package-private,
+so nothing outside `io.aeyer.plowshare.server.agents` can name it, and its first
+parameter is `Runs.ContainedStart` — a `sealed` interface whose single permitted
+implementation is a `private` record nested in `Runs`. No class but `Runs` can
+implement the interface or construct the implementation, so **no code outside
+`Runs` can produce the argument the door requires**. The conversation spoken to is
+read off that key rather than taken as a parameter of its own, so a caller cannot
+pair the key with a different conversation.
+
+What the compiler enforces is "only `Runs`". The step from there to "only
+`Runs.start`'s contained branch" rests on two facts tests pin instead: the key is
+constructed at exactly one site, and that site sits inside
+`if (ask.contained() != null)` — a branch no wire shape can reach, because
+`api.RunAgentRequest` has no component of type `Runs.Ask.Contained`. That is two
+enforced links and one pinned one. It is stated this way so a later reader does
+not read a stronger claim into it than it makes.
+
+**What must not be simplified.** A boolean parameter, a flag on a context object,
+or a public overload would make the door wide with a convention attached: any
+caller could then ask for the contained guard. A package-private key would be
+constructible by every class in this package. And `requireContainedLog` must stay
+*disjoint* from `requireSpeakable` rather than a weaker version of it — one accepts
+`TURN` alone, the other `CONTAINED` alone, and the two sets must never meet. It
+checks the reserved project prefix as well as the origin, so it is sound on its
+own rather than on `openContained`'s behalf.
+
+## Where the mid-run revocation is noticed, and the one call it cannot prevent
+
+This record requires that revoking a container's authority mid-execution stops
+descendant work, and that happens — but not where a reader would guess, and the
+accounting consequence belongs here rather than in a report.
+
+The recheck is **on the model call itself**. Every call a contained run makes
+carries the operation's own `CallAuthorization` (`() -> operations.require(…)`, or
+the equivalent through `InferenceCalls`), and `JobRuntime.streamed` invokes it
+*after the completion comes back and before that completion's output is published
+or any further effect is started*; the real `LlmDispatcher` asks the same
+authorization again before each submission. The turn loop's own recheck at the top
+of each pass and after each tool result are later boundaries. Whichever a run
+reaches first after the grant is withdrawn is the one that fires, and for a
+revocation landing during inference that is the post-inference check — established
+by mutation, not by reading: removing the loop-top recheck changes nothing, and
+removing the post-settle recheck makes the refusal stop escaping.
+
+It sees a *container's* revocation because `contain` copies the container's own
+grant rows rather than issuing any, so every support row on a child's admission
+carries the container's grant id and `requireOwn` checks them against the nearest
+enclosing **uncontained** scope. Revoking the container's grant therefore kills
+the descendant's admission with nothing about the child's row changing and nobody
+telling the run.
+
+**The consequence to record: a revoked container's ceiling can absorb one more
+model call.** The run stops before publishing that completion's output and never
+starts another turn, but the call that was already in flight when the grant went
+has been claimed and spent. Spend after revocation is bounded by **one
+completion, not zero**. No recheck placed anywhere could make it zero without
+interrupting an in-flight request, which `LlmPool.submit` records as the thing not
+to do. A reader reconciling a container's allowance against the moment of
+revocation should expect that one call.
+
+## Cancellation is process-local
+
+`ContainedApplications.cancel`, and the stop a destruction performs over the
+subtree before collecting any source, both reach runs through
+`CancellableRuns.cancelIn`, which `JobStore` implements over the same flag
+`JobStore.cancel` has always set. That flag is **a request honoured at a run's next
+turn boundary, not an interrupt**, and the jobs it can reach are the ones *this
+process* holds — `JobStore.cancel` has always said so ("this process knows …").
+Both properties are inherited deliberately rather than improved on.
+
+The verification list states without qualification that destroying a container
+stops every descendant's work. On a single-node deployment it does. On a
+multi-node one, a `destroy` served by one node does not set the flag on a
+descendant executing on another, so the bound is this: that run cannot make
+another model call, because the destroying transaction zeroes every descendant's
+allowance before its rows go, but it *can* still read files until its current turn
+ends — and the source area it is reading may be collected underneath it. The
+exposure is therefore file reads during one in-flight turn, never unbounded
+spending. Closing it properly needs a durable cancellation signal, which is a
+separate capability and not represented in this schema. A caller must likewise not
+read a zero from `cancelIn` as "nothing is running anywhere".
+
 ## The ordering of the staged-source collection, and the orphan it must not make
 
 Collection on a refused create is ordered by which failures are *certainly* a

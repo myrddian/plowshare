@@ -291,6 +291,68 @@ public final class Turn {
         null);
   }
 
+  /**
+   * The first turn of a run inside a confined child Application (ADR 0042): the contained door.
+   *
+   * <h2>Why a second door and not {@link #requireSpeakable} widened</h2>
+   *
+   * <p>{@code ConversationStore.openContained} writes {@code Origin.CONTAINED}, and {@link
+   * #requireSpeakable} accepts {@link Origin#TURN} and nothing else — correctly, because {@code
+   * Origin.ownsItsAllowance}'s own record says a contained conversation "is not a conversation a
+   * person speaks into", and because that guard is the one a <em>caller-supplied</em> conversation
+   * id reaches from {@code POST /v1/agents/&#123;name&#125;/runs} and the {@code agent.run} frame
+   * alike, neither of which compares the row's own agent against the definition it was handed.
+   * Adding {@code CONTAINED} to the accepted set would therefore let {@code agent.run} post an
+   * utterance into a child's log and spend the child's allowance, driven as whatever agent the
+   * caller named. That is the identical trap {@link #requireSpeakable} already records for {@link
+   * Origin#ORCHESTRATION}, and the answer is the identical one: not a wider guard, but a second and
+   * narrower method that nothing routes a caller-supplied id to. {@link #speakToConductor} and
+   * {@link #speakToApprovedRun} are its two siblings.
+   *
+   * <h2>What keeps it narrow, and it is the compiler rather than a convention</h2>
+   *
+   * <p>This method is <strong>package-private</strong>, so no code outside {@code
+   * io.aeyer.plowshare.server.agents} can name it, and it takes {@link Runs.ContainedStart} — a
+   * {@code sealed} type whose only permitted implementation is {@code private} to {@link Runs}. No
+   * class but {@code Runs} can produce a value of that type, so no class but {@code Runs} can call
+   * this at all; and the conversation spoken to is read off that value rather than taken as a
+   * parameter of its own, so a caller cannot pair the key with a different conversation. {@code
+   * Runs.ContainedStart} carries the rest, including what the compiler cannot enforce.
+   *
+   * <p><strong>Do not simplify two things.</strong> The parameter must stay the sealed key: a
+   * {@code String} conversation with a boolean beside it would make this door reachable by every
+   * caller that knows the convention. And the guard below must stay a refusal of every origin but
+   * {@code CONTAINED} — it is not a weaker {@link #requireSpeakable}, it is a different one, and
+   * the two sets must not meet.
+   */
+  String speakContained(
+      Runs.ContainedStart start,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Speaker speaker,
+      Consumer<Outcome> alsoEnded) {
+    Objects.requireNonNull(start, "start");
+    Objects.requireNonNull(definition, "definition");
+    Objects.requireNonNull(speaker, "speaker");
+    Objects.requireNonNull(alsoEnded, "alsoEnded");
+    // incoming = true, as every other first-utterance door states it: the container's task arrives
+    // fresh in the child's log, which is spec 6's distinction and not a property of who typed it.
+    return speak(
+        start.conversation(),
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        null,
+        alsoEnded,
+        Turn::requireContainedLog,
+        true,
+        speaker,
+        null);
+  }
+
   /** Existing scheduled work keeps its event speaker while admitting its actual executor. */
   public String speakForExecutor(
       String conversation,
@@ -1469,6 +1531,35 @@ public final class Turn {
               + "'");
     }
     requireActive(record, "speak into");
+  }
+
+  /**
+   * A confined child's run log, started as the child it belongs to — {@link #requireConductor}'s
+   * shape, for {@link #speakContained}'s narrower door.
+   *
+   * <p><strong>Disjoint from {@link #requireSpeakable} by construction.</strong> That guard accepts
+   * {@link Origin#TURN} alone; this one refuses it along with every other origin and accepts {@link
+   * Origin#CONTAINED} alone. The two sets do not meet and must not be made to: a conversation that
+   * is speakable is not a contained run's log, and a contained run's log is not speakable. So no
+   * origin becomes speakable because this exists.
+   *
+   * <p>The project prefix is checked as well as the origin, so this guard is sound on its own
+   * rather than on {@code openContained}'s behalf. Only that door writes {@code Origin.CONTAINED}
+   * and it only ever writes it on a contained home, but a guard that depended on another method's
+   * behaviour to deny would be a guard a later change could quietly open.
+   */
+  private static void requireContainedLog(ConversationRecord record) {
+    if (record.origin() != Origin.CONTAINED
+        || record.home().isGlobal()
+        || !io.aeyer.plowshare.protocol.ContainedProjects.name(record.home().project())) {
+      throw new Refused(
+          "conversation "
+              + record.id()
+              + " is not the log of a run inside a contained"
+              + " Application; only its container starts work there, and only through"
+              + " application.child.run");
+    }
+    requireActive(record, "start contained work in");
   }
 
   /** A seat, spoken to as the agent it belongs to — {@link #requireConductor}'s shape. */
