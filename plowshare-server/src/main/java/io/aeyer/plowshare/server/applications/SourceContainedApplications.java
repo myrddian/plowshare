@@ -327,14 +327,28 @@ public final class SourceContainedApplications implements ContainedApplications 
    * on this installation, and then the child's row must name the caller's own scope as its
    * container.
    *
-   * <p><strong>Three things this deliberately does not do, each of which {@code run} does.</strong>
+   * <p><strong>Two things this deliberately does not do, each of which {@code run} does.</strong>
    * It does not require containment to be configured: the root is where a child's <em>source</em>
    * lives, nothing here reads it, and a server reconfigured while work is in flight must not
-   * thereby lose the ability to stop that work. It does not refuse a destroyed child: stopping work
-   * inside one is exactly what a destruction asks for, and refusing would make the idempotent retry
-   * this contract promises impossible. And it does not refuse a zero ceiling: a child whose calls
-   * have been disabled may still hold a run that has not yet reached its next boundary, which is
-   * precisely the run a container wants stopped.
+   * thereby lose the ability to stop that work. And it does not refuse a zero ceiling: a child
+   * whose calls have been disabled may still hold a run that has not yet reached its next boundary,
+   * which is precisely the run a container wants stopped.
+   *
+   * <p><strong>What "idempotent" does and does not cover, said exactly.</strong> Repeating this
+   * call while the child exists is the same answer every time — a stop is a request and changes no
+   * state here. It is <em>not</em> idempotent across a destruction: {@link #destroy} deletes the
+   * child's project row, {@code contained_applications.project_id} is {@code ON DELETE CASCADE}
+   * (V219), and {@code records.find} carries no liveness predicate, so afterwards there is no row
+   * and this call refuses with "No such contained Application". That is the honest shape and there
+   * is nothing to fix: a destruction has already stopped the subtree's work before collecting any
+   * source, so a cancellation arriving after it has nothing left to ask.
+   *
+   * <p>There is deliberately no destroyed-child branch here, and the reason is not symmetry with
+   * {@code run} — it is that such a branch would be <strong>unreachable</strong>. {@code
+   * contained_applications.live} is vestigial: V219 declares it {@code NOT NULL DEFAULT TRUE} and
+   * nothing in this server ever writes {@code false} to it, so it appears only in read predicates.
+   * A record in the {@code live = false} state is a state production does not produce, and {@code
+   * run}'s own "has been destroyed" refusal is reachable only from a fixture that builds one.
    *
    * <p>No durable write of any kind happens here, which is why there is no unit of work: the stop
    * is a flag inside the run's own process. The subtree is therefore read without {@code

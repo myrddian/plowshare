@@ -1343,8 +1343,11 @@ What the compiler enforces is "only `Runs`". The step from there to "only
 `Runs.start`'s contained branch" rests on two facts tests pin instead: the key is
 constructed at exactly one site, and that site sits inside
 `if (ask.contained() != null)` — a branch no wire shape can reach, because
-`api.RunAgentRequest` has no component of type `Runs.Ask.Contained`. That is two
-enforced links and one pinned one. It is stated this way so a later reader does
+`api.RunAgentRequest` carries no such component — what `ContainedRunTest` pins by
+reflection is that the request record declares no component *named* `contained`
+or `workProject`, which is adequate because names are what Jackson binds, and
+that test asserts `task` and `project` are present so the absence is not an empty
+reflection result. That is two enforced links and one pinned one. It is stated this way so a later reader does
 not read a stronger claim into it than it makes.
 
 **What must not be simplified.** A boolean parameter, a flag on a context object,

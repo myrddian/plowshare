@@ -740,10 +740,14 @@ class ContainedRunTest {
     assertEquals("@service/parent", admitted.getValue().executor());
     assertEquals(childScope, admitted.getValue().scope());
     assertEquals("worker", agent.getValue());
-    // Which Turn door the first utterance goes through, and that it carries the child's speaker
-    // and task, is asserted in ContainedStartDoorTest: speakContained is package-private, so this
-    // package cannot name it to verify it, and verifying the ordinary speak() was NOT called would
-    // be an absence assertion with nothing positive beside it.
+    // WHAT THIS TEST NO LONGER COVERS, and where it is covered instead. speakContained is
+    // package-private, so this package cannot name it in order to stub or verify it -- which is
+    // the door's narrowing working rather than a gap in it. Three facts therefore moved to
+    // io.aeyer.plowshare.server.agents.ContainedStartDoorTest, which can name both doors: WHICH
+    // door the real Runs chooses, that the child's own task reaches the turn, and that the child
+    // is recorded as its author. What stays here is everything above -- the contained
+    // conversation door over the ordinary one, the child's home, the child's pool with its
+    // container's ceiling, the container's account on the hop's admission, and the agent name.
   }
 
   List<File> files() {

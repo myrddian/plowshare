@@ -380,13 +380,20 @@ class ContainedDestructionTest {
   }
 
   /**
-   * History survives destruction and therefore survives the cancellation destruction performs.
-   * {@code Origin.CONTAINED} carries {@code DELEGATION}'s retention — no ejection age — for exactly
-   * this reason, so a container can still read back what it stopped.
+   * Retained lineage is not what a destruction or a cancellation collects, and the two reads over
+   * it differ deliberately: {@code trajectory} does not gate on liveness because it reads
+   * conversation envelopes, which are history, while {@code resources} does because it reads the
+   * source area destruction collects. {@code Origin.CONTAINED} carries no ejection age for the same
+   * reason. ADR 0042 says not to harmonise the two, and this is what keeps them apart.
    *
-   * <p>It also pins the asymmetry ADR 0042 records and tells readers not to harmonise: {@code
-   * trajectory} answers for a destroyed child because it reads retained conversation lineage, and
-   * {@code resources} refuses the same child because it reads the source area destruction collects.
+   * <p><strong>What this does not claim.</strong> It is not evidence that a container can call
+   * {@code application.child.trajectory} after a real destruction. Both reads resolve the child's
+   * row first, and a real destruction deletes it, so both then answer "No such contained
+   * Application"; the envelopes survive but the operation that reads them no longer resolves its
+   * subject. The liveness asymmetry asserted below is reached only through {@link
+   * #destroyedRecord()}, a state production never produces — see that method. What the destruction
+   * path genuinely guarantees, and what the stop before collection is for, is that nothing here
+   * <em>removes</em> an envelope.
    */
   @Test
   void aDestroyedChildsTrajectorySurvives() {
@@ -400,7 +407,7 @@ class ContainedDestructionTest {
     // The record as it reads after a destruction: present as history, no longer live.
     when(records.find(child.id())).thenReturn(Optional.of(destroyedRecord()));
     var steps = service.trajectory("@service/parent", "c-1", child.id());
-    assertEquals(1, steps.size(), "retained lineage is not what a destruction collects");
+    assertEquals(1, steps.size(), "trajectory does not gate on liveness; resources does");
     assertEquals("cnv_CHILD", steps.getFirst().conversation());
     // The deliberate difference: the source area is gone and this read says so rather than
     // answering from whatever survives.
@@ -411,7 +418,20 @@ class ContainedDestructionTest {
             .getMessage());
   }
 
-  /** The child's own record as it reads once its destruction has run: history, not live. */
+  /**
+   * A record in the {@code live = false} state — <strong>which production never produces.</strong>
+   *
+   * <p>V219 declares {@code contained_applications.live} {@code NOT NULL DEFAULT TRUE} and nothing
+   * in this server ever writes {@code false} to it; the column appears only in read predicates. A
+   * real destruction deletes the project row and {@code project_id ON DELETE CASCADE} takes this
+   * record with it, so what {@code records.find} answers afterwards is <em>empty</em>, not a
+   * not-live record.
+   *
+   * <p>This fixture therefore exercises the service's own liveness branches — which is worth doing,
+   * because they are the only thing that distinguishes {@code trajectory} from {@code resources} —
+   * while asserting nothing about what a container sees after a real destruction. The test using it
+   * says the same thing in its own words; do not read it as the stronger claim.
+   */
   ContainedApplicationRepository.Retained destroyedRecord() {
     return new ContainedApplicationRepository.Retained(
         child.id(),

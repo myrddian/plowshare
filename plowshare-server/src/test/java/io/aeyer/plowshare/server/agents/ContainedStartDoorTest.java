@@ -46,10 +46,30 @@ class ContainedStartDoorTest {
   final ProjectStore projects = mock(ProjectStore.class);
   final ProjectMembers members = mock(ProjectMembers.class);
 
+  /**
+   * The authority substrate, present here because production always has it ({@code AgentsConfig}'s
+   * store is built with it) and a store without it takes a different path through {@code
+   * JobStore.submit}: {@code operation} stays null, so {@code OperationExecution.admit}, {@code
+   * requireBinding}'s five equalities and the whole question of whether a contained run carries an
+   * operation at all go unexercised. The revocation property this slice rests on depends on that
+   * last fact, so it is asserted here rather than traced by hand.
+   */
+  final OperationAuthority operations = mock(OperationAuthority.class);
+
   final String childProject = "contained:" + UUID.randomUUID();
   final Home childHome = Home.of(childProject);
   final String handle = "@service/parent";
   final AccountId account = new AccountId(UUID.randomUUID());
+  final UUID childId = UUID.randomUUID();
+
+  /** One hop's admission, reused so the envelope and the start name the same one. */
+  OperationAuthority.Admission containedAdmission;
+
+  /** What {@code derive} hands the run: the admission every recheck during the turn asks about. */
+  OperationAuthority.Admission derived;
+
+  /** The child's own conversation row, kept so a test can restore it after replacing it. */
+  ConversationRecord childRow;
 
   final AgentDefinition definition =
       new AgentDefinition(
@@ -99,7 +119,7 @@ class ContainedStartDoorTest {
     when(compaction.transcriptFor(eq(id), any(), any())).thenReturn(transcript);
     when(transcript.conversationId()).thenReturn(id);
     when(transcript.before()).thenReturn(List.of());
-    when(transcript.speaker()).thenReturn(Speaker.contained(UUID.randomUUID()));
+    when(transcript.speaker()).thenReturn(Speaker.contained(childId));
     when(transcript.usage())
         .thenReturn(io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
     when(transcript.parentUsage())
@@ -120,11 +140,48 @@ class ContainedStartDoorTest {
     when(members.mayWork("parent", handle)).thenReturn(true);
     when(members.role("parent", handle)).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
 
-    var childRow = row("cnv_CHILD", Origin.CONTAINED, childHome, childPool);
+    childRow = row("cnv_CHILD", Origin.CONTAINED, childHome, childPool);
     when(conversations.openContained(any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(childRow);
+    // openContained writes owner = callerHandle, and Turn reads it back for a harness speaker:
+    // this is the value requireBinding compares the envelope's executor against.
+    when(conversations.ownerOf("cnv_CHILD")).thenReturn(Optional.of(handle));
 
-    jobs = new JobStore(new JobRuntime(dispatcher, List.of()));
+    containedAdmission = contained();
+    derived = contained();
+    // The envelope the contained door bound, as OperationExecution.admit resolves it. Every field
+    // here is one of requireBinding's five equalities, so a drift in any of them fails the start
+    // rather than being traced by inspection.
+    when(operations.conversation("cnv_CHILD"))
+        .thenReturn(
+            Optional.of(
+                new OperationAuthority.Conversation(
+                    "cnv_CHILD",
+                    definition.name(),
+                    containedAdmission,
+                    null,
+                    new io.aeyer.plowshare.server.allowances.AllowanceId(childPool.identity()),
+                    OperationExecution.fingerprint(definition))));
+    when(operations.derive(any(), any())).thenReturn(derived);
+    // For the ordinary TURN control below, whose conversation has no retained envelope and so
+    // takes admit's branch instead of derive's.
+    when(operations.scope(any()))
+        .thenReturn(new AuthorityScope.Project(new ScopeId(UUID.randomUUID()), 7));
+    when(operations.admit(any(), any(), any()))
+        .thenReturn(
+            new OperationAuthority.Admission(
+                UUID.randomUUID(),
+                "mallory",
+                account,
+                new ScopeId(UUID.randomUUID()),
+                Home.of("parent"),
+                GrantRecipient.account(account),
+                List.of(
+                    new OperationAuthority.Support(AuthorityAction.READ, UUID.randomUUID()),
+                    new OperationAuthority.Support(AuthorityAction.WRITE, UUID.randomUUID()),
+                    new OperationAuthority.Support(AuthorityAction.RUN_MODEL, UUID.randomUUID()))));
+
+    jobs = new JobStore(operations, new JobRuntime(operations, dispatcher, List.of()));
     turns = new Turn(jobs, conversations, history, compaction);
     var resolver =
         new DefinitionResolver(
@@ -164,10 +221,10 @@ class ContainedStartDoorTest {
         3,
         null,
         List.of(),
-        Speaker.contained(UUID.randomUUID()),
+        Speaker.contained(childId),
         handle,
         true,
-        new Runs.Ask.Contained(contained(), childPool, "parent"));
+        new Runs.Ask.Contained(containedAdmission, childPool, "parent"));
   }
 
   void awaitDone(String job) throws InterruptedException {
@@ -196,6 +253,37 @@ class ContainedStartDoorTest {
     assertEquals(Outcome.Ending.ANSWERED, outcome.ending(), "the child's first turn answered");
     assertEquals("done", outcome.text());
     assertEquals(1, childPool.spent(), "and it spent the child's own allowance, once");
+
+    // THE JOB IS REACHABLE BY THE CONVERSATION A CONTAINER CAN NAME. cancel and the destroy
+    // cascade both find a run through CancellableRuns.cancelIn, which matches on
+    // Job.conversation(); a start whose job carried a different one would stop nothing and every
+    // other assertion here would still hold.
+    assertEquals("cnv_CHILD", jobs.get(started.id()).conversation());
+    assertEquals(Origin.CONTAINED, jobs.get(started.id()).conversationOrigin());
+
+    // THE RUN CARRIES AN OPERATION, AND IT IS THE DERIVED CONTAINED ONE. This is the fact the
+    // mid-run revocation property rests on: operations.require(operation) can only stop a run
+    // that has an operation. It also means requireBinding's five equalities against the bound
+    // envelope were all satisfied -- a drift in any of them would have refused this start.
+    // Narrowed from the hop's own admission, holding its own actions: Mockito names whichever of
+    // the two differs if a later change makes the start derive from something else.
+    verify(operations).derive(containedAdmission, containedAdmission.actions());
+    verify(operations, never()).admit(any(), any(), any());
+    verify(operations).started(derived, started.id());
+    verify(operations).requireTargets(derived, childHome, List.of());
+    verify(operations, atLeastOnce()).require(derived);
+
+    // WHAT REACHED THE TURN: the container's task, and the child as the author. The account is
+    // the container's and the author is the child's (ADR 0042), so the speaker is what tells a
+    // container its child's writing from its own.
+    var spoke = org.mockito.ArgumentCaptor.forClass(Speaker.class);
+    verify(compaction).transcriptFor(eq("cnv_CHILD"), eq(definition), spoke.capture());
+    assertEquals(Speaker.contained(childId), spoke.getValue(), "the child is the author");
+    assertEquals(Speaker.Kind.HARNESS, spoke.getValue().kind());
+    assertFalse(spoke.getValue().name().contains("parent"), spoke.getValue().name());
+    verify(compaction.transcriptFor("cnv_CHILD", definition, Speaker.contained(childId)))
+        .closed(eq("Summarise the notes"), any());
+
     // The contained door and never the ordinary one, so the conversation this ran in is the one
     // openContained wrote with Origin.CONTAINED.
     verify(conversations).openContained(any(), any(), any(), any(), any(), any(), any());
@@ -262,7 +350,7 @@ class ContainedStartDoorTest {
       String id = "cnv_" + origin.name();
       row(id, origin, origin == Origin.CONTAINED ? childHome : Home.of("parent"), Budget.of(5));
       try {
-        turns.speak(id, definition, "post this", null);
+        turns.speak(id, definition, "post this", null, null, Speaker.person("mallory"), o -> {});
         fail("speak admitted " + origin);
       } catch (Turn.Refused expected) {
         refused.add(origin);
@@ -282,7 +370,16 @@ class ContainedStartDoorTest {
     // admitted by the same call, and the contained row the loop above refused is admitted by the
     // contained door.
     row("cnv_PERSON", Origin.TURN, Home.of("parent"), Budget.of(5));
-    assertDoesNotThrow(() -> turns.speak("cnv_PERSON", definition, "post this", null));
+    assertDoesNotThrow(
+        () ->
+            turns.speak(
+                "cnv_PERSON",
+                definition,
+                "post this",
+                null,
+                null,
+                Speaker.person("mallory"),
+                o -> {}));
     var started = runs.start(containedAsk(), (d, h, u) -> List.of());
     awaitDone(started.id());
     assertEquals(Outcome.Ending.ANSWERED, jobs.get(started.id()).outcome().orElseThrow().ending());
@@ -353,7 +450,7 @@ class ContainedStartDoorTest {
    * origin alone.
    */
   @Test
-  void aContainedOriginOutsideAContainedProjectIsRefused() {
+  void aContainedOriginOutsideAContainedProjectIsRefused() throws Exception {
     var forged = row("cnv_FORGED", Origin.CONTAINED, Home.of("parent"), Budget.of(5));
     when(conversations.openContained(any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(forged);
@@ -364,5 +461,14 @@ class ContainedStartDoorTest {
         refused.getMessage().contains("not the log of a run inside a contained"),
         refused.getMessage());
     verifyNoInteractions(dispatcher);
+
+    // SAME-CALL POSITIVE CONTROL: the identical start, differing only in whether the row the door
+    // is handed sits in a contained project, runs the child's turn. Without it the refusal above
+    // could be read as the contained door refusing everything.
+    when(conversations.openContained(any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(childRow);
+    var started = runs.start(containedAsk(), (d, h, u) -> List.of());
+    awaitDone(started.id());
+    assertEquals(Outcome.Ending.ANSWERED, jobs.get(started.id()).outcome().orElseThrow().ending());
   }
 }
