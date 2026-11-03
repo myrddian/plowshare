@@ -156,6 +156,37 @@ class ContainedApplicationSchemaTest {
     assertEquals(0, repository.liveDescendants(container));
   }
 
+  /**
+   * The route a destruction actually takes, and the reason {@code trajectory} cannot answer for a
+   * destroyed child.
+   *
+   * <p>{@link #removingTheScopeCollectsTheRecord()} deletes the scope; a destruction deletes the
+   * <em>project</em> row, which cascades projects → {@code authority_scopes} (V155) → {@code
+   * contained_applications} (V219). Afterwards the record resolves to nothing, and both {@code
+   * trajectory} and {@code resources} open by resolving it — so the retained conversation lineage
+   * survives the destruction with nothing able to read it. ADR 0042 records that, and records that
+   * the lineage's no-ejection-age retention was justified by the opposite belief.
+   */
+  @Test
+  void deletingTheProjectRowCascadesTheRecordAway() {
+    var retained = repository.create(creation(UUID.randomUUID(), "a"));
+    // CONTROL FIRST: the record is there to be removed, so the assertion below is not vacuous.
+    assertTrue(repository.find(retained.id()).isPresent());
+
+    assertEquals(1, jdbc.update("DELETE FROM projects WHERE name=?", retained.project()));
+
+    assertTrue(repository.find(retained.id()).isEmpty());
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+                "SELECT count(*) FROM authority_scopes WHERE id=?",
+                Long.class,
+                retained.scope().value())
+            .longValue(),
+        "the authority scope went with the project row");
+    assertEquals(0, repository.liveDescendants(container));
+  }
+
   @Test
   void aChildCeilingIsExplicitAndNonNegative() {
     var retained = repository.create(creation(UUID.randomUUID(), "a"));

@@ -234,6 +234,35 @@ class ContainedAddressabilityTest {
             .contains("contained"));
   }
 
+  /**
+   * The same refusal asked with the actor a <em>running</em> child actually carries.
+   *
+   * <p>ADR 0042's messaging row says the task that makes a child execute must revisit it, and the
+   * revisit's answer is that the decision does not move: {@code require} keys its containment
+   * refusal on the <em>project name</em>, so the actor's shape is immaterial to it. What execution
+   * changes is the consequence rather than the decision — there is now a run being deprived of a
+   * self-addressed endpoint — and that is recorded in the inventory rather than asserted here.
+   *
+   * <p>The control is the thing worth having: the same bare-UUID principal is <em>not</em> refused
+   * for an ordinary project, so the refusal above is containment's and not a side effect of an
+   * identifier that looks like nothing the server recognises. {@code mayWork} is stubbed open for
+   * both, so no authority predicate is answering either question.
+   */
+  @Test
+  void aRunningChildsOwnPrincipalIsNoMessagingEndpointEither() {
+    var routing = routing(openProjects(), openMembers());
+    String principal = UUID.randomUUID().toString();
+
+    // CONTROL FIRST: a bare UUID actor reaches an ordinary project's routing unimpeded.
+    assertDoesNotThrow(() -> routing.require(principal, PARENT, PARENT));
+
+    for (String[] pair : List.of(new String[] {CHILD, CHILD}, new String[] {CHILD, PARENT})) {
+      var refusal =
+          assertThrows(Board.Refused.class, () -> routing.require(principal, pair[0], pair[1]));
+      assertTrue(refusal.getMessage().contains("contained"), refusal.getMessage());
+    }
+  }
+
   // --- Relay: fail loudly, no fallback topic ---------------------------------------------------
 
   @Test

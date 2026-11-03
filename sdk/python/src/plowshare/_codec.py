@@ -182,7 +182,12 @@ def deployment_matches(operation: str, request: object, result: object) -> bool:
     """A structural reply cannot certify a different project's retained receipt."""
     if operation.startswith(("tool.scope.host.", "tool.scope.worker.")):
         return hosted_matches(operation, request, result)
-    if operation in {"application.child.ceiling", "application.child.destroy"}:
+    if operation in {
+        "application.child.ceiling",
+        "application.child.destroy",
+        "application.child.cancel",
+        "application.child.run",
+    }:
         # A contained reply must be about the child the caller named, and a destruction
         # accounts for it and cannot have removed more source areas than records.
         child = _object(request).get("child")
@@ -191,6 +196,8 @@ def deployment_matches(operation: str, request: object, result: object) -> bool:
             (
                 contracts.ContainedApplicationCeilingDto,
                 contracts.ContainedApplicationDestructionDto,
+                contracts.ContainedApplicationCancellationDto,
+                contracts.ContainedApplicationRunningDto,
             ),
         ):
             return False

@@ -188,6 +188,72 @@ class ContainedExecutionWriteDatabaseTest {
   }
 
   /**
+   * The Relay audience a child's own knowledge write would need, and does not have.
+   *
+   * <p>ADR 0042's addressability inventory records {@code
+   * JdbcInformationEventRecords.audienceProject}'s {@code CONTAINED} arm as "already refused loudly
+   * by the default arm; this change is documentation only", because at slice one and slice two
+   * nothing executed a child, so no contained-home resource existed to announce. <strong>A running
+   * child's write produces one, so that row's refusal is now reachable — and it is reachable as an
+   * exception thrown inside the child's own write.</strong>
+   *
+   * <p>The chain is: {@code JdbcInformationCatalogueRepository.admit} announces the intake, and for
+   * a contained home announces the processing decline beside it; both go through {@code
+   * InformationEvents.publish}; {@code RelayInformationEvents.publish} opens with {@code
+   * records.resolve(revision)}; and {@code resolve} throws {@link
+   * InformationEventRecords.Unaddressable} when the home scope has no audience, which {@code
+   * InformationEvents} documents as deliberately caught nowhere. This test asserts the one link in
+   * that chain that is a database fact rather than a call this file can read: that {@code resolve}
+   * refuses the child's revision. The links either side are plain calls in production code.
+   *
+   * <p><strong>The consequence, stated rather than softened:</strong> the suite above proves a
+   * child's write works against {@link RecordedInformationEvents}, a fake that announces into a
+   * list. Under production wiring the same write would fail. That is the same defect class as the
+   * mocked {@code OperationRecords} V225 exposed, and ADR 0042 records it as a limitation with its
+   * two candidate fixes rather than one being chosen here: giving a contained scope a Relay
+   * audience is ADR 0039's deferred question, and making the information write path tolerate an
+   * unaddressable home changes a path every ordinary write shares.
+   *
+   * <p>The control is the same call for the container's own revision, so a {@code resolve} that
+   * refused everything would fail here rather than read as a fence.
+   */
+  @Test
+  void aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes() {
+    var records = new JdbcInformationEventRecords(jdbc);
+    var ordinary = work.inTransaction(() -> admit(context(HOLDER, "parent"), "parent-notes.md"));
+    var contained =
+        work.inTransaction(
+            () ->
+                admit(
+                    InformationAccess.contained(childPrincipal, HOLDER, childProject)
+                        .withView(true),
+                    "child-notes.md"));
+
+    // CONTROL FIRST: the container's own home really does resolve an audience through this call.
+    var audience = work.inTransaction(() -> records.resolve(ordinary.revision()));
+    assertEquals(
+        new io.aeyer.plowshare.server.relay.Relay.ProjectScope(parentProject), audience.scope());
+
+    // And the child's does not, naming the kind rather than failing anonymously.
+    var refused =
+        assertThrows(
+            InformationEventRecords.Unaddressable.class,
+            () -> work.inTransaction(() -> records.resolve(contained.revision())));
+    assertTrue(refused.getMessage().contains("CONTAINED"), refused.getMessage());
+
+    // That this is reached on the child's own write and not only by asking directly: the write
+    // announced two events about that exact revision, and resolve is the first thing the real
+    // publisher does with each of them.
+    assertEquals(
+        List.of(contained.revision(), contained.revision()),
+        events.announced().stream()
+            .map(InformationEvents.Occurrence::revision)
+            .filter(contained.revision()::equals)
+            .toList(),
+        "the intake and the decline are both announced about the contained revision");
+  }
+
+  /**
    * The ruled design, working: a child's knowledge write through the real Java path, with the two
    * axes separated.
    *

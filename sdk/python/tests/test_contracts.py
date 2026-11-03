@@ -131,6 +131,74 @@ class ContractsTest(unittest.TestCase):
             )
         )
 
+    def test_contained_run_and_cancel_round_trip_and_correlate(self) -> None:
+        child = "11111111-1111-1111-1111-111111111111"
+        foreign = "33333333-3333-3333-3333-333333333333"
+        asked = {"conversation": "c", "child": child}
+        operation, wire = encode_request(
+            contracts.ApplicationChildRunRequest(
+                conversation="c", child=child, agent="worker", task="do it", max_turns=3
+            )
+        )
+        self.assertEqual(operation, "application.child.run")
+        self.assertEqual(
+            wire,
+            {
+                "conversation": "c",
+                "child": child,
+                "agent": "worker",
+                "task": "do it",
+                "maxTurns": 3,
+            },
+        )
+        # null is the one absence the shape allows: it leaves the agent's own turn cap.
+        self.assertIsNone(
+            encode_request(
+                contracts.ApplicationChildRunRequest(
+                    conversation="c",
+                    child=child,
+                    agent="worker",
+                    task="do it",
+                    max_turns=None,
+                )
+            )[1]["maxTurns"]
+        )
+        running = {
+            "child": child,
+            "job": "job_1",
+            "conversation": "cnv_child",
+            "agent": "worker",
+        }
+        started = cast(
+            contracts.ContainedApplicationRunningDto,
+            decode_reply("application.child.run", running),
+        )
+        self.assertEqual(started.job, "job_1")
+        # The conversation answered is the child's own, not the container's that was named.
+        self.assertEqual(started.conversation, "cnv_child")
+        self.assertTrue(deployment_matches("application.child.run", asked, started))
+        self.assertFalse(
+            deployment_matches(
+                "application.child.run", {**asked, "child": foreign}, started
+            )
+        )
+        for bad in ({**running, "job": None}, {k: v for k, v in running.items() if k != "conversation"}):
+            with self.assertRaises(ValueError):
+                decode_reply("application.child.run", bad)
+
+        operation, wire = encode_request(
+            contracts.ApplicationChildCancelRequest(conversation="c", child=child)
+        )
+        self.assertEqual(operation, "application.child.cancel")
+        self.assertEqual(wire, asked)
+        cancelled = decode_reply("application.child.cancel", {"child": child})
+        self.assertTrue(deployment_matches("application.child.cancel", asked, cancelled))
+        self.assertFalse(
+            deployment_matches(
+                "application.child.cancel", {**asked, "child": foreign}, cancelled
+            )
+        )
+
     def test_contained_resources_round_trip_metadata_only(self) -> None:
         child = "11111111-1111-1111-1111-111111111111"
         revision = "44444444-4444-4444-4444-444444444444"

@@ -47,6 +47,7 @@ import {
 } from './retrieval.ts';
 import type { BoundPayloads } from './administration.ts';
 import type { ExtendedPayloads } from './catalog.ts';
+import { containedRunningCheck } from './application-deployments.ts';
 import type { Outcome } from '../binding/envelope.ts';
 
 /** Omitted or null means global. Never infer scope from a socket session. */
@@ -253,6 +254,9 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'orchestration.record',
   'orchestration.start',
   'orchestration.receipt',
+  // Not a JOB_SUBMISSION: its ACCEPTED reply carries its own shape rather than a StartedJob, so it
+  // is validated by its own branch in resultOf and listed here explicitly.
+  'application.child.run',
 ];
 
 export const WAIT_OPERATIONS: readonly Operation[] = [
@@ -529,6 +533,32 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
       ? { kind: 'completed', outcome }
       : { kind: 'invalid-response', outcome };
   }
+  // A contained run answers ACCEPTED, like agent.run, but with its own payload: the handle is in
+  // `job` rather than `id`, so it is not a JOB_SUBMISSION and the generic accepted branch below
+  // would refuse it. Correlation is the same rule ceiling and destroy carry -- a run answered about
+  // another child is refused rather than published, because a container acting on it would be
+  // acting inside an Application it never named.
+  if (asked.type === 'application.child.run') {
+    if (outcome.code !== 'ACCEPTED')
+      return {
+        kind: ['OK', 'CREATED', 'NO_CONTENT'].includes(outcome.code)
+          ? 'invalid-response'
+          : 'refused',
+        outcome,
+      };
+    if (
+      !containedRunningCheck(outcome.payload) ||
+      String(body?.['child']).toLowerCase() !==
+        asked.payload.child.toLowerCase()
+    )
+      return { kind: 'invalid-response', outcome };
+    return {
+      kind: 'accepted',
+      outcome,
+      job: body!['job'] as string,
+      conversation: body!['conversation'] as string,
+    };
+  }
   if (
     asked.type === 'orchestration.start' ||
     asked.type === 'orchestration.receipt'
@@ -712,7 +742,8 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     return { kind: 'invalid-response', outcome };
   if (
     (asked.type === 'application.child.ceiling' ||
-      asked.type === 'application.child.destroy') &&
+      asked.type === 'application.child.destroy' ||
+      asked.type === 'application.child.cancel') &&
     String(body?.['child']).toLowerCase() !== asked.payload.child.toLowerCase()
   )
     return { kind: 'invalid-response', outcome };

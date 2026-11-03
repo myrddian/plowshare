@@ -66,6 +66,42 @@ if(!foreignCredentialRefused)throw new Exception("Foreign credential receipt acc
     }
 }
 {
+    // A started run is a handle and not an outcome; a cancellation echoes the child asked of.
+    // Request-side semantic bounds (the agent name, the task, the turn cap) live in the
+    // TypeScript/Node request gate, as every other contained operation's do.
+    const string child = "11111111-1111-1111-1111-111111111111", foreign = "33333333-3333-3333-3333-333333333333";
+    var startAsked = Codec.Input("application.child.run", new ApplicationChildRunRequest { Conversation = "c", Child = child, Agent = "worker", Task = "do it", MaxTurns = ScheduleDefinitionDtoLimitsDtoMaxModelCalls.FromVariant2(3) });
+    if (startAsked.GetProperty("agent").GetString() != "worker" || startAsked.GetProperty("task").GetString() != "do it" || startAsked.GetProperty("maxTurns").GetDouble() != 3) throw new Exception("Run request lost a field");
+    // null is the one absence the shape allows: it leaves the agent's own turn cap.
+    var undecided = Codec.Input("application.child.run", new ApplicationChildRunRequest { Conversation = "c", Child = child, Agent = "worker", Task = "do it", MaxTurns = ScheduleDefinitionDtoLimitsDtoMaxModelCalls.FromVariant1(default) });
+    if (undecided.GetProperty("maxTurns").ValueKind != JsonValueKind.Null) throw new Exception("An undecided turn cap was not sent as null");
+    using var startedReply = JsonDocument.Parse($$"""{"child":"{{child}}","job":"job_1","conversation":"cnv_child","agent":"worker"}""");
+    var started = Codec.Result<ContainedApplicationRunningDto>("application.child.run", startedReply.RootElement);
+    // The conversation answered is the child's own, never the container's that was named.
+    if (started.Job != "job_1" || started.Conversation != "cnv_child" || started.Agent != "worker" || started.Child != child) throw new Exception("Run reply decoded wrongly");
+    foreach (var bad in new[] { $$"""{"child":"{{child}}","job":"job_1","conversation":"cnv_child"}""", $$"""{"child":"{{child}}","job":"job_1","agent":"worker"}""" })
+    {
+        using var refusedReply = JsonDocument.Parse(bad);
+        bool refused = false;
+        try { Codec.Result<ContainedApplicationRunningDto>("application.child.run", refusedReply.RootElement); } catch (JsonException) { refused = true; }
+        if (!refused) throw new Exception("Incomplete run reply accepted: " + bad);
+    }
+    var cancelAsked = Codec.Input("application.child.cancel", new ApplicationChildCancelRequest { Conversation = "c", Child = child });
+    if (cancelAsked.GetProperty("child").GetString() != child) throw new Exception("Cancel request lost a field");
+    using var runAsked = JsonDocument.Parse($$"""{"conversation":"c","child":"{{child}}"}""");
+    foreach (var (operation, reply, accepted) in new[] {
+        ("application.child.run", $$"""{"child":"{{child}}","job":"job_1","conversation":"cnv_child","agent":"worker"}""", true),
+        ("application.child.run", $$"""{"child":"{{foreign}}","job":"job_1","conversation":"cnv_child","agent":"worker"}""", false),
+        ("application.child.cancel", $$"""{"child":"{{child}}"}""", true),
+        ("application.child.cancel", $$"""{"child":"{{foreign}}"}""", false) })
+    {
+        using var answer = JsonDocument.Parse(reply);
+        bool admitted = true;
+        try { Codec.CorrelateDeployment(operation, runAsked.RootElement, answer.RootElement); } catch (JsonException) { admitted = false; }
+        if (admitted != accepted) throw new Exception($"Contained reply correlation wrong for {operation} {reply}");
+    }
+}
+{
     // application.child.resources describes a child's source files and never carries their content.
     const string child = "11111111-1111-1111-1111-111111111111", revision = "44444444-4444-4444-4444-444444444444";
     var asked = Codec.Input("application.child.resources", new ApplicationChildResourcesRequest { Conversation = "c", Child = child });

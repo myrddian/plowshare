@@ -220,8 +220,12 @@ public interface ContainedApplications {
    * never agreed to lend. So the rule here is {@link #create}'s and {@link #ceiling}'s — the
    * caller's retained admission must be acting as the scope this child is recorded under — and a
    * grandparent, a sibling, a child naming its own container and an unrelated scope are all
-   * refused. This is the same kind of deliberate asymmetry ADR 0042 records between {@code
-   * trajectory} and {@code resources} on a destroyed child.
+   * refused.
+   *
+   * <p>Do not cite the trajectory/resources pair as the precedent for this asymmetry: ADR 0042 used
+   * to describe those two as differing on a destroyed child and that description was wrong -- they
+   * refuse a destroyed child identically, because destruction cascades the record away and both
+   * open by resolving it. The asymmetry here is real and stands on its own argument above.
    *
    * <p><strong>The child is the executor and the accounting subject.</strong> The run's caller
    * identity is the child's own ephemeral principal and its speaker is the harness naming the

@@ -240,6 +240,27 @@ export interface ExtendedPayloads
     readonly conversation: string;
     readonly child: string;
   };
+  // Starting and stopping work inside one child. Container-only, and deliberately not the ancestor
+  // gate the two reads above use: starting work spends the child's own allowance and occupies its
+  // direct container's breadth accounting, both of which belong to the container that lent them, so
+  // a grandparent is refused here where it is admitted on `trajectory`. No field names a project or
+  // an authority: the run's home comes from the child's own stored row, server side, so there is no
+  // key through which a caller could choose the tier its work runs in. `agent` is resolved against
+  // the *child's* own package. `maxTurns` is part of the shape and may be null, which decides
+  // nothing and leaves the agent's own cap -- unlike a ceiling, absent here is not unlimited.
+  'application.child.run': {
+    readonly conversation: string;
+    readonly child: string;
+    readonly agent: string;
+    readonly task: string;
+    readonly maxTurns: number | null;
+  };
+  // A stop request, not an interrupt: a contained run honours it at its next turn boundary, and
+  // this answers when the asking has completed rather than when the work has.
+  'application.child.cancel': {
+    readonly conversation: string;
+    readonly child: string;
+  };
   'filestore.list': Record<string, never>;
   'application.deployment.status': { readonly project: string };
   'application.deployment.receipt': {
@@ -507,6 +528,8 @@ export const CLI_OPERATIONS = {
   'application child list': 'application.child.list',
   'application child trajectory': 'application.child.trajectory',
   'application child resources': 'application.child.resources',
+  'application child run': 'application.child.run',
+  'application child cancel': 'application.child.cancel',
   'filestore list': 'filestore.list',
   'application deployment status': 'application.deployment.status',
   'application deployment receipt': 'application.deployment.receipt',
