@@ -844,6 +844,69 @@ restated `kind` tests keep the call off ordinary scope rows. No `EXPLAIN ANALYZE
 on a realistic corpus backs any of it, so the claim is a reading of the plan's
 shape and not a number.
 
+**A running child resolves the server's global definition tier, and a global
+callee's `tools:` list is compared against nothing.** Measured against a
+running child rather than argued: a contained child's agent declaring `calls:
+[global_agent]` **keeps that edge** — `DefinitionResolver.refusalsFor` answers
+`{}` for it, because `withholdUnreachableCallees` checks a declared callee
+against `defined`, which `readProject` builds from the project's own names
+*plus the inherited tier's*. The whole global tier is present in the contained
+project's registry, including agents the child never named, and
+`Callers.find(childHome, …)` — the same call `AgentRunTool` makes before
+starting a delegate — resolves one from inside the contained home. The callee
+arrives **carrying its own `tools:` list**, and no subset test compares that
+list against the child's package or its container's, because
+`ContainedDeclarations` compares only what the two *packages* declare and a
+global definition is on neither side of that comparison. The one partial fence
+is `AgentRegistry.escalatingGrant`, which refuses a callee whose **workspace
+scopes** exceed the caller's; it covers workspace scopes only and says nothing
+about `tools:`.
+
+This is **not an escalation above the container.** `DefinitionResolver` builds
+every project's registry as `inherited.replacing(merged)`, so an ordinary
+project inherits the same tier; the tier is operator-installed at boot; and
+the container can delegate to the same global agent and obtain the same tools.
+The parent does hold what the child reaches, which is why this is documented
+rather than blocking.
+
+It is **still a limitation, and the design's claim is as written literally
+untrue for the global tier.** The model says a child "cannot name, read,
+address or reach anything outside its own subtree, including the parent", and
+a global agent is outside the subtree. The residual risk is not pedantic: it
+falls on the design's third use case, running a third-party Application under
+an owner's grants *without granting it any of them*. There, a child reaching
+the operator's global tier — and that tier's unchecked `tools:` — is a lend
+the owner may not have intended, even though the owner could reach it
+themselves.
+
+Two candidate fixes, recorded so the follow-up does not re-derive them. The
+narrower one is to subset-check a global callee's `tools:` against the
+container's package at the hop; `escalatingGrant` is the precedent for the
+shape, and it leaves the tier reachable. The stronger one is to narrow the
+inherited tier for a contained project, which is a core change to the path
+every project's registry is built through, and it may leave a child unable to
+do useful work if built-ins live in the boot tier — which would have to be
+discovered before it could be chosen. The runtime-reach test **deliberately
+does not assert the current behaviour**: a passing test over this would bake
+in an answer nobody has given, so the measurement is recorded here and in that
+class's Javadoc instead.
+
+**A running child has no door of its own to `application.child.run`, so every
+containment hop needs an authenticated driver.** The operation exists only as
+a frame behind `Asking.requireHandle`, and a contained principal is a bare
+UUID with no credential material (V218), so a child cannot start a grandchild
+on its own initiative. A hop is therefore driven by an authenticated ancestor
+naming the **child's** contained conversation, whose retained admission is the
+scope the container-only gate reads; transitive containment needs such a
+driver per hop.
+
+This is recorded as both a confinement property and a capability limitation,
+and it is **deliberately left closed**. The spec's anti-goal fears "unbounded
+recursion or width … reachable from ordinary agent work", and requiring an
+authenticated driver per hop is exactly that brake. Opening a frame door to a
+credential-less principal would need the authority decision V218 forbids, so
+the limitation and the property are the same fact and neither is closed here.
+
 Whether Relay keys topics on `authority_scopes.id`, which is what would give a
 contained scope a real audience, is ADR 0039's deferred question.
 
