@@ -227,10 +227,30 @@ public interface ContainedApplications {
    * refuse a destroyed child identically, because destruction cascades the record away and both
    * open by resolving it. The asymmetry here is real and stands on its own argument above.
    *
-   * <p><strong>The child is the executor and the accounting subject.</strong> The run's caller
-   * identity is the child's own ephemeral principal and its speaker is the harness naming the
-   * child, so the container's handle appears nowhere on the run. ADR 0025's immutable attribution
-   * is untouched and no counter is shared between container and child.
+   * <p><strong>Two axes, and they are deliberately different identities.</strong> This paragraph
+   * said the reverse for most of the slice — that the child is the executor and that the
+   * container's handle appears nowhere on the run — and that was the single most misleading
+   * sentence on this interface, because it is the one a reader meets before the implementation.
+   *
+   * <ul>
+   *   <li><b>The account is the container's.</b> A hop keeps the parent's executor and account
+   *       unchanged, so everything that needs an account — the work check, the run's caller
+   *       identity, and the accounting account — takes the container's. The child spends its
+   *       <em>own allowance</em>, under a ceiling its container set, <em>on its container's
+   *       account</em>: the pool is the child's and the accounting subject is not. That is what
+   *       keeps ADR 0025's immutable attribution and its rule that delegation cannot change the
+   *       accounting account intact, and no counter is shared between container and child.
+   *   <li><b>The author is the child's.</b> The contained principal is never an {@code
+   *       authority_accounts} subject (V218) and nothing here makes it one, so what it is recorded
+   *       as is the provenance of the work: {@code Speaker.contained(child)} travels into the log
+   *       as the utterance's speaker and survives the write. That is load-bearing rather than
+   *       cosmetic — child output is untrusted input to its container, so a container reading work
+   *       back must be able to tell its child's writing from its own, and with the account shared
+   *       the author field is the only thing that says so.
+   * </ul>
+   *
+   * <p>{@code SourceContainedApplications.run} documents the same two axes at the site that chooses
+   * them, and the two must be read together rather than one trusted over the other.
    *
    * <p><strong>The order is the contract</strong>, and it is {@code ceiling}'s: the configuration,
    * the caller's live authority, the child's row, the direct-container rule, a destroyed child, a
@@ -322,10 +342,20 @@ public interface ContainedApplications {
    * that stopped only the named child would leave the work it set in motion running.
    *
    * <p><strong>Stopping, not erasing.</strong> A cancellation removes no retained conversation
-   * envelope and no source area. That is deliberate and is the same asymmetry ADR 0042 records
-   * between {@code trajectory} and {@code resources}: a container must be able to read back what it
-   * stopped, so {@code Origin.CONTAINED} carries {@code DELEGATION}'s retention and nothing here
-   * touches it.
+   * envelope and no source area: the child stays live and startable, and a container must be able
+   * to read back what it stopped. {@code Origin.CONTAINED} carries no ejection age and nothing here
+   * touches that.
+   *
+   * <p>Do not cite the {@code trajectory}/{@code resources} pair as the precedent, as this
+   * paragraph used to: ADR 0042 described those two as differing on a destroyed child and that
+   * description was wrong — they refuse one identically. The retention is also <em>not</em> {@code
+   * DELEGATION}'s by resemblance; ADR 0042 records that its stated justification was void and that
+   * the behaviour is deliberately unchanged anyway.
+   *
+   * <p><strong>Not the cascade, and a reader will conflate the two.</strong> This operation stops
+   * work inside one named child and its descendants and destroys nothing. The separate rule that
+   * destroying or cancelling a <em>parent's execution</em> reaches every descendant is about a
+   * container's own lifecycle, not about this frame, and the two share only a verb.
    *
    * <p><strong>A request and not an interrupt.</strong> A run honours the stop at its next turn
    * boundary, so this returns before the work has necessarily finished; what it guarantees is that

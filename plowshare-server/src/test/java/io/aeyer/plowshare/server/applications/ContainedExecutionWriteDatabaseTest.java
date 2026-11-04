@@ -519,16 +519,24 @@ class ContainedExecutionWriteDatabaseTest {
    * Every catalogue management operation refuses a contained acting principal explicitly, before
    * anything writes — and each refusal has an ordinary actor passing the same guard beside it.
    *
+   * <p><strong>Eleven operations, and the first version of this test asserted nine as a closed
+   * set.</strong> {@code tags} and {@code tagGroups} had no guard and were absent from this list,
+   * and they were absent from the <em>same</em> hand-maintained enumeration the production javadoc
+   * described — so a reviewer reading either the list or this test saw a set that looked complete.
+   * That is the mechanism worth remembering rather than the two method names: an enumeration and a
+   * test built from it are one source of truth wearing two hats, and the only thing that caught it
+   * was reading the class for methods that take an {@code InformationContext} and write.
+   *
    * <p>V224 admits a contained principal into {@code lockResource} and the readability predicates
    * for its own home, so it really can arrive at every one of these.
    *
    * <p>Unguarded, only {@code link} would have failed: its {@code information_links.actor_handle}
    * is a live foreign key to {@code admins(handle)}, which a bare-UUID contained principal has no
-   * row in. The other eight would have <strong>succeeded</strong> — {@code information_events} was
-   * dropped by {@code V188__information_events_on_relay.sql:96}, and those eight hand the actor to
-   * Relay rather than to a keyed column. The guard is therefore an <strong>authority
-   * check</strong>, not an integrity patch: the gap it closes was a silent grant of nine management
-   * operations to a confined Application, not a crash.
+   * row in. The other ten would have <strong>succeeded</strong> — {@code information_events} was
+   * dropped by {@code V188__information_events_on_relay.sql:96}, and those hand the actor to Relay
+   * rather than to a keyed column; {@code tags} and {@code tagGroups} write no actor column at all.
+   * The guard is therefore an <strong>authority check</strong>, not an integrity patch: the gap it
+   * closes was a silent grant of ten management operations to a confined Application, not a crash.
    *
    * <p>Each case asserts two things: the contained principal gets the guard's own {@code
    * CallerFault}, and an ordinary actor does <strong>not</strong> — either succeeding outright, or
@@ -550,9 +558,16 @@ class ContainedExecutionWriteDatabaseTest {
     var confined = InformationAccess.contained(childPrincipal, HOLDER, childProject).withView(true);
     var ordinary = context(HOLDER, "parent").withView(true);
 
-    // One list, so a tenth management operation added without a guard shows up as a missing row
-    // here rather than as a silent grant in production: eight of the nine would succeed unguarded,
+    // One list, so a twelfth management operation added without a guard shows up as a missing row
+    // here rather than as a silent grant in production: ten of the eleven would succeed unguarded,
     // so the failure mode this list protects against is capability, not a crash.
+    //
+    // It protects against that only as well as the list is complete, which is the lesson this test
+    // has already learned once: tags and tagGroups were missing from it and from the guard at the
+    // same time. A chokepoint check inside lockResource/requireDestination with an explicit
+    // per-operation allowance would make the enumeration structural, and is a signature change
+    // across a dozen call sites plus a decision about what a contained actor may do -- recorded in
+    // the production javadoc as the alternative rather than built at the edge of a slice.
     record Operation(String name, java.util.function.Consumer<InformationContext> on) {}
     var operations =
         List.of(
@@ -591,7 +606,19 @@ class ContainedExecutionWriteDatabaseTest {
                         UUID.randomUUID())),
             new Operation(
                 "finalise",
-                context -> records.finalise(context, revisionFor(context, child, mine), Map.of())));
+                context -> records.finalise(context, revisionFor(context, child, mine), Map.of())),
+            // The two the first version of this list and this test both omitted -- the same two,
+            // which is why reading either alone showed a closed set. Neither crashes unguarded:
+            // tags and tagGroups call only lockResource, which V224's WRITE arm admits for a
+            // contained actor's own resource, and then UPDATE information_resources.
+            new Operation(
+                "tags",
+                context -> records.tags(context, revisionFor(context, child, mine), List.of("a"))),
+            new Operation(
+                "tagGroups",
+                context ->
+                    records.tagGroups(
+                        context, revisionFor(context, child, mine), Map.of("g", List.of("a")))));
 
     for (var operation : operations) {
       var refusal =

@@ -1257,7 +1257,6 @@ class ContainedRuntimeReachTest {
    * refusal and a real frame fence; this one closes the tool-shaped door it can see. Carrying it
    * further needs either a test in {@code agents} that can read that set or an accessor on it, and
    * I would rather that be asked for than added.
-   * </ul>
    */
   @Test
   void aRunningChildCannotDefineASchedule() {

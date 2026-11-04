@@ -1277,9 +1277,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * addressable Relay topic nobody named. {@link InformationEventRecords#resolve} therefore raises
    * {@link InformationEventRecords.Unaddressable} for such a home, and {@link InformationEvents}
    * documents that exception as deliberately caught nowhere. Both facts are right, and together
-   * they made a contained principal's own knowledge write — which V224 admits — fail and roll back
-   * the moment it reached a real publisher. That defect shipped behind a recording fake; the
-   * regression test for it is the un-mocked path and not a tighter assertion against the fake.
+   * they make a contained principal's own knowledge write — which V224 admits — fail and roll back
+   * unless this method tolerates the refusal. The regression test is composed with the real
+   * publisher rather than a recording fake, because a fake satisfies the interface and answers the
+   * question it was told to answer.
    *
    * <p><strong>Why tolerating is principled here and not expedient.</strong> For a declined home
    * there is no processing to announce and no audience to notify: every stage is already written
@@ -1342,9 +1343,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    *
    * <p><strong>Why a refusal and not the attribution axis.</strong> Nothing has decided that a
    * confined Application may link a document into another project, publish one, withdraw one, retry
-   * or rebuild processing, set an allowance, cancel work, record evidence or finalise a report.
-   * V224 admits a contained principal into {@code lockResource} and the readability predicates for
-   * its own home, so it can genuinely arrive at every one of them.
+   * or rebuild processing, set an allowance, cancel work, record evidence, finalise a report, or
+   * change a document's tags or tag groups. V224 admits a contained principal into {@code
+   * lockResource} and the readability predicates for its own home, so it can genuinely arrive at
+   * every one of them.
    *
    * <p>One of them would fail on integrity rather than on authority: {@code link} writes {@code
    * information_links.actor_handle}, whose foreign key targets {@code admins} (V83:77) and which a
@@ -1365,9 +1367,29 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * home's are already declined from. What a running child may reach is a decision that belongs to
    * the task that defines it, so this fails closed and keeps that decision open.
    *
-   * <p>The child's own write path does not come through here. {@code admit} is the one operation a
-   * confined Application is authorized to perform, it calls none of these, and it carries the
-   * attribution axis for its own provenance columns.
+   * <p>The child's own write path does not come through here. {@code admit} is the one operation
+   * that <em>carries the attribution axis</em> for a confined Application, it calls none of these,
+   * and it writes its own provenance columns from it. An earlier version of this paragraph said
+   * {@code admit} was "the one operation a confined Application is authorized to perform", and that
+   * was false while two mutators had no guard at all.
+   *
+   * <p><strong>Which two, and how the omission hid.</strong> {@code tags} and {@code tagGroups}
+   * take an {@code InformationContext}, call only {@code lockResource(context, revision, false)} —
+   * which V224's WRITE arm admits for a contained actor's own resource — and then {@code UPDATE
+   * information_resources}. Through {@code managed} → {@code reserve} a non-null request would
+   * insert {@code information_commands.account}, whose foreign key targets {@code admins}, with the
+   * bare UUID and raise a server fault; with a null request the write simply succeeded. They are
+   * guarded now, and the point worth keeping is the mechanism: <strong>the list of guarded
+   * operations and the test that drives it omitted the same two</strong>, so a reviewer reading
+   * either alone saw a closed set. A hand-maintained enumeration of a class's mutators and a test
+   * built from the same enumeration are one source of truth wearing two hats.
+   *
+   * <p>A structural alternative exists and is not built here: every mutator in this class reaches
+   * its write through {@code lockResource} or {@code requireDestination}, so the check could live
+   * at those two chokepoints with an explicit per-operation allowance passed in — which is a
+   * signature change across roughly a dozen call sites and a decision about what a contained actor
+   * may do, not a refactor. Until then the enumeration is the contract and the only honest
+   * mitigation is that this javadoc now says so.
    *
    * <p>Keyed on {@code contained_knowledge_actor}, which is the same predicate V224's arms are
    * keyed on, so this cannot drift from the population it is about and is safe on a non-UUID actor.
@@ -1404,6 +1426,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           revision,
           context.account(),
           project);
+    // `account()` and not `attribution()`, here and in actor_handle above, and deliberately so --
+    // this is the one site in this file that did not move to the attribution axis. Both are an
+    // AUDIT actor rather than provenance of an authorized write: actor_handle's foreign key into
+    // admins is what would refuse a bare-UUID contained principal if the guard above were ever
+    // removed, and attributing the act to the container would be the "capability granted by
+    // implementation accident" that requireUncontainedActor's own javadoc refuses. For every
+    // caller that can reach this method the two axes hold the same value, so this is a statement
+    // of intent rather than a behavioural difference. Do not harmonise it with `admit`.
     event(
         revision,
         generation(revision),
@@ -1706,6 +1736,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void tagGroups(
       InformationContext context, UUID revision, Map<String, List<String>> groups) {
+    requireUncontainedActor(context, "change a document's tag groups");
     UUID resource = lockResource(context, revision, false).id();
     if (groups != null) groups = InformationTagGroups.from(groups, null);
     changed(
@@ -1717,6 +1748,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void tags(InformationContext context, UUID revision, List<String> tags) {
+    requireUncontainedActor(context, "change a document's tags");
     UUID resource = lockResource(context, revision, false).id();
     var checked = InformationFacets.tags(tags);
     changed(

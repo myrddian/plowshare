@@ -174,7 +174,16 @@ server-configured nesting root rather than accepting a parent-supplied
 destination, because a parent typically holds no FileStore `MANAGER` over its own
 retained source and proxying could not yield a legal destination. Destroying or
 cancelling a parent destroys every descendant, and revoking the parent's
-authority mid-execution stops descendant work. An interrupted create must leave
+authority mid-execution stops descendant work.
+
+**Two things a reader will merge, and they are different subjects.** That Goals
+sentence is about a *container's own* lifecycle: destroying the container, or
+cancelling the container's execution, reaches every descendant. It is **not**
+`application.child.cancel`, which stops work inside one named child and its
+descendants and **destroys nothing** — the child stays live and startable, and its
+retained envelopes and source area are untouched. With eight `application.child.*`
+operations shipped the verb "cancel" now appears on both sides of that distinction,
+so it is drawn here as well as on the operation. An interrupted create must leave
 no orphan project, uncollected revision directory or live principal; crash
 recovery is part of the capability. A parent revision change refuses while any
 child is live, so children never outlive the configuration that authorized them
@@ -191,7 +200,12 @@ the manifest and validated at deployment, so an existing Application cannot
 acquire the capability by upgrade alone.
 
 A child allocates its own allowance under a ceiling its parent sets at creation
-and may reduce to zero. Child spend is attributed to the child.
+and may reduce to zero. **The pool is the child's and the accounting subject is
+not:** a child spends its own allowance, under its container's ceiling, **on its
+container's account**. Slice three decided that axis and this record said the
+opposite — "child spend is attributed to the child" — in four places, which is
+corrected here and at each of them. `Speaker.contained(child)` records the
+authorship the account no longer carries.
 
 One-way visibility is a property of the questions, not of a filter on the
 answers. `application.child.list` and `application.child.trajectory` take the
@@ -371,7 +385,8 @@ capability unavailable to the Applications that need it.
 Authorization and lifecycle impact is as follows. Authority can only narrow
 across a hop, and the parent cannot grant what it does not hold, tested per
 surface. Ownership, cancellation and destruction cascade downward from the
-parent, and accounting stays with the child under its parent-set ceiling.
+parent, and the child's own allowance is spent under its parent-set ceiling on the
+parent's account, with the child recorded as the author.
 Idempotency and recovery follow ADR 0005's request-UUID receipts for packaging
 and add reliable collection with recovery for an interrupted create, inverting
 ADR 0005's explicit non-collection of staged source for the case where
@@ -419,6 +434,15 @@ authority layer present rather than stubbed out. A running child's reach is
 pinned at six surfaces by `ContainedRuntimeReachTest`. A run is stoppable three
 ways: `application.child.cancel`, a destruction that stops the subtree before
 collecting any source, and a mid-run revocation of the container's grant.
+
+**Which of the two "cancel" claims this slice exercises, said exactly.** It
+exercises `application.child.cancel` — stopping work inside a named child and its
+descendants, erasing nothing — and the destruction cascade, which stops the subtree
+and then removes it. It does **not** exercise the Goals sentence's other half,
+*cancelling a container's own execution* reaching its descendants: nothing in this
+slice cancels a container's run and observes a descendant stop, so that half of the
+Goals line remains asserted by the spec and undemonstrated here. The multi-node
+bound on all of it is recorded under process-local cancellation.
 
 **Three of the four claims slice two recorded as vacuous are now results, and the
 fourth is still not one.**
@@ -767,7 +791,7 @@ contained scope and is verified to, with the verification named.
 | `V216` `authority_live_grants`, `authority_grant_insert` | grant admission and liveness | **Refused** (Task 2). Covered by `ContainedScopeSchemaTest`. The `authority_live_grants` exclusion is a backstop with no reachable route, because `authority_grant_insert` refuses first; that test reaches it only by disabling the insert trigger, and it is recorded as defence in depth rather than as a live fence. |
 | `V223` `knowledge_scope_readable` (was `V172:9`), and `V172:19` `information_project_readable`, which composes it | information and knowledge read admission | **Was fenced by kind; slice two deliberately opened it, one way; slice three admits the child's own principal to the baseline above it and re-decides the row against a running reader — see the re-audit below.** The slice-one reason — `s.kind IN ('PROJECT','PERSONAL')`, so a contained scope is excluded — is **no longer true**, and this row is the capability slice two set out to add rather than a hole it left. V223 adds one arm whose admission is `contained_scope_readable`: the scope's own `contained_principals` principal, or an actor holding `authority_project_role` on the project of a scope that transitively **contains** it, resolved by walking `contained_scope_ancestors` **upward from the descendant**. Confinement is therefore the walk's direction, not a filter: a descendant reading upward, a sibling, a nephew, a stranger, a server administrator with no role on an ancestor, and a service credential on the container are each asserted to get nothing, and a broken chain refuses at the break so nothing above it is an ancestor of anything below. `information_project_readable` is `EXISTS(… knowledge_scope_readable …)` over the scopes of one project, so it moved with the predicate and now answers true for an ancestor role holder asked about a child's project. **This inventory's own evidence for that row is `ContainedAddressabilityDatabaseTest.informationReadabilityAdmitsAnAncestorAndRefusesEveryoneElse`**, which asserts both directions in one test — an ancestor admitted, a server administrator that is a global-read member but holds no role on the container refused — so it fails whichever way the arm breaks; the opened behaviour in its own right (the self arm, the chain, siblings, the walk sentinel, a broken chain) is `ContainedKnowledgeReadSchemaTest`. The slice-one assertion that this predicate *refused* a child was obsolete the moment V223 landed and is gone; `everyRoleAndManagementPredicateRefusesAContainedProject` is what remains of that test and no longer names this predicate, because the role and management predicates are the ones that still refuse by kind. **Its consumers are fenced upstream, not by kind, and the fence is a property of the argument rather than of a closed caller list:** this predicate is only ever asked about the **request's selected project**, and a `contained:…` name cannot become one — `ProjectAuthorization`'s chokepoint resolves no role for it (the row above) and `IdentityRepository.project(String)` still refuses to resolve a contained scope from a project name. Stated that way the fence survives a new consumer; stated as a caller list it would not, which matters because the list is longer than two. There are **two Java call sites** — `MemoryStore.java:76` (`pin`, the memory-home authority check), which passes the selected project *by name*, and `JdbcQueryEmbeddingRepository.java:64` (`require`), which passes `(SELECT project_id FROM authority_scopes WHERE id=?)` for the **pin scope resolved from the selected home**, so it reaches the same project by a different step rather than by its name — and **one live SQL composition**: `information_root_readable` (latest definition `V185:27`) calls `information_project_readable(linked.id,$2)` at `V185:37`, inside an `information_links` arm constrained by `linked.name=$4`, which is that statement's `selected_project`. All three therefore turn on the same selected project, and none can be handed a contained one. That is a weaker fence than a predicate that refuses by kind, and it is recorded here for the same reason the chokepoint's five exceptions are. The superseded definitions at `V110:21`, `V111:41` and `V156:324`, whose `a.server_admin AND name NOT LIKE 'client:%'` arms *would* have admitted a child, remain dead. |
 | `V224` `knowledge_read_authority` (was `V223`, was `V178:45`) | batched knowledge read authority | **Was fenced by kind; opened by the same rule, and by the same rule only. V224 reproduces it with `general_member` pinned false for a contained actor, which is a narrowing of this body and not a second opening — see the re-audit below.** The slice-one reason — `s.kind IN ('PROJECT','PERSONAL')` guarding the whole branch — is no longer the whole predicate. V223 adds `OR (s.kind='CONTAINED' AND contained_scope_readable($1,s.id,a.member))` as a disjunct beside the pre-existing `a.member AND (…)` gate, because a contained principal has no account to be a member of. Both chokepoints consult the one shared rule, and a test asserts the batched relation and the exact predicate agree scope by scope, so discovery cannot admit what an exact read refuses or the reverse. Everything else in the body — the live-grant, `project_reads`, token and Personal fences and the `MATERIALIZED` shape — is untouched, and `authority_live_grants` still honours no grant against a contained scope (V216), so no role is ever resolved *on* one; that slice-one exclusion is now load-bearing for this arm rather than only defence in depth. |
-| `V223` `information_public_policy` (was `V172:21`), and the `general_readable` column of `V224` `knowledge_readable_candidates` (was `V223`, was `V198:5`) | general-read publication: the audience that makes a resource addressable to every account without anyone naming it | **Refused in slice two. A new row, and the only one in this inventory that runs outward rather than inward. Slice three makes it reachable rather than theoretical, because a running child now writes the contained-home resource this row is about — see the re-audit below.** Every other knowledge-read row asks who may reach *into* a contained subtree; this one asks whether a contained home can be published *out* of it. Both bodies that decide general-read publication fenced on `s.kind<>'RESTRICTED'` / `f.scope_kind<>'RESTRICTED'` alone — the only scope kind that existed to be excluded when they were written — and V216, which added `CONTAINED` as a fifth kind, did not extend either test. The consequence was concrete rather than theoretical: `knowledge_revision_readable` (`V172:38`) is `… AND (knowledge_scope_readable($2,q.home_scope_id) OR knowledge_general_readable(r.id))` and the candidates body's `facts.readable` (`V223:436`) is `… OR f.general_readable`, so a revision whose home was a contained scope, if its policy audience were `GLOBAL_READ`, would have been admitted to **every global-read member — which is every active non-bootstrap account — with no containment test taken anywhere**. It was **pre-existing from slice one and not reachable**: the policy insert trigger (`V158:88`) writes `audience='HOME'`, the navigation default makes `NOT coalesce(ownerOnly,true)` the refusing value, and nothing executes a contained child, so no contained-home resource exists to publish. That is confinement resting on a default value rather than on a structure, which is the spec's named anti-goal, so V223 adds one conjunct — `s.kind<>'CONTAINED'`, and `f.scope_kind<>'CONTAINED'` in the hoisted twin — beside each existing `RESTRICTED` test, reproducing `information_public_policy` verbatim from `V172:21` otherwise. It only ever narrows: the conjunct can refuse a general publication, never admit one. The narrow body is the one edited on purpose, because `knowledge_general_readable` (`V172:30`) and the closure predicates (`V158:183`, `V158:194`) all resolve through it, so one conjunct fences the general arm of `knowledge_revision_readable`, of `information_root_readable` and of `knowledge_document_in_boundary`'s global arm, and additionally refuses a published resource whose closure merely *reaches* a contained home. Evidence is `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree`, which asserts the baseline first — the stranger is a live general-read member and the identical publication in an ordinary home really does reach it through the general arm alone — then the refusal for the exact predicate, for discovery's own hoisted copy, for a general-read ceiling under both homes and for a closure that merely touches the subtree, and finally that the ancestor's inward read is untouched, so it fails whichever way the fence breaks. **`knowledge_revision_readable` (`V172:36`) and the candidates body's `readable` column (its kind test at `V223:433`) carry the same `RESTRICTED` test and deliberately do *not* gain this conjunct:** their test governs the whole read rather than the general arm, so excluding `CONTAINED` there would refuse an ancestor's read of a descendant's home — the capability slice two exists to open — and their general arm is already fenced through `knowledge_general_readable`. |
+| `V223` `information_public_policy` (was `V172:21`), and the `general_readable` column of `V224` `knowledge_readable_candidates` (was `V223`, was `V198:5`) | general-read publication: the audience that makes a resource addressable to every account without anyone naming it | **Refused in slice two. A new row, and the only one in this inventory that runs outward rather than inward. Slice three opens the write path this row is about and does not wire its actor, so the row is one step nearer reachable rather than reachable — see the re-audit and the no-caller limitation below.** Every other knowledge-read row asks who may reach *into* a contained subtree; this one asks whether a contained home can be published *out* of it. Both bodies that decide general-read publication fenced on `s.kind<>'RESTRICTED'` / `f.scope_kind<>'RESTRICTED'` alone — the only scope kind that existed to be excluded when they were written — and V216, which added `CONTAINED` as a fifth kind, did not extend either test. The consequence was concrete rather than theoretical: `knowledge_revision_readable` (`V172:38`) is `… AND (knowledge_scope_readable($2,q.home_scope_id) OR knowledge_general_readable(r.id))` and the candidates body's `facts.readable` (`V223:436`) is `… OR f.general_readable`, so a revision whose home was a contained scope, if its policy audience were `GLOBAL_READ`, would have been admitted to **every global-read member — which is every active non-bootstrap account — with no containment test taken anywhere**. It was **pre-existing from slice one and not reachable**: the policy insert trigger (`V158:88`) writes `audience='HOME'`, the navigation default makes `NOT coalesce(ownerOnly,true)` the refusing value, and nothing executes a contained child, so no contained-home resource exists to publish. That is confinement resting on a default value rather than on a structure, which is the spec's named anti-goal, so V223 adds one conjunct — `s.kind<>'CONTAINED'`, and `f.scope_kind<>'CONTAINED'` in the hoisted twin — beside each existing `RESTRICTED` test, reproducing `information_public_policy` verbatim from `V172:21` otherwise. It only ever narrows: the conjunct can refuse a general publication, never admit one. The narrow body is the one edited on purpose, because `knowledge_general_readable` (`V172:30`) and the closure predicates (`V158:183`, `V158:194`) all resolve through it, so one conjunct fences the general arm of `knowledge_revision_readable`, of `information_root_readable` and of `knowledge_document_in_boundary`'s global arm, and additionally refuses a published resource whose closure merely *reaches* a contained home. Evidence is `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree`, which asserts the baseline first — the stranger is a live general-read member and the identical publication in an ordinary home really does reach it through the general arm alone — then the refusal for the exact predicate, for discovery's own hoisted copy, for a general-read ceiling under both homes and for a closure that merely touches the subtree, and finally that the ancestor's inward read is untouched, so it fails whichever way the fence breaks. **`knowledge_revision_readable` (`V172:36`) and the candidates body's `readable` column (its kind test at `V223:433`) carry the same `RESTRICTED` test and deliberately do *not* gain this conjunct:** their test governs the whole read rather than the general arm, so excluding `CONTAINED` there would refuse an ancestor's read of a descendant's home — the capability slice two exists to open — and their general arm is already fenced through `knowledge_general_readable`. |
 | `plowshare-server/.../board/ProjectMessageRouting.java:85` | messaging `from_project` and `to_project` | **Refused**, in both directions. Messaging is a narrowing of the existing Relay and Application scoping and not a forwarding surface. **The ordering is a finding, not a style choice:** `require` returns early when source equals destination, so with the check after that return a child addressing *its own* project was admitted with no policy consulted at all. A contained project is not a messaging endpoint, its own included. **Slice three re-decided this row against a running child and the decision did not move** — the refusal is keyed on the project name, so the bare-UUID principal a run carries is refused exactly as a fabricated handle was, while the same principal reaches an ordinary project unimpeded; what changed is that there is now a run being deprived of a self-addressed endpoint rather than a hypothetical one. The check also precedes the route policy, so the refusal names containment rather than an absent route. |
 | `plowshare-server/.../board/ProjectMessageRouting.java:65`, `identify` | the `routingIdentity` surface | **Fenced upstream.** It maps a project to its personal-space address or answers the name unchanged; it decides nothing, and every caller of it has already passed `require`. |
 | `plowshare-server/.../information/JdbcInformationEventRecords.java:160` | the Relay audience for an information event | **Refused — and slice three found the refusal reachable, inside a running child's own write. Re-decided below; read that entry before this one.** The slice-two text follows unchanged, and the sentence of it that execution falsified is that a child's events never had a topic: a running child writes knowledge into its own home, every such write announces an intake event about that revision, and the real publisher resolves an audience for it before anything else. The honest statement at slice two: `audienceProject`'s `default -> null` already produced `Unaddressable` for a `CONTAINED` kind before this change, so a child's events never had a topic, and ADR 0037's rule for `ADMINISTRATION` and `RESTRICTED` — fail loudly, no fallback topic — already applied by exclusion. What was added is `case "CONTAINED" -> null` named beside `PROJECT`, `PERSONAL` and `ACCOUNT_KNOWLEDGE`, which is **behaviour-identical** and exists so the decision is visible where the next kind is added rather than being a silent default. The mutation that proves the behaviour changes the `default` arm, not the added case. It is still a load-bearing entry, because a contained scope *does* carry a project key: an implementation that reached for it would have published a child's events to a topic whose audience is the child's project. Per ADR 0039 no Relay scope kind is added. |
@@ -868,7 +892,7 @@ single row is re-decided in the same table.
 | `ProjectStore:1294` `allFor`, `:1337` `all` | **Refused, re-measured.** The child's own principal names nothing in either listing, **including its own project** — reading a home is not addressing a project, and that distinction is what keeps the knowledge capability from leaking into the project surface. | the same test |
 | `V223`/`V224` `knowledge_scope_readable`, `information_project_readable` | **Deliberately open, one way, and now open to a real reader.** Slice two could admit the scope and not the principal; V224 admits the principal to the baseline above it. The refusals that matter are asserted *for that principal*: its container's document, a sibling's, an ancestor's, a generally readable row it never named, and a dependency closure leaving its subtree. The ancestor's inward read is unchanged. | `ContainedActorReadSchemaTest` (`aChildReadsItsOwnDocument`, `aChildIsRefusedItsContainersDocument`, `aChildIsRefusedAGenerallyReadableRowItNeverNamed`, `aChildsDependencyClosureLeavingItsSubtreeRefuses`); `ContainedKnowledgeBoundaryDatabaseTest` |
 | `V224` `knowledge_read_authority`, `knowledge_readable_candidates` | **Narrowed, not opened again.** `general_member` is pinned false for a contained actor and the candidates baseline is a separate `(general_member OR contained)` term, so discovery admits the child's own subtree and reaches no general arm. Discovery and the exact predicate are asserted to agree scope by scope, so one cannot admit what the other refuses. | `ContainedActorReadSchemaTest.theDiscoveryPathAdmitsTheChildsOwnScopeAndNotGeneralMembership`, `aChildCannotDiscoverGenerallyReadableRows`, `aChildIsRefusedGeneralReadThroughTheBoundaryCeiling` |
-| `V223` `information_public_policy` and `V224` `knowledge_readable_candidates`' `general_readable` | **Refused, and the row stops being theoretical.** Slice two recorded this surface as pre-existing and *unreachable* because "nothing executes a contained child, so no contained-home resource exists to publish". A running child writes documents into its own home, so one exists, and the conjunct V223 added is now load-bearing rather than defence in depth. Two fences stand in front of it: the write side cannot even ask — `SET_AUDIENCE` is not admitted by V224's write arm — and the read side refuses the publication if one somehow existed. | `ContainedActorWriteSchemaTest.aChildCannotPublishGenerallyReadable`, `aChildCannotSetAnAudienceEvenOnItsOwnDocument`; `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree` |
+| `V223` `information_public_policy` and `V224` `knowledge_readable_candidates`' `general_readable` | **Refused; the row's reachability moved one step and not two.** Slice two recorded this surface as unreachable because "nothing executes a contained child, so no contained-home resource exists to publish". Slice three opens the gates that would let a child produce one and **does not wire the actor that would reach them** (see the limitation below), so no contained-home resource exists in production yet either. What changed is that the write path now exists and is proved against a constructed context, so the conjunct V223 added is the thing standing between that path and an outward publication — defence in depth that has acquired a consumer in waiting rather than a live fence. Two fences stand in front of it: the write side cannot even ask — `SET_AUDIENCE` is not admitted by V224's write arm — and the read side refuses the publication if one somehow existed. | `ContainedActorWriteSchemaTest.aChildCannotPublishGenerallyReadable`, `aChildCannotSetAnAudienceEvenOnItsOwnDocument`; `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree` |
 | V224's two write gates, `information_lock_destination` and `information_home_allows` | **New rows, inward and write-side.** Each admits a live contained principal to **its own scope's** home and nothing else, resolved from the selected project and compared against the resource's home. A child writing in its container's home, a sibling's, an ancestor's, another home while naming its own project, or after revocation are each refused. | `ContainedActorWriteSchemaTest` (nine cases); `ContainedExecutionWriteDatabaseTest.aChildWritesKnowledgeAsItselfAccountedToItsContainer` for the Java path |
 | `JdbcInformationEventRecords:160`, the Relay audience | **Refused, and the refusal turned out to be reachable — as an exception thrown inside the child's own write, which it aborted. This is the one row whose answer execution changes.** The audience is still refused, which is the row's verdict and is unchanged; what was wrong was the belief that nothing asked. The intake announcement now tolerates the refusal for a declined home only, so the write completes and the audience stays absent. Recorded as a found defect with its narrow fix below rather than as a fence working. | `ContainedExecutionWriteDatabaseTest.aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes` for the audience; `ContainedIntakeAnnouncementDatabaseTest` for the fix, composed with the real publisher |
 | `ProjectMessageRouting:85`, messaging in both directions | **Refused; the decision does not move and the consequence does.** The refusal is keyed on the project *name*, so the actor's shape is immaterial to it, and the bare-UUID principal a run carries is refused for the child's own project exactly as a fabricated handle was — while the same principal reaches an ordinary project's routing unimpeded, which is what makes the refusal containment's. What changes is that there is now a run being deprived of a self-addressed endpoint. Separately, and structurally: no messaging tool is in `RetainedToolAccess.SYNCHRONOUS` at all, so retained work of any kind — contained or not — cannot reach messaging through a tool. | `ContainedAddressabilityTest.aRunningChildsOwnPrincipalIsNoMessagingEndpointEither` |
@@ -990,10 +1014,50 @@ admits the child's own principal to the baseline `knowledge_revision_readable`
 opens with, without creating any credential row and without granting it
 general-read membership — the general arm is closed for a contained actor in the
 same expression, and `general_member` is pinned false for it on the discovery
-side. A child reads its own documents and its own memories, and nothing else.
-That half of the slice-two limitation is lifted rather than softened, and the
-authority decision it named as a prerequisite was made here: a baseline, not a
-membership.
+side. **The gate is open and the actor is not wired**: a contained principal
+presented to these predicates reads its own documents and its own memories and
+nothing else, which is asserted against inserted rows and constructed contexts —
+and no production path presents one, so no running child reads anything today.
+The authority decision slice two named as a prerequisite was made here (a
+baseline, not a membership); the wiring it needs to have an effect is named as the
+next one, in its own entry below.
+
+**The knowledge gates are open and nothing in production is the actor they are
+keyed on. This is the limitation slice three actually leaves, and it reframes the
+two rows and the position below.**
+
+`InformationAccess.contained(principal, container, project)` is the only place the
+two-axis context is built, and **it has no production caller**: every reference to
+it is in two test classes. At runtime the information actor for a contained run is
+`callerHandle` — the *container's* executor — because `contain` keeps the parent's
+executor and account unchanged, and `SourceContainedApplications.run` issues the
+child's principal and deliberately discards it ("Issued, and deliberately not
+passed as the caller"). So `contained_knowledge_actor(actor)` is **false for every
+actor a production path can present**, and with it: V224's read baseline, both of
+V224's write arms, the `attribution` axis, and all eleven management guards are
+reachable only from a hand-built context. **A contained run today reads no
+knowledge and writes no knowledge or memory** — not because a fence refuses it,
+but because nothing makes the child the information actor.
+
+It fails closed, which is why it is a limitation and not a hole: the unreached
+state is "a child has no knowledge capability", which is strictly narrower than
+what was authorized. But the honest statement of what slice three proved is
+**gates, not behaviour**: V224's arms are proved at the SQL layer against inserted
+rows and at the service layer against constructed contexts, and the Java write path
+is proved to work when handed such a context. Whether a running child's reads and
+writes land where V224 admits them is unproved, because no run produces that
+actor.
+
+**Wiring the contained principal as the information actor is the next slice's
+named prerequisite**, in exactly the form V223 used to name V224's gate. It is an
+authority decision rather than a wiring task, which is why it is not done here:
+the account axis is the container's by the user's own ruling, so making the child
+the *information* actor means deciding that one subsystem reads a different
+identity from the one the run executes as, and threading it from `Runs.Ask` through
+the job runtime to every `InformationContext` a tool builds. The pieces that
+decision needs are all present and recorded — the two axes, `accountedTo`, the
+guards, and the Relay-audience tolerance — which is the useful half of what this
+slice did here.
 
 **`information_navigation_reference_visible` carries the same unextended
 `RESTRICTED` fence and is deliberately left alone.** Slice two's outward fence
@@ -1021,17 +1085,23 @@ than by a structure.
 **Slice three is the slice that was supposed to have the consumer, and it does not
 close this.** The reason the paragraph above gave for deferring — "it is
 unreachable for the same reason plus one more", the first reason being that nothing
-executes a child — **has lost its first half**. A running child writes documents
-into its own home, so a contained-home resource exists for a navigation reference
-to be written against. What remains is only the weaker fence: the navigation
+executes a child — **has not in fact lost its first half, and an earlier draft of
+this paragraph said it had.** Slice three opens the write path but wires no actor
+to it, so no contained-home resource exists in production for a navigation
+reference to be written against, and the first reason still holds — on a narrower
+basis than before, because it now rests on an absent caller rather than on absent
+execution, and wiring that caller is named below as the next slice's prerequisite.
+The second reason is unchanged: the navigation
 default for `referenceHidden` is `true` (`V147:73`) and `NOT
 coalesce(referenceHidden,true)` is the refusing value, so a contained home would
 additionally need an explicit navigation policy written against it — and nothing
 writes one, because V224's write arm admits `WRITE` only and not `SET_AUDIENCE`,
 and a contained actor holds no role on the ordinary path a navigation policy is
-set through. So it is still unreachable, and it is now unreachable **by one default
-and one absent writer** rather than by two independent facts. That is a weaker
-position than slice two's and is stated as one. Closing it still needs the one-way
+set through. So it is still unreachable, by **two** facts and not one: an absent
+information actor and a default that refuses. The position is weaker than slice
+two's only in that the first fact is now an absent caller rather than absent
+execution — a caller the next slice is expected to wire — so this paragraph will
+need re-deciding then and not before. Closing it still needs the one-way
 direction worked out for reference visibility in its own right, because the body is
 the *only* admission arm at `JdbcInformationNavigationRepository.referenceVisible`
 and excluding `CONTAINED` there would refuse an ancestor's own reference visibility
@@ -1379,7 +1449,7 @@ parsed differently.
 | Schedule | `schedules/*.json` | **Refused** outright for a child in this slice. ADR 0020 gives a schedule operational authority over the server's own scheduler, and nothing here mediates that for a child; a container holding a schedule of its own does not change the answer. |
 | FileStore destination | the creation request's `destination` | **Refused** while non-null. The server allocates the child's source area under `plowshare.containment.root`; a container typically holds no FileStore `MANAGER` over its own retained source, so proxying could not yield a legal destination. The field stays in the operation's shape for compatibility with `application.deploy`, so every SDK sends the key, but a *named* destination is refused at the frame and again in the service rather than validated into a value nothing reads — a field accepted and dropped reads to a caller as supported. |
 | FileStore writable area | the creation request's `writableAreas` | **Refused** while non-empty. A child's writable area is allocated inside its own containment, so any requested area names a store outside its container's fence. |
-| Service account attribution and spending pool | the child's own allowance | **Allocated, never shared.** The child allocates its own allowance under a ceiling its container sets at creation and may later raise or reduce — to zero — within its own remaining allowance. The creation bound and the reconfiguration bound are one rule applied at two call sites against the same pool, because a bound enforced only at creation would be decorative: create low, raise high. An absent ceiling is not representable, because `AllowanceSnapshot` documents absent as unlimited. Child spend is attributed to the child, so ADR 0025's immutable attribution and its rule that delegation cannot change the accounting account are untouched, and no parent/child shared counter is introduced. |
+| Service account attribution and spending pool | the child's own allowance | **Allocated, never shared.** The child allocates its own allowance under a ceiling its container sets at creation and may later raise or reduce — to zero — within its own remaining allowance. The creation bound and the reconfiguration bound are one rule applied at two call sites against the same pool, because a bound enforced only at creation would be decorative: create low, raise high. An absent ceiling is not representable, because `AllowanceSnapshot` documents absent as unlimited. **The pool is the child's and the accounting account is its container's** — a hop keeps the parent's executor and account unchanged, so ADR 0025's immutable attribution and its rule that delegation cannot change the accounting account are untouched for the reason that nothing invents a second accounting subject, not because spend is attributed to the child. No parent/child shared counter is introduced, and the child is recorded as the work's author instead. |
 | Manifest `name` | `plowshare.json` `name` | **Rewritten** to the server-allocated opaque project name. `name` is identity and not authority, and the server owns the name a child cannot know in advance; every surface that *is* authority is in the rows above and is refused or reduced, never rewritten. |
 | Nesting itself | `plowshare.json` `nesting: true` | **Required of the container.** Only a literal `true` counts, so no existing Application acquires the capability by upgrade, and a missing, null, string or object value is "not declared". |
 
@@ -1501,9 +1571,11 @@ The kind that decided it is `delegation`, and it fails on **design** rather than
 on taste: a delegation shares its parent's allowance by reference and its row
 therefore holds no budget at all, so a contained conversation carried on it would
 spend its **container's** pool. That contradicts this record's own requirement
-that a child allocates its own allowance under a ceiling its parent sets — spend
-is attributed to the child, never shared — so reusing the nearest existing kind
-would have reintroduced the exact defect a separate kind exists to prevent. V225
+that a child allocates its own allowance under a ceiling its parent sets — the
+**pool** is the child's own and is never shared, which is a separate question from
+whose **account** it is spent on, and it is the pool the kind exists to protect —
+so reusing the nearest existing kind would have reintroduced the exact defect a
+separate kind exists to prevent. V225
 therefore adds `contained` to the **owned** side of
 `conversations_an_allowance_is_owned_or_shared`, which is the line that makes
 "allocated, never shared" true of a running child, and a test asserts that a
@@ -2066,8 +2138,10 @@ the request shapes that carry it are structurally identical and each types `chil
 as `{"$ref":"#/$defs/shape1","minLength":1,"nonblank":true,"noNul":true}`, where
 `shape1` is a bare `{"type":"string"}`: no UUID pattern anywhere, so all of them
 accept a non-UUID string client-side and only TypeScript's hand-written
-`containedProblem` check rejects it. The shapes are now five — `destroy`,
-`trajectory`, `resources`, `cancel` and `run`.
+`containedProblem` check rejects it. The shapes are now **six** — `ceiling`,
+`destroy`, `trajectory`, `resources`, `cancel` and `run`. The first draft of this
+sentence said five and omitted `ceiling`, which is the oldest of the six: counting
+by hand what a listing can answer is how the shape citations went wrong too.
 
 **The shape numbers these three rows used to cite are gone, and citing them was the
 mistake.** Slice two named `shape56`, `shape59` and `shape58`; adding two

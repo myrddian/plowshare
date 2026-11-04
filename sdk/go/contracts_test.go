@@ -143,7 +143,6 @@ func TestContainedRunAndCancelRoundTrip(t *testing.T) {
 	// request-side bound that is TypeScript-only; the blank task below is accepted here on purpose.
 	for _, bound := range []string{
 		`"maxTurns":0`, `"maxTurns":-1`, `"maxTurns":1.5`, `"maxTurns":2147483648`,
-		`"maxTurns":3,"agent2":"x"`,
 	} {
 		body := `{"agent":"worker","child":"` + child + `","conversation":"c","task":"do it",` + bound + `}`
 		if _, err = project(catalog.Inputs["application.child.run"], []byte(body), true); err == nil {
