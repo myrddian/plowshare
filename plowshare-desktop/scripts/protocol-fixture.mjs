@@ -48,6 +48,8 @@ export async function protocolFixture(options = {}) {
   let informationGroups=null;
   const currentGroups=()=>informationGroups ?? {databases:['postgresql']};
   const frames = [], httpPaths = [];
+  const configurationWrites=[];
+  let runtimeSetting={key:'plowshare.documents.ingest-budget',value:'40',pinned:true,updatedAt:null,updatedBy:null};
   const usageSubscriptions = new Map();
   let refuseUsage = false, refuseUsageCalls = false, refuseSnapshot = false, usageRevision = 1, captureEnabled = true;
   function usageReport(type, filter, input = '2400') {
@@ -130,6 +132,13 @@ export async function protocolFixture(options = {}) {
   let supportsFollowing = true;
   const server = createServer(async (req, res) => {
     httpPaths.push((req.url ?? '').split('?')[0]);
+    if (options.configuration && (req.url === '/v1/config' || req.url?.startsWith('/v1/config/'))) {
+      if(req.headers.authorization !== `Bearer ${access}`){res.writeHead(401).end();return;}
+      if(!options.serverAdmin){res.writeHead(403).end();return;}
+      if(req.method==='GET' && req.url==='/v1/config'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify([runtimeSetting]));return;}
+      if(req.method==='PUT' && req.url==='/v1/config/'+runtimeSetting.key){const chunks=[];for await(const chunk of req)chunks.push(chunk);const value=Buffer.concat(chunks).toString();configurationWrites.push(value);runtimeSetting={...runtimeSetting,value,updatedAt:'2026-11-04T00:00:00Z',updatedBy:'fixture'};res.setHeader('Content-Type','application/json');res.end(JSON.stringify(runtimeSetting));return;}
+      res.writeHead(400).end();return;
+    }
     if (req.url?.startsWith('/v1/sync/') && options.union?.http) {
       if (req.headers.authorization !== `Bearer ${access}`) { res.writeHead(401).end(); return; }
       return options.union.http(req, res);
@@ -741,7 +750,7 @@ export async function protocolFixture(options = {}) {
     setRefuseFiles(value) { refuseFiles = value; },
     setEmptyFileReady(value) { emptyFileReady = value; },
     loseFiles(project) { (project ? fileSockets.get(project)?.socket : fileSocket)?.close(1012, 'Server restarting'); },
-    httpPaths, file: fileRequest, base: `http://127.0.0.1:${server.address().port}`, frames,
+    configurationWrites, httpPaths, file: fileRequest, base: `http://127.0.0.1:${server.address().port}`, frames,
     publish: push,
     setUsageCapture: value => {captureEnabled=value;},
     setRefuseUsage: value => {refuseUsage=value;},
@@ -781,6 +790,6 @@ export async function protocolFixture(options = {}) {
       grew(conversation);
     },
     disconnect: () => { for (const row of eventSockets.values()) row.socket.close(); },
-    async close() { for (const pending of filePending.values()) clearTimeout(pending.timer); for (const timer of timers) clearTimeout(timer); for (const client of wss.clients) client.terminate(); await new Promise(resolve => wss.close(resolve)); await new Promise(resolve => server.close(resolve)); assert.deepEqual(httpPaths.filter(path => !['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path) && !(options.union?.http && path.startsWith('/v1/sync/')) && !(options.setup && path === '/v1/auth/setup')), [], 'operational HTTP fallback'); },
+    async close() { for (const pending of filePending.values()) clearTimeout(pending.timer); for (const timer of timers) clearTimeout(timer); for (const client of wss.clients) client.terminate(); await new Promise(resolve => wss.close(resolve)); await new Promise(resolve => server.close(resolve)); assert.deepEqual(httpPaths.filter(path => !['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path) && !(options.union?.http && path.startsWith('/v1/sync/')) && !(options.setup && path === '/v1/auth/setup') && !(options.configuration && (path === '/v1/config' || path === '/v1/config/plowshare.documents.ingest-budget'))), [], 'operational HTTP fallback'); },
   };
 }

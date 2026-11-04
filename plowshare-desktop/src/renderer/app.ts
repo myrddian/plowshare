@@ -311,6 +311,7 @@ async function request(command: Request) {
   // Every action this window issues answers with state; a payload-only reply
   // here would be a routing mistake rather than a reason to render stale state.
   update(replyState(reply));
+  if (reply.route) showWorkspace(reply.route);
   if (reply.notice) error(reply.notice);
   return reply;
 }
@@ -419,17 +420,32 @@ function openConnect() {
 }
 
 const deploymentControls = installApplicationDeployment(() => state, request);
-const serverAdministration = installServerAdmin(request);
+const serverAdministration = installServerAdmin(
+  request,
+  $('#workspace-administration'),
+);
+$('#server-admin-open').addEventListener('click', () =>
+  action({ action: 'workspace-administration' }),
+);
 const projectAccess = installProjectAccess(request);
-const toolConnections = installToolConnections(() => state, request);
+const toolConnections = installToolConnections(
+  () => state,
+  request,
+  () => {
+    background(
+      request({ action: 'workspace-administration' }).then(() =>
+        serverAdministration.select('tools'),
+      ),
+    );
+  },
+);
 const toolConnectionsButton = document.createElement('button');
 toolConnectionsButton.type = 'button';
-toolConnectionsButton.textContent = 'Tool connections';
+toolConnectionsButton.textContent = 'Desktop tools';
 toolConnectionsButton.addEventListener('click', () => {
-  const project = scope || state.personal?.project;
-  if (project) toolConnections.open(project);
+  toolConnections.open(scope || state.personal?.project || '');
 });
-$('#server-project-add').after(toolConnectionsButton);
+$('#connect-sidebar').before(toolConnectionsButton);
 
 const localFileStores = installFileStores(request);
 function render() {
@@ -437,12 +453,9 @@ function render() {
   serverAdministration.update(state);
   projectAccess.update(state);
   toolConnections.update();
-  toolConnectionsButton.disabled =
-    !state.connected || !(scope || state.personal?.project);
+  toolConnectionsButton.disabled = !state.connected;
   toolConnectionsButton.title =
-    scope || state.personal?.project
-      ? 'Manage tools for the selected execution project'
-      : 'Choose an execution project first';
+    'Manage local MCP hosts. Each profile names its execution project.';
   if (!state) return;
   const recoveryWarning = $('#personal-recovery-warning');
   recoveryWarning.textContent = state.personal?.warning ?? '';
@@ -2181,6 +2194,27 @@ const navigation = installNavigation((): NavigationItem[] => {
       icon: 'server',
       run: openConnect,
     },
+    {
+      id: 'desktop-tools',
+      title: 'Desktop tools',
+      detail: 'Local MCP hosts and your tool access',
+      group: 'Actions',
+      icon: 'tool',
+      disabled: toolConnectionsButton.disabled,
+      run: () => toolConnectionsButton.click(),
+    },
+    ...(state.connected && state.serverAdmin
+      ? [
+          {
+            id: 'administration',
+            title: 'Server administration',
+            detail: 'Configuration, accounts, server tools and pricing',
+            group: 'Actions' as const,
+            icon: 'server' as const,
+            run: () => action({ action: 'workspace-administration' }),
+          },
+        ]
+      : []),
   ];
 }, error);
 $('#connection-form').addEventListener(
@@ -2613,6 +2647,7 @@ function renderBreadcrumb() {
           Board: 'board-open',
           Swarm: 'swarm-open',
           'Manage work': 'controls-button',
+          'Server administration': 'server-admin-open',
         } as Record<string, string>
       )[workspaceRoute.label];
     if (current) button.setAttribute('aria-current', 'page');
@@ -2633,7 +2668,7 @@ function reportWorkspaceLayout() {
       width: bounds.width,
       height: bounds.height,
       visible:
-        !['chat', 'manage'].includes(workspaceRoute.kind) &&
+        !['chat', 'manage', 'administration'].includes(workspaceRoute.kind) &&
         !document.querySelector('dialog:modal'),
     };
     const stamp = JSON.stringify(layout);
@@ -2652,8 +2687,11 @@ function showWorkspace(route: WorkspaceRoute) {
   renderPersonal();
   $('#workspace-view-host').hidden = route.kind === 'chat';
   $('#workspace-manage').hidden = route.kind !== 'manage';
+  $('#workspace-administration').hidden = route.kind !== 'administration';
   $('#inspector-toggle').hidden = route.kind !== 'chat';
   if (changed) {
+    if (route.kind === 'administration') serverAdministration.open();
+    else serverAdministration.close();
     if (route.kind === 'manage') {
       try {
         operatorControls.open();

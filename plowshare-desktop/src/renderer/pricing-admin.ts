@@ -1,3 +1,4 @@
+import type { AdministrationPanel } from './admin-panel.ts';
 import { background } from './events.ts';
 import { decodeAdminCall } from '../admin-input.ts';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
@@ -9,15 +10,18 @@ import { commandProblem } from 'plowshare-client-ts/operations/commands';
 /** Rate editor holds the displayed version so concurrent administrators cannot overwrite edits. */
 export function installPricingAdmin(
   request: (value: Request) => Promise<Reply>,
-) {
-  const dialog = document.createElement('dialog');
-  dialog.id = 'pricing-admin-dialog';
-  dialog.className = 'server-admin-dialog';
-  dialog.setAttribute('aria-labelledby', 'pricing-admin-title');
-  dialog.innerHTML = `<header><h2 id="pricing-admin-title">Server pricing</h2><button type="button" data-close>Close</button></header>
+  host: HTMLElement,
+  back: () => void,
+): AdministrationPanel {
+  const panel = document.createElement('section');
+  panel.id = 'pricing-admin-panel';
+  panel.className = 'administration-panel';
+  panel.hidden = true;
+  panel.setAttribute('aria-labelledby', 'pricing-admin-title');
+  panel.innerHTML = `<header><h2 id="pricing-admin-title">Server pricing</h2><button type="button" data-close>Back to accounts</button></header>
     <p>Rates are currency units per million tokens. Changes apply to future requests. Recorded costs and retries retain their original pricing.</p>
     <p data-error role="alert" hidden></p><p data-saved role="status"></p><button type="button" data-refresh>Refresh rates</button>
-    <div data-prices></div><form data-edit hidden><h3 data-target></h3><p data-origin></p>
+    <div class="admin-columns"><div data-prices></div><section><form data-edit hidden><h3 data-target></h3><p data-origin></p>
     <label>Billing mode<select name="mode"><option>TOKEN</option><option>INCLUDED</option><option>ZERO_RATE</option><option>UNPRICED</option></select></label>
     <label>Currency<input name="currency" maxlength="3" placeholder="USD"></label>
     <div data-token><label>Input per million<input name="input" inputmode="decimal"></label><label>Output per million<input name="output" inputmode="decimal"></label>
@@ -27,10 +31,10 @@ export function installPricingAdmin(
     <p id="pricing-tier-help">Optional array of increasing fromInputTokens thresholds and full rates. Each tier replaces the base rates.</p></details></div>
     <label>Rate source<input name="source" maxlength="512" placeholder="Operator or contract reference"></label><button type="submit">Save pricing</button></form>
     <details><summary>Startup configuration</summary><p>Durable overrides take precedence. A deployment's configured intervals remain visible below.</p><pre data-configured></pre></details>
-    <button type="button" data-usage>Open usage statistics</button>`;
-  document.body.append(dialog);
+    <button type="button" data-usage>Open usage statistics</button></section></div>`;
+  host.append(panel);
   const get = <T extends HTMLElement>(selector: string) =>
-    dialog.querySelector<T>(selector)!;
+    panel.querySelector<T>(selector)!;
   const field = (name: string) =>
     get<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
       `[name="${name}"]`,
@@ -76,6 +80,16 @@ export function installPricingAdmin(
       2,
     );
     mode();
+    for (const button of get(
+      '[data-prices]',
+    ).querySelectorAll<HTMLButtonElement>('button'))
+      button.setAttribute(
+        'aria-pressed',
+        String(
+          button.dataset.price ===
+            JSON.stringify([row.billingRoute, row.model]),
+        ),
+      );
   }
   async function call<K extends 'admin.pricing.list' | 'admin.pricing.set'>(
     operation: K,
@@ -88,7 +102,7 @@ export function installPricingAdmin(
     });
     if (
       turn !== generation ||
-      !dialog.open ||
+      panel.hidden ||
       !state?.connected ||
       !state.serverAdmin
     )
@@ -98,9 +112,10 @@ export function installPricingAdmin(
   async function run(work: () => Promise<void>) {
     if (busy) return;
     busy = true;
+    const turn = generation;
     error();
     const controls = [
-      ...dialog.querySelectorAll<
+      ...panel.querySelectorAll<
         | HTMLButtonElement
         | HTMLInputElement
         | HTMLSelectElement
@@ -113,22 +128,28 @@ export function installPricingAdmin(
     try {
       await work();
     } catch (reason) {
-      if (dialog.open) error(reason);
+      if (turn === generation && !panel.hidden) error(reason);
     } finally {
-      busy = false;
-      controls.forEach((node) => {
-        node.disabled = false;
-      });
+      if (turn === generation) {
+        busy = false;
+        controls.forEach((node) => {
+          node.disabled = false;
+        });
+      }
     }
   }
   async function refresh() {
     rows = await call('admin.pricing.list');
+    render();
+  }
+  function render() {
     const parent = get('[data-prices]');
     parent.replaceChildren();
     if (!rows.length) parent.textContent = 'No served models are configured.';
     for (const row of rows) {
       const button = document.createElement('button');
       button.type = 'button';
+      button.dataset.price = JSON.stringify([row.billingRoute, row.model]);
       button.textContent = `${row.billingRoute} / ${row.model} · ${row.card?.mode ?? 'UNPRICED'}${row.card?.currency ? ' · ' + row.card.currency : ''}`;
       button.addEventListener('click', () => {
         error();
@@ -147,7 +168,7 @@ export function installPricingAdmin(
     get('[data-edit]').hidden = !current;
     if (current) choose(current);
   }
-  get('[data-close]').addEventListener('click', () => dialog.close());
+  get('[data-close]').addEventListener('click', back);
   get('[data-refresh]').addEventListener('click', () => {
     get('[data-saved]').textContent = '';
     background(run(refresh));
@@ -181,20 +202,27 @@ export function installPricingAdmin(
         }
         const problem = commandProblem('admin.pricing.set', payload);
         if (problem) throw new Error(problem);
-        selected = await call('admin.pricing.set', payload);
-        choose(selected);
+        const updated = await call('admin.pricing.set', payload);
+        rows = rows.map((row) =>
+          row.billingRoute === updated.billingRoute &&
+          row.model === updated.model
+            ? updated
+            : row,
+        );
+        selected = updated;
+        render();
         get('[data-saved]').textContent =
           'Pricing saved. Future requests use these rates; recorded history is unchanged.';
-        await refresh();
       }),
     );
   });
   get('[data-usage]').addEventListener('click', () => {
-    dialog.close();
-    document.querySelector<HTMLDialogElement>('#server-admin-dialog')?.close();
+    close();
     document.querySelector<HTMLButtonElement>('#usage-open')?.click();
   });
-  dialog.addEventListener('close', () => {
+  function close() {
+    busy = false;
+    panel.hidden = true;
     generation++;
     rows = [];
     selected = undefined;
@@ -204,17 +232,16 @@ export function installPricingAdmin(
     get('[data-configured]').textContent = '';
     get('[data-saved]').textContent = '';
     error();
-  });
+  }
   return {
+    element: panel,
     open() {
       if (state?.connected && state.serverAdmin) {
-        dialog.showModal();
+        panel.hidden = false;
         background(run(refresh));
       }
     },
-    close() {
-      if (dialog.open) dialog.close();
-    },
+    close,
     update(next: DesktopState) {
       if (
         state &&
@@ -224,7 +251,7 @@ export function installPricingAdmin(
           !next.serverAdmin)
       ) {
         generation++;
-        if (dialog.open) dialog.close();
+        if (!panel.hidden) close();
       }
       state = next;
     },

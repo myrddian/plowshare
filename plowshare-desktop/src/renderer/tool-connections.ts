@@ -22,6 +22,7 @@ import type {
 export function installToolConnections(
   state: () => DesktopState,
   request: (value: Request) => Promise<Reply>,
+  openServer: () => void,
 ) {
   const dialog = document.createElement('dialog');
   dialog.setAttribute('aria-label', 'Tool connections');
@@ -50,37 +51,7 @@ export function installToolConnections(
     }
     return reply;
   }
-  const ipcCall = (value: ManagementRequest): ProviderManagementCall => {
-    // Complete SDK boundary validation precedes this mapped-union compiler assertion.
-    const checked = managementRequest(value.type, value.payload);
-    return {
-      action: 'provider-management',
-      operation: checked.type,
-      payload: checked.payload,
-    } as ProviderManagementCall;
-  };
-  const management: ProviderManagement = {
-    async request(operation, payload) {
-      const reply = await call(ipcCall(managementRequest(operation, payload)));
-      return decodeReply(operation, reply.providerManagement);
-    },
-    async execute(value) {
-      return management.request(value.type, value.payload);
-    },
-    async pending() {
-      const reply = await call({ action: 'provider-management-pending' });
-      if (!reply.providerManagementPending)
-        throw new Error('Unreadable management bookmarks.');
-      return reply.providerManagementPending.map(decodeManagementIntent);
-    },
-    async recover(input) {
-      const intent = decodeManagementIntent(input),
-        reply = await call({ action: 'provider-management-recover', intent });
-      return 'binding' in intent
-        ? decodeReply('tool.scope.host.receipt', reply.providerManagement)
-        : decodeReply('provider.connection.receipt', reply.providerManagement);
-    },
-  };
+  const management = providerManagement(call);
   dialog.addEventListener('close', () => {
     controls?.destroy();
     native?.destroy();
@@ -148,9 +119,16 @@ export function installToolConnections(
         serverTab = document.createElement('button');
       localTab.type = serverTab.type = 'button';
       localTab.textContent = 'This client';
-      serverTab.textContent = 'Server';
+      serverTab.textContent = state().serverAdmin
+        ? 'Server administration…'
+        : 'My server tools';
       for (const tab of [localTab, serverTab]) tab.setAttribute('role', 'tab');
       const choose = (local: boolean) => {
+        if (!local && state().serverAdmin) {
+          dialog.close();
+          openServer();
+          return;
+        }
         native?.active(local);
         if (controls) {
           controls.element.hidden = local;
@@ -163,7 +141,12 @@ export function installToolConnections(
         dialog.scrollTop = 0;
       };
       localTab.addEventListener('click', () => choose(true));
-      serverTab.addEventListener('click', () => choose(false));
+      serverTab.addEventListener('click', () => {
+        if (state().serverAdmin) {
+          dialog.close();
+          openServer();
+        } else choose(false);
+      });
       tabs.addEventListener('keydown', (event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
           return;
@@ -198,4 +181,85 @@ export function installToolConnections(
         dialog.close();
     },
   };
+}
+
+/** Shared typed management adapter; each mounted view supplies its own identity fence. */
+function providerManagement(
+  call: (value: Request) => Promise<Reply>,
+): ProviderManagement {
+  const ipcCall = (value: ManagementRequest): ProviderManagementCall => {
+    // Complete SDK boundary validation precedes this mapped-union compiler assertion.
+    const checked = managementRequest(value.type, value.payload);
+    return {
+      action: 'provider-management',
+      operation: checked.type,
+      payload: checked.payload,
+    } as ProviderManagementCall;
+  };
+  const management: ProviderManagement = {
+    async request(operation, payload) {
+      const reply = await call(ipcCall(managementRequest(operation, payload)));
+      return decodeReply(operation, reply.providerManagement);
+    },
+    async execute(value) {
+      return management.request(value.type, value.payload);
+    },
+    async pending() {
+      const reply = await call({ action: 'provider-management-pending' });
+      if (!reply.providerManagementPending)
+        throw new Error('Unreadable management bookmarks.');
+      return reply.providerManagementPending.map(decodeManagementIntent);
+    },
+    async recover(input) {
+      const intent = decodeManagementIntent(input),
+        reply = await call({ action: 'provider-management-recover', intent });
+      return 'binding' in intent
+        ? decodeReply('tool.scope.host.receipt', reply.providerManagement)
+        : decodeReply('provider.connection.receipt', reply.providerManagement);
+    },
+  };
+  return management;
+}
+
+/** Server-owned endpoints and assignments mount inside administration, with unchanged SDK authorization. */
+export function serverToolConnections(
+  state: () => DesktopState,
+  request: (value: Request) => Promise<Reply>,
+  project: string,
+): ToolConnectionControls {
+  const identity = JSON.stringify([state().base, state().handle]);
+  const current = () =>
+    state().connected &&
+    state().serverAdmin === true &&
+    identity === JSON.stringify([state().base, state().handle]);
+  const call = async (value: Request): Promise<Reply> => {
+    if (!current()) throw new Error('Administration connection changed.');
+    const reply = await request(value);
+    if (!current())
+      throw new Error(
+        'Administration connection changed; previous reply discarded.',
+      );
+    if (reply.providerManagementRefusal) {
+      const refusal = reply.providerManagementRefusal;
+      throw new ProviderManagementRefused(
+        refusal.operation,
+        refusal.code,
+        refusal.unsupported,
+      );
+    }
+    return reply;
+  };
+  return toolConnectionControls({
+    project,
+    management: providerManagement(call),
+    context: () => ({
+      origin: state().base,
+      actor: state().handle,
+      connected: current(),
+      serverAdmin: state().serverAdmin === true,
+    }),
+    authorize: async (url) => {
+      await call({ action: 'open-link', url });
+    },
+  });
 }

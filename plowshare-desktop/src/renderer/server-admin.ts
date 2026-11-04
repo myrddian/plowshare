@@ -1,3 +1,6 @@
+import { installConfigurationAdmin } from './configuration-admin.ts';
+import { serverToolConnections } from './tool-connections.ts';
+import type { ToolConnectionControls } from '../../../clients/tool-connections.ts';
 import { background } from './events.ts';
 import { decodeAdminCall } from '../admin-input.ts';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
@@ -15,31 +18,52 @@ import type {
   ServerAccount,
 } from 'plowshare-client-ts/operations/conversation-replies';
 
-/** Transient operator dialog. Passwords exist only in the current response and reveal field. */
+/** Workspace-owned administration. Section changes discard revealed secrets and fence late replies. */
 export function installServerAdmin(
   request: (request: Request) => Promise<Reply>,
+  host: HTMLElement,
 ) {
-  const services = installServiceAdmin(request);
-  const pricing = installPricingAdmin(request);
-  const opener =
-    document.querySelector<HTMLButtonElement>('#server-admin-open')!;
-  const dialog = document.createElement('dialog');
-  dialog.id = 'server-admin-dialog';
-  dialog.className = 'server-admin-dialog';
-  dialog.setAttribute('aria-labelledby', 'server-admin-title');
-  dialog.innerHTML = `<header><h2 id="server-admin-title">Server administration</h2><button type="button" data-close aria-label="Close administration">Close</button></header>
-    <p data-error role="alert" hidden></p>
-    <div class="admin-actions"><button type="button" data-refresh>Refresh</button><button type="button" data-services>Service accounts</button><button type="button" data-pricing>Pricing</button></div>
-    <h3>Accounts</h3><form data-create><label>Account name <input name="handle" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" autocomplete="off"></label>
-    <label><input name="serverAdmin" type="checkbox">Server administrator</label><button>Create account</button></form>
+  type Section =
+    'configuration' | 'accounts' | 'services' | 'tools' | 'pricing' | 'audit';
+  host.innerHTML = `<div class="administration-shell"><header class="administration-heading"><div><h1>Server administration</h1><p data-server-identity></p></div><button type="button" data-return>Return to conversation</button></header>
+    <div class="administration-layout"><nav class="administration-navigation" aria-label="Administration sections"><button type="button" data-section="configuration">Configuration</button><div class="admin-nav-label">Identity &amp; access</div><button type="button" data-section="accounts">Accounts</button><button type="button" data-section="services" data-services>Service accounts</button><div class="admin-nav-label">Tools &amp; accounting</div><button type="button" data-section="tools">Server tools</button><button type="button" data-section="pricing" data-pricing>Pricing</button><button type="button" data-section="audit">Audit history</button></nav><div class="administration-content"><p data-error role="alert" hidden></p><div data-panels></div></div></div></div>`;
+  const panels = host.querySelector<HTMLElement>('[data-panels]')!;
+  const accountsPanel = document.createElement('section');
+  accountsPanel.id = 'accounts-admin-panel';
+  accountsPanel.className = 'administration-panel';
+  accountsPanel.hidden = true;
+  accountsPanel.innerHTML = `<header><div><h2>Accounts</h2><p>Account roles, access and login sessions.</p></div><button type="button" data-refresh>Refresh accounts</button></header>
+    <details class="admin-create"><summary>Create account</summary><form data-create><label>Account name <input name="handle" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" autocomplete="off"></label>
+    <label><input name="serverAdmin" type="checkbox">Server administrator</label><button>Create account</button></form></details>
     <section data-credential hidden><h3>Temporary password</h3><p data-credential-name></p><p>Give this password to the account owner. They must change it before using the server.</p><input data-password readonly aria-label="Temporary password" autocomplete="off"><button type="button" data-hide-password>Dismiss password</button></section>
-    <div class="admin-columns"><div data-accounts></div><section data-account hidden><h3 data-account-name></h3><p data-account-status></p>
+    <div class="admin-columns"><div data-accounts aria-label="Accounts"></div><section data-account hidden><h3 data-account-name></h3><p data-account-status></p>
     <div class="admin-actions"><button type="button" data-enabled></button><button type="button" data-role></button><button type="button" data-reset>Reset password</button><button type="button" data-revoke>Sign out all sessions</button></div>
-    <h4>Active login sessions</h4><div data-sessions></div></section></div>
-    <h3>Audit history</h3><p>Newest changes first. Account changes and session revocation are retained on the server.</p><div data-audit></div><button type="button" data-older hidden>Load older entries</button>`;
-  document.body.append(dialog);
+    <h4>Active login sessions</h4><div data-sessions></div></section></div>`;
+  panels.append(accountsPanel);
+  const auditPanel = document.createElement('section');
+  auditPanel.id = 'audit-admin-panel';
+  auditPanel.className = 'administration-panel';
+  auditPanel.hidden = true;
+  auditPanel.innerHTML = `<header><div><h2>Audit history</h2><p>Account changes and session revocations, newest first.</p></div><button type="button" data-audit-refresh>Refresh history</button></header><div data-audit></div><button type="button" data-older hidden>Load older entries</button>`;
+  panels.append(auditPanel);
+  const toolsPanel = document.createElement('section');
+  toolsPanel.id = 'server-tools-admin-panel';
+  toolsPanel.className = 'administration-panel';
+  toolsPanel.hidden = true;
+  toolsPanel.innerHTML = `<header><div><h2>Server tools</h2><p>Shared endpoints and project assignments. Credentials remain scoped to their owner.</p></div></header><label class="admin-project-picker">Execution project<select data-tools-project aria-label="Server tools execution project"></select></label><p data-tools-empty hidden>No execution projects are available for server tool management.</p><div data-tools-host></div>`;
+  panels.append(toolsPanel);
   const get = <T extends HTMLElement>(selector: string) =>
-    dialog.querySelector<T>(selector)!;
+    host.querySelector<T>(selector)!;
+  let active: Section = 'configuration';
+  let snapshot: DesktopState | undefined;
+  let tools: ToolConnectionControls | undefined;
+  const configuration = installConfigurationAdmin(request, panels);
+  const services = installServiceAdmin(request, panels, () =>
+    select('accounts'),
+  );
+  const pricing = installPricingAdmin(request, panels, () =>
+    select('accounts'),
+  );
   let connected = false,
     handle = '',
     base = '',
@@ -68,16 +92,17 @@ export function installServerAdmin(
       action: 'server-admin',
       ...decodeAdminCall(operation, payload),
     });
-    if (turn !== generation || !dialog.open || !connected)
+    if (turn !== generation || host.hidden || !connected)
       throw new Error('Administration connection changed.');
     return decodeReply(operation, response.administration);
   };
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
     busy = true;
+    const turn = generation;
     error();
     const controls = [
-      ...dialog.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+      ...accountsPanel.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
         'button,input',
       ),
     ];
@@ -87,13 +112,15 @@ export function installServerAdmin(
     try {
       await work();
     } catch (reason) {
-      if (dialog.open) error(reason);
+      if (turn === generation && !host.hidden) error(reason);
     } finally {
-      busy = false;
-      controls.forEach((node) => {
-        node.disabled = false;
-      });
-      renderAccount();
+      if (turn === generation) {
+        busy = false;
+        controls.forEach((node) => {
+          node.disabled = false;
+        });
+        renderAccount();
+      }
     }
   };
   function showCredential(value: AccountCredential) {
@@ -117,7 +144,7 @@ export function installServerAdmin(
       : 'Make administrator';
     get<HTMLButtonElement>('[data-reset]').disabled =
       busy || account.handle === handle;
-    dialog
+    accountsPanel
       .querySelectorAll<HTMLButtonElement>('[data-account-handle]')
       .forEach((button) =>
         button.setAttribute(
@@ -182,42 +209,90 @@ export function installServerAdmin(
     }
     renderAccount();
     await sessions();
-    await audit();
   }
-  get('[data-pricing]').addEventListener('click', () => {
+  function mountTools() {
+    tools?.destroy();
+    tools = undefined;
+    get('[data-tools-host]').replaceChildren();
+    const project = get<HTMLSelectElement>('[data-tools-project]').value;
+    get('[data-tools-empty]').hidden = !!project;
+    if (!project || !snapshot) return;
+    tools = serverToolConnections(() => snapshot!, request, project);
+    tools.element.open = true;
+    get('[data-tools-host]').append(tools.element);
+  }
+  function deactivate() {
+    generation++;
+    busy = false;
     clearPassword();
-    pricing.open();
-  });
-  get('[data-services]').addEventListener('click', () => {
-    clearPassword();
-    services.open();
-  });
-  opener.addEventListener('click', () => {
-    clearPassword();
-    dialog.showModal();
-    background(run(refresh));
-  });
-  get('[data-close]').addEventListener('click', () => dialog.close());
-  dialog.addEventListener('close', () => {
+    configuration.close();
     services.close();
     pricing.close();
-    generation++;
-    clearPassword();
-    accounts = [];
-    selected = '';
-    get('[data-accounts]').replaceChildren();
-    get('[data-sessions]').replaceChildren();
-    get('[data-audit]').replaceChildren();
+    tools?.destroy();
+    tools = undefined;
+    get('[data-tools-host]').replaceChildren();
+    accountsPanel.hidden = auditPanel.hidden = toolsPanel.hidden = true;
     error();
+  }
+  function select(section: Section) {
+    if (host.hidden || !connected) return;
+    deactivate();
+    active = section;
+    for (const button of host.querySelectorAll<HTMLButtonElement>(
+      '[data-section]',
+    )) {
+      if (button.dataset.section === section)
+        button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    }
+    if (section === 'configuration') configuration.open();
+    else if (section === 'services') services.open();
+    else if (section === 'pricing') pricing.open();
+    else if (section === 'tools') {
+      toolsPanel.hidden = false;
+      const picker = get<HTMLSelectElement>('[data-tools-project]');
+      const selectedProject = picker.value;
+      picker.replaceChildren();
+      for (const project of snapshot?.projects ?? []) {
+        const option = document.createElement('option');
+        option.value = project.name;
+        option.textContent = project.displayName ?? project.name;
+        picker.append(option);
+      }
+      if (
+        [...picker.options].some((option) => option.value === selectedProject)
+      )
+        picker.value = selectedProject;
+      mountTools();
+    } else if (section === 'accounts') {
+      accountsPanel.hidden = false;
+      background(run(refresh));
+    } else {
+      auditPanel.hidden = false;
+      background(run(() => audit()));
+    }
+  }
+  for (const button of host.querySelectorAll<HTMLButtonElement>(
+    '[data-section]',
+  ))
+    button.addEventListener('click', () =>
+      select(button.dataset.section as Section),
+    );
+  get('[data-tools-project]').addEventListener('change', mountTools);
+  get('[data-return]').addEventListener('click', () => {
+    background(request({ action: 'workspace-chat' }));
   });
-  get('[data-hide-password]').addEventListener('click', clearPassword);
   get('[data-refresh]').addEventListener('click', () => {
     clearPassword();
     background(run(refresh));
   });
+  get('[data-audit-refresh]').addEventListener('click', () => {
+    background(run(() => audit()));
+  });
   get('[data-older]').addEventListener('click', () => {
     background(run(() => audit(true)));
   });
+  get('[data-hide-password]').addEventListener('click', clearPassword);
   get<HTMLFormElement>('[data-create]').addEventListener('submit', (event) => {
     event.preventDefault();
     clearPassword();
@@ -275,7 +350,22 @@ export function installServerAdmin(
     );
   });
   return {
+    open() {
+      select(active);
+    },
+    select,
+    close() {
+      deactivate();
+      accounts = [];
+      selected = '';
+      before = 0;
+      get('[data-accounts]').replaceChildren();
+      get('[data-sessions]').replaceChildren();
+      get('[data-audit]').replaceChildren();
+      get<HTMLFormElement>('[data-create]').reset();
+    },
     update(state: DesktopState) {
+      configuration.update(state);
       services.update(state);
       pricing.update(state);
       const available = state.connected && state.serverAdmin === true;
@@ -284,14 +374,20 @@ export function installServerAdmin(
         handle !== state.handle ||
         (connected && !available)
       ) {
-        generation++;
-        if (dialog.open) dialog.close();
-        clearPassword();
+        this.close();
+        active = 'configuration';
+        if (!host.hidden) background(request({ action: 'workspace-chat' }));
       }
+      snapshot = state;
       connected = available;
       handle = state.handle;
       base = state.base;
-      opener.hidden = !available;
+      get('[data-server-identity]').textContent = state.connected
+        ? `${state.base} · ${state.handle}`
+        : 'Disconnected';
+      document.querySelector<HTMLButtonElement>('#server-admin-open')!.hidden =
+        !available;
+      tools?.update();
     },
   };
 }

@@ -200,8 +200,11 @@ for package limits, commands, FileStore authorization and rollback semantics.
 
 ### MCP tool connections
 
-Desktop's project **Tool connections** dialog separates **This client** HTTP/STDIO
-profiles from **Server** HTTP endpoints, per-account credentials and assignments.
+Desktop's **Desktop tools** button sits beside connection controls, separate from
+Application deployment. **This client** contains local HTTP/STDIO profiles. Server
+administrators manage shared endpoints and assignments in **Server administration
+→ Server tools**, with an explicit execution project. Other accounts retain
+**My server tools** for their own credentials and assignments.
 Saving a local profile does not start it; launch and sharing with server-owned work
 require separate consent. Closing the dialog retains hosts, while disconnect/account
 change/app exit stops them. TUI `/mcp` provides guided forms for the same choices.

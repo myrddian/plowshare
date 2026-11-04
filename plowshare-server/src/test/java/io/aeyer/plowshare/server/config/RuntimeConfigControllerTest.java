@@ -9,6 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -16,8 +21,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import io.aeyer.plowshare.server.api.ApiExceptionHandler;
+import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.auth.AuthFilter;
 import io.aeyer.plowshare.server.auth.AuthProperties;
+import io.aeyer.plowshare.server.auth.ServerAdministratorAccess;
+import io.aeyer.plowshare.server.auth.ServerAdministratorAccessConfig;
 import io.aeyer.plowshare.server.auth.TokenStore;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -28,6 +36,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -95,6 +104,8 @@ class RuntimeConfigControllerTest {
    */
   private static final String NOT_LIVE = "plowshare.auth.token-file";
 
+  private static final String ADMINISTRATOR = "configuration-admin";
+
   private static final String OPERATOR_TOKEN = "an-operator-token-for-this-test";
 
   /** The map the seed writes into at boot, per test method. */
@@ -110,15 +121,8 @@ class RuntimeConfigControllerTest {
    * <b>that the refusal happens before the write</b>. An endpoint that answered 401 after upserting
    * the row would satisfy a status-only assertion and would have changed the server anyway.
    *
-   * <p><b>This asserts authentication and not authorization, and this server has no finer
-   * distinction to assert.</b> The method was called {@code a_write_needs_the_operator_token},
-   * which named a privilege tier that does not exist here: {@code AuthFilter.accepted} asks {@link
-   * TokenStore#validAccess} and nothing else, and {@link TokenStore#acceptOperator} stores the
-   * operator token <em>as</em> an ordinary access grant — on a never-expiring chain, but an access
-   * grant. So a session token minted by {@code AuthController} passes this endpoint exactly as the
-   * operator token does, and the old name asserted a rule the code could not have broken. The
-   * credential below is an operator token only because it is the cheapest one to mint in a unit
-   * test.
+   * <p>The operator credential names the explicitly configured administrator. The controller
+   * independently rechecks that identity's current role, as it does for ordinary login sessions.
    */
   @Test
   void a_write_is_refused_without_a_credential_and_refused_before_it_writes() {
@@ -126,6 +130,8 @@ class RuntimeConfigControllerTest {
         new TokenStore(
             Clock.systemUTC(), Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofSeconds(10));
     tokens.acceptOperator(OPERATOR_TOKEN);
+    AuthProperties properties = new AuthProperties();
+    properties.setAdminHandle(ADMINISTRATOR);
 
     serving(
         config,
@@ -133,7 +139,7 @@ class RuntimeConfigControllerTest {
           MockMvc mvc =
               MockMvcBuilders.standaloneSetup(controller)
                   .setControllerAdvice(new ApiExceptionHandler())
-                  .addFilters(new AuthFilter(tokens, new AuthProperties()))
+                  .addFilters(new AuthFilter(tokens, properties))
                   .build();
 
           mvc.perform(write(BUDGET, "900")).andExpect(status().isUnauthorized());
@@ -146,6 +152,143 @@ class RuntimeConfigControllerTest {
               .andExpect(status().isOk());
           assertEquals(Optional.of("900"), config.get(BUDGET));
         });
+  }
+
+  @Test
+  void unauthenticated_regular_restricted_and_service_callers_cannot_access_configuration() {
+    TokenStore tokens =
+        new TokenStore(
+            Clock.systemUTC(), Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofSeconds(10));
+    String regular = tokens.issuePair("regular-user", false).access();
+    String restricted = tokens.issuePair(ADMINISTRATOR, true).access();
+    tokens.acceptOperator(OPERATOR_TOKEN);
+    String service = "pss_configuration-service-fixture";
+    tokens.withServiceCredentials(
+        presented ->
+            service.equals(presented)
+                ? Optional.of(new TokenStore.Authentication("@service/fixture", false, null))
+                : Optional.empty());
+    RuntimeConfig untouched = mock(RuntimeConfig.class);
+    serving(
+        untouched,
+        controller -> {
+          MockMvc mvc =
+              MockMvcBuilders.standaloneSetup(controller)
+                  .setControllerAdvice(new ApiExceptionHandler())
+                  .addFilters(new AuthFilter(tokens, new AuthProperties()))
+                  .build();
+          for (var request : List.of(readConfiguration(), write(BUDGET, "900"))) {
+            mvc.perform(request).andExpect(status().isUnauthorized());
+          }
+          for (String credential : List.of(regular, service, OPERATOR_TOKEN)) {
+            mvc.perform(readConfiguration().header("Authorization", "Bearer " + credential))
+                .andExpect(status().isForbidden());
+            // Even invalid keys disclose nothing until the caller is authorized. An account
+            // parameter or claimed servlet principal cannot replace the filter's identity.
+            mvc.perform(
+                    write(NOT_LIVE, "900")
+                        .header("Authorization", "Bearer " + credential)
+                        .param("account", ADMINISTRATOR)
+                        .param(AuthFilter.HANDLE_ATTRIBUTE, ADMINISTRATOR)
+                        .header(AuthFilter.HANDLE_ATTRIBUTE, ADMINISTRATOR)
+                        .principal(() -> ADMINISTRATOR))
+                .andExpect(status().isForbidden());
+          }
+          mvc.perform(readConfiguration().header("Authorization", "Bearer " + restricted))
+              .andExpect(status().isUnauthorized());
+          mvc.perform(write(BUDGET, "900").header("Authorization", "Bearer " + restricted))
+              .andExpect(status().isUnauthorized());
+          verifyNoInteractions(untouched);
+        });
+  }
+
+  @Test
+  void administrator_login_can_read_and_write_but_role_removal_applies_to_the_next_request() {
+    TokenStore tokens =
+        new TokenStore(
+            Clock.systemUTC(), Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofSeconds(10));
+    String access = tokens.issuePair(ADMINISTRATOR, false).access();
+    AtomicBoolean administrator = new AtomicBoolean(true);
+    serving(
+        config,
+        actor -> ADMINISTRATOR.equals(actor) && administrator.get(),
+        controller -> {
+          MockMvc mvc =
+              MockMvcBuilders.standaloneSetup(controller)
+                  .setControllerAdvice(new ApiExceptionHandler())
+                  .addFilters(new AuthFilter(tokens, new AuthProperties()))
+                  .build();
+          mvc.perform(readConfiguration().header("Authorization", "Bearer " + access))
+              .andExpect(status().isOk());
+          mvc.perform(write(BUDGET, " 900\n").header("Authorization", "Bearer " + access))
+              .andExpect(status().isOk());
+          assertEquals(Optional.of(" 900\n"), config.get(BUDGET));
+          administrator.set(false);
+          mvc.perform(readConfiguration().header("Authorization", "Bearer " + access))
+              .andExpect(status().isForbidden());
+          mvc.perform(write(BUDGET, "1200").header("Authorization", "Bearer " + access))
+              .andExpect(status().isForbidden());
+          assertEquals(Optional.of(" 900\n"), config.get(BUDGET));
+        });
+  }
+
+  @Test
+  void missing_or_disabled_account_authority_fails_closed_even_with_authentication_disabled() {
+    AuthProperties properties = new AuthProperties();
+    properties.setEnabled(false);
+    properties.setAdminHandle(ADMINISTRATOR);
+    RuntimeConfig untouched = mock(RuntimeConfig.class);
+    serving(
+        untouched,
+        account -> false,
+        controller -> {
+          MockMvc mvc =
+              MockMvcBuilders.standaloneSetup(controller)
+                  .setControllerAdvice(new ApiExceptionHandler())
+                  .addFilters(
+                      new AuthFilter(
+                          new TokenStore(
+                              Clock.systemUTC(),
+                              Duration.ofMinutes(15),
+                              Duration.ofDays(7),
+                              Duration.ofSeconds(10)),
+                          properties))
+                  .build();
+          mvc.perform(readConfiguration()).andExpect(status().isForbidden());
+          mvc.perform(write(BUDGET, "900")).andExpect(status().isForbidden());
+          verifyNoInteractions(untouched);
+        });
+    serving(
+        untouched,
+        controller -> {
+          MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+          mvc.perform(readConfiguration().principal(() -> ADMINISTRATOR))
+              .andExpect(status().isForbidden());
+          mvc.perform(write(BUDGET, "900").principal(() -> ADMINISTRATOR))
+              .andExpect(status().isForbidden());
+          verifyNoInteractions(untouched);
+        });
+  }
+
+  private static MockHttpServletRequestBuilder readConfiguration() {
+    return get("/v1/config").with(servletPath("/v1/config"));
+  }
+
+  @Test
+  void production_authorization_wiring_rechecks_the_existing_persisted_role_predicate() {
+    AdminStore accounts = mock(AdminStore.class);
+    when(accounts.isServerAdmin(ADMINISTRATOR)).thenReturn(true, false);
+    new ApplicationContextRunner()
+        .withBean(AdminStore.class, () -> accounts)
+        .withUserConfiguration(ServerAdministratorAccessConfig.class)
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              ServerAdministratorAccess access = context.getBean(ServerAdministratorAccess.class);
+              assertTrue(access.isServerAdmin(ADMINISTRATOR));
+              assertFalse(access.isServerAdmin(ADMINISTRATOR));
+              verify(accounts, times(2)).isServerAdmin(ADMINISTRATOR);
+            });
   }
 
   /**
@@ -638,6 +781,10 @@ class RuntimeConfigControllerTest {
    * refresh and the controller only after it.
    */
   private void serving(RuntimeConfig store, Served body) {
+    serving(store, ADMINISTRATOR::equals, body);
+  }
+
+  private void serving(RuntimeConfig store, ServerAdministratorAccess administrators, Served body) {
     new ApplicationContextRunner()
         .withBean(RuntimeConfig.class, () -> config)
         .withInitializer(context -> ConfigurationPropertySources.attach(context.getEnvironment()))
@@ -652,12 +799,16 @@ class RuntimeConfigControllerTest {
               assertNull(context.getStartupFailure());
               body.accept(
                   new RuntimeConfigController(
-                      context.getBean(RuntimeConfigSeed.class), store, context.getEnvironment()));
+                      context.getBean(RuntimeConfigSeed.class),
+                      store,
+                      context.getEnvironment(),
+                      administrators));
             });
   }
 
   private static MockMvc open(RuntimeConfigController controller) {
     return MockMvcBuilders.standaloneSetup(controller)
+        .defaultRequest(get("/").requestAttr(AuthFilter.HANDLE_ATTRIBUTE, ADMINISTRATOR))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }

@@ -114,8 +114,15 @@ authority. Do not rely on the historical assumption that every password account
 is a server administrator. Managing a project does not grant every private
 document or other account's conversation to the administrator's model context.
 
-Use **Server administration** in the desktop for accounts, role/enabled changes,
-password recovery, session revocation and audit history. Use a project's **Access**
+Use **Server administration** in the desktop for separate Configuration, Accounts,
+Service accounts, Server tools, Pricing and Audit history sections. The workspace
+keeps its navigation visible while you select an account or edit a setting.
+Configuration exposes declared live keys only; startup configuration remains in
+the deployment. Pinned values are restored from deployment configuration on restart.
+Desktop uses the configuration HTTP boundary and checks administrator status
+before access. The HTTP endpoints independently require the current administrator
+role of an enabled human account; project roles and service credentials cannot
+read or change live configuration. Use a project's **Access**
 control for its grants. The [account administration guide](../server-administration.md)
 includes complete CLI/TUI procedures and the last-administrator/Manager safeguards.
 
