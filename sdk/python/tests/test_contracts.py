@@ -163,6 +163,42 @@ class ContractsTest(unittest.TestCase):
                 )
             )[1]["maxTurns"]
         )
+        # The turn cap and the agent name ARE bounded by the generated schema, so this SDK
+        # refuses them without the TypeScript gate's help: maxTurns carries
+        # integer/minimum/maximum and agent carries minLength/maxLength/pattern/trimmed.
+        for bad in (0, -1, 1.5, 2147483648):
+            with self.assertRaises(ValueError):
+                encode_request(
+                    contracts.ApplicationChildRunRequest(
+                        conversation="c",
+                        child=child,
+                        agent="worker",
+                        task="do it",
+                        max_turns=bad,
+                    )
+                )
+        for blank in ("", " "):
+            with self.assertRaises(ValueError):
+                encode_request(
+                    contracts.ApplicationChildRunRequest(
+                        conversation="c",
+                        child=child,
+                        agent=blank,
+                        task="do it",
+                        max_turns=3,
+                    )
+                )
+        # `task` is a bare string shape and is the one request-side bound that is
+        # TypeScript-only, so a blank task reaches the wire from here. Asserted rather than
+        # described, so ADR 0042's "one of three" is checkable.
+        self.assertEqual(
+            "",
+            encode_request(
+                contracts.ApplicationChildRunRequest(
+                    conversation="c", child=child, agent="worker", task="", max_turns=3
+                )
+            )[1]["task"],
+        )
         running = {
             "child": child,
             "job": "job_1",

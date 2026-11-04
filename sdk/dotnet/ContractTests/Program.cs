@@ -75,6 +75,23 @@ if(!foreignCredentialRefused)throw new Exception("Foreign credential receipt acc
     // null is the one absence the shape allows: it leaves the agent's own turn cap.
     var undecided = Codec.Input("application.child.run", new ApplicationChildRunRequest { Conversation = "c", Child = child, Agent = "worker", Task = "do it", MaxTurns = ScheduleDefinitionDtoLimitsDtoMaxModelCalls.FromVariant1(default) });
     if (undecided.GetProperty("maxTurns").ValueKind != JsonValueKind.Null) throw new Exception("An undecided turn cap was not sent as null");
+    // The turn cap and the agent name ARE bounded by the generated schema, so this SDK refuses
+    // them without the TypeScript gate's help; `task` is a bare string shape and is the one
+    // request-side bound that is TypeScript-only. UNCOMPILED: no dotnet toolchain here.
+    foreach (var badTurns in new[] { 0d, -1d, 1.5d, 2147483648d })
+    {
+        bool refused = false;
+        try { Codec.Input("application.child.run", new ApplicationChildRunRequest { Conversation = "c", Child = child, Agent = "worker", Task = "do it", MaxTurns = ScheduleDefinitionDtoLimitsDtoMaxModelCalls.FromVariant2(badTurns) }); } catch (JsonException) { refused = true; }
+        if (!refused) throw new Exception($"Accepted an out-of-bounds turn cap: {badTurns}");
+    }
+    foreach (var blankAgent in new[] { "", " " })
+    {
+        bool refused = false;
+        try { Codec.Input("application.child.run", new ApplicationChildRunRequest { Conversation = "c", Child = child, Agent = blankAgent, Task = "do it", MaxTurns = ScheduleDefinitionDtoLimitsDtoMaxModelCalls.FromVariant2(3) }); } catch (JsonException) { refused = true; }
+        if (!refused) throw new Exception("Accepted a blank agent name");
+    }
+    // The one that is not bounded here, asserted so the ADR's "one of three" is checkable.
+    if (Codec.Input("application.child.run", new ApplicationChildRunRequest { Conversation = "c", Child = child, Agent = "worker", Task = "", MaxTurns = ScheduleDefinitionDtoLimitsDtoMaxModelCalls.FromVariant2(3) }).GetProperty("task").GetString() != "") throw new Exception("A blank task is refused by the TypeScript gate alone");
     using var startedReply = JsonDocument.Parse($$"""{"child":"{{child}}","job":"job_1","conversation":"cnv_child","agent":"worker"}""");
     var started = Codec.Result<ContainedApplicationRunningDto>("application.child.run", startedReply.RootElement);
     // The conversation answered is the child's own, never the container's that was named.

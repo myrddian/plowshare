@@ -2,6 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { decodeRequest } from './schema.ts';
 import { request, resultOf } from './direct.ts';
 import { isMutation } from './discovery.ts';
+import { OPERATION_SCHEMAS } from './operation-schemas.ts';
+
+/** The properties of a `$ref`-shaped input, resolved one level through `$defs`. */
+const resolved = (
+  operation: string,
+): Record<string, Record<string, unknown>> => {
+  const reference = (OPERATION_SCHEMAS.inputs[operation] as { $ref?: string })
+    .$ref!.split('/')
+    .pop()!;
+  return (
+    OPERATION_SCHEMAS.$defs[reference] as {
+      properties: Record<string, Record<string, unknown>>;
+    }
+  ).properties;
+};
 
 const conversation = 'caller-conversation';
 const id = '11111111-1111-1111-1111-111111111111';
@@ -167,6 +182,19 @@ describe('contained Application operations', () => {
         maxTurns: null,
       }).payload,
     ).toEqual({ ...valid['application.child.run'], maxTurns: null });
+  });
+
+  it("bounds the run request in this SDK's gate and not in its structural schema", () => {
+    // The asymmetry ADR 0042 records, asserted rather than described. THIS artifact --
+    // operation-schemas.ts, and the shared sdk-protocol.json rendered from it -- carries no
+    // keyword on any of these fields, so every request-side bound in TypeScript is the
+    // hand-written gate's, exercised above. The three native schema files are enriched
+    // separately by scripts/native-sdk-constraints.mjs, which is why `maxTurns` and `agent` are
+    // refused structurally in Go, Python and .NET while `task` is not; those are asserted in
+    // sdk/go/contracts_test.go and sdk/python/tests/test_contracts.py, where those schemas live.
+    const run = resolved('application.child.run');
+    for (const field of ['agent', 'task', 'child', 'maxTurns'] as const)
+      expect(Object.keys(run[field]!), field).toEqual(['$ref']);
   });
 
   it('classifies the five that change state as mutations', () => {

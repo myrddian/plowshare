@@ -1301,6 +1301,24 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * authority_scopes.id}, which is ADR 0039's deferred question. Nothing here answers it, and a
    * later reader must not "fix" this method by reaching for that change.
    *
+   * <p><strong>The flag and the audience are read from two different places, and the invariant that
+   * they name the same place is not obvious.</strong> {@code declinedHome} reads the
+   * <em>destination selection's</em> project name, while {@link InformationEventRecords#resolve}
+   * reads the <em>resource's</em> {@code home_scope_id}. They agree because the home is derived
+   * from the selection: {@code requireDestination} proves the selection may be written to, {@code
+   * information_home} derives the resource's home scope from that same selected project, and for a
+   * contained selection V224's write arm additionally requires the resource's home to be {@code
+   * contained_own_home(actor, selected_project)} — the selected project's own scope and no other.
+   * {@code ContainedIntakeAnnouncementDatabaseTest} asserts that identity directly, by checking the
+   * admitted resource's home scope is the child's.
+   *
+   * <p>Both directions of a hypothetical disagreement fail safe, which is why this is documented
+   * rather than guarded. A contained selection whose resource was homed elsewhere would have an
+   * audience, so the announcement would succeed and the tolerance would never be reached; a
+   * non-contained selection whose resource was homed in a contained scope would have no audience
+   * and a false flag, so the refusal would surface loudly. Neither direction can produce a silent
+   * drop, which is the only outcome worth guarding against.
+   *
    * <p>Catching mid-transaction is safe here specifically: {@code resolve} raises before any write,
    * after two statements that both succeeded, so no failed statement has poisoned the transaction
    * and the admission continues on a usable connection. That is a property of where the throw sits

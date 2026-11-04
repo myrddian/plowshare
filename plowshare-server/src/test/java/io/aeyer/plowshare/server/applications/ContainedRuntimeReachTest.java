@@ -1125,12 +1125,17 @@ class ContainedRuntimeReachTest {
    * <p>This is the anti-goal the spec names in as many words — "any path by which a child obtains
    * authority its parent lacks, including through audience-driven reads the child never names". The
    * contained run's built-in set includes {@code conversation_chat}, {@code conversation_list},
-   * {@code memory_read} and {@code result_read}; {@code RetainedToolAccess} turns their arguments
-   * into typed {@link AccessRequest.Resource} references, and {@code
-   * PinnedOperationAuthority.requireReadTargets} is what pins each one to the admission's own home.
-   * A contained admission's <em>action</em> authority is proved against the nearest enclosing
-   * uncontained scope, so that home-equality clause is the only thing standing between a child and
-   * its container's conversations and memories. It had no test; it has one now.
+   * {@code memory_read} and {@code result_read}. <strong>Of those, {@code RetainedToolAccess} turns
+   * only {@code conversation_chat}'s and {@code memory_read}'s arguments into typed {@link
+   * AccessRequest.Resource} references</strong> — it returns an empty list for every other
+   * supported tool, which an earlier draft of this paragraph did not say — and {@code
+   * PinnedOperationAuthority.requireReadTargets} is what pins each reference it <em>is</em> handed
+   * to the admission's own home. So what this test pins is the fence, for the references that reach
+   * it; which tools produce references at all is a separate gap that ADR 0042's addressability
+   * inventory records rather than this class closing. A contained admission's <em>action</em>
+   * authority is proved against the nearest enclosing uncontained scope, so that home-equality
+   * clause is the only thing standing between a child and its container's conversations and
+   * memories. It had no test; it has one now.
    *
    * <p>Both directions, because the write path is a separate method with a separate clause, and a
    * child writing into its container's conversation would be worse than reading one.

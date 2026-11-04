@@ -923,12 +923,27 @@ against the admission's own home, and a contained run cannot read or write a
 conversation or memory outside it, including an audience-driven row that several
 projects can see. What is *not* pinned is the step before it:
 `RetainedToolAccess.resources(name, arguments)` is what turns a built-in tool's
-JSON arguments into those references, and it maps `conversation_chat` to a
-`CONVERSATION` reference from the `conversation` argument, `memory_read` to
-`MEMORY` references from `ids`, and **`conversation_list` and `result_read` to no
-references at all** — `return List.of()`. A tool that named the wrong argument, or
-named none where it reads something keyed, would hand the predicate nothing to
-confine and would not be caught by anything in this slice. It belongs in this
+JSON arguments into those references, and it maps **exactly two tools**:
+`conversation_chat` to a `CONVERSATION` reference from the `conversation`
+argument, and `memory_read` to `MEMORY` references from `ids`. Its second line is
+`if (!name.equals("memory_read") && !name.equals("conversation_chat")) return
+List.of();` — so **every other supported tool hands the predicate nothing**:
+`search`, `fetch`, `memory_index`, `conversation_list`, `result_read`,
+`result_list`, `run`, `todo_read`, `todo_write`, `agent_run`, `get_date` and the
+`FileTools` set. That is eleven of thirteen plus the file tools, not the two this
+row first named, and the breadth is the point: `requireReadTargets` can only
+confine what it is handed, so for those tools it is handed an empty list and
+confines nothing. A tool that named the wrong argument, or named none where it
+reads something keyed, would not be caught by anything in this slice.
+
+**What that does and does not mean, because the number invites an overreading.**
+An empty reference list is not an open door by itself — a tool reaching
+project-keyed state has its own authority path, and several of these are stateless
+(`get_date`), or resolve through a repository that rechecks custody per read, or
+are bounded to the run's own job. The gap is that *nothing structural* connects a
+tool's arguments to the fence, so whether each of those is actually confined rests
+on its own implementation rather than on this boundary. Measuring which of them
+reach project-keyed state, and by what path, is the work this row defers. It belongs in this
 inventory rather than in a loose list of worries because it sits squarely on the
 spec's audience-driven-reads anti-goal: the predicate is the fence, and this is
 the only thing that decides what the fence is asked about. Closing it needs a test
@@ -1282,15 +1297,31 @@ statement — `contained_knowledge_actor`, a regex test guarding a single-row
 `general_member` term. The claim remains a reading of the plan's shape, now with one
 more term in it, and the honest position is unchanged: no number backs any of it.
 
-**The SDK limitations are unchanged in kind and larger in degree.** The Java SDK is
-curated and exposes **none** of these operations — eight now rather than six — and
-`bytes` and `child` remain unenforced in the Go, Python and .NET generated schemas
-as one generator gap rather than three SDK bugs. Slice three adds `maxTurns` to the
-same class: the generator renders it as a `number | null` union, so only the
-TypeScript/Node request gate refuses a zero, a fraction or a negative turn cap. And
-the .NET round-trip for `run` and `cancel` was **written and never compiled**, for
-the third slice running, because the authoring machine has no `dotnet`. All of it is
-stated with its evidence in the SDK section below.
+**The SDK limitations are unchanged in kind and larger in degree, and one of them
+was described wrongly for two slices.** The Java SDK is curated and exposes
+**none** of these operations — eight now rather than six. `bytes` and `child`
+remain unenforced in the Go, Python and .NET generated schemas, and slice three
+adds `task` to that list while finding that `maxTurns` and `agent` are **not** in
+it: both are bounded in all four SDKs, and the SDK section below has the keywords
+and the tests. And the .NET round-trip for `run` and `cancel` was **written and
+never compiled**, for the third slice running, because the authoring machine has no
+`dotnet`.
+
+**The reason those three are unenforced is not that the generator cannot express
+them.** Slices one and two called it "a semantic constraint the schema generator
+cannot express" and said the remedy was "a core contract change with its own
+decision". That is false, and it matters because a reader would defer the fix on
+the strength of it: `scripts/native-sdk-constraints.mjs` emits a UUID `pattern` for
+`requestId` globally and for `expectedRevision`, `revision`, `resource`, `source`
+and half a dozen other fields per operation, and emits `integer(...)` bounds
+wherever a field name asks for one. The three unenforced fields are simply
+**undeclared in that file** — `child` is in none of its UUID lists, `bytes` is on a
+reply shape nobody has enriched (though reply shapes *are* enriched elsewhere in
+it), and `task` is excluded from the generic non-blank rule by name. The remedy is
+a declaration per field in one generator input, which is a small change that
+someone must still decide to make, review across four SDKs and regenerate — not a
+contract redesign. Recording it as impossible made it look larger than it is, which
+is how a one-line gap survives three slices.
 
 Whether Relay keys topics on `authority_scopes.id`, which is what would give a
 contained scope a real audience, is ADR 0039's deferred question.
@@ -1506,8 +1537,19 @@ asserts both refusals and that the two messages are equal, with both reads
 answering for the live child first as the control;
 `ContainedApplicationSchemaTest.deletingTheProjectRowCascadesTheRecordAway`
 asserts the cascade itself. The "do not harmonise the two" instruction is
-withdrawn: there is nothing to harmonise, and the code comments that carried it
-have been corrected.
+withdrawn: there is nothing to harmonise.
+
+**Four comments carried the claim and all four are named rather than counted**,
+because the first attempt at this correction reported them all fixed while the
+most important one was untouched: `SourceContainedApplications.resources` (the
+"do not harmonise the two" block itself), `SourceContainedApplications.run` (the
+liveness guard beside it), `ContainedApplications.run`'s Javadoc (which cited the
+pair as the precedent for its own container-only asymmetry), and
+`RetentionPolicy.ejectAfter`'s `CONTAINED` arm — **which is the retention
+justification, so it was the one carrier that mattered most and the one a sweep
+for the phrase in `applications` could not see.** A claim lives wherever it was
+convenient to repeat it; naming the sites is what makes the next reader able to
+check this sentence rather than trust it.
 
 **Voiding the justification explicitly, because the retention it justified is
 still in force.** The envelopes do survive the destruction — that part was true —
@@ -1526,9 +1568,14 @@ follow-ups are named so the next slice does not re-derive them:
   authority ordering is exactly what would have to change: a `trajectory` that
   answers for a child whose record is gone must decide what it says about a child
   that never existed, which is the contract change the oracle entry defers.
-- **Drop the retention**, giving `contained` an ejection age like `DELEGATION`'s,
-  on the ground that evidence nothing reads is not evidence. This is the cheaper
-  change and the easier one to reverse, and it forecloses the first.
+- **Drop the retention**, giving `contained` a real ejection age, on the ground
+  that evidence nothing reads is not evidence. The age to copy is
+  **`SUBMISSION`'s**, not `DELEGATION`'s: `RetentionPolicy.ejectAfter` answers
+  `null` for `TURN`, `DELEGATION`, `ORCHESTRATION`, `BOARD` and `CONTAINED` alike,
+  so "an ejection age like `DELEGATION`'s" — which this paragraph said in its first
+  draft — describes no change at all. `SUBMISSION` and `EVENT` are the only origins
+  that carry one. This is the cheaper change and the easier one to reverse, and it
+  forecloses the first.
 
 Either is a decision about durable data and belongs to a slice that is asked for
 it.
@@ -1951,14 +1998,37 @@ conversation in the reply is never the container's that the request named, and t
 round-trip tests assert that distinction in all four languages. `run` and `cancel`
 are both classified as mutations, so neither is replayed after uncertain delivery.
 
-**Three request-side bounds are hand-written in TypeScript and nowhere else**, for
-the same generator reason `bytes` and `child` are: the agent name and task are
-bounded non-blank strings, and `maxTurns` is a positive integer or an explicit
-`null`. The generated schemas type them as a string and a `number | null`, so Go,
-Python and .NET accept a zero, a fraction or a negative turn cap client-side. The
-server's frame refuses all three — `turns(payload)` is where — so this is the same
-**defence in depth that is missing, not a reachable defect**, and it belongs beside
-the two entries above as one class rather than as a new one.
+**One of `run`'s three request-side bounds is TypeScript's alone, and it is
+`task`.** The first draft of this paragraph said all three were, by restating what
+slices one and two said about `bytes` and `child`; that was wrong, and checking it
+is what found the mechanism the two older entries also describe incorrectly.
+
+- **`maxTurns` is bounded in all four SDKs.** The native schemas carry `"integer":
+  true, "minimum": 1, "maximum": 2147483647` on it, and the three native validators
+  enforce those keywords (`sdk/go/validation.go`'s numeric arm,
+  `_validation.py`'s `integer`/`minimum`/`maximum` terms, `Validation.cs`'s
+  `Flag(schema,"integer")` and `Bound(...)`). A zero, a fraction, a negative and an
+  overflow are each refused client-side in Go, Python and .NET, which the
+  round-trip tests now assert rather than describe.
+- **`agent` is bounded in all four**, by `minLength`, `maxLength: 1024`, a
+  control-character-excluding `pattern` and `trimmed` in the native schemas. A
+  blank agent name is refused in all three native SDKs, also asserted.
+- **`task` is bounded in TypeScript only.** It stays a bare string shape, so a
+  blank task reaches the wire from Go, Python and .NET. The server's frame refuses
+  it — `text(payload, "task")` is where — so this is **defence in depth that is
+  missing, not a reachable defect.**
+
+**The mechanism, because the two older entries state it wrongly and a reader would
+act on it.** These bounds are not something the generator infers from a type. They
+are **declared by field name** in `scripts/native-sdk-constraints.mjs`, which
+enriches the three native schema files only — `operation-schemas.ts` and the shared
+`sdk-protocol.json` carry none of them, so TypeScript's own structural check bounds
+nothing here and its hand-written gate is doing all of its work. `maxTurns` is in
+that file's integer-bound name list; `agent` is in its identity name list; and
+`task` is in its **explicit exclusion** from the generic non-blank rule, beside
+`answer`, `text`, `body` and `definition` — prose fields, where a blank is
+legitimate somewhere else in the surface. So `task` is unbounded natively *on
+purpose, by name*, not because the generator could not say it.
 
 **The .NET round-trip tests for `.run` and `.cancel` were written and never
 compiled, and `./gradlew sdkCheck` could not complete, for the third slice
@@ -1982,27 +2052,44 @@ emits a plain `number` for it, so those three accept `-1` and `1.5`; only the
 TypeScript SDK's hand-written semantic check rejects them, and `kind` is
 enforced structurally in all four. The server's `Resource` record validates
 `bytes` on the producing side, so this is **defence in depth that is missing, not
-a reachable defect** — no server reply can carry an invalid value. Fixing it
-means teaching the DTO/schema generator to emit an integer bound, which is a core
-contract change with its own decision, so it is recorded here as a **generator
-gap** rather than patched in generated output.
+a reachable defect** — no server reply can carry an invalid value. **Fixing it does
+not mean teaching the generator anything**, which is what slices one and two
+recorded and is corrected below: `scripts/native-sdk-constraints.mjs` already emits
+integer bounds by field name, and enriches reply shapes elsewhere. `bytes` is
+undeclared in it, so the remedy is a declaration and a regeneration rather than a
+contract redesign — still a change someone must decide and review across four
+SDKs, and still not patched into generated output here.
 
 **`child` is unenforced as a UUID in the Go, Python and .NET SDKs — the same
-generator gap, on the request side.** In `sdk/dotnet/Plowshare.Sdk/Schemas.json`
-the three request shapes that carry it — `shape56` (`application.child.destroy`),
-`shape59` (`.trajectory`) and `shape58` (`.resources`) — are structurally
-identical and each types `child` as
-`{"$ref":"#/$defs/shape1","minLength":1,"nonblank":true,"noNul":true}`, where
-`shape1` is a bare `{"type":"string"}`: no UUID pattern anywhere, so all three
-accept a non-UUID string client-side and only
-TypeScript's hand-written `containedProblem` check rejects it. The server parses
-and validates it, so again this is **defence in depth that is missing, not a
-reachable defect**, and the remedy is the same one: teaching the generator to
-emit a format constraint, not editing generated output. The two are recorded
-together because they are **one class of limitation** — a semantic constraint the
-schema generator cannot express, enforced by hand in TypeScript and by the server
-on both sides of it — and not two independent SDK bugs. Any future entry of this
-shape belongs beside these two.
+undeclared-constraint gap, on the request side.** In the three native schema files
+the request shapes that carry it are structurally identical and each types `child`
+as `{"$ref":"#/$defs/shape1","minLength":1,"nonblank":true,"noNul":true}`, where
+`shape1` is a bare `{"type":"string"}`: no UUID pattern anywhere, so all of them
+accept a non-UUID string client-side and only TypeScript's hand-written
+`containedProblem` check rejects it. The shapes are now five — `destroy`,
+`trajectory`, `resources`, `cancel` and `run`.
+
+**The shape numbers these three rows used to cite are gone, and citing them was the
+mistake.** Slice two named `shape56`, `shape59` and `shape58`; adding two
+operations renumbered them to `shape57`, `shape62` and `shape59`, so every figure
+was wrong the moment this slice regenerated — and `shape59` was wrong in the worst
+way, by still resolving to a real shape that is no longer the one meant. A `$defs`
+key is allocated in traversal order by the schema generator, so **any** addition
+anywhere can move it: it is the least stable identifier in the artifact and must
+not be cited in prose. The stable references are the **operation name** and the
+**field name**, which is what this row now uses. The same correction applies to the
+`bytes` row above, which cites no shape for the same reason.
+
+The server parses and validates `child`, so again this is **defence in depth that
+is missing, not a reachable defect**, and the remedy is the same one: a declaration
+in `scripts/native-sdk-constraints.mjs` — `child` added to the UUID-pattern list
+that `requestId` is already in — and a regeneration, not an edit to generated
+output. `bytes`, `child` and now `task` are recorded together because they are
+**one class of limitation**: a constraint nobody has declared in the one generator
+input that declares them, enforced by hand in TypeScript and by the server on both
+sides of it. Three entries, not three independent SDK bugs, and not — as slices one
+and two had it — a constraint the generator cannot express. Any future entry of
+this shape belongs beside these three.
 
 **One frame cost four pin bumps, and the pins prove nothing about correctness.**
 Adding `application.child.resources` required the contract generators to re-render

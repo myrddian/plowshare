@@ -62,10 +62,25 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>The tolerance is keyed on the home the pipeline has already declined — a contained home, by
  * the one predicate {@code declinedHome} already uses — and not on the exception type. A blanket
  * catch would sit on the path every knowledge write in this server takes and would turn an ordinary
- * home that lost its audience through misconfiguration into silence. {@link
- * #anOrdinaryHomeWithNoRelayAudienceStillSurfacesTheRefusal()} is the assertion that stops this fix
- * becoming a bug-hider, and {@link #theToleranceIsKeyedOnTheDeclinedHomeAndNotOnTheException()} is
- * the one that shows the keying is what decides it.
+ * home that lost its audience through misconfiguration into silence.
+ *
+ * <p><strong>That narrowing is shown as two links, and this class does not claim a third.</strong>
+ * {@link #anUnaddressableHomeSurfacesTheRefusalUnlessTheHomeIsADeclinedOne()} is the behavioural
+ * link: one revision whose home has no audience, announced twice, differing only in the flag, and
+ * raising only when the flag is false. {@link #theFlagIsFalseForEveryHomeButAContainedOne()} is the
+ * structural link: {@code declinedHome} is false for every selection whose project is not a
+ * contained one, so an ordinary home can only ever supply {@code false}.
+ *
+ * <p><strong>There is deliberately no end-to-end test that writes into an ordinary home with no
+ * audience</strong>, because the schema will not let a fixture build one — {@code
+ * information_knowledge_identity} refuses a home transfer outright, and every project home is
+ * addressable by construction since {@code audienceProject} answers a {@code PROJECT} scope with
+ * its own {@code project_id}. The non-contained homes that genuinely have no audience are the
+ * built-in knowledge scope and an account knowledge home whose owner holds no personal project,
+ * both pinned in {@code InformationEventAudienceMappingTest} and neither reachable by a write this
+ * fixture can perform without first building a Global-knowledge grant. The bound is stated here as
+ * well as on the two methods, because this is the doc a reader meets first and an earlier draft of
+ * it promised exactly the proof that does not exist.
  *
  * <p>The deep fix — giving a contained scope a real Relay audience by keying Relay topics on {@code
  * authority_scopes.id} — remains ADR 0039's deferred question and is not answered here.

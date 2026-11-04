@@ -139,12 +139,20 @@ public record RetentionPolicy(Duration curator, Duration submission, Duration jo
     return switch (origin) {
       case CURATOR, MEMORY -> curator;
       case SUBMISSION, EVENT -> submission;
-      // CONTAINED has no age, with DELEGATION rather than with SUBMISSION, and the reason is a
-      // decision rather than a resemblance: a contained child's retained conversation lineage is
-      // the evidence its container reads through application.child.trajectory, and ADR 0042 makes
-      // that lineage survive the child's destruction deliberately -- which is why trajectory
-      // answers for a destroyed child where resources refuses. An age here would eject the one
-      // record of what a destroyed child did.
+      // CONTAINED has no age, with DELEGATION rather than with SUBMISSION. The behaviour is a
+      // decision rather than a resemblance, but THE REASON ORIGINALLY GIVEN FOR IT WAS WRONG and
+      // this comment is the correction: it said a contained child's retained lineage is the
+      // evidence its container reads through application.child.trajectory, that ADR 0042 makes
+      // that lineage survive destruction, and that trajectory therefore answers for a destroyed
+      // child where resources refuses. The last clause is false. Destruction deletes the child's
+      // project row, contained_applications.project_id is ON DELETE CASCADE (V219), and BOTH reads
+      // open by resolving that record -- so after a real destruction they refuse identically.
+      //
+      // The envelopes do survive; nothing can read them. So this retention currently keeps rows no
+      // operation can reach, which is the opposite of what was argued for it. The behaviour is
+      // deliberately left unchanged -- a durable-data decision is not made on the strength of a
+      // correction at the end of a slice -- and ADR 0042 records the void justification with the
+      // two candidate follow-ups, one of which is to give this origin a real age.
       case TURN, DELEGATION, ORCHESTRATION, BOARD, CONTAINED -> null;
     };
   }

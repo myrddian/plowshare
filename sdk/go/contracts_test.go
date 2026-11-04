@@ -137,6 +137,30 @@ func TestContainedRunAndCancelRoundTrip(t *testing.T) {
 			t.Fatalf("accepted %s", bad)
 		}
 	}
+	// The turn cap and the agent name ARE bounded by the generated schema, so this SDK refuses
+	// them without the TypeScript gate's help: maxTurns carries integer/minimum/maximum and agent
+	// carries minLength/maxLength/pattern/trimmed. `task` is a bare string shape and is the one
+	// request-side bound that is TypeScript-only; the blank task below is accepted here on purpose.
+	for _, bound := range []string{
+		`"maxTurns":0`, `"maxTurns":-1`, `"maxTurns":1.5`, `"maxTurns":2147483648`,
+		`"maxTurns":3,"agent2":"x"`,
+	} {
+		body := `{"agent":"worker","child":"` + child + `","conversation":"c","task":"do it",` + bound + `}`
+		if _, err = project(catalog.Inputs["application.child.run"], []byte(body), true); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	for _, blank := range []string{`"agent":""`, `"agent":" "`} {
+		body := `{"child":"` + child + `","conversation":"c","task":"do it","maxTurns":3,` + blank + `}`
+		if _, err = project(catalog.Inputs["application.child.run"], []byte(body), true); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	// And the one that is not bounded here, asserted so the ADR's "one of three" is checkable.
+	if _, err = project(catalog.Inputs["application.child.run"],
+		[]byte(`{"agent":"worker","child":"`+child+`","conversation":"c","task":"","maxTurns":3}`), true); err != nil {
+		t.Fatal("a blank task is refused by the TypeScript gate alone, so this SDK accepts it")
+	}
 	running := `{"child":"` + child + `","job":"job_1","conversation":"cnv_child","agent":"worker"}`
 	projected, err := project(catalog.Results["application.child.run"], []byte(running), false)
 	if err != nil {
