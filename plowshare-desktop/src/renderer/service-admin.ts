@@ -1,3 +1,4 @@
+import type { AdministrationPanel } from './admin-panel.ts';
 import { background } from './events.ts';
 import { decodeAdminCall } from '../admin-input.ts';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
@@ -15,28 +16,31 @@ import type {
   ProjectAccess,
 } from 'plowshare-client-ts/operations/conversation-replies';
 
-/** Machine credentials are revealed once in this dialog and never placed in application state. */
+/** Machine credentials are revealed once in this panel and never placed in application state. */
 export function installServiceAdmin(
   request: (value: Request) => Promise<Reply>,
-) {
-  const dialog = document.createElement('dialog');
-  dialog.id = 'service-admin-dialog';
-  dialog.className = 'server-admin-dialog';
-  dialog.setAttribute('aria-labelledby', 'service-admin-title');
-  dialog.innerHTML = `<header><h2 id="service-admin-title">Service accounts</h2><button type="button" data-close>Close</button></header>
+  host: HTMLElement,
+  back: () => void,
+): AdministrationPanel {
+  const panel = document.createElement('section');
+  panel.id = 'service-admin-panel';
+  panel.className = 'administration-panel';
+  panel.hidden = true;
+  panel.setAttribute('aria-labelledby', 'service-admin-title');
+  panel.innerHTML = `<header><h2 id="service-admin-title">Service accounts</h2><button type="button" data-close>Back to accounts</button></header>
     <p>Plowshare identities for integrations and pipelines. They have no password login or Personal space.</p><p data-error role="alert" hidden></p>
     <button type="button" data-refresh>Refresh</button>
-    <form data-create><label>Account name <input name="handle" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" autocomplete="off"></label><button>Create service account</button></form>
+    <details class="admin-create"><summary>Create service account</summary><form data-create><label>Account name <input name="handle" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" autocomplete="off"></label><button>Create service account</button></form></details><div class="admin-columns">
     <div data-accounts></div><section data-account hidden><h3 data-name></h3><p data-status></p><button type="button" data-enabled></button>
     <h4>Project scopes</h4><p>Grant the account access, then choose the token's permission ceiling. Existing account grants are changed only by Grant access.</p>
     <label>Project <select data-project aria-label="Service project"></select></label><label>Role <select data-role aria-label="Service role"><option>VIEWER</option><option selected>CONTRIBUTOR</option><option>MANAGER</option></select></label>
     <button type="button" data-grant>Grant access</button><button type="button" data-scope-add>Add token scope</button><div data-scopes></div>
     <form data-issue><label>Token name <input name="name" required maxlength="64" autocomplete="off"></label><label>Expires in days <input name="days" type="number" min="1" max="365" value="30" required></label><button>Issue token</button></form>
     <section data-credential hidden><h4>New credential</h4><p>Save this credential now. It is not available from token listings. Rotation invalidates its previous value.</p><input data-secret readonly aria-label="Service credential" autocomplete="off"><button type="button" data-dismiss>Dismiss credential</button></section>
-    <h4>Tokens</h4><div data-tokens></div></section>`;
-  document.body.append(dialog);
+    <h4>Tokens</h4><div data-tokens></div></section></div>`;
+  host.append(panel);
   const get = <T extends HTMLElement>(selector: string) =>
-    dialog.querySelector<T>(selector)!;
+    panel.querySelector<T>(selector)!;
   let state: DesktopState | undefined,
     selected = '',
     generation = 0,
@@ -63,7 +67,7 @@ export function installServiceAdmin(
     });
     if (
       turn !== generation ||
-      !dialog.open ||
+      panel.hidden ||
       !state?.connected ||
       !state.serverAdmin
     )
@@ -71,7 +75,7 @@ export function installServiceAdmin(
     return decodeReply(operation, reply.administration);
   };
   function controls() {
-    dialog
+    panel
       .querySelectorAll<
         HTMLButtonElement | HTMLInputElement | HTMLSelectElement
       >('button,input,select')
@@ -89,15 +93,18 @@ export function installServiceAdmin(
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
     busy = true;
+    const turn = generation;
     error();
     controls();
     try {
       await work();
     } catch (reason) {
-      if (dialog.open) error(reason);
+      if (turn === generation && !panel.hidden) error(reason);
     } finally {
-      busy = false;
-      controls();
+      if (turn === generation) {
+        busy = false;
+        controls();
+      }
     }
   };
   function reveal(value: ServiceCredential) {
@@ -194,12 +201,24 @@ export function installServiceAdmin(
             selected = account.handle;
             scopes = [];
             renderScopes();
-            await refresh();
+            renderAccount();
+            await tokens();
           }),
         );
       });
       parent.append(button);
     }
+    renderAccount();
+    await tokens();
+  }
+  function renderAccount() {
+    for (const button of get(
+      '[data-accounts]',
+    ).querySelectorAll<HTMLButtonElement>('button'))
+      button.setAttribute(
+        'aria-pressed',
+        String(button.dataset.serviceHandle === selected),
+      );
     const account = accounts.find((row) => row.handle === selected);
     get('[data-account]').hidden = !account;
     if (account) {
@@ -211,10 +230,11 @@ export function installServiceAdmin(
         ? 'Disable service account'
         : 'Enable service account';
     }
-    await tokens();
   }
-  get('[data-close]').addEventListener('click', () => dialog.close());
-  dialog.addEventListener('close', () => {
+  get('[data-close]').addEventListener('click', back);
+  function close() {
+    busy = false;
+    panel.hidden = true;
     generation++;
     clear();
     accounts = [];
@@ -227,7 +247,7 @@ export function installServiceAdmin(
     get<HTMLFormElement>('[data-issue]').reset();
     get<HTMLFormElement>('[data-create]').reset();
     error();
-  });
+  }
   get('[data-refresh]').addEventListener('click', () => {
     clear();
     background(run(refresh));
@@ -283,7 +303,7 @@ export function installServiceAdmin(
           operation: 'project.access',
           project: value.project,
         });
-        if (turn !== generation || !dialog.open) return;
+        if (turn !== generation || panel.hidden) return;
         const access = reply.administration as ProjectAccess;
         await request({
           action: 'project-access',
@@ -315,6 +335,7 @@ export function installServiceAdmin(
     );
   });
   return {
+    element: panel,
     open() {
       if (!state?.connected || !state.serverAdmin) return;
       const parent = get<HTMLSelectElement>('[data-project]');
@@ -329,13 +350,10 @@ export function installServiceAdmin(
         parent.append(option);
       }
       clear();
-      dialog.showModal();
+      panel.hidden = false;
       background(run(refresh));
     },
-    close() {
-      if (dialog.open) dialog.close();
-      clear();
-    },
+    close,
     update(next: DesktopState) {
       if (
         state &&
@@ -345,7 +363,7 @@ export function installServiceAdmin(
           !next.serverAdmin)
       ) {
         generation++;
-        if (dialog.open) dialog.close();
+        if (!panel.hidden) close();
         clear();
       }
       state = next;

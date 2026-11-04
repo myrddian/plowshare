@@ -672,3 +672,21 @@ revocation is checked on subsequent actions. Fleet-wide `usage pools` requires s
 Regular users can query their permitted project/conversation statistics; foreign
 resources remain refused. Pricing is an operator estimate, not a provider invoice.
 Local reference comparisons are separate from server prices and booked costs.
+
+
+## Live configuration authorization
+
+`GET /v1/config` and `PUT /v1/config/{key}` require the authenticated account's
+current server administrator role. The controller checks the account attribute
+supplied by the authentication filter before reading settings, disclosing live
+keys or writing a value. Regular accounts and service credentials cannot access
+these endpoints through project membership, tool grants or client-side checks.
+Anonymous requests are refused by authentication; authenticated callers without
+administrator authority receive HTTP 403. An operator credential must resolve to
+an explicitly configured account that still has the administrator role.
+
+The role is rechecked for each request. Disabled, missing, bootstrap and service
+identities are refused, and disabling the authentication filter does not bypass
+the controller's role check. Request parameters and servlet-principal names are
+not substitutes for the filter's account context. Successful writes retain the
+existing raw-text, live-key and deployment-pin behavior.

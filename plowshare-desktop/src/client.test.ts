@@ -1,3 +1,7 @@
+import type {
+  RuntimeConfiguration,
+  RuntimeSetting,
+} from './runtime-configuration.ts';
 import type { NativeSessions, McpTool } from 'plowshare-mcp-integration';
 import { decodeDesktopRequest } from './request-boundary.ts';
 import { displayText } from 'plowshare-client-ts/binding/values';
@@ -22,7 +26,10 @@ import type { Connector } from './client.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import { contextKey, replyState, stoppedJob } from './shared.ts';
 
-function fixture(nativeSessions?: NativeSessions) {
+function fixture(
+  nativeSessions?: NativeSessions,
+  runtimeConfiguration?: RuntimeConfiguration,
+) {
   let push: (value: unknown) => void = () => {};
   let closed: () => void = () => {};
   const calls: { type: string; payload: Record<string, unknown> }[] = [];
@@ -111,6 +118,7 @@ function fixture(nativeSessions?: NativeSessions) {
     return {
       session: 'desktop-session',
       serverAdmin,
+      ...(runtimeConfiguration ? { runtimeConfiguration } : {}),
       connection: {
         close() {},
         async ask(type, unknownPayload) {
@@ -3212,5 +3220,58 @@ await test('Mailbox opening and refresh do not wait for unrelated approval scope
     for (const resolve of releases)
       resolve({ code: 'OK', payload: { approvals: [] } });
     await opening;
+  }
+});
+
+await test('live configuration rechecks administration and discards replies after disconnect', async () => {
+  let reads = 0,
+    writes = 0;
+  let finish: ((value: readonly RuntimeSetting[]) => void) | undefined;
+  const configuration: RuntimeConfiguration = {
+    list: () => {
+      reads++;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    },
+    set: async (key, value) => {
+      writes++;
+      return { key, value, pinned: false, updatedAt: null, updatedBy: null };
+    },
+  };
+  const f = fixture(undefined, configuration);
+  try {
+    await connect(f.client);
+    await assert.rejects(
+      f.client.dispatch({
+        action: 'server-configuration',
+        operation: 'set',
+        key: 'test.key',
+        value: '40',
+      }),
+      /administrator/,
+    );
+    assert.equal(writes, 0);
+    f.admin(true);
+    const reply = await f.client.dispatch({
+      action: 'server-configuration',
+      operation: 'set',
+      key: 'test.key',
+      value: '40',
+    });
+    assert.equal(reply.runtimeSetting?.value, '40');
+    assert.equal(writes, 1);
+    const pending = f.client.dispatch({
+      action: 'server-configuration',
+      operation: 'list',
+    });
+    while (!finish) await new Promise((resolve) => setImmediate(resolve));
+    const rejected = assert.rejects(pending, /connection changed/);
+    await f.client.dispatch({ action: 'disconnect' });
+    finish([]);
+    await rejected;
+    assert.equal(reads, 1);
+  } finally {
+    f.client.dispose();
   }
 });

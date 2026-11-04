@@ -481,9 +481,9 @@ separate explicit usage operation and may be unavailable for the selected provid
 Click **Projects** to collapse or expand its search and project/conversation list.
 The choice is saved in the desktop profile. Account destinations move up beneath
 Projects while its list is collapsed.
-**Manage work** remains the workspace action screen. Server administration (users,
-permissions and server settings) is a separate product area; these navigation
-changes do not add a server administration API or screen.
+**Manage work** remains the workspace action screen. **Server administration**
+opens a separate workspace with persistent navigation for Configuration, Accounts,
+Service accounts, Server tools, Pricing and Audit history.
 
 ### Usage and token recording
 
@@ -540,8 +540,41 @@ help, explicit mode selection, preserved multiline arguments, compact-window
 visibility, direct workflow launch and recovery without duplicate runs. See
 [server skill conventions](../docs/skills-and-agent-rules.md).
 
-Server administrators can open **Server administration** from the sidebar to manage accounts, roles, password resets, sessions and audit history. See the [administration manual](../docs/server-administration.md).
+Server administrators can open **Server administration** from the sidebar. Accounts,
+Service accounts, Server tools, Pricing and Audit history have separate sections
+in the main workspace. Create-account forms open on demand; selecting an account
+shows its roles, status and sessions. Leaving a section clears revealed credentials
+and prevents pending responses from populating another section. Conversation drafts
+and running work remain attached to their existing owners. See the [administration manual](../docs/server-administration.md).
 
 Service accounts are managed under **Server administration → Service accounts**. Grant server project roles, issue expiring scoped credentials, rotate or revoke individual tokens, and disable an integration account. Machine credentials are revealed once and excluded from desktop snapshots and saved preferences. See [server administration](../docs/server-administration.md#service-accounts-and-scoped-tokens).
 
 Server pricing is under **Server administration → Pricing**. Edit currency, input/output/cache rates, per-attempt fees and tiers for a served route/model. The editor prevents stale changes and preserves recorded cost snapshots. Its usage button opens recorded statistics. CLI/TUI equivalents are documented in [server administration](../docs/server-administration.md#model-pricing-and-usage-statistics).
+
+
+### Live server configuration
+
+**Server administration → Configuration** lists only keys declared live by the
+connected server. Select a key to see its stored value, update metadata and whether
+deployment configuration pins it. Save sends the exact text once; it does not
+restart the server or replay an uncertain write. Reload to inspect an uncertain
+outcome. A pinned value can be changed for the current runtime, but deployment
+configuration restores it on restart. The endpoint stores text without validating
+its meaning for a consuming operation, so verify that operation after a change.
+
+Models, providers, pools, storage and other startup configuration remain owned by
+the deployment. This screen does not claim to list or edit those settings.
+Configuration uses the existing authenticated `GET /v1/config` and raw-body
+`PUT /v1/config/{key}` HTTP endpoints because no shared WebSocket operation exists.
+Desktop rechecks administrator status before either request. The HTTP API also
+requires the authenticated account to have the current server administrator role
+before reading settings, disclosing live keys or writing a value. Project roles
+and service-token scopes do not grant configuration access.
+
+**Desktop tools** is beside connection controls at the bottom of the sidebar,
+separate from Application deployment. Local MCP profiles and host lifecycles remain
+in that dialog. Administrators follow its Server administration link to the
+**Server tools** section and choose an execution project there. Non-administrators
+retain **My server tools** for their own credentials and assignments, under the
+existing server permissions. Server administration does not reveal another
+account's credential material.

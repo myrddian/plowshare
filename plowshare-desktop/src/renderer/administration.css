@@ -1,0 +1,63 @@
+/* Administration is a workspace, with one stable navigation and one active editor.
+ * Scope every rule here so these controls do not alter conversation or reader layouts. */
+#workspace-administration { height: 100%; min-height: 0; overflow: auto; color: var(--ink); font-size: 13px; }
+.main-area:has(#workspace-administration:not([hidden])) #filestore-notice { display: none; }
+.administration-shell { min-height: 100%; display: flex; flex-direction: column; }
+.administration-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding: 24px 28px; border-bottom: 1px solid var(--line); }
+.administration-heading h1 { font-size: 21px; font-weight: 500; letter-spacing: -.3px; margin: 0 0 5px; }
+.administration-heading p { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
+.administration-layout { display: grid; grid-template-columns: 184px minmax(0, 1fr); flex: 1; min-height: 0; }
+.administration-navigation { display: flex; flex-direction: column; align-items: stretch; position: sticky; top: 0; align-self: start; padding: 18px 12px; gap: 4px; border-right: 1px solid var(--line); background: var(--side); }
+.administration-shell button { font: inherit; min-height: 34px; padding: 7px 11px; border-radius: 6px; border: 1px solid var(--line); color: var(--ink); background: transparent; }
+.administration-shell button:hover { background: var(--tint); }
+.administration-shell button:disabled { opacity: .5; cursor: default; }
+.administration-shell button:focus-visible, .administration-shell summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.administration-navigation button { text-align: left; border-color: transparent; }
+.administration-navigation button[aria-current=page] { background: var(--tint); color: var(--accent); }
+.admin-nav-label { font-size: 11px; color: var(--muted); padding: 18px 11px 5px; }
+.administration-content { min-width: 0; padding: 24px 28px; }
+.administration-panel { min-width: 0; max-width: 1080px; }
+.administration-panel[hidden], #workspace-administration[hidden] { display: none; }
+.administration-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.administration-panel h2 { font-size: 18px; font-weight: 500; margin: 0; }
+.administration-panel h3 { font-size: 15px; font-weight: 500; margin: 0 0 12px; overflow-wrap: anywhere; }
+.administration-panel h4 { font-size: 13px; font-weight: 500; margin: 24px 0 12px; }
+.administration-panel p { margin: 8px 0 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.administration-panel header p, .admin-note, .administration-panel [data-account-status], .administration-panel [data-status], .administration-panel [data-origin], .administration-panel [data-updated] { color: var(--muted); font-size: 12px; }
+.administration-shell [data-error] { color: #edb5a3; background: #37231e; padding: 12px; border-radius: 6px; margin: 0 0 18px; }
+.administration-shell [data-error][hidden] { display: none; }
+.administration-shell [data-saved] { color: var(--accent); }
+.admin-note { padding: 12px 0; }
+.administration-panel label { display: grid; gap: 6px; margin: 0 0 16px; font-size: 12px; color: var(--muted); min-width: 0; }
+.administration-panel input, .administration-panel select, .administration-panel textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; width: 100%; min-width: 0; }
+.administration-panel textarea { resize: vertical; min-height: 90px; }
+.administration-panel label:has(> input[type=checkbox]) { display: flex; align-items: center; gap: 8px; }
+.administration-panel input[type=checkbox] { width: auto; }
+.administration-panel form > button[type=submit], .administration-panel form > button:not([type]) { background: var(--tint); border-color: var(--accent); }
+.admin-columns { display: grid; grid-template-columns: minmax(150px, 30%) minmax(0, 1fr); gap: 28px; margin: 20px 0; align-items: start; }
+.admin-columns > * { min-width: 0; }
+.admin-columns > [data-accounts], .admin-columns > [data-prices], .admin-columns > [data-settings] { display: flex; flex-direction: column; gap: 3px; }
+.admin-columns > [data-accounts] > button, .admin-columns > [data-prices] > button, .admin-columns > [data-settings] > button { border-color: transparent; text-align: left; overflow-wrap: anywhere; }
+.admin-columns button[aria-pressed=true] { background: var(--tint); color: var(--accent); }
+.admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.admin-create { border-bottom: 1px solid var(--line); padding: 0 0 18px; margin: 0 0 20px; }
+.admin-create summary { color: var(--accent); padding: 5px 0; cursor: pointer; }
+.admin-create form { max-width: 480px; padding-top: 18px; }
+.administration-panel [data-credential] { border: 1px solid var(--accent); border-radius: 6px; padding: 16px; margin: 18px 0; }
+.administration-panel [data-password], .administration-panel [data-secret] { font-family: var(--mono); margin: 6px 0 12px; }
+.administration-panel [data-audit] p, .administration-panel [data-sessions] p, .administration-panel [data-tokens] > section { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.administration-panel [data-tokens] button { margin-right: 8px; }
+.administration-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 var(--mono); background: var(--bg); padding: 12px; }
+#pricing-admin-panel [data-edit], #pricing-admin-panel [data-token] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+#pricing-admin-panel [data-edit] > :is(h3,p,button,details), #pricing-admin-panel [data-token] { grid-column: 1 / -1; }
+#pricing-admin-panel [data-edit] > button { justify-self: start; }
+#pricing-admin-panel [data-edit][hidden], #pricing-admin-panel [data-token][hidden] { display: none; }
+.administration-panel details:not(.admin-create) { margin: 16px 0; }
+.administration-panel details summary { font-size: 12px; color: var(--muted); }
+.admin-project-picker { max-width: 420px; }
+#server-tools-admin-panel .tool-connections { max-width: none !important; }
+#server-tools-admin-panel .tool-connections > summary { display: none; }
+#server-tools-admin-panel .tool-connections > label { max-width: 640px; }
+#server-tools-admin-panel .tool-connections > div { display: flex; flex-wrap: wrap; gap: 8px; }
+@media(max-width:1050px) { .administration-layout { grid-template-columns: 156px minmax(0,1fr); } .administration-content { padding: 20px; } .admin-columns { grid-template-columns: minmax(0,1fr); gap: 20px; } .admin-columns > :is([data-accounts],[data-prices],[data-settings]) { border-bottom: 1px solid var(--line); padding-bottom: 16px; } }
+@media(max-width:700px) { .administration-layout { grid-template-columns: minmax(0,1fr); } .administration-navigation { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); gap: 4px; } .admin-nav-label { display: none; } .administration-heading { padding: 20px; } .administration-content { padding: 18px; } #pricing-admin-panel [data-edit], #pricing-admin-panel [data-token] { grid-template-columns: minmax(0,1fr); } }

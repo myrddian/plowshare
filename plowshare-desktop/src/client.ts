@@ -1,4 +1,6 @@
 import { decodeMetadataValidation } from 'plowshare-client-ts/operations/information-content';
+import { HttpRuntimeConfiguration } from './runtime-configuration.ts';
+import type { RuntimeConfiguration } from './runtime-configuration.ts';
 import {
   NativeHostCommands,
   NativeMcpSessions,
@@ -204,6 +206,7 @@ export function emptyConnectionState(
   };
 }
 export interface Connected {
+  runtimeConfiguration?: RuntimeConfiguration;
   connection: Connection;
   session: string;
   handle?: string;
@@ -345,17 +348,19 @@ export const serverConnector: Connector = async (
     const serverAdmin =
       authority.code === 'OK' &&
       fieldsOf(authority.payload)['serverAdmin'] === true;
+    const bearer = () =>
+      serial(async () => {
+        tokens = await store.renew(door);
+        return tokens.access;
+      });
     return {
       connection: result.connection,
       session,
       handle: (await store.session()).handle,
       serverAdmin,
       spawn,
-      bearer: () =>
-        serial(async () => {
-          tokens = await store.renew(door);
-          return tokens.access;
-        }),
+      bearer,
+      runtimeConfiguration: new HttpRuntimeConfiguration(base, bearer, fetch),
       openFiles: (claim) =>
         serial(async () => {
           const files = await openFiles(
@@ -576,6 +581,7 @@ export class DesktopClient {
     () => this.emit(),
   );
   private connection: Connection | undefined;
+  private runtimeConfiguration: RuntimeConfiguration | undefined;
   private session = '';
   private lifecycle = new JobLifecycle();
   private tickets = new Map<Job, Ticket>();
@@ -885,6 +891,7 @@ export class DesktopClient {
     this.lifecycle.reset(true);
     this.connection?.close();
     this.connection = undefined;
+    this.runtimeConfiguration = undefined;
     for (const timer of [...this.timers.values(), ...this.demoTimers.values()])
       clearInterval(timer);
     this.timers.clear();
@@ -1197,6 +1204,50 @@ export class DesktopClient {
           administration: decodeReply(request.operation, result.payload),
         };
       }
+      case 'server-configuration': {
+        const generation = this.generation;
+        const configuration = this.runtimeConfiguration;
+        if (!this.state.connected || !configuration)
+          throw new Error(
+            'Connect as a server administrator to read live configuration.',
+          );
+        const status = decodeReply(
+          'admin.status',
+          ok(await this.send({ type: 'admin.status', payload: {} })).payload,
+        );
+        if (
+          generation !== this.generation ||
+          configuration !== this.runtimeConfiguration ||
+          !this.state.connected
+        )
+          throw new Error('Administration connection changed.');
+        if (this.state.serverAdmin !== status.serverAdmin) {
+          this.state.serverAdmin = status.serverAdmin;
+          this.emit();
+        }
+        if (!status.serverAdmin)
+          throw new Error(
+            'Only a server administrator may manage live configuration.',
+          );
+        const reply =
+          request.operation === 'list'
+            ? { runtimeSettings: await configuration.list() }
+            : {
+                runtimeSetting: await configuration.set(
+                  request.key,
+                  request.value,
+                ),
+              };
+        if (
+          generation !== this.generation ||
+          configuration !== this.runtimeConfiguration ||
+          !this.state.connected
+        )
+          throw new Error(
+            'Administration connection changed. Inspect the original server before retrying.',
+          );
+        return { ...reply, state: structuredClone(this.state) };
+      }
       case 'server-admin': {
         const operations = [
           'admin.pricing.list',
@@ -1470,6 +1521,7 @@ export class DesktopClient {
             throw new Error('Connection attempt superseded.');
           }
           this.connection = opened.connection;
+          this.runtimeConfiguration = opened.runtimeConfiguration;
           this.session = opened.session;
           this.peer = opened.spawn;
           if (opened.openFiles)

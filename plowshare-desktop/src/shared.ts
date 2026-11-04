@@ -1,3 +1,4 @@
+import type { RuntimeSetting } from './runtime-configuration.ts';
 import type { ImportRecovery } from './import-recovery-contract.ts';
 import type { NativeCommandResult } from 'plowshare-mcp-integration';
 import type {
@@ -124,6 +125,7 @@ export interface WorkspaceRoute {
     | 'board'
     | 'memories'
     | 'manage'
+    | 'administration'
     | 'usage'
     | 'proc'
     | 'relay';
@@ -590,6 +592,14 @@ export type Request =
       requestId: string;
     }
   | { action: 'workspace-chat'; manage?: boolean }
+  | { action: 'workspace-administration' }
+  | { action: 'server-configuration'; operation: 'list' }
+  | {
+      action: 'server-configuration';
+      operation: 'set';
+      key: string;
+      value: string;
+    }
   | {
       action: 'workspace-layout';
       x: number;
@@ -739,6 +749,8 @@ export type Request =
   | { action: 'provider-management-recover'; intent: ManagementIntent }
   | { action: 'information-import-recovery-save'; recovery: ImportRecovery };
 export interface Reply {
+  runtimeSettings?: readonly RuntimeSetting[];
+  runtimeSetting?: RuntimeSetting;
   nativeMcp?: NativeCommandResult;
   providerManagement?: ManagementValue;
   providerManagementPending?: readonly ManagementIntent[];

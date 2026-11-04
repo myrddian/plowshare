@@ -52,13 +52,13 @@ try {
   await page.locator('#connection-form button[type=submit]').click();
   await expect(page.locator('#connection-dialog')).toBeHidden();
   await page.locator('[data-project="Research"]').click();
-  await page.getByRole('button', { name: 'Tool connections', exact: true }).click();
+  await page.getByRole('button', { name: 'Desktop tools', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Tool connections', exact: true });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('tab', { name: 'This client', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
-  await expect(dialog.getByRole('tab', { name: 'Server', exact: true })).toBeFocused();
-  await expect(dialog.getByRole('tab', { name: 'Server', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByRole('tab', { name: 'My server tools', exact: true })).toBeFocused();
+  await expect(dialog.getByRole('tab', { name: 'My server tools', exact: true })).toHaveAttribute('aria-selected', 'true');
   const sockets = fixture.eventSessions();
   const server = dialog.locator('[data-connection-location=server]');
   const local = dialog.locator('[data-connection-location=local]');
@@ -140,7 +140,7 @@ try {
   assert.equal((await stdio.seen()).some(row => row.home), false);
   await expect(local).not.toContainText('fixture-secret-stderr');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Tool connections', exact: true }).click();
+  await page.getByRole('button', { name: 'Desktop tools', exact: true }).click();
   await dialog.locator('[data-connection-location=local]').getByRole('button', { name: 'Refresh local hosts', exact: true }).click();
   await expect(dialog.locator('[data-connection-location=local]')).toContainText('Echo nested values');
   assert.equal(fixture.frames.length, frameCount, 'Local controls used the server after reopen');
@@ -171,7 +171,7 @@ try {
   assert.equal(fixture.frames.filter(frame => frame.type === 'tool.scope.disconnect').length, 1);
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Tool connections', exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Desktop tools', exact: true })).toBeFocused();
   console.log('Native tool connection smoke passed: HTTP/STDIO profile forms, explicit consent, safe inventory, local lifetime, consented server sharing/withdrawal, regular owner, masked entry, one mutation, redacted state/bookmarks, same socket and close focus.');
 } finally {
   if (app) await app.close();
