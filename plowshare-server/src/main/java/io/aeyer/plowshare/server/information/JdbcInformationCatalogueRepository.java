@@ -1038,7 +1038,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * <p>A selection with no project — an account's own knowledge, or Personal — is never contained,
    * which is why the null check comes first rather than being folded into the name test.
    */
-  private static boolean declinedHome(InformationContext context) {
+  // Package-private rather than private so that the one test which has to show "the tolerance's
+  // flag is false for every ordinary home" can assert this predicate directly. That link and the
+  // behavioural one in announceIntake are what together say an ordinary home's missing audience
+  // still surfaces; see that method.
+  static boolean declinedHome(InformationContext context) {
     return context.selection().project() != null
         && io.aeyer.plowshare.protocol.ContainedProjects.name(context.selection().project());
   }
@@ -1248,20 +1252,70 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     // and information_requests.account into admins, both created_by columns into authority_accounts
     // -- while the announcement below goes to Relay rather than to a column. ADR 0042 records the
     // absence of an author field for knowledge as a capability gap rather than an oversight.
-    event(revision, 1, context.attribution(), "intake", "retained", "");
+    announceIntake(declined, revision, context.attribution(), "retained", "");
     // Observable, and that is the requirement rather than a courtesy: "blocked" must not read as
     // "broken". A document whose stages are all 'skipped' and that announced nothing would be
     // indistinguishable to an operator from one the pipeline lost, so the decline says so, names
     // its reason and is retained beside the intake it belongs to.
     if (declined)
-      event(
+      announceIntake(
+          declined,
           revision,
-          1,
           context.attribution(),
-          "intake",
           "skipped",
           "a confined Application's documents are not processed; see ADR 0042");
     return new Admission(revision, resource, true);
+  }
+
+  /**
+   * One intake announcement, tolerating the absence of a Relay audience <em>only</em> for a home
+   * the processing pipeline has already declined.
+   *
+   * <p><strong>Why any tolerance exists.</strong> A contained scope has no Relay audience, by ADR
+   * 0042's own decision: {@code audienceProject}'s {@code CONTAINED} arm answers null so that a
+   * child's events are never published to a topic whose audience is the child's project — an
+   * addressable Relay topic nobody named. {@link InformationEventRecords#resolve} therefore raises
+   * {@link InformationEventRecords.Unaddressable} for such a home, and {@link InformationEvents}
+   * documents that exception as deliberately caught nowhere. Both facts are right, and together
+   * they made a contained principal's own knowledge write — which V224 admits — fail and roll back
+   * the moment it reached a real publisher. That defect shipped behind a recording fake; the
+   * regression test for it is the un-mocked path and not a tighter assertion against the fake.
+   *
+   * <p><strong>Why tolerating is principled here and not expedient.</strong> For a declined home
+   * there is no processing to announce and no audience to notify: every stage is already written
+   * {@code skipped} above, so this announcement is a notice to nobody about work that will not
+   * happen. The operator-legible record of the decline is the {@code skipped} stage rows, which are
+   * unaffected. What is lost is the Relay half, and for a home with no audience there was never a
+   * Relay half to lose.
+   *
+   * <p><strong>Why it is keyed on the home and not on the exception.</strong> A blanket catch here
+   * would sit on the path every knowledge write in this server takes, and would convert a real
+   * defect — an <em>ordinary</em> home that lost its audience through misconfiguration, such as an
+   * account knowledge home whose account has no personal project — into silence. That trade is
+   * worse than the bug it hides, because it is invisible. So the flag is the caller's own {@code
+   * declinedHome}: one predicate ({@code ContainedProjects.name}), decided once per admission, and
+   * not a fifth way to recognise a contained scope.
+   *
+   * <p><strong>This is the narrow fix, and the deep one is still open.</strong> Giving a contained
+   * scope a real Relay audience means deciding whether Relay keys topics on {@code
+   * authority_scopes.id}, which is ADR 0039's deferred question. Nothing here answers it, and a
+   * later reader must not "fix" this method by reaching for that change.
+   *
+   * <p>Catching mid-transaction is safe here specifically: {@code resolve} raises before any write,
+   * after two statements that both succeeded, so no failed statement has poisoned the transaction
+   * and the admission continues on a usable connection. That is a property of where the throw sits
+   * and is asserted rather than assumed.
+   *
+   * @param declinedHome whether this admission's home is one the pipeline declines — which in this
+   *     slice means, and only means, a contained home
+   */
+  void announceIntake(
+      boolean declinedHome, UUID revision, String actor, String action, String detail) {
+    try {
+      event(revision, 1, actor, "intake", action, detail);
+    } catch (InformationEventRecords.Unaddressable noAudience) {
+      if (!declinedHome) throw noAudience;
+    }
   }
 
   /**

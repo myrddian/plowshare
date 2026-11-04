@@ -206,13 +206,21 @@ class ContainedExecutionWriteDatabaseTest {
    * that chain that is a database fact rather than a call this file can read: that {@code resolve}
    * refuses the child's revision. The links either side are plain calls in production code.
    *
-   * <p><strong>The consequence, stated rather than softened:</strong> the suite above proves a
+   * <p><strong>The consequence, and what closed it.</strong> The rest of this suite proves a
    * child's write works against {@link RecordedInformationEvents}, a fake that announces into a
-   * list. Under production wiring the same write would fail. That is the same defect class as the
-   * mocked {@code OperationRecords} V225 exposed, and ADR 0042 records it as a limitation with its
-   * two candidate fixes rather than one being chosen here: giving a contained scope a Relay
-   * audience is ADR 0039's deferred question, and making the information write path tolerate an
-   * unaddressable home changes a path every ordinary write shares.
+   * list; under production wiring the same write <em>failed</em>, because this refusal is raised
+   * inside it and is caught nowhere. That was the same defect class as the mocked {@code
+   * OperationRecords} V225 exposed — a fake proving a rule and not that the rule is reachable — and
+   * it is now fixed narrowly: the intake announcement tolerates a missing audience <em>only</em>
+   * for a home the pipeline has already declined, which in this slice means a contained home and
+   * nothing else. {@code ContainedIntakeAnnouncementDatabaseTest} is the regression test, composed
+   * with the real publisher rather than a fake, and it carries the assertion that keeps the fix
+   * narrow. The deep fix — giving a contained scope a real Relay audience — remains ADR 0039's
+   * deferred question.
+   *
+   * <p>This test is unchanged by that fix and still earns its place: the audience is still absent,
+   * which is what it asserts. Nothing here claims the write fails; what fails is the audience
+   * resolution the announcement now tolerates.
    *
    * <p>The control is the same call for the container's own revision, so a {@code resolve} that
    * refused everything would fail here rather than read as a fence.

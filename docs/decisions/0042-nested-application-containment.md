@@ -870,7 +870,7 @@ single row is re-decided in the same table.
 | `V224` `knowledge_read_authority`, `knowledge_readable_candidates` | **Narrowed, not opened again.** `general_member` is pinned false for a contained actor and the candidates baseline is a separate `(general_member OR contained)` term, so discovery admits the child's own subtree and reaches no general arm. Discovery and the exact predicate are asserted to agree scope by scope, so one cannot admit what the other refuses. | `ContainedActorReadSchemaTest.theDiscoveryPathAdmitsTheChildsOwnScopeAndNotGeneralMembership`, `aChildCannotDiscoverGenerallyReadableRows`, `aChildIsRefusedGeneralReadThroughTheBoundaryCeiling` |
 | `V223` `information_public_policy` and `V224` `knowledge_readable_candidates`' `general_readable` | **Refused, and the row stops being theoretical.** Slice two recorded this surface as pre-existing and *unreachable* because "nothing executes a contained child, so no contained-home resource exists to publish". A running child writes documents into its own home, so one exists, and the conjunct V223 added is now load-bearing rather than defence in depth. Two fences stand in front of it: the write side cannot even ask — `SET_AUDIENCE` is not admitted by V224's write arm — and the read side refuses the publication if one somehow existed. | `ContainedActorWriteSchemaTest.aChildCannotPublishGenerallyReadable`, `aChildCannotSetAnAudienceEvenOnItsOwnDocument`; `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree` |
 | V224's two write gates, `information_lock_destination` and `information_home_allows` | **New rows, inward and write-side.** Each admits a live contained principal to **its own scope's** home and nothing else, resolved from the selected project and compared against the resource's home. A child writing in its container's home, a sibling's, an ancestor's, another home while naming its own project, or after revocation are each refused. | `ContainedActorWriteSchemaTest` (nine cases); `ContainedExecutionWriteDatabaseTest.aChildWritesKnowledgeAsItselfAccountedToItsContainer` for the Java path |
-| `JdbcInformationEventRecords:160`, the Relay audience | **Refused, and the refusal is reachable — as an exception thrown inside the child's own write. This is the one row whose answer execution changes, and it is recorded as a defect below rather than as a fence working.** | `ContainedExecutionWriteDatabaseTest.aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes` |
+| `JdbcInformationEventRecords:160`, the Relay audience | **Refused, and the refusal turned out to be reachable — as an exception thrown inside the child's own write, which it aborted. This is the one row whose answer execution changes.** The audience is still refused, which is the row's verdict and is unchanged; what was wrong was the belief that nothing asked. The intake announcement now tolerates the refusal for a declined home only, so the write completes and the audience stays absent. Recorded as a found defect with its narrow fix below rather than as a fence working. | `ContainedExecutionWriteDatabaseTest.aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes` for the audience; `ContainedIntakeAnnouncementDatabaseTest` for the fix, composed with the real publisher |
 | `ProjectMessageRouting:85`, messaging in both directions | **Refused; the decision does not move and the consequence does.** The refusal is keyed on the project *name*, so the actor's shape is immaterial to it, and the bare-UUID principal a run carries is refused for the child's own project exactly as a fabricated handle was — while the same principal reaches an ordinary project's routing unimpeded, which is what makes the refusal containment's. What changes is that there is now a run being deprived of a self-addressed endpoint. Separately, and structurally: no messaging tool is in `RetainedToolAccess.SYNCHRONOUS` at all, so retained work of any kind — contained or not — cannot reach messaging through a tool. | `ContainedAddressabilityTest.aRunningChildsOwnPrincipalIsNoMessagingEndpointEither` |
 | `ContainedDeclarations:167` tool bindings, `:175` Relay worker account | **Reduced at declaration, and the runtime half is now asserted.** A contained run's tool call resolves the snapshot of its *own* project's `server/tools.json` and nothing else, so a binding of the container's is absent from the set the child's home resolves rather than merely ungranted. | `ContainedRuntimeReachTest.aRunningChildsToolCallResolvesOnlyItsOwnBindings` |
 | `UnionStore:86`/`:98`/`:105`, the working tree and git hub | **Fenced by `project_type`, and starting a run provisions neither.** The at-rest half was already asserted; this is the runtime half. | `ContainedRuntimeReachTest.aRunningChildAcquiresNoWorkingTreeOrGitHub` |
@@ -1149,48 +1149,84 @@ authenticated driver per hop is exactly that brake. Opening a frame door to a
 credential-less principal would need the authority decision V218 forbids, so
 the limitation and the property are the same fact and neither is closed here.
 
-**A running child's own knowledge write has no Relay audience, and the production
-publisher refuses it rather than skipping it. This is a defect slice three found
-and did not fix.** V224 opened the knowledge write gates and
-`ContainedExecutionWriteDatabaseTest` proves a child's write works through the real
-Java path — against `RecordedInformationEvents`, a fake that appends announcements
-to a list. Under production wiring the same write would fail. The chain is four
-plain calls and one database fact: `JdbcInformationCatalogueRepository.admit`
-announces the intake, and for a contained home announces the processing decline
-beside it; both go through `InformationEvents.publish`;
-`RelayInformationEvents.publish` opens with `records.resolve(revision)`; and
-`resolve` throws `InformationEventRecords.Unaddressable` when the home scope has no
-audience, which `InformationEvents`' own contract documents as **deliberately
-caught nowhere** — "a refused publication is a visible defect, while one delivered
-to the wrong audience, or silently dropped, is not". A contained scope has no
-audience by this record's own decision (the Relay row in the inventory above), so
-every knowledge write a child makes would raise an `IllegalStateException` and roll
-back. The database half is asserted, with the container's own revision as the
-control, by
-`ContainedExecutionWriteDatabaseTest.aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes`.
+**A running child's own knowledge write had no Relay audience and the production
+publisher refused it. Fixed narrowly; the deep fix is still ADR 0039's question.**
 
-**It is the same defect class as the mocked `OperationRecords` V225 exposed, and
-that is the point worth keeping.** A fake that satisfies an interface can prove the
-rule under test and cannot prove the rule is reachable in the composition
-production assembles. Two slices made a liveness claim on mocked persistence; this
-one made a write claim on a mocked publisher. The lesson is not "use fewer fakes"
-but "a claim about the composed system needs the composed system", and the two
-candidate fixes are recorded rather than chosen, because each is a decision beyond
-this slice:
+V224 opened the knowledge write gates and `ContainedExecutionWriteDatabaseTest`
+proved a child's write works through the real Java path — **against
+`RecordedInformationEvents`, a fake that appends announcements to a list.** Under
+production wiring the same write failed, and the chain was four plain calls and one
+database fact: `JdbcInformationCatalogueRepository.admit` announces the intake, and
+for a contained home announces the processing decline beside it; both go through
+`InformationEvents.publish`; `RelayInformationEvents.publish` opens with
+`records.resolve(revision)`; and `resolve` raises
+`InformationEventRecords.Unaddressable` when the home scope has no audience, which
+`InformationEvents`' own contract documents as **deliberately caught nowhere** —
+"a refused publication is a visible defect, while one delivered to the wrong
+audience, or silently dropped, is not". A contained scope has no audience by this
+record's own decision, so every knowledge write a child made raised an
+`IllegalStateException` and rolled back.
 
-- **Give a contained scope a Relay audience.** This is ADR 0039's deferred question
-  of whether Relay keys topics on `authority_scopes.id`, and answering it here
-  would hand a child project an addressable topic — the exact thing the
-  addressability inventory's Relay row refuses.
-- **Make the information write path tolerate an unaddressable home**, announcing
-  nothing for one. This changes a path every ordinary write shares and would turn a
-  loud failure into a silence for homes this record never considered, which is the
-  trade `InformationEvents` documents itself as having refused.
+**So the claim in this record that a contained principal writes its own home must
+be read with its history.** Slice three's own text, above, states the write
+capability as an established fact. It was established against a fake; the
+production path threw until the fix below. The capability is real — the gates, the
+provenance, the home, the skipped stages are all as described — and the record is
+only true about it because the gap was found and closed, not because it was right
+when first written.
 
-Either is a core change with its own authorization. Until one is made, **a
-contained child's knowledge write is not usable in a deployed server**, and the
-write capability V224 opened should be read as the authority decision it is rather
-than as a working feature.
+**That is the second time in this capability that a fake carried a claim, and the
+lesson is worth more than either fix.** The first was a mocked `OperationRecords`
+hiding that a containment hop had never persisted, recorded one task earlier in
+this same record, with the lesson written down: *a mocked repository can prove a
+rule and cannot prove that the rule is reachable.* The lesson was in the record and
+the same class of defect was shipped again, by a different author, on a different
+collaborator, in the next task. What that says is that writing the lesson down does
+not transmit it; what transmits it is composing the system under test the way
+production composes it, which is what the regression test now does. A fake that
+satisfies an interface answers the question it was told to answer.
+
+**The narrow fix, and why it is principled rather than expedient.**
+`JdbcInformationCatalogueRepository.announceIntake` tolerates a missing audience
+**only for a home the processing pipeline has already declined** — which in this
+slice means a contained home and nothing else. The reason it is right rather than
+convenient: for such a home there is no processing to announce and no audience to
+notify. Every stage is already written `skipped`, so the announcement is a notice to
+nobody about work that will not happen, and the operator-legible record of the
+decline is the `skipped` stage rows, which the fix does not touch. What is lost is
+the Relay half, and for a home with no audience there was never a Relay half to
+lose. The honest cost is that a contained home's intake does not appear in the
+event history at all, which a test asserts rather than leaves to be discovered.
+
+**It is keyed on the home, not on the exception, and that is the part worth
+guarding.** A blanket `catch` here would sit on the path every knowledge write in
+this server takes, and would convert a real defect — an *ordinary* home that lost
+its audience through misconfiguration, such as an account knowledge home whose
+owner has no personal project, a shape
+`InformationEventAudienceMappingTest` already pins — into silence. That trade is
+worse than the bug it hides, because it is invisible. The flag is therefore the
+caller's own `declinedHome`, one predicate (`ContainedProjects.name`) decided once
+per admission, and not a fifth way to recognise a contained scope.
+
+**The evidence is two links, stated as two.** The schema will not let a fixture
+manufacture an ordinary unaddressable home — `information_knowledge_identity`
+refuses a home transfer outright, and every project home is addressable by
+construction — so the narrowing is shown as: *behaviourally*, that on a real home
+with no audience the refusal surfaces when the flag is false and is tolerated when
+it is true, nothing differing between the two calls but the flag; and
+*structurally*, that `declinedHome` is false for every selection whose project is
+not a contained one, so an ordinary home can only ever supply `false`. Making the
+tolerance unconditional fails the first. The positive controls are an ordinary
+write still announcing its intake, observed as the Relay history row it writes, and
+a contained write completing with its home, provenance and skipped stages asserted
+rather than the absence of a throw.
+
+**The deep fix is not taken and is not this slice's to take.** Giving a contained
+scope a real Relay audience means deciding whether Relay keys topics on
+`authority_scopes.id` — ADR 0039's deferred question, and the thing the
+addressability inventory's Relay row refuses, because it would hand a child project
+an addressable topic nobody named. Nothing here answers it, and a later reader must
+not "fix" `announceIntake` by reaching for that change.
 
 **`contained_applications.live` is vestigial, and two refusals that read as
 liveness checks are unreachable.** V219 declares the column `NOT NULL DEFAULT
@@ -1214,18 +1250,30 @@ resume would need a door for a credential-less principal, which V218 forbids —
 it means a container's only way to continue work it stopped is to start a new run.
 Stated here because "cancellable" and "resumable" are easy to read as a pair.
 
+**Two lookup orderings exist on purpose, and must not be harmonised in the wrong
+direction.** `trajectory` and `resources` resolve the named child *before* proving
+the caller's authority, which is the existence oracle below. `run` and `cancel`
+prove authority *first* and resolve the child after, so a refusal from either
+discloses nothing about whether the named UUID is a contained Application on this
+installation. Both orders are deliberate: the reads inherited theirs from slice
+one and changing it is a contract change, while the two new operations had no
+inherited contract to preserve and were written the better way. The inconsistency
+is therefore a known cost of deferring the oracle a third time, not a drift — and
+the direction to harmonise in, when it is decided, is the writes'. A reader who
+"fixes" the inconsistency by making `run` and `cancel` look up first has made four
+operations leak instead of two.
+
 **The existence oracle in `trajectory` and `resources` is unchanged, still live,
 and still a contract change.** Both open with
 `records.find(child).orElseThrow(new CallerFault("No such contained Application"))`
 before proving the caller's authority, so a caller that contains nothing can still
 distinguish a child UUID that exists on this installation from one that does not.
-Slice three had the opportunity and did not take it: `run` and `cancel` were written
-with the **opposite** order on purpose — authority first, then the lookup — so the
-two orders now sit side by side in one class, and `run`'s Javadoc says which is
-which and why. Closing it in the reads still changes which fault a nonexistent child
-raises, so it is still a contract change rather than a reordering. It is also the
-thing standing in the way of the first candidate fix to the retention question
-below, which is a reason to decide it rather than inherit it a third time.
+Slice three had the opportunity and did not take it; the two orderings it leaves
+behind are the entry above. Closing it in the reads still changes which fault a
+nonexistent child raises, so it is still a contract change rather than a
+reordering. It is also the thing standing in the way of the first candidate fix to
+the retention question below, which is a reason to decide it rather than inherit it
+a third time.
 
 **Planner cost for the widened reads is still argued and not measured.** V224 adds
 no `EXPLAIN ANALYZE` either. What it adds is one more function call per actor per
