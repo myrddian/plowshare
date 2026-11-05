@@ -313,9 +313,9 @@ public interface InformationCatalogueRepository {
    * Conditional resource tag replacement. The resource must come from live write admission in the
    * same transaction; reuse that locked snapshot rather than resolving authority a second time.
    *
-   * <p>The context is here for the contained-actor refusal and nothing else: it is the third tags
-   * mutator in the catalogue, and without a context it sat outside the one criterion the guarded
-   * set is enumerated against. Do not resolve authority from it a second time.
+   * <p>The context is here for the contained-actor refusal and nothing else. That refusal reads its
+   * actor off the context, so a tag mutator without one is outside the criterion the guarded set is
+   * enumerated against. Do not resolve authority from it a second time.
    */
   void replaceTags(
       InformationContext context, Resource resource, List<String> tags, long expectedVersion);

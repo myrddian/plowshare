@@ -1348,17 +1348,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * lockResource} and the readability predicates for its own home, so it can genuinely arrive at
    * every one of them.
    *
-   * <p>One of them would fail on integrity rather than on authority: {@code link} writes {@code
+   * <p>{@code link} alone would fail on integrity rather than on authority: it writes {@code
    * information_links.actor_handle}, whose foreign key targets {@code admins} (V83:77) and which a
    * contained principal has no row in by design (V218), so unguarded it raises an FK error — a
-   * server fault for something a caller did. The other ten do not: eight hand the actor to the
-   * event publisher, which is Relay and not a keyed column — the delivery table that once held that
-   * foreign key was dropped when events moved onto Relay (V188:96), and it cannot be named here
-   * even in a comment about its removal, because {@code InformationEventFenceRemovedTest} refuses
-   * any reference to it from server source including inside the migration's own filename — and the
-   * two tag mutators write no actor column at all. So those ten would have <em>succeeded</em>. That
-   * is the more dangerous half, and the reason this is an authority check rather than an integrity
-   * patch: whatever made {@code link} work would have silently granted the other ten.
+   * server fault for something a caller did. <strong>Every other guarded operation would have
+   * succeeded.</strong> The event-publisher ones hand the actor to Relay rather than to a keyed
+   * column — the delivery table that once held that foreign key was dropped when events moved onto
+   * Relay (V188:96), and it cannot be named here even in a comment about its removal, because
+   * {@code InformationEventFenceRemovedTest} refuses any reference to it from server source
+   * including inside the migration's own filename — and the tag mutators write no actor column at
+   * all. That is the more dangerous half, and the reason this is an authority check rather than an
+   * integrity patch: whatever made {@code link} work would have silently granted all the rest.
    *
    * <p>Extending {@code attribution()} across them would have granted each of those capabilities by
    * implementation accident and attributed the act to an account that did not ask — against this
@@ -1396,8 +1396,16 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * its write through {@code lockResource} or {@code requireDestination}, so the check could live
    * at those two chokepoints with an explicit per-operation allowance passed in — which is a
    * signature change across roughly a dozen call sites and a decision about what a contained actor
-   * may do, not a refactor. Until then the enumeration is the contract and the only honest
-   * mitigation is that this javadoc now says so.
+   * may do, not a refactor. Until then the enumeration is the contract, and what it covers is the
+   * list above.
+   *
+   * <p><strong>One ordering this guard does not control, recorded rather than changed.</strong>
+   * Reached through the service with a non-null request, {@code managed} reserves the command
+   * before any of these bodies run, so {@code information_commands.account}'s foreign key into
+   * {@code admins} would refuse a bare-UUID actor first and this guard would never be asked. That
+   * is shared with every managed mutation here, predates the guard, and leaves the refusal a server
+   * fault rather than the caller fault this raises — and no test covers it, because the tests drive
+   * the repository directly. Command-reservation ordering is not this guard's to change.
    *
    * <p>Keyed on {@code contained_knowledge_actor}, which is the same predicate V224's arms are
    * keyed on, so this cannot drift from the population it is about and is safe on a non-UUID actor.
@@ -1768,9 +1776,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void replaceTags(
       InformationContext context, Resource resource, List<String> tags, long expectedVersion) {
-    // No context in the original signature, so the enumeration above could not reach this third
-    // tags mutator. Reached through InformationCatalogue.replaceTags -> requireWrite ->
-    // lockResource, which V224's WRITE arm admits for a contained actor's own resource.
+    // The guard reads the actor off the context, so a mutator that takes none cannot be reached by
+    // the enumeration the guard's javadoc describes -- which is why this one carries a context it
+    // resolves no authority from. It is reached through InformationCatalogue.replaceTags ->
+    // requireWrite -> lockResource, which V224's WRITE arm admits for a contained actor's own
+    // resource.
     requireUncontainedActor(context, "replace a document's tags");
     if (expectedVersion < 0 || expectedVersion > 9007199254740991L)
       throw new IllegalArgumentException("invalid expected tag version");

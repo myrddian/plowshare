@@ -524,24 +524,24 @@ class ContainedExecutionWriteDatabaseTest {
    * information repositories take an {@code InformationContext} and write without this guard, and
    * their service-layer refusal is unverified. The guard's own javadoc carries that open set.
    *
-   * <p><strong>Twelve operations, and this test has twice asserted a smaller set as a closed
-   * one.</strong> {@code tags} and {@code tagGroups} had no guard and were absent from this list,
-   * and they were absent from the <em>same</em> hand-maintained enumeration the production javadoc
-   * described — so a reviewer reading either the list or this test saw a set that looked complete.
-   * That is the mechanism worth remembering rather than the two method names: an enumeration and a
-   * test built from it are one source of truth wearing two hats, and the only thing that caught it
-   * was reading the class for methods that take an {@code InformationContext} and write.
+   * <p><strong>This test has twice asserted a smaller set as a closed one, so the mechanism is
+   * worth more than the method names.</strong> The tag mutators had no guard and were absent from
+   * this list, and absent from the <em>same</em> hand-maintained enumeration the production javadoc
+   * describes — so a reviewer reading either the list or this test saw a set that looked complete.
+   * An enumeration and a test built from it are one source of truth wearing two hats, and what
+   * caught it was reading the class for methods that take an {@code InformationContext} and write.
    *
    * <p>V224 admits a contained principal into {@code lockResource} and the readability predicates
    * for its own home, so it really can arrive at every one of these.
    *
    * <p>Unguarded, only {@code link} would have failed: its {@code information_links.actor_handle}
    * is a live foreign key to {@code admins(handle)}, which a bare-UUID contained principal has no
-   * row in. The other eleven would have <strong>succeeded</strong> — {@code information_events} was
-   * dropped by {@code V188__information_events_on_relay.sql:96}, and those hand the actor to Relay
-   * rather than to a keyed column; {@code tags} and {@code tagGroups} write no actor column at all.
-   * The guard is therefore an <strong>authority check</strong>, not an integrity patch: the gap it
-   * closes was a silent grant of ten management operations to a confined Application, not a crash.
+   * row in. <strong>Every other operation in this list would have succeeded</strong> — {@code
+   * information_events} was dropped by {@code V188__information_events_on_relay.sql:96}, so the
+   * event-publisher ones hand the actor to Relay rather than to a keyed column, and the tag
+   * mutators write no actor column at all. The guard is therefore an <strong>authority
+   * check</strong>, not an integrity patch: the gap it closed was a silent grant of catalogue
+   * management to a confined Application, not a crash.
    *
    * <p>Each case asserts two things: the contained principal gets the guard's own {@code
    * CallerFault}, and an ordinary actor does <strong>not</strong> — either succeeding outright, or
@@ -563,9 +563,8 @@ class ContainedExecutionWriteDatabaseTest {
     var confined = InformationAccess.contained(childPrincipal, HOLDER, childProject).withView(true);
     var ordinary = context(HOLDER, "parent").withView(true);
 
-    // One list, so a thirteenth management operation added without a guard shows up as a missing
-    // row here rather than as a silent grant in production: eleven of the twelve would succeed
-    // unguarded,
+    // One list, so a management operation added without a guard shows up as a missing row here
+    // rather than as a silent grant in production: every entry but link would succeed unguarded,
     // so the failure mode this list protects against is capability, not a crash.
     //
     // It protects against that only as well as the list is complete, which is the lesson this test
@@ -625,9 +624,9 @@ class ContainedExecutionWriteDatabaseTest {
                 context ->
                     records.tagGroups(
                         context, revisionFor(context, child, mine), Map.of("g", List.of("a")))),
-            // The third tags mutator, and the one the enumeration's own criterion could not reach:
-            // its signature carried no context until the guard needed one. Its Resource comes from
-            // live write admission, so the fixture takes the same lock the caller would.
+            // A tags mutator the enumeration's criterion could not reach: the guard reads its
+            // actor off the context and this one took none until the guard needed it. Its Resource
+            // comes from live write admission, so the fixture takes the same lock the caller would.
             new Operation(
                 "replaceTags",
                 context ->

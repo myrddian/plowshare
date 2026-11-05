@@ -846,15 +846,13 @@ public final class SourceContainedApplications implements ContainedApplications 
    * this must not take a non-empty answer, or a {@code manifest} entry, as a package validity
    * claim. Package validity is decided on the producing side, where the manifest is parsed.
    */
-  // CORRECTED. This comment used to say that trajectory answers for a destroyed child where this
-  // refuses one, and instructed a reader not to harmonise the two. That was never true of this
-  // code: destruction deletes the child's project row, contained_applications.project_id is
-  // ON DELETE CASCADE (V219), and BOTH methods open with records.find(child).orElseThrow -- so
-  // after a real destruction the two refuse identically, with "No such contained Application",
-  // and the only difference is a message neither of them reaches. The retained conversation
-  // lineage does survive the destruction; nothing can read it, because the row that resolves the
-  // child is gone. ContainedResourceReadTest.aRealDestructionMakesBothReadsRefuseIdentically pins
-  // that, and ADR 0042 records it along with the retention decision the old belief justified.
+  // This read and trajectory refuse a destroyed child IDENTICALLY, with "No such contained
+  // Application": destruction deletes the child's project row, contained_applications.project_id
+  // is ON DELETE CASCADE (V219), and both methods open with records.find(child).orElseThrow. The
+  // retained conversation lineage survives the destruction and nothing can read it, because the
+  // row that resolves the child is gone. ContainedResourceReadTest
+  // .aRealDestructionMakesBothReadsRefuseIdentically pins that; ADR 0042 records it with the
+  // retention decision that rests on it.
   //
   // The liveness guard below is therefore unreachable in production and is kept as a guard rather
   // than as behaviour: contained_applications.live is NOT NULL DEFAULT TRUE (V219) and nothing in

@@ -203,8 +203,8 @@ A child allocates its own allowance under a ceiling its parent sets at creation
 and may reduce to zero. **The pool is the child's and the accounting subject is
 not:** a child spends its own allowance, under its container's ceiling, **on its
 container's account**. Slice three decided that axis and this record said the
-opposite — "child spend is attributed to the child" — in four places, which is
-corrected here and at each of them. `Speaker.contained(child)` records the
+opposite — "child spend is attributed to the child" — which is corrected here and
+at each site that carried it. `Speaker.contained(child)` records the
 authorship the account no longer carries.
 
 One-way visibility is a property of the questions, not of a filter on the
@@ -869,8 +869,8 @@ whose surface is a WebSocket frame or an HTTP controller is therefore unreachabl
 execution newly reaches is a short list: the authority substrate's resolution and
 recheck path, the knowledge and information read and write predicates, the
 tool-argument boundary that turns a built-in tool's arguments into typed resource
-references, the definition registry and tool bindings of the child's own home, the
-and the conversation and allowance rows a run writes. **The knowledge and
+references, the definition registry and tool bindings of the child's own home, and
+the conversation and allowance rows a run writes. **The knowledge and
 information predicates are on that list as gates and not as traffic**: V224 opens
 them for a contained actor and nothing in production presents one, which the
 no-caller limitation states in full and which every row below that depends on it
@@ -1046,12 +1046,14 @@ criterion is narrower than "every write a confined Application could reach". It
 has been declared closed and been wrong three times, so here is what it covers.**
 
 The criterion is: the mutators of `JdbcInformationCatalogueRepository` that take an
-`InformationContext`. There are twelve, each refusing a contained actor before
-anything writes, each with an ordinary actor passing the same guard beside it in
-one list that one test drives. Three things the criterion excludes:
+`InformationContext`. Each refuses a contained actor before anything writes, each
+with an ordinary actor passing the same guard beside it, in one list that one test
+drives — and the list rather than a count is the enumeration, because a count here
+is a thing the next mutator falsifies. Three things the criterion excludes:
 
 - **`replaceTags`** had no context in its signature, so the criterion could not
-  reach it. It is a third tags mutator, reached through
+  reach it — the guard reads its actor off the context, so a mutator without one is
+  outside the criterion by construction. It is a tags mutator, reached through
   `InformationCatalogue.replaceTags` → `requireWrite` → `lockResource`, which
   V224's WRITE arm admits for a contained actor's own resource. It now takes the
   context and is guarded, and it is in the list.
@@ -1089,8 +1091,8 @@ executor and account unchanged, and `SourceContainedApplications.run` issues the
 child's principal and deliberately discards it ("Issued, and deliberately not
 passed as the caller"). So `contained_knowledge_actor(actor)` is **false for every
 actor a production path can present**, and with it: V224's read baseline, both of
-V224's write arms, the `attribution` axis, and all eleven management guards are
-reachable only from a hand-built context. **A contained run today reads no
+V224's write arms, the `attribution` axis, and every contained-actor guard in the
+catalogue repository are reachable only from a hand-built context. **A contained run today reads no
 knowledge and writes no knowledge or memory** — not because a fence refuses it,
 but because nothing makes the child the information actor.
 
@@ -1312,13 +1314,15 @@ outage. It was a defect in the capability's own write path, found and closed bef
 that path acquired a caller, and it is recorded rather than deleted because the
 lesson travels and the next slice wires the caller.
 
-**So the claim in this record that a contained principal writes its own home must
-be read with its history.** Slice three's own text, above, states the write
-capability as an established fact. It was established against a fake; the
-production path threw until the fix below. The capability is real — the gates, the
-provenance, the home, the skipped stages are all as described — and the record is
-only true about it because the gap was found and closed, not because it was right
-when first written.
+**So the claim that a contained principal writes its own home must be read for what
+it is: a gate, not a behaviour.** What is real and proved is the gate — V224's
+write arms admit a contained actor to its own home and nothing else, and handed
+such a context the Java path writes the provenance, the home and the skipped
+stages exactly as described. What is not real is any production write, because no
+production path makes a contained principal the information actor. The record
+asserted this as an established execution fact in several places; each of those is
+now scoped to the constructed context that proves it, and the no-caller limitation
+states the absence in full.
 
 **That is the second time in this capability that a fake carried a claim, and the
 lesson is worth more than either fix.** The first was a mocked `OperationRecords`
@@ -1724,13 +1728,22 @@ already (V74 and V169), so restating them is this table's ordinary maintenance.
 The retention the kind carries is decided in its own paragraph above.
 
 **A confined Application's documents are not processed, and that is a recorded
-capability gap rather than an oversight.** A child may write knowledge into its
-own home, and the processing pipeline — extraction, embedding, summarising,
-tagging — declines those documents at the enqueue boundary: every stage is
-written `skipped`, the intake announces the decline with its reason, and the
-claim scan's work list (a `pending` or expired-`running` step) therefore never
-contains them. Nothing is lost silently and nothing is retried; an operator
-reading either the steps or the event stream sees a deliberate skip.
+capability gap rather than an oversight.** V224's write arms admit a contained
+actor's knowledge write into its own home — against a constructed context, since
+no production path presents such an actor — and the processing pipeline —
+extraction, embedding, summarising, tagging — declines those documents at the
+enqueue boundary: every stage is written `skipped`, the intake announces the
+decline with its reason, and the claim scan's work list (a `pending` or
+expired-`running` step) therefore never contains them. Nothing is lost silently
+and nothing is retried.
+
+**What an operator would actually see, which is narrower than "the steps or the
+event stream".** The `skipped` stage rows are the whole of it. The decline's
+announcement does **not** reach the event stream, because a contained home has no
+Relay audience and the intake announcement tolerates that refusal rather than
+failing the write — so for a contained home the announcement is attempted and
+lands nowhere. The two statements are reconciled this way round, with the stage
+rows carrying the observability, and the narrow fix's own entry says the same.
 
 The deferred question is **ownership, and it is three-way**. Processing a
 document needs a conversation and an allowance, and for a contained home neither
