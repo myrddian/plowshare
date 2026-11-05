@@ -9,6 +9,7 @@ public sealed interface RelayPayload {
   enum Kind {
     EMPTY,
     TEXT,
+    BLOB,
     SCHEDULE_DUE,
     LIFECYCLE,
     WAKE_REQUESTED
@@ -36,6 +37,18 @@ public sealed interface RelayPayload {
     @Override
     public Kind kind() {
       return Kind.TEXT;
+    }
+  }
+
+  /** Generic immutable binary reference; broker inspection never hydrates it. */
+  record Blob(io.aeyer.plowshare.protocol.RelayBlob.Descriptor blob) implements RelayPayload {
+    public Blob {
+      java.util.Objects.requireNonNull(blob);
+    }
+
+    @Override
+    public Kind kind() {
+      return Kind.BLOB;
     }
   }
 

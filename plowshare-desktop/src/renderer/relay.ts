@@ -140,6 +140,12 @@ function eventCard(event: RelayEvent): HTMLElement {
   message.className = 'relay-message';
   const payload = event.payload;
   switch (payload.kind) {
+    case 'BLOB':
+      heading.textContent = 'Binary payload';
+      message.textContent = payload.blob
+        ? `${payload.blob.mediaType} · ${payload.blob.byteLength} bytes\nSHA-256 ${payload.blob.sha256}`
+        : 'Binary descriptor unavailable.';
+      break;
     case 'TEXT':
       heading.textContent = 'Message';
       message.textContent = payload.text;

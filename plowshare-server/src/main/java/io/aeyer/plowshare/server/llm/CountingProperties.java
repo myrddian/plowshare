@@ -3,14 +3,60 @@ package io.aeyer.plowshare.server.llm;
 import java.time.Duration;
 import okhttp3.HttpUrl;
 
-/** Opt-in vLLM 0.15.1 tokenization contract; URL is explicit, never inferred from /v1. */
+/** Explicit same-origin counters; existing vLLM text tokenization remains the default. */
 public class CountingProperties {
+  /** Wire protocol for complete chat prompts; embedding tokenization remains vLLM-only. */
+  public enum ChatProtocol {
+    VLLM_TOKENIZE("VLLM_TOKENIZE_0_15_1", "count"),
+    LLAMA_CPP_INPUT_TOKENS("LLAMA_CPP_CHAT_INPUT_TOKENS", "input_tokens"),
+    LMSTUDIO_MLX_INPUT_TOKENS("LMSTUDIO_MLX_CHAT_INPUT_TOKENS", "input_tokens");
+
+    private final String source;
+    private final String countField;
+
+    ChatProtocol(String source, String countField) {
+      this.source = source;
+      this.countField = countField;
+    }
+
+    public String source() {
+      return source;
+    }
+
+    public String countField() {
+      return countField;
+    }
+  }
+
+  private ChatProtocol chatProtocol = ChatProtocol.VLLM_TOKENIZE;
+
+  public ChatProtocol getChatProtocol() {
+    return chatProtocol;
+  }
+
+  public void setChatProtocol(ChatProtocol value) {
+    chatProtocol = java.util.Objects.requireNonNull(value, "chatProtocol");
+  }
+
   private String url;
   private String revision;
   private Duration timeout = Duration.ofSeconds(2);
   private Duration cacheTtl = Duration.ofSeconds(60);
   private int cacheEntries = 1000;
   private boolean automatic;
+  private boolean imageTokensIncluded;
+
+  /**
+   * Operator assertion: the pinned counter includes image encoder context in the complete count.
+   */
+  public boolean isImageTokensIncluded() {
+    return imageTokensIncluded;
+  }
+
+  public void setImageTokensIncluded(boolean value) {
+    imageTokensIncluded = value;
+  }
+
   private boolean embeddings;
   private boolean embeddingSpecialTokens = true;
 
@@ -89,6 +135,19 @@ public class CountingProperties {
         || cacheEntries > 10000
         || revision != null && !revision.matches("[A-Za-z0-9._:-]{1,128}"))
       throw new IllegalArgumentException("invalid pool counting bounds or revision");
+    if (chatProtocol != ChatProtocol.VLLM_TOKENIZE
+        && (url == null || revision == null || embeddings))
+      throw new IllegalArgumentException(
+          "Full-chat counting needs an explicit url, verified revision and no embedding counting");
+    // LM Studio settings can change without changing its model alias. This slice validates
+    // the live binding on every exchange; a cached count would bypass that check.
+    if (chatProtocol == ChatProtocol.LMSTUDIO_MLX_INPUT_TOKENS
+        && (cacheEntries != 0 || !revision.matches("[a-f0-9]{64}")))
+      throw new IllegalArgumentException(
+          "MLX counting needs cache-entries: 0 and the sidecar's SHA-256 revision");
+    if (imageTokensIncluded && (url == null || revision == null))
+      throw new IllegalArgumentException(
+          "Image counting needs an explicit url and verified revision");
     if (url == null) {
       if (automatic || embeddings)
         throw new IllegalArgumentException("pool counting needs an explicit url");
@@ -107,16 +166,22 @@ public class CountingProperties {
         || !url.equals(url.trim()))
       throw new IllegalArgumentException(
           "pool counting url must use the inference origin without credentials or query");
+    if (chatProtocol != ChatProtocol.VLLM_TOKENIZE
+        && !target.encodedPath().endsWith("/chat/completions/input_tokens"))
+      throw new IllegalArgumentException(
+          "Full-chat counting url must name its chat-completion input-token endpoint");
   }
 
   public String fingerprint() {
     return java.util.List.of(
+            chatProtocol.name(),
             String.valueOf(url),
             String.valueOf(revision),
             timeout.toString(),
             cacheTtl.toString(),
             Integer.toString(cacheEntries),
             Boolean.toString(embeddings),
+            Boolean.toString(imageTokensIncluded),
             Boolean.toString(embeddingSpecialTokens))
         .toString();
   }

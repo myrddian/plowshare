@@ -33,7 +33,7 @@ import org.testcontainers.junit.jupiter.*;
  *
  * <h2>Why this needs a real database</h2>
  *
- * <p>V224 opened the knowledge write gates for a contained principal and {@code
+ * <p>V229 opened the knowledge write gates for a contained principal and {@code
  * ContainedActorWriteSchemaTest} proved it at the SQL level — but that test had to insert its rows
  * by hand with {@code owner_handle} NULL, because that column's foreign key targets {@code admins}
  * and {@code information_resources.created_by}'s targets {@code authority_accounts}, and a
@@ -51,7 +51,7 @@ import org.testcontainers.junit.jupiter.*;
  * <strong>author</strong> records the principal. Measured against PostgreSQL, the knowledge write
  * path cannot express that split, because {@code InformationContext.account()} is one field serving
  * both: the destination gate is asked about it and {@code owner_handle} / {@code created_by} are
- * written from it. The principal passes the gate (V224's arm, scope-bound only) and fails the row's
+ * written from it. The principal passes the gate (V229's arm, scope-bound only) and fails the row's
  * provenance; the container's account passes the provenance and fails the gate, because a contained
  * project carries no {@code PROJECT} scope and so no role for anybody. Both halves are asserted
  * actor by actor, with the container's contributor writing in its own home as the control.
@@ -146,7 +146,7 @@ class ContainedExecutionWriteDatabaseTest {
         .withView(true);
   }
 
-  /** The same selection with the global arm off, which is the only one V224's write arm admits. */
+  /** The same selection with the global arm off, which is the only one V229's write arm admits. */
   private InformationContext scopeBound(String actor, String project) {
     return new InformationContext(
             actor,
@@ -210,7 +210,7 @@ class ContainedExecutionWriteDatabaseTest {
    * child's write works against {@link RecordedInformationEvents}, a fake that announces into a
    * list; under production wiring the same write <em>failed</em>, because this refusal is raised
    * inside it and is caught nowhere. That was the same defect class as the mocked {@code
-   * OperationRecords} V225 exposed — a fake proving a rule and not that the rule is reachable — and
+   * OperationRecords} V230 exposed — a fake proving a rule and not that the rule is reachable — and
    * it is now fixed narrowly: the intake announcement tolerates a missing audience <em>only</em>
    * for a home the pipeline has already declined, which in this slice means a contained home and
    * nothing else. {@code ContainedIntakeAnnouncementDatabaseTest} is the regression test, composed
@@ -266,7 +266,7 @@ class ContainedExecutionWriteDatabaseTest {
    * axes separated.
    *
    * <p>{@code InformationAccess.contained} is the one place the combination is built — the child's
-   * principal acting, its container's account accountable, and the scope-bound selection V224
+   * principal acting, its container's account accountable, and the scope-bound selection V229
    * admits. The assertions are what the row actually holds afterwards, because that is the thing
    * round one could not produce at all.
    */
@@ -312,7 +312,7 @@ class ContainedExecutionWriteDatabaseTest {
             UUID.class,
             admitted.revision()));
 
-    // HOME: the child's own contained scope. This is the write landing where V224's arm admits it
+    // HOME: the child's own contained scope. This is the write landing where V229's arm admits it
     // and nowhere else, and it is the field a container distinguishes the writing by.
     assertEquals(
         childScope,
@@ -531,7 +531,7 @@ class ContainedExecutionWriteDatabaseTest {
    * An enumeration and a test built from it are one source of truth wearing two hats, and what
    * caught it was reading the class for methods that take an {@code InformationContext} and write.
    *
-   * <p>V224 admits a contained principal into {@code lockResource} and the readability predicates
+   * <p>V229 admits a contained principal into {@code lockResource} and the readability predicates
    * for its own home, so it really can arrive at every one of these.
    *
    * <p>Unguarded, only {@code link} would have failed: its {@code information_links.actor_handle}
@@ -614,7 +614,7 @@ class ContainedExecutionWriteDatabaseTest {
                 context -> records.finalise(context, revisionFor(context, child, mine), Map.of())),
             // The two the first version of this list and this test both omitted -- the same two,
             // which is why reading either alone showed a closed set. Neither crashes unguarded:
-            // tags and tagGroups call only lockResource, which V224's WRITE arm admits for a
+            // tags and tagGroups call only lockResource, which V229's WRITE arm admits for a
             // contained actor's own resource, and then UPDATE information_resources.
             new Operation(
                 "tags",

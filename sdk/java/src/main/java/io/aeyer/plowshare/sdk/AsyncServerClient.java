@@ -9,6 +9,19 @@ import java.util.concurrent.CompletionStage;
 
 /** Typed asynchronous server capabilities. Completion never implies durable job completion. */
 public interface AsyncServerClient extends AutoCloseable {
+  default CompletionStage<io.aeyer.plowshare.protocol.RelayBlob.Published> publishRelayBlobAsync(
+      io.aeyer.plowshare.protocol.RelayBlob.Publish request, byte[] bytes) {
+    return java.util.concurrent.CompletableFuture.failedFuture(
+        new UnsupportedOperationException("Relay binary transfer is unavailable"));
+  }
+
+  default CompletionStage<byte[]> readRelayBlobAsync(
+      io.aeyer.plowshare.protocol.RelayBlob.Read request,
+      io.aeyer.plowshare.protocol.RelayBlob.Descriptor expected) {
+    return java.util.concurrent.CompletableFuture.failedFuture(
+        new UnsupportedOperationException("Relay binary transfer is unavailable"));
+  }
+
   String baseUrl();
 
   @Override
@@ -205,4 +218,22 @@ public interface AsyncServerClient extends AutoCloseable {
   CompletionStage<Resolution> resolveAsync(String id, boolean accept, String reason, String by);
 
   CompletionStage<UploadedImage> uploadImageAsync(String project, String filename, byte[] bytes);
+
+  default CompletionStage<io.aeyer.plowshare.protocol.ImageAdmissions.Receipt> admitImageAsync(
+      io.aeyer.plowshare.protocol.ImageAdmissions.Request request, String filename, byte[] bytes) {
+    return java.util.concurrent.CompletableFuture.failedFuture(
+        new UnsupportedOperationException("invocation image admission is unavailable"));
+  }
+
+  default CompletionStage<io.aeyer.plowshare.protocol.ToolResults.Receipt> readToolInvocationAsync(
+      io.aeyer.plowshare.protocol.ToolResults.Read request) {
+    return java.util.concurrent.CompletableFuture.failedFuture(
+        new UnsupportedOperationException("Tool invocation reads are unsupported by this client"));
+  }
+
+  default CompletionStage<io.aeyer.plowshare.protocol.ImageAdmissions.Status>
+      imageAdmissionStatusAsync(io.aeyer.plowshare.protocol.ImageAdmissions.Request request) {
+    return java.util.concurrent.CompletableFuture.failedFuture(
+        new UnsupportedOperationException("invocation image admission is unavailable"));
+  }
 }

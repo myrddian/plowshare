@@ -62,6 +62,9 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
       String call,
       BooleanSupplier cancelled) {
     binding.validate(arguments);
+    if (binding.resultProfile() != null
+        && io.aeyer.plowshare.protocol.HostedToolScopes.hosted(binding.provider()))
+      throw new CallerFault("Hosted content results are not supported by this worker protocol");
     if (owner.status() != UsageAttribution.Status.ATTRIBUTED
         || owner.scope() != UsageAttribution.Scope.PROJECT
         || owner.runs().id() == null
@@ -102,7 +105,11 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
     Instant now = clock.get().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     var request =
         new RelayToolCodec.Request(
-            binding.inputSchema() == null ? RelayToolCodec.VERSION : RelayToolCodec.NESTED_VERSION,
+            binding.resultProfile() != null
+                ? RelayToolCodec.CONTENT_VERSION
+                : binding.inputSchema() == null
+                    ? RelayToolCodec.VERSION
+                    : RelayToolCodec.NESTED_VERSION,
             id.toString(),
             binding.project(),
             binding.provider(),
@@ -114,7 +121,8 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
             arguments.values(),
             binding.inputSchema() == null
                 ? null
-                : io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(binding.inputSchema()));
+                : io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(binding.inputSchema()),
+            binding.resultProfile());
     var ancestry =
         repository
             .ancestry(project, owner)
@@ -258,7 +266,8 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
         || projects.personalOwner(binding.project()).filter(p -> !p.equals(caller)).isPresent()
         || !Objects.equals(projects.id(binding.project()), project))
       throw new CallerFault("Hosted result unavailable to this owner");
-    return new Outcome(UUID.fromString(result.invocationId()), result.state(), result.text());
+    return new Outcome(
+        UUID.fromString(result.invocationId()), result.state(), result.text(), result.content());
   }
 
   private static Outcome unknown(UUID id, String reason) {

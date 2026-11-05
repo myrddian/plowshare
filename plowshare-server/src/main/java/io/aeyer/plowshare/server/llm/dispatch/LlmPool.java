@@ -351,6 +351,11 @@ public final class LlmPool implements AutoCloseable {
     return vision.contains(wireModel);
   }
 
+  /** Verified wire formats; profile declarations and this pool's vision restriction also apply. */
+  public io.aeyer.plowshare.server.llm.ModelMediaCapabilities mediaCapabilities(String wireModel) {
+    return transport.mediaCapabilities(wireModel);
+  }
+
   /**
    * The prompt size at which a conversation on this pool's copy of {@code wireModel} folds, where
    * an operator configured one.

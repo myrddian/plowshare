@@ -433,7 +433,7 @@ public final class SourceContainedApplications implements ContainedApplications 
    * must keep refusing it. A contained run therefore goes through {@code
    * ConversationStore.openContained} instead, which takes the admission this method's hop produced
    * and binds it rather than admitting a scope, on an {@code Origin.CONTAINED} row carrying the
-   * child's own allowance. V225 opened the two shipped constraints that stood in front of that
+   * child's own allowance. V230 opened the two shipped constraints that stood in front of that
    * door. {@code ContainedConversationDoorDatabaseTest} asserts the envelope a started child gets:
    * its budget is the child's own allowance and its admission account is its container's.
    *

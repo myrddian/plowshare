@@ -47,6 +47,38 @@ import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
  */
 public interface AgentTool {
 
+  /** Optional typed producer capability. Ordinary tools keep the existing run contract. */
+  interface ContentTool extends AgentTool {
+    /**
+     * Whether this binding negotiates content and requires a durable call entry before execution.
+     */
+    boolean typedResults(Home home);
+
+    /** Execute once, returning text plus optional invocation-bound image provenance. */
+    Result runResult(
+        String arguments,
+        Home home,
+        io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner);
+  }
+
+  /** A typed result optionally retains invocation-bound images alongside its text projection. */
+  record Result(String text, ToolObservation observation) {
+    public Result {
+      java.util.Objects.requireNonNull(text);
+    }
+  }
+
+  /** Preserve the harness diagnostic for legacy tools violating the nonblank result contract. */
+  static String usableText(String result, String tool) {
+    if (result == null || result.isBlank()) {
+      return "the tool '"
+          + tool
+          + "' returned nothing at all, which is a fault in the"
+          + " tool. Nothing can be concluded from it.";
+    }
+    return result;
+  }
+
   /** Harness call identity, independent of arguments; per-run mutation tools use it for retries. */
   default void calledAs(String id) {}
 

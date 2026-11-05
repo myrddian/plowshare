@@ -518,6 +518,7 @@ background(
           'activity.html',
           'style.css',
           'desktop.css',
+          'administration.css',
           'app.js',
           'app-icon.png',
           'trajectory.js',
@@ -613,6 +614,18 @@ background(
         if (request.action === 'workspace-chat') {
           showChat(request.manage);
           return { state: client.state };
+        }
+        if (request.action === 'workspace-administration') {
+          if (!client.state.connected || !client.state.serverAdmin)
+            throw new Error('Connect as a server administrator first.');
+          activePage?.layout(workspaceBounds, false);
+          activePage = undefined;
+          workspaceRoute = {
+            kind: 'administration',
+            label: 'Server administration',
+          };
+          sendWorkspace();
+          return { state: client.state, route: workspaceRoute };
         }
         if (request.action === 'workspace-layout') {
           const values = [request.x, request.y, request.width, request.height];
@@ -1174,6 +1187,8 @@ background(
           applicationPackage: { folder, files: await applicationFiles(folder) },
         };
       }
+      if (request.action === 'server-configuration' && !main)
+        throw new Error('Manage configuration from Server administration.');
       if (
         (request.action.startsWith('provider-management') ||
           request.action === 'native-mcp') &&

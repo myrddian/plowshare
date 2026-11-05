@@ -91,7 +91,7 @@ public final class EntryStore {
   private static final String COLUMNS =
       "conversation_id, ordinal, kind, role, content, tool_call_id, tool_calls,"
           + " superseded_by, handle, turn_ordinal, recorded_at, took_ms, ejected_at,"
-          + " export";
+          + " export, tool_observation";
 
   /**
    * The log's advisory-lock space: the two-key form, so no other advisory lock this database takes
@@ -128,9 +128,9 @@ public final class EntryStore {
                                  invocation, produced_by, dispatch, model_specifier, model_pool,
                                  wire_model, completion, finish_reason, prompt_tokens,
                                  completion_tokens, reasoning_tokens, sent_at, fallback_reason,
-                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id)
+                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation)
             SELECT ?, COALESCE(MAX(ordinal), 0) + 1, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB)
               FROM entries
              WHERE conversation_id = ?
             RETURNING %s"""
@@ -1145,6 +1145,7 @@ public final class EntryStore {
 
   private final Supplier<Instant> now;
   private final UnitOfWork transactions;
+  private final TrajectoryArtifacts artifacts;
 
   /**
    * The real clock and no transaction boundary, which is a fixture and is said rather than
@@ -1159,7 +1160,7 @@ public final class EntryStore {
    * the_next_fold_takes_the_span} is what fails when a fold runs without a boundary around it.
    */
   public EntryStore forAccount(String account) {
-    EntryStore copy = new EntryStore(jdbc, now, transactions);
+    EntryStore copy = new EntryStore(jdbc, now, transactions, artifacts);
     copy.informationScoped = true;
     copy.visibility = visibility;
     copy.informationAccount = account;
@@ -1239,11 +1240,25 @@ public final class EntryStore {
    *     choose it. {@code DEFAULT now()} in the column was the alternative and is a clock nothing
    *     in a test can pull on — {@code V6__conversations.sql} settled the same question the same
    *     way for {@code created_at}
-   * @param transactions what makes {@link #fold}'s two statements one, which is the only place in
-   *     this class that has two. {@link UnitOfWork} argues why the mechanism arrives from outside
-   *     rather than being named here
+   * @param transactions keeps entry insertion/claims and fold writes atomic. Typed image entries
+   *     require the production constructor supplying {@link TrajectoryArtifacts}; no file reads
+   *     belong in these short transactions. {@link UnitOfWork} supplies the mechanism
    */
   public EntryStore(JdbcTemplate jdbc, Supplier<Instant> now, UnitOfWork transactions) {
+    this(jdbc, now, transactions, TrajectoryArtifacts.UNAVAILABLE);
+  }
+
+  /** Production append acquires entry claims in the same short transaction. */
+  public EntryStore(JdbcTemplate jdbc, UnitOfWork transactions, TrajectoryArtifacts artifacts) {
+    this(jdbc, Instant::now, transactions, artifacts);
+  }
+
+  private EntryStore(
+      JdbcTemplate jdbc,
+      Supplier<Instant> now,
+      UnitOfWork transactions,
+      TrajectoryArtifacts artifacts) {
+    this.artifacts = Objects.requireNonNull(artifacts);
     this.jdbc = jdbc;
     this.now = now;
     this.transactions = Objects.requireNonNull(transactions, "transactions");
@@ -1305,40 +1320,50 @@ public final class EntryStore {
             ArchiveUnavailableException.translating(
                 "record a conversation entry",
                 () -> {
+                  if (entry.observation() != null
+                      && !org.springframework.transaction.support.TransactionSynchronizationManager
+                          .isActualTransactionActive())
+                    throw new IllegalStateException("Typed entry append requires a transaction");
                   jdbc.query(LOCK, (ResultSet rs) -> null, conversation);
-                  return jdbc.queryForObject(
-                      INSERT,
-                      ROW_MAPPER,
-                      conversation,
-                      kind,
-                      role,
-                      entry.content(),
-                      entry.toolCallId(),
-                      calls,
-                      handle,
-                      turnOrdinal,
-                      at,
-                      entry.tookMillis(),
-                      call == null ? null : call.id(),
-                      call == null ? null : call.agent(),
-                      call == null ? null : call.dispatch().wireName(),
-                      call == null ? null : call.specifier(),
-                      call == null ? null : call.pool(),
-                      call == null ? null : call.wireModel(),
-                      call == null ? null : call.outcome().wireName(),
-                      call == null ? null : call.finishReason(),
-                      call == null ? null : call.usage().promptTokens(),
-                      call == null ? null : call.usage().completionTokens(),
-                      call == null ? null : call.usage().reasoningTokens(),
-                      call == null ? null : utc(call.sentAt()),
-                      call == null ? null : call.fallbackReason(),
-                      call == null ? null : call.firstTokenMillis(),
-                      speaker == null ? null : speaker.kind().wireName(),
-                      speaker == null ? null : speaker.name(),
-                      entry.outcome(),
-                      salients,
-                      job,
-                      conversation);
+                  EntryRecord written =
+                      jdbc.queryForObject(
+                          INSERT,
+                          ROW_MAPPER,
+                          conversation,
+                          kind,
+                          role,
+                          entry.content(),
+                          entry.toolCallId(),
+                          calls,
+                          handle,
+                          turnOrdinal,
+                          at,
+                          entry.tookMillis(),
+                          call == null ? null : call.id(),
+                          call == null ? null : call.agent(),
+                          call == null ? null : call.dispatch().wireName(),
+                          call == null ? null : call.specifier(),
+                          call == null ? null : call.pool(),
+                          call == null ? null : call.wireModel(),
+                          call == null ? null : call.outcome().wireName(),
+                          call == null ? null : call.finishReason(),
+                          call == null ? null : call.usage().promptTokens(),
+                          call == null ? null : call.usage().completionTokens(),
+                          call == null ? null : call.usage().reasoningTokens(),
+                          call == null ? null : utc(call.sentAt()),
+                          call == null ? null : call.fallbackReason(),
+                          call == null ? null : call.firstTokenMillis(),
+                          speaker == null ? null : speaker.kind().wireName(),
+                          speaker == null ? null : speaker.name(),
+                          entry.outcome(),
+                          salients,
+                          job,
+                          ToolObservationCodec.write(entry.observation()),
+                          conversation);
+                  if (entry.observation() != null) {
+                    artifacts.retain(written, job);
+                  }
+                  return written;
                 }));
   }
 
@@ -1567,9 +1592,11 @@ public final class EntryStore {
    *
    * <p>{@code content} goes and everything else stays: the ordinal, the turn, the handle, the call
    * this answered, when it happened, how long it took, and — through {@code ejected_chars} — how
-   * large it was. So the trajectory has no hole in it, no ordinal skips, no {@code superseded_by}
-   * dangles, and {@code result_read} on the handle answers with an account of where the bytes went
-   * rather than with "there is nothing at that address".
+   * large it was. Typed content and entry image claims are also removed by V227's trigger in the
+   * same ejection transaction; other owners retain their independent claims. So the trajectory has
+   * no hole in it, no ordinal skips, no {@code superseded_by} dangles, and {@code result_read} on
+   * the handle answers with an account of where the bytes went rather than with "there is nothing
+   * at that address".
    *
    * <p><b>{@code ejected_chars = length(content)} in the same statement that nulls it.</b> Postgres
    * evaluates every SET expression against the row as it was before the update, so this reads the
@@ -2984,7 +3011,8 @@ public final class EntryStore {
               // avoid.
               rs.getObject("took_ms", Long.class),
               instant(rs, "ejected_at"),
-              rs.getString("export"));
+              rs.getString("export"),
+              ToolObservationCodec.read(rs.getString("tool_observation")));
 
   /*
    * OffsetDateTime on both sides and never java.sql.Timestamp, for the reason

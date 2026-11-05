@@ -324,6 +324,8 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
             case RelayPayload.ScheduleDue due -> textWeight(due.schedule(), due.emits());
             case RelayPayload.WakeRequested wake -> textWeight(wake.firing(), wake.target());
             case RelayPayload.Empty ignored -> 0;
+            case RelayPayload.Blob binary ->
+                textWeight(binary.blob().sha256(), binary.blob().mediaType()) + 64;
           };
     }
     for (var sub : value.subscribers()) weight += 256 + textWeight(sub.key().subscriber());

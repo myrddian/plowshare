@@ -15,6 +15,33 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class OwnedHostedToolScopesTest {
+  @Test
+  void artifact_recovery_uses_durable_generation_and_credential_without_a_live_worker() {
+    var registration = f.start();
+    var retained = retain(registration);
+    assertDoesNotThrow(() -> f.service.authorizeArtifact(EXECUTOR, retained));
+    f.live.set(false);
+    var restarted =
+        f.service(f.store, UUID.randomUUID(), io.aeyer.plowshare.server.archive.UnitOfWork.NONE);
+    assertDoesNotThrow(() -> restarted.authorizeArtifact(EXECUTOR, retained));
+    assertThrows(CallerFault.class, () -> f.service.authorizeArtifact("foreign", retained));
+    var prior = f.grant.get();
+    var m = prior.credential();
+    f.grant.set(
+        new ProviderCredentialGrants.Reference(
+            prior.connection(),
+            new ProviderCredentials.Credential(
+                m.connection(),
+                m.project(),
+                m.subject(),
+                UUID.randomUUID(),
+                m.connectionRevision(),
+                m.state(),
+                m.expiresAt(),
+                m.keyId())));
+    assertThrows(CallerFault.class, () -> f.service.authorizeArtifact(EXECUTOR, retained));
+  }
+
   final HostedScopeFixture f = new HostedScopeFixture();
 
   RelayToolDefinition tool(Registration r) {

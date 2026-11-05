@@ -15,7 +15,7 @@ import org.testcontainers.junit.jupiter.*;
 /**
  * Real PostgreSQL, because the assertions are the behaviour of {@code knowledge_revision_readable}
  * and {@code knowledge_read_authority}. A contained principal is a bare UUID with no account, so
- * the baseline those predicates open with ({@code information_global_read_member}) refuses it; V224
+ * the baseline those predicates open with ({@code information_global_read_member}) refuses it; V229
  * admits it to its own subtree and, in the same statement, keeps it out of the general arm.
  *
  * <p>The successes read downward only. The refusals are what prove the direction, and the

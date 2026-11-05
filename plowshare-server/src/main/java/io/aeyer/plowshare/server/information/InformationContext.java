@@ -19,7 +19,7 @@ public record InformationContext(
    *
    * <p>Every authority gate is asked about this value — the destination gate, the resource lock,
    * readability — and for a contained run it is the child's own ephemeral principal, which is what
-   * V224's write arm admits and what must never be widened to anything else.
+   * V229's write arm admits and what must never be widened to anything else.
    *
    * <p>An alias rather than a rename: {@code account()} is read at dozens of call sites and
    * renaming the component would have made a behavioural review of this change impossible to do by
@@ -46,7 +46,7 @@ public record InformationContext(
    * are decidable, not because the second axis is in use.
    *
    * <p><strong>Why the split had to exist here.</strong> One field served both axes, and no single
-   * value can satisfy them: the child's principal passes V224's destination gate and then fails
+   * value can satisfy them: the child's principal passes V229's destination gate and then fails
    * every provenance column, each of which has a foreign key into {@code admins} or {@code
    * authority_accounts}; the container's account satisfies those keys and fails the gate, because a
    * contained project carries no {@code PROJECT} scope and so no role for anybody — not even for

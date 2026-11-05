@@ -56,6 +56,22 @@ import org.slf4j.LoggerFactory;
  */
 public final class LmStudio implements LlmProvider {
 
+  @Override
+  public io.aeyer.plowshare.server.llm.ModelMediaCapabilities mediaCapabilities(String wireModel) {
+    // A socket-enabled provider also exposes a prefill path that refuses images. Keep the
+    // declaration conservative across its call shapes; never silently switch protocols for media.
+    if (socket != null) return io.aeyer.plowshare.server.llm.ModelMediaCapabilities.TEXT_ONLY;
+    var serializer = base.mediaCapabilities(wireModel);
+    // LM Studio's documented image set is narrower than the generic HTTP serializer's set.
+    // https://lmstudio.ai/docs/python/llm-prediction/image-input
+    var backendInputs = Set.of("text/plain", "image/png", "image/jpeg", "image/webp");
+    return new io.aeyer.plowshare.server.llm.ModelMediaCapabilities(
+        serializer.inputs().stream()
+            .filter(backendInputs::contains)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet()),
+        serializer.outputs());
+  }
+
   private static final Logger log = LoggerFactory.getLogger(LmStudio.class);
 
   /**

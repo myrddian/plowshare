@@ -192,7 +192,7 @@ class ContainedConversationDoorDatabaseTest {
   @Test
   void aContainedRunGetsAnEnvelopeOnItsOwnPoolAndItsContainersAccount() {
     var child = hop(childScope, childProject);
-    // The hop is recorded and live, which V225 made possible and which nothing before it was.
+    // The hop is recorded and live, which V230 made possible and which nothing before it was.
     assertEquals(
         1,
         (int)
@@ -258,7 +258,7 @@ class ContainedConversationDoorDatabaseTest {
    *
    * <p>Sharing an allowance by reference is precisely what disqualified {@code delegation} — a
    * contained conversation carried on it would spend its container's pool, against ADR 0042's
-   * "allocated, never shared". So V225 puts {@code contained} on the <em>owned</em> side of {@code
+   * "allocated, never shared". So V230 puts {@code contained} on the <em>owned</em> side of {@code
    * conversations_an_allowance_is_owned_or_shared}, and this asserts the fence rather than trusting
    * the service to pass a budget: a budget-less contained row is refused by PostgreSQL.
    */
@@ -288,7 +288,7 @@ class ContainedConversationDoorDatabaseTest {
    *
    * <p>{@code conversations_a_person_s_conversation_names_no_agent} (V17:212) is {@code
    * (origin='turn') = (agent IS NULL)}, so it already says both things: a turn names no agent, and
-   * every other origin — {@code contained} included — must name one. V225 adds no second constraint
+   * every other origin — {@code contained} included — must name one. V230 adds no second constraint
    * saying the same thing; this asserts both halves instead, so the pairing is pinned where it
    * currently fails and where it currently holds.
    */
@@ -383,7 +383,7 @@ class ContainedConversationDoorDatabaseTest {
    * matters</strong>: both children are held by the same container, so a container holding one
    * proved contained admission must not be able to open a conversation inside the other. The
    * container's own admission covers the uncontained case in the same shape. The sibling case is
-   * built from a real hop, which V225 made possible — before it, no second contained admission
+   * built from a real hop, which V230 made possible — before it, no second contained admission
    * could exist to try.
    */
   @Test

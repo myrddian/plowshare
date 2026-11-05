@@ -21,6 +21,15 @@ Provider scopes support tools unknown before connection, with `dynamic: true`
 agent opt-in, explicit application assignments and authenticated interactive
 connections. See [provider scopes](tool-scopes.md) for the shared SDK operations.
 
+## Typed PNG result profile
+
+The Node provider path supports negotiated `content/1` results through existing
+TEXT envelopes, admission receipts and invocation blob claims. See
+[typed PNG tool results](typed-png-tool-results.md) for configuration, ordered
+references, private journals and `tool.invocation.read`. Existing text providers
+retain their v1/v2 request and v1 result behavior. Hosted worker content support,
+native model observations and structured Trajectory entries remain separate work.
+
 ## Application-owned dynamic tools
 
 Built-in tools still register at startup. The live registry supplements them with

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.llm.dispatch;
 
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.llm.MediaRequirements;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.time.Duration;
 import java.util.HashSet;
@@ -59,6 +60,8 @@ import java.util.Set;
  *     accumulates the fragments per {@code index} and returns the same {@link ToolCall} list the
  *     blocking path returns for the same turn. Nothing about a request changes with how it is
  *     dispatched.
+ * @param mediaRequirements explicit native format contract, or null for legacy routing; never sent
+ *     as an arbitrary backend parameter
  * @param authorization live effect check retained across queueing; never sent to a model
  * @param attribution server-validated ownership, carried explicitly across pool queue threads.
  *     Compatibility callers use {@link UsageAttribution#LEGACY}; production callers will supply an
@@ -83,7 +86,30 @@ public record ChatRequest(
     List<ToolSchema> tools,
     ToolChoice toolChoice,
     UsageAttribution attribution,
-    CallAuthorization authorization) {
+    CallAuthorization authorization,
+    MediaRequirements mediaRequirements) {
+
+  /** Existing request construction keeps the legacy text and unprofiled image routing path. */
+  public ChatRequest(
+      String specifier,
+      List<ChatMessage> messages,
+      Sampling sampling,
+      Duration submitTimeout,
+      List<ToolSchema> tools,
+      ToolChoice toolChoice,
+      UsageAttribution attribution,
+      CallAuthorization authorization) {
+    this(
+        specifier,
+        messages,
+        sampling,
+        submitTimeout,
+        tools,
+        toolChoice,
+        attribution,
+        authorization,
+        null);
+  }
 
   /** Ordinary callers retain their existing path; delegated callers attach explicit authority. */
   public ChatRequest(
@@ -289,7 +315,15 @@ public record ChatRequest(
 
   public ChatRequest withBudget(Duration budget) {
     return new ChatRequest(
-        specifier, messages, sampling, budget, tools, toolChoice, attribution, authorization);
+        specifier,
+        messages,
+        sampling,
+        budget,
+        tools,
+        toolChoice,
+        attribution,
+        authorization,
+        mediaRequirements);
   }
 
   /**
@@ -308,7 +342,8 @@ public record ChatRequest(
         tools,
         toolChoice,
         attribution,
-        authorization);
+        authorization,
+        mediaRequirements);
   }
 
   /**
@@ -324,7 +359,8 @@ public record ChatRequest(
         offered,
         toolChoice,
         attribution,
-        authorization);
+        authorization,
+        mediaRequirements);
   }
 
   /**
@@ -344,7 +380,8 @@ public record ChatRequest(
         tools,
         java.util.Objects.requireNonNull(choice, "toolChoice"),
         attribution,
-        authorization);
+        authorization,
+        mediaRequirements);
   }
 
   /**
@@ -363,18 +400,49 @@ public record ChatRequest(
         tools,
         toolChoice,
         attribution,
-        authorization);
+        authorization,
+        mediaRequirements);
   }
 
   /** Immutable ownership travels with the request when a pool submits it on another thread. */
   public ChatRequest withAttribution(UsageAttribution owner) {
     return new ChatRequest(
-        specifier, messages, sampling, submitTimeout, tools, toolChoice, owner, authorization);
+        specifier,
+        messages,
+        sampling,
+        submitTimeout,
+        tools,
+        toolChoice,
+        owner,
+        authorization,
+        mediaRequirements);
   }
 
   /** Preserved by every immutable copy, including filtering and accounting attribution. */
   public ChatRequest withAuthorization(CallAuthorization check) {
     return new ChatRequest(
-        specifier, messages, sampling, submitTimeout, tools, toolChoice, attribution, check);
+        specifier,
+        messages,
+        sampling,
+        submitTimeout,
+        tools,
+        toolChoice,
+        attribution,
+        check,
+        mediaRequirements);
+  }
+
+  /** Explicit format requirements survive every copy and are checked again after filtering. */
+  public ChatRequest withMediaRequirements(MediaRequirements requirements) {
+    return new ChatRequest(
+        specifier,
+        messages,
+        sampling,
+        submitTimeout,
+        tools,
+        toolChoice,
+        attribution,
+        authorization,
+        java.util.Objects.requireNonNull(requirements, "mediaRequirements"));
   }
 }

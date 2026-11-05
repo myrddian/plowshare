@@ -17,6 +17,7 @@ import (
 
 // constraints are boundary metadata, not application property bags.
 type constraints struct {
+	ToolResult            bool     `json:"toolResult"`
 	PortablePath          bool     `json:"portablePath"`
 	PortableGraph         string   `json:"portableGraph"`
 	NavigationSteps       bool     `json:"navigationSteps"`
@@ -170,7 +171,65 @@ func canonicalRelativePath(value string) bool {
 	}
 	return true
 }
+
+// checkToolResult preserves ordered text and invocation-slot references without hydrating bytes.
+func checkToolResult(value any) bool {
+	row, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	text, ok := row["text"].(string)
+	if !ok || strings.ContainsRune(text, 0) || len(utf16.Encode([]rune(text))) > 16384 {
+		return false
+	}
+	if row["content"] == nil {
+		return strings.TrimSpace(text) != ""
+	}
+	body, ok := row["content"].(map[string]any)
+	if !ok || body["version"] != "content/1" {
+		return false
+	}
+	parts, ok := body["parts"].([]any)
+	if !ok || len(parts) < 1 || len(parts) > 16 {
+		return false
+	}
+	var words strings.Builder
+	slots := map[int64]bool{}
+	for _, item := range parts {
+		part, ok := item.(map[string]any)
+		if !ok {
+			return false
+		}
+		switch part["kind"] {
+		case "TEXT":
+			word, ok := part["text"].(string)
+			if !ok || part["imageId"] != nil || part["ordinal"] != nil || part["use"] != nil {
+				return false
+			}
+			words.WriteString(word)
+		case "IMAGE":
+			n, ok := part["ordinal"].(json.Number)
+			if !ok {
+				return false
+			}
+			slot, err := n.Int64()
+			image, valid := part["imageId"].(string)
+			use := part["use"]
+			if err != nil || slot < 0 || slot > 15 || slots[slot] || !valid || !regexp.MustCompile(`^img_[0-9a-f]{32}$`).MatchString(image) || part["text"] != nil || (use != "OBSERVATION" && use != "OUTPUT" && use != "BOTH") {
+				return false
+			}
+			slots[slot] = true
+		default:
+			return false
+		}
+	}
+	return words.String() == text && len(slots) <= 4 && (len(slots) == 0 || row["state"] == "COMPLETED") && (len(slots) > 0 || strings.TrimSpace(text) != "")
+}
+
 func check(s shape, value any) error {
+	if s.ToolResult && !checkToolResult(value) {
+		return contractError
+	}
 	if s.PortablePath {
 		text, ok := value.(string)
 		if !ok || !portablePath(text) {

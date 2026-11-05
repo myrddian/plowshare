@@ -35,6 +35,11 @@ public class OpenAiCompatible implements LlmProvider, WebSocketOpener {
   private final PoolProperties props;
   private final OpenAiTransport transport;
 
+  @Override
+  public ModelMediaCapabilities mediaCapabilities(String wireModel) {
+    return transport.mediaCapabilities(wireModel);
+  }
+
   /**
    * Builds the pool's transport, and is therefore what has to be closed if anything downstream of
    * it fails to build.

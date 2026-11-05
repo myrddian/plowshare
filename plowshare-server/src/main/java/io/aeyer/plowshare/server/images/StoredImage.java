@@ -14,8 +14,8 @@ import java.util.Objects;
  * <p>The export manifest's argument is that <b>nothing is written into the data directory without a
  * record saying what it is and whose it is</b> — otherwise retention and orphan cleanup have
  * nothing to reason over and "what is in here" is unanswerable. That property is promoted here in
- * full: {@link ImageStore} writes this record beside the bytes and a byte file with no record is
- * not an image, merely a file.
+ * full: {@link ImageStore} writes this record for held bytes. A byte file with no image record is
+ * not an image, merely a file. Shared blob storage may already hold those bytes for another owner.
  *
  * <p><b>The {@code manifest.jsonl} convention itself is deliberately not promoted, and this is the
  * one place the two designs part.</b> An export is written and never read back by this server; a
@@ -23,9 +23,10 @@ import java.util.Objects;
  * An image is <em>looked up by its id</em> on the path that attaches it to a model call, so a
  * single growing file per project would make every attachment a scan of every image the project has
  * ever held, and two concurrent uploads an append race over the one file the lookup depends on. So
- * the record is a sidecar — {@code &lt;id&gt;.json} beside {@code &lt;id&gt;.&lt;ext&gt;} — which
- * makes a lookup one read, a listing one directory listing, and a re-upload of identical bytes an
- * overwrite of a file with the same content rather than a duplicate line.
+ * the record is a sidecar — {@code &lt;id&gt;.json} in the image directory — which makes a lookup
+ * one record read and a re-upload preserve the original metadata. Image-first bytes use the
+ * adjacent {@code &lt;id&gt;.&lt;ext&gt;} file; BLOB-first bytes keep their registered canonical
+ * location and are resolved through the image alias.
  *
  * <p>What is kept from the manifest is everything else: JSON a person can read with no Plowshare in
  * the picture, written by hand rather than through an {@code ObjectMapper} so that an operator's
@@ -97,9 +98,9 @@ public record StoredImage(
    * hundred copies.
    *
    * <p><b>Which is why the two kinds resolve differently and both are still one id scheme.</b> A
-   * held image is read out of {@link #fileName} beside its record, unconditionally, because this
-   * server owns those bytes. A named one is read back through {@link ImageFence}, because those
-   * bytes are the project's and the permission that reached them can be taken away.
+   * held image resolves through shared storage when registered, or the legacy {@link #fileName}
+   * beside its record. A named one is read back through {@link ImageFence}, because those bytes are
+   * the project's and the permission that reached them can be taken away.
    *
    * <p>Content addressing makes the two interchangeable where they meet: a picture uploaded to a
    * project <em>and</em> sitting in its workspace has one id, and {@link ImageStore#store}'s
@@ -111,8 +112,8 @@ public record StoredImage(
   }
 
   /**
-   * What the bytes are called on disk: the id, and the format's extension so that a person who
-   * opens the directory can double-click one.
+   * Preferred legacy image placement: the id and format extension. A registered BLOB-first image
+   * can keep its bytes elsewhere; callers must resolve through ImageStore rather than this name.
    *
    * <p>Meaningless for a record with a {@link #path} — nothing was written under this name — and
    * {@link ImageStore} asks {@link #inWorkspace} before it ever resolves one.
@@ -121,7 +122,7 @@ public record StoredImage(
     return id + '.' + format.extension();
   }
 
-  /** What this record is called on disk, beside the bytes it describes. */
+  /** What this record is called in the image directory. */
   public String recordName() {
     return id + ".json";
   }

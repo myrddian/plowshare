@@ -21,12 +21,14 @@ class RelayContractTest {
    * it into the general message and owns the codec, as RelayToolCodec and InformationEventCodec do.
    *
    * <p>So this asserts the exact set rather than a property of it: a new family must be argued for
-   * here, by name, as a general one.
+   * here, by name, as a general one. BLOB is the general immutable binary carrier, independent of
+   * image/audio/video consumers. Its descriptor carries no consumer instructions; media metadata
+   * belongs to the media service, and publication-owned claims govern only delivery retention.
    */
   @Test
   void the_payload_families_are_general_and_none_is_named_after_a_consumer() {
     assertEquals(
-        java.util.List.of("EMPTY", "TEXT", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"),
+        java.util.List.of("EMPTY", "TEXT", "BLOB", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"),
         java.util.Arrays.stream(RelayPayload.Kind.values()).map(Enum::name).toList(),
         "a payload family per consumer is the drift decision 0037's cutover introduced");
     // The protocol's public allowlist is the same vocabulary, so an SDK cannot be left able to
@@ -45,6 +47,16 @@ class RelayContractTest {
   /** The same family as the log-inspection boundary reports it, with that family's own fields. */
   private static io.aeyer.plowshare.protocol.RelayLog.Payload inspected(RelayPayload.Kind kind) {
     return switch (kind) {
+      case BLOB ->
+          new io.aeyer.plowshare.protocol.RelayLog.Payload(
+              kind.name(),
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              new io.aeyer.plowshare.protocol.RelayBlob.Descriptor("a".repeat(64), 3, "image/png"));
       case EMPTY ->
           new io.aeyer.plowshare.protocol.RelayLog.Payload(kind.name(), null, null, null, null);
       case TEXT ->

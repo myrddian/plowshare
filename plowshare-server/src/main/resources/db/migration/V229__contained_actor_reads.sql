@@ -276,7 +276,7 @@ BEGIN
 END $$;
 
 -- Reproduced from V163:23 with one added leading arm and no other edits. Signature unchanged. The
--- arm admits WRITE only (reads are the V224 read arms above), and only for a resource whose home_scope_id is the principal's
+-- arm admits WRITE only (reads are the V229 read arms above), and only for a resource whose home_scope_id is the principal's
 -- own scope (the scope is resolved from the selected project, then compared to the resource's
 -- home, so naming one's own project never reaches another home). SET_AUDIENCE falls through to
 -- `false`, and is not delegated to the ordinary path either: a contained actor holds no role there.

@@ -1,3 +1,15 @@
+export {
+  FileToolJournal,
+  admitToolPng,
+  pngToolResult,
+  toolTextPart,
+  toolPngPart,
+} from './tool-content.ts';
+export type {
+  ToolContentBody,
+  ToolContentPart,
+  ToolImageUse,
+} from './tool-content.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ToolHost } from 'plowshare-client-ts';
 export {

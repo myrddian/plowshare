@@ -21,6 +21,7 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
+import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.tokens.TokenCount;
@@ -1731,6 +1732,8 @@ public final class Compaction implements SkillSummaries {
                 turn.definition.canRedeem()),
             turn.definition.canList());
       } catch (RuntimeException failed) {
+        if (failed instanceof io.aeyer.plowshare.server.archive.InvalidToolObservationException)
+          throw failed;
         // First line only; see JobRuntime.describe. A constraint
         // violation's second line quotes the failing row, and an
         // `entries` row holds whatever a tool read off a disk.
@@ -1765,6 +1768,11 @@ public final class Compaction implements SkillSummaries {
     public void record(LoggedEntry entry) {
       turn.record(
           entry.kind() == EntryKind.UTTERANCE ? LoggedEntry.runtimeNote(entry.content()) : entry);
+    }
+
+    @Override
+    public List<Content.StoredImage> recordToolResult(LoggedEntry entry) {
+      return turn.recordToolResult(entry);
     }
 
     @Override
@@ -2257,6 +2265,8 @@ public final class Compaction implements SkillSummaries {
         }
         return messages(conversationId, definition);
       } catch (RuntimeException failed) {
+        if (failed instanceof io.aeyer.plowshare.server.archive.InvalidToolObservationException)
+          throw failed;
         // First line only; see JobRuntime.describe. A constraint
         // violation's second line quotes the failing row, and an
         // `entries` row holds whatever a tool read off a disk.
@@ -2337,6 +2347,8 @@ public final class Compaction implements SkillSummaries {
         // the sentence the retention design refuses.
         return entries.redeem(conversationId, handle).map(Redemption::of);
       } catch (RuntimeException failed) {
+        if (failed instanceof io.aeyer.plowshare.server.archive.InvalidToolObservationException)
+          throw failed;
         // First line only; see JobRuntime.describe. A constraint
         // violation's second line quotes the failing row, and an
         // `entries` row holds whatever a tool read off a disk.
@@ -2568,6 +2580,16 @@ public final class Compaction implements SkillSummaries {
             entry.kind().wireName(),
             JobRuntime.describe(notRecorded));
       }
+    }
+
+    @Override
+    public List<Content.StoredImage> recordToolResult(LoggedEntry entry) {
+      if (entry.observation() == null) {
+        record(entry);
+        return List.of();
+      }
+      retainedAuthority.run();
+      return Projection.images(entries.append(conversationId, turnOrdinal(), entry, job));
     }
 
     @Override

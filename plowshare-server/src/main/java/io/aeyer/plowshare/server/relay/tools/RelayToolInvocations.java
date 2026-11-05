@@ -16,5 +16,31 @@ public interface RelayToolInvocations {
   /** Owner-scoped, non-submitting reconciliation; safe after timeout or broker retention expiry. */
   Outcome read(String project, String account, UUID invocation);
 
-  record Outcome(UUID id, RelayToolCodec.State state, String text) {}
+  record Outcome(
+      UUID id,
+      RelayToolCodec.State state,
+      String text,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          io.aeyer.plowshare.protocol.ToolContent.Body content) {
+    public Outcome(UUID id, RelayToolCodec.State state, String text) {
+      this(id, state, text, null);
+    }
+
+    /** Explicit text-client fallback. Retained images have not been supplied as native input. */
+    public String displayText() {
+      if (content == null || content.images().isEmpty()) return text;
+      return text
+          + "\n"
+          + content.images().stream()
+              .map(
+                  p ->
+                      "PNG "
+                          + p.imageId()
+                          + " ("
+                          + p.use()
+                          + ") retained; pixels were not supplied to the active model.")
+              .collect(java.util.stream.Collectors.joining("\n"));
+    }
+  }
 }

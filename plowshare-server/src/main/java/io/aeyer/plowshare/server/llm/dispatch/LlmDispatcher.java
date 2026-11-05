@@ -1,9 +1,15 @@
 package io.aeyer.plowshare.server.llm.dispatch;
 
+import io.aeyer.plowshare.server.llm.MediaRequirements;
+import io.aeyer.plowshare.server.llm.ModelMediaCapabilities;
+import io.aeyer.plowshare.server.llm.ModelMediaProfiles;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,9 +42,11 @@ public final class LlmDispatcher implements AutoCloseable {
   private final List<LlmPool> pools;
   private final InferenceBoundary boundary;
   private final TokenLedger ledger;
+  private final ModelMediaProfiles mediaProfiles;
   private final InferenceAccounting accounting;
   private final Duration promptTimeout;
   private final Duration foldTimeout;
+  private final io.aeyer.plowshare.server.llm.tokens.Tokenizer tokenizer;
   private final UnaryOperator<String> systemBinding;
 
   /** Specifiers whose context length has already been reported; see {@link #reportOnce}. */
@@ -155,6 +163,85 @@ public final class LlmDispatcher implements AutoCloseable {
       Duration foldTimeout,
       io.aeyer.plowshare.server.security.ChatFiltering filtering,
       InferenceBoundary boundary) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        filtering,
+        boundary,
+        ModelMediaProfiles.NONE);
+  }
+
+  /** Profile-aware routing reuses the same dispatcher and immutable startup configuration. */
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      InferenceBoundary boundary,
+      ModelMediaProfiles mediaProfiles) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        filtering,
+        boundary,
+        mediaProfiles,
+        PromptImages.NONE);
+  }
+
+  /** Production composition supplies authorized entry-image resolution independently of routing. */
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      InferenceBoundary boundary,
+      ModelMediaProfiles mediaProfiles,
+      PromptImages promptImages) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        filtering,
+        boundary,
+        mediaProfiles,
+        promptImages,
+        new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(
+            io.aeyer.plowshare.server.llm.tokens.RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN));
+  }
+
+  /** The configured text meter is reused only for retained-image admission reservations. */
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      InferenceBoundary boundary,
+      ModelMediaProfiles mediaProfiles,
+      PromptImages promptImages,
+      io.aeyer.plowshare.server.llm.tokens.Tokenizer tokenizer) {
+    this.tokenizer = Objects.requireNonNull(tokenizer);
+    this.promptImages = Objects.requireNonNull(promptImages);
+    this.mediaProfiles = Objects.requireNonNull(mediaProfiles);
     this.boundary = Objects.requireNonNull(boundary);
     this.filtering = Objects.requireNonNull(filtering);
     this.promptTimeout = promptTimeout;
@@ -165,8 +252,11 @@ public final class LlmDispatcher implements AutoCloseable {
     this.systemBinding = Objects.requireNonNull(systemBinding, "systemBinding");
   }
 
+  private final PromptImages promptImages;
+
   public io.aeyer.plowshare.server.llm.counting.PromptCount count(ChatRequest request) {
-    Routing routing = route(request.specifier(), Lane.CHAT);
+    request = promptImages.resolve(request);
+    Routing routing = routeChat(request);
     return routing
         .pool()
         .countChat(routing.wireModel(), request.withSampling(carried(routing, request.sampling())));
@@ -175,6 +265,62 @@ public final class LlmDispatcher implements AutoCloseable {
   public io.aeyer.plowshare.server.llm.counting.PromptCount count(EmbeddingRequest request) {
     Routing routing = route(request.specifier(), Lane.EMBEDDING);
     return routing.pool().countEmbedding(routing.wireModel(), request);
+  }
+
+  /**
+   * Format eligibility and artifact authority have already been checked. Reserve a bounded local
+   * image/text/framing budget independently of an optional exact counter. A reservation is never
+   * booked as consumed usage or labelled measured; the backend still enforces its actual window.
+   */
+  private io.aeyer.plowshare.server.llm.counting.PromptCount admitImages(
+      Routing routing, ChatRequest request) {
+    var context = routing.pool().contextLength(routing.wireModel());
+    var reserve = request.sampling().maxTokens();
+    if (context.isEmpty() || reserve.isEmpty() || reserve.getAsInt() >= context.getAsInt())
+      throw new IllegalArgumentException(
+          "Image observation needs a known context length and explicit bounded maxTokens for the selected model");
+    // Immutable startup lookup for the selected model's admission settings, not a second
+    // permission resolution or a registry independent of format routing.
+    var budget = mediaProfiles.mediaFor(routing.wireModel()).orElseThrow().imageContext();
+    long reservedInput = budget.reserve(request, tokenizer);
+    if (routing.pool().automaticCounting()) {
+      io.aeyer.plowshare.server.llm.counting.PromptCount measured;
+      try {
+        measured = routing.pool().countChat(routing.wireModel(), request);
+      } catch (RuntimeException unavailable) {
+        measured =
+            io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
+                routing.pool().name(), routing.wireModel(), "counter_unavailable");
+      }
+      if (measured != null
+          && measured.basis() == io.aeyer.plowshare.server.llm.counting.PromptCount.Basis.MEASURED
+          && measured.tokens() != null
+          && measured.tokens() > 0
+          && measured.gaps().isEmpty()
+          && measured.revision() != null
+          && !measured.revision().isBlank()
+          && routing.pool().name().equals(measured.pool())
+          && routing.wireModel().equals(measured.model())) {
+        if (measured.tokens() > (long) context.getAsInt() - reserve.getAsInt())
+          throw new IllegalArgumentException(
+              "Image observation exceeds the selected model context budget");
+        return measured;
+      }
+    }
+    if (reservedInput > (long) context.getAsInt() - reserve.getAsInt())
+      throw new IllegalArgumentException(
+          "Image observation exceeds the selected model context budget");
+    return new io.aeyer.plowshare.server.llm.counting.PromptCount(
+        reservedInput,
+        io.aeyer.plowshare.server.llm.counting.PromptCount.Basis.ESTIMATED,
+        "IMAGE_CONTEXT_RESERVATION",
+        routing.pool().name(),
+        routing.wireModel(),
+        budget.revision(),
+        java.time.Instant.now(),
+        0,
+        false,
+        List.of("policy_reservation_not_measured"));
   }
 
   private void preflight(
@@ -195,10 +341,14 @@ public final class LlmDispatcher implements AutoCloseable {
   public Completion complete(ChatRequest request) {
     request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
-    ChatRequest filtered = filtering.input(request, () -> false);
-    boundary.require(filtered.authorization());
-    Routing routing = route(filtered.specifier(), Lane.CHAT);
+    ChatRequest input = filtering.input(request, () -> false);
+    boundary.require(input.authorization());
+    requireSameMediaContract(request, input);
+    boolean retainedImages = PromptImages.hasStored(input);
+    ChatRequest filtered = promptImages.resolve(input);
+    Routing routing = routeChat(filtered);
     Sampling sampling = carried(routing, filtered.sampling());
+    var imageCount = retainedImages ? admitImages(routing, filtered.withSampling(sampling)) : null;
     InferenceObserver observer =
         accounting.begin(
             routing.pool().name(),
@@ -209,7 +359,8 @@ public final class LlmDispatcher implements AutoCloseable {
     boundary.accounted(filtered.authorization(), observer.capture());
     observer =
         InferenceObserver.authorized(observer, () -> boundary.require(filtered.authorization()));
-    if (routing.pool().automaticCounting())
+    if (imageCount != null) observer.preflight(imageCount);
+    else if (routing.pool().automaticCounting())
       preflight(
           observer,
           routing,
@@ -300,10 +451,14 @@ public final class LlmDispatcher implements AutoCloseable {
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
     request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
-    ChatRequest filtered = filtering.input(request, abandoned);
-    boundary.require(filtered.authorization());
-    Routing routing = route(filtered.specifier(), Lane.CHAT);
+    ChatRequest input = filtering.input(request, abandoned);
+    boundary.require(input.authorization());
+    requireSameMediaContract(request, input);
+    boolean retainedImages = PromptImages.hasStored(input);
+    ChatRequest filtered = promptImages.resolve(input);
+    Routing routing = routeChat(filtered);
     Sampling sampling = carried(routing, filtered.sampling());
+    var imageCount = retainedImages ? admitImages(routing, filtered.withSampling(sampling)) : null;
     InferenceObserver observer =
         accounting.begin(
             routing.pool().name(),
@@ -314,7 +469,8 @@ public final class LlmDispatcher implements AutoCloseable {
     boundary.accounted(filtered.authorization(), observer.capture());
     observer =
         InferenceObserver.authorized(observer, () -> boundary.require(filtered.authorization()));
-    if (routing.pool().automaticCounting())
+    if (imageCount != null) observer.preflight(imageCount);
+    else if (routing.pool().automaticCounting())
       preflight(
           observer,
           routing,
@@ -439,60 +595,40 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   /**
-   * Fail now if a call on this specifier could land on a model that cannot be shown a picture.
+   * Validate an agent's vision requirement without probing a model endpoint.
    *
-   * <h2>Every pool that serves it, and not merely one</h2>
+   * <p>With a declared media profile, at least one pool must permit a native image input and text
+   * output; actual calls filter incompatible pools before load comparison. Without profiles, keep
+   * the legacy all-pool conjunction: those calls have no format contract to filter on.
    *
-   * <p>{@link #route} picks the least-loaded pool, so a specifier served by two pools of which one
-   * declares vision would work or not depending on which box happened to be idle. That is the worst
-   * shape a capability check can have: green at boot, green in a test, and intermittently wrong in
-   * production with the model itself reporting it — "I cannot see an image" — which reads as a
-   * model limitation rather than as a configuration one.
-   *
-   * <p>So this is {@link #contextLength}'s rule with a different operator. That method takes the
-   * <em>smallest</em> known length because the next call may go to any pool and a prompt is only
-   * safe if it fits the tightest; this takes the <em>conjunction</em>, because the next call may go
-   * to any pool and an image is only safe if every one of them can be shown it. Neither is routed
-   * on load, and for the same sentence.
-   *
-   * <p><b>A pool that serves the specifier and declares nothing is a refusal</b>, not a pool
-   * skipped. {@code contextLength} skips a pool that cannot say, because answering "no bound" would
-   * disable compaction against every pool including the ones that could say. Here silence is an
-   * answer: a pool that has not declared a model as seeing has said it does not, since nothing
-   * about that declaration is discovered — see {@code PoolProperties.vision}, which is why nothing
-   * here guesses from a name.
-   *
-   * <p>For startup, the way {@link #requireServed} is: an agent that needs vision from a model no
-   * pool declares would otherwise find out at its first image, inside a job, where the whole report
-   * is a model saying it saw nothing.
-   *
-   * @throws UnknownSpecifierException if nothing serves the specifier at all, which {@link #route}
-   *     raises and this deliberately does not catch: "no pool serves this" is a different fault
-   *     from "the pools that serve it cannot see", and answering the second when the first is true
-   *     would send an operator to the wrong key
-   * @throws LlmException if some pool serving it has not declared the model it resolves to as one
-   *     that sees, naming every pool and what it declared
+   * @throws UnknownSpecifierException if no pool serves the configured model or alias
+   * @throws LlmException if its profiled routes cannot carry images, or a legacy pool lacks vision
    */
   public void requireSees(String specifier) {
-    // Resolved once, up front, and the resolved form is what both the loud
-    // check below and the loop over pools use. route() alone resolving
-    // system/system.<type> would not have been enough: this method used to
-    // call pool.resolve(specifier) a second time with the raw specifier
-    // after route() succeeded, which for a system specifier is a literal
-    // string no pool's models or classes ever contain. Every wireModel
-    // would come back null, blind would stay empty, and this would return
-    // silently having checked nothing — the fault a_pool_with_every_slot
-    // catches for load, that a vision check would have made for sight.
     String target = resolveSpecifier(specifier);
     // Raises for a specifier nothing serves, so that the two faults stay
     // two faults. Its message lists what IS configured, which is the more
     // useful sentence when the name itself is the mistake.
-    route(target, Lane.CHAT);
+    List<Candidate> candidates = mediaCandidates(specifier, target);
+    if (candidates.stream().anyMatch(candidate -> candidate.profile().isPresent())) {
+      for (Candidate candidate : candidates) {
+        if (candidate.profile().isEmpty()) continue;
+        for (String type : candidate.profile().orElseThrow().inputs()) {
+          if (type.startsWith("image/")
+              && supports(
+                  candidate,
+                  new MediaRequirements(
+                      Set.of("text/plain", type), Set.of("text/plain"), Set.of("text/plain"))))
+            return;
+        }
+      }
+      throw new UnsupportedMediaException(specifier);
+    }
     List<String> blind = new ArrayList<>();
-    for (LlmPool pool : pools) {
-      String wireModel = pool.resolve(target);
-      if (wireModel != null && !pool.sees(wireModel)) {
-        blind.add(pool.name() + " serving '" + wireModel + "'");
+    for (Candidate candidate : candidates) {
+      Routing route = candidate.route();
+      if (!route.pool().sees(route.wireModel())) {
+        blind.add(route.pool().name() + " serving '" + route.wireModel() + "'");
       }
     }
     if (!blind.isEmpty()) {
@@ -881,8 +1017,11 @@ public final class LlmDispatcher implements AutoCloseable {
       String pool, ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
     request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
-    ChatRequest filtered = filtering.input(request, abandoned);
-    boundary.require(filtered.authorization());
+    ChatRequest input = filtering.input(request, abandoned);
+    boundary.require(input.authorization());
+    requireSameMediaContract(request, input);
+    boolean retainedImages = PromptImages.hasStored(input);
+    ChatRequest filtered = promptImages.resolve(input);
     LlmPool named =
         pools.stream()
             .filter(candidate -> candidate.name().equals(pool))
@@ -892,15 +1031,20 @@ public final class LlmDispatcher implements AutoCloseable {
     if (wireModel == null) {
       throw new UnknownSpecifierException(filtered.specifier(), named.describe());
     }
+    if (eligibleChat(filtered).stream().noneMatch(candidate -> candidate.pool() == named)) {
+      throw new UnsupportedMediaException(filtered.specifier());
+    }
     Routing routing = new Routing(named, wireModel);
     Sampling sampling = carried(routing, filtered.sampling());
+    var imageCount = retainedImages ? admitImages(routing, filtered.withSampling(sampling)) : null;
     InferenceObserver observer =
         accounting.begin(
             named.name(), wireModel, filtered.specifier(), Lane.CHAT, filtered.attribution());
     boundary.accounted(filtered.authorization(), observer.capture());
     observer =
         InferenceObserver.authorized(observer, () -> boundary.require(filtered.authorization()));
-    if (named.automaticCounting())
+    if (imageCount != null) observer.preflight(imageCount);
+    else if (named.automaticCounting())
       preflight(
           observer, routing, () -> named.countChat(wireModel, filtered.withSampling(sampling)));
     Completion completion =
@@ -926,6 +1070,101 @@ public final class LlmDispatcher implements AutoCloseable {
         && !approved.content().isEmpty()
         && !abandoned.getAsBoolean()) sink.answered(approved.content());
     return approved;
+  }
+
+  /** Request-aware scheduler admission. Specifier-only capacity queries retain legacy behavior. */
+  public List<LlmPool> poolsServing(ChatRequest request) {
+    return eligibleChat(promptImages.resolve(request)).stream().map(Routing::pool).toList();
+  }
+
+  private record Candidate(Routing route, Optional<ModelMediaCapabilities> profile) {}
+
+  private static void requireSameMediaContract(ChatRequest original, ChatRequest filtered) {
+    if (!Objects.equals(original.mediaRequirements(), filtered.mediaRequirements())) {
+      throw new LlmException("Input filtering changed the native output/input format contract");
+    }
+  }
+
+  private Routing routeChat(ChatRequest request) {
+    // This is the original text path, including tie-breaking, aliases and accounting ordering.
+    if (request.mediaRequirements() == null
+        && request.messages().stream().noneMatch(ChatMessage::carriesAnImage)) {
+      return route(request.specifier(), Lane.CHAT);
+    }
+    return leastLoaded(eligibleChat(request), Lane.CHAT);
+  }
+
+  /** The same strict-less comparison preserves declaration-order ties on every chat path. */
+  private static Routing leastLoaded(List<Routing> candidates, Lane lane) {
+    Routing chosen = null;
+    double lightest = Double.POSITIVE_INFINITY;
+    for (Routing candidate : candidates) {
+      double load = candidate.pool().load(lane);
+      if (load < lightest) {
+        chosen = candidate;
+        lightest = load;
+      }
+    }
+    return Objects.requireNonNull(chosen);
+  }
+
+  private List<Candidate> mediaCandidates(String specifier) {
+    return mediaCandidates(specifier, resolveSpecifier(specifier));
+  }
+
+  private List<Candidate> mediaCandidates(String specifier, String target) {
+    List<Candidate> candidates = new ArrayList<>();
+    Map<String, Optional<ModelMediaCapabilities>> profiles = new HashMap<>();
+    for (LlmPool pool : pools) {
+      String wire = pool.resolve(target);
+      if (wire != null)
+        candidates.add(
+            new Candidate(
+                new Routing(pool, wire), profiles.computeIfAbsent(wire, mediaProfiles::mediaFor)));
+    }
+    if (candidates.isEmpty()) {
+      throw new UnknownSpecifierException(
+          specifier, pools.stream().map(LlmPool::describe).collect(Collectors.joining(", ")));
+    }
+    return List.copyOf(candidates);
+  }
+
+  private List<Routing> eligibleChat(ChatRequest request) {
+    boolean images = request.messages().stream().anyMatch(ChatMessage::carriesAnImage);
+    if (request.mediaRequirements() == null && !images) {
+      String target = resolveSpecifier(request.specifier());
+      List<Routing> routes = new ArrayList<>();
+      for (LlmPool pool : pools) {
+        String wire = pool.resolve(target);
+        if (wire != null) routes.add(new Routing(pool, wire));
+      }
+      return List.copyOf(routes);
+    }
+    List<Candidate> candidates = mediaCandidates(request.specifier());
+    boolean profiledImages =
+        images && candidates.stream().anyMatch(candidate -> candidate.profile().isPresent());
+    if (request.mediaRequirements() == null && !profiledImages) {
+      return candidates.stream().map(Candidate::route).toList();
+    }
+    MediaRequirements requirements =
+        (request.mediaRequirements() == null ? MediaRequirements.TEXT : request.mediaRequirements())
+            .including(request.messages());
+    List<Routing> eligible =
+        candidates.stream()
+            .filter(candidate -> supports(candidate, requirements))
+            .map(Candidate::route)
+            .toList();
+    if (eligible.isEmpty()) throw new UnsupportedMediaException(request.specifier());
+    return eligible;
+  }
+
+  private static boolean supports(Candidate candidate, MediaRequirements requirements) {
+    Routing route = candidate.route();
+    return candidate.profile().isPresent()
+        && (requirements.inputs().stream().noneMatch(type -> type.startsWith("image/"))
+            || route.pool().sees(route.wireModel()))
+        && requirements.matches(
+            candidate.profile().orElseThrow(), route.pool().mediaCapabilities(route.wireModel()));
   }
 
   private record Routing(LlmPool pool, String wireModel) {}
@@ -962,27 +1201,12 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   private Routing route(String specifier, Lane lane) {
     String target = resolveSpecifier(specifier);
-    LlmPool chosen = null;
-    String wireModel = null;
-    // Infinity and not MAX_VALUE: load is finite for every pool, since the
-    // slot count it divides by has a floor of one, so the first pool that
-    // serves the specifier is always chosen on a real comparison. The
-    // `chosen == null` clause this replaces could never fire, and a dead
-    // clause reads like a guard someone is relying on.
-    double lightest = Double.POSITIVE_INFINITY;
+    List<Routing> candidates = new ArrayList<>();
     for (LlmPool pool : pools) {
       String resolved = pool.resolve(target);
-      if (resolved == null) {
-        continue;
-      }
-      double load = pool.load(lane);
-      if (load < lightest) {
-        chosen = pool;
-        wireModel = resolved;
-        lightest = load;
-      }
+      if (resolved != null) candidates.add(new Routing(pool, resolved));
     }
-    if (chosen == null) {
+    if (candidates.isEmpty()) {
       // The specifier the CALLER WROTE, and not `target`. For everything
       // that is not harness work the two are the same string. For
       // `system.memory` they are not: `target` is whatever
@@ -995,7 +1219,7 @@ public final class LlmDispatcher implements AutoCloseable {
       throw new UnknownSpecifierException(
           specifier, pools.stream().map(LlmPool::describe).collect(Collectors.joining(", ")));
     }
-    return new Routing(chosen, wireModel);
+    return leastLoaded(candidates, lane);
   }
 
   /**

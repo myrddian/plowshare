@@ -100,8 +100,14 @@ import java.util.regex.Pattern;
  * the same file, whereas bytes with no record are invisible to every reader here and would be an
  * orphan nothing could account for — which is the exact state the manifest property exists to make
  * impossible.
+ *
+ * <p>Shared binary storage extends this ordering without changing image identity or sidecars. It
+ * reuses an existing registered canonical file, including bytes prepared by Relay before an image
+ * record exists. In that case the image writes only this record and binds its alias/retention pin;
+ * it does not create an adjacent compatibility byte copy. Managed reads verify full SHA-256 and
+ * length, while older unregistered images retain their original disk path until a write adopts it.
  */
-public final class ImageStore {
+public final class ImageStore implements ImageSnapshots {
 
   /**
    * A deployment that holds no images.
@@ -129,6 +135,7 @@ public final class ImageStore {
 
   private final ImageDirectories where;
   private final int maxBytes;
+  private final Optional<ImageBlobAccess> blobAccess;
 
   /**
    * Whether this tier may still read a file it once named — see {@link ImageFence}, which owns the
@@ -162,6 +169,19 @@ public final class ImageStore {
    *     ImageFence#NOTHING} is the way to say "this deployment names none"
    */
   public ImageStore(ImageDirectories where, int maxBytes, ImageFence fence) {
+    this(where, maxBytes, fence, Optional.empty());
+  }
+
+  /**
+   * Production composition with claim-aware storage; disk-only constructors retain legacy fixtures.
+   */
+  public ImageStore(ImageDirectories where, int maxBytes, ImageFence fence, ImageBlobAccess blobs) {
+    this(where, maxBytes, fence, Optional.of(blobs));
+  }
+
+  private ImageStore(
+      ImageDirectories where, int maxBytes, ImageFence fence, Optional<ImageBlobAccess> blobs) {
+    this.blobAccess = blobs;
     this.where = where;
     this.maxBytes = maxBytes;
     this.fence = Objects.requireNonNull(fence, "fence");
@@ -239,7 +259,8 @@ public final class ImageStore {
               + " because a model shown a picture nobody chose is answering about"
               + " the server's resizing as much as about the image");
     }
-    ImageFormat format = ImageFormat.of(bytes);
+    byte[] snapshot = bytes.clone();
+    ImageFormat format = ImageFormat.of(snapshot);
     if (format == null) {
       throw new UnstorableImageException(
           UnstorableImageException.Reason.UNRECOGNISED,
@@ -253,34 +274,52 @@ public final class ImageStore {
     Path directory = directoryFor(home);
     StoredImage image =
         new StoredImage(
-            idFor(bytes), home, format, blankToNull(filename), bytes.length, Instant.now());
+            idFor(snapshot), home, format, blankToNull(filename), snapshot.length, Instant.now());
     Path record = directory.resolve(image.recordName());
     Path file = directory.resolve(image.fileName());
-    try {
-      // THE FIRST WRITE WINS, and this is where that is decided. Reading
-      // the existing record rather than overwriting it keeps a UID that
-      // has already been handed to an agent resolving to what it resolved
-      // to before -- same bytes, but also the same recorded name and the
-      // same instant.
-      //
-      // The `&& file` half is what lets an UPLOAD REPLACE A NAMED RECORD,
-      // which is the one direction worth allowing: a named record has no
-      // bytes beside it, so this test is false and the upload writes both.
-      // The id is unchanged either way -- it is the hash -- and what the
-      // project gains is a picture that can no longer vanish.
-      if (Files.isRegularFile(record) && Files.isRegularFile(file)) {
-        return read(home, record);
-      }
-      Files.createDirectories(directory);
-      // The record before the bytes: see the class comment for why this is
-      // the opposite order to PayloadExport's and why both are right.
-      Files.writeString(record, json(image), StandardCharsets.UTF_8);
-      Files.write(file, bytes);
-    } catch (IOException unwritable) {
-      throw new UncheckedIOException(
-          "the image " + image.id() + " could not be written to " + directory, unwritable);
-    }
-    return image;
+    blobAccess.ifPresent(blobs -> blobs.validate(directory, image));
+    StoredImage stored =
+        ImageWrites.locked(
+            directory,
+            () -> {
+              try {
+                // THE FIRST WRITE WINS, and this is where that is decided. Reading
+                // the existing record rather than overwriting it keeps a UID that
+                // has already been handed to an agent resolving to what it resolved
+                // to before -- same bytes, but also the same recorded name and the
+                // same instant.
+                //
+                // An existing held record has either adjacent bytes or a managed alias. A named
+                // workspace record has neither, so an upload can replace it with held content.
+                // The id is unchanged either way -- it is the hash -- and what the
+                // project gains is a picture that can no longer vanish.
+                if (Files.isRegularFile(record)) {
+                  var existing = read(home, record);
+                  if (Files.isRegularFile(file)
+                      || !existing.inWorkspace()
+                          && blobAccess.isPresent()
+                          && blobAccess.get().adopted(directory, existing)) {
+                    if (blobAccess.isPresent()) {
+                      blobAccess.get().store(directory, existing, snapshot, sha256(snapshot));
+                    }
+                    return existing;
+                  }
+                }
+                Files.createDirectories(directory);
+                // The record before the bytes: see the class comment for why this is
+                // the opposite order to PayloadExport's and why both are right.
+                ImageWrites.publish(record, json(image).getBytes(StandardCharsets.UTF_8));
+                if (blobAccess.isPresent()) {
+                  blobAccess.get().store(directory, image, snapshot, sha256(snapshot));
+                } else ImageWrites.publish(file, snapshot);
+              } catch (IOException unwritable) {
+                throw new UncheckedIOException(
+                    "the image " + image.id() + " could not be written to " + directory,
+                    unwritable);
+              }
+              return image;
+            });
+    return stored;
   }
 
   /**
@@ -344,25 +383,30 @@ public final class ImageStore {
             bytes.length,
             Instant.now(),
             file);
+    blobAccess.ifPresent(blobs -> blobs.validate(directory, image));
     Path record = directory.resolve(image.recordName());
-    try {
-      // THE FIRST WRITE WINS HERE TOO, and this is the arm where the two
-      // kinds meet. The same bytes uploaded to this project earlier have
-      // this id and a record with no path; reading that one back rather
-      // than overwriting it keeps the picture resolving out of bytes this
-      // server owns, which cannot vanish. It is the better of the two
-      // records to keep and the rule that keeps it is the rule `store`
-      // already had.
-      if (Files.isRegularFile(record)) {
-        return read(home, record);
-      }
-      Files.createDirectories(directory);
-      Files.writeString(record, json(image), StandardCharsets.UTF_8);
-    } catch (IOException unwritable) {
-      throw new UncheckedIOException(
-          "the image " + image.id() + " could not be recorded in " + directory, unwritable);
-    }
-    return image;
+    return ImageWrites.locked(
+        directory,
+        () -> {
+          try {
+            // THE FIRST WRITE WINS HERE TOO, and this is the arm where the two
+            // kinds meet. The same bytes uploaded to this project earlier have
+            // this id and a record with no path; reading that one back rather
+            // than overwriting it keeps the picture resolving out of bytes this
+            // server owns, which cannot vanish. It is the better of the two
+            // records to keep and the rule that keeps it is the rule `store`
+            // already had.
+            if (Files.isRegularFile(record)) {
+              return read(home, record);
+            }
+            Files.createDirectories(directory);
+            ImageWrites.publish(record, json(image).getBytes(StandardCharsets.UTF_8));
+          } catch (IOException unwritable) {
+            throw new UncheckedIOException(
+                "the image " + image.id() + " could not be recorded in " + directory, unwritable);
+          }
+          return image;
+        });
   }
 
   /**
@@ -401,9 +445,103 @@ public final class ImageStore {
     // there is one of the three answers `dataUri` owes -- collapsing "the
     // file is gone" into "no such image" would tell a run its id was never
     // real. So the record alone is what this method answers for.
-    return image.inWorkspace() || Files.isRegularFile(directory.resolve(image.fileName()))
+    return image.inWorkspace()
+            || Files.isRegularFile(directory.resolve(image.fileName()))
+            || blobAccess.isPresent() && blobAccess.get().adopted(directory, image)
         ? Optional.of(image)
         : Optional.empty();
+  }
+
+  @Override
+  public StoredImage hold(
+      Home home,
+      String filename,
+      byte[] bytes,
+      io.aeyer.plowshare.server.media.ImageDescriptor descriptor) {
+    Objects.requireNonNull(descriptor);
+    if (bytes == null
+        || bytes.length != descriptor.byteLength()
+        || ImageFormat.of(bytes) != descriptor.format()
+        || !sha256(bytes).equals(descriptor.sha256())) {
+      throw new IllegalArgumentException("snapshot does not match its validated descriptor");
+    }
+    StoredImage stored = store(home, filename, bytes);
+    Path directory = directoryFor(home);
+    return ImageWrites.locked(
+        directory,
+        () -> {
+          if (!available(home, stored.id(), descriptor)) {
+            throw new IllegalStateException("held image does not match the admitted snapshot");
+          }
+          try {
+            // Deduplication may have found a legacy object. Force both existing files, not merely
+            // the
+            // rename of a new file, before the database can acknowledge a receipt referencing them.
+            ImageWrites.forceFile(directory.resolve(stored.recordName()));
+            if (blobAccess.isEmpty()) ImageWrites.forceFile(directory.resolve(stored.fileName()));
+            ImageWrites.forceDirectory(directory);
+          } catch (IOException failure) {
+            throw new UncheckedIOException("image snapshot could not be finalized", failure);
+          }
+          return stored;
+        });
+  }
+
+  @Override
+  public boolean available(
+      Home home, String id, io.aeyer.plowshare.server.media.ImageDescriptor descriptor) {
+    requireUid(id);
+    if (!keepsAnything()) return false;
+    Path directory = directoryFor(home);
+    Path record = directory.resolve(id + ".json");
+    if (!Files.isRegularFile(record)) return false;
+    try {
+      StoredImage stored = read(home, record);
+      if (stored.inWorkspace()
+          || stored.format() != descriptor.format()
+          || stored.bytes() != descriptor.byteLength()
+          || !id.equals("img_" + descriptor.sha256().substring(0, 32))) return false;
+      if (blobAccess.isPresent()) {
+        var managed = blobAccess.get().read(directory, stored);
+        if (managed.isPresent()) {
+          return managed.get().length == descriptor.byteLength()
+              && sha256(managed.get()).equals(descriptor.sha256());
+        }
+      }
+      Path file = directory.resolve(stored.fileName());
+      if (!Files.isRegularFile(file) || Files.size(file) != descriptor.byteLength()) return false;
+      MessageDigest hash = MessageDigest.getInstance("SHA-256");
+      try (var input = Files.newInputStream(file)) {
+        byte[] buffer = new byte[8192];
+        long remaining = descriptor.byteLength();
+        while (remaining > 0) {
+          int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+          if (read < 0) return false;
+          hash.update(buffer, 0, read);
+          remaining -= read;
+        }
+        if (input.read() != -1) return false;
+      }
+      return HexFormat.of().formatHex(hash.digest()).equals(descriptor.sha256());
+    } catch (io.aeyer.plowshare.server.blobs.BlobUnavailableException unavailable) {
+      return false;
+    } catch (java.nio.file.NoSuchFileException missing) {
+      return false;
+    } catch (IOException unreadable) {
+      // A malformed/missing sidecar or unreadable finalized file is explicit unavailability. Never
+      // follow a workspace path or fall back to a matching UID from another home.
+      return false;
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is required by the Java runtime", impossible);
+    }
+  }
+
+  private static String sha256(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is required by the Java runtime", impossible);
+    }
   }
 
   /**
@@ -447,6 +585,15 @@ public final class ImageStore {
           + image.format().mediaType()
           + ";base64,"
           + Base64.getEncoder().encodeToString(workspaceBytes(home, image));
+    }
+    if (blobAccess.isPresent()) {
+      var managed = blobAccess.get().read(directoryFor(home), image);
+      if (managed.isPresent()) {
+        return "data:"
+            + image.format().mediaType()
+            + ";base64,"
+            + Base64.getEncoder().encodeToString(managed.get());
+      }
     }
     Path file = directoryFor(home).resolve(image.fileName());
     byte[] bytes;

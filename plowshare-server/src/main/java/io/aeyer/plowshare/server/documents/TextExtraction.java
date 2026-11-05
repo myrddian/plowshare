@@ -20,7 +20,9 @@ import java.util.Locale;
  *
  * <p><b>Text-like formats — anything that is valid UTF-8 and contains no NUL byte — and PDF.</b>
  * Markdown, plain text, source, CSV, JSON, HTML-as-text, and a PDF through {@link PdfExtraction}.
- * Nothing else, and in particular no Tika.
+ * Nothing else; no general Tika text extraction. The separate {@link
+ * io.aeyer.plowshare.server.media.MediaInspection} capability uses Tika's byte detector for media
+ * validation and does not expand the document formats accepted here.
  *
  * <h2>Why PDF and only PDF</h2>
  *

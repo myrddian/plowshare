@@ -338,6 +338,13 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   }
 
   @Override
+  public boolean permitsArtifact(RelayToolDefinition binding) {
+    if (boot.permitsArtifact(binding)) return true;
+    var entry = snapshot(binding.project(), binding.account()).entries().get(binding.name());
+    return entry != null && entry.available() && entry.binding().equals(binding);
+  }
+
+  @Override
   public void validateResult(String account, RelayPort.Publish request) {
     var settings = settings(request.project(), account);
     var provider =

@@ -140,7 +140,7 @@ public final class InformationAccess {
    *
    * <p>It is the only place an {@link InformationContext} is built with its two axes differing, and
    * it exists so that no caller assembles the combination by hand: the acting principal is the
-   * child's own ephemeral principal, which is what V224's gates admit, and the accounting account
+   * child's own ephemeral principal, which is what V229's gates admit, and the accounting account
    * is its container's, which is what the provenance columns' foreign keys require.
    *
    * <p><strong>No production path calls this.</strong> A contained run's information actor is
@@ -148,7 +148,7 @@ public final class InformationAccess {
    * executor and account unchanged, and {@code SourceContainedApplications.run} issues the child's
    * principal and deliberately does not pass it as the caller. So {@code contained_knowledge_actor}
    * is false for every actor a production path presents, and a contained run reads and writes no
-   * knowledge and no memory today. This method, V224's read baseline, both of V224's write arms and
+   * knowledge and no memory today. This method, V229's read baseline, both of V229's write arms and
    * every contained-actor guard in the catalogue repository are reachable only from a caller that
    * builds this context, which at present is two tests.
    *
@@ -160,7 +160,7 @@ public final class InformationAccess {
    *
    * <p><strong>{@code includeGlobal} is false, deliberately.</strong> {@link
    * InformationContext.Selection#project} sets it true, which every ordinary caller wants and which
-   * V224 correctly leaves closed to a contained actor — the global arm of the destination gate
+   * V229 correctly leaves closed to a contained actor — the global arm of the destination gate
    * requires a credentialed general-read membership a contained principal does not have. A child's
    * write is scope-bound or it is nothing, so this builds the scope-bound selection rather than
    * letting the ordinary helper's default refuse it at the gate.

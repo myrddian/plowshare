@@ -13,6 +13,32 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+const imageInvocation='11111111-1111-1111-1111-111111111111';
+const imageHash=createHash('sha256').update('invocation-image/1\n'+imageInvocation+'\n0').digest('hex').slice(0,32);
+const imageRequest = {invocation:imageInvocation,ordinal:0,requestId:`${imageHash.slice(0,8)}-${imageHash.slice(8,12)}-${imageHash.slice(12,16)}-${imageHash.slice(16,20)}-${imageHash.slice(20)}`};
+input('artifact.admission.status',imageRequest,true);
+for(const ordinal of [-1,16,0.5,'0'])input('artifact.admission.status',{...imageRequest,ordinal},false);
+input('artifact.admission.status',{...imageRequest,owner:'foreign'},false);
+input('artifact.admission.status',{...imageRequest,invocation:'bad'},false);
+const imageReceipt={request:imageRequest,project:'atlas',owner:'owner',producer:'producer',imageId:'img_'+'a'.repeat(32),mimeType:'image/png',width:2,height:3,byteLength:100,sha256:'a'.repeat(64),admittedAt:'2026-10-22T00:00:00Z'};
+for (const mimeType of ['image/png','image/jpeg','image/webp']) result('artifact.admission.status',{state:'COMMITTED',receipt:{...imageReceipt,mimeType}},true);
+for (const mimeType of ['image/gif','image/svg+xml','image/*','Image/JPEG']) result('artifact.admission.status',{state:'COMMITTED',receipt:{...imageReceipt,mimeType}},false);
+const pngPart={kind:'IMAGE',text:null,imageId:'img_'+'a'.repeat(32),ordinal:0,use:'OBSERVATION'};
+const wordsPart={kind:'TEXT',text:'before',imageId:null,ordinal:null,use:null};
+const contentResult={id:imageInvocation,state:'COMPLETED',text:'before',content:{version:'content/1',parts:[wordsPart,pngPart]}};
+input('tool.invocation.read',{project:'atlas',invocation:imageInvocation},true);
+for(const changed of [{invocation:'bad'},{project:' atlas '},{project:'atlas',invocation:imageInvocation,owner:'foreign'}]) input('tool.invocation.read',{project:'atlas',invocation:imageInvocation,...changed},false);
+result('tool.invocation.read',contentResult,true);
+result('tool.invocation.read',{id:imageInvocation,state:'COMPLETED',text:'legacy'},true);
+result('tool.invocation.read',{...contentResult,text:'',content:{version:'content/1',parts:[pngPart]}},true);
+for(const changed of [{text:'different'},{state:'UNKNOWN'},{id:'bad'},{content:{version:'content/2',parts:[pngPart]}},{content:{version:'content/1',parts:[]}},{content:{version:'content/1',parts:[wordsPart,pngPart,pngPart]}},{content:{version:'content/1',parts:[wordsPart,{...pngPart,ordinal:16}]}},{content:{version:'content/1',parts:[wordsPart,{...pngPart,imageId:'file:///private.png'}]}},{content:{version:'content/1',parts:[wordsPart,{...pngPart,use:'AUDIO'}]}},{content:{version:'content/1',parts:[wordsPart,{...pngPart,text:'untyped'}]}}]) result('tool.invocation.read',{...contentResult,...changed},false);
+result('tool.invocation.read',{...contentResult,text:'x'.repeat(16385),content:{version:'content/1',parts:[{...wordsPart,text:'x'.repeat(16385)},pngPart]}},false);
+result('tool.invocation.read',{...contentResult,content:{version:'content/1',parts:[wordsPart,...Array.from({length:5},(_,ordinal)=>({...pngPart,ordinal}))]}},false);
+result('artifact.admission.status',{state:'ABSENT',receipt:null},true);
+result('artifact.admission.status',{state:'COMMITTED',receipt:imageReceipt},true);
+result('artifact.admission.status',{state:'UNAVAILABLE',receipt:imageReceipt},true);
+result('artifact.admission.status',{state:'COMMITTED',receipt:null},false);
+for(const changed of [{width:0},{byteLength:-1},{sha256:'bad'}])result('artifact.admission.status',{state:'COMMITTED',receipt:{...imageReceipt,...changed}},false);
 // Approval reasons are optional on the server, including ordinary local commands.
 const approvalQuestion = {id:'approval-fixture',conversation:'conversation-fixture',askedIn:'conversation-fixture',agent:'worker',side:'local',command:['echo','fixture'],cwd:'/fixture',reason:null,state:'asked',scope:null,prefix:null,defaultPrefix:['echo'],createdAt:'2026-10-17T00:00:00Z',answeredAt:null,commands:null,judged:null};
 for (const reason of [null, '', 'Review the command']) result('approval.list',{approvals:[{...approvalQuestion,reason}]},true);
@@ -339,6 +365,19 @@ input('relay.consume',consume,true);
 for(const change of [{group:' '},{consumerId:'bad'},{limit:0},{limit:101},{waitMs:30001},{waitMs:1.5},{start:'EARLIEST'}]) input('relay.consume',{...consume,...change},false);
 const batch={project:'fixture',topic:'checks.requests',group:'detectors',consumerId:receipt,status:'DATA',batchId:receipt,fence:'1',through:'1',expiresAt:'2026-10-07T00:00:30Z',expiredThrough:null,events:relayPage.events};
 result('relay.consume',batch,true);
+
+const binaryDescriptor={sha256:'a'.repeat(64),byteLength:3,mediaType:'image/png'};
+const binaryEvent={...relayPage.events[0],payload:{kind:'BLOB',text:null,schedule:null,emits:null,fireAt:null,blob:binaryDescriptor}};
+result('relay.consume',{...batch,events:[binaryEvent]},true);
+result('relay.log',{...relayPage,topic:{...relayPage.topic,kind:'BLOB'},events:[binaryEvent]},true);
+for(const change of [{sha256:'a'.repeat(32)},{sha256:'A'.repeat(64)},{byteLength:0},{byteLength:1.5},{byteLength:52428801},
+    {mediaType:'Image/PNG'},{mediaType:'image/png;bad=1'},{mediaType:'image/*'}]) {
+  result('relay.consume',{...batch,events:[{...binaryEvent,payload:{...binaryEvent.payload,blob:{...binaryDescriptor,...change}}}]},false);
+}
+result('relay.consume',{...batch,events:[{...binaryEvent,payload:{...binaryEvent.payload,blob:null}}]},false);
+result('relay.consume',{...batch,events:[{...binaryEvent,payload:{...binaryEvent.payload,text:'flattened'}}]},false);
+result('relay.consume',{...batch,events:[{...relayPage.events[0],payload:{...relayPage.events[0].payload,blob:binaryDescriptor}}]},false);
+
 for(const change of [{events:[]},{batchId:null},{fence:'0'},{fence:'9223372036854775808'},{status:'EMPTY'},{expiredThrough:'1'},{through:'-1'}]) result('relay.consume',{...batch,...change},false);
 const empty={...batch,status:'EMPTY',batchId:null,fence:null,expiresAt:null,events:[]};
 result('relay.consume',empty,true);

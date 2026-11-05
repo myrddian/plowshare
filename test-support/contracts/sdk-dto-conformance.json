@@ -1,5 +1,853 @@
 [
   {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "ordinal": 0,
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "ordinal": -1,
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "ordinal": 16,
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "ordinal": 0.5,
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "ordinal": "0",
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "ordinal": 0,
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a",
+      "owner": "foreign"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "artifact.admission.status",
+    "value": {
+      "invocation": "bad",
+      "ordinal": 0,
+      "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/jpeg",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/webp",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/gif",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/svg+xml",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/*",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "Image/JPEG",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.invocation.read",
+    "value": {
+      "project": "atlas",
+      "invocation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.invocation.read",
+    "value": {
+      "project": "atlas",
+      "invocation": "bad"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.invocation.read",
+    "value": {
+      "project": " atlas ",
+      "invocation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.invocation.read",
+    "value": {
+      "project": "atlas",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "owner": "foreign"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "legacy"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "different",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "UNKNOWN",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "bad",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/2",
+        "parts": [
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": []
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 16,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "file:///private.png",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "AUDIO"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": "untyped",
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.invocation.read",
+    "value": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "state": "COMPLETED",
+      "text": "before",
+      "content": {
+        "version": "content/1",
+        "parts": [
+          {
+            "kind": "TEXT",
+            "text": "before",
+            "imageId": null,
+            "ordinal": null,
+            "use": null
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 0,
+            "use": "OBSERVATION"
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 1,
+            "use": "OBSERVATION"
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 2,
+            "use": "OBSERVATION"
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 3,
+            "use": "OBSERVATION"
+          },
+          {
+            "kind": "IMAGE",
+            "text": null,
+            "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ordinal": 4,
+            "use": "OBSERVATION"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "ABSENT",
+      "receipt": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "UNAVAILABLE",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png",
+        "width": 0,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png",
+        "width": 2,
+        "height": 3,
+        "byteLength": -1,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "artifact.admission.status",
+    "value": {
+      "state": "COMMITTED",
+      "receipt": {
+        "request": {
+          "invocation": "11111111-1111-1111-1111-111111111111",
+          "ordinal": 0,
+          "requestId": "216a1795-977c-6c84-f14e-d29352a8c97a"
+        },
+        "project": "atlas",
+        "owner": "owner",
+        "producer": "producer",
+        "imageId": "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png",
+        "width": 2,
+        "height": 3,
+        "byteLength": 100,
+        "sha256": "bad",
+        "admittedAt": "2026-10-22T00:00:00Z"
+      }
+    },
+    "valid": false
+  },
+  {
     "boundary": "result",
     "operation": "approval.list",
     "value": {
@@ -8435,6 +9283,536 @@
       ]
     },
     "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "BLOB",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "byteLength": 3,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 0,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 1.5,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 52428801,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "Image/PNG"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/png;bad=1"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/*"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": null
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "BLOB",
+            "text": "flattened",
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            },
+            "blob": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "byteLength": 3,
+              "mediaType": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
   },
   {
     "boundary": "result",

@@ -141,9 +141,13 @@ public class ContextCountFrames implements FrameArea {
         message.parts().stream()
             .map(
                 part ->
-                    part instanceof Content.Image image
-                        ? Map.of("type", "image", "uid", image.uid(), "omitted", true)
-                        : Map.of("type", "text", "text", part.text()))
+                    switch (part) {
+                      case Content.Image image ->
+                          Map.of("type", "image", "uid", image.uid(), "omitted", true);
+                      case Content.StoredImage image ->
+                          Map.of("type", "image", "uid", image.uid(), "omitted", true);
+                      case Content.Text text -> Map.of("type", "text", "text", text.text());
+                    })
             .toList());
     result.put("tool_calls", message.toolCalls());
     result.put("tool_call_id", message.toolCallId());

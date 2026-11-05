@@ -19,7 +19,7 @@ name harnesses, probes, candidates or improvement.
 **Architecture:** Three gaps separate a contained admission from a running one.
 First, every knowledge revision read opens with `information_global_read_member`,
 which a credential-less bare-UUID principal cannot pass, so a child cannot read
-even its own documents — V224 adds a second, strictly narrower way past that
+even its own documents — V229 adds a second, strictly narrower way past that
 baseline and *closes* the general-readable arm for the actors it admits, because
 the baseline's existing disjunct would otherwise hand a child every
 generally-readable row on the server. Second, nothing starts work in a contained
@@ -75,11 +75,11 @@ and Task 6 amends all three. Slice two's plan is
   `orchestration <id>`, `approval <id>` and `event <id>`. Adding a third kind
   would change a shipped wire enum for five SDKs.
 - **New Flyway migration only; never edit a shipped one.** The next free version
-  is **V224** — the highest shipped is V223. Verify with
+  is **V229** — the highest shipped is V228. Verify with
   `ls plowshare-server/src/main/resources/db/migration | sed -n 's/^V\([0-9]*\)__.*/\1/p' | sort -n | tail -1`
   before creating it, because `main` advances this number independently and a
   duplicate version makes Flyway refuse to start. ADR 0042 records that these
-  migrations have been renumbered twice already.
+  migrations have been renumbered three times already.
 - **Repositories own persistence.** Only repositories/stores may touch
   `JdbcTemplate`. Services, tools, handlers and frames must not execute SQL or
   receive one.
@@ -93,7 +93,7 @@ and Task 6 amends all three. Slice two's plan is
   identities in runtime code or SDKs.
 - After Java edits run `./gradlew format` then `./gradlew formatCheck`.
 - **Database tests** stay behind `@Tag("full-db")` and `-PfullDb`, and only where
-  the assertion *is* PostgreSQL behavior — V224 applying, and the predicate
+  the assertion *is* PostgreSQL behavior — V229 applying, and the predicate
   bodies admitting and refusing. Everything above SQL is tested through mocked
   repositories and in-memory fakes.
 
@@ -134,7 +134,7 @@ task that owns its test.
 ### Task 1: The read baseline a contained actor passes, and the general arm it must not
 
 **Files:**
-- Create: `plowshare-server/src/main/resources/db/migration/V224__contained_actor_reads.sql`
+- Create: `plowshare-server/src/main/resources/db/migration/V229__contained_actor_reads.sql`
 - Modify: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedKnowledgeReadSchemaTest.java`
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedActorReadSchemaTest.java`
 
@@ -224,7 +224,7 @@ Run: `./gradlew :plowshare-server:test -PfullDb --tests 'io.aeyer.plowshare.serv
 Expected: FAIL. `contained_knowledge_actor` does not exist, and the reads that
 should now be admitted return false.
 
-- [ ] **Step 3: Write V224**
+- [ ] **Step 3: Write V229**
 
 Create `contained_knowledge_actor` and `CREATE OR REPLACE` the two predicates
 `knowledge_revision_readable` and `knowledge_read_authority` that consult the
@@ -242,7 +242,7 @@ Run: the Step 2 command. Expected: PASS.
 In `ContainedKnowledgeReadSchemaTest.anAncestorReadsADescendantsDocumentWithinThatDescendantsBoundary`,
 `assertFalse(revisionReadable(childPrincipal, document))` is now wrong. Change it
 to `assertTrue` and replace the comment block above it — which explains the
-`information_global_read_member` refusal — with one sentence saying V224 admits
+`information_global_read_member` refusal — with one sentence saying V229 admits
 it and pointing at `ContainedActorReadSchemaTest` for the direction and the
 general-arm closure. Leave every other assertion in that method untouched.
 
@@ -254,7 +254,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add plowshare-server/src/main/resources/db/migration/V224__contained_actor_reads.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/
+git add plowshare-server/src/main/resources/db/migration/V229__contained_actor_reads.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/
 git commit -m "Admit a contained principal to its own reads without the general arm"
 ```
 
@@ -264,7 +264,7 @@ git commit -m "Admit a contained principal to its own reads without the general 
 
 **Files:**
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedActorWriteSchemaTest.java`
-- Modify: whichever gate Step 1 names — expected `plowshare-server/src/main/resources/db/migration/V224__contained_actor_reads.sql`
+- Modify: whichever gate Step 1 names — expected `plowshare-server/src/main/resources/db/migration/V229__contained_actor_reads.sql`
   if the gate is SQL, otherwise the write-authority service the test identifies.
 
 **Interfaces:**
@@ -303,7 +303,7 @@ side needs no widening and this task is the three refusals plus that note.
 - [ ] **Step 3: Admit the first assertion, if and only if Step 2 found a gate**
 
 Widen exactly the gate Step 2 named, for a `contained_knowledge_actor` writing
-within its own home and nothing else. If the gate is in V224, extend that file —
+within its own home and nothing else. If the gate is in V229, extend that file —
 it is unshipped until this branch merges. If a second gate appears behind the
 first, repeat Steps 2 and 3 rather than widening both at once.
 
@@ -445,7 +445,7 @@ constraints behind the conversation door. It was not in this plan's original
 scope; this section is the plan catching up with the work, not a prediction.
 
 **Files:**
-- Create: `plowshare-server/src/main/resources/db/migration/V225__contained_operation_lineage.sql`
+- Create: `plowshare-server/src/main/resources/db/migration/V230__contained_operation_lineage.sql`
 - Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedOperationLineageSchemaTest.java`
 - Modify: `docs/decisions/0042-nested-application-containment.md`
 
@@ -463,7 +463,7 @@ gates" already made exactly this replacement in Java: for a contained admission,
 by the containment edge itself — "the child's own stored row must name this
 ancestor's scope as its container". `operation_parent_valid` is the SQL
 counterpart of the same demand and has never been given the same treatment,
-because no hop was ever persisted to fail it. V225 applies the documented
+because no hop was ever persisted to fail it. V230 applies the documented
 replacement at the SQL level. A reviewer should hold the migration to that
 claim: anything broader than the Java gate already permits is out of scope.
 
@@ -490,7 +490,7 @@ with a positive control proving the same shape is admitted for a legitimate hop.
 Expected: `ERROR: child authority exceeds retained parent` on the hop, and the
 refusals passing already.
 
-- [ ] **Step 3: Write V225 for `operation_parent_valid`**
+- [ ] **Step 3: Write V230 for `operation_parent_valid`**
 
 `CREATE OR REPLACE` with the signature unchanged, reproduced from V162 with the
 one documented edit and no others, in this repo's "reproduced from VNNN with
@@ -517,7 +517,7 @@ slice's goal is met.
 - [ ] **Step 6: Amend ADR 0042 for the constraint and the corrected claim**
 
 Two things, and the second is about shipped slices rather than this one:
-the V225 decision and why it is the documented replacement rather than a
+the V230 decision and why it is the documented replacement rather than a
 widening; and the correction that the "two live-authority gates" section's
 liveness claim was resting on mocked persistence, since no hop could be recorded.
 State it plainly as a defect that shipped, not as a nuance.
@@ -525,7 +525,7 @@ State it plainly as a defect that shipped, not as a nuance.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add plowshare-server/src/main/resources/db/migration/V225__contained_operation_lineage.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ plowshare-server/src/main/java/ docs/decisions/0042-nested-application-containment.md
+git add plowshare-server/src/main/resources/db/migration/V230__contained_operation_lineage.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ plowshare-server/src/main/java/ docs/decisions/0042-nested-application-containment.md
 git commit -m "Let a containment hop record its lineage"
 ```
 

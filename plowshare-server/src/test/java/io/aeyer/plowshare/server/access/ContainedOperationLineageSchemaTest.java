@@ -34,9 +34,9 @@ import org.testcontainers.junit.jupiter.*;
  * <p>So the regression test is <strong>the un-mocked path</strong>, not a tightened assertion
  * against the mock. Every test below drives a real {@link JdbcOperationRecords}.
  *
- * <h2>What V225 changed, and what it must not</h2>
+ * <h2>What V230 changed, and what it must not</h2>
  *
- * <p>V225 is the SQL counterpart of a replacement ADR 0042 already made in Java: gate two already
+ * <p>V230 is the SQL counterpart of a replacement ADR 0042 already made in Java: gate two already
  * replaced {@code require}'s demand for an ancestor with an identical scope <em>and</em> home by
  * the containment edge itself — the child's own stored row must name this ancestor's scope as its
  * container. The trigger is the same demand in SQL and had never been given the same treatment,
@@ -208,7 +208,7 @@ class ContainedOperationLineageSchemaTest {
   }
 
   /**
-   * The central test: a real hop, persisted. Before V225 this failed with {@code child authority
+   * The central test: a real hop, persisted. Before V230 this failed with {@code child authority
    * exceeds retained parent} from {@code operation_parent_valid}.
    */
   @Test
@@ -363,7 +363,7 @@ class ContainedOperationLineageSchemaTest {
   /**
    * The non-contained path keeps the exact equality it has today, asserted byte-for-byte: a derived
    * child admission holds its parent's scope and project name, and a row that does not is refused
-   * exactly as it was before V225.
+   * exactly as it was before V230.
    */
   @Test
   void aNonContainedChildKeepsTheScopeAndProjectEquality() {
@@ -383,7 +383,7 @@ class ContainedOperationLineageSchemaTest {
             String.class,
             derived.id()));
 
-    // A non-contained child whose scope differs is still refused: V225's arm is keyed on a
+    // A non-contained child whose scope differs is still refused: V230's arm is keyed on a
     // CONTAINED row, so an ordinary scope gets the old equality and nothing else.
     jdbc.update("INSERT INTO projects(name) VALUES ('other')");
     var other =
@@ -425,7 +425,7 @@ class ContainedOperationLineageSchemaTest {
         "a hop cannot carry an action its parent does not hold");
     // At the fence: a forged contained child of the narrow parent, carrying the WIDE parent's
     // support rows, is refused -- so the containment arm did not become a way past the subset
-    // check. This is the invariant V225 must not have touched.
+    // check. This is the invariant V230 must not have touched.
     var wide = container();
     assertThrows(
         DataAccessException.class,

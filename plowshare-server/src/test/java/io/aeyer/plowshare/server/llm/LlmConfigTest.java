@@ -15,11 +15,17 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
+import io.aeyer.plowshare.server.llm.dispatch.Sampling;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -34,6 +40,120 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
  * at all.
  */
 class LlmConfigTest {
+
+  @Test
+  void configured_profiles_filter_real_provider_declarations_and_keep_socket_refusal(
+      @TempDir Path directory) throws IOException {
+    Files.writeString(
+        directory.resolve("deployment.yaml"),
+        """
+        version: 2
+        modes:
+          default:
+            precise: {}
+            balanced: {}
+            exploratory: {}
+        media:
+          inputs: [text/plain, image/png]
+          outputs:
+            text: {formats: [text/plain]}
+        """);
+    Files.writeString(
+        directory.resolve("models.yaml"), "models: {nomic-embed-text: {profile: deployment}}\n");
+    runner
+        .withPropertyValues(
+            onePoolPlus(
+                "plowshare.llm.sampling-directory=" + directory,
+                "plowshare.llm.pools[0].provider=OPENAI",
+                "plowshare.llm.pools[1].name=vision",
+                "plowshare.llm.pools[1].base-url=http://localhost:1235/v1",
+                "plowshare.llm.pools[1].models[0]=nomic-embed-text",
+                "plowshare.llm.pools[1].vision[0]=nomic-embed-text",
+                "plowshare.llm.pools[1].provider=OPENAI"))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              var dispatcher = context.getBean(LlmDispatcher.class);
+              assertDoesNotThrow(() -> dispatcher.requireSees("nomic-embed-text"));
+              var request =
+                  io.aeyer.plowshare.server.llm.dispatch.ChatRequest.of(
+                          "nomic-embed-text", null, "inspect")
+                      .withMediaRequirements(
+                          new MediaRequirements(
+                              Set.of("text/plain", "image/png"),
+                              Set.of("text/plain"),
+                              Set.of("text/plain")));
+              assertEquals(
+                  List.of("vision"),
+                  dispatcher.poolsServing(request).stream()
+                      .map(io.aeyer.plowshare.server.llm.dispatch.LlmPool::name)
+                      .toList());
+            });
+    runner
+        .withPropertyValues(
+            onePoolPlus(
+                "plowshare.llm.sampling-directory=" + directory,
+                "plowshare.llm.pools[0].provider=LMSTUDIO",
+                "plowshare.llm.pools[0].prefill-progress=true",
+                "plowshare.llm.pools[0].vision[0]=nomic-embed-text"))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertThrows(
+                  io.aeyer.plowshare.server.llm.dispatch.UnsupportedMediaException.class,
+                  () -> context.getBean(LlmDispatcher.class).requireSees("nomic-embed-text"));
+            });
+  }
+
+  @Test
+  void startup_loads_media_profiles_from_the_configured_disk_directory(@TempDir Path root)
+      throws IOException {
+    // Both startups use the same compiled server resources. Only operator files differ.
+    for (String format : List.of("image/png", "image/jpeg")) {
+      Path directory = Files.createDirectory(root.resolve(format.substring(6)));
+      Files.writeString(
+          directory.resolve("deployment.yaml"),
+          """
+          version: 2
+          modes:
+            default:
+              precise: {}
+              balanced: {}
+              exploratory: {}
+          media:
+            inputs: [text/plain, %s]
+            outputs:
+              text: {formats: [text/plain]}
+          """
+              .formatted(format));
+      Files.writeString(
+          directory.resolve("models.yaml"), "models: {deployment-model: {profile: deployment}}\n");
+      runner
+          .withPropertyValues(onePoolPlus("plowshare.llm.sampling-directory=" + directory))
+          .run(
+              context -> {
+                assertNull(context.getStartupFailure());
+                var resolved =
+                    context
+                        .getBean(SamplingProfiles.class)
+                        .resolve("deployment-model", Sampling.Intent.BALANCED);
+                assertEquals("deployment", resolved.profile());
+                assertEquals(Set.of("text/plain", format), resolved.media().orElseThrow().inputs());
+              });
+    }
+  }
+
+  @Test
+  void invalid_external_media_profile_stops_startup(@TempDir Path directory) throws IOException {
+    Files.writeString(directory.resolve("bad.yaml"), "version: 7\nmodes: {}\n");
+    runner
+        .withPropertyValues(onePoolPlus("plowshare.llm.sampling-directory=" + directory))
+        .run(
+            context -> {
+              assertNotNull(context.getStartupFailure());
+              assertTrue(trail(context.getStartupFailure()).contains("bad.yaml"));
+            });
+  }
 
   @Test
   void a_smaller_fold_timeout_warns_prominently_and_still_starts() {
@@ -226,6 +346,30 @@ class LlmConfigTest {
   }
 
   @Test
+  void llama_cpp_count_only_protocol_binds_without_changing_default_text_counting() {
+    runner
+        .withPropertyValues(
+            onePoolPlus(
+                "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+                "plowshare.llm.pools[0].counting.url=http://localhost:1234/proxy/v1/chat/completions/input_tokens",
+                "plowshare.llm.pools[0].counting.revision=fixture-model-projector-template-v1",
+                "plowshare.llm.pools[0].counting.image-tokens-included=true"))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              var counting =
+                  context.getBean(LlmProperties.class).getPools().getFirst().getCounting();
+              assertEquals(
+                  CountingProperties.ChatProtocol.LLAMA_CPP_INPUT_TOKENS,
+                  counting.getChatProtocol());
+              assertTrue(counting.isImageTokensIncluded());
+              assertEquals(
+                  CountingProperties.ChatProtocol.VLLM_TOKENIZE,
+                  new CountingProperties().getChatProtocol());
+            });
+  }
+
+  @Test
   void azure_cloud_bindings_keep_deployment_identity_separate_from_family_capabilities() {
     runner
         .withPropertyValues(
@@ -259,6 +403,23 @@ class LlmConfigTest {
         List.of(
             new String[] {"plowshare.llm.pools[0].counting.url=https://other.example/tokenize"},
             new String[] {"plowshare.llm.pools[0].counting.automatic=true"},
+            new String[] {"plowshare.llm.pools[0].counting.chat-protocol=unknown"},
+            new String[] {"plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens"},
+            new String[] {
+              "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+              "plowshare.llm.pools[0].counting.url=http://localhost:1234/v1/chat/completions",
+              "plowshare.llm.pools[0].counting.revision=fixture-v1"
+            },
+            new String[] {
+              "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+              "plowshare.llm.pools[0].counting.url=http://localhost:1234/v1/chat/completions/input_tokens"
+            },
+            new String[] {
+              "plowshare.llm.pools[0].counting.chat-protocol=llama_cpp_input_tokens",
+              "plowshare.llm.pools[0].counting.url=http://localhost:1234/v1/chat/completions/input_tokens",
+              "plowshare.llm.pools[0].counting.revision=fixture-v1",
+              "plowshare.llm.pools[0].counting.embeddings=true"
+            },
             new String[] {"plowshare.llm.pools[0].counting.cache-ttl=61s"},
             new String[] {
               "plowshare.llm.pools[0].request-style=cloud",

@@ -135,6 +135,12 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+  /** Same sanitized binary-storage refusal on HTTP and WebSocket tool boundaries. */
+  @ExceptionHandler(io.aeyer.plowshare.server.blobs.BlobUnavailableException.class)
+  public ResponseEntity<Map<String, String>> blobUnavailable(
+      io.aeyer.plowshare.server.blobs.BlobUnavailableException failure) {
+    return toResponse(Faults.of(failure));
+  }
 
   private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
@@ -294,6 +300,15 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(UnstorableImageException.class)
   public ResponseEntity<Map<String, String>> unstorableImage(UnstorableImageException e) {
+    return toResponse(Faults.of(e));
+  }
+
+  /**
+   * Inspection refusals preserve typed input errors and capacity pressure without parser causes.
+   */
+  @ExceptionHandler(io.aeyer.plowshare.server.media.MediaInspectionException.class)
+  public ResponseEntity<Map<String, String>> mediaInspection(
+      io.aeyer.plowshare.server.media.MediaInspectionException e) {
     return toResponse(Faults.of(e));
   }
 

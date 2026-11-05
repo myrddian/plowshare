@@ -15,6 +15,12 @@ foreach (var test in fixture.RootElement.EnumerateArray())
     catch (JsonException) { accepted = false; }
     if (accepted != test.GetProperty("valid").GetBoolean()) throw new Exception("Boundary case failed: " + test.GetRawText());
 }
+using(var askedTool=JsonDocument.Parse("""{"project":"atlas","invocation":"11111111-1111-1111-1111-111111111111"}""")) {
+ foreach(var id in new[]{"11111111-1111-1111-1111-111111111111","22222222-2222-2222-2222-222222222222"}) {
+  bool accepted=true;try{Codec.CorrelateDeployment("tool.invocation.read",askedTool.RootElement,JsonSerializer.SerializeToElement(new{id}));}catch(JsonException){accepted=false;}
+  if(accepted!=(id=="11111111-1111-1111-1111-111111111111"))throw new Exception("Foreign invocation result accepted");
+ }
+}
 // Reflection checks the full public operation surface, independently of schema decoding.
 var methods = typeof(Operations).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
 if (methods.Length != Protocol.Operations.Count) throw new Exception("Missing typed operations");

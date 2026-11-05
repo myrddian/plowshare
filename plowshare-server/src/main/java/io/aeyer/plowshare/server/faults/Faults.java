@@ -241,6 +241,22 @@ public final class Faults {
 
     // Row 10: one exception, three statuses from its own Reason.
     m.put(UnstorableImageException.class, e -> unstorableImage((UnstorableImageException) e));
+    m.put(
+        io.aeyer.plowshare.server.blobs.BlobUnavailableException.class,
+        e -> new Fault(Code.BLOB_UNAVAILABLE, e.getMessage()));
+    m.put(
+        io.aeyer.plowshare.server.media.MediaInspectionException.class,
+        e -> {
+          var refusal = (io.aeyer.plowshare.server.media.MediaInspectionException) e;
+          return new Fault(
+              switch (refusal.reason()) {
+                case BUSY -> Code.MEDIA_INSPECTION_UNAVAILABLE;
+                case TOO_LARGE, DIMENSIONS, TOO_COMPLEX -> Code.IMAGE_NOT_STORED_TOO_LARGE;
+                case UNSUPPORTED_FORMAT, ANIMATION -> Code.IMAGE_NOT_STORED_UNRECOGNISED;
+                case EMPTY, INVALID_IMAGE -> Code.IMAGE_NOT_STORED_EMPTY;
+              },
+              refusal.getMessage());
+        });
 
     // Row 11: a well-formed request whose content fails a domain rule.
     m.put(

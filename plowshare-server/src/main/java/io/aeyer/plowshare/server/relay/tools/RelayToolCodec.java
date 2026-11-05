@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.IntegrationPayload;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ToolContent;
 import io.aeyer.plowshare.protocol.ToolValue;
 import java.io.IOException;
 import java.time.Instant;
@@ -69,6 +70,7 @@ public final class RelayToolCodec {
   }
 
   public static final String VERSION = "plowshare-tool/1";
+  public static final String CONTENT_VERSION = "plowshare-tool/3";
   public static final String NESTED_VERSION = "plowshare-tool/2";
 
   public record Request(
@@ -84,7 +86,10 @@ public final class RelayToolCodec {
       Map<String, ToolValue> arguments,
       @com.fasterxml.jackson.annotation.JsonInclude(
               com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-          String schemaFingerprint) {
+          String schemaFingerprint,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String resultProfile) {
     public Request(
         String schema,
         String invocationId,
@@ -107,15 +112,51 @@ public final class RelayToolCodec {
           call,
           deadline,
           arguments,
+          null,
+          null);
+    }
+
+    public Request(
+        String schema,
+        String invocationId,
+        String project,
+        String provider,
+        String tool,
+        String account,
+        String run,
+        String call,
+        String deadline,
+        Map<String, ToolValue> arguments,
+        String schemaFingerprint) {
+      this(
+          schema,
+          invocationId,
+          project,
+          provider,
+          tool,
+          account,
+          run,
+          call,
+          deadline,
+          arguments,
+          schemaFingerprint,
           null);
     }
 
     public Request {
-      if (!VERSION.equals(schema) && !NESTED_VERSION.equals(schema)
+      if (!VERSION.equals(schema)
+              && !NESTED_VERSION.equals(schema)
+              && !CONTENT_VERSION.equals(schema)
           || NESTED_VERSION.equals(schema)
               && (schemaFingerprint == null || !schemaFingerprint.matches("[0-9a-f]{64}"))
           || VERSION.equals(schema) && schemaFingerprint != null)
         throw new IllegalArgumentException("Invalid tool envelope version");
+      if (CONTENT_VERSION.equals(schema) != ToolContent.PROFILE.equals(resultProfile)
+          || resultProfile != null && !ToolContent.PROFILE.equals(resultProfile)
+          || CONTENT_VERSION.equals(schema)
+              && schemaFingerprint != null
+              && !schemaFingerprint.matches("[0-9a-f]{64}"))
+        throw new IllegalArgumentException("Invalid tool result negotiation");
       RelayPort.uuid(invocationId);
       RelayPort.identity(project);
       RelayPort.identity(provider);
@@ -146,17 +187,55 @@ public final class RelayToolCodec {
       String provider,
       String tool,
       State state,
-      String text) {
+      String text,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          ToolContent.Body content) {
+    public Result(
+        String schema,
+        String invocationId,
+        String project,
+        String provider,
+        String tool,
+        State state,
+        String text) {
+      this(schema, invocationId, project, provider, tool, state, text, null);
+    }
+
     public Result {
-      if (!VERSION.equals(schema))
+      if (!VERSION.equals(schema) && !CONTENT_VERSION.equals(schema)
+          || CONTENT_VERSION.equals(schema) != (content != null))
         throw new IllegalArgumentException("Invalid tool envelope version");
       RelayPort.uuid(invocationId);
       RelayPort.identity(project);
       RelayPort.identity(provider);
       RelayPort.identity(tool);
       java.util.Objects.requireNonNull(state);
-      if (text == null || text.isBlank() || text.length() > 16384 || text.indexOf('\0') >= 0)
-        throw new IllegalArgumentException("Invalid tool result text");
+      if (text == null
+          || text.length() > 16384
+          || text.indexOf('\0') >= 0
+          || content == null && text.isBlank()
+          || content != null
+              && (!text.equals(content.text())
+                  || state != State.COMPLETED && !content.images().isEmpty()))
+        throw new IllegalArgumentException("Invalid tool result content");
+    }
+  }
+
+  /** v3 stores content once; the legacy text accessor is its exact derived projection. */
+  private record ContentResult(
+      String schema,
+      String invocationId,
+      String project,
+      String provider,
+      String tool,
+      State state,
+      ToolContent.Body content) {
+    Result result() {
+      if (!CONTENT_VERSION.equals(schema) || content == null)
+        throw new IllegalArgumentException("Invalid content result");
+      return new Result(
+          schema, invocationId, project, provider, tool, state, content.text(), content);
     }
   }
 
@@ -190,6 +269,11 @@ public final class RelayToolCodec {
   public static Result result(String source) {
     try {
       if (source.length() > 32768) throw new IllegalArgumentException("Tool result exceeds bound");
+      var shape = JSON.readTree(source);
+      if (CONTENT_VERSION.equals(shape.path("schema").asText()))
+        return JSON.treeToValue(shape, ContentResult.class).result();
+      if (shape.has("content"))
+        throw new IllegalArgumentException("Legacy tool results cannot contain content");
       return JSON.readValue(source, Result.class);
     } catch (IOException malformed) {
       throw new IllegalArgumentException("Invalid tool result envelope", malformed);
@@ -199,8 +283,13 @@ public final class RelayToolCodec {
   static Request request(String source) {
     try {
       var shape = JSON.readTree(source);
+      int count =
+          CONTENT_VERSION.equals(shape.path("schema").asText())
+              ? 11 + (shape.has("schemaFingerprint") ? 1 : 0)
+              : NESTED_VERSION.equals(shape.path("schema").asText()) ? 11 : 10;
       if (!shape.isObject()
-          || shape.size() != (NESTED_VERSION.equals(shape.path("schema").asText()) ? 11 : 10))
+          || shape.size() != count
+          || shape.has("schemaFingerprint") && !shape.get("schemaFingerprint").isTextual())
         throw new IllegalArgumentException("Invalid retained tool request fields");
     } catch (IOException invalid) {
       throw new IllegalStateException("Invalid retained tool request", invalid);
@@ -225,6 +314,16 @@ public final class RelayToolCodec {
   }
 
   public static String write(Result value) {
+    if (value.content() != null)
+      return encode(
+          new ContentResult(
+              value.schema(),
+              value.invocationId(),
+              value.project(),
+              value.provider(),
+              value.tool(),
+              value.state(),
+              value.content()));
     return encode(value);
   }
 

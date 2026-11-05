@@ -104,9 +104,66 @@ def _application_files(value: list[object] | tuple[object, ...]) -> bool:
     )
 
 
+def _tool_result(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    row = cast(dict[str, object], value)
+    text, state = row.get("text"), row.get("state")
+    if (
+        not isinstance(text, str)
+        or "\0" in text
+        or len(text.encode("utf-16-le", errors="surrogatepass")) // 2 > 16384
+    ):
+        return False
+    body = row.get("content")
+    if body is None:
+        return bool(text.strip())
+    if not isinstance(body, dict) or body.get("version") != "content/1":
+        return False
+    parts = body.get("parts")
+    if not isinstance(parts, list) or not 1 <= len(parts) <= 16:
+        return False
+    words: list[str] = []
+    slots: set[int] = set()
+    for item in parts:
+        if not isinstance(item, dict):
+            return False
+        part = cast(dict[str, object], item)
+        if part.get("kind") == "TEXT":
+            word = part.get("text")
+            if not isinstance(word, str) or any(
+                part.get(k) is not None for k in ("imageId", "ordinal", "use")
+            ):
+                return False
+            words.append(word)
+        elif part.get("kind") == "IMAGE":
+            slot, image = part.get("ordinal"), part.get("imageId")
+            if (
+                type(slot) is not int
+                or not 0 <= slot <= 15
+                or slot in slots
+                or not isinstance(image, str)
+                or re.fullmatch(r"img_[0-9a-f]{32}", image) is None
+                or part.get("text") is not None
+                or part.get("use") not in ("OBSERVATION", "OUTPUT", "BOTH")
+            ):
+                return False
+            slots.add(slot)
+        else:
+            return False
+    return (
+        "".join(words) == text
+        and len(slots) <= 4
+        and (not slots or state == "COMPLETED")
+        and (bool(slots) or bool(text.strip()))
+    )
+
+
 def check(schema: dict[str, object], value: object) -> None:
     if value is None:
         return
+    if schema.get("toolResult") and not _tool_result(value):
+        raise ValueError("Invalid typed tool result")
     if schema.get("portableGraph"):
         from ._interchange import check as interchange_check
 

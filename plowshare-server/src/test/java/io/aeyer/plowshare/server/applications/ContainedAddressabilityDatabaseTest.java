@@ -311,7 +311,7 @@ class ContainedAddressabilityDatabaseTest {
               projectName(project),
               principal));
     }
-    // Nor is it a general-read member, which is the gate V224 routed around rather than opened.
+    // Nor is it a general-read member, which is the gate V229 routed around rather than opened.
     assertFalse(
         jdbc.queryForObject("SELECT information_global_read_member(?)", Boolean.class, principal));
     // And it reads nothing of its container's, in the one direction the walk does not run.

@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -43,23 +42,25 @@ public sealed class Client : IAsyncDisposable
     private sealed class Admission : IDisposable
     {
         private readonly Client owner;
-        internal Admission(Client owner)
+        internal Admission(Client owner, SemaphoreSlim slots, TimeSpan timeout)
         {
             this.owner = owner;
+            this.slots = slots;
+            Timeout = timeout;
             ConnectionCancellation = owner.lifetime.Token;
         }
+        private readonly SemaphoreSlim slots;
+        internal TimeSpan Timeout { get; }
         private long bytes;
         private int released;
         private IDisposable? conversion;
         internal CancellationToken ConnectionCancellation { get; }
-        private readonly long started = Stopwatch.GetTimestamp();
-        internal TimeSpan Remaining => owner.timeout - Stopwatch.GetElapsedTime(started);
         internal async Task EnterConversionAsync(CancellationToken cancellationToken)
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, ConnectionCancellation);
-            var remaining = Remaining;
-            if (remaining <= TimeSpan.Zero) throw new TransportException(Delivery.NotSubmitted, "Request deadline expired before conversion");
-            deadline.CancelAfter(remaining);
+            // Conversion has its own bounded connection budget; the reply deadline starts
+            // only at transmission and never consumes time parked for admission.
+            deadline.CancelAfter(owner.timeout);
             try { conversion = await owner.converter.EnterAsync(deadline.Token); deadline.Token.ThrowIfCancellationRequested(); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             { throw new RequestCancelledException(Delivery.NotSubmitted, cancellationToken); }
@@ -86,6 +87,7 @@ public sealed class Client : IAsyncDisposable
                 owner.admitted--; owner.held -= bytes;
                 drained = owner.admitted == 0 ? owner.idle : null;
             }
+            slots.Release();
             drained?.TrySetResult();
         }
     }
@@ -97,7 +99,7 @@ public sealed class Client : IAsyncDisposable
     private readonly object gate = new();
     private readonly ConcurrentDictionary<string, Pending> pending = new();
     private int admitted;
-    private int maximum = 64;
+    private SemaphoreSlim admissionSlots = new(64, 64);
     private long held;
     // One shared completion per nonempty admission generation. Close stops new
     // admission before capturing it; continuations never execute under the gate.
@@ -152,7 +154,9 @@ public sealed class Client : IAsyncDisposable
                     !reply.Payload.TryGetProperty("maxPending", out var count) || count.ValueKind != JsonValueKind.Number || !count.TryGetInt32(out var maximum) || maximum < 1 || maximum > 64 ||
                     !reply.Payload.TryGetProperty("maxIdBytes", out var size) || size.ValueKind != JsonValueKind.Number || !size.TryGetInt32(out var idBytes) || idBytes != 128)
                     throw new TransportException(Delivery.NotSubmitted, "Server did not acknowledge concurrent dispatch; select ordered mode explicitly");
-                client.maximum = maximum;
+                // The negotiation lease belongs to the original semaphore; its disposal
+                // cannot release a slot into the newly negotiated window.
+                client.admissionSlots = new SemaphoreSlim(maximum, maximum);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             { await client.DisposeAsync(); throw new RequestCancelledException(Delivery.NotSubmitted, cancellationToken); }
@@ -165,16 +169,56 @@ public sealed class Client : IAsyncDisposable
     {
         lock (gate)
         {
-            if (closed || admitted >= maximum) throw new TransportException(Delivery.NotSubmitted, "Connection closed or request capacity exceeded");
+            if (closed || !admissionSlots.Wait(0)) throw new TransportException(Delivery.NotSubmitted, "Connection closed or request capacity exceeded");
             if (admitted == 0) idle = new(TaskCreationOptions.RunContinuationsAsynchronously);
             admitted++;
-            return new Admission(this);
+            return new Admission(this, admissionSlots, timeout);
         }
+    }
+
+    // Waiters own no conversion, wire bytes or dispatch slots. Semaphore admission keeps
+    // them behind existing async waiters; cancellation/close wakes them without submission.
+    private async Task<Admission> AdmitAsync(CancellationToken cancellationToken, bool wait, TimeSpan requestTimeout)
+    {
+        CancellationToken connection;
+        SemaphoreSlim slots;
+        lock (gate)
+        {
+            if (closed) throw new TransportException(Delivery.NotSubmitted, "Connection closed before admission");
+            connection = lifetime.Token;
+            slots = admissionSlots;
+        }
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection);
+        var acquired = false;
+        try
+        {
+            if (wait) { await slots.WaitAsync(stopping.Token); acquired = true; }
+            else acquired = slots.Wait(0);
+            if (!acquired) throw new TransportException(Delivery.NotSubmitted, "Request capacity exceeded");
+            lock (gate)
+            {
+                stopping.Token.ThrowIfCancellationRequested();
+                if (closed) throw new TransportException(Delivery.NotSubmitted, "Connection closed before admission");
+                if (admitted == 0) idle = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                admitted++;
+                var admission = new Admission(this, slots, requestTimeout);
+                acquired = false; // Ownership transfers to the existing admission/drain lease.
+                return admission;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        { throw new RequestCancelledException(Delivery.NotSubmitted, cancellationToken); }
+        catch (OperationCanceledException)
+        { throw new TransportException(Delivery.NotSubmitted, "Connection closed before admission"); }
+        finally { if (acquired) slots.Release(); }
     }
 
     internal async Task<Reply<TResponse>> RequestTypedAsync<TRequest, TResponse>(string operation, TRequest request, CancellationToken cancellationToken, RequestOptions? options = null)
     {
-        using var admission = Admit();
+        var requestTimeout = options?.Timeout ?? timeout;
+        if (requestTimeout <= TimeSpan.Zero || requestTimeout.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(options), "Choose a positive finite request timeout");
+        using var admission = await AdmitAsync(cancellationToken, options?.WaitForCapacity != false, requestTimeout);
         await admission.EnterConversionAsync(cancellationToken);
         // Validate before a write; count admission also bounds concurrent conversion/writer waiters.
         var body = Codec.Input(operation, request);
@@ -188,41 +232,61 @@ public sealed class Client : IAsyncDisposable
     private async Task<WireOutcome> RequestWireAsync(string operation, JsonElement body, CancellationToken cancellationToken, RequestOptions? options, Admission admission)
     {
         var id = Guid.NewGuid().ToString();
-        if (options is not null) ArgumentNullException.ThrowIfNull(options.ActingFor);
-        var wire = options is null
+        var acting = options?.ActingFor;
+        var wire = acting is null
             ? JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body })
-            : JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body, actingFor = new { context = options.ActingFor.Context.ToString() } });
+            : JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body, actingFor = new { context = acting.Context.ToString() } });
         if (wire.Length == 0 || wire.Length > (packets is null ? 1048576 : Packets.MaxMessage)) throw new TransportException(Delivery.NotSubmitted, "Encoded request exceeds negotiated allowance");
         admission.Charge(wire.Length);
         admission.ReleaseConversion();
         using var reservation = packets?.ReserveOutgoing(wire.Length);
-        var answer = new TaskCompletionSource<WireOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var waiting = new Pending(operation, answer);
+        var waiting = new Pending(operation, new(TaskCreationOptions.RunContinuationsAsynchronously));
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, admission.ConnectionCancellation);
-        var remaining = admission.Remaining;
-        if (remaining <= TimeSpan.Zero) throw new TransportException(Delivery.NotSubmitted, "Request deadline expired before writer admission");
-        deadline.CancelAfter(remaining);
+        // Keep writer admission bounded too. At the first possible write this becomes the
+        // caller's reply budget; verified capacity refusals never reset that deadline.
+        deadline.CancelAfter(timeout);
+        var started = false;
+        var backoff = 100;
+        void Submitted()
+        {
+            if (!started) { started = true; deadline.CancelAfter(admission.Timeout); }
+            waiting.Submitted = true;
+        }
         try
         {
-            lock (gate)
+            while (true)
             {
-                if (closed) throw new TransportException(Delivery.NotSubmitted, "Connection closed before writer admission");
-                if (!pending.TryAdd(id, waiting)) throw new TransportException(Delivery.NotSubmitted, "Request identity collision");
+                lock (gate)
+                {
+                    if (closed) throw new TransportException(Delivery.NotSubmitted, "Connection closed before writer admission");
+                    if (!pending.TryAdd(id, waiting)) throw new TransportException(Delivery.NotSubmitted, "Request identity collision");
+                }
+                await writer.WaitAsync(deadline.Token);
+                try
+                {
+                    if (closed) throw new TransportException(Delivery.NotSubmitted, "Connection closed before submission");
+                    deadline.Token.ThrowIfCancellationRequested();
+                    if (packets is not null) await packets.SendAsync(wire, deadline.Token, Submitted);
+                    else { Submitted(); await socket.SendAsync(wire.AsMemory(), WebSocketMessageType.Text, true, deadline.Token); }
+                }
+                finally { writer.Release(); }
+                var outcome = await waiting.Answer.Task.WaitAsync(deadline.Token);
+                if (outcome.Code != "CAPACITY_EXHAUSTED" || operation == "transport.dispatch" || options?.WaitForCapacity == false)
+                    return outcome;
+                // This exact refusal proves no work was admitted. Keep the slot, identity,
+                // encoded bytes and deadline while backing off so later callers cannot
+                // overtake it. No other refusal, cancellation or transport failure retries.
+                waiting.Submitted = false;
+                await Task.Delay(Random.Shared.Next(backoff / 2, backoff + 1), deadline.Token);
+                backoff = Math.Min(backoff * 2, 1000);
+                waiting = new Pending(operation, new(TaskCreationOptions.RunContinuationsAsynchronously));
             }
-            await writer.WaitAsync(deadline.Token);
-            try
-            {
-                if (closed) throw new TransportException(Delivery.NotSubmitted, "Connection closed before submission");
-                deadline.Token.ThrowIfCancellationRequested();
-                if (packets is not null) await packets.SendAsync(wire, deadline.Token, () => { waiting.Submitted = true; });
-                else { waiting.Submitted = true; await socket.SendAsync(wire.AsMemory(), WebSocketMessageType.Text, true, deadline.Token); }
-            }
-            finally { writer.Release(); }
-            return await answer.Task.WaitAsync(deadline.Token);
         }
         catch (TransportException) { throw; }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         { throw new RequestCancelledException(waiting.Submitted ? Delivery.Unknown : Delivery.NotSubmitted, cancellationToken); }
+        catch (OperationCanceledException) when (!admission.ConnectionCancellation.IsCancellationRequested)
+        { throw new TransportException(waiting.Submitted ? Delivery.Unknown : Delivery.NotSubmitted, "Request deadline expired; no request was replayed"); }
         catch { throw new TransportException(waiting.Submitted ? Delivery.Unknown : Delivery.NotSubmitted, "Request did not obtain a readable reply; no request was replayed"); }
         finally { pending.TryRemove(id, out _); }
     }
@@ -323,4 +387,14 @@ public sealed class Client : IAsyncDisposable
 
 /// <summary>Explicit selection on one request; never changes the socket's actor.</summary>
 public sealed record ActingSelection(Guid Context);
-public sealed record RequestOptions(ActingSelection ActingFor);
+/// <summary>Per-request acting selection, capacity policy and reply timeout.
+/// Waiting is the default. The explicit non-waiting form fails local admission
+/// immediately and returns server capacity refusals without resubmission.
+/// Timeout starts at first transmission, excludes local admission wait, and is
+/// not renewed by capacity refusals. Cancellation tokens also bound that wait.</summary>
+public sealed record RequestOptions(ActingSelection? ActingFor)
+{
+    public RequestOptions() : this(ActingFor: null) { }
+    public bool WaitForCapacity { get; init; } = true;
+    public TimeSpan? Timeout { get; init; }
+}

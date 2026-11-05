@@ -41,7 +41,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *
  * <h2>The defect this class is the regression test for</h2>
  *
- * <p>V224 admits a contained principal to its own knowledge home, and {@code
+ * <p>V229 admits a contained principal to its own knowledge home, and {@code
  * ContainedExecutionWriteDatabaseTest} proved a child's write works through the real Java path —
  * against {@code RecordedInformationEvents}, a fake that appends announcements to a list. Under
  * production wiring the same write failed. A contained scope has no Relay audience by ADR 0042's
@@ -240,7 +240,7 @@ class ContainedIntakeAnnouncementDatabaseTest {
             true));
   }
 
-  /** An ordinary caller's own project selection, with the global arm off as V224's arm requires. */
+  /** An ordinary caller's own project selection, with the global arm off as V229's arm requires. */
   private InformationContext ordinary() {
     return new InformationContext(
             HOLDER,

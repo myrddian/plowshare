@@ -77,13 +77,59 @@ Values here illustrate configuration, not commercial rates. An overlay replaces 
 
 `counting.url` is the full tokenization URL, including any proxy prefix. It must share the inference URL's scheme, host and port; redirects, embedded credentials and URL queries are refused. It is never derived by appending a path to `/v1`. No tokenizer request runs at boot or when reading saved usage/context reports.
 
-The adapter follows the [vLLM 0.15.1 tokenization protocol](https://docs.vllm.ai/en/v0.15.1/api/vllm/entrypoints/serve/tokenize/protocol/). It sends the same serialized messages, tools and configured `chat-template-kwargs` as generation, with the contract's generation-prompt flags. Images, explicit tool-choice constraints and `reasoning_effort` are currently unsupported full-template coverage and return `UNKNOWN`. A failed/unsupported count never blocks inference or becomes consumed usage. Existing cheap component estimates and compaction thresholds keep their existing behavior.
+The default adapter follows the [vLLM 0.15.1 tokenization protocol](https://docs.vllm.ai/en/v0.15.1/api/vllm/entrypoints/serve/tokenize/protocol/). It sends the same serialized messages, tools and configured `chat-template-kwargs` as generation, with the contract's generation-prompt flags. Images require explicit verified `image-tokens-included` support; explicit tool-choice constraints and `reasoning_effort` remain unsupported full-template coverage in this protocol and return `UNKNOWN`. Failed counts do not block ordinary text inference or become consumed usage. Typed image observations use a bounded local reservation when no verified complete count is available; see the [image-context policy](model-profiles.md#retained-image-context-policy). Existing cheap component estimates and compaction thresholds keep their existing behavior.
 
 Counting has a two-request concurrency bound per pool, an overall deadline, request/response size bounds and an ephemeral cache. Cache identity includes owner, conversation/project, exact model, full count input and configuration fingerprint. Configuration/template/auth changes invalidate it. TTL is at most 60s; a missing declared revision is exposed as an unverified template revision. Measured means the tokenization endpoint returned a count for the supported request shape; deterministic fixtures compare it with generation input usage. No deployed vLLM version/template has been verified in this implementation.
 
 Embedding counting is separately opt-in. The pinned protocol takes a scalar `prompt`; batches are counted as individual scalar requests within one overall deadline, then summed. Enable it only when the deployed pooling/tokenizer contract matches `embedding-special-tokens` (default true). It is not an inference batch or a booked attempt.
 
 `automatic: true` enables preflight for inference through that pool, including pinned streams. Its observation is saved separately on the call's terminal event. Consumed totals use provider attempt observations only.
+
+## Complete image counting for llama.cpp and compatible LM Studio deployments
+
+The existing counter also supports `counting.chat-protocol: llama_cpp_input_tokens`.
+Configure it within the existing vision-enabled HTTP pool:
+
+```yaml
+counting:
+  chat-protocol: llama_cpp_input_tokens
+  url: ${CHAT_INPUT_TOKENS_URL}
+  revision: ${MODEL_PROJECTOR_TEMPLATE_REVISION}
+  image-tokens-included: true
+  timeout: 2s
+  embeddings: false
+```
+
+The explicit same-origin URL must end in `/chat/completions/input_tokens`, with
+any deployment proxy prefix supplied in configuration. The count-only request
+uses the actual chat-completion body, preserving ordered history, native image
+parts, tools, tool choice, reasoning and template options. A valid response has
+`object: response.input_tokens` and a nonnegative integral `input_tokens` value;
+its count source is `LLAMA_CPP_CHAT_INPUT_TOKENS`. The endpoint never generates
+output. Missing, malformed, truncated, mismatched or unavailable counts stay
+`UNKNOWN`, without an alternate endpoint, text approximation or inference fallback.
+
+The protocol was checked against llama.cpp
+[`785322d17f2d51e5185cf996a1f4e46d87640841`](https://github.com/ggml-org/llama.cpp/blob/785322d17f2d51e5185cf996a1f4e46d87640841/tools/server/server-context.cpp#L6505-L6552),
+whose handler applies the chat template and counts media-aware prompt chunks.
+**LM Studio embedding llama.cpp does not establish that its HTTP API exposes this
+endpoint.** Verify the exact serving build, model, projector, template and image
+preprocessing settings; compare complete counts with actual full prompt context
+usage, including cached prompts. Pin that evidence in `revision` before enabling
+exact image accounting. A missing endpoint prevents exact counting, but does not
+block reservation-based image admission.
+
+Existing disk-loaded model profiles still declare formats; this adds no second
+model registry. The dispatcher still requires a known context length and explicit
+supported output reserve for typed observations, even when automatic preflight is
+disabled. LM Studio's socket prefill path remains text-only.
+
+Both protocols share the existing two-call concurrency bound, total deadline,
+owner-scoped ephemeral cache and credential/redirect fences. vLLM text and
+embedding request shapes and sources remain unchanged. The new protocol retains
+the 1 MiB text request bound, permits at most 32 MiB for native-image counter
+requests, and retains the 4 MiB response bound. Oversized prompts are refused,
+never truncated. Embedding counting cannot share this chat-count URL.
 
 ## WebSocket reads and subscriptions
 
@@ -114,6 +160,24 @@ Reports include tracking start even before the first inference, projection water
 Count refresh measures the next ordinary request projection. See [Context inspection](#context-inspection) for the difference between counting and inspecting content, empty-conversation behavior and service-account authorization.
 
 Subscribe supports aggregate reports without pagination cursors, with at most eight per physical socket. The initial correlated snapshot has revision 0. `usage.updated` envelopes have no `id`, increasing revisions, and complete replacement reports. Replace displayed quantities instead of adding them. Updates are checked at most once per second, stay quiet while unchanged, and revalidate access. Revocation produces `usage.closed` with a safe failure code. Disconnect/replacement removes subscriptions; reconnect requires fresh reads/subscriptions. The sender keeps only the latest pending snapshot per subscription, separately from correlated replies and token deltas. Unsubscribe is idempotent on the owning socket.
+
+## Processor-only LM Studio MLX counting
+
+The opt-in `lmstudio_mlx_input_tokens` protocol reuses the existing complete chat
+projection and bounded counter. A response must echo the exact configured model
+and SHA-256 `revision`; `cache-entries: 0` is required so every exchange validates
+the live model/template/processor binding. Existing text counting remains the
+default. Disk-loaded model profiles still own MIME eligibility.
+
+The [MLX counting companion](../extensions/mlx-counting/README.md) runs with the
+model host's installed packages and tokenizer/processor files without loading
+weights. It documents explicit configuration, supported prompt options, the
+same-origin deployment route and live acceptance command. **Keep
+`image-tokens-included: false` until its count agrees with actual full image
+context usage.** The inspected LM Studio HTTP usage omitted expanded image tokens;
+that discrepancy prevents claiming exact counting parity; it does not block
+reservation-based image delivery or justify correcting consumed usage. The sidecar
+is optional; see the [image-context policy](model-profiles.md#retained-image-context-policy).
 
 ## OpenAI and Azure v1 pools
 

@@ -506,7 +506,10 @@ read-only. Server authority and generation checks remain decisive.
 `relay.publish`, `relay.consume` and `relay.ack` expose configured project topics
 through the public SDK/WebSocket. They support arbitrary application text,
 including JSON owned by a consumer, without requiring a Plowshare lifecycle
-event. Egress can read any existing project topic family; ingress publishes TEXT.
+event. Egress can read any existing project topic family; WebSocket ingress publishes TEXT.
+Explicit authenticated [binary HTTP delivery](relay-blobs.md) adds fixed-family BLOB
+topics with descriptor-only consume/log reads and independent storage claims.
+Trajectory remains separate.
 System scope has no SDK port.
 
 Deployment configuration supplies `plowshare.relay.ports.bindings`: exact
@@ -890,7 +893,7 @@ avoid copying.
 A payload row is reclaimed only when no publication and no admission references it.
 `ejection_at` schedules an examination; it never authorizes deletion. Cleanup reads
 only digests, reference metadata and dates, without loading payload bytes.
-`V200` preserves V192's exact JSON/type/byte bounds in an INSERT/content-UPDATE
+`V228` preserves V192's exact JSON/type/byte bounds in an INSERT/content-UPDATE
 trigger. Metadata-only changes therefore avoid re-rendering and validating the
 whole retained JSONB value; NOT NULL, digest, byte-length and reference constraints
 remain in force. The migration changes no retained bytes or examination dates.

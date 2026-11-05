@@ -1277,7 +1277,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * addressable Relay topic nobody named. {@link InformationEventRecords#resolve} therefore raises
    * {@link InformationEventRecords.Unaddressable} for such a home, and {@link InformationEvents}
    * documents that exception as deliberately caught nowhere. Both facts are right, and together
-   * they make a contained principal's own knowledge write — which V224 admits — fail and roll back
+   * they make a contained principal's own knowledge write — which V229 admits — fail and roll back
    * unless this method tolerates the refusal. The regression test is composed with the real
    * publisher rather than a recording fake, because a fake satisfies the interface and answers the
    * question it was told to answer.
@@ -1308,7 +1308,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * reads the <em>resource's</em> {@code home_scope_id}. They agree because the home is derived
    * from the selection: {@code requireDestination} proves the selection may be written to, {@code
    * information_home} derives the resource's home scope from that same selected project, and for a
-   * contained selection V224's write arm additionally requires the resource's home to be {@code
+   * contained selection V229's write arm additionally requires the resource's home to be {@code
    * contained_own_home(actor, selected_project)} — the selected project's own scope and no other.
    * {@code ContainedIntakeAnnouncementDatabaseTest} asserts that identity directly, by checking the
    * admitted resource's home scope is the child's.
@@ -1344,7 +1344,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * <p><strong>Why a refusal and not the attribution axis.</strong> Nothing has decided that a
    * confined Application may link a document into another project, publish one, withdraw one, retry
    * or rebuild processing, set an allowance, cancel work, record evidence, finalise a report, or
-   * change a document's tags or tag groups. V224 admits a contained principal into {@code
+   * change a document's tags or tag groups. V229 admits a contained principal into {@code
    * lockResource} and the readability predicates for its own home, so it can genuinely arrive at
    * every one of them.
    *
@@ -1407,7 +1407,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * fault rather than the caller fault this raises — and no test covers it, because the tests drive
    * the repository directly. Command-reservation ordering is not this guard's to change.
    *
-   * <p>Keyed on {@code contained_knowledge_actor}, which is the same predicate V224's arms are
+   * <p>Keyed on {@code contained_knowledge_actor}, which is the same predicate V229's arms are
    * keyed on, so this cannot drift from the population it is about and is safe on a non-UUID actor.
    * Do not weaken this to a comparison of the two axes: attribution is a provenance decision and
    * this is an authority one.
@@ -1779,7 +1779,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     // The guard reads the actor off the context, so a mutator that takes none cannot be reached by
     // the enumeration the guard's javadoc describes -- which is why this one carries a context it
     // resolves no authority from. It is reached through InformationCatalogue.replaceTags ->
-    // requireWrite -> lockResource, which V224's WRITE arm admits for a contained actor's own
+    // requireWrite -> lockResource, which V229's WRITE arm admits for a contained actor's own
     // resource.
     requireUncontainedActor(context, "replace a document's tags");
     if (expectedVersion < 0 || expectedVersion > 9007199254740991L)

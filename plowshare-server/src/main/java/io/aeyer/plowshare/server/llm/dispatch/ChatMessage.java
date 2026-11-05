@@ -130,7 +130,9 @@ public record ChatMessage(
             .filter(part -> !(part instanceof Content.Text text && text.text().isEmpty()))
             .toList();
     String said = textOf(parts);
-    boolean picture = parts.stream().anyMatch(part -> part instanceof Content.Image);
+    boolean picture =
+        parts.stream()
+            .anyMatch(part -> part instanceof Content.Image || part instanceof Content.StoredImage);
     if (picture && role != Role.USER) {
       throw new IllegalArgumentException(
           "a "
@@ -241,7 +243,8 @@ public record ChatMessage(
    * array.
    */
   public boolean carriesAnImage() {
-    return parts.stream().anyMatch(part -> part instanceof Content.Image);
+    return parts.stream()
+        .anyMatch(part -> part instanceof Content.Image || part instanceof Content.StoredImage);
   }
 
   private static String textOf(List<Content> parts) {

@@ -518,7 +518,7 @@ class ContainedKnowledgeReadSchemaTest {
     assertTrue(revisionReadable(HOLDER, document));
     assertTrue(inBoundary(HOLDER, document, home));
     assertTrue(projectReadable(HOLDER, childScope));
-    // V224 admits the child to its own document; ContainedActorReadSchemaTest covers the direction
+    // V229 admits the child to its own document; ContainedActorReadSchemaTest covers the direction
     // and the general-arm closure.
     assertTrue(revisionReadable(childPrincipal, document));
     assertTrue(inBoundary(childPrincipal, document, home));

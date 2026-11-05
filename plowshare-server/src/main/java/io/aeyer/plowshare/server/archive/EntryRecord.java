@@ -88,7 +88,8 @@ public record EntryRecord(
     Instant recordedAt,
     Long tookMillis,
     Instant ejectedAt,
-    String export) {
+    String export,
+    io.aeyer.plowshare.server.agents.ToolObservation observation) {
 
   /**
    * Rejects the nulls that have no meaning, and copies the one list.
@@ -106,7 +107,41 @@ public record EntryRecord(
    * a row that lost its text with nothing saying when, and it is refused here as it is refused by
    * {@code entries_an_ejected_payload_is_gone}.
    */
+  /** Compatibility for retained text rows and projections that deliberately substitute text. */
+  public EntryRecord(
+      String conversationId,
+      int ordinal,
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Integer supersededBy,
+      UUID handle,
+      int turnOrdinal,
+      Instant recordedAt,
+      Long tookMillis,
+      Instant ejectedAt,
+      String export) {
+    this(
+        conversationId,
+        ordinal,
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        supersededBy,
+        handle,
+        turnOrdinal,
+        recordedAt,
+        tookMillis,
+        ejectedAt,
+        export,
+        null);
+  }
+
   public EntryRecord {
+    if (observation != null && (kind != EntryKind.TOOL_RESULT || ejectedAt != null))
+      throw new IllegalArgumentException("Only a retained tool result has image content");
     Objects.requireNonNull(conversationId, "conversationId");
     Objects.requireNonNull(kind, "kind");
     if ((content == null) != (ejectedAt != null)) {

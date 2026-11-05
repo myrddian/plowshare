@@ -1,4 +1,40 @@
+export {
+  TOOL_CONTENT_PROFILE,
+  decodeToolContent,
+  toolTextPart,
+  toolPngPart,
+  toolContentText,
+} from './tool-content.ts';
+export type {
+  ToolContentBody,
+  ToolContentPart,
+  ToolImageUse,
+} from './tool-content.ts';
+export type {
+  ToolInvocationRead,
+  ToolInvocationResult,
+} from './tool-results.ts';
 import type { RequestOptions } from '../binding/acting.ts';
+export {
+  decodeRelayBlobDescriptor,
+  MAX_RELAY_BLOB_BYTES,
+} from './relay-blobs.ts';
+export type {
+  RelayBlobDescriptor,
+  RelayBlobPublish,
+  RelayBlobPublished,
+  RelayBlobRead,
+} from './relay-blobs.ts';
+export {
+  imageAdmissionRequest,
+  decodeImageAdmissionReceipt,
+  IMAGE_ADMISSION_PROFILE,
+} from './image-admissions.ts';
+export type {
+  ImageAdmissionRequest,
+  ImageAdmissionReceipt,
+  ImageAdmissionStatus,
+} from './image-admissions.ts';
 export type {
   RequestOptions,
   ActingSelection,
@@ -111,6 +147,8 @@ export type {
 export { JobLifecycle } from '../jobs/lifecycle.ts';
 export {
   ToolProvider,
+  decodeToolResult,
+  decodeToolReceipt,
   toolDeploymentConfig,
   validateToolArguments,
   decodeToolCall,

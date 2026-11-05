@@ -8,6 +8,15 @@ public interface HostedInvocationAuthority {
 
   HostedInvocation pin(RelayToolRepository.Intent intent);
 
+  /**
+   * Current retained-generation authority for an artifact producer; joins the caller's short
+   * transaction.
+   */
+  default void authorizeArtifact(String actor, RelayToolRepository.Intent intent) {
+    throw new io.aeyer.plowshare.server.faults.CallerFault(
+        "Hosted artifact authority is unavailable");
+  }
+
   HostedInvocationAuthority NONE =
       new HostedInvocationAuthority() {
         public boolean permits(RelayToolDefinition t, String a) {

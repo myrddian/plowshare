@@ -164,7 +164,7 @@ SDK receipts are preserved. This does not cancel a server job or prove rollback.
 
 ## Client controls
 
-In desktop, select a project and open **Tool connections**. **This client** contains
+In desktop, select a project and open **Desktop tools** beside connection controls. **This client** contains
 private profile forms for HTTP or STDIO, owner/instance/project identity, environment
 references and configurable deadlines/admission budgets. Enter an absolute profile
 file in a dedicated private directory. **Save profile** writes a mode-0600 file
@@ -188,7 +188,9 @@ local-only availability from server sharing or unconfirmed sharing. Stop withdra
 sharing and closes the upstream connection/process. Sharing does not bypass server
 grants, relabel accounting or prove readiness of a future invocation.
 
-The **Server** tab uses the existing server owner capabilities for HTTP endpoint
+Administrators open **Server administration → Server tools**, then choose an execution
+project. Non-administrators use **My server tools** in Desktop tools for their own
+authorizations and assignments. Both use the existing server owner capabilities for HTTP endpoint
 forms, OAuth settings, masked credentials, authorized service subjects and assignments.
 These server credentials follow the authenticated account across clients. The web
 console's Projects **Server connections** panel exposes only those server operations.

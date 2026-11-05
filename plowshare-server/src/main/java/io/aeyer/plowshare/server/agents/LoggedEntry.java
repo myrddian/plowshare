@@ -56,10 +56,54 @@ public record LoggedEntry(
     Invocation invocation,
     Speaker speaker,
     String outcome,
-    Map<String, String> salients) {
+    Map<String, String> salients,
+    ToolObservation observation) {
+
+  /** Compatibility for text-only entries. */
+  public LoggedEntry(
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Long tookMillis,
+      Invocation invocation,
+      Speaker speaker,
+      String outcome,
+      Map<String, String> salients) {
+    this(
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        null);
+  }
+
+  /**
+   * Attach provider provenance before appending; acquisition of entry claims is atomic with append.
+   */
+  public LoggedEntry observing(ToolObservation observation) {
+    return new LoggedEntry(
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation);
+  }
 
   public LoggedEntry {
     Objects.requireNonNull(kind, "kind");
+    if (observation != null && kind != EntryKind.TOOL_RESULT)
+      throw new IllegalArgumentException("Only a tool result can retain images");
     Objects.requireNonNull(content, "content");
     toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
     if (tookMillis != null && tookMillis < 0) {
@@ -182,7 +226,8 @@ public record LoggedEntry(
         invocation,
         speaker,
         outcome,
-        salients);
+        salients,
+        observation);
   }
 
   /**
@@ -193,7 +238,16 @@ public record LoggedEntry(
   public LoggedEntry by(Invocation call) {
     Objects.requireNonNull(call, "call");
     return new LoggedEntry(
-        kind, content, toolCallId, toolCalls, tookMillis, call, speaker, outcome, salients);
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        call,
+        speaker,
+        outcome,
+        salients,
+        observation);
   }
 
   /**
@@ -202,7 +256,16 @@ public record LoggedEntry(
    */
   public LoggedEntry told(String outcome) {
     return new LoggedEntry(
-        kind, content, toolCallId, toolCalls, tookMillis, invocation, speaker, outcome, salients);
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation);
   }
 
   /**
@@ -211,7 +274,16 @@ public record LoggedEntry(
    */
   public LoggedEntry naming(Map<String, String> salients) {
     return new LoggedEntry(
-        kind, content, toolCallId, toolCalls, tookMillis, invocation, speaker, outcome, salients);
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation);
   }
 
   /**

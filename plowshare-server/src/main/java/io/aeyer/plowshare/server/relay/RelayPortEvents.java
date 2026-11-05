@@ -71,7 +71,8 @@ final class RelayPortEvents {
                 : null,
             payload instanceof RelayPayload.WakeRequested w
                 ? new RelayLog.Wake(w.firing(), w.target(), w.type().name())
-                : null),
+                : null,
+            payload instanceof RelayPayload.Blob binary ? binary.blob() : null),
         draft.causation());
   }
 }

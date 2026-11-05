@@ -420,6 +420,31 @@ export function constrain(graph) {
   field(actingOpened,'subject',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'});
   field(actingOpened,'expiresAt',instant);
   for (const shape of Object.values(graph.$defs)) {
+    if (shape.title === 'ToolInvocationResult') {
+      shape.toolResult = true; field(shape,'id',canonicalUuid); field(shape,'text',text(16384));
+    }
+    if (shape.title === 'RelayBlobDescriptor') {
+      field(shape,'sha256',{pattern:'^[0-9a-f]{64}$'});
+      field(shape,'byteLength',integer(1,50*1024*1024));
+      field(shape,'mediaType',{maxLength:255,pattern:'^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$'});
+    }
+    if(shape.properties?.kind && shape.properties?.text && shape.properties?.schedule && shape.properties?.blob) {
+      rules(shape,{eq:[eq('kind','BLOB'),present('blob')]});
+      rules(shape,implies(eq('kind','BLOB'),absent('text')));
+    }
+    if (shape.title === 'ImageAdmissionRequest') {
+      field(shape, 'invocation', canonicalUuid); field(shape, 'requestId', canonicalUuid);
+      field(shape, 'ordinal', integer(0, 15));
+    }
+    if (shape.title === 'ImageAdmissionReceipt') {
+      const subject = {maxLength:128,pattern:'^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}|@service/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$'};
+      field(shape, 'project', identity); field(shape, 'owner', subject);
+      field(shape, 'producer', subject);
+      field(shape, 'imageId', {pattern:'^img_[0-9a-f]{32}$'});
+      field(shape, 'sha256', {pattern:'^[0-9a-f]{64}$'});
+      field(shape, 'width', integer(1,32768)); field(shape, 'height', integer(1,32768));
+      field(shape, 'byteLength', integer(1,2147483647)); field(shape, 'admittedAt', instant);
+    }
     const title = shape.title ?? '';
     if(title.startsWith('Proc')) {
       for(const key of ['total','completed','pending','running','blocked','failed','skipped','children','calls','attempts','activeCalls','repeatedCalls','causationDepth','queued','capacity'])field(shape,key,integer(0,9007199254740991));
@@ -647,7 +672,7 @@ export function constrain(graph) {
         pattern: '^[^/\\\\]+$',
         disallow: ['.', '..'],
       });
-    if (p.mediaType)
+    if (p.mediaType && s.title !== 'RelayBlobDescriptor')
       field(s, 'mediaType', {
         maxLength: 256,
         pattern: '^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$',
@@ -797,6 +822,8 @@ export function constrain(graph) {
     }
 
   }
+  const toolRead=resolve(graph,graph.inputs['tool.invocation.read']);
+  field(toolRead,'project',{...identity,maxLength:256}); field(toolRead,'invocation',canonicalUuid);
   annotatePush(push);
   return graph;
 }

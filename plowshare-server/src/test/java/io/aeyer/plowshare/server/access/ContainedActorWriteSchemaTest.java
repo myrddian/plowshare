@@ -22,7 +22,7 @@ import org.testcontainers.junit.jupiter.*;
  * information_lock_destination} (V163, over V157:182) found no PROJECT/PERSONAL scope and required
  * an {@code admins} row, so a child could not even land a new document. Behind it {@code
  * information_home_allows} (V163, over V157:124) required {@code account_active} and a project
- * role, so a child could not write an existing one. Each was widened in turn by one arm in V224's
+ * role, so a child could not write an existing one. Each was widened in turn by one arm in V229's
  * write section, keyed on {@code contained_knowledge_actor} and the principal's own scope. {@code
  * information_set_root_audience} is deliberately not widened: SET_AUDIENCE stays refused, which is
  * what keeps a child from publishing generally readable.

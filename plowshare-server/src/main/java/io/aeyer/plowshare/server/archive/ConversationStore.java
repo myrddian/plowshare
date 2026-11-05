@@ -334,13 +334,13 @@ public final class ConversationStore {
    *
    * <h2>Reachable, and what must not be simplified to keep it so</h2>
    *
-   * <p>Two shipped constraints stood in front of this door and V225 settled both. {@code
+   * <p>Two shipped constraints stood in front of this door and V230 settled both. {@code
    * operation_parent_valid} required a child admission to carry its parent's scope and project
    * name, which a containment hop changes by design, so {@code contain} could not record its
-   * lineage at all; V225's first section replaced that conjunct with the containment edge itself.
+   * lineage at all; V230's first section replaced that conjunct with the containment edge itself.
    * {@code operation_conversation_valid} requires the conversation row's {@code agent} to equal its
    * bound envelope's, and {@code conversations_a_person_s_conversation_names_no_agent} forbids an
-   * agent on an {@code origin='turn'} row; V225's second section added {@code Origin.CONTAINED},
+   * agent on an {@code origin='turn'} row; V230's second section added {@code Origin.CONTAINED},
    * which is what this door writes. {@code ContainedConversationDoorDatabaseTest} opens a
    * conversation through here on a real hop and asserts the envelope.
    *

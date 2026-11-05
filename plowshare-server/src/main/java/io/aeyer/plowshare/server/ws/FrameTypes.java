@@ -783,6 +783,8 @@ public final class FrameTypes {
   public static final String RELAY_OPERATE = "relay.operate";
   public static final String RELAY_PROCESS = "relay.process";
   public static final String RELAY_LOG = "relay.log";
+  public static final String TOOL_INVOCATION_READ = "tool.invocation.read";
+  public static final String ARTIFACT_ADMISSION_STATUS = "artifact.admission.status";
   public static final String TOOL_SCOPE_CONNECT = "tool.scope.connect";
   public static final String TOOL_SCOPE_LIST = "tool.scope.list";
   public static final String TOOL_SCOPE_DISCONNECT = "tool.scope.disconnect";

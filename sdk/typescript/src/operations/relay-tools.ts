@@ -1,4 +1,13 @@
 import {
+  decodeToolContent,
+  toolTextPart,
+  toolContentText,
+  TOOL_CONTENT_PROFILE,
+} from './tool-content.ts';
+import type { ToolContentBody } from './tool-content.ts';
+import { decodeImageAdmissionReceipt } from './image-admissions.ts';
+import type { ImageAdmissionReceipt } from './image-admissions.ts';
+import {
   hostedRegistrationCheck,
   type HostedToolRegistration,
   type HostedToolWorker,
@@ -37,10 +46,12 @@ export interface ToolDeclaration {
   readonly parameters: readonly ToolParameter[];
   readonly timeoutSeconds: number;
   readonly inputSchema?: SchemaDefinition;
+  readonly resultProfile?: 'content/1';
 }
 export interface ToolCall {
   readonly schema?: string;
   readonly schemaFingerprint?: string;
+  readonly resultProfile?: 'content/1';
   readonly invocationId: string;
   readonly project: string;
   readonly provider: string;
@@ -54,6 +65,9 @@ export interface ToolCall {
 export interface ToolResult {
   readonly state: ToolState;
   readonly text: string;
+  readonly content?: ToolContentBody;
+  /** Local journal evidence; admission receipts are not copied into the wire envelope. */
+  readonly admissions?: readonly ImageAdmissionReceipt[];
 }
 export interface RegisteredTool {
   readonly declaration: ToolDeclaration;
@@ -149,6 +163,11 @@ function declaration(value: ToolDeclaration): void {
       value.parameters.length
   )
     throw new Error('Invalid tool declaration');
+  if (
+    value.resultProfile !== undefined &&
+    value.resultProfile !== TOOL_CONTENT_PROFILE
+  )
+    throw new Error('Unsupported tool result profile');
   if (value.inputSchema !== undefined) {
     if (value.parameters.length)
       throw new Error('Use parameters or inputSchema');
@@ -311,11 +330,21 @@ export function decodeToolCall(source: string): ToolCall {
     'deadline',
     'arguments',
   ];
-  if (row['schema'] === 'plowshare-tool/2') keys.push('schemaFingerprint');
+  if (
+    row['schema'] === 'plowshare-tool/2' ||
+    (row['schema'] === 'plowshare-tool/3' &&
+      row['schemaFingerprint'] !== undefined)
+  )
+    keys.push('schemaFingerprint');
+  if (row['schema'] === 'plowshare-tool/3') keys.push('resultProfile');
   if (
     Object.keys(row).length !== keys.length ||
     keys.some((key) => !(key in row)) ||
-    (row['schema'] !== VERSION && row['schema'] !== 'plowshare-tool/2')
+    (row['schema'] !== VERSION &&
+      row['schema'] !== 'plowshare-tool/2' &&
+      row['schema'] !== 'plowshare-tool/3') ||
+    (row['schema'] === 'plowshare-tool/3' &&
+      row['resultProfile'] !== TOOL_CONTENT_PROFILE)
   )
     throw new Error('Invalid tool envelope');
   const read = (key: string): string => {
@@ -344,8 +373,10 @@ export function decodeToolCall(source: string): ToolCall {
     )
       throw new Error('Invalid v1 tool arguments');
   } else if (
-    typeof row['schemaFingerprint'] !== 'string' ||
-    !/^[0-9a-f]{64}$/.test(row['schemaFingerprint'])
+    (row['schema'] === 'plowshare-tool/2' ||
+      row['schemaFingerprint'] !== undefined) &&
+    (typeof row['schemaFingerprint'] !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(row['schemaFingerprint']))
   )
     throw new Error('Invalid tool schema fingerprint');
   const provider = read('provider');
@@ -362,6 +393,9 @@ export function decodeToolCall(source: string): ToolCall {
   instant(deadline);
   return Object.freeze({
     schema: read('schema'),
+    ...(row['resultProfile'] === TOOL_CONTENT_PROFILE
+      ? { resultProfile: TOOL_CONTENT_PROFILE }
+      : {}),
     ...(typeof row['schemaFingerprint'] === 'string'
       ? { schemaFingerprint: row['schemaFingerprint'] }
       : {}),
@@ -376,21 +410,159 @@ export function decodeToolCall(source: string): ToolCall {
     arguments: values,
   });
 }
-function resultText(call: ToolCall, result: ToolResult | null): string {
+/** Decode caller-owned journal/result data before it can drive publication. */
+export function decodeToolResult(
+  value: unknown,
+  call: ToolCall,
+  producer?: string,
+): ToolResult {
+  const row = fieldsOf(value);
   if (
-    result === null ||
-    !['COMPLETED', 'REJECTED', 'UNKNOWN'].includes(result.state)
+    Object.keys(row).some(
+      (k) => !['state', 'text', 'content', 'admissions'].includes(k),
+    )
   )
-    throw new Error('Missing tool result');
-  text(result.text, 16384, true);
+    throw new Error('Unknown tool result field');
+  const state = row['state'],
+    words = row['text'];
+  if (
+    (state !== 'COMPLETED' && state !== 'REJECTED' && state !== 'UNKNOWN') ||
+    typeof words !== 'string'
+  )
+    throw new Error('Invalid tool result');
+  text(words, 16384, call.resultProfile === undefined);
+  if (call.resultProfile === undefined) {
+    if (row['content'] !== undefined || row['admissions'] !== undefined)
+      throw new Error('Content results were not negotiated');
+    return Object.freeze({ state, text: words });
+  }
+  const content = decodeToolContent(
+    row['content'] === undefined
+      ? {
+          version: TOOL_CONTENT_PROFILE,
+          parts: [toolTextPart(words)],
+        }
+      : row['content'],
+  );
+  if (toolContentText(content) !== words)
+    throw new Error('Content text projection differs');
+  const images = content.parts.filter((p) => p.kind === 'IMAGE');
+  if (state !== 'COMPLETED' && images.length)
+    throw new Error('Only completed results carry images');
+  const source = row['admissions'];
+  if (source !== undefined && (!Array.isArray(source) || source.length > 4))
+    throw new Error('Invalid result admission receipts');
+  const values: readonly unknown[] = Array.isArray(source) ? source : [];
+  const admissions = values.map((value) => {
+    const receipt = decodeImageAdmissionReceipt(value);
+    return Object.freeze({
+      ...receipt,
+      request: Object.freeze({ ...receipt.request }),
+    });
+  });
+  if (
+    admissions.length !== images.length ||
+    new Set(admissions.map((a) => a.request.ordinal)).size !==
+      admissions.length ||
+    images.some(
+      (p) =>
+        !admissions.some(
+          (a) =>
+            a.imageId === p.imageId &&
+            a.request.ordinal === p.ordinal &&
+            a.request.invocation === call.invocationId &&
+            a.project === call.project &&
+            a.owner === call.account &&
+            (producer === undefined || a.producer === producer),
+        ),
+    )
+  )
+    throw new Error(
+      'Result image has no matching invocation admission receipt',
+    );
+  return Object.freeze({
+    state,
+    text: words,
+    content,
+    ...(admissions.length ? { admissions: Object.freeze(admissions) } : {}),
+  });
+}
+export function decodeToolReceipt(value: unknown): ToolReceipt {
+  const row = fieldsOf(value);
+  if (
+    Object.keys(row).some(
+      (k) =>
+        ![
+          'invocationId',
+          'request',
+          'phase',
+          'result',
+          'occurredAt',
+          'hostedWorker',
+        ].includes(k),
+    ) ||
+    typeof row['request'] !== 'string'
+  )
+    throw new Error('Invalid tool receipt');
+  const call = decodeToolCall(row['request']),
+    phase = row['phase'],
+    at = row['occurredAt'];
+  if (
+    row['invocationId'] !== call.invocationId ||
+    (phase !== 'executing' &&
+      phase !== 'ready' &&
+      phase !== 'publishing' &&
+      phase !== 'done') ||
+    (phase === 'executing') !== (row['result'] === null) ||
+    (phase === 'publishing' || phase === 'done') !== (at !== null) ||
+    (at !== null && typeof at !== 'string')
+  )
+    throw new Error('Invalid tool receipt lifecycle');
+  if (typeof at === 'string') instant(at);
+  const worker =
+    row['hostedWorker'] === undefined
+      ? undefined
+      : fieldsOf(row['hostedWorker']);
+  const binding = worker?.['binding'],
+    registration = worker?.['registration'];
+  if (
+    worker !== undefined &&
+    (typeof binding !== 'string' || typeof registration !== 'string')
+  )
+    throw new Error('Invalid hosted worker');
+  return Object.freeze({
+    invocationId: call.invocationId,
+    request: row['request'],
+    phase,
+    occurredAt: at,
+    result:
+      row['result'] === null ? null : decodeToolResult(row['result'], call),
+    ...(typeof binding === 'string' && typeof registration === 'string'
+      ? {
+          hostedWorker: Object.freeze({
+            binding: uuid(binding),
+            registration: uuid(registration),
+          }),
+        }
+      : {}),
+  });
+}
+function resultText(
+  call: ToolCall,
+  result: ToolResult | null,
+  producer?: string,
+): string {
+  const checked = decodeToolResult(result, call, producer);
   const encoded = JSON.stringify({
-    schema: VERSION,
+    schema: call.resultProfile === undefined ? VERSION : 'plowshare-tool/3',
     invocationId: call.invocationId,
     project: call.project,
     provider: call.provider,
     tool: call.tool,
-    state: result.state,
-    text: result.text,
+    state: checked.state,
+    ...(checked.content === undefined
+      ? { text: checked.text }
+      : { content: checked.content }),
   });
   text(encoded, 32768, true);
   return encoded;
@@ -469,6 +641,13 @@ export class ToolProvider {
         registration.binding.route.account !== binding.account)
     )
       throw new Error('Foreign hosted provider registration');
+    if (
+      registration !== undefined &&
+      tools.some((t) => t.declaration.resultProfile !== undefined)
+    )
+      throw new Error(
+        'Hosted content results are not supported by this worker protocol',
+      );
     const config = toolDeploymentConfig(
       binding,
       tools.map((t) => t.declaration),
@@ -530,16 +709,23 @@ export class ToolProvider {
     tool: ToolDeclaration,
     call: ToolCall,
   ): Promise<void> {
-    if (tool.inputSchema === undefined) {
-      if (call.schema !== VERSION)
-        throw new Error('Offered tool schema changed');
-    } else if (
-      call.schema !== 'plowshare-tool/2' ||
-      !(await matchesToolSchemaFingerprint(
-        tool.inputSchema,
-        call.schemaFingerprint,
-        (text) => this.host.sha256(text),
-      ))
+    if (tool.resultProfile !== call.resultProfile)
+      throw new Error('Offered tool result profile changed');
+    const expected =
+      tool.resultProfile === undefined
+        ? tool.inputSchema === undefined
+          ? VERSION
+          : 'plowshare-tool/2'
+        : 'plowshare-tool/3';
+    if (
+      call.schema !== expected ||
+      (tool.inputSchema === undefined
+        ? call.schemaFingerprint !== undefined
+        : !(await matchesToolSchemaFingerprint(
+            tool.inputSchema,
+            call.schemaFingerprint,
+            (text) => this.host.sha256(text),
+          )))
     )
       throw new Error('Offered tool schema changed');
     validateToolArguments(tool, call.arguments);
@@ -566,9 +752,11 @@ export class ToolProvider {
     if (tools.length > 128)
       throw new Error('Tool catalogue exceeds 128 declarations');
     const encoded = JSON.stringify({
-      version: tools.some((tool) => tool.inputSchema !== undefined)
-        ? 'plowshare-tool-catalog/2'
-        : 'plowshare-tool-catalog/1',
+      version: tools.some((tool) => tool.resultProfile !== undefined)
+        ? 'plowshare-tool-catalog/3'
+        : tools.some((tool) => tool.inputSchema !== undefined)
+          ? 'plowshare-tool-catalog/2'
+          : 'plowshare-tool-catalog/1',
       tools,
     });
     // The complete catalogue may span transport chunks; Relay owns the payload ceiling.
@@ -700,7 +888,8 @@ export class ToolProvider {
                   ),
                 ),
               );
-              resultText(call, result);
+              result = decodeToolResult(result, call, this.binding.account);
+              resultText(call, result, this.binding.account);
             } catch {
               result = {
                 state: 'UNKNOWN',
@@ -708,6 +897,7 @@ export class ToolProvider {
               };
             }
           }
+          result = decodeToolResult(result, call, this.binding.account);
           receipt = { ...receipt, phase: 'ready', result };
           await this.journal.save(receipt);
         }
@@ -766,7 +956,8 @@ export class ToolProvider {
             if (
               event.publisher !== this.publisher ||
               event.payload.kind !== 'TEXT' ||
-              event.payload.text !== resultText(call, receipt.result) ||
+              event.payload.text !==
+                resultText(call, receipt.result, this.binding.account) ||
               event.correlationId !== call.invocationId ||
               event.causationId !== call.invocationId ||
               receipt.occurredAt === null ||
@@ -794,7 +985,7 @@ export class ToolProvider {
     }
   }
   private async receipts(): Promise<readonly ToolReceipt[]> {
-    const rows = await this.journal.all();
+    const rows = (await this.journal.all()).map(decodeToolReceipt);
     if (
       rows.length > 1000 ||
       new Set(rows.map((r) => r.invocationId)).size !== rows.length
@@ -827,14 +1018,15 @@ export class ToolProvider {
           (receipt.occurredAt !== null)
       )
         throw new Error('Invalid tool receipt phase');
-      if (receipt.result !== null) resultText(call, receipt.result);
+      if (receipt.result !== null)
+        resultText(call, receipt.result, this.binding.account);
       if (receipt.occurredAt !== null) instant(receipt.occurredAt);
     }
     return rows;
   }
   private async publish(receipt: ToolReceipt): Promise<void> {
     const call = decodeToolCall(receipt.request);
-    const encoded = resultText(call, receipt.result);
+    const encoded = resultText(call, receipt.result, this.binding.account);
     const occurredAt = this.host.now().toISOString();
     const id = await toolResultRequestId(this.host, call.invocationId);
     const intent = { ...receipt, phase: 'publishing' as const, occurredAt };

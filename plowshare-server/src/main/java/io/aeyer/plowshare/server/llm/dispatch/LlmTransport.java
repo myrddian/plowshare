@@ -28,6 +28,11 @@ import java.util.function.DoubleConsumer;
 public interface LlmTransport
     extends AutoCloseable, io.aeyer.plowshare.server.llm.counting.PromptCounter {
 
+  /** Native serializer/decoder support, without I/O; model profiles constrain it separately. */
+  default io.aeyer.plowshare.server.llm.ModelMediaCapabilities mediaCapabilities(String wireModel) {
+    return io.aeyer.plowshare.server.llm.ModelMediaCapabilities.TEXT_ONLY;
+  }
+
   /**
    * The pool this transport belongs to, for messages. Never a URL and never a key: an auth failure
    * names which pool refused, not what was offered.

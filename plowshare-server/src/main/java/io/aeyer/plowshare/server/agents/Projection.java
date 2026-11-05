@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.agents;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.archive.EntryRecord;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
+import io.aeyer.plowshare.server.llm.dispatch.Content;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -144,6 +145,31 @@ public final class Projection {
           + " tool's answer.";
 
   private Projection() {}
+
+  /** Derived native observation after all tool replies in a batch; never another execution. */
+  public static ChatMessage images(List<Content.StoredImage> images) {
+    List<Content> parts = new ArrayList<>();
+    parts.add(
+        new Content.Text(
+            "Tool image observations: "
+                + images.stream()
+                    .map(image -> image.uid() + " from entry " + image.entry())
+                    .collect(java.util.stream.Collectors.joining(", "))));
+    parts.addAll(images);
+    return new ChatMessage(ChatMessage.Role.USER, parts, List.of(), null);
+  }
+
+  /** Only the effective post-hook observation reaches a model; output references remain text. */
+  public static List<Content.StoredImage> images(EntryRecord entry) {
+    if (entry.observation() == null || entry.observation().effective() == null) return List.of();
+    return entry.observation().effective().images().stream()
+        .filter(image -> image.use() != io.aeyer.plowshare.protocol.ToolContent.Use.OUTPUT)
+        .map(
+            image ->
+                new Content.StoredImage(
+                    entry.conversationId(), entry.ordinal(), image.ordinal(), image.imageId()))
+        .toList();
+  }
 
   /**
    * Whose decision it is that a superseded row is not shown.
@@ -293,6 +319,7 @@ public final class Projection {
         shown.add(entry);
       }
     }
+    List<Content.StoredImage> pictures = new ArrayList<>();
     for (EntryRecord entry : inTurnSummariesInPlace(shown)) {
       // Before the message and not after it: a result belongs immediately
       // after the assistant turn that asked for it, so anything that is
@@ -300,7 +327,12 @@ public final class Projection {
       // reopens one is another answer, below.
       if (entry.kind() != EntryKind.TOOL_RESULT) {
         pairTheUnanswered(messages, unanswered);
+        if (!pictures.isEmpty()) {
+          messages.add(images(pictures));
+          pictures.clear();
+        }
       }
+      pictures.addAll(images(entry));
       messages.add(messageFor(entry, unanswered, foldedThrough, canList));
       if (entry.kind() == EntryKind.SUMMARY) {
         // A summary carries the last turn it stands for as its own turn
@@ -316,6 +348,7 @@ public final class Projection {
     // A log that ends inside a batch, which is exactly the run that died in
     // one.
     pairTheUnanswered(messages, unanswered);
+    if (!pictures.isEmpty()) messages.add(images(pictures));
     return messages;
   }
 

@@ -40,16 +40,29 @@ await using (var capacity = await Client.ConnectAsync(origin, "sdk-fixture-token
         var hint = await capacity.Pushes.ReadAsync();
         Check(hint.Notification.Variant3.IsSet && hint.Notification.Variant3.Value.Unread == count, "capacity arrival hint missing");
     }
-    try { await capacity.ProjectListAsync(new ProjectListRequest()); throw new Exception("65th request was submitted"); }
+    try { await capacity.ProjectListAsync(new ProjectListRequest(), options: new RequestOptions { WaitForCapacity = false }); throw new Exception("65th request was submitted"); }
     catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "capacity refusal was not local"); }
+    var parked = capacity.ProjectListAsync(new ProjectListRequest());
+    await Task.Yield();
+    Check(!parked.IsCompleted, "the default 65th request must park, not fail fast");
+    using var queuedCancellation = new CancellationTokenSource();
+    var cancelled = capacity.ProjectListAsync(new ProjectListRequest(), queuedCancellation.Token);
+    queuedCancellation.Cancel();
+    try { await cancelled; throw new Exception("cancelled parked request succeeded"); }
+    catch (RequestCancelledException e) { Check(e.Delivery == Delivery.NotSubmitted && e.CancellationToken == queuedCancellation.Token, "queued cancellation lost delivery"); }
     await Task.WhenAll(capacity.DisposeAsync().AsTask(), capacity.DisposeAsync().AsTask());
+    try { await parked; throw new Exception("closed parked request succeeded"); }
+    catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "a parked request was never submitted"); }
     foreach (var call in calls)
     {
         try { await call; throw new Exception("closed pending request succeeded"); }
         catch (TransportException e) { Check(e.Delivery == Delivery.Unknown, "submitted close lost uncertainty"); }
     }
 }
-var tests = fixture.RootElement.GetProperty("cases").EnumerateArray().Select(t => (Name: t.GetProperty("name").GetString()!, Delivery: t.TryGetProperty("delivery", out var d) ? d.GetString() : null)).ToList();
+// Capacity cases require negotiated windows and multiple requests; they are driven
+// explicitly below rather than mistaken for ordinary successful one-shot replies.
+var tests = fixture.RootElement.GetProperty("cases").EnumerateArray()
+    .Where(t => !t.TryGetProperty("capacity", out var capacityCase) || !capacityCase.GetBoolean()).Select(t => (Name: t.GetProperty("name").GetString()!, Delivery: t.TryGetProperty("delivery", out var d) ? d.GetString() : null)).ToList();
 tests.Add(("malformed-nested", "INVALID_RESPONSE")); tests.Add(("missing-payload", "INVALID_RESPONSE")); tests.Add(("bad-packet", "UNKNOWN"));
 foreach (var test in tests)
 {
@@ -85,6 +98,11 @@ foreach (var test in tests)
 await using (var client = await Open("invalid-input"))
 {
     try { await client.JobStatusAsync(new JobStatusRequest { Job = "\0bad" }); throw new Exception("invalid identifier submitted"); } catch (JsonException) { }
+    foreach (var timeout in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(-1), TimeSpan.FromMilliseconds((double)int.MaxValue + 1) })
+    {
+        try { await client.ProjectListAsync(new ProjectListRequest(), options: new RequestOptions { Timeout = timeout }); throw new Exception("invalid timeout submitted"); }
+        catch (ArgumentOutOfRangeException) { }
+    }
 }
 await using (var client = await Open("cancel"))
 {
@@ -113,4 +131,5 @@ await using (var client = await Client.ConnectAsync(origin, "sdk-fixture-token",
     var batch=(await client.RelayConsumeAsync(new RelayConsumeRequest{Project="fixture",Topic="large.events",Group="fixture",ConsumerId=id,Start="OLDEST_RETAINED"})).RequirePayload();
     Check(batch.Events.Count==1&&batch.Events[0].Payload.Text.Variant2.Value==text,"large typed reply lost bytes");
 }
+await BackpressureChecks.RunAsync(origin, fixture.RootElement.GetProperty("cases"));
 Console.WriteLine(".NET typed SDK conformance passed");

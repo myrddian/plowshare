@@ -17,6 +17,13 @@ public interface RelayToolRepository {
 
   java.util.Optional<Stored> find(long projectId, String account, UUID id);
 
+  /**
+   * Internal admission lookup only. A returned invocation grants no producer/disclosure authority.
+   */
+  default java.util.Optional<Stored> find(UUID id) {
+    throw new IllegalStateException("Invocation admission lookup is unavailable");
+  }
+
   default java.util.Optional<Stored> find(long projectId, String account, UUID id, boolean lock) {
     if (lock) throw new IllegalStateException("Invocation locking is unavailable");
     return find(projectId, account, id);

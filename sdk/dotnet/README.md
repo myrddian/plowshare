@@ -23,8 +23,15 @@ before submission. `ACCEPTED` is not completion.
 Bearer credentials use upgrade headers; redirects, HTTP application fallback
 and implicit reconnect are absent from the WS client. Requests are bounded
 to 64 outstanding and a 30-second default deadline. Transport failures expose
-`Delivery`. Caller cancellation raises `RequestCancelledException`, retaining both
-the cancellation token and delivery uncertainty. No mutation is automatically replayed.
+`Delivery`. The default waits for the negotiated dispatch window; only a verified
+`CAPACITY_EXHAUSTED` response is resubmitted, with the same ID, bytes and deadline
+on paced backoff. `new RequestOptions { WaitForCapacity = false }` preserves the
+explicit fail-fast form: local saturation is `NotSubmitted`, and a server refusal
+is returned without resubmission. `RequestOptions.Timeout` overrides the reply
+budget, starting at first transmission rather than while waiting for a slot.
+Cancellation tokens also bound local admission waits. Caller cancellation raises
+`RequestCancelledException`, retaining both the cancellation token and delivery
+uncertainty. No mutation is automatically replayed.
 
 `Pushes` is a bounded 256-entry `ChannelReader<ServerPush>` for bare/enveloped
 notifications; `DroppedPushes` counts overflow. Reconcile through durable WS reads.

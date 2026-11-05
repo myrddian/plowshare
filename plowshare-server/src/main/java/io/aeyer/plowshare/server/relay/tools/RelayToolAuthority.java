@@ -5,6 +5,11 @@ import io.aeyer.plowshare.server.relay.RelayPortProperties;
 
 /** Live project authority used immediately before an external Relay operation. */
 public interface RelayToolAuthority {
+  /** Exact current tool contract, rather than generic access to a matching Relay topic. */
+  default boolean permitsArtifact(RelayToolDefinition binding) {
+    return false;
+  }
+
   boolean permits(
       String account,
       String project,

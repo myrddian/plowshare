@@ -108,6 +108,10 @@ public interface RelayRouting {
       topic = RelayValues.topic(topic);
       Objects.requireNonNull(kind, "kind");
       Objects.requireNonNull(start, "start");
+      // Binary delivery currently belongs to public ports. Internal receiver/filter envelopes do
+      // not carry blob claims, so admitting one here would lose its ownership boundary.
+      if (kind == RelayPayload.Kind.BLOB)
+        throw new IllegalArgumentException("Relay BLOB subscriptions require a public port");
     }
   }
 

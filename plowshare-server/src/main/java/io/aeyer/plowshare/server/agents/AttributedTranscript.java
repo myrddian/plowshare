@@ -45,6 +45,12 @@ public record AttributedTranscript(
   }
 
   @Override
+  public List<io.aeyer.plowshare.server.llm.dispatch.Content.StoredImage> recordToolResult(
+      LoggedEntry entry) {
+    return delegate.recordToolResult(entry);
+  }
+
+  @Override
   public void recordDurably(LoggedEntry entry) {
     delegate.recordDurably(entry);
   }

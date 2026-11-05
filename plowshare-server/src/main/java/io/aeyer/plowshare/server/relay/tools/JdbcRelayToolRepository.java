@@ -15,6 +15,7 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
   private final UnitOfWork transactions;
   private final Relay relay;
   private final HostedInvocationAuthority hosting;
+  private final java.util.Optional<io.aeyer.plowshare.server.images.ArtifactRepository> artifacts;
 
   public JdbcRelayToolRepository(JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {
     this(jdbc, transactions, relay, HostedInvocationAuthority.NONE);
@@ -22,6 +23,25 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
 
   public JdbcRelayToolRepository(
       JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, HostedInvocationAuthority hosting) {
+    this(jdbc, transactions, relay, hosting, java.util.Optional.empty());
+  }
+
+  public JdbcRelayToolRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      HostedInvocationAuthority hosting,
+      io.aeyer.plowshare.server.images.ArtifactRepository artifacts) {
+    this(jdbc, transactions, relay, hosting, java.util.Optional.of(artifacts));
+  }
+
+  private JdbcRelayToolRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      HostedInvocationAuthority hosting,
+      java.util.Optional<io.aeyer.plowshare.server.images.ArtifactRepository> artifacts) {
+    this.artifacts = artifacts;
     this.hosting = Objects.requireNonNull(hosting);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.transactions = Objects.requireNonNull(transactions);
@@ -130,6 +150,15 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
     return transactions.inTransaction(
         () -> {
           var retained = locked(intent);
+          if (!java.util.Objects.equals(
+              retained.intent().request().resultProfile(),
+              result.content() == null ? null : result.content().version()))
+            throw new IllegalArgumentException("Provider result profile was not negotiated");
+          if (result.content() != null && !result.content().images().isEmpty())
+            artifacts
+                .orElseThrow(
+                    () -> new IllegalStateException("Tool content admission is not configured"))
+                .validateResult(retained.intent(), result.content());
           if (retained.result() == null) {
             jdbc.update(
                 "UPDATE relay_tool_invocations SET result=?,completed_at=now() WHERE id=?",
@@ -179,6 +208,31 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
   @Override
   public java.util.Optional<Stored> find(long projectId, String account, java.util.UUID id) {
     return find(projectId, account, id, false);
+  }
+
+  @Override
+  public java.util.Optional<Stored> find(java.util.UUID id) {
+    return jdbc
+        .query(
+            "SELECT project_id,fingerprint,binding,request,occurred_at,causation::text,agent,hosted::text,result FROM relay_tool_invocations WHERE id=?",
+            (row, ordinal) -> {
+              var intent =
+                  new Intent(
+                      id,
+                      row.getLong("project_id"),
+                      row.getString("fingerprint"),
+                      RelayToolCodec.definition(row.getString("binding")),
+                      RelayToolCodec.request(row.getString("request")),
+                      row.getTimestamp("occurred_at").toInstant(),
+                      RelayCausationCodec.read(row.getString("causation")),
+                      row.getString("agent"),
+                      RelayToolCodec.hosted(row.getString("hosted")));
+              var result = row.getString("result");
+              return new Stored(intent, result == null ? null : RelayToolCodec.result(result));
+            },
+            id)
+        .stream()
+        .findFirst();
   }
 
   @Override
