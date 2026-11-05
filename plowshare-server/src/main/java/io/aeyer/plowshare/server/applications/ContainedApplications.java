@@ -222,15 +222,12 @@ public interface ContainedApplications {
    * grandparent, a sibling, a child naming its own container and an unrelated scope are all
    * refused.
    *
-   * <p>Do not cite the trajectory/resources pair as the precedent for this asymmetry: ADR 0042 used
-   * to describe those two as differing on a destroyed child and that description was wrong -- they
+   * <p>{@code trajectory} and {@code resources} are not the precedent for this asymmetry: they
    * refuse a destroyed child identically, because destruction cascades the record away and both
-   * open by resolving it. The asymmetry here is real and stands on its own argument above.
+   * open by resolving it. The asymmetry here stands on its own argument above.
    *
-   * <p><strong>Two axes, and they are deliberately different identities.</strong> This paragraph
-   * said the reverse for most of the slice — that the child is the executor and that the
-   * container's handle appears nowhere on the run — and that was the single most misleading
-   * sentence on this interface, because it is the one a reader meets before the implementation.
+   * <p><strong>Two axes, and they are deliberately different identities. Do not harmonise
+   * them.</strong>
    *
    * <ul>
    *   <li><b>The account is the container's.</b> A hop keeps the parent's executor and account
@@ -346,11 +343,9 @@ public interface ContainedApplications {
    * to read back what it stopped. {@code Origin.CONTAINED} carries no ejection age and nothing here
    * touches that.
    *
-   * <p>Do not cite the {@code trajectory}/{@code resources} pair as the precedent, as this
-   * paragraph used to: ADR 0042 described those two as differing on a destroyed child and that
-   * description was wrong — they refuse one identically. The retention is also <em>not</em> {@code
-   * DELEGATION}'s by resemblance; ADR 0042 records that its stated justification was void and that
-   * the behaviour is deliberately unchanged anyway.
+   * <p>{@code trajectory} and {@code resources} are not the precedent for this: they refuse a
+   * destroyed child identically. Nor is the retention {@code DELEGATION}'s by resemblance — ADR
+   * 0042 holds that decision and what justifies it.
    *
    * <p><strong>Not the cascade, and a reader will conflate the two.</strong> This operation stops
    * work inside one named child and its descendants and destroys nothing. The separate rule that

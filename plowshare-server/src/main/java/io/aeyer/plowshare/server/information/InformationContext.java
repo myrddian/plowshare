@@ -38,6 +38,13 @@ public record InformationContext(
    * parent's executor and account unchanged and a contained principal is deliberately not an {@code
    * authority_accounts} subject (V218).
    *
+   * <p><strong>Nothing in production builds that case yet.</strong> {@code
+   * InformationAccess.contained} is the only place the two axes are made to differ and it has no
+   * production caller — a contained run's information actor is the container's executor — so every
+   * caller this method serves today holds one value for both axes. See that method for why, and ADR
+   * 0042 for the wiring it names as the next slice's prerequisite. The split is here so the gates
+   * are decidable, not because the second axis is in use.
+   *
    * <p><strong>Why the split had to exist here.</strong> One field served both axes, and no single
    * value can satisfy them: the child's principal passes V224's destination gate and then fails
    * every provenance column, each of which has a foreign key into {@code admins} or {@code

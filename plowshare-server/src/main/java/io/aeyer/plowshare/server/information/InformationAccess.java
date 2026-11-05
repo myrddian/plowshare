@@ -136,12 +136,27 @@ public final class InformationAccess {
   }
 
   /**
-   * The context a run inside a contained Application writes under, with both axes named once.
+   * The context a run inside a contained Application would write under, with both axes named once.
    *
-   * <p>It is the only place a {@link InformationContext} is built with its two axes differing, and
+   * <p>It is the only place an {@link InformationContext} is built with its two axes differing, and
    * it exists so that no caller assembles the combination by hand: the acting principal is the
    * child's own ephemeral principal, which is what V224's gates admit, and the accounting account
    * is its container's, which is what the provenance columns' foreign keys require.
+   *
+   * <p><strong>No production path calls this.</strong> A contained run's information actor is
+   * {@code callerHandle} — the container's executor — because a containment hop keeps the parent's
+   * executor and account unchanged, and {@code SourceContainedApplications.run} issues the child's
+   * principal and deliberately does not pass it as the caller. So {@code contained_knowledge_actor}
+   * is false for every actor a production path presents, and a contained run reads and writes no
+   * knowledge and no memory today. This method, V224's read baseline, both of V224's write arms and
+   * every contained-actor guard in the catalogue repository are reachable only from a caller that
+   * builds this context, which at present is two tests.
+   *
+   * <p>That is fail-closed and is the state ADR 0042 records: the gates are decided and the actor
+   * is not wired, because making one subsystem read a different identity from the one the run
+   * executes as is an authority decision rather than a wiring task. Wiring it is named there as the
+   * next slice's prerequisite. <strong>Until then, do not read this javadoc or the gates it
+   * describes as a description of what a running child does.</strong>
    *
    * <p><strong>{@code includeGlobal} is false, deliberately.</strong> {@link
    * InformationContext.Selection#project} sets it true, which every ordinary caller wants and which

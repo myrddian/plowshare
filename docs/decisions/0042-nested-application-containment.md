@@ -323,9 +323,12 @@ instruction, and any consumer that composes configuration or action from it must
 treat it so. **This is why `application.child.resources` returns metadata and no
 content.** No slice ships a consumer, and slice three changes what is at stake
 rather than that fact: a child now *produces* output — a trajectory a container can
-read back, documents in its own home, a conversation lineage — where before there
-was nothing to be injected by. Slice two shipped the operation a consumer would
-call; slice three ships the execution that fills it. The obligation binds every
+read back, a conversation lineage, utterances in its own log — where before there
+was nothing to be injected by. **Documents in its own home are not in that list**,
+and the reason is the no-caller limitation below: the write path exists and no
+production path makes the child the information actor, so a child writes no
+knowledge today. Slice two shipped the operation a consumer would call; slice
+three ships the execution that fills part of it. The obligation binds every
 later consumer: a parent that
 starts returning child bytes to a model has re-opened by consumption what the
 operation's shape closes.
@@ -794,7 +797,7 @@ contained scope and is verified to, with the verification named.
 | `V223` `information_public_policy` (was `V172:21`), and the `general_readable` column of `V224` `knowledge_readable_candidates` (was `V223`, was `V198:5`) | general-read publication: the audience that makes a resource addressable to every account without anyone naming it | **Refused in slice two. A new row, and the only one in this inventory that runs outward rather than inward. Slice three opens the write path this row is about and does not wire its actor, so the row is one step nearer reachable rather than reachable — see the re-audit and the no-caller limitation below.** Every other knowledge-read row asks who may reach *into* a contained subtree; this one asks whether a contained home can be published *out* of it. Both bodies that decide general-read publication fenced on `s.kind<>'RESTRICTED'` / `f.scope_kind<>'RESTRICTED'` alone — the only scope kind that existed to be excluded when they were written — and V216, which added `CONTAINED` as a fifth kind, did not extend either test. The consequence was concrete rather than theoretical: `knowledge_revision_readable` (`V172:38`) is `… AND (knowledge_scope_readable($2,q.home_scope_id) OR knowledge_general_readable(r.id))` and the candidates body's `facts.readable` (`V223:436`) is `… OR f.general_readable`, so a revision whose home was a contained scope, if its policy audience were `GLOBAL_READ`, would have been admitted to **every global-read member — which is every active non-bootstrap account — with no containment test taken anywhere**. It was **pre-existing from slice one and not reachable**: the policy insert trigger (`V158:88`) writes `audience='HOME'`, the navigation default makes `NOT coalesce(ownerOnly,true)` the refusing value, and nothing executes a contained child, so no contained-home resource exists to publish. That is confinement resting on a default value rather than on a structure, which is the spec's named anti-goal, so V223 adds one conjunct — `s.kind<>'CONTAINED'`, and `f.scope_kind<>'CONTAINED'` in the hoisted twin — beside each existing `RESTRICTED` test, reproducing `information_public_policy` verbatim from `V172:21` otherwise. It only ever narrows: the conjunct can refuse a general publication, never admit one. The narrow body is the one edited on purpose, because `knowledge_general_readable` (`V172:30`) and the closure predicates (`V158:183`, `V158:194`) all resolve through it, so one conjunct fences the general arm of `knowledge_revision_readable`, of `information_root_readable` and of `knowledge_document_in_boundary`'s global arm, and additionally refuses a published resource whose closure merely *reaches* a contained home. Evidence is `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree`, which asserts the baseline first — the stranger is a live general-read member and the identical publication in an ordinary home really does reach it through the general arm alone — then the refusal for the exact predicate, for discovery's own hoisted copy, for a general-read ceiling under both homes and for a closure that merely touches the subtree, and finally that the ancestor's inward read is untouched, so it fails whichever way the fence breaks. **`knowledge_revision_readable` (`V172:36`) and the candidates body's `readable` column (its kind test at `V223:433`) carry the same `RESTRICTED` test and deliberately do *not* gain this conjunct:** their test governs the whole read rather than the general arm, so excluding `CONTAINED` there would refuse an ancestor's read of a descendant's home — the capability slice two exists to open — and their general arm is already fenced through `knowledge_general_readable`. |
 | `plowshare-server/.../board/ProjectMessageRouting.java:85` | messaging `from_project` and `to_project` | **Refused**, in both directions. Messaging is a narrowing of the existing Relay and Application scoping and not a forwarding surface. **The ordering is a finding, not a style choice:** `require` returns early when source equals destination, so with the check after that return a child addressing *its own* project was admitted with no policy consulted at all. A contained project is not a messaging endpoint, its own included. **Slice three re-decided this row against a running child and the decision did not move** — the refusal is keyed on the project name, so the bare-UUID principal a run carries is refused exactly as a fabricated handle was, while the same principal reaches an ordinary project unimpeded; what changed is that there is now a run being deprived of a self-addressed endpoint rather than a hypothetical one. The check also precedes the route policy, so the refusal names containment rather than an absent route. |
 | `plowshare-server/.../board/ProjectMessageRouting.java:65`, `identify` | the `routingIdentity` surface | **Fenced upstream.** It maps a project to its personal-space address or answers the name unchanged; it decides nothing, and every caller of it has already passed `require`. |
-| `plowshare-server/.../information/JdbcInformationEventRecords.java:160` | the Relay audience for an information event | **Refused — and slice three found the refusal reachable, inside a running child's own write. Re-decided below; read that entry before this one.** The slice-two text follows unchanged, and the sentence of it that execution falsified is that a child's events never had a topic: a running child writes knowledge into its own home, every such write announces an intake event about that revision, and the real publisher resolves an audience for it before anything else. The honest statement at slice two: `audienceProject`'s `default -> null` already produced `Unaddressable` for a `CONTAINED` kind before this change, so a child's events never had a topic, and ADR 0037's rule for `ADMINISTRATION` and `RESTRICTED` — fail loudly, no fallback topic — already applied by exclusion. What was added is `case "CONTAINED" -> null` named beside `PROJECT`, `PERSONAL` and `ACCOUNT_KNOWLEDGE`, which is **behaviour-identical** and exists so the decision is visible where the next kind is added rather than being a silent default. The mutation that proves the behaviour changes the `default` arm, not the added case. It is still a load-bearing entry, because a contained scope *does* carry a project key: an implementation that reached for it would have published a child's events to a topic whose audience is the child's project. Per ADR 0039 no Relay scope kind is added. |
+| `plowshare-server/.../information/JdbcInformationEventRecords.java:160` | the Relay audience for an information event | **Refused, unchanged — and slice three found the refusal reachable from a constructed context, which is why `admit` now tolerates it for a declined home. Re-decided below; read that entry before this one.** The slice-two sentence that "a child's events never had a topic" is still true of production, because no production path makes a contained principal the information actor and so no contained-home resource exists to announce. What slice three established is the shape of the failure *when* one does: a contained-home write announces an intake event, and the real publisher resolves an audience before anything else, so the write aborts unless the announcement tolerates the refusal. The honest statement at slice two: `audienceProject`'s `default -> null` already produced `Unaddressable` for a `CONTAINED` kind before this change, so a child's events never had a topic, and ADR 0037's rule for `ADMINISTRATION` and `RESTRICTED` — fail loudly, no fallback topic — already applied by exclusion. What was added is `case "CONTAINED" -> null` named beside `PROJECT`, `PERSONAL` and `ACCOUNT_KNOWLEDGE`, which is **behaviour-identical** and exists so the decision is visible where the next kind is added rather than being a silent default. The mutation that proves the behaviour changes the `default` arm, not the added case. It is still a load-bearing entry, because a contained scope *does* carry a project key: an implementation that reached for it would have published a child's events to a topic whose audience is the child's project. Per ADR 0039 no Relay scope kind is added. |
 | ADR 0038's project-scoped Relay subscribers | consumption, which takes a lease | **Fenced by kind.** Consumption gates on `members.mayWork`, which is the `role` entry above. |
 | `plowshare-server/.../union/UnionStore.java:86` `find`, `:98` `enabled`, `:105` | the server-side working tree and the bare Git hub | **Fenced by `project_type`.** A child's row is `MANAGED`; every union read requires `STANDARD`. So a child is not a union *candidate* — it is not that one is created and then disabled — and `unionRecovery`, which iterates `unions.enabled()` at startup, never sees it. `union.status` answers `eligible: false`. Ordinary project creation provisions no union either; a union is created by `union.enable` or by Personal account creation, both of which go through the membership fence. Asserted directly: **creating a child provisions no working tree and no git hub.** |
 | `plowshare-server/.../union/UnionFrames.java:334`, `union` | `union.*` frames | **Fenced upstream** by the two above: `claimed` requires the session to root the project, and `union(project)` refuses a project `UnionStore.find` does not return. |
@@ -867,18 +870,34 @@ execution newly reaches is a short list: the authority substrate's resolution an
 recheck path, the knowledge and information read and write predicates, the
 tool-argument boundary that turns a built-in tool's arguments into typed resource
 references, the definition registry and tool bindings of the child's own home, the
-conversation and allowance rows a run writes, and the information event a
-knowledge write announces. The rows below are grouped on that.
+and the conversation and allowance rows a run writes. **The knowledge and
+information predicates are on that list as gates and not as traffic**: V224 opens
+them for a contained actor and nothing in production presents one, which the
+no-caller limitation states in full and which every row below that depends on it
+says for itself. The information event a knowledge write would announce is
+therefore not reached either. The rows below are grouped on that.
 
 **The arithmetic, so the split is checkable rather than assertable.** The main
 table keeps its thirty-five entries and gains none: **nineteen are reached by
 execution** and re-decided individually below, and **sixteen are not** and are
-listed with their one shared reason. Of the nineteen, **one changes its answer** —
-the Relay audience row — **four change their reason** while keeping their verdict
-(the chokepoint and the `role` family, now measured against the principal a run
-carries rather than against ordinary accounts; the general-read publication row,
-now reachable rather than theoretical), and the rest keep both and gain a test that
-names the live child or its principal. Beside them the re-audit adds **two new
+listed with their one shared reason. **No row changes its answer.** An earlier
+draft of this paragraph said one did — the Relay audience row, whose refusal slice
+three found reachable — and that count rested on a claim this record has since
+corrected: the refusal is reached from a constructed context and not from any
+production path, because no production path makes a contained principal the
+information actor, and nothing else can create a contained-home resource either (a
+container holds no role on a `contained:` project, so the ordinary destination lock
+refuses it). The row's verdict and its reachability are therefore both unchanged;
+what the slice added is a write path waiting for an actor.
+
+**Six rows change their reason while keeping their verdict**, and they are the ones
+that do not depend on that actor: the `ProjectAuthorization` chokepoint, the three
+`role`-family predicates and the two project listings, each measured for the first
+time against the **contained principal the hop really does create** —
+`principals.issue(scope)` writes a `contained_principals` row in production, so the
+principal is real even though it is never the information actor, and the project
+surfaces can be and are asked about it. The remaining thirteen keep both verdict
+and reason and gain a test that names the live child or that principal. Beside them the re-audit adds **two new
 write-side rows** (V224's two gates, which did not exist to be audited before) and
 **one inventory gap** it names rather than closes. The exhaustiveness inventory's
 single row is re-decided in the same table.
@@ -894,7 +913,7 @@ single row is re-decided in the same table.
 | `V224` `knowledge_read_authority`, `knowledge_readable_candidates` | **Narrowed, not opened again.** `general_member` is pinned false for a contained actor and the candidates baseline is a separate `(general_member OR contained)` term, so discovery admits the child's own subtree and reaches no general arm. Discovery and the exact predicate are asserted to agree scope by scope, so one cannot admit what the other refuses. | `ContainedActorReadSchemaTest.theDiscoveryPathAdmitsTheChildsOwnScopeAndNotGeneralMembership`, `aChildCannotDiscoverGenerallyReadableRows`, `aChildIsRefusedGeneralReadThroughTheBoundaryCeiling` |
 | `V223` `information_public_policy` and `V224` `knowledge_readable_candidates`' `general_readable` | **Refused; the row's reachability moved one step and not two.** Slice two recorded this surface as unreachable because "nothing executes a contained child, so no contained-home resource exists to publish". Slice three opens the gates that would let a child produce one and **does not wire the actor that would reach them** (see the limitation below), so no contained-home resource exists in production yet either. What changed is that the write path now exists and is proved against a constructed context, so the conjunct V223 added is the thing standing between that path and an outward publication — defence in depth that has acquired a consumer in waiting rather than a live fence. Two fences stand in front of it: the write side cannot even ask — `SET_AUDIENCE` is not admitted by V224's write arm — and the read side refuses the publication if one somehow existed. | `ContainedActorWriteSchemaTest.aChildCannotPublishGenerallyReadable`, `aChildCannotSetAnAudienceEvenOnItsOwnDocument`; `ContainedKnowledgeReadSchemaTest.aContainedHomeIsNeverPublishedOutsideItsSubtree` |
 | V224's two write gates, `information_lock_destination` and `information_home_allows` | **New rows, inward and write-side.** Each admits a live contained principal to **its own scope's** home and nothing else, resolved from the selected project and compared against the resource's home. A child writing in its container's home, a sibling's, an ancestor's, another home while naming its own project, or after revocation are each refused. | `ContainedActorWriteSchemaTest` (nine cases); `ContainedExecutionWriteDatabaseTest.aChildWritesKnowledgeAsItselfAccountedToItsContainer` for the Java path |
-| `JdbcInformationEventRecords:160`, the Relay audience | **Refused, and the refusal turned out to be reachable — as an exception thrown inside the child's own write, which it aborted. This is the one row whose answer execution changes.** The audience is still refused, which is the row's verdict and is unchanged; what was wrong was the belief that nothing asked. The intake announcement now tolerates the refusal for a declined home only, so the write completes and the audience stays absent. Recorded as a found defect with its narrow fix below rather than as a fence working. | `ContainedExecutionWriteDatabaseTest.aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes` for the audience; `ContainedIntakeAnnouncementDatabaseTest` for the fix, composed with the real publisher |
+| `JdbcInformationEventRecords:160`, the Relay audience | **Refused, and the refusal turned out to be reachable from a constructed context — as an exception thrown inside the child's own write, which it aborted. Its answer does not change under execution as shipped**, because the write path has no production actor (see the no-caller limitation), so nothing in production asks it. What was wrong was the belief that nothing *could* ask. The intake announcement now tolerates the refusal for a declined home only, so the write completes and the audience stays absent. Recorded as a found defect with its narrow fix below rather than as a fence working, and the arithmetic above counts no row as answer-changed because of it. | `ContainedExecutionWriteDatabaseTest.aChildsOwnWriteHasNoRelayAudienceAndTheContainersDoes` for the audience; `ContainedIntakeAnnouncementDatabaseTest` for the fix, composed with the real publisher |
 | `ProjectMessageRouting:85`, messaging in both directions | **Refused; the decision does not move and the consequence does.** The refusal is keyed on the project *name*, so the actor's shape is immaterial to it, and the bare-UUID principal a run carries is refused for the child's own project exactly as a fabricated handle was — while the same principal reaches an ordinary project's routing unimpeded, which is what makes the refusal containment's. What changes is that there is now a run being deprived of a self-addressed endpoint. Separately, and structurally: no messaging tool is in `RetainedToolAccess.SYNCHRONOUS` at all, so retained work of any kind — contained or not — cannot reach messaging through a tool. | `ContainedAddressabilityTest.aRunningChildsOwnPrincipalIsNoMessagingEndpointEither` |
 | `ContainedDeclarations:167` tool bindings, `:175` Relay worker account | **Reduced at declaration, and the runtime half is now asserted.** A contained run's tool call resolves the snapshot of its *own* project's `server/tools.json` and nothing else, so a binding of the container's is absent from the set the child's home resolves rather than merely ungranted. | `ContainedRuntimeReachTest.aRunningChildsToolCallResolvesOnlyItsOwnBindings` |
 | `UnionStore:86`/`:98`/`:105`, the working tree and git hub | **Fenced by `project_type`, and starting a run provisions neither.** The at-rest half was already asserted; this is the runtime half. | `ContainedRuntimeReachTest.aRunningChildAcquiresNoWorkingTreeOrGitHub` |
@@ -1021,6 +1040,42 @@ and no production path presents one, so no running child reads anything today.
 The authority decision slice two named as a prerequisite was made here (a
 baseline, not a membership); the wiring it needs to have an effect is named as the
 next one, in its own entry below.
+
+**The guarded set of catalogue mutators is closed over one criterion, and that
+criterion is narrower than "every write a confined Application could reach". It
+has been declared closed and been wrong three times, so here is what it covers.**
+
+The criterion is: the mutators of `JdbcInformationCatalogueRepository` that take an
+`InformationContext`. There are twelve, each refusing a contained actor before
+anything writes, each with an ordinary actor passing the same guard beside it in
+one list that one test drives. Three things the criterion excludes:
+
+- **`replaceTags`** had no context in its signature, so the criterion could not
+  reach it. It is a third tags mutator, reached through
+  `InformationCatalogue.replaceTags` → `requireWrite` → `lockResource`, which
+  V224's WRITE arm admits for a contained actor's own resource. It now takes the
+  context and is guarded, and it is in the list.
+- **Five sibling repositories** — `JdbcInformationNavigationRepository`,
+  `JdbcInformationProjectionRepository`, `JdbcAcquisitionRepository`,
+  `JdbcInformationContentRepository` and `JdbcInformationInterchangeRepository` —
+  each take an `InformationContext` and write, and **none carries the guard**.
+  Nothing presents a contained actor to them today, by the no-caller fact below,
+  and **whether their service layer would refuse one is unverified**. Guarding five
+  more repositories at the edge of a slice is new scope with its own risk and is
+  deliberately not done; this entry is the open item instead, and it is the honest
+  size of the surface rather than the size of the part that was audited.
+- **A mutator added to the catalogue class without a guard** is caught only by the
+  test's list gaining a row for it, which is the same enumeration rather than an
+  independent check. The structural alternative — the check at `lockResource` and
+  `requireDestination` with an explicit per-operation allowance — is costed in that
+  class's own Javadoc and not built.
+
+**The pattern across those three failures is the one worth keeping.** Each time the
+set was declared closed, the thing outside it was outside the *criterion* rather
+than overlooked within it: first two mutators the list and its test both omitted,
+then a mutator whose signature the criterion could not see, then five classes the
+criterion was never about. A closed set is only as closed as its membership rule,
+and stating the rule is what lets the next reader find the next gap.
 
 **The knowledge gates are open and nothing in production is the actor they are
 keyed on. This is the limitation slice three actually leaves, and it reframes the
@@ -1250,7 +1305,12 @@ for a contained home announces the processing decline beside it; both go through
 "a refused publication is a visible defect, while one delivered to the wrong
 audience, or silently dropped, is not". A contained scope has no audience by this
 record's own decision, so every knowledge write a child made raised an
-`IllegalStateException` and rolled back.
+`IllegalStateException` and rolled back. **Said exactly: every such write made from
+a constructed context, which is the only kind there is** — no production path
+presents a contained actor to the information layer, so this was never a live
+outage. It was a defect in the capability's own write path, found and closed before
+that path acquired a caller, and it is recorded rather than deleted because the
+lesson travels and the next slice wires the caller.
 
 **So the claim in this record that a contained principal writes its own home must
 be read with its history.** Slice three's own text, above, states the write

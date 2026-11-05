@@ -438,6 +438,99 @@ git commit -m "Add application.child.run behind the container-only gate"
 
 ---
 
+### Task 3.5: Let a containment hop record its lineage
+
+**Authorized by the user on 3 November 2026**, after Task 3 found two shipped
+constraints behind the conversation door. It was not in this plan's original
+scope; this section is the plan catching up with the work, not a prediction.
+
+**Files:**
+- Create: `plowshare-server/src/main/resources/db/migration/V225__contained_operation_lineage.sql`
+- Test: `plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ContainedOperationLineageSchemaTest.java`
+- Modify: `docs/decisions/0042-nested-application-containment.md`
+
+**Interfaces:**
+- Consumes: `operation_parent_valid` (V162:35-36) and `operation_conversation_valid`
+  (V162:62) as shipped; `authority_scopes(id, kind, project_id, container)` from
+  V216 with `container` frozen by V217; `contained_scope_ancestors` from V223;
+  Task 3's `openContained` and `OperationAuthority.bind`.
+- Produces: a persisted containment hop, so `contain` records lineage and
+  `Runs` can stop being mocked.
+
+**The shape, and why it is not a new invention.** ADR 0042's "two live-authority
+gates" already made exactly this replacement in Java: for a contained admission,
+`require`'s demand for an ancestor with an identical scope *and* home is replaced
+by the containment edge itself — "the child's own stored row must name this
+ancestor's scope as its container". `operation_parent_valid` is the SQL
+counterpart of the same demand and has never been given the same treatment,
+because no hop was ever persisted to fail it. V225 applies the documented
+replacement at the SQL level. A reviewer should hold the migration to that
+claim: anything broader than the Java gate already permits is out of scope.
+
+**What must still refuse.** The constraint being changed is the substrate's
+no-escalation invariant, so the tests that matter are the refusals:
+- a contained child admission whose scope's `container` is **not** the parent
+  admission's scope — a grandparent, a sibling subtree, an unrelated scope;
+- a child admission whose actions are not a subset of the parent's;
+- a **non**-contained child admission, which keeps the exact scope/project
+  equality unchanged, asserted byte-for-byte;
+- a chain longer than the configured depth;
+- a contained admission with no parent edge at all.
+
+- [ ] **Step 1: Write the failing schema test, including the persisted hop**
+
+New `@Tag("full-db")` class. The central test is `aContainmentHopRecordsItsLineage` —
+a real `contain` whose lineage persists, **with `OperationRecords` unmocked**.
+That mock is why this defect survived two shipped slices, so the regression test
+is the un-mocked path, not a tightened assertion. Add every refusal above, each
+with a positive control proving the same shape is admitted for a legitimate hop.
+
+- [ ] **Step 2: Run it to verify it fails closed**
+
+Expected: `ERROR: child authority exceeds retained parent` on the hop, and the
+refusals passing already.
+
+- [ ] **Step 3: Write V225 for `operation_parent_valid`**
+
+`CREATE OR REPLACE` with the signature unchanged, reproduced from V162 with the
+one documented edit and no others, in this repo's "reproduced from VNNN with
+these edits and no others" header convention. Say in the comment that the arm is
+the SQL counterpart of ADR 0042's gate-two replacement, and that it is the
+no-escalation invariant, so a later reader does not relax it further.
+
+- [ ] **Step 4: Resolve gate six — the contained turn's `Origin`**
+
+`operation_conversation_valid` (V162:62) requires the row's agent to match the
+envelope's, while V17:212 forbids an agent on the `Origin.TURN` row. A contained
+run is harness-initiated agent work and not a person's turn, so prefer an
+existing non-`TURN` origin that already permits an agent. **Add a new `Origin`
+kind only if none fits, and report before doing so** — an origin kind is a
+shipped enum with contract reach.
+
+- [ ] **Step 5: Un-mock `Runs` and assert the envelope**
+
+Task 3 wrote these assertions and gate five prevented them running: a real run
+starts in a contained scope, its envelope's `budget` is the child's own allowance
+and its admission account is the container's. This is the first evidence the
+slice's goal is met.
+
+- [ ] **Step 6: Amend ADR 0042 for the constraint and the corrected claim**
+
+Two things, and the second is about shipped slices rather than this one:
+the V225 decision and why it is the documented replacement rather than a
+widening; and the correction that the "two live-authority gates" section's
+liveness claim was resting on mocked persistence, since no hop could be recorded.
+State it plainly as a defect that shipped, not as a nuance.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add plowshare-server/src/main/resources/db/migration/V225__contained_operation_lineage.sql plowshare-server/src/test/java/io/aeyer/plowshare/server/access/ plowshare-server/src/main/java/ docs/decisions/0042-nested-application-containment.md
+git commit -m "Let a containment hop record its lineage"
+```
+
+---
+
 ### Task 4: What a running child may reach
 
 **Files:**

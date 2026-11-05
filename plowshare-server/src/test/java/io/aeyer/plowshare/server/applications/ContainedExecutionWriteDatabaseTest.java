@@ -516,11 +516,16 @@ class ContainedExecutionWriteDatabaseTest {
   }
 
   /**
-   * Every catalogue management operation refuses a contained acting principal explicitly, before
+   * The enumerated catalogue mutators refuse a contained acting principal explicitly, before
    * anything writes — and each refusal has an ordinary actor passing the same guard beside it.
    *
-   * <p><strong>Eleven operations, and the first version of this test asserted nine as a closed
-   * set.</strong> {@code tags} and {@code tagGroups} had no guard and were absent from this list,
+   * <p><strong>"Enumerated" and not "every", because the name is what a reader trusts.</strong>
+   * This list is the mutators of {@code JdbcInformationCatalogueRepository}; the sibling
+   * information repositories take an {@code InformationContext} and write without this guard, and
+   * their service-layer refusal is unverified. The guard's own javadoc carries that open set.
+   *
+   * <p><strong>Twelve operations, and this test has twice asserted a smaller set as a closed
+   * one.</strong> {@code tags} and {@code tagGroups} had no guard and were absent from this list,
    * and they were absent from the <em>same</em> hand-maintained enumeration the production javadoc
    * described — so a reviewer reading either the list or this test saw a set that looked complete.
    * That is the mechanism worth remembering rather than the two method names: an enumeration and a
@@ -532,7 +537,7 @@ class ContainedExecutionWriteDatabaseTest {
    *
    * <p>Unguarded, only {@code link} would have failed: its {@code information_links.actor_handle}
    * is a live foreign key to {@code admins(handle)}, which a bare-UUID contained principal has no
-   * row in. The other ten would have <strong>succeeded</strong> — {@code information_events} was
+   * row in. The other eleven would have <strong>succeeded</strong> — {@code information_events} was
    * dropped by {@code V188__information_events_on_relay.sql:96}, and those hand the actor to Relay
    * rather than to a keyed column; {@code tags} and {@code tagGroups} write no actor column at all.
    * The guard is therefore an <strong>authority check</strong>, not an integrity patch: the gap it
@@ -546,7 +551,7 @@ class ContainedExecutionWriteDatabaseTest {
    * got past the guard to a different refusal, and says so.
    */
   @Test
-  void everyCatalogueManagementOperationRefusesAContainedActor() {
+  void theEnumeratedCatalogueMutatorsRefuseAContainedActor() {
     var child =
         work.inTransaction(
             () ->
@@ -558,8 +563,9 @@ class ContainedExecutionWriteDatabaseTest {
     var confined = InformationAccess.contained(childPrincipal, HOLDER, childProject).withView(true);
     var ordinary = context(HOLDER, "parent").withView(true);
 
-    // One list, so a twelfth management operation added without a guard shows up as a missing row
-    // here rather than as a silent grant in production: ten of the eleven would succeed unguarded,
+    // One list, so a thirteenth management operation added without a guard shows up as a missing
+    // row here rather than as a silent grant in production: eleven of the twelve would succeed
+    // unguarded,
     // so the failure mode this list protects against is capability, not a crash.
     //
     // It protects against that only as well as the list is complete, which is the lesson this test
@@ -618,7 +624,18 @@ class ContainedExecutionWriteDatabaseTest {
                 "tagGroups",
                 context ->
                     records.tagGroups(
-                        context, revisionFor(context, child, mine), Map.of("g", List.of("a")))));
+                        context, revisionFor(context, child, mine), Map.of("g", List.of("a")))),
+            // The third tags mutator, and the one the enumeration's own criterion could not reach:
+            // its signature carried no context until the guard needed one. Its Resource comes from
+            // live write admission, so the fixture takes the same lock the caller would.
+            new Operation(
+                "replaceTags",
+                context ->
+                    records.replaceTags(
+                        context,
+                        records.lockResource(context, revisionFor(context, child, mine), false),
+                        List.of("a"),
+                        0)));
 
     for (var operation : operations) {
       var refusal =

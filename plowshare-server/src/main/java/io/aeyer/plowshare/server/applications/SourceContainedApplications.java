@@ -264,9 +264,13 @@ public final class SourceContainedApplications implements ContainedApplications 
                   new AuthorityScope.Contained(
                       retained.scope(), retained.projectId(), retained.container());
               // The child allocates its OWN allowance, as nested starts already do, under the
-              // ceiling its container set. There is no shared counter: child spend is attributed to
-              // the child, which leaves ADR 0025's immutable attribution and the rule that
-              // delegation cannot change the accounting account exactly as they are.
+              // ceiling its container set. There is no shared counter, and the pool is the only
+              // thing that is the child's here: a contained run spends this allowance on its
+              // CONTAINER'S account, because a hop keeps the parent's executor and account
+              // unchanged. That is what leaves ADR 0025's immutable attribution and the rule that
+              // delegation cannot change the accounting account exactly as they are -- nothing
+              // invents a second accounting subject. The child is the author, not the account; the
+              // two axes are set out at run() below.
               allowances.retain(new AllowanceSnapshot(allowance, retained.ceiling(), 0));
               principals.issue(scope);
               // Last, because it is the one step that can still refuse on authority rather than on
