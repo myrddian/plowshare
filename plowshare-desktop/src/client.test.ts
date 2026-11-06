@@ -2285,7 +2285,7 @@ await test('authoring admits a served role with a builder grant while ordinary c
   await f.client.authoringTurn(
     'first',
     'interlocutor',
-    'Start the granted design_orchestration',
+    '/orchestration:design_orchestration',
   );
   assert.equal(f.calls.filter((row) => row.type === 'agent.run').length, 1);
 });

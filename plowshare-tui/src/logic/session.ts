@@ -1495,6 +1495,7 @@ export function typed(
   project?: string,
   waiting: readonly string[] = [],
   usageContext: { conversation?: string; agent?: string } = {},
+  commandAliases: readonly string[] = [],
 ): Typed {
   const text = line.trim();
   if (text === '/admin') return { kind: 'retrieval-error', text: ADMIN_USAGE };
@@ -1766,6 +1767,8 @@ export function typed(
       : { kind: 'sync', action };
   }
   if (text.startsWith('/')) {
+    if (commandAliases.includes((text.split(/\s/u, 1)[0] ?? '').toLowerCase()))
+      return { kind: 'utterance', text: line };
     return { kind: 'unknown', named: text };
   }
   return { kind: 'utterance', text };

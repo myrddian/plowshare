@@ -31,8 +31,9 @@ grants, account/project authorization and normal hooks apply. Any authorized
 user-defined definition uses the same start command. See the
 [CLI contract](../plowshare-cli/README.md) for offline discovery and structured recovery.
 
-Ask a bot granted `deep_research` for a research report, or use its `/research`
-trigger. Farnsworth and Aristoxenus already carry that grant. The bot's existing
+Use `/research <request>` or `/orchestration:deep_research <request>` with a bot
+granted `deep_research` for an explicit harness-dispatched start. Asking for a
+research report in ordinary conversation remains a model-selected workflow. Farnsworth and Aristoxenus already carry that grant. The bot's existing
 `orchestrate_deep_research` tool accepts the research request and context. Project
 runs use the caller's project and account; global runs use personal/shared policy.
 The script cannot select another account or project through document arguments.

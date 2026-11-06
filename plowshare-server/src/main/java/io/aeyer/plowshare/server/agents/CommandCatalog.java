@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.agents;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** Server-owned discovery, shared by skills and orchestrations; contains no execution path. */
 public final class CommandCatalog {
@@ -83,6 +85,13 @@ public final class CommandCatalog {
                   skill.hash(),
                   skill.agentVisible()));
         });
+    // Only granted definitions participate. Ambiguous aliases are withheld from discovery and
+    // binding; the qualified command remains available for each definition.
+    Map<String, Long> aliasCounts =
+        orchestrations.entrySet().stream()
+            .filter(entry -> agent.orchestrations().contains(entry.getKey()))
+            .flatMap(entry -> aliases(entry.getValue()).stream())
+            .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
     orchestrations.entrySet().stream()
         .sorted(Map.Entry.comparingByKey())
         .forEach(
@@ -92,7 +101,9 @@ public final class CommandCatalog {
               entries.add(
                   new Entry(
                       "/orchestration:" + entry.getKey(),
-                      List.of(),
+                      aliases(definition).stream()
+                          .filter(alias -> aliasCounts.get(alias) == 1)
+                          .toList(),
                       "orchestration",
                       entry.getKey(),
                       definition.description(),
@@ -103,5 +114,14 @@ public final class CommandCatalog {
                       definition.hash()));
             });
     return List.copyOf(entries);
+  }
+
+  private static List<String> aliases(OrchestrationDefinition definition) {
+    return definition.triggers().stream()
+        .filter(OrchestrationDefinition.Trigger::command)
+        .map(OrchestrationDefinition.Trigger::text)
+        .distinct()
+        .sorted()
+        .toList();
   }
 }

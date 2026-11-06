@@ -8,6 +8,16 @@ import java.util.function.BooleanSupplier;
 public interface ChatFiltering {
   ChatRequest input(ChatRequest request, BooleanSupplier abandoned);
 
+  /**
+   * Inspect retained history for a model-only summary. Historical instructions are quoted evidence,
+   * not a new request; disclosure checks and configured external review still apply. This internal
+   * service entry point is never selectable through a chat payload. Implementations without a
+   * history policy retain their ordinary inspection behavior.
+   */
+  default ChatRequest historyInput(ChatRequest request, BooleanSupplier abandoned) {
+    return input(request, abandoned);
+  }
+
   Completion output(Completion completion);
 
   /**

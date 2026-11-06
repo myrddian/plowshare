@@ -240,8 +240,7 @@ class SkillExecutionsTest {
             end,
             Map.of());
     assertNull(prepared.refusal());
-    assertNull(prepared.tool());
-    assertNull(prepared.unfinished());
+    assertTrue(prepared.dispatchCalls().isEmpty());
     assertTrue(prepared.notice().contains("Read the evidence and produce the requested review."));
     assertTrue(prepared.notice().contains("Invocation arguments (user data):\nOriginal request"));
     assertFalse(prepared.notice().contains("allowed-tools:"));

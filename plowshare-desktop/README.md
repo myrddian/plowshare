@@ -522,8 +522,12 @@ The tabs support arrow keys, Home and End. Adding a project opens Files.
 The selected Bot's server-provided command catalog appears directly in **Info → Commands**.
 Commands include help and executor details. Clicking one prepares an editable
 draft; Send uses ordinary conversation transport. A portable skill without a
-package mode requires an explicit context selection. The server binds the
-invocation and the handling Agent calls `command_dispatch`.
+package mode defaults to DIRECT; other context modes can be selected explicitly. The server binds the
+invocation and the harness dispatches the selected operation. Explicit skill
+commands use the same path for every context mode; the mode chooses the executor
+and context, not whether a model must launch it. Granted orchestration command
+triggers are also exposed as aliases. Builder launches submit an explicit
+`/orchestration:design_orchestration` command.
 
 Orchestration commands also have a **Start workflow** button. It submits the
 editable message through `orchestration.start`, using the selected Bot's grant

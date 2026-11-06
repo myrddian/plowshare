@@ -186,8 +186,7 @@ and compaction state untouched. The child loads its own role, rules and skill.
 For an explicit DIRECT command, the harness loads and activates the pinned skill
 before the first model call. Its command notice tells the current Agent or Bot to
 read and execute the skill body, with frontmatter removed, and includes the
-original arguments as user data. No `command_dispatch` or `skill_run` call is
-needed. Skill constraints apply to the first inference's offered tools as well
+original arguments as user data. No model-selected `skill_run` call is needed. Skill constraints apply to the first inference's offered tools as well
 as execution. Model-selected DIRECT activation still returns the instructions
 through `skill_run`, with constraints applied before later calls in the same
 batch. Both paths retain the current executor's role and grants.
@@ -259,19 +258,31 @@ select delegated context, or `--mode=DIRECT` to state the default explicitly.
 An orchestration does not take this flag. Skill arguments may be empty: both
 `/skill:weather-capture` and `/skill:weather-capture --mode=DIRECT` load the
 skill's instructions. Orchestration commands require a description of the work;
-an empty invocation reports the command and its argument hint. Only qualified
-commands are exposed, avoiding collisions with native client commands.
+an empty invocation reports the command and its argument hint. Qualified commands are always available. Command-style orchestration triggers
+such as `/research`, `/implement`, `/deliver`, and `/design-orchestration` are
+also exposed as aliases for granted definitions. An alias claimed by multiple
+granted definitions is withheld; use the qualified command instead. Client-native
+commands retain their existing local behavior. External ingress command fields
+continue to use their qualified protocol syntax.
 
 The harness validates the selected Agent's catalog and binds the original
 arguments, definition hash, mode, owning account, conversation, caller and source
 run in migration V91. An explicit DIRECT skill is activated by the harness once
 before inference; its notice begins "The user has issued the following command"
-and contains the skill instructions and original arguments. Delegated skills and
-orchestrations receive a dispatch notice and structured JSON; the Agent invokes
-`command_dispatch` with only that UUID. Model-supplied replacement arguments are
-refused. Skill/agent/orchestration start alternatives are fenced and withheld
-from the model's tool catalog for the bound command. A model that ends before a
-required dispatch does not produce a successful command outcome.
+and contains the skill instructions and original arguments. An explicit
+orchestration command is dispatched by the harness through its tool authorization
+and pre/post hooks, without an inference call or a `command_dispatch` tool. Its
+original request cannot be replaced by a hook. The transcript records the real
+`orchestrate_<name>` call and result without model provenance, then returns the
+orchestration handle. Starting the orchestration does not approve any later plan
+or question; those retain their normal approval lifecycle.
+Explicit delegated skills use the same harness dispatch, recording `skill_run`
+with the pinned invocation, arguments and selected mode. `NEW`, `INHERITED`, and
+`SUMMARISED` determine the child context; they never require a model to select or
+launch the skill again. Child work and summarisation retain their normal model
+budgets, attribution, cancellation and approval propagation. There is no
+`command_dispatch` tool. Model-selected `skill_run` remains available for granted,
+model-visible skills during ordinary agent work.
 Existing orchestration phrase notices are suppressed for bound slash commands.
 
 Dispatch claims the receipt once before invoking the operation. Orchestration

@@ -429,7 +429,10 @@ public final class LlmDispatcher implements AutoCloseable {
     return stream(request, sink, abandoned, false);
   }
 
-  /** Both compaction paths use the fold budget, independent of accounting availability. */
+  /**
+   * Summarise retained history with the fold budget and historical-data inspection. This is an
+   * internal, model-only service path: it cannot offer tools or relax request authorization.
+   */
   public Completion streamFold(ChatRequest request, Deltas sink) {
     return stream(request, sink, () -> false, true);
   }
@@ -451,7 +454,10 @@ public final class LlmDispatcher implements AutoCloseable {
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
     request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
-    ChatRequest input = filtering.input(request, abandoned);
+    if (fold && !request.tools().isEmpty())
+      throw new IllegalArgumentException("Historical summary requests cannot carry tools");
+    ChatRequest input =
+        fold ? filtering.historyInput(request, abandoned) : filtering.input(request, abandoned);
     boundary.require(input.authorization());
     requireSameMediaContract(request, input);
     boolean retainedImages = PromptImages.hasStored(input);

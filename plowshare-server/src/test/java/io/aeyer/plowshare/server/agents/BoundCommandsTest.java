@@ -31,6 +31,7 @@ class BoundCommandsTest {
   final UUID id = UUID.randomUUID();
   final BoundCommands commands = new BoundCommands(store, skills, orchestrations, callers, runtime);
   final AtomicReference<CommandInvocations.Bound> stored = new AtomicReference<>();
+  final BoundCommandTool orchestrationOperation = mock(BoundCommandTool.class);
   final DefinitionResolver.Caller authority = new DefinitionResolver.Caller(null, "session");
 
   @BeforeEach
@@ -132,17 +133,17 @@ class BoundCommandsTest {
   void dispatch_keeps_original_arguments_and_same_receipt_never_runs_twice() {
     var prepared = prepare(true, "/skill:review Review exactly this\nincluding this line");
     assertNull(prepared.refusal());
-    assertTrue(prepared.notice().contains("The following command has been invoked"));
+    assertTrue(prepared.notice().contains("The user selected an explicit command"));
     assertTrue(prepared.notice().contains(id.toString()));
     assertEquals("Review exactly this\nincluding this line", stored.get().arguments());
     assertNotNull(prepared.fence("skill_run"));
     assertNotNull(prepared.fence("agent_run"));
     assertNull(prepared.fence("file_read"));
-    assertNotNull(prepared.unfinished());
-    var tool = prepared.tool();
-    assertTrue(
-        tool.run("{\"invocation\":\"" + id + "\",\"arguments\":\"replaced\"}", Home.global())
-            .contains("only"));
+    assertEquals("bound", stored.get().state());
+    assertEquals(SkillRuntime.RUN, prepared.dispatchCalls().getFirst().name());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> prepared.dispatchBound(UUID.randomUUID(), Home.global()));
     verifyNoInteractions(runtime);
     when(runtime.dispatch(
             any(),
@@ -155,9 +156,9 @@ class BoundCommandsTest {
             eq("alice"),
             same(end)))
         .thenReturn("Reviewed");
-    assertEquals("Reviewed", tool.run("{\"invocation\":\"" + id + "\"}", Home.global()));
-    assertNull(prepared.unfinished());
-    assertTrue(tool.run("{\"invocation\":\"" + id + "\"}", Home.global()).contains("not replayed"));
+    assertEquals("Reviewed", prepared.dispatchBound(id, Home.global()));
+    assertEquals("finished", stored.get().state());
+    assertTrue(prepared.dispatchBound(id, Home.global()).contains("not replayed"));
     verify(runtime, times(1))
         .dispatch(
             argThat(
@@ -181,8 +182,8 @@ class BoundCommandsTest {
             "Read and execute these instructions.\nInstructions.\nOriginal arguments: request");
     var prepared = prepare(true, "/skill:review request");
     assertNull(prepared.refusal());
-    assertNull(prepared.tool());
-    assertNull(prepared.unfinished());
+    assertTrue(prepared.dispatchCalls().isEmpty());
+    assertEquals("finished", stored.get().state());
     assertTrue(
         prepared.notice().contains("The user has issued the following command: /skill:review"));
     assertTrue(
@@ -253,7 +254,7 @@ class BoundCommandsTest {
         .thenReturn("Instructions.");
     var prepared = prepare(true, "/skill:review");
     assertNull(prepared.refusal());
-    assertNull(prepared.tool());
+    assertTrue(prepared.dispatchCalls().isEmpty());
     assertTrue(prepared.notice().contains("Instructions."));
     assertEquals("DIRECT", stored.get().mode());
     assertEquals("", stored.get().arguments());
@@ -271,7 +272,7 @@ class BoundCommandsTest {
     offer("mode: NEW\n");
     var delegated = prepare(true, "/skill:review");
     assertNull(delegated.refusal());
-    assertNotNull(delegated.tool());
+    assertEquals(1, delegated.dispatchCalls().size());
     assertEquals("NEW", stored.get().mode());
     assertEquals("", stored.get().arguments());
   }
@@ -321,7 +322,7 @@ class BoundCommandsTest {
     assertEquals(original.notice(), continuation.notice());
     verify(store, never()).bind(any(), any(), any(), any(), any(), any(), any());
     verifyNoInteractions(skills, orchestrations, runtime);
-    assertNull(prepare(true, "Review this work please").tool());
+    assertTrue(prepare(true, "Review this work please").dispatchCalls().isEmpty());
   }
 
   @Test
@@ -329,10 +330,128 @@ class BoundCommandsTest {
     var prepared = prepare(true, "/skill:review request");
     when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenThrow(new IllegalStateException("The definition changed. Nothing ran."));
-    assertThrows(
-        IllegalStateException.class,
-        () -> prepared.tool().run("{\"invocation\":\"" + id + "\"}", Home.global()));
+    assertThrows(IllegalStateException.class, () -> prepared.dispatchBound(id, Home.global()));
     assertEquals("failed", stored.get().state());
-    assertTrue(prepared.unfinished().contains("definition changed"));
+    assertTrue(stored.get().result().contains("definition changed"));
+  }
+
+  BoundCommands.Prepared orchestration(String input) {
+    var definition = mock(OrchestrationDefinition.class);
+    when(definition.conductor()).thenReturn(caller);
+    when(definition.tier()).thenReturn(OrchestrationDefinition.Tier.GLOBAL);
+    when(definition.hash()).thenReturn("pinned-hash");
+    when(definition.triggers())
+        .thenReturn(List.of(new OrchestrationDefinition.Trigger("/review", true)));
+    when(orchestrations.forCaller(authority)).thenReturn(Map.of("review", definition));
+    var workflowCaller = mock(AgentDefinition.class);
+    when(workflowCaller.name()).thenReturn("bot");
+    when(workflowCaller.orchestrations()).thenReturn(List.of("review"));
+    when(orchestrationOperation.runBound(
+            id, "pinned-hash", "Original request\nwith details", Home.global()))
+        .thenReturn("Orchestration started");
+    return commands.prepare(
+        true,
+        input,
+        workflowCaller,
+        transcript,
+        Home.global(),
+        budget,
+        () -> false,
+        "session",
+        "alice",
+        end,
+        new LinkedHashMap<>(Map.of("orchestrate_review", orchestrationOperation)));
+  }
+
+  @Test
+  void orchestration_is_dispatched_by_the_harness_without_a_model_tool_or_replacement_arguments() {
+    var prepared = orchestration("/orchestration:review Original request\nwith details");
+    assertNull(prepared.refusal());
+    assertEquals(1, prepared.dispatchCalls().size());
+    assertFalse(prepared.notice().contains("command_dispatch"));
+    var call = prepared.dispatchCalls().getFirst();
+    assertEquals(id.toString(), call.id());
+    assertEquals("orchestrate_review", call.name());
+    assertTrue(call.arguments().contains("Original request\\nwith details"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> prepared.dispatchBound(UUID.randomUUID(), Home.global()));
+    assertEquals("Orchestration started", prepared.dispatchBound(id, Home.global()));
+    assertEquals("finished", stored.get().state());
+    assertTrue(prepared.dispatchBound(id, Home.global()).contains("not replayed"));
+    verify(store, times(1)).ended(any(), eq("finished"), eq("Orchestration started"));
+    verify(orchestrationOperation, times(1))
+        .runBound(id, "pinned-hash", "Original request\nwith details", Home.global());
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
+  void orchestration_rechecks_source_and_authority_before_starting_and_never_replays_failure() {
+    var prepared = orchestration("/orchestration:review Original request\nwith details");
+    when(orchestrations.forCaller(authority)).thenReturn(Map.of());
+    assertThrows(IllegalStateException.class, () -> prepared.dispatchBound(id, Home.global()));
+    assertEquals("failed", stored.get().state());
+    assertTrue(
+        assertThrows(IllegalStateException.class, () -> prepared.dispatchBound(id, Home.global()))
+            .getMessage()
+            .contains("not replayed"));
+    verify(store, times(1)).ended(any(), eq("failed"), anyString());
+    verifyNoInteractions(orchestrationOperation);
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
+  void orchestration_revocation_prevents_starting() {
+    var prepared = orchestration("/orchestration:review Original request\nwith details");
+    doThrow(new IllegalStateException("Project access refused"))
+        .when(callers)
+        .requireWork(any(), any());
+    assertThrows(IllegalStateException.class, () -> prepared.dispatchBound(id, Home.global()));
+    assertEquals("failed", stored.get().state());
+    verifyNoInteractions(orchestrationOperation);
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
+  void an_uncertain_orchestration_claim_is_inspect_only() {
+    var prepared = orchestration("/orchestration:review Original request\nwith details");
+    when(store.claim(any())).thenReturn(false);
+    assertTrue(
+        assertThrows(IllegalStateException.class, () -> prepared.dispatchBound(id, Home.global()))
+            .getMessage()
+            .contains("not replayed"));
+    verifyNoInteractions(orchestrationOperation);
+    verify(store, never()).ended(any(), any(), any());
+  }
+
+  @Test
+  void a_command_alias_binds_the_canonical_operation_with_original_arguments() {
+    var prepared = orchestration("/REVIEW Original request\nwith details");
+    assertNull(prepared.refusal());
+    assertEquals("/orchestration:review", stored.get().command());
+    assertEquals("Original request\nwith details", stored.get().arguments());
+    assertEquals("Orchestration started", prepared.dispatchBound(id, Home.global()));
+    verify(orchestrationOperation)
+        .runBound(id, "pinned-hash", "Original request\nwith details", Home.global());
+  }
+
+  @Test
+  void every_explicit_delegated_mode_is_harness_dispatched_and_keeps_its_context_policy() {
+    for (String mode : List.of("NEW", "INHERITED", "SUMMARISED")) {
+      offer("mode: " + mode + "\n");
+      when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+          .thenReturn("Skill completed");
+      var prepared = prepare(true, "/skill:review Original request\nwith details");
+      assertNull(prepared.refusal());
+      assertFalse(prepared.notice().contains("command_dispatch"));
+      var call = prepared.dispatchCalls().getFirst();
+      assertEquals(SkillRuntime.RUN, call.name());
+      assertTrue(call.arguments().contains("\"mode\":\"" + mode + "\""));
+      assertEquals("Skill completed", prepared.dispatchBound(id, Home.global()));
+      assertEquals(mode, stored.get().mode());
+      assertEquals("finished", stored.get().state());
+    }
+    verify(runtime, times(3))
+        .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any());
   }
 }

@@ -36,4 +36,16 @@ describe('server commands use conversation transport', () => {
     expect(completing('/ski', []).matches).toContain('/skills');
     expect(completing('/comm', []).matches).toContain('/commands');
   });
+  it('passes only discovered aliases to the harness and preserves native commands', () => {
+    expect(
+      typed('/research Original request\nwith details', 'Research', [], {}, [
+        '/research',
+      ]),
+    ).toEqual({
+      kind: 'utterance',
+      text: '/research Original request\nwith details',
+    });
+    expect(typed('/research request', 'Research').kind).toBe('unknown');
+    expect(typed('/help', 'Research', [], {}, ['/help']).kind).toBe('help');
+  });
 });

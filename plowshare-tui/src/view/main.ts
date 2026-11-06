@@ -4404,10 +4404,12 @@ export async function converse(talking: Talking): Promise<void> {
           name: '/mcp',
           detail: 'manage This client HTTP/STDIO and Server HTTP connections',
         },
-        ...(chosen.agent.commands ?? []).map((command) => ({
-          name: command.command,
-          detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
-        })),
+        ...(chosen.agent.commands ?? []).flatMap((command) =>
+          [command.command, ...command.aliases].map((name) => ({
+            name,
+            detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
+          })),
+        ),
       ],
     );
     if (!starting) {
@@ -5315,10 +5317,16 @@ export async function converse(talking: Talking): Promise<void> {
           }
           continue;
         }
-        const line = typed(asked, now.project, answerable, {
-          ...(now.conversation ? { conversation: now.conversation } : {}),
-          agent: now.who.name,
-        });
+        const line = typed(
+          asked,
+          now.project,
+          answerable,
+          {
+            ...(now.conversation ? { conversation: now.conversation } : {}),
+            agent: now.who.name,
+          },
+          (now.who.commands ?? []).flatMap((command) => command.aliases),
+        );
         if (line.kind === 'projects') {
           await list(line.ask, projects, describeProjects);
           continue;
@@ -5350,10 +5358,12 @@ export async function converse(talking: Talking): Promise<void> {
                 detail:
                   'manage This client HTTP/STDIO and Server HTTP connections',
               },
-              ...(selected?.commands ?? []).map((command) => ({
-                name: command.command,
-                detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
-              })),
+              ...(selected?.commands ?? []).flatMap((command) =>
+                [command.command, ...command.aliases].map((name) => ({
+                  name,
+                  detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
+                })),
+              ),
             ],
           );
           place = { ...now, who: selected ?? { ...now.who, commands: [] } };

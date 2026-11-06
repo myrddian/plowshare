@@ -190,7 +190,10 @@ granted skills can remain available through bound human commands such as
 `/skill:<name>`. Human skill commands accept empty arguments and default to
 `DIRECT` when the package omits its mode. Use `--mode=INHERITED`, `SUMMARISED`,
 or `NEW` to select delegated context. A package selecting another agent requires
-a delegated mode. Model-selected invocation still requires a configured mode.
+a delegated mode. Every explicit skill command is activated or launched by the
+harness without a model dispatch decision. Delegated context modes still use
+their selected executor and normal approval lifecycle. Model-selected invocation
+still requires a configured mode.
 Optional `argument-hint` frontmatter explains useful inputs in command discovery.
 
 | Mode | Context behavior |

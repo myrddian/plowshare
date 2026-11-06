@@ -41,6 +41,18 @@ example, explicit instructions to ignore previous instructions or print the
 system prompt are refused before an inference call. SYSTEM and ASSISTANT text
 skip injection keyword checks. Images are preserved without inspection.
 
+Conversation compaction (both between turns and within a turn) and skill-context
+summaries use an internal historical-data inspection path. Their USER message
+contains a quoted log, including earlier assistant/tool text, rather than new
+instructions to execute. Local injection keyword matching therefore does not
+reject that historical text. Message roles are preserved; input-size and
+sensitive-data policies, configured external review, output inspection and live
+authorization remain in force. Summary requests cannot carry tools. This policy
+cannot be selected by a user payload or by labelling ordinary chat as `FOLD`.
+The folder must describe any instruction override as an attributed historical
+event, never promote it into instructions for a later turn. A refusal from a
+disclosure policy or external reviewer still leaves the original history intact.
+
 The server bundles prompt-injection keyword rules and a sensitive-pattern catalog.
 The original rule data, [license](../plowshare-server/src/main/resources/security/rules/LICENSE)
 and [data notice](../plowshare-server/src/main/resources/security/rules/NOTICE) are
