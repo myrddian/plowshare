@@ -87,7 +87,7 @@ function checkbox(root: HTMLElement, label: string) {
   if (!control) throw new Error('Missing checkbox');
   return control;
 }
-function fixture() {
+function fixture(selected: NativeProfile = profile) {
   let actor = 'owner',
     connected = true;
   let deferred:
@@ -104,7 +104,17 @@ function fixture() {
     execute: async (command) => {
       commands.push(command);
       if (deferred) return deferred(command);
-      if (command.action === 'profile-read') return profile;
+      if (command.action === 'profile-read') return selected;
+      if (command.action === 'configuration-files')
+        return {
+          configurationFiles: [
+            {
+              scope: 'user',
+              file: selected.file,
+              profiles: [selected.config.profile],
+            },
+          ],
+        };
       if (command.action === 'inspect')
         return { ...host, active: false, tools: [] };
       if (command.action === 'start') return host;
@@ -114,7 +124,13 @@ function fixture() {
   });
   controls.element.open = true;
   document.body.append(controls.element);
-  field(controls.element, 'file').value = profile.file;
+  if (selected.entry === undefined) {
+    const storage = controls.element.querySelector<HTMLSelectElement>('select');
+    if (!storage) throw new Error('Missing storage selection');
+    storage.value = 'Private profile file';
+    storage.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  field(controls.element, 'file').value = selected.file;
   return {
     controls,
     commands,
@@ -139,6 +155,7 @@ test('native form reads do not launch; start binds reviewed revision and nested 
   button(root, 'Load profile').click();
   await vi.waitFor(() => expect(field(root, 'profile').value).toBe('echo'));
   expect(f.commands.map((command) => command.action)).toEqual(['profile-read']);
+  expect(f.commands[0]).toEqual({ action: 'profile-read', file: profile.file });
   button(root, 'Start local host').click();
   await vi.waitFor(() => expect(root.textContent).toContain('Action refused'));
   expect(f.commands).toHaveLength(1);
@@ -166,6 +183,46 @@ test('native form reads do not launch; start binds reviewed revision and nested 
   ).toBe(false);
   f.controls.destroy();
   expect(f.commands.some((command) => command.action === 'stop')).toBe(false);
+});
+
+test('shared-file launch retains the loaded entry and revision instead of guessing from the connection name', async () => {
+  const selected = {
+    ...profile,
+    file: '/private-fixture/mcp.json',
+    entry: profile.config.profile,
+  };
+  const f = fixture(selected),
+    root = f.controls.element;
+  f.controls.loadSettings();
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain('User MCP settings loaded'),
+  );
+  button(root, 'Load profile').click();
+  await vi.waitFor(() => expect(field(root, 'profile').value).toBe('echo'));
+  expect(
+    f.commands.find((command) => command.action === 'profile-read'),
+  ).toEqual({
+    action: 'profile-read',
+    file: selected.file,
+    entry: selected.entry,
+  });
+  checkbox(
+    root,
+    'I reviewed this profile and permit this instance to connect or launch its configured process',
+  ).checked = true;
+  button(root, 'Start local host').click();
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain('Local host started'),
+  );
+  for (const action of ['inspect', 'start'])
+    expect(
+      f.commands.find((command) => command.action === action),
+    ).toMatchObject({
+      file: selected.file,
+      entry: selected.entry,
+      expectedRevision: selected.revision,
+    });
+  f.controls.destroy();
 });
 
 test('account changes discard delayed profile reads and clear private drafts', async () => {

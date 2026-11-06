@@ -10,6 +10,8 @@ import type { NativeMcpConfig, NativeOwner } from './native-config.ts';
 
 export interface NativeProfile {
   readonly file: string;
+  /** Named entry in a shared mcp.json; absent for a standalone private profile. */
+  readonly entry?: string;
   readonly revision: string;
   readonly config: NativeMcpConfig;
 }
@@ -24,15 +26,17 @@ function revision(config: NativeMcpConfig): string {
   return createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 /** Profile authoring only. Reads/saves never resolve environment references or start a host.
- * Compare the complete validated revision under the SDK's exclusive private writer lock;
+ * Compare the complete validated entry revision under the store's exclusive writer lock;
  * a stale editor cannot overwrite another editor or adopt a foreign account's profile.
  */
 export interface NativeProfileStore {
-  read(file: string): Promise<NativeProfile>;
+  /** Omit entry for a standalone private profile; supply its name for a shared mcp.json. */
+  read(file: string, entry?: string): Promise<NativeProfile>;
   save(
     file: string,
     config: NativeMcpConfig,
     expectedRevision: string | null,
+    entry?: string,
   ): Promise<NativeProfile>;
 }
 export class NativeProfiles implements NativeProfileStore {

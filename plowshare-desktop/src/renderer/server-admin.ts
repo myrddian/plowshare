@@ -22,11 +22,18 @@ import type {
 export function installServerAdmin(
   request: (request: Request) => Promise<Reply>,
   host: HTMLElement,
+  work: { open(host: HTMLElement): void; close(): void },
 ) {
   type Section =
-    'configuration' | 'accounts' | 'services' | 'tools' | 'pricing' | 'audit';
+    | 'configuration'
+    | 'accounts'
+    | 'services'
+    | 'tools'
+    | 'pricing'
+    | 'audit'
+    | 'work';
   host.innerHTML = `<div class="administration-shell"><header class="administration-heading"><div><h1>Server administration</h1><p data-server-identity></p></div><button type="button" data-return>Return to conversation</button></header>
-    <div class="administration-layout"><nav class="administration-navigation" aria-label="Administration sections"><button type="button" data-section="configuration">Configuration</button><div class="admin-nav-label">Identity &amp; access</div><button type="button" data-section="accounts">Accounts</button><button type="button" data-section="services" data-services>Service accounts</button><div class="admin-nav-label">Tools &amp; accounting</div><button type="button" data-section="tools">Server tools</button><button type="button" data-section="pricing" data-pricing>Pricing</button><button type="button" data-section="audit">Audit history</button></nav><div class="administration-content"><p data-error role="alert" hidden></p><div data-panels></div></div></div></div>`;
+    <div class="administration-layout"><nav class="administration-navigation" aria-label="Administration sections"><button type="button" data-section="configuration">Configuration</button><div class="admin-nav-label">Identity &amp; access</div><button type="button" data-section="accounts">Accounts</button><button type="button" data-section="services" data-services>Service accounts</button><div class="admin-nav-label">Work &amp; tools</div><button type="button" data-section="work">Manage work</button><button type="button" data-section="tools">Server MCP</button><button type="button" data-section="pricing" data-pricing>Pricing</button><button type="button" data-section="audit">Audit history</button></nav><div class="administration-content"><p data-error role="alert" hidden></p><div data-panels></div></div></div></div>`;
   const panels = host.querySelector<HTMLElement>('[data-panels]')!;
   const accountsPanel = document.createElement('section');
   accountsPanel.id = 'accounts-admin-panel';
@@ -50,8 +57,13 @@ export function installServerAdmin(
   toolsPanel.id = 'server-tools-admin-panel';
   toolsPanel.className = 'administration-panel';
   toolsPanel.hidden = true;
-  toolsPanel.innerHTML = `<header><div><h2>Server tools</h2><p>Shared endpoints and project assignments. Credentials remain scoped to their owner.</p></div></header><label class="admin-project-picker">Execution project<select data-tools-project aria-label="Server tools execution project"></select></label><p data-tools-empty hidden>No execution projects are available for server tool management.</p><div data-tools-host></div>`;
+  toolsPanel.innerHTML = `<header><div><h2>Server MCP</h2><p>Shared endpoints and project assignments. Credentials remain scoped to their owner.</p></div></header><label class="admin-project-picker">Execution project<select data-tools-project aria-label="Server tools execution project"></select></label><p data-tools-empty hidden>No execution projects are available for server tool management.</p><div data-tools-host></div>`;
   panels.append(toolsPanel);
+  const workPanel = document.createElement('section');
+  workPanel.className = 'administration-panel';
+  workPanel.id = 'work-admin-panel';
+  workPanel.hidden = true;
+  panels.append(workPanel);
   const get = <T extends HTMLElement>(selector: string) =>
     host.querySelector<T>(selector)!;
   let active: Section = 'configuration';
@@ -225,6 +237,8 @@ export function installServerAdmin(
     generation++;
     busy = false;
     clearPassword();
+    work.close();
+    workPanel.hidden = true;
     configuration.close();
     services.close();
     pricing.close();
@@ -245,7 +259,10 @@ export function installServerAdmin(
         button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     }
-    if (section === 'configuration') configuration.open();
+    if (section === 'work') {
+      workPanel.hidden = false;
+      work.open(workPanel);
+    } else if (section === 'configuration') configuration.open();
     else if (section === 'services') services.open();
     else if (section === 'pricing') pricing.open();
     else if (section === 'tools') {

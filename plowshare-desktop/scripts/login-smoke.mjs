@@ -1,3 +1,4 @@
+import { openConnectionSettings } from './settings-navigation.mjs';
 import { connectionDirectory } from '../../sdk/node/build/connections.js';
 import { _electron as electron, expect } from 'playwright/test';
 import executablePath from 'electron';
@@ -24,7 +25,7 @@ const state = page => page.evaluate(async () => (await window.plowshare.request(
 const close = async () => { await app.close(); app = undefined; };
 try {
   let page = await launch();
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture');
   await page.locator('#password').fill('fixture-password');
@@ -52,7 +53,7 @@ try {
   assert.equal((await state(page)).handle, 'another-account');
   assert.equal((await state(page)).connected, false);
   await page.evaluate(name => window.plowshare.request({ action: 'connection-select', name }), config.connections[0].name);
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await expect(page.locator('#server-url')).toHaveValue(fixture.base);
   await expect(page.locator('#handle')).toHaveValue('fixture');
   await expect(page.locator('#password')).toHaveValue('');
@@ -68,7 +69,7 @@ try {
   await close();
   page = await launch();
   assert.equal((await state(page)).connected, false, 'Explicit disconnect must survive restart.');
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await expect(page.locator('#server-url')).toHaveValue(fixture.base);
   await expect(page.locator('#password')).toHaveValue('');
   await page.locator('#submit-connection').click();
@@ -79,7 +80,7 @@ try {
   page = await launch();
   assert.equal((await state(page)).connected, false);
   assert.match((await state(page)).connectionPersistenceError, /Saved connection could not be restored/);
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await expect(page.locator('#server-url')).toHaveValue(fixture.base);
   await expect(page.locator('#handle')).toHaveValue('fixture');
   await page.locator('#password').fill('fixture-password');

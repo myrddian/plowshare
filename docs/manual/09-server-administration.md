@@ -115,8 +115,12 @@ is a server administrator. Managing a project does not grant every private
 document or other account's conversation to the administrator's model context.
 
 Use **Server administration** in the desktop for separate Configuration, Accounts,
-Service accounts, Server tools, Pricing and Audit history sections. The workspace
+Service accounts, Manage work, Server MCP, Pricing and Audit history sections. The workspace
 keeps its navigation visible while you select an account or edit a setting.
+Manage work covers memories, conversation lifecycle, command permissions and work
+limits using their existing ownership rules. Regular users retain those controls
+through project Info → Files → Project controls or Find. Processes remains a main
+workspace destination for authorized job, queue and model-call inspection.
 Configuration exposes declared live keys only; startup configuration remains in
 the deployment. Pinned values are restored from deployment configuration on restart.
 Desktop uses the configuration HTTP boundary and checks administrator status

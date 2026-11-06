@@ -15,9 +15,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { object, text } from './codec.ts';
 import { uuid } from './journal.ts';
 import { boundedInteger, renewalFraction, MAX_TIMER_MS } from './settings.ts';
-import { decodeNativeConfig, readNativeConfig } from './native-config.ts';
+import { decodeNativeConfig } from './native-config.ts';
 import type { NativeMcpConfig } from './native-config.ts';
-import { NativeProfiles } from './native-profiles.ts';
+import { NativeConfigurations } from './native-configuration.ts';
+import type {
+  NativeConfigurationFile,
+  NativeConfigurationStore,
+} from './native-configuration.ts';
 import type { NativeProfile, NativeProfileStore } from './native-profiles.ts';
 import type { NativeOwner } from './native-config.ts';
 import { NativeMcpHosts, nativeLaunchReview } from './native-host.ts';
@@ -29,28 +33,37 @@ import type {
 import type { NativeSharingConnection } from './native-bridge.ts';
 import { NativeProviderBridge } from './native-bridge.ts';
 
+interface ProfileTarget {
+  readonly file: string;
+  readonly entry?: string;
+}
 export type NativeCommand =
-  | { readonly action: 'profile-read'; readonly file: string }
+  | { readonly action: 'configuration-files'; readonly root?: string }
+  | ({ readonly action: 'profile-read' } & ProfileTarget)
   | {
       readonly action: 'profile-save';
       readonly file: string;
+      readonly entry?: string;
       readonly config: NativeMcpConfig;
       readonly expectedRevision: string | null;
     }
   | {
       readonly action: 'inspect';
       readonly file: string;
+      readonly entry?: string;
       readonly expectedRevision?: string;
     }
   | {
       readonly action: 'start';
       readonly file: string;
+      readonly entry?: string;
       readonly consent: boolean;
       readonly expectedRevision?: string;
     }
   | {
       readonly action: 'share';
       readonly file: string;
+      readonly entry?: string;
       readonly consent: boolean;
       readonly expectedRevision?: string;
       readonly scope: ToolScopeConnect;
@@ -76,6 +89,7 @@ export type NativeCommandResult =
   | NativeManagedStatus
   | readonly NativeManagedStatus[]
   | NativeProfile
+  | { readonly configurationFiles: readonly NativeConfigurationFile[] }
   | ToolResult
   | { readonly stopped: true };
 function fields(
@@ -119,12 +133,24 @@ export function decodeNativeCommand(source: unknown): NativeCommand {
     !/^[a-f0-9]{64}$/.test(revision.expectedRevision)
   )
     throw new Error('Invalid native MCP profile revision');
+  const target = row.entry === undefined ? {} : { entry: text(row.entry, 64) };
+  if (
+    'entry' in target &&
+    !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(target.entry)
+  )
+    throw new Error('Invalid MCP configuration profile name');
   switch (row.action) {
+    case 'configuration-files':
+      fields(row, ['action', 'root']);
+      return {
+        action: 'configuration-files',
+        ...(row.root === undefined ? {} : { root: text(row.root, 4096) }),
+      };
     case 'profile-read':
-      fields(row, ['action', 'file']);
-      return { action: 'profile-read', file: text(row.file, 4096) };
+      fields(row, ['action', 'file', 'entry']);
+      return { action: 'profile-read', file: text(row.file, 4096), ...target };
     case 'profile-save': {
-      fields(row, ['action', 'file', 'config', 'expectedRevision']);
+      fields(row, ['action', 'file', 'entry', 'config', 'expectedRevision']);
       if (
         row.expectedRevision !== null &&
         (typeof row.expectedRevision !== 'string' ||
@@ -134,22 +160,29 @@ export function decodeNativeCommand(source: unknown): NativeCommand {
       return {
         action: 'profile-save',
         file: text(row.file, 4096),
+        ...target,
         config: decodeNativeConfig(row.config),
         expectedRevision: row.expectedRevision,
       };
     }
     case 'inspect':
-      fields(row, ['action', 'file', 'expectedRevision']);
-      return { action: 'inspect', file: text(row.file, 4096), ...revision };
+      fields(row, ['action', 'file', 'entry', 'expectedRevision']);
+      return {
+        action: 'inspect',
+        file: text(row.file, 4096),
+        ...target,
+        ...revision,
+      };
     case 'start':
     case 'share': {
       fields(
         row,
         row.action === 'start'
-          ? ['action', 'file', 'consent', 'expectedRevision']
+          ? ['action', 'file', 'entry', 'consent', 'expectedRevision']
           : [
               'action',
               'file',
+              'entry',
               'consent',
               'scope',
               'pollMs',
@@ -161,6 +194,7 @@ export function decodeNativeCommand(source: unknown): NativeCommand {
         throw new Error('Native MCP launch requires explicit consent');
       const base = {
         file: text(row.file, 4096),
+        ...target,
         consent: row.consent,
         ...revision,
       };
@@ -231,6 +265,7 @@ export function nativeProviderConnection(
  */
 export class NativeHostCommands {
   private readonly profiles: NativeProfileStore;
+  private readonly configurations: NativeConfigurationStore;
   private configurationWork: Promise<NativeCommandResult> | undefined;
   readonly hosts: NativeMcpHosts;
   private shares = new Map<
@@ -247,13 +282,16 @@ export class NativeHostCommands {
     sessions: NativeSessions,
     private readonly connection?: NativeSharingConnection,
     profiles?: NativeProfileStore,
+    configurations?: NativeConfigurationStore,
   ) {
     this.owner = {
       origin: canonicalServer(owner.origin),
       account: connectionAccount(owner.account),
     };
     this.hosts = new NativeMcpHosts(this.owner, sessions);
-    this.profiles = profiles ?? new NativeProfiles(this.owner);
+    this.configurations =
+      configurations ?? new NativeConfigurations(this.owner);
+    this.profiles = profiles ?? this.configurations;
   }
   async execute(source: NativeCommand): Promise<NativeCommandResult> {
     const command = decodeNativeCommand(source);
@@ -280,13 +318,17 @@ export class NativeHostCommands {
     }
   }
   private async perform(command: NativeCommand): Promise<NativeCommandResult> {
+    if (command.action === 'configuration-files')
+      return {
+        configurationFiles: await this.configurations.files(command.root),
+      };
     if (command.action === 'profile-read')
-      return this.profiles.read(command.file);
+      return this.profiles.read(command.file, command.entry);
     if (command.action === 'profile-save') {
       const original =
         command.expectedRevision === null
           ? undefined
-          : await this.profiles.read(command.file);
+          : await this.profiles.read(command.file, command.entry);
       if (
         this.hosts
           .list()
@@ -306,6 +348,7 @@ export class NativeHostCommands {
         command.file,
         command.config,
         command.expectedRevision,
+        command.entry,
       );
     }
     if (command.action === 'list')
@@ -332,12 +375,14 @@ export class NativeHostCommands {
     const profile =
       command.expectedRevision === undefined
         ? undefined
-        : await this.profiles.read(command.file);
+        : await this.profiles.read(command.file, command.entry);
     if (profile !== undefined && profile.revision !== command.expectedRevision)
       throw new Error(
         'Native MCP profile changed after review; reload before launch',
       );
-    const config = profile?.config ?? (await readNativeConfig(command.file));
+    const config = (
+      profile ?? (await this.profiles.read(command.file, command.entry))
+    ).config;
     if (
       config.owner.origin !== this.owner.origin ||
       config.owner.account !== this.owner.account

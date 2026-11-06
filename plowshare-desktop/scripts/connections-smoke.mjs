@@ -1,3 +1,4 @@
+import { openConnectionSettings } from './settings-navigation.mjs';
 import { _electron as electron, expect } from 'playwright/test';
 import executablePath from 'electron';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
@@ -26,7 +27,7 @@ const select = async (page, name) => {
   await expect.poll(async () => (await state(page)).connected).toBe(true);
 };
 const connect = async (page, name, server, account = 'fixture') => {
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await page.locator('#connection-name').fill(name);
   await page.locator('#server-url').fill(server);
   await page.locator('#handle').fill(account);

@@ -5185,8 +5185,12 @@ export async function converse(talking: Talking): Promise<void> {
             ),
           );
           const nativeOwner = nativeMcp;
+          const claim = rooting.current();
           await mcpControls({
             project: now.project ?? `personal:${loginHandle}`,
+            ...(claim !== undefined && claim.project === now.project
+              ? { root: claim.root }
+              : {}),
             owner,
             current: () =>
               !connectionLost &&

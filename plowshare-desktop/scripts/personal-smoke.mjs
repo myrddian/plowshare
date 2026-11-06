@@ -84,7 +84,7 @@ try {
     await expect(page.locator('#personal-title')).toHaveText(section === 'In' ? 'Inbox' : section);
     assert.equal(await page.locator('[data-personal-inbox]').count(), 0);
   }
-  await page.locator('#controls-button').click();
+  await page.locator('#navigation-open').click();await page.locator('#navigation-query').fill('Project controls');await page.locator('#navigation-results button').first().click();
   await expect(page.locator('#personal-panel')).toBeHidden();
   await expect(page.locator('#workspace-manage')).toBeVisible();
   await page.locator('[data-personal-section="Planning"]').click();

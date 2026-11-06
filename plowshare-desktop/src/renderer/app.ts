@@ -423,6 +423,19 @@ const deploymentControls = installApplicationDeployment(() => state, request);
 const serverAdministration = installServerAdmin(
   request,
   $('#workspace-administration'),
+  {
+    open(host) {
+      host.append($('#workspace-manage'));
+      $('#workspace-manage').hidden = false;
+      operatorControls.open();
+    },
+    close() {
+      if (!$('#work-admin-panel')?.contains($('#workspace-manage'))) return;
+      operatorControls.close();
+      $('#workspace-manage').hidden = true;
+      $('#workspace-view-host').prepend($('#workspace-manage'));
+    },
+  },
 );
 $('#server-admin-open').addEventListener('click', () =>
   action({ action: 'workspace-administration' }),
@@ -431,21 +444,26 @@ const projectAccess = installProjectAccess(request);
 const toolConnections = installToolConnections(
   () => state,
   request,
-  () => {
-    background(
-      request({ action: 'workspace-administration' }).then(() =>
-        serverAdministration.select('tools'),
-      ),
-    );
-  },
+  openConnect,
 );
 const toolConnectionsButton = document.createElement('button');
 toolConnectionsButton.type = 'button';
-toolConnectionsButton.textContent = 'Desktop tools';
+toolConnectionsButton.id = 'settings-open';
+toolConnectionsButton.className = 'subtle-button';
+toolConnectionsButton.innerHTML = `${icon('gear')}<span>Settings</span>`;
 toolConnectionsButton.addEventListener('click', () => {
   toolConnections.open(scope || state.personal?.project || '');
 });
 $('#connect-sidebar').before(toolConnectionsButton);
+function openWorkControls() {
+  if (state.serverAdmin) {
+    background(
+      request({ action: 'workspace-administration' }).then(() =>
+        serverAdministration.select('work'),
+      ),
+    );
+  } else action({ action: 'workspace-chat', manage: true });
+}
 
 const localFileStores = installFileStores(request);
 function render() {
@@ -453,9 +471,14 @@ function render() {
   serverAdministration.update(state);
   projectAccess.update(state);
   toolConnections.update();
-  toolConnectionsButton.disabled = !state.connected;
+  for (const id of [
+    'project-work-open',
+    'project-mcp-open',
+    'project-server-tools-open',
+  ])
+    $<HTMLButtonElement>(`#${id}`).disabled = !state.connected;
   toolConnectionsButton.title =
-    'Manage local MCP hosts. Each profile names its execution project.';
+    'Server connections and client MCP configuration';
   if (!state) return;
   const recoveryWarning = $('#personal-recovery-warning');
   recoveryWarning.textContent = state.personal?.warning ?? '';
@@ -626,6 +649,7 @@ function render() {
     $('#notice>span:nth-child(2)').textContent =
       'Sample workspace · local replies';
   }
+  $('#connect-sidebar').hidden = state.connected;
   $('#connect-sidebar .button-label').textContent =
     state.mode === 'live' ? 'Connection settings' : 'Connect server';
   const roster = state.agents[scope] ?? [];
@@ -2188,20 +2212,40 @@ const navigation = installNavigation((): NavigationItem[] => {
     },
     {
       id: 'connection',
-      title: 'Connection settings',
+      title: 'Settings',
       detail: state.mode === 'demo' ? 'Connect your server' : state.base,
       group: 'Actions',
       icon: 'server',
-      run: openConnect,
+      run: () => toolConnectionsButton.click(),
     },
     {
-      id: 'desktop-tools',
-      title: 'Desktop tools',
-      detail: 'Local MCP hosts and your tool access',
+      id: 'client-mcp',
+      title: 'Client MCP settings',
+      detail: 'Shared user and project MCP configuration for Desktop and TUI',
       group: 'Actions',
       icon: 'tool',
       disabled: toolConnectionsButton.disabled,
-      run: () => toolConnectionsButton.click(),
+      run: () =>
+        toolConnections.open(scope || state.personal?.project || '', 'mcp'),
+    },
+    {
+      id: 'work-controls',
+      title: state.serverAdmin ? 'Manage work' : 'Project controls',
+      detail: 'Memories, conversations, permissions and work limits',
+      group: 'Actions',
+      icon: 'gear',
+      disabled: !state.connected,
+      run: openWorkControls,
+    },
+    {
+      id: 'my-server-tools',
+      title: 'My server tools',
+      detail: 'Your project tool credentials and assignments',
+      group: 'Actions',
+      icon: 'tool',
+      disabled: !state.connected,
+      run: () =>
+        toolConnections.openOwner(scope || state.personal?.project || ''),
     },
     ...(state.connected && state.serverAdmin
       ? [
@@ -2577,6 +2621,7 @@ for (const [selector, actionName] of [
   );
 }
 
+// Subscribe after update() so operator notifications render the current root snapshot.
 const operatorControls = installOperator(
   window.plowshare,
   () => state,
@@ -2587,12 +2632,19 @@ const operatorControls = installOperator(
   },
 );
 $('#workspace-manage').classList.add('workspace-manage');
-$('#controls-button').addEventListener('click', () => {
-  if (!state.connected) {
-    error('Connect to manage work.');
-    return;
-  }
-  action({ action: 'workspace-chat', manage: true });
+$('#controls-button').addEventListener('click', openWorkControls);
+$('#project-work-open').addEventListener('click', openWorkControls);
+$('#project-mcp-open').addEventListener('click', () =>
+  toolConnections.open(scope || state.personal?.project || '', 'mcp'),
+);
+$('#project-server-tools-open').addEventListener('click', () => {
+  if (state.serverAdmin)
+    background(
+      request({ action: 'workspace-administration' }).then(() =>
+        serverAdministration.select('tools'),
+      ),
+    );
+  else toolConnections.openOwner(scope || state.personal?.project || '');
 });
 
 function renderBreadcrumb() {
@@ -2646,7 +2698,7 @@ function renderBreadcrumb() {
           Usage: 'usage-open',
           Board: 'board-open',
           Swarm: 'swarm-open',
-          'Manage work': 'controls-button',
+          'Project controls': 'controls-button',
           'Server administration': 'server-admin-open',
         } as Record<string, string>
       )[workspaceRoute.label];
@@ -2698,7 +2750,7 @@ function showWorkspace(route: WorkspaceRoute) {
       } catch (reason) {
         error(errorMessage(reason));
       }
-    } else operatorControls.close();
+    } else if (route.kind !== 'administration') operatorControls.close();
     if (route.kind === 'chat') {
       signature = '';
       render();

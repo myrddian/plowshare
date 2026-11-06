@@ -75,7 +75,7 @@ export function installOperator(
   const dialog = document.createElement('dialog');
   dialog.className = 'operator-dialog';
   dialog.setAttribute('aria-label', 'Workspace controls');
-  dialog.innerHTML = `<header><div><div class="eyebrow">WORKSPACE</div><h2>Manage work</h2></div><button data-close type="button" class="secondary-button">Close</button></header><p>Choose a task below. You can review the exact change before applying it.</p><div class="operator-toolbar">${select(
+  dialog.innerHTML = `<header><div><div class="eyebrow">WORKSPACE</div><h2>Manage work</h2></div><button data-close type="button" class="secondary-button">Close</button></header><p>Manage project memories, conversation lifecycle, command permissions and work limits. Each action uses your existing access; review the exact change before applying it.</p><div class="operator-toolbar">${select(
     'kind',
     'What would you like to do?',
     OPERATOR_KINDS.map((k) => [k, labels[k]]),
@@ -581,6 +581,9 @@ export function installOperator(
     },
     open() {
       if (!state().connected) throw new Error('Connect to manage work.');
+      dialog.querySelector('h2')!.textContent = state().serverAdmin
+        ? 'Manage work'
+        : 'Project controls';
       project.innerHTML = `<option value="">Global workspace</option>${state()
         .projects.map(
           (p) => `<option value="${esc(p.name)}">${esc(p.name)}</option>`,

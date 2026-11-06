@@ -61,3 +61,9 @@
 #server-tools-admin-panel .tool-connections > div { display: flex; flex-wrap: wrap; gap: 8px; }
 @media(max-width:1050px) { .administration-layout { grid-template-columns: 156px minmax(0,1fr); } .administration-content { padding: 20px; } .admin-columns { grid-template-columns: minmax(0,1fr); gap: 20px; } .admin-columns > :is([data-accounts],[data-prices],[data-settings]) { border-bottom: 1px solid var(--line); padding-bottom: 16px; } }
 @media(max-width:700px) { .administration-layout { grid-template-columns: minmax(0,1fr); } .administration-navigation { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); gap: 4px; } .admin-nav-label { display: none; } .administration-heading { padding: 20px; } .administration-content { padding: 18px; } #pricing-admin-panel [data-edit], #pricing-admin-panel [data-token] { grid-template-columns: minmax(0,1fr); } }
+#work-admin-panel .operator-dialog { padding: 0; background: transparent; }
+#work-admin-panel .operator-dialog > header .eyebrow { display: none; }
+#work-admin-panel .operator-toolbar { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; align-items: end; }
+@media (max-width: 1000px) {
+  #work-admin-panel .operator-toolbar { grid-template-columns: 1fr; }
+}

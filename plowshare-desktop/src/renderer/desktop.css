@@ -860,3 +860,8 @@
 .information-panel:has(> .information-interchange[open]) { overflow:auto; }
 .information-panel:has(> .information-interchange[open]) > .information-workspace { flex:0 0 320px; min-height:240px; }
 .information-interchange[open] { max-height:none; overflow:visible; }
+/* Settings keeps its sections visible while the selected configuration scrolls. */
+.tool-connections-dialog[aria-label="Settings"][open] { display: flex; flex-direction: column; height: min(850px, calc(100vh - 48px)); overflow: hidden; }
+.tool-connections-dialog[aria-label="Settings"] > .dialog-header, .tool-connections-dialog[aria-label="Settings"] > .tool-connection-tabs { flex-shrink: 0; }
+.tool-connections-dialog[aria-label="Settings"] > [role="tabpanel"] { flex: 1; min-height: 0; overflow: auto; margin: 12px 0 0; padding: 0 8px 16px 0; }
+.tool-connections-dialog[aria-label="Settings"] > .tool-connections > summary { display: none; }

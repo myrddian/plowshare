@@ -155,3 +155,68 @@ test('server menu uses owner capability and presents original unconfirmed receip
   expect(messages.join('\n')).toContain('Server (HTTP)');
   expect(messages.join('\n')).toContain('no mutation was replayed');
 });
+
+test('shared project MCP settings can be edited by TUI and read by another native client without launch', async () => {
+  const { NativeConfigurations } = await import('plowshare-mcp-integration');
+  const { realpath } = await import('node:fs/promises');
+  const fixture = await nativeFixture();
+  const root = await realpath(fixture.directory);
+  const store = new NativeConfigurations(fixture.config.owner, root);
+  const files = await store.files(root);
+  const project = files.find((file) => file.scope === 'project');
+  if (!project) throw new Error('Missing project MCP location');
+  await store.save(project.file, fixture.config, null, fixture.config.profile);
+  const owner = new NativeHostCommands(
+    fixture.config.owner,
+    new NativeMcpSessions({}),
+    undefined,
+    undefined,
+    store,
+  );
+  const replies = ['1', '7', '2', '2', '1', '2'];
+  let question = '';
+  const commands: NativeCommand[] = [];
+  try {
+    await mcpControls({
+      project: fixture.config.project,
+      root,
+      owner: fixture.config.owner,
+      current: () => true,
+      prompt: {
+        show(message) {
+          question = message;
+        },
+        async read() {
+          if (replies.length) return replies.shift();
+          if (question.startsWith('Tool prefix')) return 'edited_';
+          if (question.startsWith('Save private')) return 'yes';
+          return '';
+        },
+      },
+      native: async (command) => {
+        commands.push(command);
+        return owner.execute(command);
+      },
+      server: refusedServer(),
+      authorize: async () => {
+        throw new Error('Unexpected server authorization');
+      },
+    });
+    const desktop = new NativeConfigurations(fixture.config.owner, root);
+    expect(
+      (await desktop.read(project.file, fixture.config.profile)).config.prefix,
+    ).toBe('edited_');
+    expect(
+      commands.find((command) => command.action === 'profile-save'),
+    ).toMatchObject({ file: project.file, entry: fixture.config.profile });
+    expect(
+      commands.some(
+        (command) => command.action === 'start' || command.action === 'share',
+      ),
+    ).toBe(false);
+    expect((await fixture.seen()).length).toBe(0);
+  } finally {
+    await owner.close();
+    await fixture.close();
+  }
+});

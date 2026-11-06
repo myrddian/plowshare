@@ -18,14 +18,15 @@ import type {
   ProviderManagementCall,
 } from '../shared.ts';
 
-/** Main owns the socket and private bookmarks. Renderer only holds display DTOs and drafts. */
+/** Settings owns client configuration; server credentials have a separate project view.
+ * Main owns files, processes and sockets. Closing a view discards drafts, never a host.
+ */
 export function installToolConnections(
   state: () => DesktopState,
   request: (value: Request) => Promise<Reply>,
-  openServer: () => void,
+  openConnection: () => void,
 ) {
   const dialog = document.createElement('dialog');
-  dialog.setAttribute('aria-label', 'Tool connections');
   dialog.className = 'tool-connections-dialog';
   document.body.append(dialog);
   let controls: ToolConnectionControls | undefined,
@@ -51,45 +52,74 @@ export function installToolConnections(
     }
     return reply;
   }
-  const management = providerManagement(call);
-  dialog.addEventListener('close', () => {
+  const context = () => ({
+    origin: state().base,
+    actor: state().handle,
+    connected: state().connected,
+    serverAdmin: state().serverAdmin === true,
+  });
+  const clear = () => {
     controls?.destroy();
     native?.destroy();
     native = undefined;
     controls = undefined;
     dialog.replaceChildren();
+  };
+  dialog.addEventListener('close', () => {
+    clear();
     restore?.focus();
   });
+  function header(title: string) {
+    clear();
+    identity = key();
+    restore =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    dialog.setAttribute('aria-label', title);
+    const header = document.createElement('header');
+    header.className = 'dialog-header';
+    const heading = document.createElement('h2');
+    heading.textContent = title;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => dialog.close());
+    header.append(heading, close);
+    dialog.append(header);
+    return close;
+  }
   return {
-    open(project: string) {
-      controls?.destroy();
-      native?.destroy();
-      identity = key();
-      restore =
-        document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null;
-      controls = toolConnectionControls({
-        project,
-        management,
-        context: () => ({
-          origin: state().base,
-          actor: state().handle,
-          connected: state().connected,
-          serverAdmin: state().serverAdmin === true,
-        }),
-        authorize: async (url) => {
-          await call({ action: 'open-link', url });
-        },
+    open(project: string, initial: 'connection' | 'mcp' = 'connection') {
+      const close = header('Settings');
+      const tabs = document.createElement('div');
+      tabs.className = 'tool-connection-tabs';
+      tabs.setAttribute('role', 'tablist');
+      tabs.setAttribute('aria-label', 'Settings sections');
+      const connectionTab = document.createElement('button'),
+        mcpTab = document.createElement('button');
+      const connection = document.createElement('section');
+      connection.id = 'connection-settings';
+      connection.setAttribute('role', 'tabpanel');
+      const description = document.createElement('p');
+      description.textContent = state().connected
+        ? `${state().base} · ${state().handle}`
+        : 'Choose a server and sign in.';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = 'Manage server connections';
+      edit.addEventListener('click', () => {
+        dialog.close();
+        openConnection();
       });
+      connection.append(description, edit);
+      const root = state().projectFolders?.find(
+        (folder) => folder.name === project,
+      )?.path;
       native = nativeMcpControls({
         project,
-        context: () => ({
-          origin: state().base,
-          actor: state().handle,
-          connected: state().connected,
-          serverAdmin: state().serverAdmin === true,
-        }),
+        ...(root === undefined ? {} : { root }),
+        context,
         execute: async (command) => {
           const reply = await call({
             action: 'native-mcp',
@@ -101,84 +131,71 @@ export function installToolConnections(
         },
       });
       native.element.open = true;
-      controls.element.open = true;
-      const close = document.createElement('button');
-      close.textContent = 'Close';
-      close.type = 'button';
-      close.addEventListener('click', () => dialog.close());
-      const header = document.createElement('div');
-      header.className = 'dialog-header';
-      const title = document.createElement('h2');
-      title.textContent = 'Tool connections';
-      header.append(title, close);
-      const tabs = document.createElement('div');
-      tabs.className = 'tool-connection-tabs';
-      tabs.setAttribute('role', 'tablist');
-      tabs.setAttribute('aria-label', 'Connection location');
-      const localTab = document.createElement('button'),
-        serverTab = document.createElement('button');
-      localTab.type = serverTab.type = 'button';
-      localTab.textContent = 'This client';
-      serverTab.textContent = state().serverAdmin
-        ? 'Server administration…'
-        : 'My server tools';
-      for (const tab of [localTab, serverTab]) tab.setAttribute('role', 'tab');
-      const choose = (local: boolean) => {
-        if (!local && state().serverAdmin) {
-          dialog.close();
-          openServer();
-          return;
-        }
-        native?.active(local);
-        if (controls) {
-          controls.element.hidden = local;
-          controls.element.open = !local;
-        }
-        localTab.setAttribute('aria-selected', String(local));
-        serverTab.setAttribute('aria-selected', String(!local));
-        localTab.tabIndex = local ? 0 : -1;
-        serverTab.tabIndex = local ? -1 : 0;
+      native.element.id = 'native-tool-connections';
+      native.element.setAttribute('role', 'tabpanel');
+      for (const [tab, label, panel, id] of [
+        [connectionTab, 'Connection', connection, 'connection-settings-tab'],
+        [mcpTab, 'Client MCP', native.element, 'native-tool-tab'],
+      ] as const) {
+        tab.type = 'button';
+        tab.textContent = label;
+        tab.id = id;
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-controls', panel.id);
+        panel.setAttribute('aria-labelledby', id);
+        tabs.append(tab);
+      }
+      let loaded = false;
+      const choose = (mcp: boolean) => {
+        connection.hidden = mcp;
+        native?.active(mcp);
+        connectionTab.setAttribute('aria-selected', String(!mcp));
+        mcpTab.setAttribute('aria-selected', String(mcp));
+        connectionTab.tabIndex = mcp ? -1 : 0;
+        mcpTab.tabIndex = mcp ? 0 : -1;
         dialog.scrollTop = 0;
+        if (mcp && !loaded && state().connected) {
+          loaded = true;
+          native?.loadSettings();
+        }
       };
-      localTab.addEventListener('click', () => choose(true));
-      serverTab.addEventListener('click', () => {
-        if (state().serverAdmin) {
-          dialog.close();
-          openServer();
-        } else choose(false);
-      });
+      connectionTab.addEventListener('click', () => choose(false));
+      mcpTab.addEventListener('click', () => choose(true));
       tabs.addEventListener('keydown', (event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
           return;
         event.preventDefault();
-        const local =
-          event.key === 'Home' ||
-          (event.key !== 'End' &&
-            localTab.getAttribute('aria-selected') !== 'true');
-        choose(local);
-        (local ? localTab : serverTab).focus();
+        const mcp =
+          event.key === 'End' ||
+          (event.key !== 'Home' &&
+            mcpTab.getAttribute('aria-selected') !== 'true');
+        choose(mcp);
+        (mcp ? mcpTab : connectionTab).focus();
       });
-      native.element.id = 'native-tool-connections';
-      controls.element.id = 'server-tool-connections';
-      localTab.setAttribute('aria-controls', native.element.id);
-      serverTab.setAttribute('aria-controls', controls.element.id);
-      localTab.id = 'native-tool-tab';
-      serverTab.id = 'server-tool-tab';
-      native.element.setAttribute('role', 'tabpanel');
-      native.element.setAttribute('aria-labelledby', localTab.id);
-      controls.element.setAttribute('role', 'tabpanel');
-      controls.element.setAttribute('aria-labelledby', serverTab.id);
-      tabs.append(localTab, serverTab);
-      dialog.replaceChildren(header, tabs, native.element, controls.element);
-      choose(true);
+      dialog.append(tabs, connection, native.element);
+      choose(initial === 'mcp');
+      dialog.showModal();
+      close.focus();
+    },
+    openOwner(project: string) {
+      const close = header('My server tools');
+      controls = toolConnectionControls({
+        project,
+        management: providerManagement(call),
+        context,
+        authorize: async (url) => {
+          await call({ action: 'open-link', url });
+        },
+      });
+      controls.element.open = true;
+      dialog.append(controls.element);
       dialog.showModal();
       close.focus();
     },
     update() {
       controls?.update();
       native?.update();
-      if (dialog.open && (identity !== key() || !state().connected))
-        dialog.close();
+      if (dialog.open && identity !== key()) dialog.close();
     },
   };
 }

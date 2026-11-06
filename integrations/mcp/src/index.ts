@@ -50,3 +50,9 @@ export type {
 } from './native-commands.ts';
 export type { NativeProfile, NativeProfileStore } from './native-profiles.ts';
 export type { NativeSharingConnection } from './native-bridge.ts';
+
+export { NativeConfigurations } from './native-configuration.ts';
+export type {
+  NativeConfigurationStore,
+  NativeConfigurationFile,
+} from './native-configuration.ts';

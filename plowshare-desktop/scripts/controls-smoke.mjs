@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
 const temporary=await realpath(await mkdtemp(join(tmpdir(),'plowshare-controls-'))),root=join(temporary,'Research');await mkdir(root);
-const fixture=await protocolFixture({controls:true});
+const fixture=await protocolFixture({controls:true,serverAdmin:true,configuration:true});
 const env={...process.env,PLOWSHARE_CONFIG_DIR:join(temporary,'credentials'),PLOWSHARE_DESKTOP_CONFIG:join(temporary,'config'),PLOWSHARE_DESKTOP_PROFILE:join(temporary,'profile')};delete env.ELECTRON_RUN_AS_NODE;
 let app;
 try{
@@ -14,7 +14,7 @@ try{
  await main.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
  await app.evaluate(({dialog},root)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[root]});},root);
  await main.evaluate(()=>window.plowshare.request({action:'files-choose'}));
- await main.locator('#controls-button').click();const panel=main.locator('.operator-dialog');await expect(panel).toBeVisible();await expect(panel.locator('[data-change]')).toBeVisible();await expect(panel.locator('[data-task-description]')).toContainText('Save something agents should remember');await mkdir('build/smoke',{recursive:true});await main.screenshot({path:'build/smoke/manage-work.png'});
+ await main.locator('#server-admin-open').click();await main.locator('[data-section=work]').click();const panel=main.locator('.operator-dialog');await expect(panel).toBeVisible();await expect(panel.locator('[data-change]')).toBeVisible();await expect(panel.locator('[data-task-description]')).toContainText('Save something agents should remember');await mkdir('build/smoke',{recursive:true});await main.screenshot({path:'build/smoke/manage-work.png'});
  async function choose(kind,project=''){
   await panel.locator('[name="kind"]').selectOption(kind);
   if(kind!=='approval-grant')await panel.locator('[name="project"]').selectOption(project);
