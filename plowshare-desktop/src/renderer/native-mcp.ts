@@ -97,10 +97,10 @@ export function nativeMcpControls(options: {
   ]);
   const savedProfiles = select(editor, 'Saved connection', []);
   let configurationFiles: readonly NativeConfigurationFile[] = [];
+  // Launch the exact target returned by the profile store. A standalone profile
+  // has a connection name too, but that name is not an entry in a shared file.
   const target = () =>
-    storage.value === 'Private profile file'
-      ? {}
-      : { entry: loaded?.entry ?? inputs.get('profile')!.value };
+    loaded?.entry === undefined ? {} : { entry: loaded.entry };
   function chooseStorage() {
     loaded = undefined;
     fill();

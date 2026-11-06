@@ -216,6 +216,15 @@ val pnpmTest by tasks.registering(Exec::class) {
 
     // Imported TUI logic resolves the shared client through the TUI dependency links.
     dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild", ":plowshare-tui:pnpmInstall")
+    // Native renderer tests live here for the DOM fixture, but import Desktop
+    // controls and the MCP package. Changes to those inputs must invalidate tests.
+    dependsOn(":plowshare-desktop:pnpmInstall", ":plowshare-mcp-integration:mcpIntegrationBuild")
+    inputs.file(rootProject.file("plowshare-desktop/src/renderer/native-mcp.ts"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("integrations/mcp/src"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("sdk/node/src"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("sdk/typescript/build/operations"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("plowshare-tui/src/logic"))
