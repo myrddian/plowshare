@@ -1010,6 +1010,43 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     }
   }
 
+  /**
+   * Whether this destination's documents are declined by the processing pipeline.
+   *
+   * <p><strong>A confined Application's documents are not processed in this slice</strong>, and the
+   * decline is decided here and applied at the enqueue boundary rather than when work is claimed.
+   *
+   * <p>Why declined at all: processing a document needs a conversation and a budget, and for a
+   * contained home neither has an owner. The pipeline's log belongs to neither the child nor its
+   * container and would spend a third allowance inside a confined home, which is an authority shape
+   * nothing in this capability has designed. ADR 0042 records it as a capability gap with the
+   * three-way ownership question it defers; refusing a surface is an acceptable slice, honouring
+   * one nobody has authorized is not.
+   *
+   * <p>Why at the enqueue boundary and not at the claim: a {@code pending} row is the claim scan's
+   * work list ({@code JdbcInformationProcessingRepository}: {@code s.state='pending' OR
+   * (s.state='running' AND s.lease_until<?)}), so a document declined only when claimed would
+   * already have enqueued work that fails, takes a lease and retries. Writing the stages {@code
+   * skipped} means the scan never selects the revision, so there is nothing to lease and nothing to
+   * retry — structural rather than a check each sweep must remember.
+   *
+   * <p>{@code skipped} and not a new state: it is that table's existing word for deliberate
+   * non-processing, already used for a syntax-only intake and for a code document's prose stages,
+   * so no migration and no new vocabulary. The announcement the caller makes alongside is what
+   * keeps the decline legible to an operator rather than a document that merely never moves.
+   *
+   * <p>A selection with no project — an account's own knowledge, or Personal — is never contained,
+   * which is why the null check comes first rather than being folded into the name test.
+   */
+  // Package-private rather than private so that the one test which has to show "the tolerance's
+  // flag is false for every ordinary home" can assert this predicate directly. That link and the
+  // behavioural one in announceIntake are what together say an ordinary home's missing audience
+  // still surfaces; see that method.
+  static boolean declinedHome(InformationContext context) {
+    return context.selection().project() != null
+        && io.aeyer.plowshare.protocol.ContainedProjects.name(context.selection().project());
+  }
+
   /** Creation has no revision to lock yet; validate the exact destination and live role. */
   private void requireDestination(InformationContext context) {
     if (!Boolean.TRUE.equals(
@@ -1049,12 +1086,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
         Boolean.class,
-        context.account() + ":" + request);
+        // The accounting account, because information_requests.account below has a foreign key
+        // into admins: the lock has to serialise the same namespace the row is written in.
+        context.attribution() + ":" + request);
     List<Map<String, Object>> prior =
         jdbc.queryForList(
             "SELECT fingerprint,revision_id FROM information_requests"
                 + " WHERE account=? AND request_id=?",
-            context.account(),
+            context.attribution(),
             request);
     if (!prior.isEmpty()) {
       if (!fingerprint.equals(prior.getFirst().get("fingerprint")))
@@ -1066,7 +1105,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         && jdbc.queryForObject(
                 "SELECT count(*) FROM information_acquisitions WHERE account=? AND request_id=?",
                 Integer.class,
-                context.account(),
+                context.attribution(),
                 request)
             != 0) throw new CallerFault("requestId was already used for URL acquisition");
     for (UUID input : inputs) if (!readable(context, input)) throw absent();
@@ -1102,10 +1141,13 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                   "SELECT legacy_handle FROM authority_accounts WHERE id=?",
                   String.class,
                   context.selection().account())
-              : context.account(),
+              // The accounting account. owner_handle's foreign key targets admins and created_by's
+              // targets authority_accounts, and a contained principal is a subject of neither by
+              // design, so provenance is the container's while every gate above stays the child's.
+              : context.attribution(),
           project,
           kind,
-          context.account());
+          context.attribution());
     } else {
 
       if (!kind.equals(resources.getFirst().get("kind")))
@@ -1152,9 +1194,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         documentType.type(),
         documentType.subtype(),
         write.expectedRevision(),
-        write.typingExplicit() ? context.account() : null,
+        // Both provenance, both foreign-keyed: revised_by into admins, created_by into
+        // authority_accounts. See the resource insert above.
+        write.typingExplicit() ? context.attribution() : null,
         write.processingPolicy(),
-        context.account());
+        context.attribution());
     if (write.binding() != null) {
       var binding = write.binding();
       jdbc.update(
@@ -1166,12 +1210,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           binding.metadataHash(),
           io.aeyer.plowshare.protocol.SchemaCodec.compactJson(binding.metadata()));
     }
+    boolean declined = declinedHome(context);
     for (String stage : STAGES)
       jdbc.update(
           "INSERT INTO information_steps(revision_id,generation,stage,state)" + " VALUES(?,1,?,?)",
           revision,
           stage,
-          (syntaxOnly && List.of("embed", "autoTag", "tagGroups").contains(stage))
+          declined
+                  || (syntaxOnly && List.of("embed", "autoTag", "tagGroups").contains(stage))
                   || (documentType.isCode()
                       && List.of("summarise", "summary_embed").contains(stage))
               ? "skipped"
@@ -1185,26 +1231,204 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
                 + " VALUES(?,1,?,?,?)",
             revision,
             stage,
-            context.account(),
+            // actor carries a foreign key into admins, so it is the accounting account.
+            context.attribution(),
             request);
     }
     for (UUID input : inputs)
       jdbc.update("INSERT INTO information_inputs VALUES(?,?)", revision, input);
     jdbc.update(
         "INSERT INTO information_requests VALUES(?,?,?,?)",
-        context.account(),
+        // account carries a foreign key into admins; the lookup and the lock above use the same
+        // value, so one request UUID means one thing throughout this method.
+        context.attribution(),
         request,
         fingerprint,
         revision);
-    event(revision, 1, context.account(), "intake", "retained", "");
+    // actor_handle carries a foreign key into admins as well, so the audit actor is the accounting
+    // account. This is why knowledge has no column that can hold a contained principal as author:
+    // every provenance column this insert writes is keyed to a credentialed identity --
+    // owner_handle
+    // and information_requests.account into admins, both created_by columns into authority_accounts
+    // -- while the announcement below goes to Relay rather than to a column. ADR 0042 records the
+    // absence of an author field for knowledge as a capability gap rather than an oversight.
+    announceIntake(declined, revision, context.attribution(), "retained", "");
+    // Observable, and that is the requirement rather than a courtesy: "blocked" must not read as
+    // "broken". A document whose stages are all 'skipped' and that announced nothing would be
+    // indistinguishable to an operator from one the pipeline lost, so the decline says so, names
+    // its reason and is retained beside the intake it belongs to.
+    if (declined)
+      announceIntake(
+          declined,
+          revision,
+          context.attribution(),
+          "skipped",
+          "a confined Application's documents are not processed; see ADR 0042");
     return new Admission(revision, resource, true);
   }
 
-  public void link(InformationContext context, UUID revision, String project, boolean remove) {
+  /**
+   * One intake announcement, tolerating the absence of a Relay audience <em>only</em> for a home
+   * the processing pipeline has already declined.
+   *
+   * <p><strong>Why any tolerance exists.</strong> A contained scope has no Relay audience, by ADR
+   * 0042's own decision: {@code audienceProject}'s {@code CONTAINED} arm answers null so that a
+   * child's events are never published to a topic whose audience is the child's project — an
+   * addressable Relay topic nobody named. {@link InformationEventRecords#resolve} therefore raises
+   * {@link InformationEventRecords.Unaddressable} for such a home, and {@link InformationEvents}
+   * documents that exception as deliberately caught nowhere. Both facts are right, and together
+   * they make a contained principal's own knowledge write — which V229 admits — fail and roll back
+   * unless this method tolerates the refusal. The regression test is composed with the real
+   * publisher rather than a recording fake, because a fake satisfies the interface and answers the
+   * question it was told to answer.
+   *
+   * <p><strong>Why tolerating is principled here and not expedient.</strong> For a declined home
+   * there is no processing to announce and no audience to notify: every stage is already written
+   * {@code skipped} above, so this announcement is a notice to nobody about work that will not
+   * happen. The operator-legible record of the decline is the {@code skipped} stage rows, which are
+   * unaffected. What is lost is the Relay half, and for a home with no audience there was never a
+   * Relay half to lose.
+   *
+   * <p><strong>Why it is keyed on the home and not on the exception.</strong> A blanket catch here
+   * would sit on the path every knowledge write in this server takes, and would convert a real
+   * defect — an <em>ordinary</em> home that lost its audience through misconfiguration, such as an
+   * account knowledge home whose account has no personal project — into silence. That trade is
+   * worse than the bug it hides, because it is invisible. So the flag is the caller's own {@code
+   * declinedHome}: one predicate ({@code ContainedProjects.name}), decided once per admission, and
+   * not a fifth way to recognise a contained scope.
+   *
+   * <p><strong>This is the narrow fix, and the deep one is still open.</strong> Giving a contained
+   * scope a real Relay audience means deciding whether Relay keys topics on {@code
+   * authority_scopes.id}, which is ADR 0039's deferred question. Nothing here answers it, and a
+   * later reader must not "fix" this method by reaching for that change.
+   *
+   * <p><strong>The flag and the audience are read from two different places, and the invariant that
+   * they name the same place is not obvious.</strong> {@code declinedHome} reads the
+   * <em>destination selection's</em> project name, while {@link InformationEventRecords#resolve}
+   * reads the <em>resource's</em> {@code home_scope_id}. They agree because the home is derived
+   * from the selection: {@code requireDestination} proves the selection may be written to, {@code
+   * information_home} derives the resource's home scope from that same selected project, and for a
+   * contained selection V229's write arm additionally requires the resource's home to be {@code
+   * contained_own_home(actor, selected_project)} — the selected project's own scope and no other.
+   * {@code ContainedIntakeAnnouncementDatabaseTest} asserts that identity directly, by checking the
+   * admitted resource's home scope is the child's.
+   *
+   * <p>Both directions of a hypothetical disagreement fail safe, which is why this is documented
+   * rather than guarded. A contained selection whose resource was homed elsewhere would have an
+   * audience, so the announcement would succeed and the tolerance would never be reached; a
+   * non-contained selection whose resource was homed in a contained scope would have no audience
+   * and a false flag, so the refusal would surface loudly. Neither direction can produce a silent
+   * drop, which is the only outcome worth guarding against.
+   *
+   * <p>Catching mid-transaction is safe here specifically: {@code resolve} raises before any write,
+   * after two statements that both succeeded, so no failed statement has poisoned the transaction
+   * and the admission continues on a usable connection. That is a property of where the throw sits
+   * and is asserted rather than assumed.
+   *
+   * @param declinedHome whether this admission's home is one the pipeline declines — which in this
+   *     slice means, and only means, a contained home
+   */
+  void announceIntake(
+      boolean declinedHome, UUID revision, String actor, String action, String detail) {
+    try {
+      event(revision, 1, actor, "intake", action, detail);
+    } catch (InformationEventRecords.Unaddressable noAudience) {
+      if (!declinedHome) throw noAudience;
+    }
+  }
 
+  /**
+   * Refuses an operation a confined Application has never been authorized to perform, before
+   * anything is written.
+   *
+   * <p><strong>Why a refusal and not the attribution axis.</strong> Nothing has decided that a
+   * confined Application may link a document into another project, publish one, withdraw one, retry
+   * or rebuild processing, set an allowance, cancel work, record evidence, finalise a report, or
+   * change a document's tags or tag groups. V229 admits a contained principal into {@code
+   * lockResource} and the readability predicates for its own home, so it can genuinely arrive at
+   * every one of them.
+   *
+   * <p>{@code link} alone would fail on integrity rather than on authority: it writes {@code
+   * information_links.actor_handle}, whose foreign key targets {@code admins} (V83:77) and which a
+   * contained principal has no row in by design (V218), so unguarded it raises an FK error — a
+   * server fault for something a caller did. <strong>Every other guarded operation would have
+   * succeeded.</strong> The event-publisher ones hand the actor to Relay rather than to a keyed
+   * column — the delivery table that once held that foreign key was dropped when events moved onto
+   * Relay (V188:96), and it cannot be named here even in a comment about its removal, because
+   * {@code InformationEventFenceRemovedTest} refuses any reference to it from server source
+   * including inside the migration's own filename — and the tag mutators write no actor column at
+   * all. That is the more dangerous half, and the reason this is an authority check rather than an
+   * integrity patch: whatever made {@code link} work would have silently granted all the rest.
+   *
+   * <p>Extending {@code attribution()} across them would have granted each of those capabilities by
+   * implementation accident and attributed the act to an account that did not ask — against this
+   * capability's own rule that refusing a surface is an acceptable first slice while honouring one
+   * nobody authorized is not. Several are pipeline-lifecycle operations over documents a contained
+   * home's are already declined from. What a running child may reach is a decision that belongs to
+   * the task that defines it, so this fails closed and keeps that decision open.
+   *
+   * <p>The child's own write path does not come through here. {@code admit} <em>carries the
+   * attribution axis</em> for a confined Application, calls none of these, and writes its own
+   * provenance columns from it. It is not the only operation a confined Application could otherwise
+   * reach — every guarded site above is one — so do not read it as the whole of what a child may
+   * do.
+   *
+   * <p><strong>What this set is closed over, stated because it is narrower than "every
+   * mutator".</strong> It is the mutators of <em>this class</em> that take an {@code
+   * InformationContext}: a hand-maintained enumeration against a signature, not a structure. Three
+   * things that criterion excludes, so a reader does not read "closed" as "complete":
+   *
+   * <ul>
+   *   <li>{@code replaceTags(Resource, …)} takes no context, so the criterion does not reach it. It
+   *       is guarded anyway, from the context its caller holds.
+   *   <li>The sibling repositories — {@code JdbcInformationNavigationRepository}, {@code
+   *       JdbcInformationProjectionRepository}, {@code JdbcAcquisitionRepository}, {@code
+   *       JdbcInformationContentRepository} and {@code JdbcInformationInterchangeRepository} — each
+   *       take an {@code InformationContext} and write, and none carries this guard. Nothing
+   *       presents a contained actor to them today, and <strong>whether their service layer would
+   *       refuse one is unverified.</strong>
+   *   <li>A mutator added to this class without a guard is caught only by the list in {@code
+   *       ContainedExecutionWriteDatabaseTest} gaining a row for it, which is the same enumeration
+   *       and not an independent check.
+   * </ul>
+   *
+   * <p>A structural alternative exists and is not built here: every mutator in this class reaches
+   * its write through {@code lockResource} or {@code requireDestination}, so the check could live
+   * at those two chokepoints with an explicit per-operation allowance passed in — which is a
+   * signature change across roughly a dozen call sites and a decision about what a contained actor
+   * may do, not a refactor. Until then the enumeration is the contract, and what it covers is the
+   * list above.
+   *
+   * <p><strong>One ordering this guard does not control, recorded rather than changed.</strong>
+   * Reached through the service with a non-null request, {@code managed} reserves the command
+   * before any of these bodies run, so {@code information_commands.account}'s foreign key into
+   * {@code admins} would refuse a bare-UUID actor first and this guard would never be asked. That
+   * is shared with every managed mutation here, predates the guard, and leaves the refusal a server
+   * fault rather than the caller fault this raises — and no test covers it, because the tests drive
+   * the repository directly. Command-reservation ordering is not this guard's to change.
+   *
+   * <p>Keyed on {@code contained_knowledge_actor}, which is the same predicate V229's arms are
+   * keyed on, so this cannot drift from the population it is about and is safe on a non-UUID actor.
+   * Do not weaken this to a comparison of the two axes: attribution is a provenance decision and
+   * this is an authority one.
+   */
+  private void requireUncontainedActor(InformationContext context, String operation) {
+    if (Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT contained_knowledge_actor(?)", Boolean.class, context.acting())))
+      throw new CallerFault("A confined Application may not " + operation);
+  }
+
+  public void link(InformationContext context, UUID revision, String project, boolean remove) {
+    requireUncontainedActor(context, "link a document into another project");
+
+    // The destination is a different project, so the selection is rebuilt -- but the accounting
+    // axis travels with it. Dropping it would silently return this context to a single-axis one
+    // and write provenance from the acting principal again.
     requireDestination(
         new InformationContext(
-            context.account(), InformationAccess.projectSelection(context.account(), project)));
+                context.acting(), InformationAccess.projectSelection(context.acting(), project))
+            .accountedTo(context.attribution()));
     lockResource(context, revision, false);
     if (remove)
       jdbc.update(
@@ -1218,6 +1442,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           revision,
           context.account(),
           project);
+    // `account()` and not `attribution()`, here and in actor_handle above, and deliberately so --
+    // this is the one site in this file that did not move to the attribution axis. Both are an
+    // AUDIT actor rather than provenance of an authorized write: actor_handle's foreign key into
+    // admins is what would refuse a bare-UUID contained principal if the guard above were ever
+    // removed, and attributing the act to the container would be the "capability granted by
+    // implementation accident" that requireUncontainedActor's own javadoc refuses. For every
+    // caller that can reach this method the two axes hold the same value, so this is a statement
+    // of intent rather than a behavioural difference. Do not harmonise it with `admit`.
     event(
         revision,
         generation(revision),
@@ -1229,6 +1461,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void share(InformationContext context, UUID revision, boolean shared) {
+    requireUncontainedActor(context, "change a document's audience");
 
     // Root policy changes serialize with navigation policy and reference changes. This lock must
     // precede the resource lock; upgrading a content writer's shared lock can deadlock publishers.
@@ -1278,6 +1511,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void availability(InformationContext context, UUID revision, String state) {
+    requireUncontainedActor(context, "change a document's availability");
     if (!Set.of("active", "excluded", "included", "withdrawn", "deleted").contains(state))
       throw new IllegalArgumentException("invalid availability");
 
@@ -1364,6 +1598,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void retry(InformationContext context, UUID revision) {
+    requireUncontainedActor(context, "retry processing");
 
     lockResource(context, revision, false);
     if (!"active".equals(row(revision).availability()))
@@ -1378,6 +1613,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void rebuild(InformationContext context, UUID revision, String from) {
+    requireUncontainedActor(context, "rebuild processing");
     int first = STAGES.indexOf(from);
     if (first < 2) throw new CallerFault("invalid rebuild stage");
 
@@ -1458,6 +1694,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void allowance(InformationContext context, UUID revision, int total) {
+    requireUncontainedActor(context, "set a processing allowance");
     if (total < 1) throw new IllegalArgumentException("allowance must be positive");
 
     lockResource(context, revision, false);
@@ -1482,6 +1719,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void cancelProcessing(InformationContext context, UUID revision) {
+    requireUncontainedActor(context, "cancel processing");
     lockResource(context, revision, false);
     long prior = generation(revision);
     jdbc.update("UPDATE information_revisions SET generation=generation+1 WHERE id=?", revision);
@@ -1514,6 +1752,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void tagGroups(
       InformationContext context, UUID revision, Map<String, List<String>> groups) {
+    requireUncontainedActor(context, "change a document's tag groups");
     UUID resource = lockResource(context, revision, false).id();
     if (groups != null) groups = InformationTagGroups.from(groups, null);
     changed(
@@ -1525,6 +1764,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   public void tags(InformationContext context, UUID revision, List<String> tags) {
+    requireUncontainedActor(context, "change a document's tags");
     UUID resource = lockResource(context, revision, false).id();
     var checked = InformationFacets.tags(tags);
     changed(
@@ -1534,7 +1774,14 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             resource));
   }
 
-  public void replaceTags(Resource resource, List<String> tags, long expectedVersion) {
+  public void replaceTags(
+      InformationContext context, Resource resource, List<String> tags, long expectedVersion) {
+    // The guard reads the actor off the context, so a mutator that takes none cannot be reached by
+    // the enumeration the guard's javadoc describes -- which is why this one carries a context it
+    // resolves no authority from. It is reached through InformationCatalogue.replaceTags ->
+    // requireWrite -> lockResource, which V229's WRITE arm admits for a contained actor's own
+    // resource.
+    requireUncontainedActor(context, "replace a document's tags");
     if (expectedVersion < 0 || expectedVersion > 9007199254740991L)
       throw new IllegalArgumentException("invalid expected tag version");
     Objects.requireNonNull(resource);
@@ -1656,6 +1903,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       String quote,
       String locator,
       UUID request) {
+    requireUncontainedActor(context, "record evidence on a document");
 
     if (!readable(context, revision)) throw absent();
     String text = text(revision);
@@ -1734,6 +1982,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   public void finalise(
       InformationContext context, UUID revision, Map<String, String> fingerprints) {
+    // Already unreachable for a child's document by arithmetic -- a final report needs five
+    // 'ready' stages and a contained home's stages are all 'skipped' -- but incidentally rather
+    // than deliberately, and an incidental refusal is one a later change can remove without
+    // noticing. This says it.
+    requireUncontainedActor(context, "finalise a report");
 
     lockResource(context, revision, false);
     if (!readable(context, revision)) throw absent();

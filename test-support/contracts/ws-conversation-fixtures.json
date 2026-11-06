@@ -980,6 +980,12 @@
       ]
     }
   },
+  "application.child.cancel": {
+    "code": "OK",
+    "payload": {
+      "child": "33333333-3333-3333-3333-333333333333"
+    }
+  },
   "application.child.resources": {
     "code": "OK",
     "payload": {

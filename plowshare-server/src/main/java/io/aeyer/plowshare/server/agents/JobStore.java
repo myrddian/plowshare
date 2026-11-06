@@ -95,7 +95,8 @@ import org.slf4j.LoggerFactory;
  * nothing. What the beat <em>says</em> about the run's progress is still not this class's to know:
  * the two counts are read off {@link JobWatch}, which has seen every one that was ever published.
  */
-public final class JobStore implements AutoCloseable, EventRuns, RunningConversations {
+public final class JobStore
+    implements AutoCloseable, EventRuns, RunningConversations, CancellableRuns {
 
   private static final Logger log = LoggerFactory.getLogger(JobStore.class);
 
@@ -1553,6 +1554,29 @@ public final class JobStore implements AutoCloseable, EventRuns, RunningConversa
     }
     Job job = byId.get(id);
     return job != null && job.requestCancel();
+  }
+
+  /**
+   * Asks every run going in one conversation to stop, on {@link #cancel}'s terms exactly.
+   *
+   * <p>The same flag, reached by the one key a caller that did not submit the run can hold. Written
+   * for ADR 0042's cancellation paths, where a container stops work inside a child it addresses by
+   * its retained conversation envelopes and has no job id of its own; see {@link CancellableRuns}
+   * for why the contract is keyed that way and why a zero is not an error.
+   *
+   * <p>Jobs whose {@link Job#conversation()} is null — a plain submission over {@code
+   * Transcript.NONE}, a curator's pass — can never match, which is correct rather than a gap: a run
+   * with no conversation is not a run any conversation's owner can name.
+   */
+  @Override
+  public int cancelIn(String conversation) {
+    Objects.requireNonNull(conversation, "conversation");
+    int asked = 0;
+    // requestCancel is the compare-and-set Job documents, so two callers racing on one run produce
+    // one true between them and a run that has already answered produces none.
+    for (Job job : byId.values())
+      if (conversation.equals(job.conversation()) && job.requestCancel()) asked++;
+    return asked;
   }
 
   /**

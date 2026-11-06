@@ -1,7 +1,11 @@
 package io.aeyer.plowshare.server.applications;
 
 import io.aeyer.plowshare.protocol.ApplicationDeployment.File;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.access.*;
+import io.aeyer.plowshare.server.agents.FilesystemDefinitions;
+import io.aeyer.plowshare.server.agents.Runs;
+import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
@@ -29,10 +33,16 @@ import java.util.*;
  *
  * <p><strong>What is replaced.</strong> There is no server-administrator check and no destination
  * FileStore {@code MANAGER} check, and there is no collaborator here through which either could be
- * made: this class holds neither {@code ProjectMembers} nor {@code FileStores}. It holds no {@code
- * IdentityRepository} either, which is the structural form of a narrower point: nothing on this
- * path resolves a scope through the general scope read, so nothing on it can be defeated by that
- * read's refusal of a {@code CONTAINED} row. The authority is the creating Application's own
+ * made: this class holds neither {@code ProjectMembers} nor {@code FileStores}. Nothing on the
+ * creating path resolves a scope through the general scope read either, so nothing on it can be
+ * defeated by that read's refusal of a {@code CONTAINED} row — and since {@link #run} arrived that
+ * is a statement about behaviour rather than about the constructor, because an {@code
+ * IdentityRepository} <em>is</em> held now, for {@code containedHome} and for nothing else. {@code
+ * containedHome} is not the general read: it resolves the stored containment row with the scope,
+ * the kind, the container and the project all bound in one predicate, so it can only ever answer a
+ * container's own child's project, whereas {@code home(AuthorityScope)} refuses a contained scope
+ * outright. {@code ContainedApplicationCreationTest} and {@code ContainedVisibilityTest} assert
+ * that creation and both reads touch it not at all. The authority is the creating Application's own
  * retained admission, narrowed across one containment hop by {@link OperationAuthority#contain},
  * and the destination is allocated by the server under {@link ContainmentConfig#root()}. A parent
  * typically holds no FileStore {@code MANAGER} over its own retained source, so proxying a
@@ -83,35 +93,75 @@ public final class SourceContainedApplications implements ContainedApplications 
    */
   private static final long MAX_RESOURCE_ENTRIES = MAX_RESOURCES * 32L;
 
+  /**
+   * A contained run is shown no pictures, structurally rather than by convention.
+   *
+   * <p>{@link Runs.Shown} is how a surface turns image ids into bytes, and the ids would have to
+   * come from a caller. A container does not supply any — {@link ContainedApplications.Run} has no
+   * such field — so this resolver answers the empty list for the empty request and refuses anything
+   * else, which keeps a later widening of the request shape from silently acquiring a route into
+   * the surface's own image tier.
+   */
+  private static final Runs.Shown NO_PICTURES =
+      (definition, home, uids) -> {
+        if (uids != null && !uids.isEmpty())
+          throw new CallerFault("A contained run is shown no pictures");
+        return List.of();
+      };
+
   private final ContainedApplicationRepository records;
   private final ProjectWorkspaces projects;
   private final ApplicationPackageValidator validator;
   private final OperationAuthority authority;
+  private final IdentityRepository identities;
   private final ContainedPrincipals principals;
   private final AllowanceRepository allowances;
   private final UnitOfWork work;
   private final ContainmentConfig config;
   private final ContainedStaging staging;
+  private final Runs runs;
+  private final io.aeyer.plowshare.server.agents.CancellableRuns jobs;
 
+  /**
+   * @param identities held for {@link IdentityRepository#containedHome} alone, and that is not the
+   *     general scope read this class's javadoc says nothing here depends on. {@code
+   *     home(AuthorityScope)} <em>refuses</em> a contained scope by design; {@code containedHome}
+   *     resolves the stored containment row with all four of its facts bound in the predicate, so
+   *     it can only ever answer this container's own child's project. It is used by {@link #run}
+   *     and by nothing else.
+   * @param runs the run service, which is the owning API for starting one agent on one task. Reused
+   *     rather than re-implemented: a second submission path would decide the order of its own
+   *     refusals differently from the one every other surface gets.
+   * @param jobs how a run already going is asked to stop, and the narrowest contract that can say
+   *     so: it holds one method keyed on a conversation. Deliberately not {@code JobStore} itself —
+   *     this class must not acquire the ability to submit, poll or list runs in order to stop one —
+   *     and deliberately not {@code Runs}, whose subject is starting work. See {@link #cancel}.
+   */
   public SourceContainedApplications(
       ContainedApplicationRepository records,
       ProjectWorkspaces projects,
       ApplicationPackageValidator validator,
       OperationAuthority authority,
+      IdentityRepository identities,
       ContainedPrincipals principals,
       AllowanceRepository allowances,
       UnitOfWork work,
       ContainmentConfig config,
-      ContainedStaging staging) {
+      ContainedStaging staging,
+      Runs runs,
+      io.aeyer.plowshare.server.agents.CancellableRuns jobs) {
     this.records = Objects.requireNonNull(records);
     this.projects = Objects.requireNonNull(projects);
     this.validator = Objects.requireNonNull(validator);
     this.authority = Objects.requireNonNull(authority);
+    this.identities = Objects.requireNonNull(identities);
     this.principals = Objects.requireNonNull(principals);
     this.allowances = Objects.requireNonNull(allowances);
     this.work = Objects.requireNonNull(work);
     this.config = Objects.requireNonNull(config);
     this.staging = Objects.requireNonNull(staging);
+    this.runs = Objects.requireNonNull(runs);
+    this.jobs = Objects.requireNonNull(jobs);
   }
 
   @Override
@@ -214,9 +264,13 @@ public final class SourceContainedApplications implements ContainedApplications 
                   new AuthorityScope.Contained(
                       retained.scope(), retained.projectId(), retained.container());
               // The child allocates its OWN allowance, as nested starts already do, under the
-              // ceiling its container set. There is no shared counter: child spend is attributed to
-              // the child, which leaves ADR 0025's immutable attribution and the rule that
-              // delegation cannot change the accounting account exactly as they are.
+              // ceiling its container set. There is no shared counter, and the pool is the only
+              // thing that is the child's here: a contained run spends this allowance on its
+              // CONTAINER'S account, because a hop keeps the parent's executor and account
+              // unchanged. That is what leaves ADR 0025's immutable attribution and the rule that
+              // delegation cannot change the accounting account exactly as they are -- nothing
+              // invents a second accounting subject. The child is the author, not the account; the
+              // two axes are set out at run() below.
               allowances.retain(new AllowanceSnapshot(allowance, retained.ceiling(), 0));
               principals.issue(scope);
               // Last, because it is the one step that can still refuse on authority rather than on
@@ -270,6 +324,243 @@ public final class SourceContainedApplications implements ContainedApplications 
   }
 
   /**
+   * Stops the work inside one child and its descendants, under its container's authority.
+   *
+   * <p>The order is {@link #run}'s: the caller's live authority is proved <em>before</em> any
+   * lookup, so a refusal discloses nothing about whether the named UUID is a contained Application
+   * on this installation, and then the child's row must name the caller's own scope as its
+   * container.
+   *
+   * <p><strong>Two things this deliberately does not do, each of which {@code run} does.</strong>
+   * It does not require containment to be configured: the root is where a child's <em>source</em>
+   * lives, nothing here reads it, and a server reconfigured while work is in flight must not
+   * thereby lose the ability to stop that work. And it does not refuse a zero ceiling: a child
+   * whose calls have been disabled may still hold a run that has not yet reached its next boundary,
+   * which is precisely the run a container wants stopped.
+   *
+   * <p><strong>What "idempotent" does and does not cover, said exactly.</strong> Repeating this
+   * call while the child exists is the same answer every time — a stop is a request and changes no
+   * state here. It is <em>not</em> idempotent across a destruction: {@link #destroy} deletes the
+   * child's project row, {@code contained_applications.project_id} is {@code ON DELETE CASCADE}
+   * (V219), and {@code records.find} carries no liveness predicate, so afterwards there is no row
+   * and this call refuses with "No such contained Application". That is the honest shape and there
+   * is nothing to fix: a destruction has already stopped the subtree's work before collecting any
+   * source, so a cancellation arriving after it has nothing left to ask.
+   *
+   * <p>There is deliberately no destroyed-child branch here, and the reason is not symmetry with
+   * {@code run} — it is that such a branch would be <strong>unreachable</strong>. {@code
+   * contained_applications.live} is vestigial: V219 declares it {@code NOT NULL DEFAULT TRUE} and
+   * nothing in this server ever writes {@code false} to it, so it appears only in read predicates.
+   * A record in the {@code live = false} state is a state production does not produce, and {@code
+   * run}'s own "has been destroyed" refusal is reachable only from a fixture that builds one.
+   *
+   * <p>No durable write of any kind happens here, which is why there is no unit of work: the stop
+   * is a flag inside the run's own process. The subtree is therefore read without {@code
+   * lockSubtree} — a creation committing alongside this call adds a record whose run cannot have
+   * started yet, and a caller who wants it stopped asks again, which costs nothing because asking
+   * twice is the same answer.
+   */
+  @Override
+  public void cancel(String account, String conversation, UUID child) {
+    // First, and before any lookup, exactly as run does.
+    var parent = parent(account, conversation);
+    var retained =
+        records.find(child).orElseThrow(() -> new CallerFault("No such contained Application"));
+    if (!parent.admission().scope().equals(retained.container()))
+      throw new CallerFault("This Application does not contain that Application");
+    stop(
+        records.subtree(retained.scope()).stream()
+            .map(ContainedApplicationRepository.Retained::scope)
+            .toList());
+  }
+
+  /**
+   * Asks every run inside these scopes to stop, in the order they are given.
+   *
+   * <p>Shared by {@link #cancel} and by both of {@link #destroy}'s halves on purpose, so there is
+   * one notion of "the work inside a subtree" rather than three that could drift. It takes scopes
+   * rather than records because the two callers hold different row types for the same subtree — a
+   * live {@code Retained} and a {@code Collection} written by a destruction — and the scope is the
+   * only thing either of them needs to contribute.
+   *
+   * <p><strong>The caller supplies the order and this method neither sorts nor reverses
+   * it.</strong> Deepest first is the destruction's contract and belongs where that contract is
+   * stated; a sort here would make the ordering two claims in two places.
+   *
+   * <p>A run is reached through the child's own retained conversation envelopes, which is the only
+   * durable key a container holds on work it did not submit. {@code conversationsIn} is immutable
+   * evidence and grants nothing — the caller proved its authority above — and it is not transitive,
+   * which is why this iterates the scopes rather than asking once about the root.
+   */
+  private void stop(List<AuthorityIds.ScopeId> ordered) {
+    for (var scope : ordered)
+      for (var envelope : authority.conversationsIn(scope)) jobs.cancelIn(envelope.id());
+  }
+
+  /**
+   * Starts work inside one child, as that child.
+   *
+   * <p>The order is the contract and it is {@link #ceiling}'s, not {@link #trajectory}'s. The
+   * configuration is checked, the caller's live authority is proved, the child's row is resolved,
+   * the caller's scope must <em>be</em> that row's recorded container, a destroyed child and a zero
+   * ceiling are refused, the home is resolved through the stored containment row, the agent is
+   * resolved against the child's own staged package, and only then is anything started. Nothing
+   * before the authority proof reads the child's package or touches its source area; {@code
+   * trajectory} and {@code resources} look the child up first and ADR 0042 records that existence
+   * oracle as a known limitation, which this operation deliberately does not copy.
+   *
+   * <p>Why the direct container and not the ancestor walk is argued on {@link
+   * ContainedApplications#run}: the spend and the breadth accounting belong to the container that
+   * lent them, so a grandparent cannot raise work under a ceiling the intermediate container set.
+   * Do not harmonise this with {@code trajectory}.
+   *
+   * <p>No durable write of this class's own happens here. The child's principal is issued
+   * idempotently — it already exists for any child created by this service, and issuing is how its
+   * identifier is read back rather than a second source of it — and everything the run itself
+   * persists is {@link Runs}' own.
+   *
+   * <p><strong>The account is the container's and the author is the child's.</strong> A hop keeps
+   * the parent's executor and account unchanged, so the run's caller identity, its work authority
+   * and its accounting account are all the container's; the contained principal is never made an
+   * {@code authority_accounts} subject and is recorded as the <em>author</em> instead, through
+   * {@link Speaker#contained}. A container must be able to tell its child's writing from its own,
+   * because child output is untrusted input to it, and with the account shared the author is what
+   * carries that.
+   *
+   * <p><strong>What stands below this method, now that it works.</strong> {@link Runs} reaches
+   * {@code ConversationStore}, whose ordinary doors resolve a run's home to a scope through {@code
+   * OperationAuthority.scope(Home)} — a resolution that refuses a contained project by design, and
+   * must keep refusing it. A contained run therefore goes through {@code
+   * ConversationStore.openContained} instead, which takes the admission this method's hop produced
+   * and binds it rather than admitting a scope, on an {@code Origin.CONTAINED} row carrying the
+   * child's own allowance. V230 opened the two shipped constraints that stood in front of that
+   * door. {@code ContainedConversationDoorDatabaseTest} asserts the envelope a started child gets:
+   * its budget is the child's own allowance and its admission account is its container's.
+   *
+   * <p>One thing a reader must not do here: a confined Application's documents are not processed by
+   * the information pipeline, and that is a recorded decision rather than a gap to close in passing
+   * — ADR 0042 names the three-way ownership question it defers.
+   */
+  @Override
+  public Running run(String account, Run request) {
+    if (!config.configured()) throw new CallerFault("This server does not configure nesting");
+    // First, and before any lookup: a refusal below this line discloses nothing about whether the
+    // named UUID is a contained Application on this installation.
+    var parent = parent(account, request.conversation());
+    var retained =
+        records
+            .find(request.child())
+            .orElseThrow(() -> new CallerFault("No such contained Application"));
+    if (!parent.admission().scope().equals(retained.container()))
+      throw new CallerFault("This Application does not contain that Application");
+    // Unreachable in production, and kept as a guard rather than as behaviour: a destroyed child's
+    // record is cascade-deleted with its project row (V219), so find() above already refused it,
+    // and contained_applications.live is NOT NULL DEFAULT TRUE with nothing in this server ever
+    // writing it false. See the same note on resources below and ADR 0042's record of it.
+    if (!retained.live()) throw new CallerFault("That contained Application has been destroyed");
+    // A child that cannot make a call is not started. Zero is a deliberate and useful state --
+    // this is how a container disables its child -- so a run under it is refused rather than
+    // started and starved, which would spend a turn to discover the same thing.
+    if (retained.ceiling() != null && retained.ceiling() == 0)
+      throw new CallerFault(
+          "That contained Application's ceiling is zero, so it can make no call; raise the"
+              + " ceiling before starting work inside it");
+    var scope =
+        new AuthorityScope.Contained(retained.scope(), retained.projectId(), retained.container());
+    // Resolved from the stored containment row and never from a name in the request -- there is no
+    // such field. The general scope read refuses a CONTAINED row by design, so this is the one read
+    // that can answer, and it binds the scope, the kind, the container and the project together.
+    Home home = identities.containedHome(scope, retained.container());
+    // The work question, asked where a child's work authority actually lives. A contained project
+    // carries no PROJECT scope and so no role for anybody, so asking about the child's own project
+    // name answers "no role" whoever asks; the deciding question is the container's account against
+    // the nearest enclosing uncontained scope, which is the same question the hop answered.
+    Home mediating = authority.mediatingHome(scope);
+    String agent = declared(retained, request.agent());
+    // The hop, run again for this operation: contain is the only way a contained admission comes
+    // into being, and each started run is its own operation with its own admission -- the same
+    // shape JobRuntime uses for a delegated child, where derive stands where contain stands here.
+    // It proves the stored containment row, the depth bound and the container's live grants, so a
+    // revoked container starts nothing.
+    var admission = authority.contain(parent.admission(), scope, narrowed(parent.admission()));
+    // The child's own allowance, restored rather than minted: the conversation points at the pool
+    // its container already set a ceiling on, so the run spends the child's allowance while the
+    // admission above keeps the container's account. No counter is shared.
+    var pool =
+        allowances
+            .find(retained.allowance())
+            .map(found -> allowances.restore(found.id()))
+            .orElseThrow(
+                () -> new CallerFault("That contained Application's allowance is unavailable"));
+    // Two axes, and they are deliberately different identities.
+    //
+    // ACCOUNT: the container's. A hop keeps the parent's executor and account unchanged, and a
+    // child's authority is a projection of its container's, so everything that needs an account --
+    // the work check above, the run's caller identity, and the accounting account -- takes the
+    // container's. That is also what keeps ADR 0025's immutable attribution and its rule that
+    // delegation cannot change the accounting account intact: nothing here invents a second
+    // accounting subject.
+    //
+    // AUTHOR: the contained principal's. It is not an authority_accounts subject and never becomes
+    // one -- V218 is unchanged and nothing here creates a row for it -- so what it is recorded as
+    // is the provenance of the work: Speaker.contained(child) travels into the log as the
+    // utterance's speaker and survives the write. That distinction is load-bearing rather than
+    // cosmetic: child output is untrusted input to its container, so a container reading work back
+    // must be able to tell its child's writing from its own, and with the account now shared the
+    // author field is the only thing that says so.
+    var principal = principals.issue(scope);
+    var started =
+        runs.start(
+            new Runs.Ask(
+                agent,
+                request.task(),
+                home.project(),
+                null,
+                null,
+                request.maxTurns(),
+                null,
+                List.of(),
+                Speaker.contained(retained.id()),
+                parent.admission().executor(),
+                true,
+                new Runs.Ask.Contained(admission, pool, mediating.project())),
+            NO_PICTURES);
+    // Issued, and deliberately not passed as the caller: see the two axes above. Reading it back
+    // here is what proves the principal exists for a child this operation is about to start, which
+    // Tasks 4 and 5 key cancellation and revocation off.
+    Objects.requireNonNull(principal.id(), "a started child has its own principal");
+    return new Running(retained.id(), started.id(), started.conversation(), started.agent());
+  }
+
+  /**
+   * The agent name, proved against the child's <em>own</em> staged package and nothing else.
+   *
+   * <p>This is a containment check and not the registry resolution: {@link Runs#start} resolves the
+   * name again against the child's project, which is where availability, exposure and the client's
+   * own definitions are decided. What this adds is the one thing that resolution cannot say on its
+   * own — that the name came from the child's package rather than from the container's, which is
+   * what keeps a container from naming an agent of its own and having it run inside the child.
+   *
+   * <p>Read from the child's single staged revision, derived from its opaque project name under the
+   * configured root exactly as {@link #resources} derives it, never from a stored path.
+   */
+  private String declared(ContainedApplicationRepository.Retained retained, String agent) {
+    Path staged =
+        workspace(retained.project()).resolve("revisions").resolve(retained.revision().toString());
+    var names =
+        new FilesystemDefinitions(staged.resolve("agents"))
+            .list().stream()
+                .map(io.aeyer.plowshare.server.agents.DefinitionSource.Definition::name)
+                .toList();
+    if (!names.contains(agent))
+      throw new CallerFault(
+          "That contained Application declares no agent named '"
+              + agent
+              + "'; an agent of the container is not nameable inside it");
+    return agent;
+  }
+
+  /**
    * Destroys a child and its descendants, deepest first, then collects their source areas.
    *
    * <p><strong>The order is the contract.</strong> Authority first, and proved exactly as {@link
@@ -313,6 +604,13 @@ public final class SourceContainedApplications implements ContainedApplications 
               destroy(held, child);
               return held;
             });
+    // BEFORE THE FIRST REMOVAL, over the same deepest-first set the cascade just walked. A run
+    // still reading its source area while that area is collected is the one failure the ordering
+    // below is otherwise careful to avoid, and the allowance zeroed inside the unit does not close
+    // it: a run mid-turn can make no further call, but it can still read files. Stopping after the
+    // commit rather than inside it is deliberate twice over -- a cancellation is a process-local
+    // flag that no rollback could take back, and the ordered set is only known under the lock.
+    stop(subtree.stream().map(ContainedApplicationRepository.Retained::scope).toList());
     int sources = 0;
     for (var held : subtree) {
       Path workspace = workspace(held.project());
@@ -418,6 +716,11 @@ public final class SourceContainedApplications implements ContainedApplications 
     // Deepest first, as the original answered. The rebuild appends a node before its children, so
     // reversing it yields children before parents at every level.
     Collections.reverse(rebuilt);
+    // The same stop, for the same reason, before this retry removes the bytes the original could
+    // not. The original destruction asked too, but a destruction interrupted between its commit
+    // and its removal may have been interrupted before that ask landed, and the directories this
+    // loop is about to collect are exactly the ones such a run would still be reading.
+    stop(rebuilt.stream().map(ContainedApplicationRepository.Collection::scope).toList());
     int sources = 0;
     for (var held : rebuilt) if (finish(held)) sources++;
     return new Destroyed(
@@ -543,11 +846,19 @@ public final class SourceContainedApplications implements ContainedApplications 
    * this must not take a non-empty answer, or a {@code manifest} entry, as a package validity
    * claim. Package validity is decided on the producing side, where the manifest is parsed.
    */
-  // Unlike trajectory, this refuses a destroyed child. Not an inconsistency: trajectory reads
-  // retained conversation lineage, which is history and deliberately survives destruction, whereas
-  // this reads the source area, which destruction collects. There is nothing to return, and
-  // answering from a surviving directory would make a destroyed child's source look readable.
-  // Do not harmonise the two.
+  // This read and trajectory refuse a destroyed child IDENTICALLY, with "No such contained
+  // Application": destruction deletes the child's project row, contained_applications.project_id
+  // is ON DELETE CASCADE (V219), and both methods open with records.find(child).orElseThrow. The
+  // retained conversation lineage survives the destruction and nothing can read it, because the
+  // row that resolves the child is gone. ContainedResourceReadTest
+  // .aRealDestructionMakesBothReadsRefuseIdentically pins that; ADR 0042 records it with the
+  // retention decision that rests on it.
+  //
+  // The liveness guard below is therefore unreachable in production and is kept as a guard rather
+  // than as behaviour: contained_applications.live is NOT NULL DEFAULT TRUE (V219) and nothing in
+  // this server ever writes it false. What is still true, and is this read's own reason, is that
+  // answering from a source area a collection had not finished removing would make a destroyed
+  // child's source look readable.
   @Override
   public List<Resource> resources(String account, String conversation, UUID child) {
     var retained =

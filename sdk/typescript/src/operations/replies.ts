@@ -14,6 +14,7 @@ import type { ConversationReplies } from './conversation-replies.ts';
 import type { InspectionReplies } from './inspection-replies.ts';
 import type { RecordPageView } from './records.ts';
 import type { RetrievalReplies } from './retrieval.ts';
+import type { ContainedApplicationRunning } from './application-deployments.ts';
 
 export interface IncomingTask {
   readonly id: string;
@@ -134,6 +135,11 @@ export interface Replies
   'memory.digest': ObservedStartedJob;
   'agent.curate': ObservedStartedJob;
   'agent.run': ObservedStartedJob;
+  // Typed here rather than with the other contained operations because it is the only one that
+  // answers ACCEPTED: a run is a handle to poll, so its reply belongs with the started-job shapes
+  // and not with the conversation family's OK replies. Its own shape, not a StartedJob: the handle
+  // is in `job` and the identity the caller correlates on is `child`.
+  'application.child.run': ContainedApplicationRunning;
   'conversation.resume': ObservedStartedJob;
   'document.ask': ObservedStartedJob;
   'job.status': ObservedJob;

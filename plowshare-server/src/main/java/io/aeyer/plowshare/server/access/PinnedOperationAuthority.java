@@ -448,6 +448,15 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     return containment;
   }
 
+  @Override
+  public Home mediatingHome(AuthorityScope.Contained child) {
+    Objects.requireNonNull(child);
+    if (!bounds.configured()) throw denied();
+    // identities.home refuses a CONTAINED row, and mediating only ever returns an uncontained
+    // scope, so this pair cannot answer a contained project name however the walk ends.
+    return identities.home(mediating(child));
+  }
+
   /**
    * The nearest enclosing uncontained scope: the one whose live grants a hop was projected from.
    *

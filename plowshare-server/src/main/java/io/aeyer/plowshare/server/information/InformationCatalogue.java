@@ -838,7 +838,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         parameters,
         () -> {
           var current = requireWrite(context, revision);
-          repository.replaceTags(current, parameters.values(), expectedVersion);
+          repository.replaceTags(context, current, parameters.values(), expectedVersion);
           event(
               revision,
               generation(revision),

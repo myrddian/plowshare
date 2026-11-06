@@ -102,6 +102,27 @@ public final class FrameTypes {
   /** A child's source resources as metadata, to an ancestor only; never file content. */
   public static final String APPLICATION_CHILD_RESOURCES = "application.child.resources";
 
+  /**
+   * Starting work inside a child, as that child. Behind the <em>direct container</em> rule {@code
+   * create} and {@code ceiling} use rather than the ancestor gate the two reads use, because
+   * starting work spends the child's allowance and occupies its direct container's breadth
+   * accounting. It answers {@code ACCEPTED} with a job handle, for {@code agent.run}'s reason: a
+   * run is minutes, and {@code OK} would tell a client its work had finished.
+   */
+  public static final String APPLICATION_CHILD_RUN = "application.child.run";
+
+  /**
+   * Stopping the work inside a child and its descendants. Behind the same <em>direct container</em>
+   * rule {@code run} is, because the allowance a descendant run is spending was lent by its direct
+   * container. It answers {@code OK} rather than {@code ACCEPTED}: unlike {@code run} there is no
+   * handle to poll, and the thing that has completed when this answers is the <em>asking</em> —
+   * cancellation is honoured at a run's next turn boundary, so a container that needs to know the
+   * work has actually ended reads {@code job.status} or {@code application.child.trajectory}.
+   * Cancelling a child with nothing running is {@code OK} too; see {@code
+   * ContainedApplications.cancel} for why that is a contract and not a leniency.
+   */
+  public static final String APPLICATION_CHILD_CANCEL = "application.child.cancel";
+
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";

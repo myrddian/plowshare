@@ -21,6 +21,11 @@ import org.springframework.stereotype.Component;
  * of the operation's shape and must be null: the server allocates a child's source area under its
  * configured containment root, so a named destination is refused here rather than validated into a
  * value nothing reads.
+ *
+ * <p>{@code run} is the one operation here that does not answer {@code OK}. A run is minutes, so it
+ * answers {@code ACCEPTED} with a handle to poll, for {@code AgentRunHandler}'s reason; and it is
+ * the one that checks its own answer, refusing a reply about a child other than the one asked about
+ * rather than publishing it to a container that would act on it.
  */
 @Component
 public final class ContainedApplicationFrames implements FrameArea {
@@ -44,7 +49,110 @@ public final class ContainedApplicationFrames implements FrameArea {
         FrameTypes.APPLICATION_CHILD_TRAJECTORY,
         this::trajectory,
         FrameTypes.APPLICATION_CHILD_RESOURCES,
-        this::resources);
+        this::resources,
+        FrameTypes.APPLICATION_CHILD_RUN,
+        this::run,
+        FrameTypes.APPLICATION_CHILD_CANCEL,
+        this::cancel);
+  }
+
+  /**
+   * Stops the work inside one child and its descendants. {@code OK} and not {@code ACCEPTED}: there
+   * is no handle to poll here, and what has completed when this answers is the asking rather than
+   * the work — a run honours a cancellation at its next turn boundary.
+   *
+   * <p>Keyed and authorized exactly as a ceiling change is, and the answer names the child the
+   * <em>caller</em> asked about, read once from the payload. The operation returns nothing, so
+   * there is no server-side answer to correlate against; echoing the request's own target is what
+   * keeps a container from reading this reply as being about any other Application.
+   */
+  private Outcome cancel(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation", "child"));
+    UUID child = uuid(payload, "child");
+    children.cancel(
+        asking.requireHandle(FrameTypes.APPLICATION_CHILD_CANCEL),
+        Payloads.required(
+            payload,
+            "conversation",
+            FrameTypes.APPLICATION_CHILD_CANCEL,
+            "the container's conversation"),
+        child);
+    return Outcome.ok(Map.of("child", child.toString()));
+  }
+
+  /**
+   * Starts work inside one child. {@code ACCEPTED}, never {@code OK}: a run is minutes and this
+   * answer is a handle to poll, exactly as {@code agent.run} answers.
+   *
+   * <p>No field names a project. The run's home comes from the child's own stored row on the server
+   * side, so there is no key through which a caller could choose the tier its work runs in; {@code
+   * maxTurns} is part of the shape and may be null, which decides nothing and leaves the agent's
+   * own cap.
+   */
+  private Outcome run(Map<String, Object> payload, Asking asking) {
+    fields(payload, Set.of("conversation", "child", "agent", "task", "maxTurns"));
+    UUID child = uuid(payload, "child");
+    ContainedApplications.Run request;
+    try {
+      request =
+          new ContainedApplications.Run(
+              Payloads.required(
+                  payload,
+                  "conversation",
+                  FrameTypes.APPLICATION_CHILD_RUN,
+                  "the container's conversation"),
+              child,
+              text(payload, "agent"),
+              text(payload, "task"),
+              turns(payload));
+    } catch (IllegalArgumentException invalid) {
+      // The DTO's own invariants are caller errors, not server faults, as create's are.
+      throw new CallerFault(invalid.getMessage());
+    }
+    var running = children.run(asking.requireHandle(FrameTypes.APPLICATION_CHILD_RUN), request);
+    // The answer must be about the child that was asked about. A Running naming another one is a
+    // server-side inconsistency rather than anything the caller did, so it is an IllegalState and
+    // not a CallerFault -- and it is refused rather than published, because a container acting on
+    // it would be acting on a run inside an Application it never named.
+    if (!child.equals(running.child()))
+      throw new IllegalStateException(
+          "A contained run answered about a different contained Application than the one asked"
+              + " about");
+    return new Outcome(
+        io.aeyer.plowshare.protocol.frames.Code.ACCEPTED,
+        null,
+        Map.of(
+            "child",
+            running.child().toString(),
+            "job",
+            running.job(),
+            "conversation",
+            running.conversation(),
+            "agent",
+            running.agent()));
+  }
+
+  /**
+   * A bounded non-blank string field; a number, a map or a blank is refused rather than coerced.
+   */
+  private static String text(Map<String, Object> payload, String field) {
+    if (!(payload.get(field) instanceof String value) || value.isBlank() || value.length() > 8192)
+      throw new CallerFault(field + " must be a bounded non-blank string");
+    return value;
+  }
+
+  /**
+   * A turn cap: a positive integer, or an explicit null that decides nothing. Zero is refused
+   * rather than read as "no turns", which would be a run that cannot run.
+   */
+  private static Integer turns(Map<String, Object> payload) {
+    Object value = payload.get("maxTurns");
+    if (value == null) return null;
+    if (!(value instanceof Integer || value instanceof Long)
+        || ((Number) value).longValue() <= 0
+        || ((Number) value).longValue() > Integer.MAX_VALUE)
+      throw new CallerFault("maxTurns must be a positive turn cap, or null to leave it undecided");
+    return (int) ((Number) value).longValue();
   }
 
   /**

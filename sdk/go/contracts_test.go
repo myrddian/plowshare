@@ -105,6 +105,108 @@ func TestContainedRepliesAreAboutTheChildAsked(t *testing.T) {
 	}
 }
 
+// A started run is a handle and not an outcome, and a cancellation echoes the child asked of.
+// The request-side semantic bounds (the agent name, the task, the turn cap) live in the
+// TypeScript/Node request gate, as every other contained operation's do; this pins what the Go
+// schema expresses and the correlation this SDK performs.
+func TestContainedRunAndCancelRoundTrip(t *testing.T) {
+	const child, foreign = "11111111-1111-1111-1111-111111111111", "33333333-3333-3333-3333-333333333333"
+	turns := float64(3)
+	data, err := json.Marshal(ApplicationChildRunRequest{Conversation: "c", Child: child, Agent: "worker", Task: "do it",
+		MaxTurns: ScheduleDefinitionDtoLimitsDtoMaxModelCalls{Variant2: &turns}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"agent":"worker","child":"`+child+`","conversation":"c","maxTurns":3,"task":"do it"}` {
+		t.Fatalf("request encoded as %s", data)
+	}
+	if _, err = project(catalog.Inputs["application.child.run"], data, true); err != nil {
+		t.Fatal(err)
+	}
+	// null is the one absence the shape allows; every other omission is refused.
+	if _, err = project(catalog.Inputs["application.child.run"], []byte(`{"agent":"worker","child":"`+child+`","conversation":"c","maxTurns":null,"task":"do it"}`), true); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`{"agent":"worker","child":"` + child + `","conversation":"c","task":"do it"}`,
+		`{"child":"` + child + `","conversation":"c","maxTurns":3,"task":"do it"}`,
+		`{"agent":"worker","child":"` + child + `","conversation":"c","maxTurns":3}`,
+		`{"agent":"worker","child":"` + child + `","conversation":"c","maxTurns":3,"task":"do it","extra":1}`,
+	} {
+		if _, err = project(catalog.Inputs["application.child.run"], []byte(bad), true); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+	// The turn cap and the agent name ARE bounded by the generated schema, so this SDK refuses
+	// them without the TypeScript gate's help: maxTurns carries integer/minimum/maximum and agent
+	// carries minLength/maxLength/pattern/trimmed. `task` is a bare string shape and is the one
+	// request-side bound that is TypeScript-only; the blank task below is accepted here on purpose.
+	for _, bound := range []string{
+		`"maxTurns":0`, `"maxTurns":-1`, `"maxTurns":1.5`, `"maxTurns":2147483648`,
+	} {
+		body := `{"agent":"worker","child":"` + child + `","conversation":"c","task":"do it",` + bound + `}`
+		if _, err = project(catalog.Inputs["application.child.run"], []byte(body), true); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	for _, blank := range []string{`"agent":""`, `"agent":" "`} {
+		body := `{"child":"` + child + `","conversation":"c","task":"do it","maxTurns":3,` + blank + `}`
+		if _, err = project(catalog.Inputs["application.child.run"], []byte(body), true); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	// And the one that is not bounded here, asserted so the ADR's "one of three" is checkable.
+	if _, err = project(catalog.Inputs["application.child.run"],
+		[]byte(`{"agent":"worker","child":"`+child+`","conversation":"c","task":"","maxTurns":3}`), true); err != nil {
+		t.Fatal("a blank task is refused by the TypeScript gate alone, so this SDK accepts it")
+	}
+	running := `{"child":"` + child + `","job":"job_1","conversation":"cnv_child","agent":"worker"}`
+	projected, err := project(catalog.Results["application.child.run"], []byte(running), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var started ContainedApplicationRunningDto
+	if err = json.Unmarshal(projected, &started); err != nil {
+		t.Fatal(err)
+	}
+	// The conversation answered is the child's own, never the container's that was named.
+	if started.Job != "job_1" || started.Conversation != "cnv_child" || started.Agent != "worker" {
+		t.Fatalf("decoded %+v", started)
+	}
+	for _, bad := range []string{
+		`{"child":"` + child + `","job":"job_1","conversation":"cnv_child"}`,
+		`{"child":"` + child + `","job":"job_1","agent":"worker"}`,
+	} {
+		if _, err = project(catalog.Results["application.child.run"], []byte(bad), false); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+	asked := []byte(`{"conversation":"c","child":"` + child + `"}`)
+	for operation, cases := range map[string]map[string]bool{
+		"application.child.run": {
+			running: true,
+			`{"child":"` + foreign + `","job":"job_1","conversation":"cnv_child","agent":"worker"}`: false,
+		},
+		"application.child.cancel": {
+			`{"child":"` + child + `"}`:   true,
+			`{"child":"` + foreign + `"}`: false,
+		},
+	} {
+		for reply, want := range cases {
+			if got := deploymentMatches(operation, asked, []byte(reply)); got != want {
+				t.Fatalf("%s %s: got %v want %v", operation, reply, got, want)
+			}
+		}
+	}
+	cancel, err := json.Marshal(ApplicationChildCancelRequest{Conversation: "c", Child: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = project(catalog.Inputs["application.child.cancel"], cancel, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The generated schema types bytes as a plain number, so the non-negative integer bound is
 // enforced by the TypeScript SDK alone; this test pins only what the Go schema does express.
 func TestContainedResourcesRoundTripMetadataOnly(t *testing.T) {

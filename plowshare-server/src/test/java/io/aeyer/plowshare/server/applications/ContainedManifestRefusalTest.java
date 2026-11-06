@@ -146,11 +146,16 @@ class ContainedManifestRefusalTest {
             projects,
             validator,
             authority,
+            mock(io.aeyer.plowshare.server.access.IdentityRepository.class),
             principals,
             allowances,
             work,
             new ContainmentConfig(root.toString(), 2, 4, null),
-            new InProcessContainedStaging());
+            new InProcessContainedStaging(),
+            mock(io.aeyer.plowshare.server.agents.Runs.class),
+            // No run is going in any conversation here; stopping one is
+            // ContainedCancellationTest's.
+            conversation -> 0);
   }
 
   /** A child package whose extra files are added to the minimum valid Application. */

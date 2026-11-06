@@ -31,6 +31,8 @@ const MUTATIONS = new Set<string>([
   'application.child.create',
   'application.child.ceiling',
   'application.child.destroy',
+  'application.child.run',
+  'application.child.cancel',
   'application.token.issue',
   'admin.service.account.create',
   'admin.service.account.update',

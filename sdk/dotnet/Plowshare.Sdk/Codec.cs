@@ -75,7 +75,7 @@ internal static class Codec
     {
         if(operation.StartsWith("tool.scope.host.",StringComparison.Ordinal)||operation.StartsWith("tool.scope.worker.",StringComparison.Ordinal)){if(!HostedMatches(operation,request,result))throw Invalid();return;}
         static string? IdentityText(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-        if (operation is "application.child.ceiling" or "application.child.destroy") {
+        if (operation is "application.child.ceiling" or "application.child.destroy" or "application.child.cancel" or "application.child.run") {
             // A contained reply must be about the child the caller named; a destruction accounts
             // for it and cannot have removed more source areas than records.
             var askedChild=IdentityText(request,"child");

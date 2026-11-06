@@ -96,6 +96,9 @@ const callCount = (value: unknown): value is number =>
   Number.isInteger(value) &&
   value >= 0 &&
   value <= MAX_CALLS;
+/** A turn cap is a positive int, bound as a Java int. Zero is not a cap at all. */
+const turnCap = (value: unknown): value is number =>
+  callCount(value) && value > 0;
 /**
  * The request checks the server applies to a contained-Application frame, run before anything is
  * sent. Every child operation addresses a container by its own retained `conversation` and a child
@@ -118,6 +121,19 @@ export function containedProblem(
     if (!deploymentUuid(body['child'])) return 'child must be a UUID';
     if (type === 'application.child.ceiling' && !callCount(body['calls']))
       return 'calls must be an explicit non-negative call count; zero disables calls';
+    if (type === 'application.child.run') {
+      // The same bounds the frame applies: a bounded non-blank agent name and task, and a turn cap
+      // that is positive or an explicit null. Zero is refused rather than read as "no turns",
+      // which would be a run that cannot run.
+      for (const field of ['agent', 'task'] as const) {
+        const value = body[field];
+        if (typeof value !== 'string' || !value.trim() || value.length > 8192)
+          return `${field} must be a bounded non-blank string`;
+      }
+      const turns = body['maxTurns'];
+      if (turns !== null && !turnCap(turns))
+        return 'maxTurns must be a positive turn cap, or null to leave it undecided';
+    }
     return undefined;
   }
   if (!deploymentUuid(body['requestId']))
@@ -289,6 +305,34 @@ export const containedResourceCheck = record({
 export const containedResourcesCheck = record({
   resources: list(containedResourceCheck),
 });
+/**
+ * One started run inside a contained Application. A handle and not an outcome: a run is minutes, so
+ * the operation answers `ACCEPTED` and `job` is pollable at once. `conversation` is the one opened
+ * in the child's own home that this run is the first turn of -- the envelope `trajectory` later
+ * reads back -- and is never the container's own conversation the request named. `agent` is the
+ * definition's own name as the child's registry spells it; nothing child-authored is in this reply.
+ */
+export interface ContainedApplicationRunning {
+  readonly child: string;
+  readonly job: string;
+  readonly conversation: string;
+  readonly agent: string;
+}
+/**
+ * What a cancellation answers: the child the *caller* named, echoed. The operation returns nothing
+ * of its own, so this is not a server-side answer to correlate against -- echoing the request's own
+ * target is what keeps a container from reading the reply as being about another Application.
+ */
+export interface ContainedApplicationCancellation {
+  readonly child: string;
+}
+export const containedRunningCheck = record({
+  child: deploymentUuid,
+  job: named,
+  conversation: named,
+  agent: named,
+});
+export const containedCancellationCheck = record({ child: deploymentUuid });
 export const deploymentStatusCheck = record({
   project: named,
   activeRevision: nullable(deploymentUuid),

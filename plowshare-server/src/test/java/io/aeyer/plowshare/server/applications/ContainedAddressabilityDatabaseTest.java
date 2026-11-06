@@ -254,6 +254,95 @@ class ContainedAddressabilityDatabaseTest {
             "SELECT information_project_readable(?,?)", Boolean.class, parentId, "admin"));
   }
 
+  /**
+   * The child's own principal, asked of every role, management and listing surface this inventory
+   * fences — measured rather than argued, now that a child executes and its principal is a real
+   * actor on the installation.
+   *
+   * <p>ADR 0042 records the misclassification risk this closes: a contained principal's identifier
+   * is a bare UUID, so {@code ServiceCredentials.principal} is false for it and any path that
+   * classifies a caller by the {@code @service/} prefix routes it into the <em>user</em> branch —
+   * {@code RequestProjects}, {@code ProjectAuthorization} and {@code ApplicationProjectMembers}.
+   * That branch's fail-closed behaviour was stated as an argument ("{@code authority_project_role}
+   * finds no {@code admins} and no {@code project_members} row for a UUID") and is asserted here
+   * instead, against the principal a run actually carries.
+   *
+   * <p>It is also the slice-three re-decision of four inventory rows at once — the {@code
+   * ProjectAuthorization} chokepoint, {@code JdbcProjectMembers}' {@code role} family, {@code
+   * readableProjects} and {@code project.list} — each of which was proved against inserted rows and
+   * ordinary accounts, never against the actor a running child is.
+   *
+   * <p><strong>The control is not a second account: it is this same principal succeeding.</strong>
+   * A refusal measured against a principal that resolves nothing anywhere proves nothing, so the
+   * first assertion is that the principal genuinely reaches its own home through V223's self arm.
+   * The container's own MANAGER is the second control, for the predicates themselves.
+   */
+  @Test
+  void theRunningChildsOwnPrincipalResolvesNoRoleOrListingAnywhere() {
+    holdsParent("alice");
+    UUID childScope =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_scopes WHERE project_id=?", UUID.class, childId);
+    jdbc.update("INSERT INTO contained_principals(scope_id) VALUES(?)", childScope);
+    String principal =
+        jdbc.queryForObject(
+                "SELECT id FROM contained_principals WHERE scope_id=?", UUID.class, childScope)
+            .toString();
+
+    // CONTROL FIRST, with this principal: it is live and it does reach its own home, so nothing
+    // below can pass because the fixture never installed a principal at all.
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT contained_scope_readable(?,?,false)", Boolean.class, principal, childScope));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT information_project_readable(?,?)", Boolean.class, childId, principal),
+        "a child reads its own project, which is the capability rather than a hole");
+
+    // It holds no role anywhere: not on its own project, and not on its container's.
+    for (long project : List.of(childId, parentId)) {
+      assertNull(
+          jdbc.queryForObject(
+              "SELECT authority_project_role(?,?)", String.class, projectName(project), principal));
+      assertNull(
+          jdbc.queryForObject(
+              "SELECT authority_project_management_grant(?,?)",
+              UUID.class,
+              projectName(project),
+              principal));
+    }
+    // Nor is it a general-read member, which is the gate V229 routed around rather than opened.
+    assertFalse(
+        jdbc.queryForObject("SELECT information_global_read_member(?)", Boolean.class, principal));
+    // And it reads nothing of its container's, in the one direction the walk does not run.
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_project_readable(?,?)", Boolean.class, parentId, principal));
+
+    // The repository reads every Java call site asks, including the chokepoint's own.
+    assertTrue(members.role(child, principal).isEmpty());
+    assertTrue(members.role("parent", principal).isEmpty());
+    assertFalse(members.mayUse("parent", principal));
+    assertFalse(members.mayWork("parent", principal));
+    assertFalse(members.mayManage("parent", principal));
+    assertFalse(members.mayAdminister("parent", principal));
+    assertFalse(members.isMember("parent", principal));
+    assertEquals(Set.of(), members.readableProjects(List.of(child, "parent"), principal));
+
+    // And it names nothing in either listing -- not its own project, which it can read knowledge
+    // in, because reading a home is not addressing a project.
+    assertEquals(List.of(), names(projects.allFor(principal)));
+    // Second control, for the predicates themselves: the container's MANAGER still resolves.
+    assertEquals(
+        "MANAGER",
+        jdbc.queryForObject("SELECT authority_project_role(?,?)", String.class, "parent", "alice"));
+    assertEquals(List.of("parent"), names(projects.allFor("alice")));
+  }
+
+  private String projectName(long id) {
+    return jdbc.queryForObject("SELECT name FROM projects WHERE id=?", String.class, id);
+  }
+
   @Test
   void aMembershipRowAgainstAChildMintsNoGrant() {
     // The repository refuses to write one; this writes it underneath that refusal, because the

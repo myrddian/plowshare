@@ -11,7 +11,68 @@ public record InformationContext(
     Corpus corpus,
     InformationFacets facets,
     boolean typedView,
-    io.aeyer.plowshare.server.access.KnowledgeReadScope readBoundary) {
+    io.aeyer.plowshare.server.access.KnowledgeReadScope readBoundary,
+    String attribution) {
+
+  /**
+   * {@link #account} under the name that says which of the two axes it is: <em>who is acting</em>.
+   *
+   * <p>Every authority gate is asked about this value — the destination gate, the resource lock,
+   * readability — and for a contained run it is the child's own ephemeral principal, which is what
+   * V229's write arm admits and what must never be widened to anything else.
+   *
+   * <p>An alias rather than a rename: {@code account()} is read at dozens of call sites and
+   * renaming the component would have made a behavioural review of this change impossible to do by
+   * reading the diff. New gate call sites should say {@code acting()}.
+   */
+  public String acting() {
+    return account;
+  }
+
+  /**
+   * The other axis: <em>who the work is accounted to</em>, which is what provenance columns record.
+   *
+   * <p>For every ordinary caller this is the acting principal, so nothing changes. It differs for
+   * exactly one case, a run inside a contained Application (ADR 0042): the acting principal is the
+   * child, and the accounting account is its container's, because a containment hop keeps the
+   * parent's executor and account unchanged and a contained principal is deliberately not an {@code
+   * authority_accounts} subject (V218).
+   *
+   * <p><strong>Nothing in production builds that case yet.</strong> {@code
+   * InformationAccess.contained} is the only place the two axes are made to differ and it has no
+   * production caller — a contained run's information actor is the container's executor — so every
+   * caller this method serves today holds one value for both axes. See that method for why, and ADR
+   * 0042 for the wiring it names as the next slice's prerequisite. The split is here so the gates
+   * are decidable, not because the second axis is in use.
+   *
+   * <p><strong>Why the split had to exist here.</strong> One field served both axes, and no single
+   * value can satisfy them: the child's principal passes V229's destination gate and then fails
+   * every provenance column, each of which has a foreign key into {@code admins} or {@code
+   * authority_accounts}; the container's account satisfies those keys and fails the gate, because a
+   * contained project carries no {@code PROJECT} scope and so no role for anybody — not even for
+   * the container. {@code ContainedExecutionWriteDatabaseTest} measures both halves.
+   */
+  public String attribution() {
+    return attribution == null ? account : attribution;
+  }
+
+  /**
+   * The same selection, accounted to another account: the contained case and nothing else.
+   *
+   * <p>It never widens what the caller may do — the acting principal, the selection and the read
+   * boundary are all untouched, and every gate still asks about the acting principal. It only says
+   * which account the rows this write leaves behind are attributed to.
+   */
+  public InformationContext accountedTo(String account) {
+    return new InformationContext(
+        this.account,
+        selection,
+        corpus,
+        facets,
+        typedView,
+        readBoundary,
+        Objects.requireNonNull(account, "account"));
+  }
 
   public InformationContext(
       String account,
@@ -19,7 +80,7 @@ public record InformationContext(
       Corpus corpus,
       InformationFacets facets,
       boolean typedView) {
-    this(account, selection, corpus, facets, typedView, null);
+    this(account, selection, corpus, facets, typedView, null, null);
   }
 
   public InformationContext within(io.aeyer.plowshare.server.access.KnowledgeReadScope boundary) {
@@ -29,7 +90,8 @@ public record InformationContext(
         corpus,
         facets,
         typedView,
-        readBoundary == null ? Objects.requireNonNull(boundary) : readBoundary.intersect(boundary));
+        readBoundary == null ? Objects.requireNonNull(boundary) : readBoundary.intersect(boundary),
+        attribution);
   }
 
   public InformationContext(
@@ -38,7 +100,8 @@ public record InformationContext(
   }
 
   public InformationContext withView(boolean supporting) {
-    return new InformationContext(account, selection, corpus, facets, supporting, readBoundary);
+    return new InformationContext(
+        account, selection, corpus, facets, supporting, readBoundary, attribution);
   }
 
   public InformationContext(String account, Selection selection, Corpus corpus) {
@@ -47,7 +110,13 @@ public record InformationContext(
 
   public InformationContext withFacets(InformationFacets value) {
     return new InformationContext(
-        account, selection, corpus, Objects.requireNonNull(value), typedView, readBoundary);
+        account,
+        selection,
+        corpus,
+        Objects.requireNonNull(value),
+        typedView,
+        readBoundary,
+        attribution);
   }
 
   public InformationContext(String account, Selection selection) {
@@ -72,7 +141,8 @@ public record InformationContext(
   public InformationContext withCorpus(Corpus value) {
     return value == null
         ? this
-        : new InformationContext(account, selection, value, facets, typedView, readBoundary);
+        : new InformationContext(
+            account, selection, value, facets, typedView, readBoundary, attribution);
   }
 
   public InformationContext {

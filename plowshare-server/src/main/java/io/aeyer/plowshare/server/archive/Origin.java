@@ -97,6 +97,24 @@ public enum Origin {
   ORCHESTRATION("orchestration"),
 
   /**
+   * Work a container started inside one confined child Application (ADR 0042).
+   *
+   * <p>One agent's run from end to end, so its row names its agent, and <b>it owns its
+   * allowance</b> — which is the entire reason this kind exists rather than being one of the eight
+   * above it. The nearest existing kind, {@link #DELEGATION}, shares its parent's allowance by
+   * reference and so holds no budget on its row; a contained run carried on it would spend its
+   * <em>container's</em> pool, and ADR 0042 requires a child to allocate its own under a ceiling
+   * its container sets. {@link #SUBMISSION} would have been schema-compatible and actively
+   * misleading — V17 defines it as a caller's own parentless run — and {@link #ORCHESTRATION}
+   * brings lifecycle special-cases a contained run has no use for.
+   *
+   * <p>It is a root: its parent conversation is its container's, which the authority envelope
+   * records, not this row — {@code conversations_a_delegation_is_what_has_a_parent} reserves the
+   * parent column for a delegation.
+   */
+  CONTAINED("contained"),
+
+  /**
    * A seat on a project's board — spec 2026-09-29, the project board and the swarm, §4. One agent's
    * place on one topic, woken turn by turn. It spends the root topic's pot, so its row holds no
    * allowance, the same shape as a delegation's; unlike a delegation it is a root.
@@ -136,7 +154,10 @@ public enum Origin {
         || this == SUBMISSION
         || this == MEMORY
         || this == EVENT
-        || this == ORCHESTRATION;
+        || this == ORCHESTRATION
+        // A child allocates its own allowance under the ceiling its container set and never
+        // shares one: ADR 0042's "allocated, never shared", and the reason this kind exists.
+        || this == CONTAINED;
   }
 
   /**

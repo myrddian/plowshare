@@ -2,6 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { decodeRequest } from './schema.ts';
 import { request, resultOf } from './direct.ts';
 import { isMutation } from './discovery.ts';
+import { OPERATION_SCHEMAS } from './operation-schemas.ts';
+
+/** The properties of a `$ref`-shaped input, resolved one level through `$defs`. */
+const resolved = (
+  operation: string,
+): Record<string, Record<string, unknown>> => {
+  const reference = (OPERATION_SCHEMAS.inputs[operation] as { $ref?: string })
+    .$ref!.split('/')
+    .pop()!;
+  return (
+    OPERATION_SCHEMAS.$defs[reference] as {
+      properties: Record<string, Record<string, unknown>>;
+    }
+  ).properties;
+};
 
 const conversation = 'caller-conversation';
 const id = '11111111-1111-1111-1111-111111111111';
@@ -29,6 +44,8 @@ const OPERATIONS = [
   'application.child.list',
   'application.child.resources',
   'application.child.trajectory',
+  'application.child.run',
+  'application.child.cancel',
 ] as const;
 const valid = {
   'application.child.create': create,
@@ -37,7 +54,25 @@ const valid = {
   'application.child.list': { conversation },
   'application.child.resources': { conversation, child: id },
   'application.child.trajectory': { conversation, child: id },
+  'application.child.run': {
+    conversation,
+    child: id,
+    agent: 'worker',
+    task: 'do the thing',
+    maxTurns: 3,
+  },
+  'application.child.cancel': { conversation, child: id },
 } as const;
+/**
+ * The only contained operation that answers ACCEPTED: a run is minutes, so the reply is a handle.
+ * The conversation in it is the child's own, never the container's that the request named.
+ */
+const running = {
+  child: id,
+  job: 'job_1',
+  conversation: 'cnv_child',
+  agent: 'worker',
+};
 const resource = {
   path: 'plowshare.json',
   kind: 'manifest',
@@ -116,16 +151,58 @@ describe('contained Application operations', () => {
         { conversation: '' },
         /container conversation/,
       ],
+      ['application.child.cancel', { child: 'nope' }, /child must be a UUID/],
+      [
+        'application.child.cancel',
+        { conversation: ' ' },
+        /container conversation/,
+      ],
+      ['application.child.run', { child: 'nope' }, /child must be a UUID/],
+      ['application.child.run', { agent: ' ' }, /agent must be a bounded/],
+      // A wrong JSON type is refused structurally, before the semantic gate runs.
+      ['application.child.run', { agent: 7 }, shape],
+      ['application.child.run', { task: '' }, /task must be a bounded/],
+      ['application.child.run', { task: null }, shape],
+      // Zero is refused rather than read as "no turns", which would be a run that cannot run,
+      // and a cap is an integer. Null is the one absence the shape allows.
+      ['application.child.run', { maxTurns: 0 }, /positive turn cap/],
+      ['application.child.run', { maxTurns: -1 }, /positive turn cap/],
+      ['application.child.run', { maxTurns: 1.5 }, /positive turn cap/],
+      ['application.child.run', { maxTurns: '3' }, shape],
     ] as const)
       expect(() => decodeRequest(type, { ...valid[type], ...bad })).toThrow(
         reason,
       );
   });
 
-  it('classifies the three that change state as mutations', () => {
+  it('accepts the one absence the run shape allows, and no other', () => {
+    expect(
+      decodeRequest('application.child.run', {
+        ...valid['application.child.run'],
+        maxTurns: null,
+      }).payload,
+    ).toEqual({ ...valid['application.child.run'], maxTurns: null });
+  });
+
+  it("bounds the run request in this SDK's gate and not in its structural schema", () => {
+    // The asymmetry ADR 0042 records, asserted rather than described. THIS artifact --
+    // operation-schemas.ts, and the shared sdk-protocol.json rendered from it -- carries no
+    // keyword on any of these fields, so every request-side bound in TypeScript is the
+    // hand-written gate's, exercised above. The three native schema files are enriched
+    // separately by scripts/native-sdk-constraints.mjs, which is why `maxTurns` and `agent` are
+    // refused structurally in Go, Python and .NET while `task` is not; those are asserted in
+    // sdk/go/contracts_test.go and sdk/python/tests/test_contracts.py, where those schemas live.
+    const run = resolved('application.child.run');
+    for (const field of ['agent', 'task', 'child', 'maxTurns'] as const)
+      expect(Object.keys(run[field]!), field).toEqual(['$ref']);
+  });
+
+  it('classifies the five that change state as mutations', () => {
     expect(isMutation('application.child.create')).toBe(true);
     expect(isMutation('application.child.ceiling')).toBe(true);
     expect(isMutation('application.child.destroy')).toBe(true);
+    expect(isMutation('application.child.run')).toBe(true);
+    expect(isMutation('application.child.cancel')).toBe(true);
     expect(isMutation('application.child.list')).toBe(false);
     expect(isMutation('application.child.resources')).toBe(false);
     expect(isMutation('application.child.trajectory')).toBe(false);
@@ -153,14 +230,48 @@ describe('contained Application operations', () => {
           },
         ],
       },
+      'application.child.cancel': { child: id },
     } as const;
     for (const type of OPERATIONS)
-      expect(
-        resultOf(request(type, valid[type]), {
-          code: 'OK',
-          payload: replies[type],
-        }).kind,
-      ).toBe('completed');
+      if (type !== 'application.child.run')
+        expect(
+          resultOf(request(type, valid[type]), {
+            code: 'OK',
+            payload: replies[type],
+          }).kind,
+        ).toBe('completed');
+  });
+
+  it('reads a started run as a handle and not as a completed answer', () => {
+    const asked = request(
+      'application.child.run',
+      valid['application.child.run'],
+    );
+    expect(resultOf(asked, { code: 'ACCEPTED', payload: running })).toEqual({
+      kind: 'accepted',
+      outcome: { code: 'ACCEPTED', payload: running },
+      job: running.job,
+      conversation: running.conversation,
+    });
+    // OK is the wrong success for a run: the work has not finished, so an OK answer is a reply
+    // this SDK does not understand rather than a result to act on.
+    for (const code of ['OK', 'CREATED', 'NO_CONTENT'] as const)
+      expect(resultOf(asked, { code, payload: running }).kind).toBe(
+        'invalid-response',
+      );
+    expect(
+      resultOf(asked, { code: 'BAD_REQUEST', payload: running }).kind,
+    ).toBe('refused');
+    for (const bad of [
+      { ...running, job: '' },
+      { ...running, conversation: '' },
+      { ...running, agent: '' },
+      { ...running, child: 'nope' },
+      { child: running.child, job: running.job, agent: running.agent },
+    ])
+      expect(resultOf(asked, { code: 'ACCEPTED', payload: bad }).kind).toBe(
+        'invalid-response',
+      );
   });
 
   it('refuses a reply that carries an internal value object or a malformed project', () => {
@@ -201,10 +312,19 @@ describe('contained Application operations', () => {
         'application.child.destroy',
         { child: other, collected: [other], sources: 1 },
       ],
+      ['application.child.cancel', { child: other }],
     ] as const)
       expect(
         resultOf(request(type, valid[type]), { code: 'OK', payload }).kind,
       ).toBe('invalid-response');
+    // A started run answered about another child is refused rather than published: a container
+    // acting on it would be acting inside an Application it never named.
+    expect(
+      resultOf(
+        request('application.child.run', valid['application.child.run']),
+        { code: 'ACCEPTED', payload: { ...running, child: other } },
+      ).kind,
+    ).toBe('invalid-response');
   });
 
   it('refuses a destruction that reports more sources than records', () => {

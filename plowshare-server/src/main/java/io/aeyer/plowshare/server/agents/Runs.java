@@ -87,6 +87,61 @@ public final class Runs {
   }
 
   /**
+   * The key to {@link Turn}'s contained door, and the whole of that door's narrowing.
+   *
+   * <p>A contained run's conversation carries {@code Origin.CONTAINED}, which {@code
+   * Turn.requireSpeakable} refuses by design: such a row is the log of a run and not a conversation
+   * anybody speaks into, and that guard is the one a <em>caller-supplied</em> conversation id
+   * reaches from {@code POST /v1/agents/&#123;name&#125;/runs} and the {@code agent.run} frame
+   * alike. Widening it to accept {@code CONTAINED} would therefore let {@code agent.run} post an
+   * utterance into a child's log and spend the child's allowance, driven as whatever agent the
+   * caller named. So a second, narrower door exists instead — {@code requireConductor}'s and {@code
+   * requireSeat}'s shape — and this type is what makes it narrow.
+   *
+   * <p><strong>Reachability is the safety property, and it is enforced by the compiler rather than
+   * by a convention.</strong> This interface is {@code sealed} and permits exactly one
+   * implementation, which is {@code private} to {@code Runs}. No class outside {@code Runs} can
+   * implement it and none can construct the implementation, so <em>no code outside {@code Runs} can
+   * produce a value of this type at all</em> — and {@code Turn.speakContained} cannot be called
+   * without one. {@code Turn.speakContained} is itself package-private, so nothing outside {@code
+   * io.aeyer.plowshare.server.agents} can even name it.
+   *
+   * <p><strong>What must not be simplified.</strong> Replacing this with a boolean, a flag on a
+   * context object, or a public overload would make the door wide with a convention attached: any
+   * caller could then ask for the contained guard. The {@code sealed} modifier and the {@code
+   * private} implementation are the mechanism; a package-private record here would be constructible
+   * by every class in this package, which is wider than the one branch that may use it.
+   *
+   * <p><strong>The residual link, stated rather than overclaimed.</strong> "Only {@code Runs}" is
+   * compiler-enforced. The narrowing from there to "only {@link #start}'s contained branch" rests
+   * on two things a compiler cannot see and tests pin instead: this type is constructed at exactly
+   * one site, and that site is inside {@code if (ask.contained() != null)} — a branch no wire shape
+   * can reach, because {@code api.RunAgentRequest} has no component of type {@link Ask.Contained}
+   * and {@code ContainedRunTest} asserts that by reflection.
+   */
+  sealed interface ContainedStart permits ContainedOpened {
+    /**
+     * The conversation the contained door opened, which is the only one this start may speak to.
+     */
+    String conversation();
+  }
+
+  /**
+   * The one implementation, private so that {@code Runs} is the only code that can make one.
+   *
+   * <p>It carries the conversation id and nothing else on purpose: the authority a contained run
+   * holds is proved before this is built and rechecked below {@code Turn} by {@code
+   * OperationExecution.admit} against the bound envelope, so a second copy of it here would be a
+   * second source of truth for one fact.
+   */
+  private record ContainedOpened(String conversation) implements ContainedStart {
+    private ContainedOpened {
+      if (conversation == null || conversation.isBlank())
+        throw new IllegalArgumentException("A contained start names the conversation it opened");
+    }
+  }
+
+  /**
    * What one caller asked to run, in fields and never in a wire shape.
    *
    * <p>{@code api.RunAgentRequest} is the HTTP body Jackson binds and it stays on the HTTP surface;
@@ -114,6 +169,10 @@ public final class Runs {
    * @param newConversation whether to open a fresh conversation for this first turn
    * @param callerHandle the authenticated account submitting the run, also when the harness speaks
    *     an approval reply on its behalf
+   * @param contained what a run inside a confined child Application brings with it, or {@code null}
+   *     for every other run — which is every run that is not {@code application.child.run}. See
+   *     {@link Contained}; the three facts travel together because they come from one proved
+   *     admission and are meaningless apart.
    */
   public record Ask(
       String agent,
@@ -126,11 +185,89 @@ public final class Runs {
       List<String> images,
       Speaker speaker,
       String callerHandle,
-      Boolean newConversation) {
+      Boolean newConversation,
+      Contained contained) {
+
+    /**
+     * The authority a contained run carries, proved before it was built (ADR 0042).
+     *
+     * <p>One record and not three nullable fields on {@link Ask}, because the three are one fact: a
+     * containment hop produced an admission, and this is that admission, the pool the run spends
+     * and the project its work authority was proved against. A caller holding any of them holds all
+     * of them.
+     *
+     * <p><strong>Server-side only, and that is what keeps it safe.</strong> {@code
+     * api.RunAgentRequest} — the record Jackson binds for the HTTP body and for the frame payload —
+     * has no component of this type, so no wire shape can supply one; the only caller that does is
+     * the contained-run service, which proved the admission first. {@code ContainedRunTest} pins
+     * that by reflection. A wire-settable version would let a caller prove work authority against a
+     * project it holds and then run somewhere else.
+     *
+     * @param admission the child's admission, whose account is its <em>container's</em>: a hop
+     *     keeps the parent's executor and account unchanged, so nothing here invents a second
+     *     accounting subject and ADR 0025's immutable attribution is untouched
+     * @param budget the child's <em>own</em> allowance, under the ceiling its container set.
+     *     Restored from the existing allowance rather than minted, so the conversation points at
+     *     the pool the container already bounded and no counter is shared
+     * @param workProject the project this run's work authority is proved against: the nearest
+     *     enclosing <em>uncontained</em> scope's home. A contained project carries no {@code
+     *     PROJECT} scope and therefore no role for anybody — not for the child's principal and not
+     *     for its container — so asking the work question about the child's own project name
+     *     answers "no role" whoever asks. Supplying the enclosing project here asks the question
+     *     that genuinely decides a child's work authority, through the existing predicate, instead
+     *     of widening the predicate
+     */
+    public record Contained(
+        io.aeyer.plowshare.server.access.OperationAuthority.Admission admission,
+        Budget budget,
+        String workProject) {
+      public Contained {
+        java.util.Objects.requireNonNull(admission, "admission");
+        java.util.Objects.requireNonNull(budget, "budget");
+        if (workProject == null || workProject.isBlank())
+          throw new IllegalArgumentException(
+              "A contained run names the project its work authority is proved against");
+      }
+    }
 
     /** Never null, for {@code api.RunAgentRequest}'s own reason. */
     public Ask {
       images = images == null ? List.of() : List.copyOf(images);
+      // A contained run opens its own conversation through the contained door and speaks into it.
+      // Carrying contained authority while naming an existing conversation, or without asking for
+      // a fresh one, would take the utterance branch below -- which resolves the conversation's
+      // own home and never reaches that door. It fails closed today at ConversationStore's guard,
+      // but incidentally; this is the structural statement, made where the combination is built.
+      if (contained != null && (conversation != null || !Boolean.TRUE.equals(newConversation)))
+        throw new IllegalArgumentException(
+            "A contained run opens its own conversation: it names none and asks for a fresh one");
+    }
+
+    public Ask(
+        String agent,
+        String task,
+        String project,
+        String session,
+        String conversation,
+        Integer maxTurns,
+        Boolean noTurnCap,
+        List<String> images,
+        Speaker speaker,
+        String callerHandle,
+        Boolean newConversation) {
+      this(
+          agent,
+          task,
+          project,
+          session,
+          conversation,
+          maxTurns,
+          noTurnCap,
+          images,
+          speaker,
+          callerHandle,
+          newConversation,
+          null);
     }
 
     public Ask(
@@ -277,28 +414,64 @@ public final class Runs {
     TurnCap turnCap = RequestedTurnCap.in(ask.maxTurns(), ask.noTurnCap(), "this run");
     if (ask.conversation() == null) {
       Home home = RequestedHome.in(runProject);
-      callers.requireWork(home.project(), ask.callerHandle());
+      // The project the work question is asked about is not always the one the run answers from.
+      // Ask.workProject explains the one case where they differ and why it cannot be set from the
+      // wire; null -- every ordinary caller -- asks about the run's own project as it always has.
+      callers.requireWork(
+          ask.contained() == null ? home.project() : ask.contained().workProject(),
+          ask.callerHandle());
       if (Boolean.TRUE.equals(ask.newConversation())) {
         if (!ask.images().isEmpty())
           throw new CallerFault("a new conversation cannot carry images; use a standalone run");
         if (conversations == null) throw new CallerFault("new conversations are unavailable");
+        // Two doors, and which one is not a detail: a contained home's scope is never resolved
+        // from its project name and its admission comes from a containment hop rather than from
+        // admitting a scope, so openContained takes the proved admission and binds it. The pool is
+        // the child's own allowance, not this server's default conversation budget.
         var opened =
-            conversations.open(
-                home,
-                io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
-                    conversationProperties.defaultBudgetLimit()),
-                turnCap,
-                ask.callerHandle());
+            ask.contained() == null
+                ? conversations.open(
+                    home,
+                    io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
+                        conversationProperties.defaultBudgetLimit()),
+                    turnCap,
+                    ask.callerHandle())
+                : conversations.openContained(
+                    home,
+                    ask.contained().budget(),
+                    turnCap,
+                    ask.callerHandle(),
+                    ask.contained().admission(),
+                    definition.name(),
+                    // Computed here and not carried on the Ask: the fingerprint is a property of
+                    // the resolved definition, which is resolved here, and a caller-supplied one
+                    // could claim capabilities the agent does not have.
+                    OperationExecution.fingerprint(definition));
         logStages.getObject().opened(LogStages.LogOpened.ofConversation(opened, session));
+        // Two doors here as well, and for the same reason the two above are two: a contained run's
+        // log carries Origin.CONTAINED, which requireSpeakable refuses by design because that guard
+        // is the one a caller-supplied conversation id reaches. The contained branch therefore goes
+        // through speakContained, whose key -- ContainedStart -- no code outside this class can
+        // construct. THIS IS THE ONLY SITE THAT CONSTRUCTS ONE; see ContainedStart for what rests
+        // on that and what must not be simplified.
         String id =
-            turns.speak(
-                opened.id(),
-                definition,
-                task,
-                session,
-                turnCap,
-                ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
-                outcome -> {});
+            ask.contained() == null
+                ? turns.speak(
+                    opened.id(),
+                    definition,
+                    task,
+                    session,
+                    turnCap,
+                    ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
+                    outcome -> {})
+                : turns.speakContained(
+                    new ContainedOpened(opened.id()),
+                    definition,
+                    task,
+                    session,
+                    turnCap,
+                    ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
+                    outcome -> {});
         return new Started(id, definition.name(), opened.id());
       }
       // incoming = true: a plain submission with no conversation is a person's own words

@@ -148,6 +148,27 @@ public interface OperationAuthority {
   AuthorityScope scope(Home home);
 
   /**
+   * The home of the nearest enclosing <em>uncontained</em> scope above a contained child: the one
+   * whose live grants the child's authority was projected from.
+   *
+   * <p>This exists because a contained project carries no {@code PROJECT} scope and therefore no
+   * role for anyone — not for the child's principal and not for its container — so every
+   * project-keyed work check asked about a contained project name answers "no role" whoever asks.
+   * The question a child's work authority is actually decided by is the one {@code requireOwn}
+   * already asks: the container's account against the nearest enclosing uncontained scope, because
+   * a child's authority is a projection of its container's and {@code contain} copies the
+   * container's own grant rows rather than issuing any (ADR 0042).
+   *
+   * <p>It is the same walk {@code requireOwn} performs, exposed rather than reimplemented: a second
+   * walk would be a second confinement surface to prove shut. Bounded by the configured depth and
+   * by a visited set, so a chain that ought to be impossible refuses rather than looping.
+   *
+   * <p><strong>Not a permission check.</strong> It resolves a home and grants nothing; the caller
+   * still has to ask the work question against it.
+   */
+  Home mediatingHome(AuthorityScope.Contained child);
+
+  /**
    * Resolves and retains exact supporting grants for an explicit scope; never changes account or
    * home on refusal.
    *

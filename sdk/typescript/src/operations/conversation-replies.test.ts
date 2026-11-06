@@ -168,7 +168,8 @@ const asked = (type: ConversationOperation): Request => {
     });
   if (
     type === 'application.child.destroy' ||
-    type === 'application.child.resources'
+    type === 'application.child.resources' ||
+    type === 'application.child.cancel'
   )
     return request(type, {
       conversation: 'c',

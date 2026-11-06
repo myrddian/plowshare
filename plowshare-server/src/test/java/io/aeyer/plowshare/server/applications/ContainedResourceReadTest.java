@@ -105,6 +105,7 @@ class ContainedResourceReadTest {
         mock(ProjectWorkspaces.class),
         mock(ApplicationPackageValidator.class),
         authority,
+        mock(io.aeyer.plowshare.server.access.IdentityRepository.class),
         mock(ContainedPrincipals.class),
         mock(AllowanceRepository.class),
         new UnitOfWork() {
@@ -114,7 +115,10 @@ class ContainedResourceReadTest {
           }
         },
         config,
-        new InProcessContainedStaging());
+        new InProcessContainedStaging(),
+        mock(io.aeyer.plowshare.server.agents.Runs.class),
+        // No run is going in any conversation here; stopping one is ContainedCancellationTest's.
+        conversation -> 0);
   }
 
   @BeforeEach
@@ -197,6 +201,53 @@ class ContainedResourceReadTest {
                 CallerFault.class,
                 () -> service.resources("@service/parent", "c-parent", gone.id()))
             .getMessage());
+  }
+
+  /**
+   * After a <em>real</em> destruction the two reads refuse identically, and ADR 0042's claim that
+   * {@code trajectory} answers for a destroyed child where {@code resources} refuses one is void.
+   *
+   * <p>The claim was never true of this code. Destruction deletes the child's project row and
+   * {@code contained_applications.project_id} is {@code ON DELETE CASCADE} (V219), so afterwards
+   * {@code records.find} answers empty — and <em>both</em> methods open with {@code
+   * records.find(child).orElseThrow(...)} before anything else. The retained conversation lineage
+   * does survive the destruction, which is what the record said; what it got wrong is that nothing
+   * can read it, because the row that resolves the child is gone.
+   *
+   * <p>{@link #aDestroyedChildRefusesRatherThanReturningHistory()} above exercises the {@code
+   * live=false} record instead, which is a state production never produces: V219 declares the
+   * column {@code NOT NULL DEFAULT TRUE} and nothing writes it false. So that test pins a guard and
+   * this one pins the path a destruction actually takes.
+   *
+   * <p>Controls first, in the same fixture: both reads answer for the live child.
+   */
+  @Test
+  void aRealDestructionMakesBothReadsRefuseIdentically() throws Exception {
+    conversation("c-parent", parentScope, "parent");
+    var gone = child(firstScope, parentScope, true);
+    stage(gone, "plowshare.json", "{}");
+
+    // CONTROL: while the row resolves, resources lists and trajectory answers.
+    assertEquals(1, service.resources("@service/parent", "c-parent", gone.id()).size());
+    assertEquals(List.of(), service.trajectory("@service/parent", "c-parent", gone.id()));
+
+    // The post-destruction state the cascade produces: no record, with the source area left on
+    // disk exactly as an interrupted collection would leave it.
+    when(records.find(gone.id())).thenReturn(Optional.empty());
+
+    String trajectory =
+        assertThrows(
+                CallerFault.class,
+                () -> service.trajectory("@service/parent", "c-parent", gone.id()))
+            .getMessage();
+    String resources =
+        assertThrows(
+                CallerFault.class,
+                () -> service.resources("@service/parent", "c-parent", gone.id()))
+            .getMessage();
+
+    assertEquals("No such contained Application", trajectory);
+    assertEquals(trajectory, resources, "the two reads refuse a destroyed child identically");
   }
 
   @Test

@@ -42,6 +42,9 @@ class ContainedApplicationCreationTest {
   ApplicationPackageValidator validator = mock(ApplicationPackageValidator.class);
   OperationAuthority authority = mock(OperationAuthority.class);
   ContainedPrincipals principals = mock(ContainedPrincipals.class);
+  io.aeyer.plowshare.server.access.IdentityRepository identities =
+      mock(io.aeyer.plowshare.server.access.IdentityRepository.class);
+  io.aeyer.plowshare.server.agents.Runs runs = mock(io.aeyer.plowshare.server.agents.Runs.class);
   Allowances allowances = new Allowances();
   Work work = new Work();
 
@@ -202,11 +205,15 @@ class ContainedApplicationCreationTest {
         projects,
         validator,
         authority,
+        identities,
         principals,
         allowances,
         work,
         config,
-        new InProcessContainedStaging());
+        new InProcessContainedStaging(),
+        runs,
+        // No run is going in any conversation here; stopping one is ContainedCancellationTest's.
+        conversation -> 0);
   }
 
   static void manifest(Path workspace, String text) throws Exception {
@@ -652,13 +659,19 @@ class ContainedApplicationCreationTest {
    * The collaborator set, asserted rather than described, because three separate guarantees rest on
    * what this class cannot reach: no {@code ProjectMembers}, so no server-administrator check and
    * no project-membership role lookup; no {@code FileStores}, so no destination FileStore {@code
-   * MANAGER} check and no caller-supplied destination; and no {@code IdentityRepository}, so
-   * nothing here resolves an account from a string or a scope through the general scope read that
-   * refuses a contained row. A later change that reintroduces one of these has to delete this test
-   * to do it.
+   * MANAGER} check and no caller-supplied destination.
+   *
+   * <p>The third guarantee changed shape when {@code run} arrived and can no longer be read off the
+   * constructor: an {@code IdentityRepository} <em>is</em> held now, for {@code containedHome} and
+   * for nothing else, because resolving a started child's home is the one question only the stored
+   * containment row can answer. So what is asserted instead is the behaviour the absent
+   * collaborator used to stand for — the creating path touches it not at all, and therefore
+   * resolves no account from a string and no scope through the general read that refuses a
+   * contained row. A later change that reintroduces membership or FileStores, or that makes
+   * creation consult an identity, has to delete this test to do it.
    */
   @Test
-  void theCreatingPathHoldsNoMembershipFileStoreOrIdentityCollaborator() {
+  void theCreatingPathHoldsNoMembershipOrFileStoreCollaboratorAndResolvesNoIdentity() {
     var held =
         java.util.Arrays.stream(SourceContainedApplications.class.getConstructors())
             .flatMap(one -> java.util.Arrays.stream(one.getParameterTypes()))
@@ -666,7 +679,12 @@ class ContainedApplicationCreationTest {
             .collect(java.util.stream.Collectors.toSet());
     assertFalse(held.contains("ProjectMembers"), held.toString());
     assertFalse(held.contains("FileStores"), held.toString());
-    assertFalse(held.contains("IdentityRepository"), held.toString());
+
+    service.create("@service/parent", request());
+
+    verifyNoInteractions(identities);
+    // And nothing was started either: creation admits a child, it does not run one.
+    verifyNoInteractions(runs);
   }
 
   int children() {

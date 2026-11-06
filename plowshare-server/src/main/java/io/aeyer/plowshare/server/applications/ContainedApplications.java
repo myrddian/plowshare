@@ -143,8 +143,124 @@ public interface ContainedApplications {
     }
   }
 
+  /**
+   * A request to start work inside one contained Application, as the frame has converted it.
+   *
+   * <p>There is deliberately no project field. {@code project(String)} refuses a contained scope,
+   * and the run's home is resolved from the child's own stored row, so a caller names the child by
+   * UUID and has no way to name the tier its work runs in.
+   *
+   * @param conversation the container's own live conversation; its retained admission is the
+   *     authority for this start, exactly as it is for {@link #create} and {@link #ceiling}, and it
+   *     is not the conversation the run itself is a turn in
+   * @param child the Application to start work inside, named by its contained record's id
+   * @param agent the agent to run, resolved against the <em>child's</em> own package and nothing
+   *     else, so a container cannot name an agent of its own and have it run inside the child
+   * @param task what the child is being asked to do, in prose. Never null, and never blank: the
+   *     frame refuses a blank string before this record is built, so a task that reaches here is
+   *     one the run service will accept
+   * @param maxTurns how many turns this run may take, or {@code null} to decide nothing and leave
+   *     the agent's own cap. Unlike a ceiling, absence here is not unlimited — the agent's cap
+   *     stands — so {@code null} is representable and zero is not a cap at all
+   */
+  record Run(String conversation, UUID child, String agent, String task, Integer maxTurns) {
+    public Run {
+      Objects.requireNonNull(child, "child");
+      Objects.requireNonNull(task, "task");
+      if (conversation == null || conversation.isBlank() || conversation.length() > 1024)
+        throw new IllegalArgumentException(
+            "Work inside a contained Application is started from a live conversation of its"
+                + " container");
+      if (agent == null || agent.isBlank())
+        throw new IllegalArgumentException("A run names the agent it starts");
+      if (maxTurns != null && maxTurns <= 0)
+        throw new IllegalArgumentException("A turn cap is positive, or absent to decide nothing");
+    }
+  }
+
+  /**
+   * One started run inside a contained Application, as its container reads the answer back.
+   *
+   * <p>A boundary DTO, so every component is a plain wire value and no {@link ScopeId} travels, for
+   * the reason {@link Child} records. Nothing child-authored is in it: the agent name is the
+   * registry's own spelling of what the container asked for, and the job and conversation
+   * identifiers are the server's.
+   *
+   * @param child the Application the caller named
+   * @param job the job id, pollable at once; a run is minutes, so this answer is a handle and not
+   *     an outcome
+   * @param conversation the conversation opened in the child's own home that this run is the first
+   *     turn of — the envelope {@link #trajectory} later reads back to its container
+   * @param agent the definition's own name, as the registry spells it
+   */
+  record Running(UUID child, String job, String conversation, String agent) {
+    public Running {
+      Objects.requireNonNull(child);
+      if (job == null || job.isBlank())
+        throw new IllegalArgumentException("A started run names its job");
+      if (conversation == null || conversation.isBlank())
+        throw new IllegalArgumentException("A started run names the conversation it opened");
+      if (agent == null || agent.isBlank())
+        throw new IllegalArgumentException("A started run names its agent");
+    }
+  }
+
   /** Validates, allocates and admits a child, or refuses leaving nothing behind. */
   Child create(String account, Create request);
+
+  /**
+   * Starts work inside one contained Application: the first operation that executes a child.
+   *
+   * <p><strong>Container-only, and deliberately not the ancestor gate {@link #trajectory}
+   * uses.</strong> {@code trajectory} and {@link #resources} walk the containment chain upwards, so
+   * a grandparent reads through it. This does not, and the asymmetry is the point rather than an
+   * oversight: starting work spends the child's own allowance and occupies the direct container's
+   * breadth accounting, and both of those belong to the container that lent them. A grandparent
+   * raising work inside a grandchild would spend under a ceiling the intermediate container set and
+   * never agreed to lend. So the rule here is {@link #create}'s and {@link #ceiling}'s — the
+   * caller's retained admission must be acting as the scope this child is recorded under — and a
+   * grandparent, a sibling, a child naming its own container and an unrelated scope are all
+   * refused.
+   *
+   * <p>{@code trajectory} and {@code resources} are not the precedent for this asymmetry: they
+   * refuse a destroyed child identically, because destruction cascades the record away and both
+   * open by resolving it. The asymmetry here stands on its own argument above.
+   *
+   * <p><strong>Two axes, and they are deliberately different identities. Do not harmonise
+   * them.</strong>
+   *
+   * <ul>
+   *   <li><b>The account is the container's.</b> A hop keeps the parent's executor and account
+   *       unchanged, so everything that needs an account — the work check, the run's caller
+   *       identity, and the accounting account — takes the container's. The child spends its
+   *       <em>own allowance</em>, under a ceiling its container set, <em>on its container's
+   *       account</em>: the pool is the child's and the accounting subject is not. That is what
+   *       keeps ADR 0025's immutable attribution and its rule that delegation cannot change the
+   *       accounting account intact, and no counter is shared between container and child.
+   *   <li><b>The author is the child's.</b> The contained principal is never an {@code
+   *       authority_accounts} subject (V218) and nothing here makes it one, so what it is recorded
+   *       as is the provenance of the work: {@code Speaker.contained(child)} travels into the log
+   *       as the utterance's speaker and survives the write. That is load-bearing rather than
+   *       cosmetic — child output is untrusted input to its container, so a container reading work
+   *       back must be able to tell its child's writing from its own, and with the account shared
+   *       the author field is the only thing that says so.
+   * </ul>
+   *
+   * <p>{@code SourceContainedApplications.run} documents the same two axes at the site that chooses
+   * them, and the two must be read together rather than one trusted over the other.
+   *
+   * <p><strong>The order is the contract</strong>, and it is {@code ceiling}'s: the configuration,
+   * the caller's live authority, the child's row, the direct-container rule, a destroyed child, a
+   * zero ceiling, the home, the agent against the child's own package, and only then the start.
+   * Nothing before the authority proof reads the child's package or touches its source area —
+   * unlike {@code trajectory} and {@code resources}, whose lookup-before-proof existence oracle ADR
+   * 0042 records as a known limitation and which this operation does not copy.
+   *
+   * <p><strong>Child output is untrusted input to its container.</strong> What comes back here is
+   * the server's own identifiers, never anything the child wrote; a consumer that later composes a
+   * decision out of child-authored content has re-opened by consumption what this shape closes.
+   */
+  Running run(String account, Run request);
 
   /**
    * The live Applications the caller's conversation directly contains.
@@ -206,6 +322,44 @@ public interface ContainedApplications {
   void ceiling(String account, String conversation, UUID child, Integer calls);
 
   /**
+   * Stops the work going on inside one contained Application and every descendant beneath it.
+   *
+   * <p><strong>Container-only, and idempotent.</strong> The rule is {@link #run}'s and {@link
+   * #ceiling}'s rather than the ancestor gate the two reads use, and for {@code run}'s reason: the
+   * allowance a descendant run is spending was lent by its <em>direct</em> container, so stopping
+   * it is that container's call and not a grandparent's. A sibling, a grandparent, a child naming
+   * its own container and an unrelated scope are all refused. Cancelling a child that holds no live
+   * run is a success and not a refusal — the idiom {@code ContainedPrincipals.revoke} already sets
+   * for removing nothing — because a caller that had to tell "nothing was running" apart from "you
+   * may not ask" could not stop work idempotently.
+   *
+   * <p><strong>The subtree, deepest first</strong>, over the same ordered set {@link #destroy}'s
+   * cascade walks. One notion of "a child's work" rather than two: a descendant's run was started
+   * under an allowance this child lent out of the one its own container lent it, so a cancellation
+   * that stopped only the named child would leave the work it set in motion running.
+   *
+   * <p><strong>Stopping, not erasing.</strong> A cancellation removes no retained conversation
+   * envelope and no source area: the child stays live and startable, and a container must be able
+   * to read back what it stopped. {@code Origin.CONTAINED} carries no ejection age and nothing here
+   * touches that.
+   *
+   * <p>{@code trajectory} and {@code resources} are not the precedent for this: they refuse a
+   * destroyed child identically. Nor is the retention {@code DELEGATION}'s by resemblance — ADR
+   * 0042 holds that decision and what justifies it.
+   *
+   * <p><strong>Not the cascade, and a reader will conflate the two.</strong> This operation stops
+   * work inside one named child and its descendants and destroys nothing. The separate rule that
+   * destroying or cancelling a <em>parent's execution</em> reaches every descendant is about a
+   * container's own lifecycle, not about this frame, and the two share only a verb.
+   *
+   * <p><strong>A request and not an interrupt.</strong> A run honours the stop at its next turn
+   * boundary, so this returns before the work has necessarily finished; what it guarantees is that
+   * no further turn will be started. The reachable runs are also this process's, which {@code
+   * CancellableRuns} states and which this operation inherits rather than improves on.
+   */
+  void cancel(String account, String conversation, UUID child);
+
+  /**
    * What a destruction collected, as its container reads the answer back.
    *
    * <p>A boundary DTO, so every component is a plain wire value and no {@link ScopeId} travels. It
@@ -245,6 +399,13 @@ public interface ContainedApplications {
    * design's: a surviving descendant of a destroyed container is the orphan this capability names
    * as failure. Each descendant's allowance is zeroed before its rows go, so work in flight cannot
    * claim another call on the way out.
+   *
+   * <p><strong>Every descendant's work is stopped before the first source area is removed</strong>,
+   * over that same deepest-first set, so no run is left reading a directory this destruction is
+   * collecting. The stop is {@link #cancel}'s and carries its terms: a request honoured at the next
+   * turn boundary, reaching this process's runs. It is not reported in {@link Destroyed} — {@code
+   * collected} and {@code sources} mean exactly what they meant before, and that shape travels
+   * through five SDKs.
    *
    * <p>A destroyed child is <strong>not</strong> promoted to a retained release. ADR 0005's release
    * history records what may be activated and a destroyed child may not be activated at all; what
