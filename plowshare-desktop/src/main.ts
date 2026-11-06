@@ -174,7 +174,7 @@ function showChat(manage = false) {
   activePage = undefined;
   workspaceRoute = {
     kind: manage ? 'manage' : 'chat',
-    label: manage ? 'Manage work' : 'Conversation',
+    label: manage ? 'Project controls' : 'Conversation',
   };
   sendWorkspace();
 }

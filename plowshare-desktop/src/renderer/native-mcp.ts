@@ -3,6 +3,7 @@ import type {
   NativeCommandResult,
   NativeManagedStatus,
   NativeProfile,
+  NativeConfigurationFile,
   NativeMcpConfig,
 } from 'plowshare-mcp-integration';
 import {
@@ -23,6 +24,7 @@ import type { ToolConnectionContext } from '../../../clients/tool-connections.ts
  */
 export function nativeMcpControls(options: {
   readonly project: string;
+  readonly root?: string;
   readonly context: () => ToolConnectionContext;
   readonly execute: (command: NativeCommand) => Promise<NativeCommandResult>;
 }) {
@@ -34,7 +36,7 @@ export function nativeMcpControls(options: {
   const element = node('details');
   element.dataset['connectionLocation'] = 'local';
   element.className = 'tool-connections';
-  element.append(node('summary', 'This client'));
+  element.append(node('summary', 'Client MCP'));
   const location = node('p'),
     status = node('p'),
     error = node('p');
@@ -87,12 +89,39 @@ export function nativeMcpControls(options: {
     return control;
   }
   const editor = node('fieldset');
-  editor.append(node('legend', 'Private native profile'));
+  editor.append(node('legend', 'MCP connection'));
+  const storage = select(editor, 'Save configuration in', [
+    'User settings',
+    'Project settings',
+    'Private profile file',
+  ]);
+  const savedProfiles = select(editor, 'Saved connection', []);
+  let configurationFiles: readonly NativeConfigurationFile[] = [];
+  const target = () =>
+    storage.value === 'Private profile file'
+      ? {}
+      : { entry: loaded?.entry ?? inputs.get('profile')!.value };
+  function chooseStorage() {
+    loaded = undefined;
+    fill();
+    const location = configurationFiles.find(
+      (item) =>
+        item.scope ===
+        (storage.value === 'Project settings' ? 'project' : 'user'),
+    );
+    file.readOnly = storage.value !== 'Private profile file';
+    file.value = file.readOnly ? (location?.file ?? '') : '';
+    savedProfiles.replaceChildren();
+    for (const name of file.readOnly ? (location?.profiles ?? []) : []) {
+      const option = node('option', name);
+      option.value = name;
+      savedProfiles.append(option);
+    }
+    savedProfiles.disabled = !file.readOnly;
+  }
+  storage.addEventListener('change', chooseStorage);
   element.append(editor);
-  const file = field(
-    editor,
-    'Profile file (absolute path in a private directory)',
-  );
+  const file = field(editor, 'Configuration file');
   file.dataset['nativeField'] = 'file';
   const kind = select(editor, 'Upstream transport', ['http', 'stdio']);
   const groups = {
@@ -246,7 +275,7 @@ export function nativeMcpControls(options: {
   );
   editor.append(share);
   location.after(status, error);
-  element.insertBefore(hostSection, editor);
+
   function fill(config?: NativeMcpConfig) {
     saved = config !== undefined;
     const draft = nativeDraft(options.project, config);
@@ -268,6 +297,8 @@ export function nativeMcpControls(options: {
     for (const [key, input] of limits)
       input.value = String(config?.limits[key] ?? DEFAULT_LIMITS[key]);
     consent.checked = shareConsent.checked = false;
+    shareScope.value = provider.value = agents.value = grants.value = '';
+    share.open = false;
     launchReview.textContent = '';
     visibility();
   }
@@ -353,6 +384,7 @@ export function nativeMcpControls(options: {
     drawInventory();
   }
   function active(value: boolean) {
+    if (element.hidden === !value) return;
     epoch++;
     element.hidden = !value;
     consent.checked = shareConsent.checked = false;
@@ -430,30 +462,69 @@ export function nativeMcpControls(options: {
       throw new Error('Native view changed');
     return result;
   }
+  action(draftActions, 'Refresh saved connections', async () => {
+    const result = await execute({
+      action: 'configuration-files',
+      ...(options.root === undefined ? {} : { root: options.root }),
+    });
+    if (!('configurationFiles' in result))
+      throw new Error('Expected configuration files');
+    configurationFiles = result.configurationFiles;
+    chooseStorage();
+    return options.root
+      ? 'User and project MCP settings loaded. Nothing was started.'
+      : 'User MCP settings loaded. Attach a local project folder to use project settings.';
+  });
   action(draftActions, 'Load profile', async () => {
-    const result = await execute({ action: 'profile-read', file: file.value });
+    const result = await execute({
+      action: 'profile-read',
+      file: file.value,
+      ...(storage.value === 'Private profile file'
+        ? {}
+        : { entry: savedProfiles.value }),
+    });
     if (!('config' in result)) throw new Error('Expected profile');
     loaded = result;
     fill(result.config);
     return 'Private profile loaded. No host was started.';
   });
   action(draftActions, 'Save profile', async () => {
+    const config = readConfig();
     const result = await execute({
       action: 'profile-save',
       file: file.value,
-      config: readConfig(),
-      expectedRevision: loaded?.file === file.value ? loaded.revision : null,
+      config,
+      ...(storage.value === 'Private profile file'
+        ? {}
+        : { entry: config.profile }),
+      expectedRevision:
+        loaded?.file === file.value &&
+        (storage.value === 'Private profile file' ||
+          loaded.entry === config.profile)
+          ? loaded.revision
+          : null,
     });
     if (!('config' in result)) throw new Error('Expected profile');
     loaded = result;
     fill(result.config);
-    return 'Private profile saved. No host was started.';
+    if (result.entry !== undefined) {
+      const entry = result.entry;
+      configurationFiles = configurationFiles.map((location) =>
+        location.file === result.file && !location.profiles.includes(entry)
+          ? { ...location, profiles: [...location.profiles, entry] }
+          : location,
+      );
+      if (![...savedProfiles.options].some((option) => option.value === entry))
+        savedProfiles.append(node('option', entry));
+      savedProfiles.value = entry;
+    }
+    return 'MCP profile saved. No host was started.';
   });
   const newProfile = node('button', 'New profile');
   newProfile.type = 'button';
   newProfile.addEventListener('click', () => {
     loaded = undefined;
-    file.value = '';
+    if (storage.value === 'Private profile file') file.value = '';
     fill();
   });
   draftActions.prepend(newProfile);
@@ -463,6 +534,7 @@ export function nativeMcpControls(options: {
     const result = await execute({
       action: 'inspect',
       file: loaded.file,
+      ...target(),
       expectedRevision: loaded.revision,
     });
     if (!('tools' in result)) throw new Error('Expected launch review');
@@ -481,6 +553,7 @@ export function nativeMcpControls(options: {
     await execute({
       action: 'start',
       file: file.value,
+      ...target(),
       consent: true,
       expectedRevision: loaded.revision,
     });
@@ -524,6 +597,7 @@ export function nativeMcpControls(options: {
     await execute({
       action: 'share',
       file: file.value,
+      ...target(),
       ...(loaded === undefined ? {} : { expectedRevision: loaded.revision }),
       consent: true,
       scope,
@@ -553,8 +627,16 @@ export function nativeMcpControls(options: {
   });
   fill();
   update();
+  storage.querySelector<HTMLOptionElement>(
+    'option[value="Project settings"]',
+  )!.disabled = !options.root;
   return {
     element,
+    loadSettings() {
+      [...draftActions.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Refresh saved connections')
+        ?.click();
+    },
     update,
     active,
     destroy() {

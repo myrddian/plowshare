@@ -113,9 +113,9 @@ try {
   await assert.rejects(opened.get('Board').evaluate(()=>window.plowshare.request({action:'board-view',view:'swarm'})),/workspace sidebar/);
   await main.locator('#projects-toggle').click();await expect(main.locator('#sidebar-projects')).toBeHidden();await expect(main.locator('#projects-toggle')).toHaveAttribute('aria-expanded','false');
   await main.reload();await expect(main.locator('#sidebar-projects')).toBeHidden();await main.locator('#projects-toggle').click();await expect(main.locator('#sidebar-projects')).toBeVisible();
-  await main.locator('#controls-button').click();
+  await main.locator('#navigation-open').click();await main.locator('#navigation-query').fill('Project controls');await main.locator('#navigation-results button').first().click();
   await expect(main.locator('#workspace-manage .operator-dialog')).toBeVisible();
-  await expect(main.locator('#title-caption')).toHaveText('Manage work');
+  await expect(main.locator('#title-caption')).toHaveText('Project controls');
   assert.equal(await main.locator('.operator-dialog').evaluate(node => node.matches(':modal')), false, 'Management is a workspace page.');
   await expect(main.locator('.operator-dialog [data-change]')).toBeVisible();
   await main.keyboard.press('Control+k');

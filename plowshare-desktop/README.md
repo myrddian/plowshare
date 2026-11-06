@@ -104,7 +104,8 @@ they never invoke a model or call your server.
   Unconfirmed requests keep their identity across reloads: choose **Check pending
   member retry…** to reconcile explicitly without creating another wake. Requires
   the updated server's `board.retry` operation.
-- Open **Manage work** from the sidebar to save memories, manage conversations,
+- Open **Server administration → Manage work** (or **Project controls** from
+  project Info → Files or Find for regular users) to save memories, manage conversations,
   review permissions or adjust work limits. Options load automatically when you
   choose a task and workspace; each change still has a separate review and confirmation.
 - Stop a running job or filter the conversation list.
@@ -481,9 +482,11 @@ separate explicit usage operation and may be unavailable for the selected provid
 Click **Projects** to collapse or expand its search and project/conversation list.
 The choice is saved in the desktop profile. Account destinations move up beneath
 Projects while its list is collapsed.
-**Manage work** remains the workspace action screen. **Server administration**
-opens a separate workspace with persistent navigation for Configuration, Accounts,
-Service accounts, Server tools, Pricing and Audit history.
+**Server administration** contains Configuration, Accounts, Service accounts,
+Manage work, Server MCP, Pricing and Audit history. Manage work explains its memory,
+conversation, command-permission and work-limit actions before review. Regular
+users retain Project controls through project Info → Files or Find. Processes
+stays in the main navigation because it inspects the caller’s authorized work.
 
 ### Usage and token recording
 
@@ -541,7 +544,7 @@ visibility, direct workflow launch and recovery without duplicate runs. See
 [server skill conventions](../docs/skills-and-agent-rules.md).
 
 Server administrators can open **Server administration** from the sidebar. Accounts,
-Service accounts, Server tools, Pricing and Audit history have separate sections
+Service accounts, Manage work, Server MCP, Pricing and Audit history have separate sections
 in the main workspace. Create-account forms open on demand; selecting an account
 shows its roles, status and sessions. Leaving a section clears revealed credentials
 and prevents pending responses from populating another section. Conversation drafts
@@ -571,10 +574,13 @@ requires the authenticated account to have the current server administrator role
 before reading settings, disclosing live keys or writing a value. Project roles
 and service-token scopes do not grant configuration access.
 
-**Desktop tools** is beside connection controls at the bottom of the sidebar,
-separate from Application deployment. Local MCP profiles and host lifecycles remain
-in that dialog. Administrators follow its Server administration link to the
-**Server tools** section and choose an execution project there. Non-administrators
-retain **My server tools** for their own credentials and assignments, under the
-existing server permissions. Server administration does not reveal another
-account's credential material.
+**Settings → Connection** manages server logins. **Settings → Client MCP** edits
+local MCP connections in shared user `mcp.json` or project `.plowshare/mcp.json`
+files, also readable/writable by TUI. Choose a location, load a saved connection or
+create one, then save without launching. Arbitrary private profiles remain available
+as a separate storage choice. Launch consent and explicit server sharing stay
+separate from configuration. Administrators configure server-hosted endpoints under
+**Server administration → Server MCP**, with an explicit execution project.
+Regular users retain **My server tools** in Find and **Server tools** in project
+Info → Files for their own credentials and assignments. See [native MCP hosting](../docs/native-mcp-hosting.md#client-controls)
+for the shared file format, ownership and process lifecycle.

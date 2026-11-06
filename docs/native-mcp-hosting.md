@@ -164,14 +164,41 @@ SDK receipts are preserved. This does not cancel a server job or prove rollback.
 
 ## Client controls
 
-In desktop, select a project and open **Desktop tools** beside connection controls. **This client** contains
-private profile forms for HTTP or STDIO, owner/instance/project identity, environment
-references and configurable deadlines/admission budgets. Enter an absolute profile
-file in a dedicated private directory. **Save profile** writes a mode-0600 file
-without connecting or launching; **Load profile** reads an existing owned profile.
-A stale revision cannot overwrite a newer profile. Stop a running host before editing
-its profile. Save/load and restart are explicit; opening a dialog never restores
-hosts automatically.
+In Desktop, open **Settings** at the bottom of the sidebar. **Connection** manages
+saved Plowshare server logins. **Client MCP** configures local HTTP/STDIO connections
+and their explicit host lifetimes. Server-hosted MCP is a separate administration
+section, described below.
+
+Choose **User settings** or **Project settings**. Both Desktop and TUI use the same
+files:
+
+- User: `mcp.json` in the shared `userConfigDirectory()` root, selected by
+  `PLOWSHARE_CONFIG_DIR` (the existing legacy `PLOWSHARE_DESKTOP_CONFIG` override is
+  also recognized), otherwise `~/.plowshare/mcp.json`.
+- Project: `.plowshare/mcp.json` inside the attached local project folder. A project
+  known only to the server has no local project file until you attach its folder.
+
+The selected location is explicit; neither file silently overrides the other.
+**Saved connection → Load profile** reads an entry for the current server/account.
+**New profile** starts an empty editor. **Save profile** writes the selected file
+without connecting or launching. Existing arbitrary private profile files remain
+available through **Private profile file**; no existing file is migrated or rewritten
+just by opening Settings.
+
+Shared files have the versioned shape `{"version":1,"profiles":[...]}`. Each entry is
+a complete native profile with the fields shown above, including `owner` and a
+`profile` connection name. Names are unique per server/account within each file.
+Reads filter the chooser to that login; edits preserve other entries and reject
+stale revisions. Entries retain explicit execution projects, process identity,
+private receipt locations, network policies and environment references. These
+are Plowshare files; other harness formats are not imported or rewritten.
+
+Project files should contain only non-secret configuration and environment-variable
+references. Do not put secret values in process arguments. Receipts and process
+locks belong in the configured private journal directory, outside source control.
+Files are written atomically with mode 0600; existing project-directory permissions
+are preserved. Shared authoring does not share process ownership: stop a running
+host before editing it or opening the same receipt journal from another client.
 
 **Review launch** shows the configured endpoint or executable basename, argument
 count and selected environment names. Review the full profile and check launch
@@ -188,9 +215,9 @@ local-only availability from server sharing or unconfirmed sharing. Stop withdra
 sharing and closes the upstream connection/process. Sharing does not bypass server
 grants, relabel accounting or prove readiness of a future invocation.
 
-Administrators open **Server administration → Server tools**, then choose an execution
-project. Non-administrators use **My server tools** in Desktop tools for their own
-authorizations and assignments. Both use the existing server owner capabilities for HTTP endpoint
+Administrators open **Server administration → Server MCP**, then choose an execution
+project. Non-administrators use **Server tools** in the project Info → Files panel, or
+**Find → My server tools**, for their own authorizations and assignments. Both use the existing server owner capabilities for HTTP endpoint
 forms, OAuth settings, masked credentials, authorized service subjects and assignments.
 These server credentials follow the authenticated account across clients. The web
 console's Projects **Server connections** panel exposes only those server operations.
@@ -198,8 +225,11 @@ It cannot launch, edit or adopt a native host. Owner management replies do not i
 a remote tool catalogue or worker health; the UI reports these as unavailable rather
 than treating a saved assignment as proof of availability.
 
-In TUI, `/mcp` opens guided **This client (HTTP/STDIO)** and **Server (HTTP)** menus.
-The native menu supports profile create/edit, review/start, host/tool snapshots,
+In TUI, `/mcp` opens guided **Client MCP settings (HTTP/STDIO)** and **Server (HTTP)** menus.
+Choose **Shared user and project MCP settings** in the client menu to add, edit,
+review/start or explicitly share named connections from the same files as Desktop.
+Project settings use the TUI’s current rooted local project. The native menu also
+supports standalone private profile create/edit, review/start, host/tool snapshots,
 stop and explicit sharing. The server menu supports endpoint forms, credential
 status/update/browser authorization, assignments and original unconfirmed receipt
 inspection. `/cancel` returns without another submission. Configurable native
@@ -211,8 +241,11 @@ TUI accepts `/mcp local COMMAND_JSON`. Supported commands are `inspect` with `fi
 `start` with `file`/`consent`, `list`, `stop` with `instance`/`profile`, `call` with
 `instance`/`profile`/`invocation`, and `share` using the JSON above. Native command
 inputs are redacted in terminal history. Direct commands do not call Plowshare;
-`profile-read` and `profile-save` provide owned, revision-checked private authoring
-without launch. GUI/menu launch carries that reviewed revision. Share borrows the original authenticated socket and cannot migrate to a reconnect.
+`profile-read` and `profile-save` provide owned, revision-checked authoring
+without launch. Supply `entry` with the connection name when `file` is a shared
+`mcp.json`; omit it for a standalone native profile. `configuration-files` lists
+the user location and, with an explicit canonical local `root`, its project location.
+It never creates files or starts hosts. GUI/menu launch carries that reviewed revision. Share borrows the original authenticated socket and cannot migrate to a reconnect.
 
 Desktop main accepts the generated IPC action `{action:'native-mcp', command:JSON}`
 from the main workspace window. It uses the same commands and direct host registry.

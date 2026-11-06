@@ -28,6 +28,7 @@ class Cancelled extends Error {}
 export async function mcpControls(options: {
   readonly prompt: McpControlPrompt;
   readonly project: string;
+  readonly root?: string;
   readonly owner: NativeOwner;
   readonly current: () => boolean;
   readonly native: (command: NativeCommand) => Promise<NativeCommandResult>;
@@ -35,6 +36,8 @@ export async function mcpControls(options: {
   readonly authorize: (url: string) => Promise<void>;
 }): Promise<void> {
   const { prompt } = options;
+  let entry: string | undefined;
+  const target = () => (entry === undefined ? {} : { entry });
   async function native(command: NativeCommand) {
     if (!options.current()) throw new Cancelled();
     const result = await options.native(command);
@@ -72,7 +75,7 @@ export async function mcpControls(options: {
       throw new Cancelled();
   }
   async function nativeProfile(file: string): Promise<NativeProfile> {
-    const result = await native({ action: 'profile-read', file });
+    const result = await native({ action: 'profile-read', file, ...target() });
     if (!options.current() || !('config' in result)) throw new Cancelled();
     return result;
   }
@@ -85,7 +88,10 @@ export async function mcpControls(options: {
         : 'stdio';
     for (const [key, label, group] of NATIVE_FIELDS)
       if (group === 'common' || group === kind)
-        draft[key] = await ask(label, draft[key]);
+        draft[key] =
+          key === 'profile' && entry !== undefined
+            ? entry
+            : await ask(label, draft[key]);
     const args: string[] = [],
       environment: NativeEnvironmentReference[] = [];
     if (kind === 'stdio') {
@@ -165,19 +171,21 @@ export async function mcpControls(options: {
     await native({
       action: 'profile-save',
       file,
+      ...target(),
       config: next,
       expectedRevision: existing?.revision ?? null,
     });
     prompt.show('Profile saved. Start remains explicit.');
   }
   async function local() {
-    const action = await choose('This client · HTTP/STDIO · instance-owned', [
+    let action = await choose('Client MCP · HTTP/STDIO', [
       'List hosts and tools',
       'Add profile',
       'Edit profile',
       'Review and start local host',
       'Stop host',
       'Review and share with server',
+      'Shared user and project MCP settings',
     ]);
     if (action === 0) {
       const result = await native({ action: 'list' });
@@ -205,9 +213,50 @@ export async function mcpControls(options: {
       prompt.show('Host stopped.');
       return;
     }
-    const file = await ask(
-      'Private profile file (absolute path in a private directory)',
-    );
+    let file: string;
+    if (action === 6) {
+      const result = await native({
+        action: 'configuration-files',
+        ...(options.root === undefined ? {} : { root: options.root }),
+      });
+      if (!('configurationFiles' in result))
+        throw new Error('Invalid MCP settings reply');
+      const locations = result.configurationFiles;
+      const location =
+        locations[
+          await choose(
+            'Configuration location',
+            locations.map((item) => `${item.scope} · ${item.file}`),
+          )
+        ];
+      if (!location) throw new Cancelled();
+      file = location.file;
+      const selection = await choose('Shared MCP settings', [
+        'Add connection',
+        'Edit connection',
+        'Review and start connection',
+        'Review and share connection',
+      ]);
+      action = [1, 2, 3, 5][selection] ?? -1;
+      if (action === 1) entry = await ask('New connection name');
+      else {
+        if (!location.profiles.length) {
+          prompt.show('No saved connections for this login. Add one first.');
+          return;
+        }
+        entry =
+          location.profiles[
+            await choose('Saved connection', location.profiles)
+          ];
+        if (entry === undefined) throw new Cancelled();
+      }
+      prompt.show(
+        `Selected ${file} · ${entry}. Reading and saving never starts a host.`,
+      );
+    } else
+      file = await ask(
+        'Private profile file (absolute path in a private directory)',
+      );
     if (action === 1) {
       await editNative(file);
       return;
@@ -220,6 +269,7 @@ export async function mcpControls(options: {
     const result = await native({
       action: 'inspect',
       file,
+      ...target(),
       expectedRevision: profile.revision,
     });
     if (!('tools' in result)) throw new Error('Invalid native review');
@@ -233,6 +283,7 @@ export async function mcpControls(options: {
       await native({
         action: 'start',
         file,
+        ...target(),
         consent: true,
         expectedRevision: profile.revision,
       });
@@ -262,6 +313,7 @@ export async function mcpControls(options: {
     await native({
       action: 'share',
       file,
+      ...target(),
       expectedRevision: profile.revision,
       consent: true,
       scope,
@@ -599,7 +651,7 @@ export async function mcpControls(options: {
   try {
     if (
       (await choose('MCP connections', [
-        'This client (HTTP/STDIO)',
+        'Client MCP settings (HTTP/STDIO)',
         'Server (HTTP)',
       ])) === 0
     )

@@ -1,10 +1,12 @@
 import { _electron as electron, expect } from 'playwright/test';
 import executablePath from 'electron';
-import { mkdtemp, readFile, readdir, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, mkdir, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
+import { NativeConfigurations, NativeHostCommands, NativeMcpSessions } from '../../integrations/mcp/build/mcp/index.js';
+import { mcpControls } from '../../plowshare-tui/src/view/mcp-controls.ts';
 import { nativeFixture } from '../../integrations/mcp/build/mcp/native.test-support.js';
 import { McpWire, rawTool } from '../../integrations/mcp/build/mcp/wire.test-support.js';
 
@@ -13,6 +15,8 @@ upstream.tools = [{ ...rawTool, description: 'Echo nested values <img src=x oner
 await upstream.start();
 const stdio = await nativeFixture();
 const directory = await mkdtemp(join(tmpdir(), 'plowshare-provider-ui-'));
+const projectRoot = join(await realpath(directory), 'Research');
+await mkdir(projectRoot);
 const id = '11111111-1111-1111-1111-111111111111';
 const connection = { project: 'Research', connection: id, revision: id, enabled: true, deleted: false,
   definition: { name: 'Fixture endpoint', endpoint: 'https://provider.example/mcp', authentication: 'API_KEY', apiKeyHeader: 'X-API-Key', oauth: null } };
@@ -44,31 +48,23 @@ let app;
 try {
   app = await electron.launch({ executablePath, args: [resolve('.')], env });
   const page = await app.firstWindow();
-  await page.locator('#connect-sidebar').click();
-  await page.locator('#server-url').fill(fixture.base);
-  await page.locator('#handle').fill('fixture');
-  await page.locator('#password').click();
-  await page.locator('#password').pressSequentially('fixture-password', { delay: 20 });
-  await page.locator('#connection-form button[type=submit]').click();
-  await expect(page.locator('#connection-dialog')).toBeHidden();
+  await page.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
+  await app.evaluate(({dialog},root)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[root]});},projectRoot);
+  await page.evaluate(()=>window.plowshare.request({action:'files-choose'}));
   await page.locator('[data-project="Research"]').click();
-  await page.getByRole('button', { name: 'Desktop tools', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Tool connections', exact: true });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('tab', { name: 'This client', exact: true }).focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(dialog.getByRole('tab', { name: 'My server tools', exact: true })).toBeFocused();
-  await expect(dialog.getByRole('tab', { name: 'My server tools', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.locator('#navigation-open').click();
+  await page.locator('#navigation-query').fill('My server tools');
+  await page.locator('#navigation-results button').first().click();
+  const ownerDialog = page.getByRole('dialog', { name: 'My server tools', exact: true });
+  await expect(ownerDialog).toBeVisible();
   const sockets = fixture.eventSessions();
-  const server = dialog.locator('[data-connection-location=server]');
-  const local = dialog.locator('[data-connection-location=local]');
-  await expect(local).toContainText('This client');
+  const server = ownerDialog.locator('[data-connection-location=server]');
   await expect(server).toContainText('Server connections');
   await server.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(server.getByRole('status')).toContainText('Snapshot read at');
   await server.locator('select').nth(0).selectOption(id);
   await server.getByRole('button', { name: 'Inspect authorization', exact: true }).click();
-  await expect(dialog).toContainText('Authorization for fixture: READY');
+  await expect(ownerDialog).toContainText('Authorization for fixture: READY');
   const secret = server.locator('input[type=password]');
   await secret.click(); await secret.pressSequentially('fixture-private-material', { delay: 10 });
   await server.getByRole('button', { name: 'Set credential', exact: true }).click();
@@ -83,9 +79,17 @@ try {
   for (const file of await readdir(join(directory, 'provider-management'))) {
     if (file.endsWith('.json')) assert.equal((await readFile(join(directory, 'provider-management', file), 'utf8')).includes('fixture-private-material'), false);
   }
-  await dialog.getByRole('tab', { name: 'This client', exact: true }).click();
+  await ownerDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await dialog.getByRole('tab', { name: 'Connection', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.getByRole('tab', { name: 'Client MCP', exact: true })).toBeFocused();
+  const local = dialog.locator('[data-connection-location=local]');
+  await expect(local.getByRole('status')).toContainText('User and project MCP settings loaded');
+  await local.getByLabel('Save configuration in', { exact: true }).selectOption('Private profile file');
   const frameCount = fixture.frames.length;
-  await local.getByLabel('Profile file (absolute path in a private directory)', { exact: true }).fill(join(directory, 'native', 'http.json'));
+  await local.getByLabel('Configuration file', { exact: true }).fill(join(directory, 'native', 'http.json'));
   for (const [label, value] of [
     ['Client instance ID', 'desktop-ui'], ['Connection name', 'http'], ['Execution project', 'Research'],
     ['Tool prefix', 'ui_'], ['Private receipt directory (absolute path)', join(directory, 'native-receipts')],
@@ -94,7 +98,7 @@ try {
   await local.getByLabel('Allow unencrypted HTTP', { exact: true }).check();
   await local.getByLabel('Allow private network endpoints', { exact: true }).check();
   await local.getByRole('button', { name: 'Save profile', exact: true }).click();
-  await expect(local.getByRole('status')).toContainText('Private profile saved');
+  await expect(local.getByRole('status')).toContainText('MCP profile saved');
   assert.equal(upstream.seen.length, 0, 'Save launched an upstream connection');
   await local.getByRole('button', { name: 'Start local host', exact: true }).click();
   await expect(local.getByRole('alert')).toContainText('Action refused');
@@ -119,7 +123,7 @@ try {
   assert.equal(savedProfile.owner.account, 'fixture');
   assert.equal(savedProfile.owner.origin, fixture.base);
   await local.getByRole('button', { name: 'New profile', exact: true }).click();
-  await local.getByLabel('Profile file (absolute path in a private directory)', { exact: true }).fill(join(directory, 'native', 'stdio.json'));
+  await local.getByLabel('Configuration file', { exact: true }).fill(join(directory, 'native', 'stdio.json'));
   await local.getByLabel('Upstream transport', { exact: true }).selectOption('stdio');
   for (const [label, value] of [
     ['Client instance ID', 'desktop-ui'], ['Connection name', 'stdio'], ['Execution project', 'Research'],
@@ -129,7 +133,7 @@ try {
   await local.getByRole('button', { name: 'Add argument', exact: true }).click();
   await local.getByLabel('Process argument', { exact: true }).fill(stdio.config.transport.args[0]);
   await local.getByRole('button', { name: 'Save profile', exact: true }).click();
-  await expect(local.getByRole('status')).toContainText('Private profile saved');
+  await expect(local.getByRole('status')).toContainText('MCP profile saved');
   assert.equal((await stdio.seen()).length, 0);
   await local.getByRole('button', { name: 'Review launch', exact: true }).click();
   await expect(local.getByRole('status')).toContainText('Review the saved profile');
@@ -140,17 +144,20 @@ try {
   assert.equal((await stdio.seen()).some(row => row.home), false);
   await expect(local).not.toContainText('fixture-secret-stderr');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Desktop tools', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Client MCP', exact: true }).click();
+  await expect(dialog.locator('[data-connection-location=local]').getByRole('status')).toContainText('User and project MCP settings loaded');
   await dialog.locator('[data-connection-location=local]').getByRole('button', { name: 'Refresh local hosts', exact: true }).click();
   await expect(dialog.locator('[data-connection-location=local]')).toContainText('Echo nested values');
   assert.equal(fixture.frames.length, frameCount, 'Local controls used the server after reopen');
   await mkdir('build/smoke', { recursive: true });
-  await dialog.evaluate(node => { node.scrollTop = 0; });
+  await dialog.locator('[data-connection-location=local]').evaluate(node => { node.scrollTop = 0; });
   await page.screenshot({ path: 'build/smoke/tool-connections.png' });
   await dialog.locator('[data-connection-location=local]').getByRole('button', { name: 'Stop selected host', exact: true }).click();
   await expect(dialog.locator('[data-connection-location=local]').getByRole('status')).toContainText('Host stopped');
   const nativePanel = dialog.locator('[data-connection-location=local]');
-  await nativePanel.getByLabel('Profile file (absolute path in a private directory)', { exact: true }).fill(join(directory, 'native', 'stdio.json'));
+  await nativePanel.getByLabel('Save configuration in', {exact:true}).selectOption('Private profile file');
+  await nativePanel.getByLabel('Configuration file', { exact: true }).fill(join(directory, 'native', 'stdio.json'));
   await nativePanel.getByRole('button', { name: 'Load profile', exact: true }).click();
   await expect(nativePanel.getByRole('status')).toContainText('Private profile loaded');
   await nativePanel.getByText('Share this profile with server-owned work', { exact: true }).click();
@@ -169,9 +176,54 @@ try {
   await nativePanel.getByRole('button', { name: 'Stop selected host', exact: true }).click();
   await expect(nativePanel.getByRole('status')).toContainText('Host stopped');
   assert.equal(fixture.frames.filter(frame => frame.type === 'tool.scope.disconnect').length, 1);
+  await nativePanel.getByLabel('Save configuration in', {exact:true}).selectOption('User settings');
+  for (const [label, value] of [
+    ['Client instance ID','shared-ui'],['Connection name','shared-http'],['Execution project','Research'],
+    ['Tool prefix','shared_'],['Private receipt directory (absolute path)',join(directory,'shared-receipts')],['MCP HTTP endpoint',upstream.endpoint],
+  ]) await nativePanel.getByLabel(label,{exact:true}).fill(value);
+  await nativePanel.getByLabel('Allow unencrypted HTTP',{exact:true}).check();
+  await nativePanel.getByLabel('Allow private network endpoints',{exact:true}).check();
+  const beforeSave=upstream.seen.length;
+  await nativePanel.getByRole('button',{name:'Save profile',exact:true}).click();
+  await expect(nativePanel.getByRole('status')).toContainText('MCP profile saved');
+  assert.equal(upstream.seen.length,beforeSave,'Saving shared settings launched MCP');
+  const sharedFile=join(await realpath(directory),'mcp.json');
+  const store=new NativeConfigurations(savedProfile.owner,await realpath(directory));
+  const fromDesktop=await store.read(sharedFile,'shared-http');
+  assert.equal(fromDesktop.config.project,'Research');
+  const tui=new NativeHostCommands(savedProfile.owner,new NativeMcpSessions({}),undefined,undefined,store);
+  const answers=['1','7','1','3','1','yes'],messages=[];
+  try {
+    await mcpControls({project:'Research',root:projectRoot,owner:savedProfile.owner,current:()=>true,
+      prompt:{show:message=>messages.push(message),read:async()=>answers.shift()},
+      native:command=>tui.execute(command),
+      server:{request:async()=>{throw new Error('Unexpected server request');},execute:async()=>{throw new Error('Unexpected server mutation');},pending:async()=>[],recover:async()=>{throw new Error('Unexpected recovery');}},
+      authorize:async()=>{throw new Error('Unexpected authorization');},
+    });
+    assert.equal(tui.hosts.list()[0]?.active,true,'TUI did not start the Desktop-authored profile');
+    assert.ok(messages.some(message=>message.includes('Local host started')));
+  } finally {await tui.close();}
+  await nativePanel.getByLabel('Save configuration in',{exact:true}).selectOption('Project settings');
+  await expect(nativePanel.getByLabel('Configuration file',{exact:true})).toHaveValue(join(projectRoot,'.plowshare','mcp.json'));
+  for (const [label, value] of [
+    ['Client instance ID','project-ui'],['Connection name','project-http'],['Execution project','Research'],
+    ['Tool prefix','project_'],['Private receipt directory (absolute path)',join(directory,'project-receipts')],['MCP HTTP endpoint',upstream.endpoint],
+  ]) await nativePanel.getByLabel(label,{exact:true}).fill(value);
+  await nativePanel.getByLabel('Allow unencrypted HTTP',{exact:true}).check();
+  await nativePanel.getByLabel('Allow private network endpoints',{exact:true}).check();
+  await nativePanel.getByRole('button',{name:'Save profile',exact:true}).click();
+  await expect(nativePanel.getByRole('status')).toContainText('MCP profile saved');
+  assert.equal((await store.read(join(projectRoot,'.plowshare','mcp.json'),'project-http')).config.profile,'project-http');
+  await nativePanel.evaluate(node=>{node.scrollTop=0;});
+  await page.screenshot({path:'build/smoke/client-mcp-settings.png'});
+  const window = await app.browserWindow(page);
+  await window.evaluate(win=>win.setContentSize(900,720));
+  await expect(dialog.getByRole('tab',{name:'Client MCP',exact:true})).toBeVisible();
+  assert.equal(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth),true,'Settings overflows at compact width');
+  await page.screenshot({path:'build/smoke/client-mcp-settings-compact.png'});
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Desktop tools', exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused();
   console.log('Native tool connection smoke passed: HTTP/STDIO profile forms, explicit consent, safe inventory, local lifetime, consented server sharing/withdrawal, regular owner, masked entry, one mutation, redacted state/bookmarks, same socket and close focus.');
 } finally {
   if (app) await app.close();

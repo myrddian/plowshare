@@ -1,3 +1,4 @@
+import { openConnectionSettings } from './settings-navigation.mjs';
 import { _electron as electron, expect } from 'playwright/test';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -91,12 +92,12 @@ try {
   await page.keyboard.press('Enter');
   await expect(page.locator('#chat-title')).toHaveText('The peaceful atom');
   await page.keyboard.press('Control+k');
-  await page.locator('#navigation-query').fill('Connection settings');
+  await page.locator('#navigation-query').fill('Settings');
   await page.keyboard.press('Enter');
-  await expect(page.locator('#connection-dialog')).toBeVisible();
+  await expect(page.getByRole('dialog',{name:'Settings',exact:true})).toBeVisible();
   await page.keyboard.press('Control+k');
   await expect(page.locator('#navigation-dialog')).toBeHidden();
-  await page.locator('#close-dialog').click();
+  await page.getByRole('dialog',{name:'Settings',exact:true}).getByRole('button',{name:'Close',exact:true}).click();
 
   await page.locator('#dock').click();
   await expect(page.locator('#chat')).toHaveClass(/docked/);
@@ -186,7 +187,7 @@ try {
   await expect(page.locator('#transcript .message.summary')).toHaveCount(0);
   await expect(page.locator('.conversation-alert')).toHaveCount(1);
 
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture');
   await page.locator('#password').fill('wrong-password');
@@ -578,7 +579,7 @@ try {
   assert.equal(errors.length, 0, errors.join('\n'));
 
   fixture.appendTurn('fixture-first', 'A result delivered while disconnected.');
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await page.locator('#password').fill('');
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText(/(?:^| · )Connected$/);
@@ -602,13 +603,13 @@ try {
   assert.equal(await copiedText(), longAnswer, 'Copy includes the ending of a long answer.');
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 3, 'Reconnect does not resubmit agent work.');
 
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await page.locator('#password').fill('');
   await page.locator('#handle').fill('');
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toContainText('Connected');
   assert.equal(fixture.loginCount(), 1, 'Reconnect uses the saved session instead of another password login.');
-  await page.locator('#connect-sidebar').click();
+  await openConnectionSettings(page);
   await page.locator('#use-demo').click();
   await expect.poll(() => liveTrajectory.isClosed()).toBe(true);
   await expect.poll(() => reconnectActivity.isClosed()).toBe(true);
