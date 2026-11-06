@@ -24,6 +24,16 @@ offered `orchestrate_code_implementation` tool. `implement_specification` divide
 a larger specification into nested phases; `deep_research` is a scripted research
 workflow. Each still needs available models, tools, scopes and budgets.
 
+To select an orchestration explicitly in a conversation, submit
+`/orchestration:deep_research` followed by the research request. The harness
+validates the selected caller's grant and dispatches the pinned request directly;
+it does not ask a model to call a separate dispatch tool. The start returns a
+handle, while research and any plan-review questions proceed through the normal
+orchestration lifecycle. A retained start receipt prevents uncertain replay. Command triggers such as
+`/research` are aliases for their granted workflow. Desktop builder launches and
+the TUI `/design-orchestration` command submit an explicit
+`/orchestration:design_orchestration` request through this same harness path.
+
 Explicit CLI control uses the same WebSocket operations:
 
 ```sh

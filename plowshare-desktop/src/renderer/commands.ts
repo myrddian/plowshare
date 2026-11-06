@@ -48,11 +48,13 @@ export function commandOffers(text: string, commands: readonly CommandEntry[]) {
       description,
       argumentHint: '',
     })),
-    ...commands.map((command) => ({
-      command: command.command,
-      description: command.description,
-      argumentHint: command.argumentHint,
-    })),
+    ...commands.flatMap((command) =>
+      [command.command, ...command.aliases].map((name) => ({
+        command: name,
+        description: command.description,
+        argumentHint: command.argumentHint,
+      })),
+    ),
   ].filter((command) => command.command.toLowerCase().startsWith(query));
 }
 
@@ -160,12 +162,12 @@ export function commandDraft(
   ) {
     throw new Error('Unknown skill context mode.');
   }
-  let existing =
-    argumentsText === command.command
-      ? ''
-      : argumentsText.startsWith(command.command + ' ')
-        ? argumentsText.slice(command.command.length + 1)
-        : argumentsText;
+  const name = [command.command, ...command.aliases].find(
+    (name) => argumentsText === name || argumentsText.startsWith(name + ' '),
+  );
+  let existing = name
+    ? argumentsText.slice(name.length).trimStart()
+    : argumentsText;
   if (command.kind === 'skill' && command.mode === null)
     existing = existing.replace(
       /^--mode=(INHERITED|SUMMARISED|NEW|DIRECT)(?:\s|$)/,
@@ -177,9 +179,10 @@ export function commandDraft(
 export function workflowArguments(command: CommandEntry, text: string): string {
   if (command.kind !== 'orchestration')
     throw new Error('Choose an orchestration command.');
-  const request = text.startsWith(command.command + ' ')
-    ? text.slice(command.command.length + 1)
-    : text;
+  const name = [command.command, ...command.aliases].find(
+    (name) => text === name || text.startsWith(name + ' '),
+  );
+  const request = name ? text.slice(name.length).trimStart() : text;
   if (!request.trim())
     throw new Error('Describe the work in the message box first.');
   return request;

@@ -1015,77 +1015,173 @@ class JobRuntimeTest {
   }
 
   @Test
-  void a_bound_command_is_not_a_successful_answer_until_the_agent_dispatches_it() throws Exception {
-    for (boolean dispatches : List.of(false, true)) {
-      var dispatched = new AtomicBoolean();
-      AgentTool operation =
-          new AgentTool() {
-            @Override
-            public ToolSchema schema() {
-              return ToolSchema.from("command_dispatch", "Bound invocation", Map.of());
-            }
+  void explicit_commands_dispatch_without_a_model_and_preserve_tool_gates() throws Exception {
+    for (String toolName : List.of("orchestrate_review", SkillRuntime.RUN)) {
+      for (String gate :
+          List.of(
+              "allow",
+              "deny",
+              "skill-deny",
+              "rewrite",
+              "post-failure",
+              "dispatch-failure",
+              "awaiting",
+              "child-failure",
+              "cancel")) {
+        var ending = new AtomicReference<TurnEnd>();
+        var id = java.util.UUID.randomUUID();
+        var request = new ToolCall(id.toString(), toolName, "{\"request\":\"Original request\"}");
+        var commands = org.mockito.Mockito.mock(BoundCommands.class);
+        var prepared = org.mockito.Mockito.mock(BoundCommands.Prepared.class);
+        org.mockito.Mockito.when(prepared.dispatchCalls()).thenReturn(List.of(request));
+        org.mockito.Mockito.when(prepared.notice())
+            .thenReturn("The harness dispatches the pinned request.");
+        org.mockito.Mockito.when(prepared.dispatchBound(id, Home.global()))
+            .thenAnswer(
+                invocation -> {
+                  if (gate.equals("dispatch-failure"))
+                    throw new IllegalStateException("Source changed");
+                  if (gate.equals("awaiting"))
+                    ending.get().request(Ending.AWAITING, "Waiting for approval");
+                  if (gate.equals("child-failure"))
+                    throw new AgentRunTool.SubAgentFailed(
+                        "worker",
+                        new Outcome(
+                            Ending.UNAVAILABLE, "Child unavailable", 0, 1, "endpoint unavailable"));
+                  return "Command completed";
+                });
+        org.mockito.Mockito.when(
+                commands.prepare(
+                    org.mockito.ArgumentMatchers.eq(true),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(
+                invocation -> {
+                  ending.set(invocation.getArgument(9));
+                  return prepared;
+                });
+        var transport =
+            new Scripted()
+                .thenAlways(
+                    () -> {
+                      throw new AssertionError("An explicit command launch must not call a model");
+                    });
+        var runtime = runtimeOver(transport);
+        runtime.useBoundCommands(commands);
+        if (gate.equals("skill-deny")) {
+          var skills = org.mockito.Mockito.mock(SkillRuntime.class);
+          org.mockito.Mockito.when(
+                  skills.decorate(
+                      org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+              .thenAnswer(invocation -> invocation.getArgument(1));
+          org.mockito.Mockito.when(
+                  skills.refusal(
+                      org.mockito.ArgumentMatchers.any(),
+                      org.mockito.ArgumentMatchers.eq(request.name())))
+              .thenReturn("The active skill does not permit this orchestration");
+          runtime.useSkills(skills);
+        }
+        runtime.useHooks(
+            new io.aeyer.plowshare.server.hooks.Hooks() {
+              @Override
+              public io.aeyer.plowshare.server.hooks.ToolPre toolPre(
+                  io.aeyer.plowshare.server.hooks.HookContext context,
+                  String tool,
+                  String arguments) {
+                assertEquals(toolName, tool);
+                assertEquals(request.arguments(), arguments);
+                if (gate.equals("deny"))
+                  return new io.aeyer.plowshare.server.hooks.ToolPre(
+                      arguments, "Denied", List.of());
+                return io.aeyer.plowshare.server.hooks.ToolPre.allowed(
+                    gate.equals("rewrite") ? "{}" : arguments);
+              }
 
-            @Override
-            public String run(String arguments, Home home) {
-              dispatched.set(true);
-              return "Dispatched original request";
-            }
-          };
-      var commands = org.mockito.Mockito.mock(BoundCommands.class);
-      var prepared = org.mockito.Mockito.mock(BoundCommands.Prepared.class);
-      org.mockito.Mockito.when(prepared.tool()).thenReturn(operation);
-      org.mockito.Mockito.when(prepared.notice())
-          .thenReturn("The following command has been invoked: bound UUID and original arguments");
-      org.mockito.Mockito.when(prepared.unfinished())
-          .thenAnswer(
-              call -> dispatched.get() ? null : "Command remains bound; it was not dispatched.");
-      org.mockito.Mockito.when(
-              commands.prepare(
-                  org.mockito.ArgumentMatchers.eq(true),
-                  org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any(),
-                  org.mockito.ArgumentMatchers.any()))
-          .thenReturn(prepared);
-      Scripted transport = new Scripted();
-      if (dispatches) transport.then(() -> asking("", call("dispatch", "command_dispatch", "{}")));
-      transport.then(() -> answer("Done"));
-      JobRuntime runtime = runtimeOver(transport);
-      runtime.useBoundCommands(commands);
-      var outcome =
-          runtime.run(
-              agent("echo"),
-              "/skill:review request",
-              Home.global(),
-              Budget.of(4),
-              () -> false,
-              null,
-              JobWatch.UNWATCHED,
-              Transcript.NONE,
-              TurnCap.of(4),
-              List.of(),
-              "alice",
-              true);
-      assertEquals(dispatches ? Ending.ANSWERED : Ending.UNAVAILABLE, outcome.ending());
-      assertEquals(dispatches, dispatched.get());
-      assertTrue(
-          transport.calls().getFirst().messages().stream()
-              .anyMatch(
-                  message ->
-                      message.role() == ChatMessage.Role.USER
-                          && message
-                              .content()
-                              .toString()
-                              .contains("The following command has been invoked")));
-      assertTrue(
-          transport.calls().getFirst().tools().stream()
-              .anyMatch(tool -> tool.name().equals("command_dispatch")));
+              @Override
+              public io.aeyer.plowshare.server.hooks.ToolPost toolPost(
+                  io.aeyer.plowshare.server.hooks.HookContext context,
+                  String tool,
+                  String arguments,
+                  String result) {
+                if (gate.equals("post-failure"))
+                  throw new IllegalStateException("Result gate failed");
+                return io.aeyer.plowshare.server.hooks.ToolPost.untouched(result);
+              }
+            });
+        var transcript = new Recorded(List.of(), "command-conversation");
+        var durableTranscript =
+            org.mockito.Mockito.mock(
+                Transcript.class, org.mockito.AdditionalAnswers.delegatesTo(transcript));
+        org.mockito.Mockito.doAnswer(
+                invocation -> {
+                  transcript.record(invocation.getArgument(0));
+                  return null;
+                })
+            .when(durableTranscript)
+            .recordDurably(org.mockito.ArgumentMatchers.any());
+        var budget = Budget.of(4);
+        var outcome =
+            runtime.run(
+                agent("echo"),
+                toolName.equals(SkillRuntime.RUN)
+                    ? "/skill:review Original request"
+                    : "/orchestration:review Original request",
+                Home.global(),
+                budget,
+                () -> gate.equals("cancel"),
+                null,
+                JobWatch.UNWATCHED,
+                durableTranscript,
+                TurnCap.of(4),
+                List.of(),
+                "alice",
+                true);
+        assertEquals(
+            gate.equals("allow")
+                ? Ending.ANSWERED
+                : gate.equals("cancel")
+                    ? Ending.CANCELLED
+                    : gate.equals("awaiting")
+                        ? Ending.AWAITING
+                        : gate.equals("child-failure")
+                            ? Ending.SUB_AGENT_FAILED
+                            : Ending.UNAVAILABLE,
+            outcome.ending(),
+            gate);
+        assertEquals(0, outcome.modelCalls(), gate);
+        assertEquals(0, budget.spent(), gate);
+        assertTrue(transport.calls().isEmpty(), gate);
+        boolean ran =
+            List.of("allow", "post-failure", "dispatch-failure", "awaiting", "child-failure")
+                .contains(gate);
+        org.mockito.Mockito.verify(prepared, org.mockito.Mockito.times(ran ? 1 : 0))
+            .dispatchBound(id, Home.global());
+        if (!gate.equals("cancel")) {
+          var recordedCall =
+              transcript.entries().stream()
+                  .filter(entry -> entry.toolCalls() != null && !entry.toolCalls().isEmpty())
+                  .findFirst()
+                  .orElseThrow();
+          assertNull(recordedCall.invocation(), "a harness start must not claim model provenance");
+          assertEquals(List.of(request), recordedCall.toolCalls());
+          assertTrue(
+              transcript.entries().stream()
+                  .anyMatch(
+                      entry ->
+                          entry.kind() == EntryKind.TOOL_RESULT
+                              && id.toString().equals(entry.toolCallId())));
+        }
+        if (gate.equals("allow")) assertEquals("Command completed", outcome.text());
+        if (gate.equals("awaiting")) assertEquals("Waiting for approval", outcome.text());
+      }
     }
   }
 

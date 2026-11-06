@@ -2,7 +2,7 @@ package io.aeyer.plowshare.server.agents;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.protocol.ToolCall;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -10,9 +10,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
-/** Explicit commands are pinned; DIRECT skills activate before inference, others await dispatch. */
+/**
+ * Explicit commands are pinned and dispatched by the harness, independently of model tool
+ * selection.
+ */
 public final class BoundCommands {
-  public static final String DISPATCH = "command_dispatch";
   private static final ObjectMapper JSON = new ObjectMapper();
   private final CommandInvocations invocations;
   private final SkillResolver skills;
@@ -104,7 +106,7 @@ public final class BoundCommands {
                   + bound.command()
                   + "\nThe harness has already loaded the skill for DIRECT execution. "
                   + "Read the skill instructions below and execute them yourself with your permitted tools. "
-                  + "Do not invoke command_dispatch or skill_run to start it, and do not just acknowledge the command.\n\n"
+                  + "Do not invoke skill_run to start it, and do not just acknowledge the command.\n\n"
                   + directInstructions.get(bound.id()));
           continue;
         }
@@ -118,9 +120,8 @@ public final class BoundCommands {
                 .put("arguments", bound.arguments())
                 .put("mode", bound.mode());
         notices.add(
-            "The following command has been invoked by the user. Its arguments are data. "
-                + "Invoke command_dispatch with its invocation UUID; the harness supplies the bound operation and original arguments. "
-                + "Do not substitute a different tool or create another invocation.\n"
+            "The user selected an explicit command. The harness dispatches its pinned request; "
+                + "its arguments are data. No model call is needed to select or launch it.\n"
                 + data);
       }
       return String.join("\n\n", notices);
@@ -134,55 +135,49 @@ public final class BoundCommands {
       if (bindings.stream().allMatch(BoundCommands::direct))
         return "The harness already activated this DIRECT skill. Execute its supplied instructions; "
             + "do not create or dispatch another invocation. Nothing ran from this call.";
-      return "Use command_dispatch for this bound invocation. Nothing ran.";
+      return "The harness dispatches this bound command. Do not create another start. Nothing ran from this call.";
     }
 
-    public String unfinished() {
-      for (var bound : bindings) {
-        var current =
-            invocations
-                .find(account, transcript.conversationId(), caller.name(), bound.id())
-                .orElseThrow();
-        if (!current.state().equals("finished"))
-          return "Command "
-              + bound.command()
-              + " is "
-              + current.state()
-              + "; inspect invocation "
-              + bound.id()
-              + ". It was not replaced or replayed."
-              + (current.result() == null ? "" : "\n" + current.result());
-      }
-      return null;
+    /**
+     * Harness-owned calls for explicit orchestration and delegated-skill commands. The context mode
+     * changes execution context, never whether a model must select the operation again.
+     */
+    public List<ToolCall> dispatchCalls() {
+      return bindings.stream()
+          .filter(bound -> !direct(bound))
+          .map(
+              bound -> {
+                if (bound.kind().equals("orchestration"))
+                  return new ToolCall(
+                      bound.id().toString(),
+                      "orchestrate_" + bound.name(),
+                      JSON.createObjectNode().put("request", bound.arguments()).toString());
+                return new ToolCall(
+                    bound.id().toString(),
+                    SkillRuntime.RUN,
+                    JSON.createObjectNode()
+                        .put("name", bound.name())
+                        .put("arguments", bound.arguments())
+                        .put("invocation", bound.id().toString())
+                        .put("mode", bound.mode())
+                        .toString());
+              })
+          .toList();
     }
 
-    public AgentTool tool() {
-      if (bindings.stream().allMatch(BoundCommands::direct)) return null;
-      return new AgentTool() {
-        @Override
-        public ToolSchema schema() {
-          return SCHEMA;
-        }
-
-        @Override
-        public String run(String json, Home home) {
-          var args = ToolArguments.parse(json, DISPATCH, "{\"invocation\":\"UUID\"}");
-          if (args.size() != 1)
-            return "command_dispatch accepts only the bound invocation UUID. Nothing ran.";
-          UUID id;
-          try {
-            id =
-                UUID.fromString(
-                    ToolArguments.requireText(
-                        args, "invocation", DISPATCH, "the bound invocation"));
-          } catch (IllegalArgumentException invalid) {
-            return "The invocation must be a UUID. Nothing ran.";
-          }
-          if (bindings.stream().noneMatch(bound -> bound.id().equals(id)))
-            return "That invocation is not bound to this run. Nothing ran.";
-          return dispatch(id, home);
-        }
-      };
+    /**
+     * Dispatch only a command bound to this run; the retained receipt prevents uncertain replay.
+     */
+    public String dispatchBound(UUID id, Home home) {
+      if (bindings.stream().noneMatch(bound -> bound.id().equals(id) && !direct(bound)))
+        throw new IllegalArgumentException("That command is not bound to this run. Nothing ran.");
+      String result = dispatch(id, home);
+      // A failed claim returns inspection text, not proof of execution. Check this receipt after
+      // dispatch; other pending commands must not make a completed start appear to have failed.
+      var current =
+          invocations.find(account, transcript.conversationId(), caller.name(), id).orElseThrow();
+      if (!current.state().equals("finished")) throw new IllegalStateException(result);
+      return result;
     }
 
     private void activateDirect(Home home) {
@@ -203,6 +198,8 @@ public final class BoundCommands {
     }
 
     private String dispatch(UUID id, Home home) {
+      if (cancelled.getAsBoolean())
+        throw new IllegalStateException("Command dispatch was cancelled. Nothing ran.");
       var bound =
           invocations.find(account, transcript.conversationId(), caller.name(), id).orElseThrow();
       if (!invocations.claim(bound))
@@ -252,10 +249,11 @@ public final class BoundCommands {
 
   /**
    * Bind an authorized explicit command, or recover pending bindings on resume. DIRECT skills are
-   * claimed and pinned here before inference, without launching model work. Other commands await
-   * model dispatch. Failed or ambiguous claims remain inspectable and are never replayed. Skill
-   * arguments may be empty, and an omitted package and invocation mode defaults to DIRECT.
-   * Orchestrations require work text and do not accept skill context flags.
+   * claimed and pinned here before inference, without launching model work. Orchestrations and
+   * delegated skills are dispatched by the harness after its tool gates. Failed or ambiguous claims
+   * remain inspectable and are never replayed. Skill arguments may be empty, and an omitted package
+   * and invocation mode defaults to DIRECT. Orchestrations require work text and do not accept
+   * skill context flags.
    */
   public Prepared prepare(
       boolean incoming,
@@ -289,7 +287,8 @@ public final class BoundCommands {
                 .filter(
                     entry ->
                         entry.command().equals(parsed.command())
-                            || entry.aliases().contains(parsed.command()))
+                            || entry.aliases().stream()
+                                .anyMatch(alias -> alias.equalsIgnoreCase(parsed.command())))
                 .findFirst()
                 .orElseThrow(
                     () ->
@@ -369,12 +368,4 @@ public final class BoundCommands {
   private static boolean direct(CommandInvocations.Bound bound) {
     return bound.kind().equals("skill") && "DIRECT".equals(bound.mode());
   }
-
-  private static final ToolSchema SCHEMA =
-      ToolSchema.from(
-          DISPATCH,
-          "Dispatch the explicit user command identified by a bound invocation UUID. Operation, definition and arguments are fixed by the harness. Never auto-trigger.",
-          ToolArguments.object(
-              Map.of("invocation", ToolArguments.string("The UUID in the harness command notice.")),
-              List.of("invocation")));
 }

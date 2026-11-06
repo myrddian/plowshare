@@ -500,7 +500,7 @@ public final class SkillRuntime {
           "Run a granted skill from the available skills catalog when it helps complete the user's task. "
               + "Model-selected invocation requires effective agentVisible=true and a configured mode. "
               + "Hidden skills require an explicit /skill command: the harness loads DIRECT instructions before inference, "
-              + "while delegated modes use command_dispatch. "
+              + "and launches delegated modes through the harness. "
               + "Reuse the invocation UUID when inspecting a previous request; never retry ambiguous work with a new UUID. "
               + "The UUID fixes the original arguments and mode; user clarifications are conversation context, not a replacement invocation. "
               + "INHERITED, SUMMARISED and NEW delegate to the skill's Agent; DIRECT loads it in this conversation.",

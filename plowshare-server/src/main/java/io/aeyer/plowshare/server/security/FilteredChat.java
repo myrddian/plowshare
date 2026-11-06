@@ -20,18 +20,33 @@ public final class FilteredChat implements ChatFiltering {
 
   @Override
   public ChatRequest input(ChatRequest request, BooleanSupplier abandoned) {
+    return inspect(request, abandoned, false);
+  }
+
+  @Override
+  public ChatRequest historyInput(ChatRequest request, BooleanSupplier abandoned) {
+    if (!request.tools().isEmpty())
+      throw new IllegalArgumentException("Historical summary requests cannot carry tools");
+    return inspect(request, abandoned, true);
+  }
+
+  private ChatRequest inspect(ChatRequest request, BooleanSupplier abandoned, boolean history) {
     var messages =
         request.messages().stream()
             .map(
                 m -> {
                   boolean untrusted =
                       m.role() == ChatMessage.Role.USER || m.role() == ChatMessage.Role.TOOL;
+                  // Compaction flattens historical roles into USER text. Do not reinterpret quoted
+                  // past instructions as a new attack on the folder. They retain their original
+                  // message role and remain subject to disclosure policy and external review.
+                  boolean injection = untrusted && !history;
                   var parts =
                       m.parts().stream()
                           .map(
                               p -> {
                                 if (!(p instanceof Content.Text text)) return p;
-                                String approved = local.inspect(text.text(), untrusted, true);
+                                String approved = local.inspect(text.text(), injection, true);
                                 if (untrusted && !approved.isBlank())
                                   approved =
                                       review.review(
@@ -42,7 +57,7 @@ public final class FilteredChat implements ChatFiltering {
                                 // A reviewer must not introduce content that the local policy would
                                 // refuse.
                                 return (Content)
-                                    new Content.Text(local.inspect(approved, untrusted, true));
+                                    new Content.Text(local.inspect(approved, injection, true));
                               })
                           .toList();
                   var calls =

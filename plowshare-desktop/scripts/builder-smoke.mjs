@@ -39,6 +39,7 @@ try {
   await mkdir('build/smoke', { recursive: true }); await builder.screenshot({ path: 'build/smoke/builder-review.png' });
   await builder.setViewportSize({ width: 860, height: 620 }); await builder.screenshot({ path: 'build/smoke/builder-review-compact.png' }); await builder.setViewportSize({ width: 1160, height: 800 });
   assert.equal(fixture.frames.filter(row => row.type === 'agent.run').length, 1);
+  assert.match(fixture.frames.find(row => row.type === 'agent.run').payload.task, /^\/orchestration:design_orchestration /);
   assert.match(fixture.frames.find(row => row.type === 'agent.run').payload.task, /revising deep_research/);
   await assert.rejects(builder.evaluate(() => window.plowshare.request({ action: 'builder-start', project: 'Research', agent: 'fixture-bot', intent: 'Duplicate launch' })), /still active/);
   await builder.locator('[data-question-defer]').click(); await builder.locator('#activity-refresh').click();
@@ -58,7 +59,8 @@ try {
   const launches = fixture.frames.filter(row => row.type === 'agent.run').length;
   if (!(await builder.locator('#builder-form').evaluate(el => el.open))) await builder.locator('#builder-form summary').click();
   await builder.locator('#builder-prepare').click(); await builder.locator('#activity-refresh').click();
-  await assert.rejects(builder.evaluate(() => window.plowshare.request({ action: 'builder-start', project: 'Research', agent: 'fixture-bot', intent: 'Do not replay' })), /uncertain|still active/);
+  // A lost launch can also disconnect project presence; either fence must prevent a second send.
+  await assert.rejects(builder.evaluate(() => window.plowshare.request({ action: 'builder-start', project: 'Research', agent: 'fixture-bot', intent: 'Do not replay' })), /uncertain|still active|Project connection lost/);
   assert.equal(fixture.frames.filter(row => row.type === 'agent.run').length, launches);
   await expect(builder.locator('#run-answer-send')).toBeEnabled();
   await builder.locator('[data-choice="0"] input[value="Install"]').check(); await builder.locator('#run-answer-send').click(); await expect(builder.locator('.run-notice')).toContainText('Answer recorded');

@@ -3941,6 +3941,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     const workflow = {
       ...hidden,
       command: '/orchestration:research',
+      aliases: ['/research'],
       kind: 'orchestration',
       name: 'research',
       description: 'Research the topic',
@@ -3956,13 +3957,20 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     const fake = await scriptedPlowshare(['answer-first'], [selected, other]);
     const invocation =
       ' /skill:review --mode=SUMMARISED Review\nthis exact change ';
-    const prompt = scripted(['/skills', '/commands', '/help', invocation]);
+    const prompt = scripted([
+      '/skills',
+      '/commands',
+      '/help',
+      invocation,
+      '/research Alias request',
+    ]);
     await converse(talkingTo(fake, prompt));
     expect(prompt.commandOffers).toEqual(
       Array.from({ length: 3 }, () => [
         '/mcp',
         '/skill:review',
         '/orchestration:research',
+        '/research',
       ]),
     );
     expect(prompt.said.join('\n')).toContain(
@@ -3981,7 +3989,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
       fake.heard.frames
         .filter((frame) => frame.type === 'agent.run')
         .map((frame) => (frame.payload as { task: string }).task),
-    ).toEqual([invocation]);
+    ).toEqual([invocation, '/research Alias request']);
     expect(
       fake.heard.frames.some((frame) => frame.type === 'orchestration.start'),
     ).toBe(false);
@@ -4807,7 +4815,7 @@ describe('where a person is, and how they move', () => {
       'author',
     );
     expect((frames[0]?.payload as Record<string, unknown>)['task']).toContain(
-      'Start the granted design_orchestration',
+      '/orchestration:design_orchestration',
     );
     expect((frames[0]?.payload as Record<string, unknown>)['task']).toContain(
       'Read sources and ask before publication',

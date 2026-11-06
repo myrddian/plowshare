@@ -111,3 +111,24 @@ await test('choosing context after completion updates the draft without nesting 
     '/orchestration:review --mode=NEW Review',
   );
 });
+
+await test('discovered aliases complete and canonicalize without becoming request text', () => {
+  const command: CommandEntry = {
+    ...skill,
+    kind: 'orchestration',
+    command: '/orchestration:review',
+    aliases: ['/research'],
+  };
+  assert.ok(
+    commandOffers('/res', [command]).some((row) => row.command === '/research'),
+  );
+  assert.equal(
+    commandDraft(command, '', '/research Original request\nwith details'),
+    '/orchestration:review Original request\nwith details',
+  );
+  assert.equal(
+    workflowArguments(command, '/research Original request\nwith details'),
+    'Original request\nwith details',
+  );
+  assert.throws(() => workflowArguments(command, '/research'), /Describe/);
+});

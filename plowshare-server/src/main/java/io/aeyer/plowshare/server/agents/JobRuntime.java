@@ -2430,7 +2430,6 @@ public final class JobRuntime {
       return stopped(
           Ending.UNAVAILABLE, bound.refusal(), List.of(), 0, 0, "command binding refused");
     }
-    if (bound != null && bound.tool() != null) offered.put(BoundCommands.DISPATCH, bound.tool());
     if (skills != null) {
       // An explicit DIRECT command may have activated after offeredTo. Apply its tool fence before
       // the first inference as well as at execution, so the model sees only permitted operations.
@@ -2663,6 +2662,22 @@ public final class JobRuntime {
                         null,
                         0))));
     pre.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+    if (bound != null && !bound.dispatchCalls().isEmpty()) {
+      return dispatchBoundCommands(
+          bound,
+          home,
+          transcript,
+          definition,
+          activeHooks(route, harnessRun, skillChecks),
+          hookContext,
+          end,
+          cancelled,
+          () -> {
+            admittedAuthority.run();
+            if (operation != null) operations.require(operation);
+          },
+          watch);
+    }
     List<String> trail = new ArrayList<>();
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
       var resumption = new io.aeyer.plowshare.server.approvals.RunCallResumption(suspendedRunCalls);
@@ -3278,15 +3293,6 @@ public final class JobRuntime {
           history.add(ChatMessage.user(revisionRequest(review)));
           answerReviewed = true;
           continue;
-        }
-        if (bound != null && bound.unfinished() != null) {
-          return stopped(
-              Ending.UNAVAILABLE,
-              bound.unfinished(),
-              trail,
-              steps,
-              modelCalls,
-              "command was not dispatched");
         }
         transcript.record(LoggedEntry.answer(post.reply(), List.of()).took(modelCallTook).by(call));
         post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
@@ -3917,6 +3923,93 @@ public final class JobRuntime {
       // The step is whole and the turn goes on: the boundary a fold inside it may run at.
       aStepEnded = true;
     }
+  }
+
+  /**
+   * A slash command already specifies the operation and payload. Run it through the tool gates
+   * without asking a model to select it again. Durable call/result pairs carry no model provenance
+   * or inference charge; the existing bound/start receipts retain at-most-once execution.
+   */
+  private Outcome dispatchBoundCommands(
+      BoundCommands.Prepared bound,
+      Home home,
+      Transcript transcript,
+      AgentDefinition definition,
+      Hooks active,
+      HookContext context,
+      TurnEnd end,
+      BooleanSupplier cancelled,
+      Runnable authorize,
+      JobWatch watch) {
+    List<String> trail = new ArrayList<>();
+    List<String> results = new ArrayList<>();
+    for (ToolCall call : bound.dispatchCalls()) {
+      if (cancelled.getAsBoolean())
+        return stopped(
+            Ending.CANCELLED, "Command dispatch was cancelled. Nothing ran.", trail, 0, 0, "");
+      authorize.run();
+      // A durable request precedes the effect, as for scripted orchestration calls. It must not
+      // manufacture a model invocation merely to make the request visible in the transcript.
+      transcript.recordDurably(LoggedEntry.answer("", List.of(call)));
+      String result;
+      boolean failed = false;
+      Ending failureEnding = Ending.UNAVAILABLE;
+      RunActivity.Call recording =
+          activity.called(
+              transcript.conversationId(),
+              definition.name(),
+              call.name(),
+              () -> ToolLines.salient(call.name(), call.arguments()));
+      try {
+        String refusal =
+            skills == null ? null : skills.refusal(transcript.conversationId(), call.name());
+        if (refusal != null) throw new IllegalStateException(refusal);
+        ToolPre before = toolPre(active, context, call.name(), call.arguments());
+        before.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+        if (before.isDenied()) throw new IllegalStateException(before.denied());
+        if (!call.arguments().equals(before.arguments()))
+          throw new IllegalStateException(
+              "A hook cannot replace a bound command's original arguments. Nothing ran.");
+        authorize.run();
+        if (cancelled.getAsBoolean())
+          throw new IllegalStateException("Command dispatch was cancelled. Nothing ran.");
+        watch.toolCalled(definition.name(), call.name());
+        trail.add(call.name());
+        result =
+            usable(bound.dispatchBound(java.util.UUID.fromString(call.id()), home), call.name());
+        authorize.run();
+        ToolPost after = toolPost(active, context, call.name(), call.arguments(), result);
+        after.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+        result = usable(after.result(), call.name());
+        failed = withheld(after);
+      } catch (AgentRunTool.SubAgentFailed child) {
+        result = child.sentence();
+        failureEnding = Ending.SUB_AGENT_FAILED;
+        failed = true;
+      } catch (RuntimeException broken) {
+        result = "Bound command dispatch stopped: " + describe(broken);
+        failureEnding =
+            broken instanceof SessionGoneException
+                ? Ending.SESSION_GONE
+                : cancelled.getAsBoolean() ? Ending.CANCELLED : Ending.UNAVAILABLE;
+        failed = true;
+      }
+      String told = failed ? ToolLines.ERROR : ToolLines.outcome(call.name(), result);
+      transcript.recordDurably(LoggedEntry.toolResult(call.id(), result).told(told));
+      recording.returned(told);
+      if (failed)
+        return stopped(failureEnding, result, trail, 0, 0, "bound command dispatch failed");
+      if (end.requested().isPresent()) {
+        var requested = end.requested().orElseThrow();
+        if (requested.ending() == Ending.ANSWERED)
+          transcript.record(LoggedEntry.answer(requested.text(), List.of()));
+        return new Outcome(requested.ending(), requested.text(), 0, 0, "", Pace.NONE, true);
+      }
+      results.add(result);
+    }
+    String answer = String.join("\n\n", results);
+    transcript.record(LoggedEntry.answer(answer, List.of()));
+    return new Outcome(Ending.ANSWERED, answer, 0, 0, "", Pace.NONE, true);
   }
 
   /** Decision details are audit-only; an approved call contributes only its result to the model. */

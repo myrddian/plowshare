@@ -32,6 +32,9 @@ describe('authoring authority and intent', () => {
     expect(
       authoringRequest('Read sources\nAsk before publication', 'source_review'),
     ).toContain('revising source_review');
+    expect(authoringRequest('Read sources')).toMatch(
+      /^\/orchestration:design_orchestration /,
+    );
     expect(authoringRequest('Read sources')).toContain('Do not install or run');
     expect(() => authoringRequest('Read sources', AUTHORING)).toThrow(
       /required system/,

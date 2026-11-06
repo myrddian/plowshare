@@ -560,9 +560,9 @@ export async function protocolFixture(options = {}) {
         case 'agent.run': {
           const job = start(payload, false, sessionId);
           if (dropRunReply) { dropRunReply = false; connection.close(); return; }
-          if (options.authoring && payload.task.includes('Start the granted design_orchestration')) runRows.unshift(runWire(`fixture-builder-${jobs.size}`, 'asking', { definition: 'design_orchestration', conductorConversation: 'fixture-authoring-conductor', createdAt: new Date().toISOString(), project: payload.project ?? conversations.find(row => row.id === payload.conversation)?.project ?? null, callerConversation: payload.conversation, pendingCap: 'install' }));
+          if (options.authoring && payload.task.startsWith('/orchestration:design_orchestration ')) runRows.unshift(runWire(`fixture-builder-${jobs.size}`, 'asking', { definition: 'design_orchestration', conductorConversation: 'fixture-authoring-conductor', createdAt: new Date().toISOString(), project: payload.project ?? conversations.find(row => row.id === payload.conversation)?.project ?? null, callerConversation: payload.conversation, pendingCap: 'install' }));
           if (options.authoring) setTimeout(() => finish(job, 'ANSWERED', 'Started the builder.'), 10);
-          if (dropAuthoringReply && payload.task.includes('Start the granted design_orchestration')) { dropAuthoringReply = false; connection.close(); return; }
+          if (dropAuthoringReply && payload.task.startsWith('/orchestration:design_orchestration ')) { dropAuthoringReply = false; connection.close(); return; }
           result = { code: 'ACCEPTED', payload: { id: job.id, agent: 'fixture-bot' } }; break;
         }
         case 'job.status': {
