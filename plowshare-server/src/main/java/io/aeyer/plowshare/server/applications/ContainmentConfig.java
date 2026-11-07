@@ -34,8 +34,6 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(prefix = "plowshare.containment", name = "root")
 @ConfigurationProperties(prefix = "plowshare.containment")
 public final class ContainmentConfig {
-  private static final ContainmentConfig ABSENT = new ContainmentConfig();
-
   /**
    * The conservative default, used when {@code sweep-grace} is absent, and the floor every
    * configured value is clamped to.
@@ -48,6 +46,9 @@ public final class ContainmentConfig {
   static final java.time.Duration DEFAULT_SWEEP_GRACE = java.time.Duration.ofMinutes(30);
 
   static final java.time.Duration MINIMUM_SWEEP_GRACE = java.time.Duration.ofMinutes(1);
+
+  // The absent instance reads the default in its constructor, so initialize that value first.
+  private static final ContainmentConfig ABSENT = new ContainmentConfig();
 
   private final Path root;
   private final ContainmentBounds bounds;

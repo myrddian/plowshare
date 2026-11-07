@@ -577,8 +577,13 @@ class ContainedRecoveryTest {
   @Test
   void sweepDoesNothingWhenNestingIsNotConfigured() {
     var unconfigured =
-        new ContainedSourceCollector(
-            records, work, ContainmentConfig.absent(), staging, Duration.ZERO);
+        new ApplicationDeploymentConfig()
+            .containedSourceCollector(
+                records,
+                work,
+                staging,
+                new org.springframework.beans.factory.support.DefaultListableBeanFactory()
+                    .getBeanProvider(ContainmentConfig.class));
     var swept = unconfigured.sweep();
     assertEquals(0, swept.collected());
     assertEquals(0, swept.retained());
