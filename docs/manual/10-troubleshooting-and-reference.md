@@ -60,6 +60,8 @@ summary operation. Each summary currently makes one model call. Usage can name
 the source conversation without reducing its remaining calls. If summaries are
 disabled/unavailable, compaction keeps the full history; a required skill summary
 refuses the handoff instead of silently changing its context mode.
+If the folder returns a tool request, the trajectory records a failed fold. The
+history stays available to the model so a later fold can cover the same turns.
 
 ## Offline command discovery
 
