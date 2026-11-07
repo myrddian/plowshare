@@ -65,6 +65,7 @@ import {
   jobStatusOf,
 } from 'plowshare-client-ts/binding/job-view';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   finishSetup,
   signIn,
@@ -415,7 +416,7 @@ export class DesktopClient {
   );
   readonly activity = new ActivityClient(
     () => this.state,
-    (ask) => this.send(ask),
+    (ask) => this.sendActivity(ask),
     () => this.emit(),
   );
   readonly applicationFiles = new ApplicationFilesClient(
@@ -435,7 +436,7 @@ export class DesktopClient {
   );
   readonly runs = new RunClient(
     () => this.state,
-    (ask) => this.send(ask),
+    (ask) => this.sendActivity(ask),
     () => this.emit(),
   );
   readonly operator = new OperatorClient(
@@ -873,6 +874,27 @@ export class DesktopClient {
   }
   private async send(request: WsRequest) {
     return this.ask(request.type, request.payload);
+  }
+  private async sendActivity(request: WsRequest): Promise<Outcome> {
+    const generation = this.generation;
+    let answer = await this.send(request);
+    // Activity refreshes share the account's read budget across connections. Only retry
+    // these audited reads, since a decision can commit before its own reply is refused.
+    if (
+      request.type !== 'inbox.list' &&
+      request.type !== 'orchestration.list' &&
+      request.type !== 'orchestration.status' &&
+      request.type !== 'orchestration.record'
+    )
+      return answer;
+    for (const milliseconds of [150, 400]) {
+      if (answer.code !== 'ARCHIVE_UNAVAILABLE') break;
+      await delay(milliseconds);
+      if (generation !== this.generation)
+        throw new Error('The connection changed while reading Activity.');
+      answer = await this.send(request);
+    }
+    return answer;
   }
   dispose() {
     this.stopNativeMcp();
