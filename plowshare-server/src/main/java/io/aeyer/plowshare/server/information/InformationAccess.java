@@ -108,6 +108,36 @@ public final class InformationAccess {
   }
 
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
+    return forRun(InformationActor.of(account), home);
+  }
+
+  /**
+   * The same run resolution, with both of the run's axes named rather than one handle meaning both.
+   *
+   * <p>For an uncontained actor this <em>is</em> the single-argument body: the acting principal is
+   * resolved exactly as {@code account} was and {@link InformationContext#accountedTo} is never
+   * called, so the context is byte-identical to the one this method produced before the carrier
+   * existed — not merely equivalent. That is the whole of the behaviour change for every caller
+   * that exists today.
+   *
+   * <p><strong>A contained actor is refused here, deliberately.</strong> This body cannot resolve
+   * differing axes and must not pretend to: it runs {@link PersonalSpaces#resolveAddress} and
+   * {@link PersonalSpaces#requireOwn} against the acting principal, and both refuse a contained
+   * project name outright, so a contained actor could only ever resolve by being treated as its
+   * container — silently collapsing the two axes this carrier exists to keep apart. A later slice
+   * replaces the raise with a branch delegating to {@link #contained(String, String, String)}.
+   *
+   * <p>The refusal is a server fault rather than a {@link CallerFault} because no caller can cause
+   * it: nothing in production builds a contained actor, so reaching it means the resolution path
+   * was wired without its destination.
+   */
+  public InformationContext forRun(InformationActor actor, io.aeyer.plowshare.protocol.Home home) {
+    Objects.requireNonNull(actor, "actor");
+    if (!actor.uncontained())
+      throw new IllegalStateException(
+          "The contained information resolution path is not wired yet;"
+              + " a contained actor cannot resolve a run home");
+    String account = actor.acting();
     if (home.isGlobal())
       throw new CallerFault("A retained run needs an explicit Personal or project home");
     // A run's Personal home is a server-owned workspace project, while its retained information

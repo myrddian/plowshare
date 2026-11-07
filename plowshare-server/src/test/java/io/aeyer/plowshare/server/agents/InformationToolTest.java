@@ -35,7 +35,9 @@ class InformationToolTest {
   }
 
   private InformationTool reader(InformationNavigationService navigation) {
-    when(access.forRun("alice", Home.global())).thenReturn(context);
+    // The run binding now names both of the run's axes; for this uncontained run both hold
+    // "alice", so the resolved context is the same one the handle-only stub returned.
+    when(access.forRun(InformationActor.of("alice"), Home.global())).thenReturn(context);
     when(inputs.reads("cnv_reader", context)).thenReturn(read::add);
     when(retrieval.scoped(access, context)).thenReturn(retrieval);
     return new InformationTool(false, () -> catalogue, null, () -> navigation)

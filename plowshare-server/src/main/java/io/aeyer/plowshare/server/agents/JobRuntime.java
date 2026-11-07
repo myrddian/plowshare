@@ -27,6 +27,7 @@ import io.aeyer.plowshare.server.hooks.Tier;
 import io.aeyer.plowshare.server.hooks.ToolPost;
 import io.aeyer.plowshare.server.hooks.ToolPre;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.information.InformationActor;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
@@ -4525,12 +4526,23 @@ public final class JobRuntime {
                     .forRun(cancelled, runInformation, callerHandle, budget, sessionId)
                     .withInputs(informationInputs, transcript.conversationId());
       }
+      // Both of this run's information axes, named once for the two bindings that take
+      // them. Every run reaching here is uncontained, so both axes are the caller's own
+      // handle and neither binding sees a value it did not see before; the carrier exists
+      // so that a contained run can one day present the child's principal here instead.
+      // A handle-less run (an unauthenticated fixture, or a job bound before a caller is
+      // known) carried a null handle into both bindings and must keep doing so, so there is
+      // no actor to build; the bindings' own "needs an authenticated durable run" guards
+      // still decide what that means.
+      InformationActor informationActor =
+          callerHandle == null ? null : InformationActor.of(callerHandle);
       if (tool instanceof MemoryTools.Write write)
         tool =
             write.forRun(
                 informationInputs,
                 transcript.conversationId(),
-                callerHandle,
+                // A memory write's rows are accounted to the attribution axis.
+                informationActor == null ? null : informationActor.attribution(),
                 () -> {
                   if (cancelled.getAsBoolean())
                     throw new IllegalStateException("Memory write run ended");
@@ -4553,7 +4565,7 @@ public final class JobRuntime {
                 .forRun(
                     runInformation,
                     informationInputs,
-                    callerHandle,
+                    informationActor,
                     transcript.conversationId(),
                     sessionId)
                 .withQueryValidity(
