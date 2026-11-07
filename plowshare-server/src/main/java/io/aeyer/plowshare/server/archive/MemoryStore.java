@@ -68,6 +68,16 @@ import org.springframework.stereotype.Repository;
  * selecting the live {@code contained_principals} row rather than casting the caller's string, so
  * the value is always a principal that exists; a reader who later joins this field against {@code
  * authority_accounts} finds no row and refuses, which is the direction a mistake here should fail.
+ *
+ * <p><strong>Case, and why both pins also refuse a null account.</strong> {@code
+ * contained_knowledge_actor} (V229:30) admits case-INSENSITIVELY — {@code ~*}, and {@code ::uuid}
+ * accepts an uppercase UUID — while {@code c.id::text} always renders lowercase. A case-sensitive
+ * projection would therefore have made the arm true and the projected account NULL for a mixed-case
+ * actor string, which {@code InformationActor.acting} neither normalises nor UUID-validates. The
+ * branches match on {@code lower(?)} so the projection is exactly as case-insensitive as the
+ * predicate admitting it, and both pins refuse a row with a null account as well as one with a null
+ * scope — so no {@link QuerySources.Pin} leaves this class without one, and the paragraph above is
+ * true rather than nearly true. {@code aMixedCaseActorStringNeverProducesANullAccountPin} holds it.
  */
 @Repository
 public class MemoryStore implements MemoryRepository {
@@ -103,7 +113,7 @@ public class MemoryStore implements MemoryRepository {
               AND (?::text IS NULL OR information_project_readable(
                 (SELECT id FROM projects WHERE name=?),?))
             UNION ALL
-            SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=?),
+            SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=lower(?)),
               (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?)
             WHERE contained_memory_actor_allows(?,?,false)
             """,
@@ -122,7 +132,7 @@ public class MemoryStore implements MemoryRepository {
             request.home().project(),
             request.account(),
             request.home().project());
-    if (rows.size() != 1 || rows.getFirst().scope() == null)
+    if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
       throw new CallerFault("Memory query is outside live read authority");
     return new Selection(rows.getFirst(), request.readScope().memoryHomes());
   }
@@ -184,7 +194,7 @@ public class MemoryStore implements MemoryRepository {
         FROM authority_accounts a WHERE a.id=CASE WHEN ? THEN ?::uuid ELSE
           (SELECT id FROM authority_accounts WHERE legacy_handle=?) END
         UNION ALL
-        SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=?),
+        SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=lower(?)),
           (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?)
         WHERE contained_memory_actor_allows(?,?,true)
         """,
@@ -201,7 +211,8 @@ public class MemoryStore implements MemoryRepository {
             request.home().project(),
             request.account(),
             request.home().project());
-    if (rows.size() != 1 || rows.getFirst().scope() == null) throw writeDenied();
+    if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
+      throw writeDenied();
     var pin = rows.getFirst();
     require(request, pin, false);
     return pin;

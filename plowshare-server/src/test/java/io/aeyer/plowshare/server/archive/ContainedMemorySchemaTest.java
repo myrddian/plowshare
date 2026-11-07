@@ -20,17 +20,20 @@ import org.testcontainers.junit.jupiter.*;
  * Each is reproduced here from the store's own statement rather than driven through the store, so
  * what is measured is the gate and not a service's handling of it.
  *
- * <p>CHARACTERIZATION (run before any widening). Three of these eight failed — {@code
- * aContainedActorReadsItsOwnMemories}, {@code aContainedActorWritesItsOwnMemories} and the own-home
- * control inside {@code aSiblingReadsNothingOfItsSiblings} — so the memory side did need widening,
- * and ADR 0042's claim that a contained principal "reads its own documents and its own memories"
- * was over-claimed for memories. Five passed beforehand and are regression tests now: {@code
- * anAncestorReadsItsDescendantsMemories} (the container's walk already worked), {@code
+ * <p>CHARACTERIZATION (run before any widening). Three of the eight tests that existed then failed
+ * — {@code aContainedActorReadsItsOwnMemories}, {@code aContainedActorWritesItsOwnMemories} and the
+ * own-home control inside {@code aSiblingReadsNothingOfItsSiblings} — so the memory side did need
+ * widening, and ADR 0042's claim that a contained principal "reads its own documents and its own
+ * memories" was over-claimed for memories. Five passed beforehand and are regression tests now:
+ * {@code anAncestorReadsItsDescendantsMemories} (the container's walk already worked), {@code
  * aContainedActorDoesNotReachAGloballyReadableMemory}, {@code
  * anOrdinaryAccountsMemoryAccessIsUnchanged}, {@code
  * theMemoryDoorIsClosedByTheAccountJoinAndNotByGlobalRead} and {@code
  * aContainedActorReadsNoOtherProjectsMemories} — the last of which passed only because everything
- * was refused, so on its own it proved nothing until the three above passed too.
+ * was refused, so on its own it proved nothing until the three above passed too. {@code
+ * aMixedCaseActorStringNeverProducesANullAccountPin} is the ninth and was added after the widening,
+ * for a hole the widening itself introduced; {@code MemoryStore}'s class Javadoc states what it
+ * holds.
  *
  * <p><strong>WHICH PREDICATE REFUSED, IN ORDER.</strong> On the READ path the first refusal is the
  * statement's own {@code FROM authority_accounts a WHERE a.legacy_handle=$actor} (the shape is
@@ -83,7 +86,7 @@ class ContainedMemorySchemaTest {
         AND (?::text IS NULL OR information_project_readable(
           (SELECT id FROM projects WHERE name=?),?))
       UNION ALL
-      SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=?),
+      SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=lower(?)),
         (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?)
       WHERE contained_memory_actor_allows(?,?,false)
       """;
@@ -98,7 +101,7 @@ class ContainedMemorySchemaTest {
       FROM authority_accounts a WHERE a.id=CASE WHEN ? THEN ?::uuid ELSE
         (SELECT id FROM authority_accounts WHERE legacy_handle=?) END
       UNION ALL
-      SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=?),
+      SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=lower(?)),
         (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?)
       WHERE contained_memory_actor_allows(?,?,true)
       """;
@@ -246,7 +249,9 @@ class ContainedMemorySchemaTest {
    * it.
    */
   private boolean readAdmits(String actor, String project) {
-    return readPin(actor, project).filter(pin -> pin.scope() != null).isPresent();
+    return readPin(actor, project)
+        .filter(pin -> pin.scope() != null && pin.account() != null)
+        .isPresent();
   }
 
   /** The admitted pin itself, for the one assertion that is about what the arm projects. */
@@ -290,7 +295,8 @@ class ContainedMemorySchemaTest {
             project,
             actor,
             project);
-    if (rows.size() != 1 || rows.getFirst().scope() == null) return false;
+    if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
+      return false;
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             WRITE_AUTHORITY,
@@ -421,6 +427,45 @@ class ContainedMemorySchemaTest {
                 childPrincipal)),
         "the write path's administrator arm has no row to find either -- but it is not reached for"
             + " a project-homed write at all, which anOrdinaryAccountsMemoryAccessIsUnchanged pins");
+  }
+
+  /**
+   * The admission and the projection must agree about case. {@code contained_knowledge_actor}
+   * (V229:30) tests the actor with {@code ~*} and casts it with {@code ::uuid}, both
+   * case-insensitive, and {@code contained_own_home} compares UUIDs rather than text — so a
+   * mixed-case actor string for a live principal selects the arm. {@code c.id::text} renders
+   * lowercase, so a case-sensitive projection would have paired that admission with a NULL account:
+   * not a leak, since it is the same principal and its own home, but a {@code Pin} escaping this
+   * repository with a null account, whose next reader is {@code pin.account().toString()} or a NOT
+   * NULL column. {@code InformationActor.acting} is a free string validated only for non-blankness,
+   * so nothing upstream rules the case out.
+   */
+  @Test
+  void aMixedCaseActorStringNeverProducesANullAccountPin() {
+    // An explicit id rather than the table's gen_random_uuid default, so the actor string is
+    // guaranteed to contain hex letters and the uppercase form really differs from it.
+    var scope = contained(parentScope);
+    var lettered = UUID.fromString("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d");
+    jdbc.update("INSERT INTO contained_principals(id,scope_id) VALUES (?,?)", lettered, scope);
+    memory(scope, lettered.toString());
+    var mixed = lettered.toString().toUpperCase(java.util.Locale.ROOT);
+    assertNotEquals(lettered.toString(), mixed);
+
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT contained_memory_actor_allows(?,?,false)", Boolean.class, mixed, home(scope)),
+        "the arm admits case-insensitively, which is what makes the projection's case matter");
+
+    var pin = readPin(mixed, home(scope)).orElseThrow();
+    assertNotNull(pin.account(), "admitted, so the account is the principal's own and never null");
+    assertEquals(lettered, pin.account());
+    assertEquals(scope, pin.scope());
+    assertTrue(readAdmits(mixed, home(scope)));
+    assertTrue(writeAdmits(mixed, home(scope)));
+
+    // And the refusals are unmoved by case: a mixed-case actor reaches no other home either.
+    assertFalse(readAdmits(mixed, "parent"));
+    assertFalse(readAdmits(mixed, home(siblingScope)));
   }
 
   @Test

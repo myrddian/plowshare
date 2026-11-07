@@ -291,7 +291,11 @@ first of two. The child's own scope *is* admitted by V223's self arm, but
 `knowledge_revision_readable` opened with `information_global_read_member(actor)`,
 which requires an `admins` row carrying the `GLOBAL_READ` role, and a contained
 principal holds no credential material by design (V218): its identifier is a bare
-UUID with no row in `admins`, `authority_accounts` or `service_tokens`. V223 left
+UUID with no row in `admins`, `authority_accounts` or `service_tokens`. (That
+"carrying the `GLOBAL_READ` role" describes the conjunct's *effect* here — V229
+widened exactly it — and not the predicate's body, which tests no grant of that
+role and no scope; the amendment under the knowledge-read limitations below states
+what it actually requires.) V223 left
 that as the **named prerequisite of the execution slice**, and slice three is that
 slice.
 
