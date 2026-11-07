@@ -713,7 +713,7 @@ public final class JobRuntime {
    * durable fact to decide containment from. {@link #informationActorFor} fails closed for both
    * absences, but a setter that makes the pair expressible is a shape a later change can get wrong.
    *
-   * <p>{@code principals} is taken as the typed {@link ContainedPrincipals} contract and narrowed
+   * <p>{@code principals} is taken as the typed {@code ContainedPrincipals} contract and narrowed
    * to its one read here. The run loop must not hold {@code issue} or {@code revoke}: a service
    * that may resolve a child's principal must not thereby acquire the ability to mint or retire
    * one.

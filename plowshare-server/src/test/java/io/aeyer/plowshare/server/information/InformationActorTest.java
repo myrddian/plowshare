@@ -117,22 +117,58 @@ class InformationActorTest {
   }
 
   /**
-   * The seam, visible rather than latent. {@code forRun} cannot resolve differing axes: its body
-   * runs {@code PersonalSpaces.resolveAddress}/{@code requireOwn}, which refuse a contained project
-   * name outright. A later slice replaces this raise with a branch into {@link
-   * InformationAccess#contained(String, String, String)}. Until then the carrier is inert and says
-   * so, rather than resolving a contained actor as though it were its container.
+   * The seam is closed, and this is what it resolves to.
+   *
+   * <p><strong>This method used to assert the opposite.</strong> It was {@code
+   * aContainedActorIsNotResolvableYet} and it pinned an {@code IllegalStateException} out of {@code
+   * forRun}, placed deliberately one slice earlier so that the unwired resolution path was visible
+   * to the compiler and the suite rather than latent. That raise is <strong>gone</strong>: {@code
+   * forRun(InformationActor, Home)} now branches to {@code InformationAccess.containedRun}, which
+   * delegates to {@link InformationAccess#contained(String, String, String)}. A reader looking for
+   * the former raise will not find one, and should not go hunting.
+   *
+   * <p>What is pinned instead is the resolution's four decided properties: the gates are asked
+   * about the child's principal, the rows are accounted to its container, the selection is the
+   * child's own {@code contained:} project, and {@code includeGlobal} is false — so no gate's
+   * global arm, each of which wants a credentialed general-read membership this bare principal has
+   * no row for, is ever asked for.
+   *
+   * <p>{@code verifyNoInteractions(members)} is kept and is now a stronger statement than it was.
+   * The contained branch asks <strong>no membership question at all</strong>: it does not call
+   * {@code requireSelection}, because a contained project carries no {@code PROJECT} scope and so
+   * grants no role to anybody — not the principal and not its container — and relaxing that gate
+   * would amount to granting the child credential authority. The run's own {@code
+   * KnowledgeReadScope} supplies the ceiling and the SQL arms (V223, V229, V231, V232) supply the
+   * admission. A future change that reached for a role here would fail this line.
+   *
+   * <p>The home is a contained one, which the old fixture's {@code "research"} no longer is the
+   * right shape for: an ordinary project is refused by {@code contained(...)}'s own prefix test, so
+   * it is asserted beside the positive case rather than used as it.
    */
   @Test
-  void aContainedActorIsNotResolvableYet() {
+  void aContainedActorResolvesWithoutAskingAboutMembership() {
     var members = mock(ProjectMembers.class);
     var access = new InformationAccess(new EffectiveProjectPermissions(members));
-    var home = io.aeyer.plowshare.protocol.Home.of("research");
-    var actor = InformationActor.contained(UUID.randomUUID().toString(), "parent");
-    var raised = assertThrows(IllegalStateException.class, () -> access.forRun(actor, home));
-    assertTrue(
-        raised.getMessage().contains("contained"),
-        () -> "unexpected message: " + raised.getMessage());
+    String principal = UUID.randomUUID().toString();
+    String project = "contained:" + UUID.randomUUID();
+    var actor = InformationActor.contained(principal, "parent");
+
+    var context = access.forRun(actor, io.aeyer.plowshare.protocol.Home.of(project));
+
+    assertEquals(principal, context.acting(), "the gates are asked about the child");
+    assertEquals("parent", context.attribution(), "the rows are accounted to its container");
+    assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
+    assertEquals(project, context.selection().project(), "the child's own home, by name");
+    assertFalse(context.selection().includeGlobal(), "Global is excluded, deliberately");
+
+    // An ordinary project home on the contained branch is refused by contained(...)'s prefix test,
+    // so the branch cannot be used to resolve somebody else's project under a bare principal.
+    assertThrows(
+        CallerFault.class,
+        () -> access.forRun(actor, io.aeyer.plowshare.protocol.Home.of("research")));
+
+    // NO MEMBERSHIP QUESTION, on either call. This is the line a future requireSelection would
+    // break, and it is the property that keeps the child credential-free.
     verifyNoInteractions(members);
   }
 }
