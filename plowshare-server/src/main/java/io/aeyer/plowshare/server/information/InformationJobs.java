@@ -27,6 +27,12 @@ public final class InformationJobs implements InformationLogAccess {
     return repository.hasInputs(log);
   }
 
+  /**
+   * Records this log's input selections; the repository writes them under the log's owning account.
+   *
+   * <p>See {@code JdbcJobInformationRepository.bind} for why that is {@link
+   * InformationContext#attribution()} and not the acting axis.
+   */
   public void bind(String job, InformationContext context, List<UUID> revisions) {
     repository.bind(job, context, revisions);
   }
@@ -72,11 +78,29 @@ public final class InformationJobs implements InformationLogAccess {
       throw new NotFoundFault("log inputs are unavailable to this account");
   }
 
+  /**
+   * Binds one read revision onto this log and rechecks that the log is still readable.
+   *
+   * <p><strong>A log is owned by the attribution axis, so that is the axis this recheck asks
+   * about.</strong> Both halves of this method are about the <em>log</em>, not about the corpus:
+   * {@link #bind} stores the log's owner and {@link #requireLog} asks whether that owner may still
+   * read everything bound to it. The corpus question — may this actor see this revision — belongs
+   * to the acting axis and is asked by the SQL read gates, which are untouched.
+   *
+   * <p>This method used to pass {@code context.account()}, the acting axis, while {@code
+   * InformationTool} passed {@code actor.attribution()} to the same {@link #requireLog} a few lines
+   * earlier. The two were one handle for every caller that existed, so the disagreement was inert;
+   * a contained run makes the same log's readability be checked against two different accounts in
+   * one call, and the acting one is the one that cannot own a log at all (see {@code
+   * JdbcJobInformationRepository.bind}: {@code owner_handle} is a foreign key into {@code admins}).
+   * Agreeing on attribution widens nothing — {@link #requireLog} and {@link #logAllowed} are
+   * unchanged, and for an uncontained caller the two axes hold one value.
+   */
   public java.util.function.Consumer<UUID> reads(String log, InformationContext context) {
     return revision -> {
       if (log == null) throw new IllegalStateException("a corpus-reading run needs a durable log");
       bind(log, context, List.of(revision));
-      requireLog(log, context.account());
+      requireLog(log, context.attribution());
     };
   }
 

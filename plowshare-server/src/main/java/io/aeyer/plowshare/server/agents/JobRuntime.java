@@ -689,6 +689,145 @@ public final class JobRuntime {
   }
 
   /**
+   * The durable conversation record a run's containment is decided from, by id.
+   *
+   * <p>On {@link #useApprovalRoots}' shape, and read for one purpose: {@link
+   * #containedPrincipalOf}. It is the record itself and not a derived boolean because the decision
+   * is two facts about the same row and a caller that could be handed one without the other is a
+   * caller that could be handed half the rule.
+   */
+  private volatile java.util.function.Function<
+          String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
+      logRecords = ignored -> Optional.empty();
+
+  /** A contained project's live principal, narrowed from {@code ContainedPrincipals}. */
+  private volatile java.util.function.Function<String, Optional<java.util.UUID>>
+      containedPrincipals = ignored -> Optional.empty();
+
+  /**
+   * Both halves of the contained-run decision, wired together because neither is sound alone.
+   *
+   * <p>One setter rather than two, so the lookup of the record and the lookup of the principal
+   * cannot be half-wired. A deployment with the record and not the principal would read {@code
+   * Origin.CONTAINED} and resolve no actor; one with the principal and not the record would have no
+   * durable fact to decide containment from. {@link #informationActorFor} fails closed for both
+   * absences, but a setter that makes the pair expressible is a shape a later change can get wrong.
+   *
+   * <p>{@code principals} is taken as the typed {@link ContainedPrincipals} contract and narrowed
+   * to its one read here. The run loop must not hold {@code issue} or {@code revoke}: a service
+   * that may resolve a child's principal must not thereby acquire the ability to mint or retire
+   * one.
+   */
+  public void useContainedRuns(
+      java.util.function.Function<
+              String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
+          records,
+      io.aeyer.plowshare.server.applications.ContainedPrincipals principals) {
+    Objects.requireNonNull(principals, "principals");
+    this.logRecords = Objects.requireNonNull(records, "records");
+    this.containedPrincipals = principals::principalOfProject;
+  }
+
+  /**
+   * The contained principal a run in this log acts as, or empty when the run is not contained.
+   *
+   * <p><strong>The two-part test, as one rule.</strong> A run is contained when its conversation's
+   * origin is {@link io.aeyer.plowshare.server.archive.Origin#CONTAINED} <em>and</em> its home is a
+   * {@code contained:} project. That is {@code Turn.requireContainedLog}'s test verbatim and for
+   * its stated reason: only {@code ConversationStore.openContained} writes that origin and it only
+   * ever writes it on a contained home, but a rule that leaned on another method's behaviour to
+   * deny would be a rule a later change could quietly open. Both parts live in this one method so
+   * that a reader meets one rule rather than two conditions in sequence, and the executing-home
+   * agreement below is a third narrowing that cannot admit anything the two-part test refused.
+   *
+   * <p><strong>Decided from the durable record and from nothing a caller supplies.</strong> The
+   * origin and the home come off the stored row and the principal comes from {@code
+   * contained_principals} through the authority record. Nothing in the turn, the submission, the
+   * tool arguments or the agent definition can move this answer. That is the whole safety argument:
+   * the acting identity a contained run presents to every information gate is a fact about its log,
+   * not a claim about itself.
+   *
+   * <p>{@code executing} is the home the run is actually executing in and is compared rather than
+   * trusted: it can only make this method answer empty, never make it answer a principal it would
+   * not otherwise have answered. A run in one child's home must not act as another child's
+   * principal, and the two agree by construction because {@code ConversationStore.openContained}
+   * opens the log on the home the run then executes in.
+   *
+   * <p>One record read and one principal read, both only on the path that can need them. There is
+   * no second read of either: the record's home is the value compared, the value the principal is
+   * resolved from, and the value returned about.
+   */
+  private Optional<java.util.UUID> containedPrincipalOf(String conversation, String executing) {
+    if (conversation == null) return Optional.empty();
+    var record = logRecords.apply(conversation).orElse(null);
+    if (record == null
+        || record.origin() != io.aeyer.plowshare.server.archive.Origin.CONTAINED
+        || record.home().isGlobal()
+        || !io.aeyer.plowshare.protocol.ContainedProjects.name(record.home().project())
+        || !record.home().project().equals(executing)) return Optional.empty();
+    return containedPrincipals.apply(record.home().project());
+  }
+
+  /**
+   * Both of this run's information axes, decided once for the two bindings that take them.
+   *
+   * <p>An uncontained run presents one handle on both axes, exactly as it did before the carrier
+   * existed, so neither binding sees a value it did not see before. A contained run presents the
+   * child's principal acting and its container's handle accountable: the gates are keyed on the
+   * principal and the provenance columns' foreign keys require the account, and nothing anywhere
+   * issues the principal a handle or a credential — it is a bare UUID with no {@code admins},
+   * {@code authority_accounts} or {@code service_tokens} row, which is what makes eleven
+   * confinement surfaces shut by absence rather than by a check each call site must remember.
+   *
+   * <p>A handle-less run (an unauthenticated fixture, or a job bound before a caller is known)
+   * carried a null handle into both bindings and must keep doing so, so there is no actor to build;
+   * the bindings' own "needs an authenticated durable run" guards still decide what that means.
+   *
+   * <p><strong>The tool home narrows and never grants, which is what lets it be read at
+   * all.</strong> The record lookup is asked only for a run whose own tool home is a contained
+   * Application's. Two reasons, and the safety one comes first: a home that disagrees with the
+   * record can only make this method answer "no contained actor", never "yes", so reading it cannot
+   * manufacture containment — the origin and the contained principal still come off the stored row
+   * and nowhere else. The second reason is cost: every ordinary run reaches this line, and asking a
+   * {@code conversations} row per run to learn that the run is ordinary is a read whose answer its
+   * home already gives. The record's home must also equal the tool home: a run executing in one
+   * child's home must not act as another child's principal, and the two agree by construction
+   * because {@code ConversationStore.openContained} opens the log on the home the run then executes
+   * in.
+   *
+   * <p><strong>The refusal fails closed and is the important part.</strong> If the tool home is a
+   * contained Application's but the two-part test resolved no principal — an unwired lookup, a
+   * missing or non-{@code CONTAINED} record, a home that disagrees, a revoked principal — this
+   * returns no actor at all rather than the container's. Falling back to {@link
+   * InformationActor#of} there would hand a confined child its parent's authority inside the
+   * child's own home, which is the single escalation this wiring must not be able to produce.
+   *
+   * <p>A lookup that fails with an exception is left to propagate rather than caught as an absence,
+   * unlike {@link #ownerOf}'s tolerated absence: this decides an acting identity, and a run that
+   * cannot be told whose authority it holds must stop rather than continue as somebody.
+   *
+   * <p>Package-private rather than private so that {@code ContainedInformationActorTest} asserts
+   * this decision directly. Its only production caller is {@link #offeredTo}, and the alternative
+   * was a test that reproduced the rule instead of exercising it.
+   */
+  InformationActor informationActorFor(String callerHandle, String conversation, Home toolHome) {
+    if (callerHandle == null) return null;
+    if (toolHome == null
+        || toolHome.isGlobal()
+        || !io.aeyer.plowshare.protocol.ContainedProjects.name(toolHome.project()))
+      return InformationActor.of(callerHandle);
+    var principal = containedPrincipalOf(conversation, toolHome.project());
+    if (principal.isPresent())
+      return InformationActor.contained(principal.get().toString(), callerHandle);
+    log.warn(
+        "a run in the contained home of {} resolved no contained principal from its log {};"
+            + " it is offered no information actor rather than its container's",
+        toolHome.project(),
+        conversation);
+    return null;
+  }
+
+  /**
    * The account a turn acts for: the handle it was spoken with, else the owner written on its log,
    * else the one its client session is signed in as, else none.
    *
@@ -4529,15 +4668,11 @@ public final class JobRuntime {
                     .withInputs(informationInputs, transcript.conversationId());
       }
       // Both of this run's information axes, named once for the two bindings that take
-      // them. Every run reaching here is uncontained, so both axes are the caller's own
-      // handle and neither binding sees a value it did not see before; the carrier exists
-      // so that a contained run can one day present the child's principal here instead.
-      // A handle-less run (an unauthenticated fixture, or a job bound before a caller is
-      // known) carried a null handle into both bindings and must keep doing so, so there is
-      // no actor to build; the bindings' own "needs an authenticated durable run" guards
-      // still decide what that means.
+      // them. This is the site where the conversation record is in hand, so it is where
+      // the decision of WHICH actor to build belongs; informationActorFor carries the
+      // two-part containment test and the fail-closed clause, and argues both.
       InformationActor informationActor =
-          callerHandle == null ? null : InformationActor.of(callerHandle);
+          informationActorFor(callerHandle, transcript.conversationId(), toolHome);
       if (tool instanceof MemoryTools.Write write)
         tool =
             write.forRun(

@@ -1,0 +1,618 @@
+package io.aeyer.plowshare.server.applications;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import io.aeyer.plowshare.protocol.DocumentType;
+import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Memory;
+import io.aeyer.plowshare.protocol.MemoryState;
+import io.aeyer.plowshare.protocol.Provenance;
+import io.aeyer.plowshare.server.access.ScopedPermissions;
+import io.aeyer.plowshare.server.archive.ArchiveConfig;
+import io.aeyer.plowshare.server.archive.MemoryStore;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.information.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+import java.util.Properties;
+import java.util.UUID;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.*;
+
+/**
+ * What a contained run reaches once its information actor is resolved from its own log.
+ *
+ * <h2>Why this needs a real database</h2>
+ *
+ * <p>Every gate this task turns on is a SQL predicate. V223's contained arm, V229's read baseline
+ * and write arms, V231's reference arm and V232's memory arms each admit a bare-UUID principal to
+ * its own contained scope and to nothing else, by walking {@code contained_scope_ancestors} upward
+ * from the descendant; {@code information_job_inputs.owner_handle} is a live foreign key into
+ * {@code admins}; {@code home_scope_id} is resolved by a shipped trigger. None of those is a fact a
+ * mock can state, and the authority claim this task makes — a child reaches its own corpus and no
+ * other — is exactly the claim a mocked gate would assert about itself. The Java half of the change
+ * is proved without a database in {@code ContainedInformationActorTest}.
+ *
+ * <p>Reads and writes go through the real repositories and the real {@link MemoryStore} with a
+ * context produced by {@code InformationAccess.forRun}, which is the call the run binding makes.
+ * The one fixture that is not production code is {@link #permissions}, and it reproduces {@code
+ * EffectiveProjectPermissions} over {@code JdbcProjectMembers}' own effective-role query for an
+ * ordinary project rather than standing up that class's whole collaborator graph; the query it
+ * issues is {@code authority_project_role}, which is the statement that decides the answer.
+ *
+ * <h2>Characterization, measured before the wiring</h2>
+ *
+ * <p>The production change was inverted to its pre-task behaviour ({@code InformationAccess.forRun}
+ * raising {@code IllegalStateException} for a contained actor) and this class was run as written:
+ * <strong>7 tests, 6 failed, 1 passed, in 1m 47s.</strong> Every one of the six failures was that
+ * same {@code IllegalStateException} out of {@code forRun} — including the four tests whose subject
+ * is a <em>refusal</em>, because each has to resolve the child's context before it can assert what
+ * the child cannot reach. That uniformity is the finding: before this task there was no contained
+ * context a production call could hold, so none of these questions could be asked at all, and "a
+ * contained run resolves as its container" was observable only through the mocked test's actor, one
+ * layer up.
+ *
+ * <p>The one that <strong>passed beforehand</strong> is {@link
+ * #aContainedChildReadsAndWritesItsOwnMemories}, and that is worth more than a line in a table: it
+ * never calls {@code forRun}, because the memory path takes a {@code Home} and an author string
+ * rather than an {@link InformationContext}. V232 had already opened {@link MemoryStore}'s three
+ * identity statements, so the child's memory write and the predicate behind its read worked before
+ * this task and work after it. <strong>This task adds nothing to the memory half</strong>, and that
+ * test is kept as the regression that says so rather than as evidence of this change.
+ *
+ * <p>One correction to this class's own first draft, recorded because it changes what two
+ * assertions mean. {@link #aContainedChildCannotSetAnAudience} and {@link
+ * #aContainedChildReachesNoGenerallyReadableDocument} first read {@code
+ * information_resources.audience}, a column that does not exist: V158 moved the authoritative root
+ * audience to {@code information_resource_policies.audience} with the values {@code HOME} and
+ * {@code GLOBAL_READ}, and left the per-revision {@code visibility} flags behind as historical
+ * evidence no writer may change. Both tests failed with a grammar error on the first green run and
+ * now read {@link #audienceOf}. The pre-task characterization above is unaffected, because both had
+ * already failed on {@code forRun} several statements earlier.
+ *
+ * <h2>What this proves, and what it does not</h2>
+ *
+ * <p><strong>It proves</strong> that a contained run's context is the child's principal acting and
+ * its container accountable; that a document written under it lands on the child's own contained
+ * scope with the container's account in every provenance column; that the child reads that document
+ * back through {@code JdbcInformationCatalogueRepository}'s real gate; that it reads no document of
+ * its container, no generally readable document and nothing of a sibling; that its log inputs are
+ * stored under the container's handle and that storing them under the principal is impossible
+ * rather than merely refused; and that {@code SET_AUDIENCE} is shut both at the permission question
+ * and at the repository guard.
+ *
+ * <p><strong>It does not prove that a child drives the information tool end to end.</strong> One
+ * layer above these repositories, {@code InformationAccess.requireSelection}, {@code requireWork}
+ * and {@code requireAudience} ask {@link ScopedPermissions} for a live project role; a contained
+ * project carries no {@code PROJECT} scope and so grants none, to the principal or to its
+ * container. Every {@code InformationCatalogue} operation that calls one of those still refuses a
+ * contained context, which {@link #aContainedChildReadsAndWritesItsOwnDocuments} asserts rather
+ * than leaves implied. What a contained run reaches through {@code InformationTool} today is the
+ * navigation read path, which calls no such gate.
+ *
+ * <p><strong>The memory half is proved at the store and nowhere above it.</strong> {@link
+ * #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore} and V232's predicate
+ * directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites} ask
+ * the same {@link ScopedPermissions} question as the information service gates, with no containment
+ * awareness, so a contained principal is refused there — asserted in that test as the SQL fact the
+ * refusal rests on. Whether those two layers should admit a contained principal is an open
+ * authority decision and is not this task's to make.
+ */
+@Tag("full-db")
+@Testcontainers
+class ContainedInformationReachDatabaseTest {
+  @Container
+  static final PostgreSQLContainer<?> POSTGRES =
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
+          .withUrlParam("sslmode", "disable")
+          .withUrlParam("gssEncMode", "disable");
+
+  private static final String HOLDER = "alice";
+
+  private JdbcTemplate jdbc;
+  private UnitOfWork work;
+  private JdbcInformationCatalogueRepository records;
+  private RecordedInformationEvents events;
+  private MemoryStore memories;
+  private InformationAccess access;
+  private ScopedPermissions permissions;
+
+  private long parentProject;
+  private UUID parentScope;
+
+  /** Two siblings under one container, so "no sibling reach" is a measurement and not a shape. */
+  private Child first;
+
+  private Child second;
+
+  /** One contained Application's durable identity, as this fixture inserts it. */
+  private record Child(String project, UUID scope, String principal) {}
+
+  @BeforeEach
+  void migrate() {
+    var source =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    var schema = "contained_reach_" + UUID.randomUUID().toString().replace("-", "");
+    new JdbcTemplate(source).execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public");
+    new JdbcTemplate(source).execute("CREATE SCHEMA " + schema);
+    var properties = new Properties();
+    properties.setProperty("currentSchema", schema + ",public");
+    source.setConnectionProperties(properties);
+    Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).load().migrate();
+    jdbc = new JdbcTemplate(source);
+    work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
+    events = new RecordedInformationEvents();
+    records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), events);
+    memories = new MemoryStore(jdbc);
+    permissions = permissions();
+    access = new InformationAccess(permissions);
+
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,must_change_password) VALUES (?,'fixture',FALSE)",
+        HOLDER);
+    jdbc.update("INSERT INTO projects(name) VALUES ('parent')");
+    parentProject = jdbc.queryForObject("SELECT id FROM projects WHERE name='parent'", Long.class);
+    parentScope =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_scopes WHERE project_id=?", UUID.class, parentProject);
+    // MANAGER rather than CONTRIBUTOR, so the audience test has a control that succeeds: the
+    // container really can set an audience in its own home, and the child's refusal is therefore
+    // about the actor and not about the operation being shut for everybody.
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,'MANAGER')",
+        parentProject,
+        HOLDER);
+
+    first = child();
+    second = child();
+  }
+
+  /** One contained child of {@code parent}: its project, its CONTAINED scope, its principal. */
+  private Child child() {
+    String project = "contained:" + UUID.randomUUID();
+    jdbc.update("INSERT INTO projects(name) VALUES (?)", project);
+    long id = jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, project);
+    UUID scope = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_scopes(id,kind,project_id,container) VALUES (?,'CONTAINED',?,?)",
+        scope,
+        id,
+        parentScope);
+    jdbc.update("INSERT INTO contained_principals(scope_id) VALUES (?)", scope);
+    return new Child(
+        project,
+        scope,
+        jdbc.queryForObject(
+                "SELECT id FROM contained_principals WHERE scope_id=?", UUID.class, scope)
+            .toString());
+  }
+
+  /**
+   * {@code EffectiveProjectPermissions} over the one query that decides an ordinary project's role.
+   *
+   * <p>{@code JdbcProjectMembers.role} issues exactly this statement for a project that is neither
+   * a client's nor a personal space, and {@code EffectiveProjectPermissions} maps the role to the
+   * three actions exactly as reproduced here. The shortcut is the collaborator graph, not the
+   * decision: the answer for every actor in this fixture is {@code authority_project_role}'s.
+   */
+  private ScopedPermissions permissions() {
+    return (principal, target, action) -> {
+      String role =
+          jdbc.queryForObject(
+              "SELECT authority_project_role(?,?)",
+              String.class,
+              target.value(),
+              principal.value());
+      if (role == null) return false;
+      return switch (action) {
+        case READ -> true;
+        case WRITE -> !role.equals("VIEWER");
+        case SET_AUDIENCE -> role.equals("MANAGER");
+      };
+    };
+  }
+
+  /** The call the run binding makes, for a contained run: the child acting, its container owed. */
+  private InformationContext childContext(Child child) {
+    return access.forRun(
+        InformationActor.contained(child.principal(), HOLDER), Home.of(child.project()));
+  }
+
+  /** The same call for an ordinary run, which is the control every refusal is measured against. */
+  private InformationContext containerContext() {
+    return access.forRun(InformationActor.of(HOLDER), Home.of("parent"));
+  }
+
+  private InformationCatalogue.Admission admit(InformationContext context, String name) {
+    byte[] bytes = ("body of " + name + " " + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8);
+    return records.admit(
+        context,
+        UUID.randomUUID(),
+        new InformationCatalogueRepository.AdmissionWrite(
+            name,
+            bytes,
+            "text/markdown",
+            null,
+            "source",
+            List.of(),
+            null,
+            10,
+            0,
+            false,
+            new DocumentType("document", "markdown"),
+            digest(bytes),
+            null,
+            null,
+            true));
+  }
+
+  /** The idempotency fingerprint; {@code InformationCatalogue.sha256} is package-private. */
+  private static String digest(byte[] bytes) {
+    try {
+      return java.util.HexFormat.of()
+          .formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException(impossible);
+    }
+  }
+
+  /**
+   * The resolved context, and the child's own corpus read back through it.
+   *
+   * <p>The write is {@code JdbcInformationCatalogueRepository.admit} and the read is the same
+   * class's {@code readable} and {@code authorizedText}, both of which build their SQL from the
+   * context's acting axis. So this is one actor writing and then reading, through the gate, rather
+   * than two assertions about the same row.
+   *
+   * <p>The last block is the boundary, asserted rather than implied: the service-layer gates on
+   * {@code InformationAccess} refuse this very context. A reader who takes "a child reads and
+   * writes its own documents" to mean "a child drives {@code InformationCatalogue}" is wrong, and
+   * this is where they find out.
+   */
+  @Test
+  void aContainedChildReadsAndWritesItsOwnDocuments() {
+    var context = childContext(first);
+
+    assertEquals(first.principal(), context.acting(), "the gates are asked about the child");
+    assertEquals(HOLDER, context.attribution(), "the rows are accounted to its container");
+    assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
+    assertEquals(first.project(), context.selection().project());
+    assertFalse(context.selection().includeGlobal(), "Global is excluded, deliberately");
+
+    var written = work.inTransaction(() -> admit(context, "child-notes.md"));
+
+    assertEquals(
+        first.scope(),
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM information_resources WHERE id=?",
+            UUID.class,
+            written.resource()),
+        "a child's document lands on the child's own contained scope");
+    assertTrue(
+        records.readable(context, written.revision()),
+        "and the child reads its own revision back through the repository's own gate");
+    var text = records.authorizedText(context, written.revision());
+    assertTrue(
+        text.isPresent(), "including its bytes, which is a second statement and a second gate");
+
+    // THE BOUNDARY. These gates ask for a live project role and a contained project grants none.
+    assertThrows(CallerFault.class, () -> access.requireSelection(context));
+    assertThrows(CallerFault.class, () -> access.requireWork(context));
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT authority_project_role(?,?)", String.class, first.project(), first.principal()),
+        "which is this SQL fact, unchanged by this task and asserted so it stays unchanged");
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT authority_project_role(?,?)", String.class, first.project(), HOLDER),
+        "and it is no role for the container either: a contained project has no PROJECT scope");
+  }
+
+  /**
+   * The memory half, at the store, and the honest statement of where it stops.
+   *
+   * <p>V232 gave {@link MemoryStore}'s three identity statements a contained arm, and this drives
+   * the store and that predicate. The last block is the layer above: {@code
+   * BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites} ask {@link ScopedPermissions}
+   * about {@code request.account()}, which for a contained run is the principal, and the answer is
+   * read from {@code authority_project_role} — asserted null here. So a contained child's memory
+   * read or write <em>through those entry points</em> is refused, and nothing in this task changes
+   * that. Driving them to observe the refusal would need a {@code QueryEmbeddings.Origin}, an
+   * embedding pool and a {@code MemoryProposal}, none of which this assertion is about; the SQL
+   * fact the refusal rests on is the thing a later change would have to move.
+   */
+  @Test
+  void aContainedChildReadsAndWritesItsOwnMemories() {
+    String id = "mem-" + UUID.randomUUID();
+    memories.save(memory(id, Home.of(first.project()), first.principal()));
+
+    assertEquals(
+        first.scope(),
+        jdbc.queryForObject("SELECT home_scope_id FROM memories WHERE id=?", UUID.class, id),
+        "a child's memory lands on the child's own contained scope");
+    assertEquals(
+        first.principal(),
+        jdbc.queryForObject("SELECT formed_by FROM memories WHERE id=?", String.class, id),
+        "formed by the contained principal, which needs no credential row");
+
+    // V232's own predicate, read and write, for the child's own home and for nobody else's.
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT contained_memory_actor_allows(?,?,FALSE)",
+            Boolean.class,
+            first.principal(),
+            first.project()));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT contained_memory_actor_allows(?,?,TRUE)",
+            Boolean.class,
+            first.principal(),
+            first.project()));
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT contained_memory_actor_allows(?,?,FALSE)",
+            Boolean.class,
+            first.principal(),
+            second.project()),
+        "and not a sibling's, which is what makes the arm a confinement and not an opening");
+
+    // THE LAYER ABOVE THE STORE, which has no containment awareness and is not opened here.
+    assertFalse(
+        permissions.allows(
+            new ScopedPermissions.Principal(first.principal()),
+            new ScopedPermissions.ProjectTarget(first.project()),
+            ScopedPermissions.Action.READ),
+        "so BoundMemoryQueries.requireScope refuses a contained principal");
+    assertFalse(
+        permissions.allows(
+            new ScopedPermissions.Principal(first.principal()),
+            new ScopedPermissions.ProjectTarget(first.project()),
+            ScopedPermissions.Action.WRITE),
+        "and so does BoundMemoryWrites");
+  }
+
+  /** A container's own document is outside the child, and the container still reads it. */
+  @Test
+  void aContainedChildReachesNoDocumentOfItsContainer() {
+    var parent = containerContext();
+    var mine = work.inTransaction(() -> admit(parent, "parent-notes.md"));
+
+    assertTrue(records.readable(parent, mine.revision()), "the control: its owner reads it");
+    assertFalse(
+        records.readable(childContext(first), mine.revision()),
+        "and the child it contains does not, although its container wrote it");
+    assertTrue(
+        records.authorizedText(childContext(first), mine.revision()).isEmpty(),
+        "not by hiding the bytes behind a readable row, but by the same gate");
+    assertEquals(
+        parentScope,
+        jdbc.queryForObject(
+            "SELECT home_scope_id FROM information_resources WHERE id=?",
+            UUID.class,
+            mine.resource()),
+        "the home the refusal is about is the container's, which the child's walk never reaches");
+  }
+
+  /**
+   * Shared is not a route in, and the reason is the selection rather than the audience.
+   *
+   * <p>A contained context's {@code includeGlobal} is false, so no gate's global arm is asked for;
+   * and the arm would refuse anyway, because it wants {@code information_global_read_member}, which
+   * is a credentialed membership a bare principal has no row for. Both halves are asserted, because
+   * either one alone would be a fence a later change could remove without noticing the other.
+   */
+  @Test
+  void aContainedChildReachesNoGenerallyReadableDocument() {
+    var parent = containerContext();
+    var shared = work.inTransaction(() -> admit(parent, "handbook.md"));
+    work.inTransaction(
+        () -> {
+          records.share(parent, shared.revision(), true);
+          return null;
+        });
+
+    assertEquals(
+        "GLOBAL_READ",
+        audienceOf(shared.resource()),
+        "the control: the document's root policy really does say generally readable now");
+    assertFalse(
+        records.readable(childContext(first), shared.revision()),
+        "and the child still does not reach it");
+    assertFalse(
+        childContext(first).selection().includeGlobal(), "it never asks for the global arm");
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_global_read_member(?)", Boolean.class, first.principal()),
+        "and would be refused if it did: a contained principal is no general-read member");
+  }
+
+  /** Confinement is per scope, not per container: siblings share a parent and reach nothing. */
+  @Test
+  void twoSiblingChildrenReachNothingOfEachOther() {
+    var one = childContext(first);
+    var other = childContext(second);
+    var mine = work.inTransaction(() -> admit(one, "first.md"));
+    var theirs = work.inTransaction(() -> admit(other, "second.md"));
+
+    assertTrue(records.readable(one, mine.revision()));
+    assertTrue(records.readable(other, theirs.revision()));
+    assertFalse(records.readable(one, theirs.revision()), "no sibling reach, either direction");
+    assertFalse(records.readable(other, mine.revision()));
+    assertNotEquals(first.scope(), second.scope());
+    assertNotEquals(first.principal(), second.principal());
+    // The container's account reaches neither, which is the other thing a shared-account design
+    // could have got wrong: attribution is not admission.
+    assertFalse(records.readable(containerContext(), mine.revision()));
+    assertFalse(records.readable(containerContext(), theirs.revision()));
+  }
+
+  /**
+   * {@code SET_AUDIENCE} stays refused, at both of the two places it could be allowed.
+   *
+   * <p>The permission question is shut because a contained project grants no role; the repository's
+   * {@code ContainedActorGuard} refuses the operation by name before anything is written. Two
+   * independent refusals rather than one, with the container's own successful share beside them so
+   * that neither reads as the operation being shut for everybody.
+   */
+  @Test
+  void aContainedChildCannotSetAnAudience() {
+    var context = childContext(first);
+    var mine = work.inTransaction(() -> admit(context, "child-notes.md"));
+
+    assertThrows(CallerFault.class, () -> access.requireAudience(context));
+    assertFalse(
+        permissions.allows(
+            new ScopedPermissions.Principal(first.principal()),
+            new ScopedPermissions.ProjectTarget(first.project()),
+            ScopedPermissions.Action.SET_AUDIENCE));
+
+    var refused =
+        assertThrows(
+            CallerFault.class,
+            () ->
+                work.inTransaction(
+                    () -> {
+                      records.share(context, mine.revision(), true);
+                      return null;
+                    }));
+    assertTrue(
+        refused.getMessage().startsWith("A confined Application may not "), refused.getMessage());
+    assertEquals(
+        "HOME",
+        audienceOf(mine.resource()),
+        "and nothing was published: a contained home is not addressable outward");
+
+    // CONTROL: the same operation by the container in its own home succeeds, so the refusals above
+    // are about the actor.
+    var parent = containerContext();
+    var theirs = work.inTransaction(() -> admit(parent, "handbook.md"));
+    access.requireAudience(parent);
+    work.inTransaction(
+        () -> {
+          records.share(parent, theirs.revision(), true);
+          return null;
+        });
+    assertEquals("GLOBAL_READ", audienceOf(theirs.resource()));
+  }
+
+  /**
+   * The authoritative root audience, which lives on {@code information_resource_policies} and not
+   * on the resource row: V158 moved it there and {@code information_set_root_audience} writes
+   * {@code HOME} or {@code GLOBAL_READ}. The per-revision {@code visibility} flags left on the old
+   * tables are retained historical evidence that no writer may change, so reading them instead
+   * would have asserted the wrong column.
+   */
+  private String audienceOf(UUID resource) {
+    return jdbc.queryForObject(
+        "SELECT audience FROM information_resource_policies WHERE resource_id=?",
+        String.class,
+        resource);
+  }
+
+  /**
+   * The two axes, observed in stored rows — and the axis decision this task had to make.
+   *
+   * <p>The provenance columns hold the container's account, because their foreign keys target
+   * {@code admins} and {@code authority_accounts} and a contained principal has a row in neither.
+   * That half was already true of a hand-built contained context; what is new is the <strong>log
+   * input</strong> row, and it is where the two axes actually disagreed.
+   *
+   * <p>{@code InformationTool} checked log ownership against the attribution axis while {@code
+   * InformationJobs.reads} re-checked the same log against the acting axis, and {@code bind} stored
+   * the acting axis in {@code information_job_inputs.owner_handle}. For one handle that was inert.
+   * For a contained run it is not merely a disagreement: the acting axis <strong>cannot</strong>
+   * occupy that column, because it is {@code NOT NULL REFERENCES admins(handle)} (V83). The last
+   * block proves that by trying it, so "we chose attribution" is a measurement and not a
+   * preference. No log guard is widened — {@code information_log_readable} is asked about the
+   * account that owns the log, which is what it has always compared.
+   */
+  @Test
+  void aWriteByAContainedChildIsAttributedToItsContainer() {
+    var context = childContext(first);
+    var written = work.inTransaction(() -> admit(context, "child-notes.md"));
+
+    assertEquals(
+        HOLDER,
+        jdbc.queryForObject(
+            "SELECT owner_handle FROM information_resources WHERE id=?",
+            String.class,
+            written.resource()),
+        "owner_handle is the container's account, never the bare principal");
+    assertEquals(
+        jdbc.queryForObject(
+            "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, HOLDER),
+        jdbc.queryForObject(
+            "SELECT created_by FROM information_resources WHERE id=?",
+            UUID.class,
+            written.resource()));
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_resources WHERE owner_handle=?",
+                Integer.class,
+                first.principal()),
+        "the bare principal reaches no foreign-keyed provenance column");
+    assertEquals(
+        List.of(HOLDER),
+        events.announced().stream().map(InformationEvents.Occurrence::actor).distinct().toList(),
+        "and the announcement is under the accounting account, as its own column requires");
+
+    // THE LOG INPUT ROW: the axis decision, stored.
+    String log = "cnv_" + UUID.randomUUID();
+    new JdbcJobInformationRepository(jdbc).bind(log, context, List.of(written.revision()));
+    assertEquals(
+        HOLDER,
+        jdbc.queryForObject(
+            "SELECT owner_handle FROM information_job_inputs WHERE job_id=?", String.class, log),
+        "a contained run's log input is owned by the account that owns the log");
+    assertTrue(
+        jdbc.queryForObject("SELECT information_log_readable(?,?)", Boolean.class, log, HOLDER),
+        "so the log stays readable to its owner, which is the check the tool makes");
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_log_readable(?,?)", Boolean.class, log, first.principal()),
+        "and is not readable to the acting principal, which is the disagreement this task settled");
+
+    // AND THE ACTING AXIS COULD NOT HAVE BEEN STORED THERE AT ALL.
+    var violated =
+        assertThrows(
+            org.springframework.dao.DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "INSERT INTO information_job_inputs"
+                        + "(job_id,owner_handle,revision_id,scope,project_name,include_shared)"
+                        + " VALUES (?,?,?,'project',?,FALSE)",
+                    "cnv_" + UUID.randomUUID(),
+                    first.principal(),
+                    written.revision(),
+                    first.project()));
+    assertTrue(violated.getMessage().contains("information_job_inputs"), violated.getMessage());
+  }
+
+  private Memory memory(String id, Home home, String formedBy) {
+    return new Memory(
+        id,
+        "what the child learned",
+        "deployment",
+        new Provenance(Instant.now(), formedBy, "contained run"),
+        MemoryState.ACTIVE,
+        false,
+        0,
+        null,
+        "body of " + id,
+        null,
+        null,
+        null,
+        home);
+  }
+}

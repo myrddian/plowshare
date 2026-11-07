@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.applications;
 import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.access.AuthorityScope;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -35,6 +36,30 @@ public interface ContainedPrincipals {
    * or a mis-described one.
    */
   ContainedPrincipal issue(AuthorityScope.Contained scope);
+
+  /**
+   * The live principal of the contained scope hosted by this project, or empty.
+   *
+   * <p>This is the resolution a run binding needs and the only one it needs: a contained run knows
+   * its home, which is the child's own {@code contained:} project, and it has to arrive at the
+   * principal UUID every information gate is asked about. It is a read and it issues nothing — a
+   * caller holding only this method cannot mint a principal, which is why it is separate from
+   * {@link #issue} rather than a fallback inside it.
+   *
+   * <p><strong>It hands out no credential material.</strong> The returned UUID is an identity and
+   * nothing else: it is not a handle, not an {@code admins} or {@code authority_accounts} row and
+   * not a token, so a caller that obtains one gains no way to authenticate as the child. That is
+   * the same absence {@link ContainedPrincipals}' own contract rests on, restated here because this
+   * method is the first one a non-containment caller reaches for.
+   *
+   * <p>Empty means "not a contained project, or no live principal for it", and the two are
+   * deliberately one answer: both must leave a caller resolving no contained actor rather than
+   * guessing one. A project name that is not a contained Application's is answered empty without a
+   * query.
+   *
+   * @param project a project name, or null; neither has to be a contained project
+   */
+  Optional<UUID> principalOfProject(String project);
 
   /**
    * Removes the scope's principal if present. Removal of the scope itself already collects it by

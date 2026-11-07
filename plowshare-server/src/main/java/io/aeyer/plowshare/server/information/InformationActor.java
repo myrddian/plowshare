@@ -9,12 +9,13 @@ package io.aeyer.plowshare.server.information;
  * separately, so that a run inside a contained Application can one day act as the child's own
  * principal while staying attributed to its container (ADR 0042).
  *
- * <p><strong>Nothing in production builds a contained actor yet.</strong> Every run binding
- * presents {@link #of(String)}, where both axes hold the same handle, so no gate, provenance column
- * or log sees a value it did not see before. {@link #contained(String, String)} exists so the seam
- * is a named contract rather than a pair of parallel parameters, and {@link
- * InformationAccess#forRun(InformationActor, io.aeyer.plowshare.protocol.Home)} refuses it
- * explicitly until the resolution path is wired.
+ * <p><strong>Production builds both.</strong> {@code JobRuntime} presents {@link #of(String)} for
+ * every ordinary run, where both axes hold the same handle, so no gate, provenance column or log
+ * sees a value it did not see before; it presents {@link #contained(String, String)} for a run
+ * whose own durable conversation record says it is a contained Application's, and {@link
+ * InformationAccess#forRun(InformationActor, io.aeyer.plowshare.protocol.Home)} resolves that one
+ * through its contained branch. The containment decision is the conversation record's, never the
+ * caller's.
  *
  * <p>Both components are required. The "same as acting" fallback belongs to {@link
  * InformationContext#attribution()} and nowhere else: a second place that quietly means the same

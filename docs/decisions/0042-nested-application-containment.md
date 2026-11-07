@@ -1096,6 +1096,45 @@ predicate refused first on each path and holds as regressions the five assertion
 that passed before the widening. **The gate is open and the actor is still not
 wired**: no production path presents a contained principal to the archive.
 
+**"The actor is not wired" is no longer true, and every statement in this record
+that rests on it is listed below.** Slice four wired it: `JobRuntime` builds
+`InformationActor.contained` for a run whose own durable conversation record
+carries `Origin.CONTAINED` on a `contained:` home, resolves the acting principal
+through `ContainedPrincipals.principalOfProject`, and
+`InformationAccess.forRun` resolves that actor through a contained branch
+delegating to `InformationAccess.contained`. A production path therefore
+presents a contained principal to the knowledge predicates and to `MemoryStore`,
+and `contained_knowledge_actor` is true for an actor a running child presents.
+Every statement in this record that rests on "no production path presents one"
+describes slice three and not the current code. They are, besides the two
+paragraphs above: the `JdbcInformationEventRecords` inventory row and the
+paragraph introducing that inventory, the audience-defect paragraph's "a
+constructed context, which is the only kind there is", and the
+documents-not-processed gap. The slice-three *behaviour* each of them reasons
+about is unchanged — the audience is still absent, the write path still declines
+processing, the refusals still refuse — and it is only the reachability claim
+that has moved: each of those paths now has the caller it was described as
+waiting for. The write path's own defect was closed in slice three before it
+acquired that caller, which is why wiring the actor did not turn it into an
+outage.
+
+**What a running child reaches is narrower than "the information tool", and the
+boundary is a Java one rather than a SQL one.** The SQL arms (V223, V229, V231,
+V232) admit the child to its own scope. One layer above them,
+`InformationAccess.requireSelection`, `requireWork` and `requireAudience` ask
+`ScopedPermissions` for a live project role, and a contained project carries no
+`PROJECT` scope and so grants none — to the principal or to its container. Every
+`InformationCatalogue` operation that calls one of those still refuses a
+contained context, and `BoundMemoryQueries.requireScope` and
+`BoundMemoryWrites` ask the same question with the same answer. So a running
+child reaches the navigation read path, the catalogue repository's write path and
+`MemoryStore` directly; it does not drive `InformationCatalogue` or the memory
+query entry points. `SET_AUDIENCE` is refused by exactly that absence, which is
+the outcome this record already requires. Whether those Java layers should admit
+a contained principal is an open authority decision and was not made in slice
+four; `ContainedInformationReachDatabaseTest` carries the characterization,
+asserting the refusals rather than leaving them implied.
+
 **The guarded set of catalogue mutators is closed over one criterion, and that
 criterion is narrower than "every write a confined Application could reach". It
 has been declared closed and been wrong three times, so here is what it covers.**
