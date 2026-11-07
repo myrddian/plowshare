@@ -25,6 +25,7 @@ import { DesktopClient, validatedBase } from './client.ts';
 import type { Connector } from './client.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import { contextKey, replyState, stoppedJob } from './shared.ts';
+import { runWire, statusWire } from './run-fixtures.ts';
 
 function fixture(
   nativeSessions?: NativeSessions,
@@ -98,6 +99,10 @@ function fixture(
   let onRelay: typeof onUsage = () => ({ code: 'OK' });
   let onProvider: typeof onUsage = () => ({ code: 'OK' });
   let onDeployment: typeof onUsage = () => ({ code: 'OK' });
+  let onOrchestration: typeof onUsage = (type) =>
+    type === 'orchestration.list'
+      ? { code: 'OK', payload: { orchestrations: [] } }
+      : { code: 'OK' };
   let onConversations: typeof onUsage = () => ({
     code: 'OK',
     payload: [conversationWire('first'), conversationWire('second')],
@@ -198,8 +203,8 @@ function fixture(
           if (type === 'approval.answer') return onApproval();
           if (type === 'inbox.list')
             return { code: 'OK', payload: { items: [], unread: 0 } };
-          if (type === 'orchestration.list')
-            return { code: 'OK', payload: { orchestrations: [] } };
+          if (type.startsWith('orchestration.'))
+            return onOrchestration(type, payload);
           return { code: 'OK' };
         },
       },
@@ -243,6 +248,9 @@ function fixture(
     closed: () => closed(),
     workflow: (value: typeof onWorkflow) => {
       onWorkflow = value;
+    },
+    orchestration: (value: typeof onOrchestration) => {
+      onOrchestration = value;
     },
     run: (value: typeof onRun) => {
       onRun = value;
@@ -292,6 +300,53 @@ const connect = (client: DesktopClient) =>
     handle: 'tester',
     password: 'fixture-password',
   });
+
+await test('Activity retries a busy status read after Resume and sends each decision once', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  let resumed = false;
+  let refreshes = 0;
+  f.orchestration((type) => {
+    if (type === 'orchestration.list')
+      return {
+        code: 'OK',
+        payload: { orchestrations: [runWire('root', 'failed')] },
+      };
+    if (type === 'orchestration.resume') {
+      resumed = true;
+      return { code: 'OK', payload: { id: 'root', state: 'running' } };
+    }
+    if (type === 'orchestration.cancel')
+      return { code: 'ARCHIVE_UNAVAILABLE', said: 'Read capacity is busy' };
+    assert.equal(type, 'orchestration.status');
+    if (resumed && ++refreshes <= 2) return { code: 'ARCHIVE_UNAVAILABLE' };
+    return {
+      code: 'OK',
+      payload: statusWire('root', resumed ? 'running' : 'failed'),
+    };
+  });
+  await connect(f.client);
+  await f.client.activity.open('runs');
+  await f.client.runs.resume('root');
+  assert.equal(refreshes, 3);
+  assert.equal(
+    f.calls.filter((ask) => ask.type === 'orchestration.resume').length,
+    1,
+  );
+  assert.equal(
+    f.client.state.activity.details.root?.value?.run.state,
+    'running',
+  );
+  assert.equal(
+    f.client.state.activity.decisions?.root?.notice,
+    'Resume request recorded.',
+  );
+  await assert.rejects(f.client.runs.cancel('root'), /Read capacity is busy/);
+  assert.equal(
+    f.calls.filter((ask) => ask.type === 'orchestration.cancel').length,
+    1,
+  );
+});
 
 await test('confirmed archive retires retained active-chat metadata while preserving history and restore', async () => {
   const f = fixture();
