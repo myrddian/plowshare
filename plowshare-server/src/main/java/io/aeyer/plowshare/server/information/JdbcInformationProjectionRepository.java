@@ -275,6 +275,27 @@ public final class JdbcInformationProjectionRepository implements InformationPro
         reusable);
   }
 
+  /**
+   * Retains the exact reuse plan an approved request will copy from.
+   *
+   * <p><strong>Why this repository carries no contained-actor guard.</strong> Every preparation is
+   * a row in {@code information_reuse_preparations}, whose composite foreign key {@code
+   * information_reuse_preparations_actor_request_id_fkey} targets {@code
+   * information_write_gates(account, request_id)} — so a preparation exists only for a command that
+   * account actually reserved, and {@code information_write_gates.account} is itself a foreign key
+   * into {@code admins} (V83:352), where a confined Application's principal has no row by design
+   * (V218). Characterized against real PostgreSQL by {@code ContainedActorWriteReachDatabaseTest},
+   * a contained actor reached exactly that constraint and was refused by it; {@code capture} ahead
+   * of it only locks and reads, so nothing had been written. {@link #copy} is reachable only with a
+   * {@code Prepared} this method produced, so the same reservation fence stands in front of it.
+   * That is a lifecycle fence on the reservation key rather than a provenance column's accident,
+   * which is why {@code ContainedActorGuard} is deliberately not called in front of it.
+   *
+   * <p>It does leave the refusal a {@code DataIntegrityViolationException} — a server fault for
+   * something a caller did — which is the same ordering the catalogue repository's command
+   * reservation already has and is recorded in {@code ContainedActorGuard} rather than patched
+   * here.
+   */
   @Override
   public Prepared prepare(
       InformationContext context,

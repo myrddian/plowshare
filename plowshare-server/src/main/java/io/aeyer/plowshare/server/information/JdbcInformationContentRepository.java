@@ -17,6 +17,7 @@ public final class JdbcInformationContentRepository implements InformationConten
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .build();
   private final JdbcTemplate jdbc;
+  private final ContainedActorGuard contained;
   private static final String BINDING_COLUMNS =
       "c.revision_id AS binding_revision,c.metadata_hash,c.metadata,(r.availability<>'deleted') AS contract_available,"
           + "v.id,v.type_id,v.ordinal,v.schema_definition,v.presentation,v.profile,v.definition_hash,t.slug,t.label,t.description";
@@ -28,6 +29,7 @@ public final class JdbcInformationContentRepository implements InformationConten
   public JdbcInformationContentRepository(
       JdbcTemplate jdbc, InformationContentTypeRepository types) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.contained = new ContainedActorGuard(jdbc);
     // Retain the existing construction contract. Binding reads now join the exact immutable
     // definition instead of issuing nested repository reads from a JDBC row mapper.
     Objects.requireNonNull(types);
@@ -164,9 +166,23 @@ public final class JdbcInformationContentRepository implements InformationConten
                 revision));
   }
 
+  /**
+   * Grants the current generation's stages to a caller, and refuses a confined Application first.
+   *
+   * <p>The guard is not redundant with {@link #requireWrite} below it. Characterized against real
+   * PostgreSQL by {@code ContainedActorWriteReachDatabaseTest}, a contained actor reached the
+   * insert: {@code requireWrite} <em>admitted</em> it, because V229's write arm opens {@code
+   * information_lock_knowledge} for a contained principal in its own home, and the only thing that
+   * refused was {@code information_stage_authorizations_actor_fkey}, the {@code actor} column's
+   * foreign key into {@code admins} — an integrity error raised as a server fault for something a
+   * caller did, and one that would evaporate the moment that column were written from {@code
+   * attribution()} as the catalogue repository's provenance columns now are. Nothing has decided
+   * that a confined Application may authorise pipeline stages, so this says so in its own voice.
+   */
   @Override
   public void authorise(
       InformationContext context, UUID revision, UUID request, List<String> stages) {
+    contained.requireUncontained(context, "authorise processing stages");
     if (request == null || stages.isEmpty() || stages.size() > 7)
       throw new IllegalArgumentException("Processing needs a stable request and stages");
     requireWrite(context, revision);
