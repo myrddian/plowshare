@@ -686,6 +686,12 @@ services own semantic authorization. Resource-ID resolution must precede policy
 decisions. Search, pagination, counts, events, job status and error details are
 disclosures too. Filesystem and tool grants remain independent restrictions.
 
+Conversation identity locates durable history and constrains the workspace. The
+admission of the initiating execution supplies authority for a new effect. A
+person chat can use different agents on different turns, so a launch from that
+chat derives from the current turn's admission. A continuation uses the admission
+retained for that execution and rechecks its supporting grants.
+
 Persist grant references and the admission ceiling with jobs, schedules, Relay
 work, orchestration, approvals and child agents. Children inherit or narrow the
 parent's authority. Synchronous `agent_run` delegates share the caller's allowance;
