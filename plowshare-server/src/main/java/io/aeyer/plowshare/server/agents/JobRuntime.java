@@ -1978,7 +1978,8 @@ public final class JobRuntime {
                 owner,
                 commands,
                 end,
-                runHooks));
+                runHooks,
+                operation));
     if (extras == null) throw new IllegalStateException("script run extras are unavailable");
     if (extras.end() == null)
       extras =
@@ -2371,7 +2372,8 @@ public final class JobRuntime {
                       owner,
                       commands,
                       end,
-                      runHooks)),
+                      runHooks,
+                      operation)),
               RunExtras.Extras.NONE);
     } catch (RuntimeException failed) {
       log.warn(

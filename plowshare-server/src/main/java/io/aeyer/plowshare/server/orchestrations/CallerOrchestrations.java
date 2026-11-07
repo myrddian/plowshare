@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /** Builds and authorises the tools an orchestration's caller holds. */
 public final class CallerOrchestrations implements GrantedOrchestrations {
@@ -146,24 +147,12 @@ public final class CallerOrchestrations implements GrantedOrchestrations {
           return renderHandle(started.run(), definition, note);
         }
         OrchestrationRecord run =
-            orchestrations.start(
-                new Orchestrations.Start(
-                    definition,
-                    context.home(),
-                    request,
-                    suppliedContext,
-                    context.conversationId(),
-                    context.definition().name(),
-                    context.callerHandle(),
-                    context.sessionId(),
-                    null,
-                    0));
+            startRoot(context, definition, request, suppliedContext, null, null);
         return renderHandle(run, definition, ROOT_CANNOT_WAIT);
       }
 
       @Override
-      public String startBound(
-          String name, String request, java.util.UUID invocation, String hash) {
+      public String startBound(String name, String request, UUID invocation, String hash) {
         OrchestrationDefinition definition = definitions.get(name);
         if (definition == null || !definition.hash().equals(hash)) {
           throw new IllegalStateException(
@@ -182,20 +171,7 @@ public final class CallerOrchestrations implements GrantedOrchestrations {
                 .put("request", request)
                 .toString();
         OrchestrationRecord run =
-            orchestrations.start(
-                new Orchestrations.Start(
-                    definition,
-                    context.home(),
-                    request,
-                    null,
-                    context.conversationId(),
-                    context.definition().name(),
-                    context.callerHandle(),
-                    context.sessionId(),
-                    null,
-                    0),
-                invocation,
-                payload);
+            startRoot(context, definition, request, null, invocation, payload);
         return renderHandle(run, definition, ROOT_CANNOT_WAIT);
       }
 
@@ -379,6 +355,32 @@ public final class CallerOrchestrations implements GrantedOrchestrations {
         return "Cancelled orchestration " + id + ".";
       }
     };
+  }
+
+  private OrchestrationRecord startRoot(
+      RunExtras.Context context,
+      OrchestrationDefinition definition,
+      String request,
+      String suppliedContext,
+      UUID invocation,
+      String payload) {
+    var start =
+        new Orchestrations.Start(
+            definition,
+            context.home(),
+            request,
+            suppliedContext,
+            context.conversationId(),
+            context.definition().name(),
+            context.callerHandle(),
+            context.sessionId(),
+            null,
+            0);
+    if (context.operation() != null)
+      return orchestrations.startFromRun(start, context.operation(), invocation, payload);
+    return invocation == null
+        ? orchestrations.start(start)
+        : orchestrations.start(start, invocation, payload);
   }
 
   /**

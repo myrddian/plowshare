@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.Callers;
@@ -109,25 +110,40 @@ class CallerOrchestrationsTest {
   @Test
   void a_bound_start_uses_the_atomic_receipt_and_checks_its_exact_definition() {
     java.util.UUID invocation = java.util.UUID.randomUUID();
+    var admittedTurn = mock(OperationAuthority.Admission.class);
     OrchestrationRecord started = mock(OrchestrationRecord.class);
     when(started.id()).thenReturn("orc_bound");
-    when(engine.start(any(), eq(invocation), any())).thenReturn(started);
+    when(engine.startFromRun(any(), eq(admittedTurn), eq(invocation), any())).thenReturn(started);
+    var caller = context("enzo", "cnv_person");
+    var context =
+        new RunExtras.Context(
+            caller.definition(),
+            caller.conversationId(),
+            caller.sessionId(),
+            caller.transcript(),
+            caller.home(),
+            caller.callerHandle(),
+            caller.commands(),
+            caller.end(),
+            caller.hooks(),
+            admittedTurn);
     var operation =
         (io.aeyer.plowshare.server.agents.BoundCommandTool)
-            tool(context("enzo", "cnv_person"), "orchestrate_code_implementation");
+            tool(context, "orchestrate_code_implementation");
     assertTrue(
         operation
             .runBound(invocation, definition.hash(), "original request", Home.of("story"))
             .contains("orc_bound"));
     var payload = ArgumentCaptor.forClass(String.class);
-    verify(engine).start(any(), eq(invocation), payload.capture());
+    verify(engine).startFromRun(any(), eq(admittedTurn), eq(invocation), payload.capture());
     assertTrue(payload.getValue().contains("original request"));
     assertTrue(payload.getValue().contains(definition.hash()));
     org.junit.jupiter.api.Assertions.assertThrows(
         IllegalStateException.class,
         () ->
             operation.runBound(invocation, "changed source", "original request", Home.of("story")));
-    verify(engine, org.mockito.Mockito.times(1)).start(any(), eq(invocation), any());
+    verify(engine, org.mockito.Mockito.times(1))
+        .startFromRun(any(), eq(admittedTurn), eq(invocation), any());
   }
 
   @Test

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import java.util.List;
 import java.util.Objects;
 
@@ -60,6 +61,7 @@ public interface RunExtras {
    *     caller-side tool can end the caller's turn (spec 2026-09-27 §2)
    * @param hooks the run's in-turn log stages — {@code stage.*} and {@code approval.pre} (spec
    *     2026-09-28-hooks-reach-the-log, slices 2 and 3); null reads as {@link RunHooks#NONE}
+   * @param operation this turn's retained admission, supplied only by the runtime that admitted it
    */
   record Context(
       AgentDefinition definition,
@@ -70,10 +72,34 @@ public interface RunExtras {
       String callerHandle,
       Commands.Port commands,
       TurnEnd end,
-      RunHooks hooks) {
+      RunHooks hooks,
+      OperationAuthority.Admission operation) {
 
     public Context {
       hooks = hooks == null ? RunHooks.NONE : hooks;
+    }
+
+    public Context(
+        AgentDefinition definition,
+        String conversationId,
+        String sessionId,
+        Transcript transcript,
+        Home home,
+        String callerHandle,
+        Commands.Port commands,
+        TurnEnd end,
+        RunHooks hooks) {
+      this(
+          definition,
+          conversationId,
+          sessionId,
+          transcript,
+          home,
+          callerHandle,
+          commands,
+          end,
+          hooks,
+          null);
     }
 
     /** The pre-hooks shape, kept for every caller built before a run's gates reached it. */
