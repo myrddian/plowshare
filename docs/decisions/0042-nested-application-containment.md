@@ -1056,6 +1056,42 @@ The authority decision slice two named as a prerequisite was made here (a
 baseline, not a membership); the wiring it needs to have an effect is named as the
 next one, in its own entry below.
 
+**"And its own memories" was over-claimed, and it is true now rather than then.**
+The sentence above was correct for documents after V229 and wrong for memories.
+V229 widened five knowledge functions and deliberately touched nothing in the
+archive: `MemoryStore`'s read pin, its write pin and the write authority behind it
+each opened on `authority_accounts` — by `legacy_handle` on the read side, by `id`
+on the write side — and a contained principal has no row there by design (V218),
+so each statement returned no row and the store refused before any predicate
+beside that join decided anything.
+
+**That account join is what closed the memory door — not general-read membership,
+and not scope.** `information_global_read_member` (V158:16) does answer false for a
+contained principal, but its body is `account_active` plus an `admins`-to-
+`authority_accounts` join and a `CROSS JOIN` onto the `GLOBAL_READ` role row: it
+never tests that the *account* holds a grant of that role and it names no scope at
+all, so it means "is this an ordinary active account" and its refusal here is the
+same missing-rows fact as the join's. Scope was never the barrier either —
+`information_project_readable`, the only conjunct that is about scope, already
+answered TRUE for the child's own contained project through V223's contained arm
+(V172:19 resolves it to `knowledge_scope_readable`). Recording global-read as the
+fence would have put a false statement in this record.
+
+V232 therefore adds one arm, `contained_memory_actor_allows`, beside each of the
+three statements: a contained principal reaches the memories of its own home and
+nothing else, bounded by `contained_own_home` to that one scope rather than by a
+walk, so neither an ancestor's nor a sibling's nor its own descendant's. An
+ancestor's read of a descendant's memories is the pre-existing upward walk and
+worked before this slice. No credential, role or grant row is created or consulted
+and `information_global_read_member` is still untouched. The `server_admin`
+requirement on the write path is *conditional* — reached only when the home has no
+project, which is the Global tier — and is left in force for every writer it
+already applied to; the Global tier and `SET_AUDIENCE` stay refused for a contained
+actor. `ContainedMemorySchemaTest` is the characterization: it records which
+predicate refused first on each path and holds as regressions the five assertions
+that passed before the widening. **The gate is open and the actor is still not
+wired**: no production path presents a contained principal to the archive.
+
 **The guarded set of catalogue mutators is closed over one criterion, and that
 criterion is narrower than "every write a confined Application could reach". It
 has been declared closed and been wrong three times, so here is what it covers.**

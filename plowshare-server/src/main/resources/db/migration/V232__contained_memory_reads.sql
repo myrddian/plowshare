@@ -1,0 +1,91 @@
+-- A contained principal reads and files the memories of its own home, and nothing else gains or
+-- loses access to anything.
+--
+-- WHAT WAS CLOSED, AND BY WHICH PREDICATE. ADR 0042 recorded that a contained principal "reads its
+-- own documents and its own memories". After V229 the first half was true; the second was not, and
+-- ContainedMemorySchemaTest measured why before this migration was written. The archive is reached
+-- through three statements in MemoryStore -- the read pin, the write pin, and the write authority
+-- behind it -- and all three OPEN ON authority_accounts: the read pin selects
+-- `FROM authority_accounts a WHERE a.legacy_handle=$actor`, and the write pin requires
+-- `a.id=(SELECT id FROM authority_accounts WHERE legacy_handle=$actor)`. A contained principal is a
+-- bare UUID with no row in admins, authority_accounts or service_tokens by design (V218), so each
+-- statement returned NO ROW and the store raised its own refusal before any predicate beside that
+-- join decided anything. THAT JOIN IS WHAT CLOSED THE MEMORY DOOR.
+--
+-- information_global_read_member IS NOT THE FENCE, and recording it as one would put a false
+-- statement into the architecture record. Its body (V158:16) is account_active($1) AND an EXISTS
+-- that joins admins to authority_accounts and CROSS JOINs authority_roles for the row named
+-- GLOBAL_READ carrying a READ action. It never tests that the ACCOUNT holds a grant of that role,
+-- and it names no scope at all: every active, non-bootstrap account whose authority_accounts row
+-- has `builtin IS NULL` satisfies it. It means "is this an ordinary active account", so its
+-- refusal of a contained principal is the same missing-rows fact as the join's and not a scope
+-- decision. V229 deliberately left it alone and this migration does too: no account gains
+-- membership, no role, grant, token or credential row is created or consulted anywhere below, and
+-- a contained principal still has no row in admins, authority_accounts, authority_roles or
+-- service_tokens of any kind. Its coarseness is untouched in both directions.
+--
+-- THE SCOPE CONJUNCT WAS ALREADY OPEN, which is why no read predicate needed widening here. The
+-- read pin's third conjunct is information_project_readable(project,$actor), which V172:19 defines
+-- as knowledge_scope_readable over the project's one scope, and V223:188 gave that function a
+-- contained arm. Measured before this migration, by
+-- theMemoryDoorIsClosedByTheAccountJoinAndNotByGlobalRead, it already answers TRUE for a contained
+-- principal's own contained project and FALSE for every other. So the only thing missing was a row
+-- the statement could project at all, admitted by a predicate keyed on the principal itself.
+--
+-- WHY THIS IS AN ADDED ARM AND NOT A CHANGED CONJUNCT. The widening happens in MemoryStore, where
+-- each of the three statements gains the function below BESIDE its existing arm -- the two pins as
+-- a `UNION ALL` branch, because what they lacked was a row and not a true predicate, and the write
+-- authority as a top-level `OR` outside its `EXISTS`. The shipped arms are left byte-for-byte as
+-- they are. Folding the condition into an existing conjunct would have applied it to EVERY caller:
+-- ordinary accounts and service principals are not contained actors, so the conjunct would be
+-- false for all of them and the archive would close for the whole installation. The ancestor reads
+-- that work today -- a container's member reading a descendant's memories through
+-- information_project_readable's upward walk, which the characterization recorded PASSING
+-- beforehand -- are exactly what that would destroy. This is the same shape as V229's five read
+-- arms and V231's reference arm, for the same reason.
+--
+-- WHAT THE ARM ADMITS, AND WHAT IT CANNOT. contained_own_home (V229) resolves the single
+-- contained_principals row's own scope and only when `project` names THAT scope's own project. It
+-- is one row's identity, not a walk and not a name match, so the arm reaches neither an ancestor's
+-- home nor a sibling's nor its own descendant's, and naming another home in the request does not
+-- reach it either. Ancestor reads come from the upward walk in contained_scope_readable (V223),
+-- which resolves from the descendant towards its container and is untouched here; nothing below
+-- walks downward. Because contained_own_home requires a live contained_principals row, a principal
+-- revoked with its scope loses the arm on the next statement.
+--
+-- THE ADMINISTRATOR ARM ON THE WRITE PATH STAYS INTACT. The write authority's own conjunct is
+-- `?::text IS NOT NULL OR EXISTS(admins … server_admin …)` -- a CONDITIONAL requirement, reached
+-- only when the home's project parameter is NULL, which is the Global knowledge tier. A
+-- project-homed write never reaches it, before or after this change; it is not relaxed for anybody,
+-- and a contained actor is admitted by the new disjunct instead of by touching it.
+-- anOrdinaryAccountsMemoryAccessIsUnchanged pins both halves: an ordinary contributor who is not a
+-- server administrator still files into its project and still cannot file into the Global tier.
+--
+-- THE GLOBAL TIER STAYS SHUT TO A CONTAINED ACTOR, on both paths. contained_own_home requires a
+-- named project that is the principal's own, and the Global tier is the absence of a project, so
+-- the arm cannot select it. The `writing` argument restates that refusal at the write site, where
+-- the administrator arm it would otherwise have to pass lives; the restatement is redundant with
+-- contained_own_home's own body and is stated anyway, so a later reader of the write statement does
+-- not have to resolve another function to see that a child cannot file deployment-wide knowledge.
+-- Nothing here writes a policy or an audience, so this is not a route to SET_AUDIENCE, which V229
+-- deliberately left refused and which stays refused.
+
+-- The arm. STABLE and side-effect free: it decides admission and locks nothing, exactly as the
+-- predicates it sits beside do; the store's own advisory and scope locks are unchanged.
+--
+-- `NOT EXISTS(admins …)` is load-bearing rather than decorative, and it is the same guard V223's
+-- contained_scope_readable self arm carries. It makes this arm and the authority_accounts arm it is
+-- UNION-ed with MUTUALLY EXCLUSIVE: were a handle ever to be the text of a live contained
+-- principal's UUID, both branches could produce a row, and the store concludes a refusal from
+-- `rows.size() != 1` -- so without this the collision would turn an admission into a refusal for
+-- the account and, worse, make which row is projected depend on the branch order. With it, an
+-- actor that any credential table knows cannot reach this arm at all.
+CREATE FUNCTION contained_memory_actor_allows(actor TEXT, project TEXT, writing BOOLEAN)
+ RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+ SELECT coalesce(contained_knowledge_actor($1)
+   AND NOT EXISTS(SELECT 1 FROM admins u WHERE u.handle=$1)
+   AND contained_own_home($1,$2) IS NOT NULL
+   -- Redundant with contained_own_home above, which has no answer for a NULL project; restated
+   -- for the write site only, where the Global tier's administrator arm is the thing being kept.
+   AND (NOT $3 OR $2 IS NOT NULL),false);
+$$;
