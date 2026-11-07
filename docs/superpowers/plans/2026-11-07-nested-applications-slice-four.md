@@ -5,8 +5,20 @@
 **Goal:** Make the contained principal the identity the information system
 resolves for a run inside a contained Application — acting as the child, attributed
 to its container — and close or deliberately open every read and write gate that
-identity now reaches, so that a contained child reads and writes its own documents
-and its own memories and nothing else.
+identity now reaches, **at the repository layer, reached today by no production
+caller**, so that a contained child reads and writes its own documents and its own
+memories and nothing else.
+
+> **Correction, after the whole-branch review.** This goal line said "and nothing
+> else" without saying where. The identity resolves correctly and the repository and
+> store layer is open to it, but **no production surface above those layers admits
+> it**: navigation refuses at `requireActive`/`lockIdentity` (no `admins` row,
+> V218), the catalogue at `requireWork`, and the memory entry points at
+> `ScopedPermissions`. The widened SQL arms — V229's read and write arms, V231's
+> reference disjunct, V232's memory arms — are therefore reachable from a direct
+> repository or store call and not yet from a running child. Whether that ceiling
+> should open is an authority decision ADR 0042 does not grant, and this plan does
+> not make it.
 
 **Architecture:** Three facts make this one slice rather than a one-line change.
 First, `InformationAccess.contained(principal, container, project)` already exists
@@ -599,8 +611,23 @@ assumes:
 - Every information write path a contained actor can reach is guarded or deliberately
   admitted, with the characterization recorded per repository.
 - The memory door has its own arm, and ADR 0042's over-claim is corrected in the
-  record.
-- A child's binary output's survival until collection is proved rather than hoped.
+  record. A later fix wave also made `JobRuntime`'s two memory bindings present the
+  *acting* axis, so the principal V232's arm admits is the one a contained run
+  carries; above `MemoryStore`, `ScopedPermissions` still refuses it.
+- **A child's binary output survives until its parent collects it because of the
+  CLAIM, not because of any restraint in a sweep.** The guarantee is a `PINNED`
+  `blob_claims` row attached in the same transaction as the record that references
+  the bytes: a pinned claim has no clock, so no sweep is eligible to collect the
+  blob while it exists. Plan B must not look for, or add, a sweep that knows about
+  containment — there is none and there should be none.
+
+  Two unrelated sweeps were conflated in slice four's own Task 6 brief, and the
+  distinction matters to anyone reading that task: `ContainedCollectionSweeps`
+  collects contained **source directories** on a 30-minute
+  `ContainmentConfig.DEFAULT_SWEEP_GRACE`, while the **blob** sweep is
+  `BlobMaintenance` → `DiskBinaryBlobStorage.collect` on a 10-minute
+  `BlobProperties.recoveryGrace`. Neither grace period is what keeps a child's
+  output alive.
 
 What Plan B must decide and this plan deliberately does not: the namespace's
 representation and addressing, where reference resolution sits on each door, and

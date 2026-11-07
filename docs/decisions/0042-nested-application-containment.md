@@ -1109,8 +1109,15 @@ Every statement in this record that rests on "no production path presents one"
 describes slice three and not the current code. They are, besides the two
 paragraphs above: the `JdbcInformationEventRecords` inventory row and the
 paragraph introducing that inventory, the audience-defect paragraph's "a
-constructed context, which is the only kind there is", and the
-documents-not-processed gap. The slice-three *behaviour* each of them reasons
+constructed context, which is the only kind there is", the
+documents-not-processed gap, and — the one this list first omitted while
+claiming to be complete — **"The arithmetic, so the split is checkable rather
+than assertable"**, whose correction of the Relay audience row rests on "no
+production path makes a contained principal the information actor". That clause
+is now false. The row's verdict and its reachability from a *production* path are
+nonetheless still unchanged, for the reason in the paragraph after next: a
+running child reaches no surface that would create a contained-home resource, so
+the arithmetic's conclusion survives its premise. The slice-three *behaviour* each of them reasons
 about is unchanged — the audience is still absent, the write path still declines
 processing, the refusals still refuse — and it is only the reachability claim
 that has moved: each of those paths now has the caller it was described as
@@ -1126,14 +1133,46 @@ V232) admit the child to its own scope. One layer above them,
 `PROJECT` scope and so grants none — to the principal or to its container. Every
 `InformationCatalogue` operation that calls one of those still refuses a
 contained context, and `BoundMemoryQueries.requireScope` and
-`BoundMemoryWrites` ask the same question with the same answer. So a running
-child reaches the navigation read path, the catalogue repository's write path and
-`MemoryStore` directly; it does not drive `InformationCatalogue` or the memory
-query entry points. `SET_AUDIENCE` is refused by exactly that absence, which is
-the outcome this record already requires. Whether those Java layers should admit
-a contained principal is an open authority decision and was not made in slice
-four; `ContainedInformationReachDatabaseTest` carries the characterization,
-asserting the refusals rather than leaving them implied.
+`BoundMemoryWrites.requireRecipient` ask the same question with the same answer.
+
+**Narrower again, and this correction matters because an earlier draft of this
+paragraph claimed otherwise.** It said a running child reaches "the navigation
+read path, the catalogue repository's write path and `MemoryStore` directly". It
+reaches none of those three through a production surface. The actor is wired and
+resolves correctly, and the repository and store layer is open to it, but every
+production entry point above that layer refuses it first, and each refusal has a
+name:
+
+- **Navigation.** `InformationTool` hands `actor.acting()` to
+  `DocumentNavigation.execute`. Its read path calls `repository.requireActive`
+  — `EXISTS(SELECT 1 FROM admins WHERE handle=? AND account_active(handle) AND NOT
+  bootstrap)` in `JdbcInformationNavigationRepository` — and its mutation path
+  calls `repository.lockAccount`, which is `lockIdentity`'s `SELECT handle FROM
+  admins … FOR SHARE`. A contained principal has no `admins` row by design (V218),
+  so every navigation operation a contained run issues is refused **before V231's
+  new disjunct is evaluated**. That disjunct is reachable only from a direct
+  repository call.
+- **The catalogue.** `InformationCatalogue.admit` calls `access.requireWork` as
+  its first statement, so the write path refuses at the role question before any
+  SQL arm.
+- **Memory.** The two `Bound*` entry points ask `ScopedPermissions` the same
+  question.
+
+`SET_AUDIENCE` is refused by exactly that absence, which is the outcome this
+record already requires. Whether those Java layers should admit a contained
+principal is an open authority decision and was not made in slice four;
+`ContainedInformationReachDatabaseTest` and `ContainedMemorySchemaTest` carry the
+characterization, asserting the refusals rather than leaving them implied.
+
+**One thing a running child's wiring did change, in a later fix wave.**
+`JobRuntime`'s two memory bindings passed the *container's* identity into the
+field `MemoryStore` asks its authority questions about, so V232's arm had no
+production caller that could select it and the memory gate for a contained run
+was decided about the container. Both bindings now pass the acting axis
+(`JobRuntime.memoryActingAxis`). It was fail-closed before only because
+`ScopedPermissions` resolves no role on a `contained:` project — a ceiling one
+layer up, not a property of the gate — which is a further reason that ceiling is
+an authority decision and not an oversight to be quietly relaxed.
 
 **The guarded set of catalogue mutators is closed over one criterion, and that
 criterion is narrower than "every write a confined Application could reach". It

@@ -44,8 +44,8 @@ import org.testcontainers.junit.jupiter.*;
  * <h2>CHARACTERIZATION: what was found, before any change</h2>
  *
  * <p><strong>Nothing was broken. No production code changed.</strong> All six assertions below
- * passed against HEAD on the first run. What follows is the per-case finding and the predicate that
- * decided it.
+ * passed on the first run, before any edit in this slice's blob task. What follows is the per-case
+ * finding and the predicate that decided it.
  *
  * <p><strong>1. The claim path admits a contained principal, and no actor predicate is consulted at
  * all.</strong> {@code aContainedActorCanClaimABlobItWrote} passes because the blob layer is
@@ -62,14 +62,37 @@ import org.testcontainers.junit.jupiter.*;
  * material. This is the one surface in the slice whose guard is the absence of a guard,
  * deliberately.
  *
+ * <p><strong>"No actor predicate is consulted at all" is isolated rather than read off the
+ * SQL.</strong> The earlier form of this finding was argued from the statements, and every other
+ * assertion in {@code aContainedActorCanClaimABlobItWrote} would have passed just as well if an
+ * actor predicate existed and happened to admit this principal — the fixture gives it a real {@code
+ * contained_principals} row, so a predicate keyed on that row is indistinguishable from no
+ * predicate at all. The discriminating assertion is in that test now: a claim owned by a bare
+ * random UUID with <strong>no {@code contained_principals} row, no {@code admins} row and no scope
+ * of any kind</strong> is admitted identically, and the stored {@code owner} column holds it
+ * verbatim. Only actor-blindness explains that.
+ *
  * <p><strong>The owner match is case SENSITIVE here, unlike V229's.</strong> {@code c.owner=?} is
  * plain TEXT equality in {@code acquire}, {@code readable} and {@code release}, whereas {@code
  * contained_knowledge_actor} (V229:30) matches a principal's UUID case-insensitively. The same
  * principal spelled in upper case is therefore a different blob owner, and is asserted to be. This
  * is recorded, not changed: {@code owner} is a generic slot identifier shared with relay
  * publication hashes and invocation ids, where case is meaningful, so folding it would be a wider
- * change than this slice authorizes. Callers are safe as long as they pass {@code UUID.toString()},
- * which is always lower case, and every current one does.
+ * change than this slice authorizes.
+ *
+ * <p><strong>The grounds for leaving it alone, corrected.</strong> An earlier draft said "every
+ * current caller passes {@code UUID.toString()}, which is always lower case". That is false, and it
+ * is the wrong argument anyway. Three of the four owner values production ever constructs are not
+ * UUIDs: {@code conversation + ":" + ordinal} ({@code trajectory-entry}, {@code
+ * JdbcTrajectoryArtifacts}), {@code img_<32 hex>} ({@code image-retention}, {@code
+ * ImageBlobAccess.retained}) and {@code RelayPort.hash(topic) + ":" + position} ({@code
+ * relay-publication}, {@code RelayBlobClaims}); only {@code invocation-admission}'s owner is a
+ * UUID, and it is an invocation's. The correct and stronger argument is that <strong>no production
+ * path ever uses a contained principal as a blob claim owner</strong>. The two predicates — {@code
+ * c.owner=?} here and {@code contained_knowledge_actor}'s case-insensitive UUID match — therefore
+ * never evaluate the same value, so this is structurally <em>not</em> the shape of the
+ * case-sensitivity defect found on the knowledge path in task 4. Leaving the code alone is correct,
+ * and the contained claim this class acquires is a constructed one.
  *
  * <p><strong>2. A claimed blob is never a sweep candidate, and a child's image claim cannot be
  * released at all.</strong> {@code deletions} selects on {@code state='DELETING' OR (state='READY'
@@ -79,8 +102,16 @@ import org.testcontainers.junit.jupiter.*;
  * actually carries is the PINNED {@code image-retention} claim that {@code
  * DiskImageBlobAccess.store} attaches in the <em>same</em> transaction that registers the bytes,
  * and {@code release} refuses a PINNED claim outright ("pinned blob claims require an owning-record
- * removal policy"). A child's image bytes therefore cannot reach the sweep by any release path;
- * only an owning-record policy deleting the claim row can start their clock.
+ * removal policy"). A child's image bytes therefore cannot reach the sweep by any release path.
+ *
+ * <p><strong>And no such policy exists for {@code image-retention}, so that pin is currently
+ * unconditional.</strong> The error message names a policy as the way out, which reads as though
+ * one were in place. There are three owning-record triggers — {@code release_invocation_blob_claim}
+ * (V225:39), {@code release_relay_blob_claim} (V226:23) and {@code release_trajectory_blob_claim}
+ * (V227:25) — and each deletes only its own {@code kind} and only where {@code
+ * retention='RELEASABLE'}. None can remove a PINNED claim, and none is about {@code
+ * image-retention}. So a child's image bytes have no clock at all today, which is what makes their
+ * survival until collection a property of the claim rather than of any grace period.
  *
  * <p><strong>3. The brief's premise was wrong, so there was no defect to fix.</strong> The brief
  * named this case {@code aContainedChildsUnclaimedBlobIsNotSweptWhileItsSpaceIsReadable}; it is
@@ -284,7 +315,44 @@ class ContainedBlobClaimDatabaseTest {
         "the same principal in a different case is a different owner here");
 
     // The namespace is keyed on the contained project's row, never on the contained scope UUID.
-    assertThrows(IllegalArgumentException.class, () -> new BlobKey("projects/" + childScope, "0"));
+    // The digest is a VALID 64-hex one and the message is pinned, because "0" is also an invalid
+    // digest: BlobKey happens to call requireScope before the sha256 check (BlobKey:5-9), so with
+    // a bad digest this assertion measures whichever check runs first and would keep passing if
+    // those two lines were reordered -- measuring nothing about the scope.
+    assertEquals(
+        "invalid blob scope",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BlobKey("projects/" + childScope, source.key().sha256()))
+            .getMessage());
+
+    // NO ACTOR PREDICATE, isolated. This owner is a bare random UUID with no contained_principals
+    // row, no admins row and no scope anywhere -- so every row-keyed explanation for the claim
+    // above is excluded, and only actor-blindness is left. Were a predicate keyed on the
+    // principal's row, this claim would be refused and the one above admitted.
+    var strangerBytes = registered(childNamespace(), "stranger output " + UUID.randomUUID());
+    var stranger = UUID.randomUUID().toString();
+    assertEquals(
+        0,
+        (int)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM contained_principals WHERE id=?::uuid",
+                Integer.class,
+                stranger),
+        "the premise: this owner is not a principal of anything");
+    var strangerClaim = new BlobClaim("trajectory-entry", stranger, 0, Retention.PINNED);
+    acquire(strangerBytes.key(), strangerClaim);
+    assertTrue(
+        blobs.readable(blobs.find(strangerBytes.key()).orElseThrow(), strangerClaim),
+        "admitted identically to the live principal's claim");
+    assertEquals(
+        stranger,
+        jdbc.queryForObject(
+            "SELECT owner FROM binary_blob_claims WHERE scope=? AND sha256=?",
+            String.class,
+            strangerBytes.key().scope(),
+            strangerBytes.key().sha256()),
+        "and stored verbatim, as TEXT");
   }
 
   @Test
@@ -346,8 +414,9 @@ class ContainedBlobClaimDatabaseTest {
     var source = registered(childNamespace(), "unclaimed child output " + UUID.randomUUID());
     aged(source.key());
 
-    // The child's space is still live: its scope row and its principal both exist, so V231/V232
-    // still admit reads in it.
+    // The child's space is still live: its scope row and its principal both exist. That V231/V232
+    // would still admit reads in it is INFERRED from those rows and from those predicates' own
+    // tests, not measured here -- this test asks nothing of either predicate.
     assertEquals(
         1,
         (int)
