@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -108,14 +107,19 @@ public final class JdbcCommandInvocationsRepository implements CommandInvocation
         .findFirst();
   }
 
-  public List<Bound> pending(String account, String conversation, String caller) {
-    if (account == null || conversation == null) return List.of();
-    return jdbc.query(
-        "SELECT * FROM command_invocations WHERE account_handle=? AND conversation=? AND caller=? AND state IN ('bound', 'dispatching', 'failed') ORDER BY created_at",
-        ROW,
-        account,
-        conversation,
-        caller);
+  public Optional<Bound> findUnfinished(
+      String account, String conversation, String caller, String sourceRun) {
+    if (account == null || conversation == null || sourceRun == null) return Optional.empty();
+    return jdbc
+        .query(
+            "SELECT * FROM command_invocations WHERE account_handle=? AND conversation=? AND caller=? AND source_run=? AND state IN ('bound', 'dispatching', 'failed')",
+            ROW,
+            account,
+            conversation,
+            caller,
+            sourceRun)
+        .stream()
+        .findFirst();
   }
 
   public boolean claim(Bound bound) {

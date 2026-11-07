@@ -219,7 +219,9 @@ class BoundCommandsTest {
     assertTrue(prepared.refusal().contains("pinned definition changed"));
     assertNull(prepared.notice());
     assertEquals("failed", stored.get().state());
-    when(store.pending("alice", "parent", "bot")).thenReturn(List.of(stored.get()));
+    when(transcript.continuingTurn()).thenReturn(1);
+    when(store.findUnfinished("alice", "parent", "bot", "job"))
+        .thenReturn(Optional.of(stored.get()));
     assertNotNull(prepare(false, "Resume").refusal());
     verify(runtime, times(1))
         .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any());
@@ -314,12 +316,20 @@ class BoundCommandsTest {
   }
 
   @Test
-  void continuation_recovers_pending_binding_but_normal_text_never_auto_triggers() {
+  void only_a_continuation_recovers_the_same_execution_binding() {
     var original = prepare(true, "/skill:review request");
-    when(store.pending("alice", "parent", "bot")).thenReturn(List.of(stored.get()));
+    when(store.findUnfinished("alice", "parent", "bot", "job"))
+        .thenReturn(Optional.of(stored.get()));
+    when(transcript.continuingTurn()).thenReturn(null);
     clearInvocations(store, skills, orchestrations);
+    var background = prepare(false, "Research is ready for review");
+    assertNull(background.notice());
+    assertTrue(background.dispatchCalls().isEmpty());
+    verifyNoInteractions(store);
+    when(transcript.continuingTurn()).thenReturn(1);
     var continuation = prepare(false, "Resume");
     assertEquals(original.notice(), continuation.notice());
+    verify(store).findUnfinished("alice", "parent", "bot", "job");
     verify(store, never()).bind(any(), any(), any(), any(), any(), any(), any());
     verifyNoInteractions(skills, orchestrations, runtime);
     assertTrue(prepare(true, "Review this work please").dispatchCalls().isEmpty());

@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -49,7 +48,9 @@ public interface CommandInvocations {
 
   Optional<Bound> find(String account, String conversation, String caller, UUID id);
 
-  List<Bound> pending(String account, String conversation, String caller);
+  /** Only the exact continued execution can recover or inspect an unfinished command. */
+  Optional<Bound> findUnfinished(
+      String account, String conversation, String caller, String sourceRun);
 
   /** Only the bound-to-dispatching CAS grants execution authority. */
   boolean claim(Bound bound);

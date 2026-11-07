@@ -252,7 +252,9 @@ class SkillExecutionsTest {
     assertNotNull(skillRuntime.refusal(parent, "file_write"));
     assertNull(skillRuntime.refusal(parent, "file_read"));
     assertTrue(
-        new JdbcCommandInvocationsRepository(jdbc).pending("alice", parent, "worker").isEmpty());
+        new JdbcCommandInvocationsRepository(jdbc)
+            .findUnfinished("alice", parent, "worker", transcript.usage().runs().id())
+            .isEmpty());
     var inspected =
         commands.prepare(
             true,
@@ -325,7 +327,8 @@ class SkillExecutionsTest {
     assertTrue(commands.find("bob", parent, "bot", first.id()).isEmpty());
     assertTrue(commands.find("alice", child, "bot", first.id()).isEmpty());
     assertTrue(commands.find("alice", parent, "other", first.id()).isEmpty());
-    assertEquals(1, commands.pending("alice", parent, "bot").size());
+    assertEquals(first, commands.findUnfinished("alice", parent, "bot", "job").orElseThrow());
+    assertTrue(commands.findUnfinished("alice", parent, "bot", "other-turn").isEmpty());
     try (var threads = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
       var claims = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
       for (int n = 0; n < 12; n++) claims.add(threads.submit(() -> commands.claim(first)));
@@ -333,7 +336,9 @@ class SkillExecutionsTest {
       for (var claim : claims) if (claim.get()) won++;
       assertEquals(1, won);
     }
-    assertEquals("dispatching", commands.pending("alice", parent, "bot").getFirst().state());
+    assertEquals(
+        "dispatching",
+        commands.findUnfinished("alice", parent, "bot", "job").orElseThrow().state());
     assertEquals(
         "dispatching",
         new JdbcCommandInvocationsRepository(jdbc)
