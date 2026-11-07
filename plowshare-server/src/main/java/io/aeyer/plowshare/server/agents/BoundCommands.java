@@ -248,12 +248,12 @@ public final class BoundCommands {
   }
 
   /**
-   * Bind an authorized explicit command, or recover pending bindings on resume. DIRECT skills are
-   * claimed and pinned here before inference, without launching model work. Orchestrations and
-   * delegated skills are dispatched by the harness after its tool gates. Failed or ambiguous claims
-   * remain inspectable and are never replayed. Skill arguments may be empty, and an omitted package
-   * and invocation mode defaults to DIRECT. Orchestrations require work text and do not accept
-   * skill context flags.
+   * Bind an authorized explicit command, or recover its binding on a continuation of the same
+   * execution. DIRECT skills are claimed and pinned here before inference, without launching model
+   * work. Orchestrations and delegated skills are dispatched by the harness after its tool gates.
+   * Failed or ambiguous claims remain inspectable and are never replayed. Skill arguments may be
+   * empty, and an omitted package and invocation mode defaults to DIRECT. Orchestrations require
+   * work text and do not accept skill context flags.
    */
   public Prepared prepare(
       boolean incoming,
@@ -325,8 +325,18 @@ public final class BoundCommands {
                     command,
                     parsed.arguments(),
                     mode));
-      } else if (!incoming) {
-        bindings = invocations.pending(account, transcript.conversationId(), caller.name());
+      } else if (!incoming && transcript.continuingTurn() != null) {
+        // Background messages can open a new turn in the same chat. Only an actual continuation
+        // retains the source execution that authorized this invocation.
+        bindings =
+            invocations
+                .findUnfinished(
+                    account,
+                    transcript.conversationId(),
+                    caller.name(),
+                    transcript.usage().runs().id())
+                .stream()
+                .toList();
       }
     } catch (RuntimeException invalid) {
       refusal = "Command refused: " + invalid.getMessage();
