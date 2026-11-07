@@ -611,9 +611,13 @@ assumes:
 - Every information write path a contained actor can reach is guarded or deliberately
   admitted, with the characterization recorded per repository.
 - The memory door has its own arm, and ADR 0042's over-claim is corrected in the
-  record. A later fix wave also made `JobRuntime`'s two memory bindings present the
-  *acting* axis, so the principal V232's arm admits is the one a contained run
-  carries; above `MemoryStore`, `ScopedPermissions` still refuses it.
+  record. A later fix wave also made all three of `JobRuntime`'s memory bindings
+  present the *acting* axis — the two `MemoryTools` bindings and the automatic
+  reminder's `reminding.forQueries` — so the principal V232's arms admit is the one
+  a contained run carries. V232's WRITE arm is evaluated by a production caller
+  (`BoundMemoryWrites` pins before it checks the recipient); its READ arm is not,
+  because `BoundMemoryQueries.requireScope` precedes the pin. Above `MemoryStore`,
+  `ScopedPermissions` still refuses a contained principal either way.
 - **A child's binary output survives until its parent collects it because of the
   CLAIM, not because of any restraint in a sweep.** The guarantee is a `PINNED`
   `blob_claims` row attached in the same transaction as the record that references

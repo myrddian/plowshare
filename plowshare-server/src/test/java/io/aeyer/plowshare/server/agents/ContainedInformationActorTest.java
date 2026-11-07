@@ -177,13 +177,21 @@ class ContainedInformationActorTest {
     assertEquals(PRINCIPAL, UUID.fromString(actor.acting()));
     assertNotEquals(actor.acting(), actor.attribution());
 
-    // AND WHICH AXIS THE ARCHIVE IS ASKED ABOUT. JobRuntime.memoryActingAxis is the decision the
-    // two MemoryTools bindings take, named so it can be asserted here rather than reproduced: the
-    // identity a MemoryWrites/MemoryQueries.Request carries is an authority subject -- the pins'
-    // authority_accounts arms, V232's contained_memory_actor_allows arms, and ScopedPermissions
-    // one layer above -- and not a provenance value. Until this fix wave the write binding passed
-    // attribution() and the recall binding the raw callerHandle, so the memory gate for a
-    // contained run was decided about the CONTAINER. This line is what a revert would fail.
+    // AND WHICH AXIS THE ARCHIVE IS ASKED ABOUT. JobRuntime.memoryActingAxis is the decision all
+    // three memory bindings take: the identity a MemoryWrites/MemoryQueries.Request carries is an
+    // authority subject -- the pins' authority_accounts arms, V232's contained_memory_actor_allows
+    // arms, and ScopedPermissions one layer above -- and not a provenance value. Until this fix
+    // wave the write binding passed attribution(), the recall binding the raw callerHandle, and
+    // the reminder binding the turn's owner, so the memory gate for a contained run was decided
+    // about the CONTAINER.
+    //
+    // WHAT THIS LINE DOES NOT COVER, said plainly. It asserts the HELPER'S BODY. memoryActingAxis
+    // has three references -- JobRuntime's two offeredTo bindings and this test -- and reverting
+    // either CALL SITE, where the whole defect lived, leaves the helper intact and fails no test
+    // in this suite: offeredTo is private and no seam reaches it, and driving it was judged not
+    // worth the refactor. The one memory call site a test does cover is the reminder's, through
+    // the public Reminding#forQueries seam, in
+    // aContainedRunsAutomaticReminderIsBoundToTheChildsPrincipal -- measured to fail on revert.
     assertEquals(
         PRINCIPAL.toString(),
         JobRuntime.memoryActingAxis(actor),
@@ -362,5 +370,215 @@ class ContainedInformationActorTest {
     assertThrows(
         io.aeyer.plowshare.server.faults.CallerFault.class,
         () -> access.forRun(actor, Home.of("parent")));
+  }
+
+  // =============================================================================================
+  // The third memory-path site, driven through a real run.
+  // =============================================================================================
+
+  /**
+   * A transport that answers every call at once, so a run reaches its first turn and stops.
+   *
+   * <p>Only {@code poolName}, {@code complete} and {@code stream} are implemented; every other
+   * member of {@code LlmTransport} and {@code PromptCounter} has a default. This exists because the
+   * site under test lives inside {@code JobRuntime.converse}, which no seam reaches without a run.
+   */
+  private static final class OneAnswer
+      implements io.aeyer.plowshare.server.llm.dispatch.LlmTransport {
+    @Override
+    public String poolName() {
+      return "scripted";
+    }
+
+    @Override
+    public io.aeyer.plowshare.server.llm.dispatch.Completion complete(
+        String wireModel,
+        List<io.aeyer.plowshare.server.llm.dispatch.ChatMessage> messages,
+        io.aeyer.plowshare.server.llm.dispatch.Sampling sampling,
+        List<io.aeyer.plowshare.server.llm.dispatch.ToolSchema> tools) {
+      return new io.aeyer.plowshare.server.llm.dispatch.Completion(
+          "done", "stop", io.aeyer.plowshare.server.llm.dispatch.TokenUsage.UNKNOWN, List.of());
+    }
+
+    @Override
+    public io.aeyer.plowshare.server.llm.dispatch.Completion stream(
+        String wireModel,
+        List<io.aeyer.plowshare.server.llm.dispatch.ChatMessage> messages,
+        io.aeyer.plowshare.server.llm.dispatch.Sampling sampling,
+        List<io.aeyer.plowshare.server.llm.dispatch.ToolSchema> tools,
+        io.aeyer.plowshare.server.llm.dispatch.Deltas sink,
+        java.util.function.BooleanSupplier abandoned) {
+      return complete(wireModel, messages, sampling, tools);
+    }
+
+    @Override
+    public io.aeyer.plowshare.server.llm.dispatch.Embeddings embed(
+        String wireModel, List<String> input) {
+      throw new UnsupportedOperationException("this fixture answers chat calls only");
+    }
+
+    @Override
+    public void close() {}
+  }
+
+  /** The reminder binding's own seam, recording which identity {@code converse} hands it. */
+  private static final class CapturingReminding implements Reminding {
+    private final java.util.List<String> accounts =
+        java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+    @Override
+    public Reminding forQueries(
+        String account,
+        Home home,
+        java.util.function.Supplier<io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin>
+            origin) {
+      accounts.add(account);
+      return this;
+    }
+
+    @Override
+    public Optional<io.aeyer.plowshare.server.llm.dispatch.ChatMessage> whatTheArchiveHolds(
+        AgentDefinition definition, Home home, String utterance) {
+      return Optional.empty();
+    }
+  }
+
+  /** A run whose log is this conversation, which is what the containment decision reads. */
+  private static Transcript loggedAs(String conversation) {
+    return new Transcript() {
+      @Override
+      public List<io.aeyer.plowshare.server.llm.dispatch.ChatMessage> before() {
+        return List.of();
+      }
+
+      @Override
+      public void promptMeasured(int promptTokens) {}
+
+      @Override
+      public String conversationId() {
+        return conversation;
+      }
+
+      @Override
+      public Spoken spokenIn() {
+        return new Spoken(conversation, 1);
+      }
+    };
+  }
+
+  private JobRuntime runWith(CapturingReminding reminding, ConversationRecord... records) {
+    var byId = new java.util.HashMap<String, ConversationRecord>();
+    for (var record : records) byId.put(record.id(), record);
+    var runtime =
+        new JobRuntime(
+            new io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher(
+                List.of(
+                    new io.aeyer.plowshare.server.llm.dispatch.LlmPool(
+                        "scripted",
+                        List.of("model"),
+                        Map.of("fast", "model"),
+                        2,
+                        1,
+                        java.time.Duration.ofSeconds(5),
+                        new OneAnswer())),
+                new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger()),
+            List.of(),
+            null,
+            null,
+            Instant::now,
+            reminding,
+            io.aeyer.plowshare.server.images.ImageStore.NONE,
+            RefusalDetector.PHRASES,
+            System::nanoTime,
+            AgentDelegates.fixed(() -> new AgentRegistry(Map.of("worker", reminded()))));
+    runtime.useContainedRuns(
+        id -> Optional.ofNullable(byId.get(id)), principals(Map.of(CHILD_PROJECT, PRINCIPAL)));
+    return runtime;
+  }
+
+  private static AgentDefinition reminded() {
+    return new AgentDefinition(
+        "worker",
+        "work",
+        "fast",
+        List.of(MemoryTools.RECALL_NAME),
+        List.of(),
+        List.of(),
+        1,
+        1,
+        "work");
+  }
+
+  /**
+   * THE THIRD memory-path site, and the only one of the three a test can fail on revert.
+   *
+   * <p>{@code JobRuntime.converse} binds the automatic reminder with {@code
+   * reminding.forQueries(account, home, origin)}, and {@code Reminder.query} puts that account
+   * straight into {@code MemoryQueries.Request.acting} — the subject {@code MemoryStore.pin}'s
+   * {@code authority_accounts} arm and V232's {@code contained_memory_actor_allows} arm are asked
+   * about. It used to be handed {@code owner}, the turn's account handle, which for a run inside a
+   * contained Application is the CONTAINER's. So the memory authority question was asked about the
+   * container inside the child's home, at a site reachable with no containment gate anywhere on the
+   * path ({@code canBeReminded()} is {@code canRecall() && } no trajectory tool).
+   *
+   * <p><strong>Why this one is coverable and the other two are not.</strong> {@code forQueries} is
+   * a public interface method that {@code converse} calls directly, so a test {@code Reminding}
+   * records the exact value the production site chose. The {@code MemoryTools} bindings are inside
+   * the private {@code offeredTo} and are reached through no seam, which is why {@code
+   * ContainedInformationActorTest}'s {@code memoryActingAxis} assertion pins the helper's body and
+   * not those two call sites — see the note there.
+   *
+   * <p>This asserts the identity handed to the binding and nothing downstream. Whether {@code
+   * MemoryStore} then admits that principal is PostgreSQL's and is {@code
+   * ContainedMemorySchemaTest}'s; whether the operation completes is decided one layer up by {@code
+   * ScopedPermissions}, which refuses, as {@code aContainedPrincipalIsStillRefusedAboveTheStore}
+   * measures.
+   */
+  @Test
+  void aContainedRunsAutomaticReminderIsBoundToTheChildsPrincipal() {
+    var reminding = new CapturingReminding();
+    var runtime = runWith(reminding, log("cnv_child", Origin.CONTAINED, Home.of(CHILD_PROJECT)));
+
+    runtime.run(
+        reminded(),
+        "what do you know",
+        Home.of(CHILD_PROJECT),
+        Budget.of(4),
+        () -> false,
+        null,
+        JobWatch.UNWATCHED,
+        loggedAs("cnv_child"),
+        TurnCap.none(),
+        List.of(),
+        CONTAINER,
+        false);
+
+    assertEquals(
+        List.of(PRINCIPAL.toString()),
+        reminding.accounts,
+        "the reminder's memory read is bound to the child's principal, not its container");
+  }
+
+  /** The control: an ordinary run binds the same handle it always did, so nothing else moves. */
+  @Test
+  void anUncontainedRunsAutomaticReminderIsBoundToItsCaller() {
+    var reminding = new CapturingReminding();
+    var runtime = runWith(reminding, log("cnv_turn", Origin.TURN, Home.of("parent")));
+
+    runtime.run(
+        reminded(),
+        "what do you know",
+        Home.of("parent"),
+        Budget.of(4),
+        () -> false,
+        null,
+        JobWatch.UNWATCHED,
+        loggedAs("cnv_turn"),
+        TurnCap.none(),
+        List.of(),
+        CONTAINER,
+        false);
+
+    assertEquals(List.of(CONTAINER), reminding.accounts);
   }
 }

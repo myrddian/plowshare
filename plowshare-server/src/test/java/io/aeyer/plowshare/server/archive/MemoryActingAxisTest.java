@@ -14,47 +14,67 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
- * Which axis the two memory bindings carry, and the proof that changing it moved no ordinary run.
+ * What the memory bindings build from each axis, on both sides of the acting/attribution split.
  *
  * <h2>What changed and why it was a defect</h2>
  *
- * <p>{@code JobRuntime}'s memory bindings used to pass {@code informationActor.attribution()} to
- * {@code MemoryTools.Write} and the run's raw {@code callerHandle} to {@code MemoryTools.Recall}.
- * Both of those are the CONTAINER's handle for a run inside a contained Application. The value
- * lands on {@code MemoryWrites.Request#acting()} / {@code MemoryQueries.Request#acting()}, and
- * every place it is read is an authority gate, not a provenance column: {@code MemoryStore.pin}'s
- * {@code authority_accounts} arm and its {@code contained_memory_actor_allows} arm, the write
- * authority {@code EXISTS} in {@code MemoryStore.require}, {@code information_lock_scope}, and
- * {@code PersonalSpaces.requireOwn} plus {@code ScopedPermissions.allows} in the two {@code Bound*}
- * classes. So the memory authority question for a contained run was asked about its container while
- * every other gate in this slice was asked about the child, and V232's arm — which only a contained
- * principal can select — had no production caller that could present one.
+ * <p>{@code JobRuntime} has THREE memory bindings and every one of them used to pass the
+ * CONTAINER's identity for a run inside a contained Application: {@code
+ * informationActor.attribution()} to {@code MemoryTools.Write}, the run's raw {@code callerHandle}
+ * to {@code MemoryTools.Recall}, and the turn's {@code owner} to the automatic reminder's {@code
+ * Reminding#forQueries}. (The third was found by a second review, after the first two were fixed;
+ * it is covered in {@code ContainedInformationActorTest}, which is where the reminder site is
+ * driven.) The value lands on {@code MemoryWrites.Request#acting()} / {@code
+ * MemoryQueries.Request#acting()}, and every place it is read is an authority gate, not a
+ * provenance column: {@code MemoryStore.pin}'s {@code authority_accounts} arm and its {@code
+ * contained_memory_actor_allows} arm, the write authority {@code EXISTS} in {@code
+ * MemoryStore.require}, {@code information_lock_scope}, and {@code PersonalSpaces.requireOwn} plus
+ * {@code ScopedPermissions.allows} in the two {@code Bound*} classes. So the memory authority
+ * question for a contained run was asked about its container while every other gate in this slice
+ * was asked about the child.
  *
  * <p>It was fail-closed rather than an escalation only because {@code ScopedPermissions} resolves
  * no role on a {@code contained:} project. That is a ceiling one layer above {@code MemoryStore},
- * not a property of the gate, and whether it should open is an open authority decision. Both
- * bindings now pass {@code acting()}.
+ * not a property of the gate, and whether it should open is an open authority decision. All three
+ * bindings now pass {@code acting()}, through {@code JobRuntime.memoryActingAxis}.
  *
- * <h2>Why the risk is low, measured rather than assumed</h2>
+ * <p>V232's arms are selectable only by a contained principal, and the fix changed what reaches
+ * them asymmetrically. The WRITE arm is now evaluated by a production caller: {@code
+ * BoundMemoryWrites.write} calls {@code memories.pin(request)} before any recipient check, and
+ * {@code requireRecipient} is reached pre-commit through {@code open()} → {@code require(false)},
+ * so the arm is asked with the child's principal and the operation then refuses one layer up
+ * without writing. The READ arm is not, because {@code BoundMemoryQueries.requireScope} precedes
+ * {@code pin}; it is reached only from a direct store call, which {@code ContainedMemorySchemaTest}
+ * makes.
  *
- * <p>{@link #anUncontainedRunsMemoryRequestsAreUnchanged} is the safety argument. For an
- * uncontained actor {@code acting()} and {@code attribution()} are the same string, so the request
- * a binding builds is the same RECORD, component for component, whichever axis it was given — and
- * record equality here covers the acting axis, the home, the proposal and the origin together, so
- * it is byte-identity and not a resemblance. The {@code alive}/{@code authority}/{@code validity}
- * runnables are deliberately shared between the two bindings so that {@code Origin}'s own record
- * equality is decided by its invocation string rather than by lambda identity.
+ * <h2>What this class measures, and what measures the rest</h2>
  *
- * <p>{@link #aContainedRunsMemoryRequestsNameTheChild} is the other half: given the acting axis,
- * the request names the child's bare principal and not the container's handle. <strong>It does not
- * measure which axis {@code JobRuntime} chooses</strong> — it is handed one — so a revert of that
- * choice would not fail it. The assertion that would fail is {@code
- * ContainedInformationActorTest.aContainedRunActsAsItsPrincipalAndIsAttributedToItsContainer}'s
- * call to {@code JobRuntime.memoryActingAxis}, which is the binding's own decision, named so it can
- * be exercised rather than reproduced. What the store then does with the principal is PostgreSQL's,
- * and is measured in {@code ContainedMemorySchemaTest}; nothing here claims a contained run
- * completes a memory write end to end, because above the store {@code ScopedPermissions} still
- * refuses it.
+ * <p>Both tests here are handed an axis and assert what the bindings then build. <strong>Neither
+ * measures which axis {@code JobRuntime} chooses</strong>, so neither fails if a binding is
+ * reverted. What they are for is the shape of the request on each side of the change.
+ *
+ * <p>{@link #anUncontainedRunsMemoryRequestsAreUnchanged} shows that the two axes produce the same
+ * RECORD — component for component, the acting axis, the home, the proposal and the origin
+ * together, with the {@code alive}/{@code authority}/{@code validity} runnables shared so {@code
+ * Origin}'s own record equality turns on its invocation string and not on lambda identity. On the
+ * write half both calls receive literally the same string, so <strong>that assertion cannot fail
+ * unless its premise assertion fails first</strong>; it is a statement of the shape, not an
+ * independent measurement, and calling it "the safety argument" would be an over-claim. The
+ * property it describes — that an uncontained run's axes are one handle, and that the identity the
+ * memory path is handed is unchanged — IS measured, in {@code
+ * ContainedInformationActorTest.anUncontainedRunActsAndIsAttributedAsItsCaller} and {@code
+ * anUncontainedRunsAutomaticReminderIsBoundToItsCaller}, the second of which drives a real run.
+ *
+ * <p>{@link #aContainedRunsMemoryRequestsNameTheChild} is the other side: given the acting axis,
+ * the request names the child's bare principal and not the container's handle. The test that fails
+ * on revert of a real binding is {@code
+ * ContainedInformationActorTest.aContainedRunsAutomaticReminderIsBoundToTheChildsPrincipal}, which
+ * reaches the reminder site through the public {@code Reminding#forQueries} seam; the two {@code
+ * MemoryTools} bindings inside the private {@code offeredTo} are covered by no test, which {@code
+ * JobRuntime.memoryActingAxis}'s javadoc states. What the store then does with the principal is
+ * PostgreSQL's and is measured in {@code ContainedMemorySchemaTest}; nothing here claims a
+ * contained run completes a memory write end to end, because above the store {@code
+ * ScopedPermissions} still refuses it.
  */
 class MemoryActingAxisTest {
   private static final String CONTAINER = "alice";
@@ -65,7 +85,7 @@ class MemoryActingAxisTest {
   private final Archive archive = mock(Archive.class);
   private final Scribe scribe = mock(Scribe.class);
 
-  /** Shared between both bindings so {@code Origin}'s record equality is about the axis. */
+  /** Shared between the two calls so {@code Origin}'s record equality is about the axis. */
   private final Runnable alive = () -> {};
 
   private final Runnable authority = () -> {};
@@ -101,8 +121,13 @@ class MemoryActingAxisTest {
   }
 
   /**
-   * The equivalence that makes C1 safe: an ordinary run's requests are the identical record whether
-   * the binding is handed the acting axis or the attribution axis.
+   * An ordinary run's requests are the identical record whether the binding is handed the acting
+   * axis or the attribution axis.
+   *
+   * <p>On the write half both calls receive literally the same string, so the record-equality
+   * assertion cannot fail unless the premise assertion above it fails first. That is the point — it
+   * states the shape — but it is not an independent measurement, and the class javadoc names the
+   * two tests that do measure the property.
    */
   @Test
   void anUncontainedRunsMemoryRequestsAreUnchanged() {

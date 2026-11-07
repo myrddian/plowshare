@@ -292,8 +292,10 @@ public final class InformationAccess {
    * every run whose own conversation record says it is a contained Application's: {@code
    * JobRuntime} builds {@link InformationActor#contained} when the durable record's origin is
    * {@code Origin.CONTAINED} and its home is a {@code contained:} project, and the information tool
-   * and both memory bindings take that actor. So {@code contained_knowledge_actor} is true for an
-   * actor a production path presents, and the acting axis a running child supplies now reaches the
+   * and all three memory bindings — {@code MemoryTools.Recall}, {@code MemoryTools.Write} and the
+   * automatic reminder's {@code Reminding#forQueries} — take that actor's acting axis through
+   * {@code JobRuntime.memoryActingAxis}. So {@code contained_knowledge_actor} is true for an actor
+   * a production path presents, and the acting axis a running child supplies now reaches the
    * repository and store layer. The tests that also build this context directly are now three —
    * {@code ContainedExecutionWriteDatabaseTest}, {@code ContainedActorWriteReachDatabaseTest} and
    * {@code ContainedIntakeAnnouncementDatabaseTest} — and {@code

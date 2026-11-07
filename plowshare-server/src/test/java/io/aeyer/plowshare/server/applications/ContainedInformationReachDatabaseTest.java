@@ -67,9 +67,13 @@ import org.testcontainers.junit.jupiter.*;
  * identity statements, so the child's memory write and the predicate behind its read worked before
  * this task and work after it. <strong>That task added nothing to the memory half</strong>, and
  * that test is kept as the regression that says so rather than as evidence of this change. A later
- * fix wave did change it: {@code JobRuntime}'s two memory bindings now pass {@code
- * InformationActor.acting()} rather than {@code attribution()}, so the principal V232's arm admits
- * is the one a contained run presents. The store-driven half of that is {@code
+ * fix wave did change it: all THREE of {@code JobRuntime}'s memory bindings — {@code
+ * MemoryTools.Recall}, {@code MemoryTools.Write} and the automatic reminder's {@code
+ * Reminding#forQueries} — now pass {@code InformationActor.acting()} rather than the container's
+ * identity, so the principal V232's arms admit is the one a contained run presents. V232's WRITE
+ * arm is now evaluated by a production caller, because {@code BoundMemoryWrites.write} pins before
+ * it checks the recipient; its READ arm is not, because {@code BoundMemoryQueries.requireScope}
+ * precedes the pin. The store-driven half is {@code
  * ContainedMemorySchemaTest.aContainedPrincipalIsStillRefusedAboveTheStore}; the ceiling below is
  * unchanged.
  *

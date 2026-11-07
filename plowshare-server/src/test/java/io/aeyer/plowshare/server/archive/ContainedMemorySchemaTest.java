@@ -496,8 +496,11 @@ class ContainedMemorySchemaTest {
         "the arm admits case-insensitively, which is what makes the projection's case matter");
 
     var store = store();
-    // THE STORE'S OWN read pin. Revert the lower(?) in MemoryStore and this raises; revert the
-    // null-account clause and the account below is null.
+    // THE STORE'S OWN read pin, not READ_PIN. Measured: revert the lower(?) in MemoryStore and
+    // this raises. Reverting the store's null-account clause on its own changes nothing here --
+    // while the projection is correct an admitted row's account is never null, so that clause is
+    // unreachable; it would matter only in conjunction with the lower(?) revert, which is what the
+    // method javadoc above says and what this comment said wrongly.
     var selection = store.pin(read(mixed, home(scope)));
     assertNotNull(
         selection.pin().account(),

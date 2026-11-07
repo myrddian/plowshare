@@ -830,11 +830,21 @@ public final class JobRuntime {
   /**
    * Which of a run's two axes the archive is asked about: the ACTING one, always.
    *
-   * <p>Named, and package-private, for {@link #informationActorFor}'s reason — {@code
-   * ContainedInformationActorTest} asserts this decision directly, and the alternative was a test
-   * that reproduced the rule instead of exercising it. It has exactly two callers, the {@code
-   * MemoryTools.Recall} and {@code MemoryTools.Write} bindings in {@link #offeredTo}, and each of
-   * them argues the choice at the call site.
+   * <p>Named, and package-private, so the decision has one definition rather than three. It has
+   * exactly THREE callers, and each argues the choice at its own call site: the {@code
+   * MemoryTools.Recall} and {@code MemoryTools.Write} bindings in {@link #offeredTo}, and the
+   * automatic reminder's {@code reminding.forQueries} binding in {@code converse}.
+   *
+   * <p><strong>What a test covers, and what it does not.</strong> {@code
+   * ContainedInformationActorTest.aContainedRunsAutomaticReminderIsBoundToTheChildsPrincipal}
+   * drives a real run and fails if the reminder call site is reverted — measured — because {@code
+   * Reminding#forQueries} is a public seam {@code converse} calls directly. The two {@code
+   * offeredTo} call sites are <strong>not</strong> covered: they are inside a private method no
+   * seam reaches, so reverting either of them to {@code attribution()} or to the raw {@code
+   * callerHandle} fails no test in the suite. {@code ContainedInformationActorTest}'s {@code
+   * memoryActingAxis} assertion pins this method's BODY, not those call sites. Driving {@code
+   * offeredTo} was judged not worth the refactor; a reader should not take the named helper as
+   * coverage of its callers.
    *
    * <p>It is the acting axis because the identity a memory request carries is an authority subject
    * and nothing else. {@code MemoryStore.pin} asks {@code authority_accounts a WHERE
@@ -851,8 +861,10 @@ public final class JobRuntime {
    * child — which is what this used to do.
    *
    * <p>Null in, null out, and that is the fail-closed clause: {@link #informationActorFor} returns
-   * null for a run in a contained home whose log resolves no principal, and both bindings refuse
-   * before any archive call rather than falling back to the caller's handle.
+   * null for a run in a contained home whose log resolves no principal, and all three bindings
+   * refuse before any archive call rather than falling back to the caller's handle. (At the
+   * reminder, "refuse" is {@code MemoryQueries.Request}'s own null check, which {@code Reminder}'s
+   * wide catch turns into a warning and an empty reminder.)
    */
   static String memoryActingAxis(InformationActor actor) {
     return actor == null ? null : actor.acting();
@@ -2745,7 +2757,24 @@ public final class JobRuntime {
     // the position this exists not to take.
     var memoryReminder =
         reminding.forQueries(
-            owner,
+            // THE THIRD memory-path site, and the acting axis for the same reason as the other
+            // two: Reminder.query puts this straight into MemoryQueries.Request.acting, which is
+            // the subject MemoryStore.pin's authority_accounts arm and V232's
+            // contained_memory_actor_allows arm are asked about. `owner` is the turn's account
+            // handle -- the CONTAINER's, for a run inside a contained Application -- and `home`
+            // here is the run's own home, which for such a run is its `contained:` project. So
+            // this asked the memory authority question about the container inside the child's
+            // home. It was fail-closed, because ScopedPermissions resolves no role on a
+            // contained: project and Reminder's wide catch turns the refusal into a warning and
+            // Optional.empty(); but information_project_readable's ancestor walk (V223) answers
+            // TRUE for a container over its descendant's project, so had that ceiling opened the
+            // container's handle would have selected the authority_accounts arm and read the
+            // CHILD's memories. canBeReminded() is canRecall() && no trajectory tool
+            // (AgentDefinition:1389) and carries no containment test, so the site is reachable.
+            //
+            // informationActorFor is given `owner` rather than callerHandle because that is the
+            // identity this site already used, so an uncontained run's request is unchanged.
+            memoryActingAxis(informationActorFor(owner, transcript.conversationId(), home)),
             home,
             () -> {
               if (operation == null

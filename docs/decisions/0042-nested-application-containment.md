@@ -1165,14 +1165,32 @@ principal is an open authority decision and was not made in slice four;
 characterization, asserting the refusals rather than leaving them implied.
 
 **One thing a running child's wiring did change, in a later fix wave.**
-`JobRuntime`'s two memory bindings passed the *container's* identity into the
-field `MemoryStore` asks its authority questions about, so V232's arm had no
-production caller that could select it and the memory gate for a contained run
-was decided about the container. Both bindings now pass the acting axis
-(`JobRuntime.memoryActingAxis`). It was fail-closed before only because
+`JobRuntime`'s memory bindings passed the *container's* identity into the field
+`MemoryStore` asks its authority questions about, so V232's arms had no
+production caller that could select them and the memory gate for a contained run
+was decided about the container. There are **three** such bindings, not two, and
+the third was found by a second review after the first fix: `MemoryTools.Recall`
+and `MemoryTools.Write` in `offeredTo`, and the automatic reminder's
+`reminding.forQueries(owner, home, …)` in `converse`, whose account goes straight
+into `MemoryQueries.Request.acting` by way of `Reminder.query` and
+`Archive.survey`. All three now pass the acting axis through
+`JobRuntime.memoryActingAxis`. It was fail-closed before only because
 `ScopedPermissions` resolves no role on a `contained:` project — a ceiling one
 layer up, not a property of the gate — which is a further reason that ceiling is
-an authority decision and not an oversight to be quietly relaxed.
+an authority decision and not an oversight to be quietly relaxed. Note that
+`information_project_readable`'s ancestor walk (V223) answers TRUE for a
+container over its descendant's project, so had that ceiling opened, the
+container's handle would have selected the `authority_accounts` arm and read the
+*child's* memories inside the *child's* home.
+
+**V232's WRITE arm is genuinely evaluated by a production caller now; its READ
+arm is not.** On the write path `BoundMemoryWrites.write` calls
+`memories.pin(request)` before any recipient check, and `requireRecipient` is
+reached pre-commit through `open()` → `require(false)`, so the arm is asked with
+the child's principal and the operation then refuses one layer up without
+writing. On the read path `BoundMemoryQueries.requireScope` precedes `pin`, so
+the read arm is still reached only from a direct store call, which
+`ContainedMemorySchemaTest` makes.
 
 **The guarded set of catalogue mutators is closed over one criterion, and that
 criterion is narrower than "every write a confined Application could reach". It
