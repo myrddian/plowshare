@@ -107,8 +107,35 @@ public final class InformationAccess {
     return InformationContext.Selection.project(PersonalSpaces.name(account));
   }
 
+  /**
+   * The handle-only run resolution, unchanged for every caller including a handle-less one.
+   *
+   * <p>The null and blank checks are here rather than left to {@link InformationActor#of} on
+   * purpose. {@code AskTool}, {@code DocumentTools.Search} and {@code DocumentTools.AgentList} all
+   * pass a run's {@code callerHandle} straight through and that handle is nullable (see {@code
+   * JobRuntime.ownerOf}, which exists to recover an owner when it is absent). The old body refused
+   * such a run with {@link PersonalSpaces}' caller-visible fault, and refused a Global home before
+   * ever looking at the handle; {@code InformationActor} rejects a blank acting principal as a
+   * programming error, which is right for the record and wrong for this entry point. So this method
+   * keeps its own precondition, in its original order, and builds the actor only once the handle is
+   * one an actor may hold.
+   */
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
+    if (home.isGlobal())
+      throw new CallerFault("A retained run needs an explicit Personal or project home");
+    if (account == null || account.isBlank()) throw unauthenticated(account);
     return forRun(InformationActor.of(account), home);
+  }
+
+  /**
+   * {@link PersonalSpaces} owns this refusal's wording, so it is re-raised rather than copied.
+   *
+   * <p>The old {@code forRun} body reached {@code PersonalSpaces.name(account)} before anything
+   * else could reject a missing handle, which is the fault a handle-less run must keep receiving.
+   */
+  private static CallerFault unauthenticated(String account) {
+    PersonalSpaces.name(account);
+    throw new IllegalStateException("A missing account must not resolve a personal space name");
   }
 
   /**
