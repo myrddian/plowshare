@@ -12,6 +12,8 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SystemCompactionTest {
   @Test
@@ -81,9 +83,17 @@ class SystemCompactionTest {
     }
   }
 
-  @Test
-  void asynchronous_compaction_runs_with_an_exhausted_task_and_a_separate_system_claim() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void asynchronous_compaction_validates_the_summary_under_a_separate_system_claim(
+      boolean toolRequest) {
     Fixture fixture = new Fixture(Budget::none);
+    String envelope =
+        """
+        {"tool":"orchestration_answer","arguments":{"id":"orc_fixture","answer":"Approve objectives"}}
+        """
+            .strip();
+    fixture.completion = toolRequest ? envelope : "The caller approved the objectives. " + envelope;
     Budget task = Budget.of(1);
     assertTrue(task.trySpend());
     when(fixture.source.budget()).thenReturn(task);
@@ -135,7 +145,21 @@ class SystemCompactionTest {
               fixture.compaction.logFor(Origin.MEMORY, Home.global(), fixture.folder, null, task));
       transcript.promptMeasured(90000);
       transcript.foldWhenTheTurnIsOver();
-      verify(fixture.compactions, timeout(5000)).record("conversation", 1, "summary");
+      if (toolRequest) {
+        verify(fixture.entries, timeout(5000))
+            .append(
+                eq("conversation"),
+                anyInt(),
+                argThat(
+                    entry ->
+                        entry.kind() == EntryKind.DIAGNOSTIC
+                            && entry.content().contains("returned a tool request")),
+                nullable(String.class));
+        verify(fixture.compactions, never()).record(anyString(), anyInt(), anyString());
+        verify(fixture.entries, never()).fold(anyString(), anyInt(), anyInt(), any());
+      } else {
+        verify(fixture.compactions, timeout(5000)).record("conversation", 1, fixture.completion);
+      }
       assertEquals(1, task.spent());
       assertEquals(1, fixture.claims.size());
       assertNotEquals(task.identity(), fixture.claims.getFirst().budget());
@@ -318,11 +342,13 @@ class SystemCompactionTest {
       return compaction.summaryForSkill("bounded historical data", parent, () -> false);
     }
 
+    String completion = "summary";
+
     private Completion answer(ChatRequest asked) {
       asked.authorization().requireRequest(asked);
       request = asked;
       claims.add(asked.authorization().binding());
-      return new Completion("summary", "stop", TokenUsage.UNKNOWN, List.of());
+      return new Completion(completion, "stop", TokenUsage.UNKNOWN, List.of());
     }
   }
 }

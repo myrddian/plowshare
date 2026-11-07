@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.agents;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
@@ -147,6 +148,24 @@ final class WrittenCalls {
       }
     }
     return fits.size() == 1 ? Optional.of(fits.get(0)) : Optional.empty();
+  }
+
+  /** A reply consisting entirely of a serialized tool request, optionally in a code fence. */
+  static boolean writesToolEnvelope(String content) {
+    String body = unfenced(content);
+    if (!body.startsWith("{") || !body.endsWith("}")) return false;
+    try {
+      JsonNode envelope = JSON.readTree(body);
+      JsonNode tool = envelope.path("tool");
+      JsonNode arguments = envelope.path("arguments");
+      return envelope.isObject()
+          && envelope.size() == 2
+          && tool.isTextual()
+          && !tool.textValue().isBlank()
+          && (arguments.isObject() || arguments.isTextual());
+    } catch (JsonProcessingException notJson) {
+      return false;
+    }
   }
 
   /**

@@ -3018,8 +3018,8 @@ public final class Compaction implements SkillSummaries {
       return last;
     }
 
-    /** The final summary only, under the pool's streaming timeout bounds. */
-    private Completion summarisingCall(AgentDefinition folding, List<ChatMessage> asked) {
+    /** A validated summary, under the pool's streaming timeout bounds. */
+    private String summarisingCall(AgentDefinition folding, List<ChatMessage> asked) {
       if (confined)
         throw new IllegalStateException("Acting turns do not admit background model work");
       retainedAuthority.run();
@@ -3030,7 +3030,19 @@ public final class Compaction implements SkillSummaries {
               folding,
               JobRuntime.requestFor(folding, asked).withAttribution(foldUsage(folding)),
               () -> false);
-      return models.streamFold(request, Deltas.DISCARDING);
+      Completion written = models.streamFold(request, Deltas.DISCARDING);
+      String summary = written.content() == null ? "" : written.content().strip();
+      // A folder can echo a tool request as ordinary text even though it has no tools.
+      // Refuse that output before either fold path supersedes any recorded history.
+      if (!written.toolCalls().isEmpty()
+          || "tool_calls".equals(written.finishReason())
+          || WrittenCalls.writesToolEnvelope(summary)) {
+        throw new IllegalStateException("the folder returned a tool request instead of a summary");
+      }
+      if (summary.isEmpty()) {
+        throw new IllegalStateException("the summary came back empty");
+      }
+      return summary;
     }
 
     /**
@@ -3055,12 +3067,7 @@ public final class Compaction implements SkillSummaries {
                   askForATurnSummary(since, turn, workSummarised)
                       + "\n\n"
                       + theWorkSoFar(since, turn, from, through, shown)));
-      Completion written = summarisingCall(folding, asked);
-      String summary = written.content() == null ? "" : written.content().strip();
-      if (summary.isEmpty()) {
-        throw new IllegalStateException("the summary came back empty");
-      }
-      return summary;
+      return summarisingCall(folding, asked);
     }
 
     /**
@@ -4082,12 +4089,7 @@ public final class Compaction implements SkillSummaries {
       // make one of the three fields behave unlike the other two".
       // The three fields are consistent again here and it is the other
       // way round: model, prompt and temperature are all the folder's.
-      Completion written = summarisingCall(folding, asked);
-      String summary = written.content() == null ? "" : written.content().strip();
-      if (summary.isEmpty()) {
-        throw new IllegalStateException("the summary came back empty");
-      }
-      return summary;
+      return summarisingCall(folding, asked);
     }
 
     /**
