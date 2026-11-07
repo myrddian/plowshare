@@ -618,6 +618,17 @@ assumes:
   (`BoundMemoryWrites` pins before it checks the recipient); its READ arm is not,
   because `BoundMemoryQueries.requireScope` precedes the pin. Above `MemoryStore`,
   `ScopedPermissions` still refuses a contained principal either way.
+
+- **Nothing locks the `contained_principals` row on the memory path.**
+  `information_lock_scope(acting, scope)` in `MemoryStore.lock`/`lockRead` locks no
+  identity rows for a contained principal, where V229's
+  `information_lock_destination` does lock on the knowledge path. This is **not a
+  live hole**: the post-lock `require(...)` re-pin re-evaluates
+  `contained_memory_actor_allows` on a fresh snapshot, so a revocation that lands
+  mid-transaction is still caught. Slice four left it alone deliberately, because
+  changing that SQL was outside the authorization it was given. It is the **first
+  thing to examine if the `ScopedPermissions` ceiling is ever opened**, since that
+  ceiling is the only reason production callers do not reach the path today.
 - **A child's binary output survives until its parent collects it because of the
   CLAIM, not because of any restraint in a sweep.** The guarantee is a `PINNED`
   `blob_claims` row attached in the same transaction as the record that references
@@ -636,6 +647,22 @@ assumes:
 What Plan B must decide and this plan deliberately does not: the namespace's
 representation and addressing, where reference resolution sits on each door, and
 whether the reference and tombstone representation needs SQL at all.
+
+**A prerequisite Plan B inherits, which slice four's cut did not identify.** The
+service layer above the gates refuses a contained actor for the child's principal
+*and* for its container: the same `ScopedPermissions.allows` question is asked in
+`BoundMemoryQueries.requireScope`, `BoundMemoryWrites`, and
+`InformationAccess.requireSelection` / `requireWork` / `requireAudience`, all
+resolving to `authority_project_role` (V156), which returns NULL for a contained
+project either way. Navigation closes one layer higher still, at
+`DocumentNavigation`'s `requireActive` / `lockAccount` on an `admins` row a
+contained principal has by design. So slice four opens the repository and store
+layer, and **no production surface above those layers admits a contained
+principal.** Opening it means either granting a contained principal a project role
+— which ADR 0042 forbids — or adding a containment arm to the general
+`ScopedPermissions` contract. That is an authority decision requiring its own
+authorization and its own design record, not wiring, and it blocks any Plan B task
+that needs a contained run to drive a tool rather than a repository.
 
 ## Open decisions for the user
 
