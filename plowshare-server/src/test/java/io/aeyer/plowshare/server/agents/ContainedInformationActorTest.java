@@ -33,6 +33,11 @@ import org.junit.jupiter.api.Test;
  * values are then handed to <em>are</em> database facts, and they are proved in {@code
  * ContainedInformationReachDatabaseTest}.
  *
+ * <p>The last two tests are the exception to "a decision over two lookups": they drive a real
+ * {@code JobRuntime.run} to reach the automatic reminder's binding, which lives inside {@code
+ * converse} and is reachable through no narrower seam. They still need no database — the transport
+ * answers at once and the archive is never asked — and their own javadoc says what they cover.
+ *
  * <h2>Characterization, measured before the wiring</h2>
  *
  * <p>Measured, not predicted. The production change was inverted to its pre-task behaviour -- the
