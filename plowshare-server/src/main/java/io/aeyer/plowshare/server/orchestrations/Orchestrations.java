@@ -6,8 +6,10 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Orchestration;
 import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.AccessRequest;
 import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRunTool;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -876,21 +878,27 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
 
   /** A caller-supplied durable key; repeated submissions never speak another first turn. */
   public OrchestrationRecord start(Start start, java.util.UUID requestId, String payload) {
+    return start(start, requestId, payload, null);
+  }
+
+  /**
+   * Launch from the exact admission already retained by the runtime for this turn. Person chats
+   * have no fixed agent binding, but their admitted turns can supply a parent for the new run.
+   * Nested and external starts still use their own retained authority paths.
+   */
+  OrchestrationRecord startFromRun(
+      Start start, OperationAuthority.Admission caller, UUID requestId, String payload) {
+    Objects.requireNonNull(caller, "caller admission");
+    if (operations == null || start.parent() != null)
+      throw new CallerFault("A caller turn can only start a root orchestration");
+    return start(start, requestId, payload, caller);
+  }
+
+  private OrchestrationRecord start(
+      Start start, UUID requestId, String payload, OperationAuthority.Admission admittedCaller) {
     access.requireWork(start.home().project(), start.callerHandle());
     access.requireSession(start.callerSession(), start.callerHandle());
-    if (operations != null && start.parent() != null && start.callerConversation() == null)
-      throw new CallerFault("Nested start needs its retained caller");
-    if (operations != null && start.callerConversation() != null) {
-      var caller =
-          operations
-              .conversation(start.callerConversation())
-              .orElseThrow(() -> new CallerFault("Caller has no retained authority"));
-      operations.require(caller.admission());
-      if (!caller.admission().executor().equals(start.callerHandle())
-          || !caller.admission().home().equals(start.home())
-          || !caller.admission().actions().contains(AuthorityAction.CONVERSATION_CREATE))
-        throw new CallerFault("Caller cannot start this orchestration");
-    }
+    var caller = callerAdmission(start, admittedCaller);
 
     OrchestrationDefinition definition = start.definition();
     // The person's caps (spec 2026-09-29 §2): the budget the conversation is logged with and
@@ -917,27 +925,13 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                     if (operations != null) {
                       var actions = new HashSet<>(OperationExecution.actions(conductor));
                       actions.add(AuthorityAction.CONVERSATION_CREATE);
-                      if (start.callerConversation() == null) {
-                        if (start.parent() != null)
-                          throw new CallerFault("Nested start needs its retained caller");
-                        envelope =
-                            operations.admit(
-                                start.callerHandle(), operations.scope(start.home()), actions);
-                      } else {
-                        var parent =
-                            operations
-                                .conversation(start.callerConversation())
-                                .orElseThrow(
-                                    () -> new CallerFault("Caller has no retained authority"));
-                        if (!parent.admission().executor().equals(start.callerHandle())
-                            || !parent.admission().home().equals(start.home())
-                            || !parent
-                                .admission()
-                                .actions()
-                                .contains(AuthorityAction.CONVERSATION_CREATE))
-                          throw new CallerFault("Caller cannot start this orchestration");
-                        envelope = operations.derive(parent.admission(), actions);
-                      }
+                      // Derivation rechecks the original supporting grants inside the start
+                      // transaction. The caller snapshot never becomes an authorization lease.
+                      envelope =
+                          caller == null
+                              ? operations.admit(
+                                  start.callerHandle(), operations.scope(start.home()), actions)
+                              : operations.derive(caller, actions);
                     }
                     // Authority derives from the caller; funding does not. Each orchestration,
                     // including a nested phase or a board-launched workflow, selects its own
@@ -1045,6 +1039,35 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                 definition.name(), start.request(), start.context(), own, parentDir, phase);
     speakOrFail(run, conductor, utterance, null, start.source());
     return store.find(run.id()).orElse(run);
+  }
+
+  private OperationAuthority.Admission callerAdmission(
+      Start start, OperationAuthority.Admission admittedCaller) {
+    if (operations == null) return null;
+    String conversation = start.callerConversation();
+    if (conversation == null && admittedCaller == null) {
+      if (start.parent() != null) throw new CallerFault("Nested start needs its retained caller");
+      return null;
+    }
+    var caller =
+        admittedCaller != null
+            ? admittedCaller
+            : operations
+                .conversation(conversation)
+                .orElseThrow(() -> new CallerFault("Caller has no retained authority"))
+                .admission();
+    if (!caller.executor().equals(start.callerHandle())
+        || !caller.home().equals(start.home())
+        || !caller.actions().contains(AuthorityAction.CONVERSATION_CREATE))
+      throw new CallerFault("Caller cannot start this orchestration");
+    if (admittedCaller != null && conversation != null)
+      operations.requireTargets(
+          caller,
+          start.home(),
+          List.of(
+              new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, conversation)));
+    else operations.require(caller);
+    return caller;
   }
 
   /**
