@@ -37,14 +37,33 @@ public interface MemoryWrites {
     }
   }
 
-  record Request(String account, Home home, MemoryProposal proposal, Origin origin) {
+  /**
+   * The write, named by the principal whose authority admits it.
+   *
+   * <p><strong>{@code acting} is an authority subject, not a provenance value.</strong> It is the
+   * only thing this record carries about the caller, and every place it is read is a gate: {@code
+   * MemoryStore.pin(Request)}'s {@code authority_accounts a WHERE a.id=...legacy_handle=?} arm and
+   * its {@code contained_memory_actor_allows(?,?,true)} arm, the write authority {@code EXISTS} in
+   * {@code MemoryStore.require}, {@code information_lock_scope} in {@code MemoryStore.lock}, and
+   * {@code PersonalSpaces.requireOwn} plus {@code ScopedPermissions.allows} in {@code
+   * BoundMemoryWrites.requireRecipient}. It was called {@code account}, which read as though it
+   * named the account a row is booked to; nothing in this path books a row to it. The archive's own
+   * provenance is {@code memories.formed_by}, which comes from {@link MemoryProposal#formedBy()}
+   * and never from here, and {@code embedding_queries.account_id} takes {@code QuerySources.Pin
+   * #account()} — a value the pin's SQL projects, not one a caller supplies. So a run inside a
+   * contained Application must present its CHILD principal here, and attributing the write to the
+   * container is not something this record can express or needs to.
+   *
+   * @param acting the principal every authority gate on the write path is asked about
+   */
+  record Request(String acting, Home home, MemoryProposal proposal, Origin origin) {
     public Request {
       Objects.requireNonNull(home);
       Objects.requireNonNull(proposal);
       Objects.requireNonNull(origin);
-      if (origin.learning() == null && (account == null || account.isBlank()))
+      if (origin.learning() == null && (acting == null || acting.isBlank()))
         throw new IllegalArgumentException("Authenticated memory writer required");
-      if (origin.learning() != null && account != null)
+      if (origin.learning() != null && acting != null)
         throw new IllegalArgumentException("Learning uses its own SYSTEM authority");
       // An old conversation's NULL project is unclassified execution history, not proof
       // that its extracted memories belong in deployment-wide Global knowledge.

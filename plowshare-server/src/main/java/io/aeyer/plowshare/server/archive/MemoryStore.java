@@ -73,11 +73,28 @@ import org.springframework.stereotype.Repository;
  * contained_knowledge_actor} (V229:30) admits case-INSENSITIVELY — {@code ~*}, and {@code ::uuid}
  * accepts an uppercase UUID — while {@code c.id::text} always renders lowercase. A case-sensitive
  * projection would therefore have made the arm true and the projected account NULL for a mixed-case
- * actor string, which {@code InformationActor.acting} neither normalises nor UUID-validates. The
- * branches match on {@code lower(?)} so the projection is exactly as case-insensitive as the
- * predicate admitting it, and both pins refuse a row with a null account as well as one with a null
- * scope — so no {@link QuerySources.Pin} leaves this class without one, and the paragraph above is
- * true rather than nearly true. {@code aMixedCaseActorStringNeverProducesANullAccountPin} holds it.
+ * actor string. The branches match on {@code lower(?)} so the projection is exactly as
+ * case-insensitive as the predicate admitting it, and both pins refuse a row with a null account as
+ * well as one with a null scope — so no {@link QuerySources.Pin} leaves this class without one, and
+ * the paragraph above is true rather than nearly true.
+ *
+ * <p>Both halves of that are this class's own, and they are not equally testable. {@code
+ * aMixedCaseActorStringNeverProducesANullAccountPin} calls {@link #pin} on a real store, which is
+ * what makes it a regression test for this code rather than for its own copy of these statements —
+ * the rest of {@code ContainedMemorySchemaTest} reproduces them, and {@code READ_PIN}'s javadoc
+ * there records why. Measured on 2026-11-08: replacing {@code lower(?)} with {@code ?} in the two
+ * statements above fails that test, so the projection half is held. Deleting the {@code
+ * rows.getFirst().account() == null} clause from both refusals does NOT fail it, and cannot — while
+ * the projection is correct an admitted row's account is never null, so that clause is unreachable.
+ * It is defence in depth against a future edit to the projection and no test can isolate it; do not
+ * read it as something the suite would notice the loss of.
+ *
+ * <p>{@code InformationActor.contained} now also canonicalises a UUID-shaped acting principal to
+ * one lower-case spelling, because the READ and WRITE gates below {@code
+ * contained_memory_actor_allows} do not agree about case with {@code contained_scope_readable}'s
+ * self arm (V223:158-160). That is a fix for a different symptom — a child admitted to write what
+ * it could not read — and it is upstream of here. It does not make the {@code lower(?)} above
+ * removable: this class is reached by callers that never pass through that carrier.
  */
 @Repository
 public class MemoryStore implements MemoryRepository {
@@ -123,14 +140,14 @@ public class MemoryStore implements MemoryRepository {
             request.home().project(),
             BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
             request.home().project(),
-            request.account(),
-            request.account(),
+            request.acting(),
+            request.acting(),
             request.home().project(),
             request.home().project(),
-            request.account(),
-            request.account(),
+            request.acting(),
+            request.acting(),
             request.home().project(),
-            request.account(),
+            request.acting(),
             request.home().project());
     if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
       throw new CallerFault("Memory query is outside live read authority");
@@ -151,13 +168,13 @@ public class MemoryStore implements MemoryRepository {
     jdbc.queryForObject(
         "SELECT information_lock_scope(?,?) IS NULL",
         Boolean.class,
-        request.account(),
+        request.acting(),
         expected.pin().scope());
     if (expected.tiers().stream().anyMatch(Home::isGlobal) && !request.home().isGlobal())
       jdbc.queryForObject(
           "SELECT information_lock_scope(?,?) IS NULL",
           Boolean.class,
-          request.account(),
+          request.acting(),
           BuiltInIdentities.GLOBAL_KNOWLEDGE.value());
     // Source-before-provenance matches memory writes. Serialize short telemetry-bearing reads;
     // no provider IO occurs while these locks are held. Privacy evidence cannot change mid-read.
@@ -206,10 +223,10 @@ public class MemoryStore implements MemoryRepository {
             request.home().project(),
             learning,
             BuiltInIdentities.SYSTEM.value(),
-            request.account(),
-            request.account(),
+            request.acting(),
+            request.acting(),
             request.home().project(),
-            request.account(),
+            request.acting(),
             request.home().project());
     if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
       throw writeDenied();
@@ -243,11 +260,11 @@ public class MemoryStore implements MemoryRepository {
               "SELECT EXISTS(SELECT 1 FROM authority_accounts a WHERE a.id=? AND a.legacy_handle=? AND information_global_read_member(?) AND (?::text IS NOT NULL OR EXISTS(SELECT 1 FROM admins u WHERE u.handle=? AND u.enabled AND u.server_admin AND NOT u.bootstrap AND u.account_kind='USER'))) OR contained_memory_actor_allows(?,?,true)",
               Boolean.class,
               pin.account(),
-              request.account(),
-              request.account(),
+              request.acting(),
+              request.acting(),
               request.home().project(),
-              request.account(),
-              request.account(),
+              request.acting(),
+              request.acting(),
               request.home().project()))) throw writeDenied();
     }
     var learning = request.origin().learning();
@@ -287,11 +304,11 @@ public class MemoryStore implements MemoryRepository {
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
         Boolean.class);
-    if (!processing && request.account() != null)
+    if (!processing && request.acting() != null)
       jdbc.queryForObject(
           "SELECT information_lock_scope(?,?) IS NULL",
           Boolean.class,
-          request.account(),
+          request.acting(),
           pin.scope());
     else {
       jdbc.queryForList(

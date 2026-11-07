@@ -828,6 +828,37 @@ public final class JobRuntime {
   }
 
   /**
+   * Which of a run's two axes the archive is asked about: the ACTING one, always.
+   *
+   * <p>Named, and package-private, for {@link #informationActorFor}'s reason — {@code
+   * ContainedInformationActorTest} asserts this decision directly, and the alternative was a test
+   * that reproduced the rule instead of exercising it. It has exactly two callers, the {@code
+   * MemoryTools.Recall} and {@code MemoryTools.Write} bindings in {@link #offeredTo}, and each of
+   * them argues the choice at the call site.
+   *
+   * <p>It is the acting axis because the identity a memory request carries is an authority subject
+   * and nothing else. {@code MemoryStore.pin} asks {@code authority_accounts a WHERE
+   * a.legacy_handle=?} of it on the read side and {@code a.id=(SELECT id FROM authority_accounts
+   * WHERE legacy_handle=?)} on the write side, with {@code contained_memory_actor_allows(?,?,…)}
+   * (V232) as the arm beside each; {@code MemoryStore.require}'s write-authority {@code EXISTS}
+   * asks it again; and {@code BoundMemoryQueries.requireScope} and {@code
+   * BoundMemoryWrites.requireRecipient} put it to {@code PersonalSpaces.requireOwn} and {@code
+   * ScopedPermissions.allows}. Nothing books a row to it: the archive's provenance is {@code
+   * memories.formed_by}, which comes from the model's own {@code formed_by} argument, and {@code
+   * embedding_queries.account_id} takes the id the pin's SQL projects. So the attribution axis has
+   * nothing on this path to be written to, and passing it would mean deciding a contained run's
+   * memory authority about its CONTAINER while every other gate in the slice decides it about the
+   * child — which is what this used to do.
+   *
+   * <p>Null in, null out, and that is the fail-closed clause: {@link #informationActorFor} returns
+   * null for a run in a contained home whose log resolves no principal, and both bindings refuse
+   * before any archive call rather than falling back to the caller's handle.
+   */
+  static String memoryActingAxis(InformationActor actor) {
+    return actor == null ? null : actor.acting();
+  }
+
+  /**
    * The account a turn acts for: the handle it was spoken with, else the owner written on its log,
    * else the one its client session is signed in as, else none.
    *
@@ -4599,6 +4630,15 @@ public final class JobRuntime {
         continue;
       }
       if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
+      // Both of this run's information axes, named once for the four bindings that take
+      // them. This is the site where the conversation record is in hand, so it is where
+      // the decision of WHICH actor to build belongs; informationActorFor carries the
+      // two-part containment test and the fail-closed clause, and argues both.
+      //
+      // Declared before the memory bindings rather than after them because they take the
+      // ACTING axis too. See the comment on the Recall binding.
+      InformationActor informationActor =
+          informationActorFor(callerHandle, transcript.conversationId(), toolHome);
       if (tool instanceof MemoryTools.Read read && operation != null)
         tool =
             read.forRun(
@@ -4620,7 +4660,16 @@ public final class JobRuntime {
       if (tool instanceof MemoryTools.Recall recall)
         tool =
             recall.forRun(
-                callerHandle,
+                // The ACTING axis, not the container's handle. MemoryQueries.Request's only
+                // caller-supplied identity is an authority subject: MemoryStore.pin asks
+                // `authority_accounts a WHERE a.legacy_handle=?` of it and, on V232's arm,
+                // `contained_memory_actor_allows(?,?,false)`. A contained run that presented
+                // its container here would have the memory read gate decided about the
+                // container while every other gate in this slice is decided about the child.
+                // A read books nothing to any provenance column, so there is no second axis
+                // to pass. A null actor means the run resolved none and must reach no archive:
+                // the origin() guard in MemoryTools.Recall refuses a null acting principal.
+                memoryActingAxis(informationActor),
                 transcript.conversationId(),
                 () -> {
                   if (operation == null
@@ -4667,19 +4716,22 @@ public final class JobRuntime {
                     .forRun(cancelled, runInformation, callerHandle, budget, sessionId)
                     .withInputs(informationInputs, transcript.conversationId());
       }
-      // Both of this run's information axes, named once for the two bindings that take
-      // them. This is the site where the conversation record is in hand, so it is where
-      // the decision of WHICH actor to build belongs; informationActorFor carries the
-      // two-part containment test and the fail-closed clause, and argues both.
-      InformationActor informationActor =
-          informationActorFor(callerHandle, transcript.conversationId(), toolHome);
       if (tool instanceof MemoryTools.Write write)
         tool =
             write.forRun(
                 informationInputs,
                 transcript.conversationId(),
-                // A memory write's rows are accounted to the attribution axis.
-                informationActor == null ? null : informationActor.attribution(),
+                // The ACTING axis. MemoryWrites.Request's `acting` is the authority subject
+                // of MemoryStore.pin's `authority_accounts` arm, of V232's
+                // `contained_memory_actor_allows(?,?,true)` arm, of the write-authority EXISTS
+                // in MemoryStore.require and of PersonalSpaces.requireOwn plus
+                // ScopedPermissions.allows in BoundMemoryWrites.requireRecipient. It is NOT a
+                // provenance value: the archive's own provenance is memories.formed_by, which
+                // MemoryTools.Write reads from the model's `formed_by` argument, and
+                // embedding_queries.account_id takes the id MemoryStore's pin SQL projects.
+                // So this axis is the child's principal and the attribution axis has nothing
+                // on this path to be written to.
+                memoryActingAxis(informationActor),
                 () -> {
                   if (cancelled.getAsBoolean())
                     throw new IllegalStateException("Memory write run ended");

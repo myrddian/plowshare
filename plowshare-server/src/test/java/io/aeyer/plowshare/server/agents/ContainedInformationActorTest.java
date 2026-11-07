@@ -176,6 +176,21 @@ class ContainedInformationActorTest {
     // so nothing here could be presented to an authentication path as the child.
     assertEquals(PRINCIPAL, UUID.fromString(actor.acting()));
     assertNotEquals(actor.acting(), actor.attribution());
+
+    // AND WHICH AXIS THE ARCHIVE IS ASKED ABOUT. JobRuntime.memoryActingAxis is the decision the
+    // two MemoryTools bindings take, named so it can be asserted here rather than reproduced: the
+    // identity a MemoryWrites/MemoryQueries.Request carries is an authority subject -- the pins'
+    // authority_accounts arms, V232's contained_memory_actor_allows arms, and ScopedPermissions
+    // one layer above -- and not a provenance value. Until this fix wave the write binding passed
+    // attribution() and the recall binding the raw callerHandle, so the memory gate for a
+    // contained run was decided about the CONTAINER. This line is what a revert would fail.
+    assertEquals(
+        PRINCIPAL.toString(),
+        JobRuntime.memoryActingAxis(actor),
+        "the memory bindings present the child, not its container");
+    assertNull(
+        JobRuntime.memoryActingAxis(null),
+        "and a run that resolved no actor presents none, so the bindings refuse");
   }
 
   /**
@@ -193,6 +208,11 @@ class ContainedInformationActorTest {
     var actor = runtime.informationActorFor(CONTAINER, "cnv_turn", Home.of("parent"));
     assertEquals(InformationActor.of(CONTAINER), actor);
     assertTrue(actor.uncontained());
+    assertEquals(
+        CONTAINER,
+        JobRuntime.memoryActingAxis(actor),
+        "and the archive is asked about the same handle it was asked about before the split;"
+            + " MemoryActingAxisTest measures that the requests built from it are identical");
 
     assertEquals(
         InformationActor.of(CONTAINER),
@@ -305,14 +325,21 @@ class ContainedInformationActorTest {
     assertThrows(
         io.aeyer.plowshare.server.faults.CallerFault.class, () -> access.requireAudience(context));
 
-    // THE CONTAINER CANNOT RESOLVE THE SAME HOME AS ITSELF, which is the other side of the split:
-    // the uncontained branch runs PersonalSpaces.resolveAddress against a contained project name
-    // and refuses it there, before any role question. The refusal's type is that helper's and is
-    // not a CallerFault, so this asserts the refusal and not its wording -- a contained home is
-    // not an address an ordinary run has, and the branch above is the only way into it.
-    assertThrows(
-        RuntimeException.class,
-        () -> access.forRun(InformationActor.of(CONTAINER), Home.of(CHILD_PROJECT)));
+    // THE CONTAINER CANNOT RESOLVE THE SAME HOME AS ITSELF, which is the other side of the split.
+    // WHICH PREDICATE REFUSES: requireSelection, inside resolve(...), on the ROLE question --
+    // ScopedPermissions.allows, which this fixture answers false for. It is NOT PersonalSpaces:
+    // resolveAddress returns a project unchanged unless it starts with "Personal:"
+    // (PersonalSpaces:66-71) and requireOwn throws only for a "personal:" prefix (:73-77), so a
+    // "contained:" project passes both silently and the uncontained branch walks on to resolve.
+    // The message is pinned because that is the only thing distinguishing this refusal from the
+    // other CallerFaults on the same path, and because a bare RuntimeException assertion would
+    // also pass on an NPE from a fixture that stopped returning a permissions answer at all.
+    assertEquals(
+        "this account may not read the selected project's information",
+        assertThrows(
+                io.aeyer.plowshare.server.faults.CallerFault.class,
+                () -> access.forRun(InformationActor.of(CONTAINER), Home.of(CHILD_PROJECT)))
+            .getMessage());
   }
 
   /**

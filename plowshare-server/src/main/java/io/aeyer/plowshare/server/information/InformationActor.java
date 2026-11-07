@@ -46,11 +46,56 @@ public record InformationActor(String acting, String attribution) {
    * second axis has to be carried: the provenance columns' foreign keys require the container's
    * account, while the gates require the child's principal.
    *
+   * <p><strong>The principal is canonicalised to one spelling, because the gates do not agree on
+   * case.</strong> {@code contained_knowledge_actor} (V229:30) matches case-INsensitively — a
+   * {@code ~*} regex, then {@code $1::uuid}, which accepts an uppercase UUID — and {@code
+   * contained_own_home} (V229:248) likewise casts {@code $1::uuid}, so every WRITE arm and V232's
+   * memory arm admit a mixed-case spelling. {@code contained_scope_readable}'s self arm compares
+   * {@code principal.id::text=$1} case-SENSITIVELY (V223:158-160) against a column Postgres always
+   * renders lowercase, so every READ arm — V231's new reference disjunct included — refuses the
+   * same string. The net effect is fail-closed rather than an escalation, but it is a child that
+   * can write what it then cannot read, and it is reachable only because this carrier used to pass
+   * the caller's string through untouched. Lower-casing it here means one spelling reaches all of
+   * them. {@code MemoryStore}'s {@code lower(?)} projections stay as defence in depth; this does
+   * not replace them.
+   *
+   * <p>The test is {@link #UUID_SHAPE}, which is {@code contained_knowledge_actor}'s own regex
+   * character for character, and the rewrite is {@code toLowerCase(ROOT)}. Both halves of that
+   * matter. Because the shape is the gate's, a string the gate would reject is never rewritten into
+   * one it would accept — so this cannot widen admission, only make it consistent. {@link
+   * java.util.UUID#fromString} is deliberately NOT used: it accepts abbreviated forms such as
+   * {@code 1-1-1-1-1} and expands them to a full UUID, which Postgres' {@code ::uuid} cast would
+   * have refused, and that would be exactly the widening this must not do.
+   *
+   * <p>A string that does not match is left exactly as given, neither lower-cased nor rejected:
+   * {@code contained_knowledge_actor} is false for it, so it is admitted by no contained arm either
+   * way, and this record is a carrier that must not acquire a refusal of its own — {@code
+   * JobRuntime.informationActorFor} decides containment from the durable conversation record and is
+   * the only production caller.
+   *
    * @param principal the contained principal, acting
    * @param container the container's account, accountable
    */
   public static InformationActor contained(String principal, String container) {
-    return new InformationActor(principal, container);
+    return new InformationActor(canonical(principal), container);
+  }
+
+  /**
+   * {@code contained_knowledge_actor}'s guard (V229:31): the same pattern text, and {@code
+   * CASE_INSENSITIVE} for the same reason SQL spells it {@code ~*} rather than {@code ~}. Kept
+   * identical on purpose — {@link #canonical} is safe only because a string this does not match is
+   * left alone, which holds only while this accepts no more than the gate does.
+   */
+  private static final java.util.regex.Pattern UUID_SHAPE =
+      java.util.regex.Pattern.compile(
+          "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          java.util.regex.Pattern.CASE_INSENSITIVE);
+
+  /** One spelling of a UUID-shaped principal; anything else unchanged. See {@link #contained}. */
+  private static String canonical(String principal) {
+    return principal != null && UUID_SHAPE.matcher(principal).matches()
+        ? principal.toLowerCase(java.util.Locale.ROOT)
+        : principal;
   }
 
   /** Whether both axes name the same account, which is true of every production caller today. */

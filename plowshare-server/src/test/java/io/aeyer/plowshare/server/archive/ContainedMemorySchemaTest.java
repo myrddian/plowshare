@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.embedding.QuerySources;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.Properties;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
@@ -17,8 +18,15 @@ import org.testcontainers.junit.jupiter.*;
 /**
  * Real PostgreSQL, because the assertions are the behaviour of the SQL gates {@code MemoryStore}
  * puts in front of the archive: the read pin, the write pin, and the write authority behind it.
- * Each is reproduced here from the store's own statement rather than driven through the store, so
- * what is measured is the gate and not a service's handling of it.
+ *
+ * <p><strong>Two kinds of test here, and the difference is deliberate.</strong> The gate
+ * characterizations reproduce the store's statements as the constants below and ask them directly,
+ * so what is measured is the gate and not a service's handling of it. {@code
+ * aMixedCaseActorStringNeverProducesANullAccountPin} and {@code
+ * aContainedPrincipalIsStillRefusedAboveTheStore} instead drive a real {@code MemoryStore}, because
+ * what they are about is Java-side — the {@code lower(?)} in the store's own statements, the
+ * store's null-account refusals, and which principal a production binding presents — and a copy
+ * cannot regress any of it. The first of those two carries the full argument.
  *
  * <p>CHARACTERIZATION (run before any widening). Three of the eight tests that existed then failed
  * — {@code aContainedActorReadsItsOwnMemories}, {@code aContainedActorWritesItsOwnMemories} and the
@@ -76,6 +84,12 @@ class ContainedMemorySchemaTest {
    * a proposal and a protected-information flag to be reached, none of which these assertions are
    * about, and because the three statements are the gate — there is no SQL function to call
    * instead, which is how {@code ContainedActorWriteSchemaTest} avoids the same duplication.
+   *
+   * <p>That named risk is why the two tests whose subject IS the store's Java — {@code
+   * aMixedCaseActorStringNeverProducesANullAccountPin} and {@code
+   * aContainedPrincipalIsStillRefusedAboveTheStore} — do not use this constant for their load-
+   * bearing assertions. They call {@link #store()}. Nothing a copy asserts can regress Java that
+   * the copy also contains.
    */
   private static final String READ_PIN =
       """
@@ -430,15 +444,40 @@ class ContainedMemorySchemaTest {
   }
 
   /**
-   * The admission and the projection must agree about case. {@code contained_knowledge_actor}
-   * (V229:30) tests the actor with {@code ~*} and casts it with {@code ::uuid}, both
-   * case-insensitive, and {@code contained_own_home} compares UUIDs rather than text — so a
-   * mixed-case actor string for a live principal selects the arm. {@code c.id::text} renders
-   * lowercase, so a case-sensitive projection would have paired that admission with a NULL account:
-   * not a leak, since it is the same principal and its own home, but a {@code Pin} escaping this
-   * repository with a null account, whose next reader is {@code pin.account().toString()} or a NOT
-   * NULL column. {@code InformationActor.acting} is a free string validated only for non-blankness,
-   * so nothing upstream rules the case out.
+   * The admission and the projection must agree about case — asserted against {@code MemoryStore}
+   * itself, not against the copies above.
+   *
+   * <p>{@code contained_knowledge_actor} (V229:30) tests the actor with {@code ~*} and casts it
+   * with {@code ::uuid}, both case-insensitive, and {@code contained_own_home} compares UUIDs
+   * rather than text — so a mixed-case actor string for a live principal selects the arm. {@code
+   * c.id::text} renders lowercase, so a case-sensitive projection would have paired that admission
+   * with a NULL account: not a leak, since it is the same principal and its own home, but a {@code
+   * Pin} escaping the store with a null account, whose next reader is {@code
+   * pin.account().toString()} or a NOT NULL column.
+   *
+   * <p><strong>Why this one test drives the store and the other eight do not.</strong> The defect
+   * it regresses is Java-side: the {@code lower(?)} in {@code MemoryStore}'s own two pin
+   * statements. {@link #READ_PIN} and {@link #WRITE_PIN} are copies of those statements and carry
+   * their own {@code lower(?)}, so an assertion made through {@link #readPin} keeps passing when
+   * the store's is reverted — it would be measuring this file. Measured on 2026-11-08 by doing
+   * exactly that: with {@code c.id::text=?} in {@code MemoryStore} and {@code lower(?)} still here,
+   * the store-driven assertions below fail and {@link #readAdmits} still passes.
+   *
+   * <p>The store's other half of the guarantee — the {@code rows.getFirst().account() == null}
+   * clause in each of its two refusals — is NOT measured here, and cannot be: while the projection
+   * is correct an admitted row's account is never null, so deleting both clauses changes nothing
+   * this test can see (also measured, same date). It is defence in depth, not a tested behaviour.
+   *
+   * <p>The other eight tests characterize SQL gates, where the duplication buys a statement that
+   * can be asked in isolation and the store adds nothing to what is under test; this one has to ask
+   * the store.
+   *
+   * <p>Driving {@code MemoryStore.pin} is also the only production-shaped caller that presents a
+   * contained principal to V232's arm: every entry point above it — {@code
+   * BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites.requireRecipient} — asks {@code
+   * ScopedPermissions} for a project role that a {@code contained:} project grants nobody. That
+   * refusal is deliberate and is asserted, as itself, by {@link
+   * #aContainedPrincipalIsStillRefusedAboveTheStore}.
    */
   @Test
   void aMixedCaseActorStringNeverProducesANullAccountPin() {
@@ -456,16 +495,116 @@ class ContainedMemorySchemaTest {
             "SELECT contained_memory_actor_allows(?,?,false)", Boolean.class, mixed, home(scope)),
         "the arm admits case-insensitively, which is what makes the projection's case matter");
 
-    var pin = readPin(mixed, home(scope)).orElseThrow();
-    assertNotNull(pin.account(), "admitted, so the account is the principal's own and never null");
-    assertEquals(lettered, pin.account());
-    assertEquals(scope, pin.scope());
+    var store = store();
+    // THE STORE'S OWN read pin. Revert the lower(?) in MemoryStore and this raises; revert the
+    // null-account clause and the account below is null.
+    var selection = store.pin(read(mixed, home(scope)));
+    assertNotNull(
+        selection.pin().account(),
+        "admitted, so the account is the principal's own and never null");
+    assertEquals(lettered, selection.pin().account());
+    assertEquals(scope, selection.pin().scope());
+
+    // And the store's own write pin, which also runs the write authority behind it in require(...).
+    var writePin = store.pin(write(mixed, home(scope)));
+    assertEquals(lettered, writePin.account());
+    assertEquals(scope, writePin.scope());
+
+    // The refusals are unmoved by case: the store refuses a mixed-case actor every other home.
+    assertEquals(
+        "Memory query is outside live read authority",
+        assertThrows(CallerFault.class, () -> store.pin(read(mixed, "parent"))).getMessage());
+    assertEquals(
+        "Memory query is outside live read authority",
+        assertThrows(CallerFault.class, () -> store.pin(read(mixed, home(siblingScope))))
+            .getMessage());
+    assertEquals(
+        "Memory write is outside its live authority or source window",
+        assertThrows(CallerFault.class, () -> store.pin(write(mixed, "parent"))).getMessage());
+
+    // The reproduced statements agree with the store on all of it, which is what keeps the other
+    // eight tests' copies honest for this one principal.
     assertTrue(readAdmits(mixed, home(scope)));
     assertTrue(writeAdmits(mixed, home(scope)));
-
-    // And the refusals are unmoved by case: a mixed-case actor reaches no other home either.
     assertFalse(readAdmits(mixed, "parent"));
     assertFalse(readAdmits(mixed, home(siblingScope)));
+  }
+
+  /**
+   * The canonical-case child, through the store, and the refusal one layer above it.
+   *
+   * <p>The first half is V232's arm reached as production reaches it: {@code JobRuntime}'s memory
+   * bindings now pass {@code InformationActor.acting()}, so a contained run's child principal is
+   * what {@code MemoryStore.pin} is asked about. Before the acting/attribution split those bindings
+   * passed {@code attribution()} — the container's handle — and no production caller could put a
+   * contained principal into either statement.
+   *
+   * <p>The second half is the ceiling, asserted rather than assumed. {@code
+   * ScopedPermissions.allows} is what {@code BoundMemoryQueries.requireScope} and {@code
+   * BoundMemoryWrites.requireRecipient} ask, and it resolves a role from {@code project_members}; a
+   * {@code contained:} project has no member row and no {@code PROJECT} scope, so it answers false
+   * for the child AND for its container. That is why the store's own admission is not yet reachable
+   * through {@code Archive}, and widening it is an authority decision ADR 0042 does not grant — so
+   * this asserts the absence as a fact about today rather than as a defect.
+   */
+  @Test
+  void aContainedPrincipalIsStillRefusedAboveTheStore() {
+    memory(childScope, childPrincipal);
+    var store = store();
+
+    var selection = store.pin(read(childPrincipal, home(childScope)));
+    assertEquals(UUID.fromString(childPrincipal), selection.pin().account());
+    assertEquals(childScope, selection.pin().scope());
+    assertEquals(childScope, store.pin(write(childPrincipal, home(childScope))).scope());
+
+    // One layer up: the role question both Bound* entry points ask, asked here directly against
+    // the same rows. No role for the child, and none for its container either.
+    for (String actor : java.util.List.of(childPrincipal, HOLDER)) {
+      assertTrue(
+          jdbc.queryForList(
+                  "SELECT m.role FROM project_members m JOIN projects p ON p.id=m.project_id"
+                      + " WHERE p.name=? AND m.handle=?",
+                  home(childScope),
+                  actor)
+              .isEmpty(),
+          "a contained project grants no project role, which is what ScopedPermissions resolves");
+    }
+    assertTrue(
+        jdbc.queryForList(
+                "SELECT id FROM authority_scopes WHERE project_id=(SELECT id FROM projects"
+                    + " WHERE name=?) AND kind='PROJECT'",
+                home(childScope))
+            .isEmpty(),
+        "and it carries no PROJECT scope for a role to be granted on");
+  }
+
+  /** The store under test, with the privacy flag its own pins require. */
+  private MemoryStore store() {
+    var store = new MemoryStore(jdbc);
+    store.protectInformation();
+    return store;
+  }
+
+  /** A run-unbound project read: the smallest request shape {@code pin} will accept. */
+  private MemoryQueries.Request read(String actor, String project) {
+    return new MemoryQueries.Request(
+        actor,
+        io.aeyer.plowshare.protocol.Home.of(project),
+        MemoryQueries.Kind.RECALL,
+        "what is known",
+        5,
+        false,
+        new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(null, () -> {}));
+  }
+
+  /** A non-learning write: the arm under test is the one keyed on the acting principal. */
+  private MemoryWrites.Request write(String actor, String project) {
+    return new MemoryWrites.Request(
+        actor,
+        io.aeyer.plowshare.protocol.Home.of(project),
+        new io.aeyer.plowshare.protocol.MemoryProposal(
+            "fixture", "project", "body", "fixture", "fixture"),
+        MemoryWrites.Origin.request(() -> {}));
   }
 
   @Test

@@ -119,19 +119,15 @@ class InformationActorTest {
   /**
    * The seam is closed, and this is what it resolves to.
    *
-   * <p><strong>This method used to assert the opposite.</strong> It was {@code
-   * aContainedActorIsNotResolvableYet} and it pinned an {@code IllegalStateException} out of {@code
-   * forRun}, placed deliberately one slice earlier so that the unwired resolution path was visible
-   * to the compiler and the suite rather than latent. That raise is <strong>gone</strong>: {@code
-   * forRun(InformationActor, Home)} now branches to {@code InformationAccess.containedRun}, which
-   * delegates to {@link InformationAccess#contained(String, String, String)}. A reader looking for
-   * the former raise will not find one, and should not go hunting.
+   * <p>There is no longer any raise out of {@code forRun(InformationActor, Home)} for a contained
+   * actor: it branches to {@code InformationAccess.containedRun}, which delegates to {@link
+   * InformationAccess#contained(String, String, String)}.
    *
-   * <p>What is pinned instead is the resolution's four decided properties: the gates are asked
-   * about the child's principal, the rows are accounted to its container, the selection is the
-   * child's own {@code contained:} project, and {@code includeGlobal} is false — so no gate's
-   * global arm, each of which wants a credentialed general-read membership this bare principal has
-   * no row for, is ever asked for.
+   * <p>What is pinned is the resolution's four decided properties: the gates are asked about the
+   * child's principal, the rows are accounted to its container, the selection is the child's own
+   * {@code contained:} project, and {@code includeGlobal} is false — so no gate's global arm, each
+   * of which wants a credentialed general-read membership this bare principal has no row for, is
+   * ever asked for.
    *
    * <p>{@code verifyNoInteractions(members)} is kept and is now a stronger statement than it was.
    * The contained branch asks <strong>no membership question at all</strong>: it does not call
@@ -141,9 +137,9 @@ class InformationActorTest {
    * KnowledgeReadScope} supplies the ceiling and the SQL arms (V223, V229, V231, V232) supply the
    * admission. A future change that reached for a role here would fail this line.
    *
-   * <p>The home is a contained one, which the old fixture's {@code "research"} no longer is the
-   * right shape for: an ordinary project is refused by {@code contained(...)}'s own prefix test, so
-   * it is asserted beside the positive case rather than used as it.
+   * <p>The home has to be a contained one. {@code contained(...)}'s prefix test refuses an ordinary
+   * project name such as {@code "research"} outright, so that name cannot serve as the positive
+   * fixture here; it is asserted beside the positive case as the refusal it is.
    */
   @Test
   void aContainedActorResolvesWithoutAskingAboutMembership() {
@@ -163,12 +159,59 @@ class InformationActorTest {
 
     // An ordinary project home on the contained branch is refused by contained(...)'s prefix test,
     // so the branch cannot be used to resolve somebody else's project under a bare principal.
-    assertThrows(
-        CallerFault.class,
-        () -> access.forRun(actor, io.aeyer.plowshare.protocol.Home.of("research")));
+    // The MESSAGE is pinned, not just the type: containedRun raises its own CallerFault for a
+    // Global home before the project is read, and requireHome raises one too, so a type-only
+    // assertion would pass on a refusal from either of those instead of the prefix test.
+    assertEquals(
+        "A contained write names the child's own contained project",
+        assertThrows(
+                CallerFault.class,
+                () -> access.forRun(actor, io.aeyer.plowshare.protocol.Home.of("research")))
+            .getMessage());
 
     // NO MEMBERSHIP QUESTION, on either call. This is the line a future requireSelection would
     // break, and it is the property that keeps the child credential-free.
     verifyNoInteractions(members);
+  }
+
+  /**
+   * D1 — one spelling of the principal reaches every gate.
+   *
+   * <p>The gates disagree about case: {@code contained_knowledge_actor} (V229:31) matches {@code
+   * ~*} and so admits an upper-case UUID, and {@code contained_own_home} (V229:248) casts {@code
+   * $1::uuid}, while {@code contained_scope_readable}'s self arm compares {@code
+   * principal.id::text=$1} (V223:158-160) against a column Postgres renders lower-case. A
+   * mixed-case acting string was therefore admitted by every write arm and V232's memory arm and
+   * refused by every read arm. {@link InformationActor#contained} canonicalises, so the string that
+   * reaches all of them is the one {@code c.id::text} renders.
+   *
+   * <p>The lower-casing is bounded by {@code contained_knowledge_actor}'s own regex, and the two
+   * assertions below are what makes that non-vacuous rather than an assumption: a UUID-shaped
+   * string is rewritten, and a string the gate's regex rejects is returned unchanged — in
+   * particular {@code "1-1-1-1-1"}, which {@code UUID.fromString} would have expanded into a valid
+   * UUID that Postgres' {@code ::uuid} cast refuses. Expanding it would have been a widening.
+   */
+  @Test
+  void aContainedPrincipalReachesEveryGateInOneSpelling() {
+    UUID principal = UUID.randomUUID();
+    assertEquals(
+        principal.toString(),
+        InformationActor.contained(
+                principal.toString().toUpperCase(java.util.Locale.ROOT), "parent")
+            .acting(),
+        "a mixed-case UUID is canonicalised to the spelling c.id::text renders");
+    assertEquals(
+        principal.toString(),
+        InformationActor.contained(principal.toString(), "parent").acting(),
+        "and an already-canonical one is untouched");
+    // Not UUID-shaped: contained_knowledge_actor's regex is false for these, so they are admitted
+    // by no contained arm. They must come back exactly as given, which is what keeps the rewrite
+    // from accepting anything the gate would not.
+    for (String notAUuid : java.util.List.of("1-1-1-1-1", "Alice", "ABC", principal + "x")) {
+      assertEquals(notAUuid, InformationActor.contained(notAUuid, "parent").acting());
+    }
+    // The attribution axis is a handle, where case is significant, and is never rewritten.
+    assertEquals(
+        "Parent", InformationActor.contained(principal.toString(), "Parent").attribution());
   }
 }

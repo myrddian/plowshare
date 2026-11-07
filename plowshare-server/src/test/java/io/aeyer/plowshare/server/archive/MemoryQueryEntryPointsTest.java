@@ -44,9 +44,9 @@ class MemoryQueryEntryPointsTest {
     var requests = ArgumentCaptor.forClass(MemoryQueries.Request.class);
     verify(archive, times(2)).recall(requests.capture());
     var frame = requests.getAllValues().getFirst();
-    assertEquals("reader", frame.account());
+    assertEquals("reader", frame.acting());
     assertFalse(frame.runBound());
-    assertEquals("service", requests.getAllValues().getLast().account());
+    assertEquals("service", requests.getAllValues().getLast().acting());
     alive.set(false);
     assertThrows(IllegalStateException.class, frame.origin().validity()::run);
     verify(archive, never()).usage(any(), any(), any());

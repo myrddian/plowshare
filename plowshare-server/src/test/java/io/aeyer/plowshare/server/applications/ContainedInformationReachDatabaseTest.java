@@ -65,8 +65,13 @@ import org.testcontainers.junit.jupiter.*;
  * never calls {@code forRun}, because the memory path takes a {@code Home} and an author string
  * rather than an {@link InformationContext}. V232 had already opened {@link MemoryStore}'s three
  * identity statements, so the child's memory write and the predicate behind its read worked before
- * this task and work after it. <strong>This task adds nothing to the memory half</strong>, and that
- * test is kept as the regression that says so rather than as evidence of this change.
+ * this task and work after it. <strong>That task added nothing to the memory half</strong>, and
+ * that test is kept as the regression that says so rather than as evidence of this change. A later
+ * fix wave did change it: {@code JobRuntime}'s two memory bindings now pass {@code
+ * InformationActor.acting()} rather than {@code attribution()}, so the principal V232's arm admits
+ * is the one a contained run presents. The store-driven half of that is {@code
+ * ContainedMemorySchemaTest.aContainedPrincipalIsStillRefusedAboveTheStore}; the ceiling below is
+ * unchanged.
  *
  * <p>One correction to this class's own first draft, recorded because it changes what two
  * assertions mean. {@link #aContainedChildCannotSetAnAudience} and {@link
@@ -95,16 +100,29 @@ import org.testcontainers.junit.jupiter.*;
  * project carries no {@code PROJECT} scope and so grants none, to the principal or to its
  * container. Every {@code InformationCatalogue} operation that calls one of those still refuses a
  * contained context, which {@link #aContainedChildReadsAndWritesItsOwnDocuments} asserts rather
- * than leaves implied. What a contained run reaches through {@code InformationTool} today is the
- * navigation read path, which calls no such gate.
+ * than leaves implied. {@code InformationCatalogue.admit} calls {@code requireWork} as its first
+ * statement, so the catalogue write path refuses before any SQL arm is evaluated.
+ *
+ * <p><strong>Nor does the navigation path reach V231's disjunct.</strong> An earlier draft of this
+ * paragraph said a contained run reaches "the navigation read path, which calls no such gate". It
+ * calls a different one. {@code InformationTool} hands {@code actor.acting()} to {@code
+ * DocumentNavigation.execute}; its read path calls {@code repository.requireActive}, which is
+ * {@code EXISTS(SELECT 1 FROM admins WHERE handle=? AND account_active(handle) AND NOT bootstrap)}
+ * in {@code JdbcInformationNavigationRepository}, and its mutation path calls {@code
+ * repository.lockAccount} → {@code lockIdentity}'s {@code SELECT handle FROM admins ... FOR SHARE}.
+ * A contained principal has no {@code admins} row (V218), so every navigation operation a contained
+ * run issues is refused there, before V231's new disjunct is evaluated. That disjunct is reachable
+ * only from a direct repository call, which is what the tests here make. So: the actor is wired and
+ * resolves correctly, the repository and store layer is open to it, and no production surface above
+ * those layers admits it.
  *
  * <p><strong>The memory half is proved at the store and nowhere above it.</strong> {@link
  * #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore} and V232's predicate
- * directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites} ask
- * the same {@link ScopedPermissions} question as the information service gates, with no containment
- * awareness, so a contained principal is refused there — asserted in that test as the SQL fact the
- * refusal rests on. Whether those two layers should admit a contained principal is an open
- * authority decision and is not this task's to make.
+ * directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code
+ * BoundMemoryWrites.requireRecipient} ask the same {@link ScopedPermissions} question as the
+ * information service gates, with no containment awareness, so a contained principal is refused
+ * there — asserted in that test as the SQL fact the refusal rests on. Whether those two layers
+ * should admit a contained principal is an open authority decision and is not this task's to make.
  */
 @Tag("full-db")
 @Testcontainers

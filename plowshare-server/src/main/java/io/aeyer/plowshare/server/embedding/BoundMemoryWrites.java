@@ -199,8 +199,8 @@ public final class BoundMemoryWrites implements MemoryWrites {
       request.origin().authority().run();
       if (!request.home().isGlobal()) {
         io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(
-            request.home().project(), request.account());
-        var principal = new ScopedPermissions.Principal(request.account());
+            request.home().project(), request.acting());
+        var principal = new ScopedPermissions.Principal(request.acting());
         var target = new ScopedPermissions.ProjectTarget(request.home().project());
         if (!permissions.allows(principal, target, ScopedPermissions.Action.READ)
             || !permissions.allows(principal, target, ScopedPermissions.Action.WRITE))
