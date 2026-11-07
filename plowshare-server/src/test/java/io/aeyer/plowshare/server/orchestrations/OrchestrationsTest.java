@@ -15,8 +15,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.CommandRunner;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.ApplicationGrantLineage;
+import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.JdbcIdentityRepository;
+import io.aeyer.plowshare.server.access.JdbcOperationRecords;
+import io.aeyer.plowshare.server.access.JdbcResourceScopeRepository;
+import io.aeyer.plowshare.server.access.JdbcScopedGrantRepository;
+import io.aeyer.plowshare.server.access.LiveScopedAuthority;
+import io.aeyer.plowshare.server.access.PinnedOperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.Commands;
@@ -39,14 +48,17 @@ import io.aeyer.plowshare.server.agents.StructuredQuestions;
 import io.aeyer.plowshare.server.agents.StudioTools;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.events.AccountPushes;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.hooks.Gate;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
 import io.aeyer.plowshare.server.todos.LockedMoves;
@@ -68,8 +80,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -329,6 +343,84 @@ class OrchestrationsTest {
     assertEquals(announced, changes.size());
     org.mockito.Mockito.verify(logs, org.mockito.Mockito.times(1))
         .opened(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void a_person_chat_launches_once_under_its_admitted_turn_and_retains_the_grant_fence() {
+    Home home = Home.of("story");
+    var chat = conversations.open(home, Budget.of(5), null, "enzo");
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role)"
+            + " SELECT id,'enzo','CONTRIBUTOR' FROM projects WHERE name=?",
+        home.project());
+    var identities = new JdbcIdentityRepository(jdbc);
+    var grants = new JdbcScopedGrantRepository(jdbc);
+    ApplicationPolicy applications =
+        ignored -> new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of());
+    var records = new JdbcOperationRecords(jdbc);
+    var operations =
+        new PinnedOperationAuthority(
+            identities,
+            grants,
+            new LiveScopedAuthority(
+                grants,
+                applications,
+                new ApplicationGrantLineage(grants, applications),
+                identities),
+            new JdbcProjectMembers(jdbc),
+            records,
+            new JdbcResourceScopeRepository(jdbc));
+    var turn =
+        operations.admit(
+            "enzo",
+            operations.scope(home),
+            Set.of(
+                AuthorityAction.READ,
+                AuthorityAction.WRITE,
+                AuthorityAction.RUN_MODEL,
+                AuthorityAction.CONVERSATION_CREATE));
+    var engine =
+        new Orchestrations(
+            store,
+            conversations,
+            seeding,
+            todos,
+            work,
+            voice,
+            delivery,
+            TOOLS,
+            UnaryOperator.identity(),
+            session -> true,
+            () -> T0,
+            changes::add,
+            cancelledJobs::add,
+            MAX_DEPTH,
+            mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
+            new JdbcOrchestrationRecovery(jdbc, work),
+            new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc),
+            operations,
+            new JdbcAllowanceRepository(jdbc));
+    var request = start(chat.id(), "enzo");
+    var key = UUID.randomUUID();
+    String payload = "{\"request\":\"build the login page\"}";
+    assertTrue(operations.conversation(chat.id()).isEmpty());
+    assertThrows(CallerFault.class, () -> engine.start(request));
+
+    var launched = engine.startFromRun(request, turn, key, payload);
+    var retained = operations.conversation(launched.conductorConversation()).orElseThrow();
+    assertEquals(chat.id(), launched.callerConversation());
+    assertEquals(chat.id(), retained.parent());
+    assertEquals(Optional.of(turn.id()), records.parent(retained.admission().id()));
+    assertFalse(chat.budget().snapshot().id().equals(retained.budget()));
+    assertTrue(operations.conversation(chat.id()).isEmpty());
+    assertEquals(launched.id(), engine.startFromRun(request, turn, key, payload).id());
+    assertEquals(1, voice.calls.size());
+
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='enzo' AND project_id=(SELECT id FROM projects WHERE name=?)",
+        home.project());
+    assertThrows(CallerFault.class, () -> engine.startFromRun(request, turn, key, payload));
+    assertEquals(1, voice.calls.size());
   }
 
   @Test
