@@ -16,7 +16,6 @@ import java.util.Properties;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -64,19 +63,24 @@ import org.testcontainers.junit.jupiter.*;
  *       nothing on the portable-import path asked about the acting principal at all.
  * </ul>
  *
- * <p>WHAT THAT DECIDED. The guard was added where the characterization showed a write admitted
- * (interchange) and where the only thing refusing was a provenance column's foreign key into {@code
- * admins} (acquisition, content). The latter two are refusals the catalogue repository's own
- * reasoning already calls insufficient for {@code link} — a server fault for a caller's act — and
- * they would evaporate the moment those columns were written from {@code attribution()}, which is
- * exactly the change the catalogue's provenance columns have already had. Navigation and projection
- * got no guard and a Javadoc sentence instead, because each refuses on a predicate of its own that
- * runs before any write: {@code lockIdentity} and the write-gate reservation. A second refusal in
- * front of a sound one is a second thing to keep in step.
+ * <p>WHAT THAT DECIDED. Four of the five got the guard: the one that admitted outright
+ * (interchange), and the three whose only refusal was a foreign key reached from a column written
+ * off the <em>acting</em> axis (acquisition, content, projection). The catalogue repository's own
+ * reasoning already calls that shape insufficient for {@code link} — a server fault for a caller's
+ * act — and it evaporates the moment such a column is written from {@code attribution()}, which is
+ * exactly the change the catalogue's provenance columns have already had. Projection's is the
+ * clearest case rather than the exception: a contained run's write gate is the natural thing for
+ * the container's account to hold, so that move is likely rather than hypothetical, and {@code
+ * capture}'s own {@code requireWrite} had already admitted the child.
  *
- * <p>So the assertions below are asymmetric on purpose. Three name the guard's exact message; two
- * name the refusal that was already there, and failing them means that refusal has moved and the
- * repository now needs the guard.
+ * <p>Navigation alone got no guard, and a Javadoc paragraph instead. {@code lockIdentity} is its
+ * mutators' first statement, asks about the acting principal, and answers as a caller-visible
+ * {@code NotFoundFault} — an authority predicate, which cannot evaporate the way a foreign key can.
+ * A second refusal in front of a sound one is a second thing to keep in step.
+ *
+ * <p>So the assertions below are asymmetric on purpose. Four name the guard's exact message; the
+ * navigation one names the refusal that was already there, and failing it means that refusal has
+ * moved and the repository now needs the guard too.
  *
  * <p>Not covered here: whether the service layer above these repositories would have refused a
  * contained actor earlier. It is still unverified, and these are the repositories' own contracts.
@@ -270,22 +274,19 @@ class ContainedActorWriteReachDatabaseTest {
   void projectionRefusesAContainedActorsWrite() {
     var document = admit(contained(), "child-projected.md");
 
-    // No guard here either: a preparation exists only for a command this account reserved, and a
-    // contained principal can hold no write gate because that table's account is an admins handle.
     var refused =
         assertThrows(
-            DataIntegrityViolationException.class,
+            CallerFault.class,
             () ->
                 work.inTransaction(
                     () ->
                         projection.prepare(
                             contained(), UUID.randomUUID(), document.revision(), null, Map.of())));
-    assertTrue(
-        refused
-            .getMostSpecificCause()
-            .getMessage()
-            .contains("information_reuse_preparations_actor_request_id_fkey"),
-        refused.getMostSpecificCause().getMessage());
+    assertEquals(CONFINED + "prepare a metadata revision", refused.getMessage());
+    assertEquals(
+        0,
+        jdbc.queryForObject("SELECT count(*) FROM information_reuse_preparations", Integer.class),
+        "and no preparation was retained");
   }
 
   @Test

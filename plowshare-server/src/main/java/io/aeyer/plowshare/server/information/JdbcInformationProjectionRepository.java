@@ -21,11 +21,13 @@ public final class JdbcInformationProjectionRepository implements InformationPro
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .build();
   private final JdbcTemplate jdbc;
+  private final ContainedActorGuard contained;
   private final InformationContentRepository content;
 
   public JdbcInformationProjectionRepository(
       JdbcTemplate jdbc, InformationContentRepository content) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.contained = new ContainedActorGuard(jdbc);
     this.content = Objects.requireNonNull(content);
   }
 
@@ -276,25 +278,34 @@ public final class JdbcInformationProjectionRepository implements InformationPro
   }
 
   /**
-   * Retains the exact reuse plan an approved request will copy from.
+   * Retains the exact reuse plan an approved request will copy from, and refuses a confined
+   * Application first.
    *
-   * <p><strong>Why this repository carries no contained-actor guard.</strong> Every preparation is
-   * a row in {@code information_reuse_preparations}, whose composite foreign key {@code
-   * information_reuse_preparations_actor_request_id_fkey} targets {@code
-   * information_write_gates(account, request_id)} — so a preparation exists only for a command that
-   * account actually reserved, and {@code information_write_gates.account} is itself a foreign key
-   * into {@code admins} (V83:352), where a confined Application's principal has no row by design
-   * (V218). Characterized against real PostgreSQL by {@code ContainedActorWriteReachDatabaseTest},
-   * a contained actor reached exactly that constraint and was refused by it; {@code capture} ahead
-   * of it only locks and reads, so nothing had been written. {@link #copy} is reachable only with a
-   * {@code Prepared} this method produced, so the same reservation fence stands in front of it.
-   * That is a lifecycle fence on the reservation key rather than a provenance column's accident,
-   * which is why {@code ContainedActorGuard} is deliberately not called in front of it.
+   * <p><strong>Characterized before the guard existed.</strong> Driven directly by {@code
+   * ContainedActorWriteReachDatabaseTest}, a contained actor got all the way to the insert: {@code
+   * capture}'s own authority predicate, {@code content.requireWrite}, <em>admitted</em> it, because
+   * V229's write arm opens {@code information_lock_knowledge} for a contained principal in its own
+   * home. The only thing that refused was {@code
+   * information_reuse_preparations_actor_request_id_fkey}, whose composite key targets {@code
+   * information_write_gates(account, request_id)} and so resolves to {@code
+   * information_write_gates.account}'s own foreign key into {@code admins} (V83:352), where a
+   * confined Application's principal has no row by design (V218) — a {@code
+   * DataIntegrityViolationException}, which is a server fault for something a caller did.
    *
-   * <p>It does leave the refusal a {@code DataIntegrityViolationException} — a server fault for
-   * something a caller did — which is the same ordering the catalogue repository's command
-   * reservation already has and is recorded in {@code ContainedActorGuard} rather than patched
-   * here.
+   * <p><strong>That refusal is not a reason to omit the guard.</strong> The row's {@code actor} is
+   * written from {@code context.account()}, the acting axis, so the refusal is the same incidental
+   * shape as the provenance columns guarded in {@code JdbcAcquisitionRepository} and {@code
+   * JdbcInformationContentRepository} — and here the argument is stronger, not weaker: a contained
+   * run's write gate is the natural thing for the <em>container's</em> account to hold, since the
+   * container is the accountable party, so moving these columns onto the attribution axis is a
+   * likely later change rather than a hypothetical one. After it, this method would admit with no
+   * authority check anywhere on its path. The catalogue repository records a command reservation
+   * refusing ahead of its own guard as a caveat and still guards all twelve mutators; this follows
+   * that, not the caveat.
+   *
+   * <p>{@link #copy} needs no guard of its own: it is reachable only with a {@code Prepared} this
+   * method produced, from {@code InformationCatalogue.reviseMetadata}, which calls {@code prepare}
+   * earlier in the same flow.
    */
   @Override
   public Prepared prepare(
@@ -303,6 +314,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
       UUID revision,
       InformationContent.Binding binding,
       Map<String, String> configuration) {
+    contained.requireUncontained(context, "prepare a metadata revision");
     var retained =
         jdbc.query(
             "SELECT payload FROM information_reuse_preparations WHERE actor=? AND request_id=?",

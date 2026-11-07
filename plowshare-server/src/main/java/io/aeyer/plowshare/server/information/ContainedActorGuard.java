@@ -17,9 +17,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <p><strong>Why a refusal and not the attribution axis.</strong> Nothing has decided that a
  * confined Application may link a document into another project, publish one, withdraw one, retry
  * or rebuild processing, set an allowance, cancel work, record evidence, finalise a report, change
- * a document's tags or tag groups, queue a URL for acquisition, authorise processing stages, or
- * import a portable bundle. V229 admits a contained principal into {@code lockResource} and the
- * readability predicates for its own home, so it can genuinely arrive at every one of them.
+ * a document's tags or tag groups, queue a URL for acquisition, authorise processing stages,
+ * prepare a metadata revision, or import a portable bundle. V229 admits a contained principal into
+ * {@code lockResource} and the readability predicates for its own home, so it can genuinely arrive
+ * at every one of them.
  *
  * <p>{@code link} alone would fail on integrity rather than on authority: it writes {@code
  * information_links.actor_handle}, whose foreign key targets {@code admins} (V83:77) and which a
@@ -54,14 +55,20 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <ul>
  *   <li>{@code replaceTags(Resource, …)} takes no context, so the criterion does not reach it. It
  *       is guarded anyway, from the context its caller holds.
- *   <li>{@code JdbcInformationNavigationRepository} and {@code JdbcInformationProjectionRepository}
- *       carry no call to this guard, because each already refuses a contained actor on a predicate
- *       of its own that runs before any write — {@code lockIdentity} and the write-gate reservation
- *       respectively. {@code ContainedActorWriteReachDatabaseTest} records what each one actually
- *       did and holds the assertions that keep those refusals in place; a second refusal in front
- *       of a sound one is a second thing to keep in step.
- *   <li>A mutator added without a guard is caught only by that test gaining a row for it, which is
- *       the same enumeration and not an independent check.
+ *   <li>{@code JdbcInformationNavigationRepository} carries no call to this guard, because {@code
+ *       lockIdentity} is its mutators' first statement and already refuses the acting principal on
+ *       an {@code admins} row it cannot have, as a caller-visible {@code NotFoundFault}, before any
+ *       write. That is an authority predicate about the acting axis, which cannot evaporate the way
+ *       a provenance column's foreign key can; a second refusal in front of a sound one is a second
+ *       thing to keep in step. {@code ContainedActorWriteReachDatabaseTest} records what every
+ *       sibling repository actually did before any of them was guarded, and holds the assertions
+ *       that keep that one refusal in place.
+ *   <li>A mutator added without a guard is caught only by an enumeration gaining a row for it —
+ *       {@code ContainedExecutionWriteDatabaseTest} for this package's catalogue mutators, {@code
+ *       ContainedActorWriteReachDatabaseTest} for the sibling repositories — which is the same
+ *       hand-maintained criterion as the guarded set itself and not an independent check. Neither
+ *       test replaces the other: the first holds a row per catalogue mutator, the second one test
+ *       per sibling repository.
  * </ul>
  *
  * <p>A structural alternative exists and is not built here: every mutator in the catalogue
