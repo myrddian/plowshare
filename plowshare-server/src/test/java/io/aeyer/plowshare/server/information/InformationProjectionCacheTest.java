@@ -9,6 +9,7 @@ import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.cache.SnapshotCache;
 import java.sql.ResultSet;
 import java.time.Clock;
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -255,5 +256,38 @@ class InformationProjectionCacheTest {
     assertTrue(scalarSql.isEmpty());
     assertEquals(1, metadataSql.size());
     assertEquals(1, textSql.size());
+  }
+
+  @Test
+  void readinessCacheCanWeighAndRetainCompletedExtractionTimestamps() throws Exception {
+    var readiness = new RecordingCache<Map<UUID, InformationCatalogueRepository.ExtractionState>>();
+    var cached =
+        new JdbcInformationCatalogueRepository(
+            jdbc,
+            Clock.systemUTC(),
+            mock(AllowanceRepository.class),
+            metadata,
+            text,
+            ProjectionCache.direct(),
+            ProjectionCache.direct(),
+            readiness,
+            new RecordedInformationEvents());
+    var row = mock(ResultSet.class);
+    var started = OffsetDateTime.parse("2026-10-01T12:00:00Z");
+    var finished = started.plusSeconds(1);
+    when(row.getObject("id", UUID.class)).thenReturn(revision);
+    when(row.getLong("generation")).thenReturn(1L);
+    when(row.getString("stage")).thenReturn("extract");
+    when(row.getString("state")).thenReturn("ready");
+    when(row.getObject("started_at", OffsetDateTime.class)).thenReturn(started);
+    when(row.getObject("finished_at", OffsetDateTime.class)).thenReturn(finished);
+    when(jdbc.query(anyString(), ArgumentMatchers.<RowMapper<Object>>any(), any(Object[].class)))
+        .thenAnswer(call -> List.of(call.<RowMapper<Object>>getArgument(1).mapRow(row, 0)));
+
+    var first = cached.extractionStates(context, List.of(revision));
+    assertEquals(started.toInstant(), first.get(revision).extraction().startedAt());
+    assertEquals(finished.toInstant(), first.get(revision).extraction().finishedAt());
+    assertSame(first, cached.extractionStates(context, List.of(revision)));
+    assertEquals(1, readiness.bounded);
   }
 }
