@@ -362,12 +362,14 @@ class ContainedInformationReachDatabaseTest {
    * <p>V232 gave {@link MemoryStore}'s three identity statements a contained arm, and this drives
    * the store and that predicate. The last block is the layer above: {@code
    * BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites} ask {@link ScopedPermissions}
-   * about {@code request.account()}, which for a contained run is the principal, and the answer is
-   * read from {@code authority_project_role} — asserted null here. So a contained child's memory
-   * read or write <em>through those entry points</em> is refused, and nothing in this task changes
-   * that. Driving them to observe the refusal would need a {@code QueryEmbeddings.Origin}, an
-   * embedding pool and a {@code MemoryProposal}, none of which this assertion is about; the SQL
-   * fact the refusal rests on is the thing a later change would have to move.
+   * about {@code request.acting()}, which for a contained run is the principal, and the answer is
+   * read from {@code authority_project_role} — asserted null here, and still null. That answer was
+   * the whole gate when this was written; it is now one of two arms, because those entry points
+   * consult {@code ContainedHomes} first. The SQL fact was indeed "the thing a later change would
+   * have to move", and the change went around it rather than through it: the role answer is
+   * untouched and the admission comes from containment. {@code ContainedMemoryGateTest} drives the
+   * dispatch with a zero limit, which is what avoids the embedding pool this assertion could not
+   * stand up.
    */
   @Test
   void aContainedChildReadsAndWritesItsOwnMemories() {
@@ -404,13 +406,17 @@ class ContainedInformationReachDatabaseTest {
             second.project()),
         "and not a sibling's, which is what makes the arm a confinement and not an opening");
 
-    // THE LAYER ABOVE THE STORE, which has no containment awareness and is not opened here.
+    // THE SQL FACT THE OLD REFUSAL RESTED ON. Still false, and still worth asserting — but no
+    // longer the whole gate: BoundMemoryQueries.requireScope and BoundMemoryWrites.
+    // requireRecipient now consult ContainedHomes as a disjunct before asking this, so a contained
+    // principal reaches its own home while this answer stays exactly as it was.
     assertFalse(
         permissions.allows(
             new ScopedPermissions.Principal(first.principal()),
             new ScopedPermissions.ProjectTarget(first.project()),
             ScopedPermissions.Action.READ),
-        "so BoundMemoryQueries.requireScope refuses a contained principal");
+        "and no role appears for a contained principal, which is what the dispatch routes around"
+            + " rather than changes");
     assertFalse(
         permissions.allows(
             new ScopedPermissions.Principal(first.principal()),

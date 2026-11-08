@@ -33,6 +33,21 @@ public interface ContainedHomes {
   boolean ownsHome(String actingPrincipal, String project);
 
   /**
+   * {@link #ownsHome} behind the cheap test that keeps it off the ordinary path.
+   *
+   * <p>Only a {@code contained:} project can be a contained home, so for every other name the
+   * answer is false without a query. Every gate calls this rather than {@link #ownsHome} directly:
+   * each one is reached by every ordinary request, and the first version of the information gate
+   * put a round trip on that path for an answer it could not change. Keeping the guard here is what
+   * stops the next gate repeating it.
+   */
+  default boolean ownsContainedHome(String actingPrincipal, String project) {
+    if (project == null || !io.aeyer.plowshare.protocol.ContainedProjects.name(project))
+      return false;
+    return ownsHome(actingPrincipal, project);
+  }
+
+  /**
    * The fail-closed default, for compositions with no containment source wired.
    *
    * <p>With this in place every contained principal is refused at the gates exactly as it was

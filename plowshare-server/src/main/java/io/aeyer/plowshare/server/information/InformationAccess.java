@@ -455,15 +455,10 @@ public final class InformationAccess {
    * contained actor and never SET_AUDIENCE.
    */
   private boolean ownsSelectedHome(InformationContext context) {
-    String project = context.selection().project();
-    // A prefix test before the query, and it is not an optimisation to be tidied away: every
-    // ordinary run reaches these gates, and asking the containment source first put one round trip
-    // on that path for an answer it could not change. Only a `contained:` project can be a
-    // contained home, so `contained_own_home` would have returned NULL for every other name
-    // anyway. InformationFeatureConfigTest pins the no-database property this restores.
-    if (project == null || !io.aeyer.plowshare.protocol.ContainedProjects.name(project))
-      return false;
-    return containedHomes.ownsHome(context.acting(), project);
+    // ownsContainedHome, not ownsHome: the prefix guard that keeps this off the ordinary path lives
+    // on the contract so the memory gates share it rather than restate it.
+    // InformationFeatureConfigTest pins the no-database property it preserves.
+    return containedHomes.ownsContainedHome(context.acting(), context.selection().project());
   }
 
   /** Content WRITE does not grant permission to change an existing resource's audience. */
