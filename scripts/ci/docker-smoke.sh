@@ -55,10 +55,24 @@ export PLOWSHARE_PASSWORD_FILE="$PLOWSHARE_STATE_ROOT/secrets/admin-password"
 export PLOWSHARE_NEXT_PASSWORD_FILE="$PLOWSHARE_STATE_ROOT/secrets/changed-password"
 export PLOWSHARE_CI_EXPECT_FIXTURES=true
 node scripts/ci/runtime-smoke.mjs --initial
-expected=$(python3 -c 'import pathlib; print(len(list(pathlib.Path("plowshare-server/src/main/resources/db/migration").glob("V*__*.sql"))))')
-sql="select count(*) from flyway_schema_history where success; select count(*) from flyway_schema_history where not success; select count(*) from search_providers; select count(*) from admins where handle='admin' and not must_change_password;"
+expected_scripts=$(python3 - <<'PY'
+from pathlib import Path
+
+def version(path):
+    return int(path.name[1:].split('__', 1)[0])
+
+db = Path('plowshare-server/src/main/resources/db')
+baseline = max((db / 'baseline').glob('B*__*.sql'), key=version)
+print(baseline.name)
+for migration in sorted((db / 'migration').glob('V*__*.sql'), key=version):
+    if version(migration) > version(baseline):
+        print(migration.name)
+PY
+)
+expected=$(printf '%s\n' "$expected_scripts" | awk 'END {print NR}')
+sql="select script from flyway_schema_history where success order by installed_rank; select count(*) from flyway_schema_history where not success; select count(*) from search_providers; select count(*) from admins where handle='admin' and not must_change_password;"
 before=$(compose exec -T postgres psql -U plowshare -d plowshare -Atc "$sql")
-test "$before" = "$(printf '%s\n0\n1\n1' "$expected")"
+test "$before" = "$(printf '%s\n0\n1\n1' "$expected_scripts")"
 compose exec -T server sh -c 'printf persistence-ok > /var/lib/plowshare/.ci-persistence'
 compose up -d --no-build --force-recreate --wait --wait-timeout 240
 after=$(compose exec -T postgres psql -U plowshare -d plowshare -Atc "$sql")
