@@ -8,6 +8,7 @@ import type {
 } from 'plowshare-client-ts/operations/relay';
 import { replyState } from '../shared.ts';
 import type { DesktopState } from '../shared.ts';
+import { applicationRelayScopeKey, readRelayScope } from './application-hub.ts';
 import { background } from './events.ts';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 const scope = document.querySelector<HTMLSelectElement>('#relay-scope')!;
@@ -17,6 +18,7 @@ let state: DesktopState;
 let page: RelayReplies['relay.log'] | undefined;
 let generation = 0;
 let identity = '';
+let appliedRelayAt = 0;
 let snapshotValid = false;
 let operating = false;
 function disableControls() {
@@ -457,13 +459,40 @@ function update(next: DesktopState) {
     scope.add(new Option(project.name, project.name));
   if (state.serverAdmin)
     scope.add(new Option('Server system topics (administrator)', ':system:'));
-  if ([...scope.options].some((option) => option.value === previous))
+  // A newer hub binding wins once, then the operator's own scope choice sticks.
+  const binding = readRelayScope();
+  const bound =
+    binding &&
+    binding.at > appliedRelayAt &&
+    [...scope.options].some((option) => option.value === binding.project)
+      ? binding
+      : undefined;
+  if (bound) {
+    appliedRelayAt = bound.at;
+    scope.value = bound.project;
+  } else if ([...scope.options].some((option) => option.value === previous))
     scope.value = previous;
   if (state.mode === 'live' && state.connected) {
     clearSnapshot('Loading retained events…');
     background(topics());
   }
 }
+window.addEventListener('storage', (event) => {
+  if (event.key !== applicationRelayScopeKey || !event.newValue) return;
+  const binding = readRelayScope();
+  if (
+    !binding ||
+    binding.at <= appliedRelayAt ||
+    ![...scope.options].some((option) => option.value === binding.project)
+  )
+    return;
+  appliedRelayAt = binding.at;
+  if (scope.value === binding.project) return;
+  scope.value = binding.project;
+  topic.replaceChildren();
+  clearSnapshot('Loading topics for this scope…');
+  background(topics());
+});
 scope.addEventListener('change', () => {
   topic.replaceChildren();
   clearSnapshot('Loading topics for this scope…');

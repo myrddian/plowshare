@@ -185,8 +185,8 @@ rename/remove and recovery behavior.
 
 ## Deploy an Application
 
-Desktop offers **Deploy** beside Applications for connected server administrators.
-Choose a folder containing `plowshare.json`, enter the project and explicit server
+Connected server administrators open **Server administration** and choose
+**Deploy**. Choose a folder containing `plowshare.json`, enter the project and explicit server
 FileStore destination, and read deployment status before submitting. The CLI
 provides `application deploy ./folder '<deployment JSON>'`. Server resource loading
 continues after the client closes. Updates retain project identity and its durable

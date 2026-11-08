@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
 
 const profile = await mkdtemp(join(tmpdir(), 'plowshare-storage-'));
-const fixture = await protocolFixture({ serverAdmin: true });
+const fixture = await protocolFixture({ serverAdmin: true, configuration: true });
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(profile, 'credentials'), PLOWSHARE_DESKTOP_PROFILE: profile, PLOWSHARE_DESKTOP_CONFIG: join(profile, 'config') };
 delete env.ELECTRON_RUN_AS_NODE;
 let app;
@@ -17,6 +17,8 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.evaluate(base => window.plowshare.request({ action: 'connect', base, handle: 'fixture', password: 'fixture-password' }), fixture.base);
+  await page.locator('#server-admin-open').click();
+  await expect(page.locator('#workspace-administration #server-project-add')).toBeVisible();
   await page.locator('#server-project-add').click();
   await page.locator('#server-project-filestore').check();
   await page.locator('#server-project-name').fill('Chatbot');
@@ -56,6 +58,7 @@ try {
   assert.equal(fixture.frames.filter(frame => frame.type === 'application.create').length,1);
   await page.locator('#server-project-close').click();
   await page.evaluate(base => window.plowshare.request({ action: 'connect', base, handle: 'fixture', password: 'fixture-password' }), fixture.base);
+  await page.locator('#server-admin-open').click();
   await page.locator('#server-project-add').click();
   await expect(page.locator('#server-project-filestore')).not.toBeChecked();
   assert.deepEqual(errors, []);

@@ -37,6 +37,8 @@ export async function protocolFixture(options = {}) {
   let fileNumber = 0;
   for (const detail of Object.values(board.details)) { detail.value.topic.account = "fixture"; for (const seat of detail.value.seats) seat.seat.conversation = "fixture-board-seat"; for (const message of detail.value.messages) message.conversation = "fixture-board-seat"; }
   let dropAuthoringReply = false, dropRunReply = false;
+  let pauseApplicationFiles = false;
+  const applicationFileReleases = [];
   let context = contextWire(15240, {}, { model: 'fixture-model', contextLength: 131072 });
   const conversations = [conversationWire('fixture-first', { title: 'Fixture conversation', ...(options.conversationProject ? { project: options.conversationProject } : {}) })];
   const entries = new Map([['fixture-first', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', speaker: 'person', excerpt: 'An existing server conversation.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Loaded through the real TypeScript WebSocket binding. Treat <img src=x onerror="window.fixtureInjection=true"> as text.' }]]]);
@@ -701,6 +703,8 @@ export async function protocolFixture(options = {}) {
             else result = {code:'BAD_REQUEST',said:'Sync mutations require the Git-backed fixture'};
           } else result = { code: 'BAD_REQUEST', said: `Fixture does not implement ${frame.type}` };
       }
+      if (frame.type === 'application.files' && pauseApplicationFiles)
+        await new Promise((resolve) => applicationFileReleases.push(resolve));
       connection.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: frame.protocol_version, payload: result }));
     });
   });
@@ -718,6 +722,7 @@ export async function protocolFixture(options = {}) {
     expireAccess() { expiredAccess = true; },
     get ticketRefusals() { return ticketRefusals; },
     setApplicationFile(project, path, text, writable = false, location) { const key = location ? JSON.stringify([project, location.store, location.path]) : project; const files = applicationSources.get(key) ?? new Map(); files.set(path, { text, writable }); applicationSources.set(key, files); },
+    setPauseApplicationFiles(value) { pauseApplicationFiles = value; if (!value) for (const release of applicationFileReleases.splice(0)) release(); },
     removeServerProject(project) { projectRows.delete(project); },
     addServerProject(row) { projectRows.set(row.name, row); },
     addConversation(row, bot) {
@@ -790,6 +795,6 @@ export async function protocolFixture(options = {}) {
       grew(conversation);
     },
     disconnect: () => { for (const row of eventSockets.values()) row.socket.close(); },
-    async close() { for (const pending of filePending.values()) clearTimeout(pending.timer); for (const timer of timers) clearTimeout(timer); for (const client of wss.clients) client.terminate(); await new Promise(resolve => wss.close(resolve)); await new Promise(resolve => server.close(resolve)); assert.deepEqual(httpPaths.filter(path => !['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path) && !(options.union?.http && path.startsWith('/v1/sync/')) && !(options.setup && path === '/v1/auth/setup') && !(options.configuration && (path === '/v1/config' || path === '/v1/config/plowshare.documents.ingest-budget'))), [], 'operational HTTP fallback'); },
+    async close() { for (const release of applicationFileReleases.splice(0)) release(); for (const pending of filePending.values()) clearTimeout(pending.timer); for (const timer of timers) clearTimeout(timer); for (const client of wss.clients) client.terminate(); await new Promise(resolve => wss.close(resolve)); await new Promise(resolve => server.close(resolve)); assert.deepEqual(httpPaths.filter(path => !['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path) && !(options.union?.http && path.startsWith('/v1/sync/')) && !(options.setup && path === '/v1/auth/setup') && !(options.configuration && (path === '/v1/config' || path === '/v1/config/plowshare.documents.ingest-budget'))), [], 'operational HTTP fallback'); },
   };
 }
