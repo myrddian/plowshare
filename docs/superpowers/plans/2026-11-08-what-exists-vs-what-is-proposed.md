@@ -81,7 +81,7 @@ the role question, so every ordinary decision is bit-for-bit the one it was.
 | `21f51929` | The information service's `requireSelection` (READ) and `requireWork` (WRITE) | A new narrow contract, `ContainedHomes`, dispatched before the role gate. A `contained:` prefix guard on the contract keeps the gates off the database on the ordinary path. |
 | `1e6ac271` | Navigation **reads** | `requireActive` asks `admins` first and unchanged, then `contained_knowledge_actor`. Existence is liveness for a contained principal (V218 has no revocation column). |
 | `783379a6` | Both bound memory gates | The same `ContainedHomes` contract. One arm covers READ and WRITE together, because V229 and V232 both admit a contained actor in its own home. |
-| `3a8d9f40` | Navigation **relationship writes** (`create`, `remove`) | `lockIdentity` takes the `InformationContext` and tells the two axes apart: liveness off `acting()`, the share lock and `information_relationships.actor` off `attribution()`. |
+| `0130aea2` | Navigation **relationship writes** (`create`, `remove`) | `lockIdentity` takes the `InformationContext` and tells the two axes apart: liveness off `acting()`, the share lock and `information_relationships.actor` off `attribution()`. |
 
 **Still refused, deliberately:** `requireAudience` / `SET_AUDIENCE`; the three
 repositories behind `ContainedActorGuard` (projection, acquisition, content); and
