@@ -152,6 +152,12 @@ data is not automatically a valid rollback. Use a known compatible code/database
 journal backup set. Reclaimed acknowledged journal segments cannot reconstruct
 a database restored to an earlier watermark.
 
+On an empty database, normal server startup applies the cumulative baseline in
+`db/baseline` and any newer versioned migrations. A database with Flyway history
+continues through `db/migration`. Historical migration tests use `db/migration`
+alone so they can create schemas older than the baseline. Preserve both sets of
+shipped scripts when upgrading or restoring a database.
+
 ## Install and update the manual
 
 Run the Library installer from a checkout matching the server's intended edition.

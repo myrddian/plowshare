@@ -827,7 +827,6 @@ erDiagram
         TEXT context
         TEXT related
         TIMESTAMPTZ occurred_at
-        TIMESTAMPTZ captured_at
         JSONB relay_causation
     }
 
