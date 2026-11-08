@@ -98,14 +98,15 @@ import org.testcontainers.junit.jupiter.*;
  * rather than merely refused; and that {@code SET_AUDIENCE} is shut both at the permission question
  * and at the repository guard.
  *
- * <p><strong>It does not prove that a child drives the information tool end to end.</strong> One
- * layer above these repositories, {@code InformationAccess.requireSelection}, {@code requireWork}
- * and {@code requireAudience} ask {@link ScopedPermissions} for a live project role; a contained
- * project carries no {@code PROJECT} scope and so grants none, to the principal or to its
- * container. Every {@code InformationCatalogue} operation that calls one of those still refuses a
- * contained context, which {@link #aContainedChildReadsAndWritesItsOwnDocuments} asserts rather
- * than leaves implied. {@code InformationCatalogue.admit} calls {@code requireWork} as its first
- * statement, so the catalogue write path refuses before any SQL arm is evaluated.
+ * <p><strong>The service gates admit a child to its own home now; this paragraph used to say they
+ * refused it.</strong> {@code InformationAccess.requireSelection} and {@code requireWork} ask
+ * {@link ScopedPermissions} for a live project role, which a contained project grants to nobody —
+ * so they refused every contained context, and {@code InformationCatalogue.admit} calls {@code
+ * requireWork} as its first statement, which refused the catalogue write path before any SQL arm
+ * was evaluated. Both now consult {@link io.aeyer.plowshare.server.access.ContainedHomes} first,
+ * and {@link #theServiceGatesAdmitAChildToItsOwnHomeOnly} drives that with the production source
+ * over these real rows. {@code requireAudience} deliberately still refuses: V229 admits WRITE for a
+ * contained actor and never SET_AUDIENCE.
  *
  * <p><strong>Nor does the navigation path reach V231's disjunct.</strong> An earlier draft of this
  * paragraph said a contained run reaches "the navigation read path, which calls no such gate". It
@@ -116,9 +117,10 @@ import org.testcontainers.junit.jupiter.*;
  * repository.lockAccount} → {@code lockIdentity}'s {@code SELECT handle FROM admins ... FOR SHARE}.
  * A contained principal has no {@code admins} row (V218), so every navigation operation a contained
  * run issues is refused there, before V231's new disjunct is evaluated. That disjunct is reachable
- * only from a direct repository call, which is what the tests here make. So: the actor is wired and
- * resolves correctly, the repository and store layer is open to it, and no production surface above
- * those layers admits it.
+ * only from a direct repository call, which is what the tests here make. So navigation remains
+ * closed to a contained run, and the information service gates above the repositories no longer
+ * are: that is the one layer the second authorization path has opened, and navigation and the
+ * memory gates below are the two that remain.
  *
  * <p><strong>The memory half is proved at the store and nowhere above it.</strong> {@link
  * #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore} and V232's predicate
@@ -176,7 +178,14 @@ class ContainedInformationReachDatabaseTest {
     records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), events);
     memories = new MemoryStore(jdbc);
     permissions = permissions();
-    access = new InformationAccess(permissions);
+    // The production containment source over these real rows, not a stand-in: the point of the
+    // service-gate test below is that the gate and V229's arms agree about ownership.
+    access =
+        new InformationAccess(
+            permissions,
+            io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY,
+            io.aeyer.plowshare.server.information.AccountKnowledgePermissions.DENY,
+            new io.aeyer.plowshare.server.access.JdbcContainedHomes(jdbc));
 
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,must_change_password) VALUES (?,'fixture',FALSE)",
@@ -326,9 +335,15 @@ class ContainedInformationReachDatabaseTest {
     assertTrue(
         text.isPresent(), "including its bytes, which is a second statement and a second gate");
 
-    // THE BOUNDARY. These gates ask for a live project role and a contained project grants none.
-    assertThrows(CallerFault.class, () -> access.requireSelection(context));
-    assertThrows(CallerFault.class, () -> access.requireWork(context));
+    // THE BOUNDARY, MOVED. These two gates asked for a live project role, which a contained project
+    // grants to nobody, so both refused here. They now consult ContainedHomes first and admit a
+    // child to the home it owns; theServiceGatesAdmitAChildToItsOwnHomeOnly is where that is
+    // asserted, with a sibling's home and the container's project as the controls. Kept as an
+    // admission rather than deleted, so this test still says which layer decides.
+    assertDoesNotThrow(() -> access.requireSelection(context));
+    assertDoesNotThrow(() -> access.requireWork(context));
+    // Audience is unchanged and still refused: ownership of a home is not audience authority.
+    assertThrows(CallerFault.class, () -> access.requireAudience(context));
     assertNull(
         jdbc.queryForObject(
             "SELECT authority_project_role(?,?)", String.class, first.project(), first.principal()),
@@ -636,5 +651,40 @@ class ContainedInformationReachDatabaseTest {
         null,
         null,
         home);
+  }
+
+  /**
+   * The gate this task opened, driven over real rows by the production source.
+   *
+   * <p>A child selects and works in its own home; a sibling's home and its container's project are
+   * both refused, which is what makes the admission containment's rather than a blanket opening.
+   * The audience refusal is asserted beside them because ownership of a home must not become
+   * audience authority — V229 admits WRITE for a contained actor and deliberately not SET_AUDIENCE.
+   *
+   * <p>The control matters: {@code permissions} here is the real {@code authority_project_role}
+   * question, and it answers nothing for any of these projects. So every admission below comes from
+   * the containment path and none of it from a role that the fixture accidentally granted.
+   */
+  @Test
+  void theServiceGatesAdmitAChildToItsOwnHomeOnly() {
+    var actor =
+        io.aeyer.plowshare.server.information.InformationActor.contained(first.principal(), HOLDER);
+    var own = access.forRun(actor, io.aeyer.plowshare.protocol.Home.of(first.project()));
+
+    assertDoesNotThrow(() -> access.requireSelection(own));
+    assertDoesNotThrow(() -> access.requireWork(own));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class, () -> access.requireAudience(own));
+
+    // A sibling's home: the actor is a live contained principal, so this is the ownership match
+    // failing rather than the contained gate failing.
+    var sibling = access.forRun(actor, io.aeyer.plowshare.protocol.Home.of(second.project()));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class, () -> access.requireSelection(sibling));
+
+    // And the container's own project is not a contained home at all.
+    assertFalse(
+        new io.aeyer.plowshare.server.access.JdbcContainedHomes(jdbc)
+            .ownsHome(first.principal(), "parent"));
   }
 }

@@ -38,12 +38,12 @@ public record InformationContext(
    * parent's executor and account unchanged and a contained principal is deliberately not an {@code
    * authority_accounts} subject (V218).
    *
-   * <p><strong>Nothing in production builds that case yet.</strong> {@code
-   * InformationAccess.contained} is the only place the two axes are made to differ and it has no
-   * production caller — a contained run's information actor is the container's executor — so every
-   * caller this method serves today holds one value for both axes. See that method for why, and ADR
-   * 0042 for the wiring it names as the next slice's prerequisite. The split is here so the gates
-   * are decidable, not because the second axis is in use.
+   * <p><strong>Production builds that case.</strong> An earlier draft of this paragraph said
+   * nothing did — that a contained run's information actor is the container's executor — and that
+   * was already false when it was written: {@code JobRuntime.informationActorFor} returns {@link
+   * InformationActor#contained} for a run whose tool home is a {@code contained:} project, and its
+   * production caller is {@code JobRuntime.offeredTo}, which every run reaches. So the two axes do
+   * differ in production, and the gates that read them are the ones that must keep them apart.
    *
    * <p><strong>Why the split had to exist here.</strong> One field served both axes, and no single
    * value can satisfy them: the child's principal passes V229's destination gate and then fails

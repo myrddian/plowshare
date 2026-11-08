@@ -17,6 +17,7 @@ public final class InformationAccess {
   private final io.aeyer.plowshare.server.access.KnowledgeReadScope boundary;
   private final AccountKnowledgePermissions accounts;
   private final io.aeyer.plowshare.server.requests.RequestProjects projects;
+  private final io.aeyer.plowshare.server.access.ContainedHomes containedHomes;
 
   public InformationAccess(ScopedPermissions permissions) {
     this(permissions, io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY);
@@ -31,18 +32,35 @@ public final class InformationAccess {
       ScopedPermissions permissions,
       io.aeyer.plowshare.server.requests.RequestProjects projects,
       AccountKnowledgePermissions accounts) {
-    this(permissions, projects, accounts, null);
+    this(permissions, projects, accounts, io.aeyer.plowshare.server.access.ContainedHomes.NONE);
+  }
+
+  /**
+   * The composition that can admit a contained run: the second authorization path is supplied.
+   *
+   * <p>Every other constructor defaults it to {@link
+   * io.aeyer.plowshare.server.access.ContainedHomes#NONE}, so a composition that does not wire one
+   * refuses every contained principal exactly as the server did before this path existed.
+   */
+  public InformationAccess(
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.requests.RequestProjects projects,
+      AccountKnowledgePermissions accounts,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes) {
+    this(permissions, projects, accounts, containedHomes, null);
   }
 
   private InformationAccess(
       ScopedPermissions permissions,
       io.aeyer.plowshare.server.requests.RequestProjects projects,
       AccountKnowledgePermissions accounts,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes,
       io.aeyer.plowshare.server.access.KnowledgeReadScope boundary) {
     this.boundary = boundary;
     this.accounts = Objects.requireNonNull(accounts);
     this.permissions = Objects.requireNonNull(permissions, "permissions");
     this.projects = Objects.requireNonNull(projects, "projects");
+    this.containedHomes = Objects.requireNonNull(containedHomes, "containedHomes");
   }
 
   /**
@@ -53,6 +71,9 @@ public final class InformationAccess {
         permissions,
         projects,
         accounts,
+        // Carried, not defaulted: a run binds its read ceiling before it reaches a gate, so losing
+        // the containment source here would refuse every contained run on the only path it takes.
+        containedHomes,
         boundary == null ? Objects.requireNonNull(scope) : boundary.intersect(scope));
   }
 
@@ -391,6 +412,7 @@ public final class InformationAccess {
         && context.selection().scope() == InformationContext.Scope.PERSONAL)
       throw new CallerFault("Service tokens cannot select Personal information");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
+        && !ownsSelectedHome(context)
         && !permissions.allows(
             new Principal(context.account()),
             new ProjectTarget(context.selection().project()),
@@ -405,12 +427,43 @@ public final class InformationAccess {
     if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault("Global READ is a read selection; select a writable home");
     if (context.selection().scope() == InformationContext.Scope.PROJECT
+        && !ownsSelectedHome(context)
         && !permissions.allows(
             new Principal(context.account()),
             new ProjectTarget(context.selection().project()),
             Action.WRITE))
       throw new CallerFault(
           "This account needs CONTRIBUTOR access to change the selected project's information");
+  }
+
+  /**
+   * The second authorization path's dispatch: does the acting principal own the selected project as
+   * its own contained home?
+   *
+   * <p>Placed as a disjunct before {@link ScopedPermissions} rather than instead of it, so an
+   * ordinary run's decision is bit-for-bit what it was and only a principal the containment source
+   * recognises can take the new arm. A true answer short-circuits, which is deliberate: asking the
+   * role family about a contained project as well would leave it resolving one, and V216 made
+   * {@code CONTAINED} an authority-free scope kind precisely so that it does not.
+   *
+   * <p>The <em>acting</em> axis is what is asked about. The accounting account is a provenance
+   * decision and answering an authority question with it would hand a confined child its
+   * container's authority, which is the mistake {@code InformationContext.attribution} warns about.
+   *
+   * <p>This admits a <em>selection</em>, never an action beyond the one its caller is gating:
+   * {@code requireAudience} deliberately does not consult it, because V229 admits WRITE for a
+   * contained actor and never SET_AUDIENCE.
+   */
+  private boolean ownsSelectedHome(InformationContext context) {
+    String project = context.selection().project();
+    // A prefix test before the query, and it is not an optimisation to be tidied away: every
+    // ordinary run reaches these gates, and asking the containment source first put one round trip
+    // on that path for an answer it could not change. Only a `contained:` project can be a
+    // contained home, so `contained_own_home` would have returned NULL for every other name
+    // anyway. InformationFeatureConfigTest pins the no-database property this restores.
+    if (project == null || !io.aeyer.plowshare.protocol.ContainedProjects.name(project))
+      return false;
+    return containedHomes.ownsHome(context.acting(), project);
   }
 
   /** Content WRITE does not grant permission to change an existing resource's audience. */

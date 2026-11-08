@@ -33,13 +33,26 @@ public class DocumentsConfig {
     return new EffectiveProjectPermissions(members);
   }
 
+  /**
+   * The containment source for the second authorization path.
+   *
+   * <p>Concrete and JDBC-backed here rather than inside the service, because this is the
+   * composition root and {@code InformationAccess} consumes the interface.
+   */
+  @Bean
+  public io.aeyer.plowshare.server.access.ContainedHomes containedHomes(
+      org.springframework.jdbc.core.JdbcTemplate jdbc) {
+    return new io.aeyer.plowshare.server.access.JdbcContainedHomes(jdbc);
+  }
+
   @Bean
   public io.aeyer.plowshare.server.information.InformationAccess informationAccess(
       ScopedPermissions permissions,
       io.aeyer.plowshare.server.requests.RequestProjects projects,
-      io.aeyer.plowshare.server.information.AccountKnowledgePermissions accounts) {
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions accounts,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes) {
     return new io.aeyer.plowshare.server.information.InformationAccess(
-        permissions, projects, accounts);
+        permissions, projects, accounts, containedHomes);
   }
 
   @Bean
