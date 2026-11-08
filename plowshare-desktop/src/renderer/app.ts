@@ -9,6 +9,16 @@ import { displayText } from 'plowshare-client-ts/binding/values';
 import { botDisplayName, botDetails } from './bot-details.ts';
 import { installPaneResize } from './pane-resize.ts';
 import { installApplication } from './application.ts';
+import {
+  installFileBrowser,
+  type FileBrowserHandle,
+  type FileBrowserPort,
+} from './file-browser.ts';
+import {
+  applicationRelayScopeKey,
+  applicationScheduleProjectKey,
+  writeRelayScope,
+} from './application-hub.ts';
 import { installProjectAccess } from './project-access.ts';
 import { installToolConnections } from './tool-connections.ts';
 import { installServerAdmin } from './server-admin.ts';
@@ -115,7 +125,19 @@ const application = installApplication(
   () => state,
   request,
   chooseScope,
+  openApplicationSchedules,
+  openApplicationRelay,
 );
+function openApplicationSchedules(project: string) {
+  // Account-wide Scheduled work has no project field on schedule rows.
+  // Activity keeps this name and drops rows that cannot name the Application.
+  localStorage.setItem(applicationScheduleProjectKey, project);
+  action({ action: 'activity', view: 'schedules' });
+}
+function openApplicationRelay(project: string) {
+  writeRelayScope(project);
+  action({ action: 'relay' });
+}
 const approvalControls = installApprovalControls(
   document,
   () => state,
@@ -419,7 +441,7 @@ function openConnect() {
   if (!dialog.open) dialog.showModal();
 }
 
-const deploymentControls = installApplicationDeployment(() => state, request);
+// The administration shell renders Deploy and Add before those dialogs bind them.
 const serverAdministration = installServerAdmin(
   request,
   $('#workspace-administration'),
@@ -437,6 +459,7 @@ const serverAdministration = installServerAdmin(
     },
   },
 );
+const deploymentControls = installApplicationDeployment(() => state, request);
 $('#server-admin-open').addEventListener('click', () =>
   action({ action: 'workspace-administration' }),
 );
@@ -484,7 +507,8 @@ function render() {
   recoveryWarning.textContent = state.personal?.warning ?? '';
   recoveryWarning.hidden = state.mode !== 'live' || !state.personal?.warning;
   renderFiles();
-  $('#server-project-add').hidden = !state.connected || !state.serverAdmin;
+  $('#workspace-administration #server-project-add').hidden =
+    !state.connected || !state.serverAdmin;
   deploymentControls.update();
   questionPopup.update(state, scope, selected);
   const filter = $<HTMLInputElement>(
@@ -571,12 +595,16 @@ function render() {
         const machine = recorded?.workspace
           ? (recorded.machine ?? 'Server')
           : folder?.machine;
-        const location = [
-          recorded?.type === 'DISJOINT' ? 'DISJOINT · no sync' : undefined,
-          path ? `${machine ?? 'Server'} · ${path}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(' · ');
+        // Applications stay on the server. Do not lead the row with a local
+        // folder or with sync status, and do not ask deployment status per row.
+        const location = application
+          ? ['Active on server', recorded?.type].filter(Boolean).join(' · ')
+          : [
+              recorded?.type === 'DISJOINT' ? 'DISJOINT · no sync' : undefined,
+              path ? `${machine ?? 'Server'} · ${path}` : undefined,
+            ]
+              .filter(Boolean)
+              .join(' · ');
         const expanded = filter
           ? (filterExpansion[project] ?? true)
           : (projectExpansion[project] ?? scope === project);
@@ -1168,6 +1196,71 @@ async function openPersonalBot(bot: string, create = false) {
     render();
   }
 }
+const personalFileSections = [
+  'In',
+  'Out',
+  'Resources',
+  'Archive',
+  'Planning',
+] as const;
+type PersonalFileSection = (typeof personalFileSections)[number];
+const isPersonalFileSection = (value: string): value is PersonalFileSection =>
+  (personalFileSections as readonly string[]).includes(value);
+
+const personalFilesPort: FileBrowserPort = {
+  async list(path) {
+    const personal = state.personal;
+    if (!personal?.section || !isPersonalFileSection(personal.section))
+      throw new Error('Personal files are unavailable.');
+    const section = personal.section;
+    await request({
+      action: 'personal-section',
+      section,
+      ...(path ? { path } : {}),
+    });
+    const next = state.personal;
+    if (next?.error) throw new Error(next.error);
+    if (next?.note && !next.entries?.length)
+      return { path: path || section, entries: [], more: false };
+    return {
+      path: path || section,
+      more: false,
+      entries: (next?.entries ?? []).map((row) => ({
+        name: row.name,
+        path: row.path,
+        directory: row.directory,
+      })),
+    };
+  },
+  async read(path) {
+    const personal = state.personal;
+    if (!personal?.section || !isPersonalFileSection(personal.section))
+      throw new Error('Personal files are unavailable.');
+    await request({
+      action: 'personal-section',
+      section: personal.section,
+      path,
+    });
+    const next = state.personal;
+    if (next?.error) throw new Error(next.error);
+    if (next?.text === undefined)
+      throw new Error('The file could not be read.');
+    return {
+      path,
+      text: next.text,
+      revision: `personal:${path}`,
+      writable: false,
+    };
+  },
+};
+
+const personalFiles: FileBrowserHandle = installFileBrowser(
+  $('#personal-file-browser'),
+  personalFilesPort,
+  { pathDataset: 'personalPath' },
+);
+let personalFilesSection = '';
+
 function renderPersonal() {
   const personal = state.personal;
   const showPersonal =
@@ -1186,36 +1279,36 @@ function renderPersonal() {
   );
   $('#personal-path').textContent = personal.path ?? personal.root ?? '';
   const section = personal.section ?? 'Resources';
-  const path = personal.path ?? section;
-  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-  const bots =
-    section === 'Bots'
-      ? (state.agents[personal.project] ?? [])
-          .filter((row) => row.bot)
-          .map(
-            (row) =>
-              `<button class="personal-bot" data-personal-bot="${esc(row.name)}" ${!row.served ? 'disabled' : ''}>${icon('cpu')}<span>${esc(row.name)}</span>${row.preferred ? '<small>Default</small>' : ''}</button>`,
-          )
-          .join('')
-      : '';
+  const files = isPersonalFileSection(section);
+  $('#personal-file-browser').hidden = !files;
+  $('#personal-content').hidden = files;
+  if (files) {
+    personalFiles.session.setScope(`${personal.project}\0${section}`);
+    if (personalFilesSection !== section) {
+      personalFilesSection = section;
+      void personalFiles.openRoot().catch((reason: unknown) => {
+        personalFiles.session.error =
+          reason instanceof Error ? reason.message : errorMessage(reason);
+        personalFiles.render();
+      });
+    } else personalFiles.render();
+    return;
+  }
+  personalFilesSection = '';
+  const bots = (state.agents[personal.project] ?? [])
+    .filter((row) => row.bot)
+    .map(
+      (row) =>
+        `<button class="personal-bot" data-personal-bot="${esc(row.name)}" ${!row.served ? 'disabled' : ''}>${icon('cpu')}<span>${esc(row.name)}</span>${row.preferred ? '<small>Default</small>' : ''}</button>`,
+    )
+    .join('');
   setHTML(
     $('#personal-content'),
     (personal.error ? `<p role="alert">${esc(personal.error)}</p>` : '') +
-      (parent
-        ? `<button class="secondary-button" data-personal-path="${esc(parent)}">Back</button>`
-        : '') +
       bots +
-      (personal.text !== undefined
-        ? `<pre class="personal-preview">${esc(personal.text)}</pre>`
-        : personal.note
-          ? `<p>${esc(personal.note)}</p>`
-          : (personal.entries ?? [])
-              .map(
-                (row) =>
-                  `<button class="personal-file" data-personal-path="${esc(row.path)}">${icon(row.directory ? 'folder' : 'file')}<span>${esc(row.name)}</span></button>`,
-              )
-              .join('') ||
-            '<p>This section is empty. Add files in your personal folder.</p>'),
+      (bots
+        ? ''
+        : '<p>No personal bots are available for this account.</p>'),
   );
 }
 $('#personal-sections').addEventListener('click', (event) => {
@@ -1241,17 +1334,9 @@ $('#personal-conversations').addEventListener('click', (event) => {
   if (id) background(choose(id));
 });
 $('#personal-content').addEventListener('click', (event) => {
-  const target = event.target as HTMLElement;
-  const path = target.closest<HTMLElement>('[data-personal-path]')?.dataset
-    .personalPath;
-  if (path && state.personal?.section)
-    action({
-      action: 'personal-section',
-      section: state.personal.section,
-      path,
-    });
-  const bot = target.closest<HTMLElement>('[data-personal-bot]')?.dataset
-    .personalBot;
+  const bot = (event.target as HTMLElement).closest<HTMLElement>(
+    '[data-personal-bot]',
+  )?.dataset.personalBot;
   if (bot) background(openPersonalBot(bot, true));
 });
 $('#personal-bots').addEventListener('click', (event) => {
@@ -1427,10 +1512,14 @@ $('#runs-open').addEventListener('click', () =>
 $('#studio-open').addEventListener('click', () =>
   action({ action: 'activity', view: 'builder' }),
 );
-$('#relay-open').addEventListener('click', () => action({ action: 'relay' }));
-$('#schedules-open').addEventListener('click', () =>
-  action({ action: 'activity', view: 'schedules' }),
-);
+$('#relay-open').addEventListener('click', () => {
+  localStorage.removeItem(applicationRelayScopeKey);
+  action({ action: 'relay' });
+});
+$('#schedules-open').addEventListener('click', () => {
+  localStorage.removeItem(applicationScheduleProjectKey);
+  action({ action: 'activity', view: 'schedules' });
+});
 $('#memories-open').addEventListener('click', () =>
   action({ action: 'library', view: 'memories', project: scope || null }),
 );
@@ -2082,6 +2171,7 @@ document.addEventListener('keydown', (event) => {
 const navigation = installNavigation((): NavigationItem[] => {
   if (!state) return [];
   const available = state.mode === 'demo' || state.connected;
+  const applicationScope = selectedApplicationScope();
   return [
     ...[...state.conversations]
       .sort((a, b) => Number(b.id === selected) - Number(a.id === selected))
@@ -2204,8 +2294,10 @@ const navigation = installNavigation((): NavigationItem[] => {
     },
     {
       id: 'files',
-      title: 'Project files',
-      detail: 'Connect or disconnect a local folder',
+      title: applicationScope ? 'App files' : 'Project files',
+      detail: applicationScope
+        ? 'Open server source for this Application'
+        : 'Connect or disconnect a local folder',
       group: 'Actions',
       icon: 'folder',
       run: () => $('#files-open').click(),
@@ -2326,8 +2418,30 @@ let fileAccessError = '';
 let fileAccessScope = '';
 const deniedFileAccess = new Set<string>();
 const fileAccessKey = () => `${identity}:${scope}`;
+/** Applications use server source. Adding a Project folder still uses the local claim UI. */
+function selectedApplicationScope() {
+  return (
+    !addingProject &&
+    state.projects.find((row) => row.name === scope)?.kind === 'application'
+  );
+}
 function renderFiles() {
+  const applicationFiles = selectedApplicationScope();
   renderSync(state, scope, addingProject);
+  // Sync renders for any named live scope. Hide it again for Applications.
+  if (applicationFiles) $('#project-sync').hidden = true;
+  $('#info-files-tab').textContent = applicationFiles ? 'App files' : 'Files';
+  $('#app-files').hidden = !applicationFiles;
+  $('#project-files').hidden = applicationFiles;
+  if (applicationFiles) {
+    $('#file-access-prompt').hidden = true;
+    $('#app-files-description').textContent =
+      `${scope} keeps its files on the server. Open them in the Application hub. Folder connect and project sync stay with Projects.`;
+    $('#files-label').textContent = 'App files';
+    $('#files-open').title = `App files for ${scope}`;
+    $('#files-open').dataset.status = 'off';
+    return;
+  }
   const personal = scope === state.personal?.project && !addingProject;
   const folder = state.projectFolders?.find((row) => row.name === scope);
   const recorded = state.projects.find((row) => row.name === scope);
@@ -2476,6 +2590,21 @@ $('#files-open').addEventListener(
     $('#files-error').hidden = true;
     renderFiles();
     showInfoTab('files');
+  }),
+);
+$('#app-files-open').addEventListener(
+  'click',
+  ownedEvent(async () => {
+    const project = scope;
+    if (
+      state.projects.find((row) => row.name === project)?.kind !== 'application'
+    )
+      return;
+    await request({ action: 'workspace-chat' });
+    if (scope !== project) return;
+    const opening = application.openFiles(project);
+    renderPersonal();
+    await opening;
   }),
 );
 $('#file-access-allow').addEventListener(
@@ -2845,21 +2974,24 @@ serverPlacement.reload.addEventListener(
   ownedEvent(loadServerPlacement),
 );
 let serverProjectConnection = '';
-$('#server-project-add').addEventListener('click', () => {
-  serverProjectConnection = JSON.stringify([state.base, state.handle]);
-  $<HTMLFormElement>('#server-project-form').reset();
-  serverPlacement.reset();
-  $('#server-project-placement').hidden = true;
-  $<HTMLFieldSetElement>('#server-project-placement').disabled = true;
-  $('#server-project-legacy').hidden = false;
-  $('#server-project-error').hidden = true;
-  $<HTMLSelectElement>('#server-project-type').value = 'MANAGED';
-  $<HTMLInputElement>('#server-project-writes').value = '.';
-  $<HTMLInputElement>('#server-project-workspace').required = false;
-  $('#server-project-path-note').textContent =
-    'Leave the path blank to provision a server workspace.';
-  $<HTMLDialogElement>('#server-project-dialog').showModal();
-});
+$('#workspace-administration #server-project-add').addEventListener(
+  'click',
+  () => {
+    serverProjectConnection = JSON.stringify([state.base, state.handle]);
+    $<HTMLFormElement>('#server-project-form').reset();
+    serverPlacement.reset();
+    $('#server-project-placement').hidden = true;
+    $<HTMLFieldSetElement>('#server-project-placement').disabled = true;
+    $('#server-project-legacy').hidden = false;
+    $('#server-project-error').hidden = true;
+    $<HTMLSelectElement>('#server-project-type').value = 'MANAGED';
+    $<HTMLInputElement>('#server-project-writes').value = '.';
+    $<HTMLInputElement>('#server-project-workspace').required = false;
+    $('#server-project-path-note').textContent =
+      'Leave the path blank to provision a server workspace.';
+    $<HTMLDialogElement>('#server-project-dialog').showModal();
+  },
+);
 $('#server-project-filestore').addEventListener(
   'change',
   ownedEvent(async () => {
@@ -2938,10 +3070,11 @@ $('#server-project-form').addEventListener(
   }),
 );
 
-document.querySelector('#conversations')!.addEventListener('click', (event) => {
-  const button = (event.target as Element).closest<HTMLElement>(
-    '[data-project-access]',
-  );
-  if (button?.dataset.projectAccess)
-    projectAccess.open(button.dataset.projectAccess);
-});
+for (const navigation of ['#conversations', '#application-conversations'])
+  $(navigation).addEventListener('click', (event) => {
+    const button = (event.target as Element).closest<HTMLElement>(
+      '[data-project-access]',
+    );
+    if (button?.dataset.projectAccess)
+      projectAccess.open(button.dataset.projectAccess);
+  });

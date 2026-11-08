@@ -1,3 +1,8 @@
+import {
+  applicationScheduleProjectKey,
+  scheduleNamesProject,
+  scheduledIdForProject,
+} from './application-hub.ts';
 import { background } from './events.ts';
 import { retainedReport } from '../retained-report.ts';
 import { installPaneResize } from './pane-resize.ts';
@@ -144,6 +149,8 @@ function listHtml(html: string): void {
 }
 function render() {
   if (!state || !initialized) return;
+  const scheduleProject =
+    localStorage.getItem(applicationScheduleProjectKey) ?? '';
   const activity = state.activity,
     inbox = activity.inbox,
     runs = activity.runs;
@@ -171,7 +178,9 @@ function render() {
           ? 'Available orchestration definitions and stages'
           : view === 'builder'
             ? 'Interview, draft, validate and review an agent-driven procedure'
-            : 'Schedules, triggers and recent firings across your account';
+            : scheduleProject
+              ? `Schedules that name ${scheduleProject}`
+              : 'Schedules, triggers and recent firings across your account';
   $('#activity-unread').textContent =
     inbox.unread === undefined ? '—' : String(inbox.unread);
   $('.activity-tabs').hidden = pageGroup !== 'studio';
@@ -365,16 +374,38 @@ function render() {
       : `${rows.length} definitions`;
   }
   if (view === 'schedules') {
+    const files = activity.schedules?.files ?? [];
+    const scheduleRows = activity.schedules?.schedules ?? [];
+    const triggerRows = activity.schedules?.triggers ?? [];
+    // The detail pane looks up scheduledId in the unfiltered arrays. Drop a
+    // selection this Application filter has taken off the list. A reused
+    // schedules window applies the bind here; the storage listener only
+    // clears stamps.
+    const visibleId = scheduledIdForProject(
+      scheduledId,
+      scheduleProject,
+      scheduleRows,
+      triggerRows,
+      files,
+    );
+    if (visibleId !== scheduledId) {
+      scheduledId = visibleId;
+      detailStamp = '';
+    }
     const rows = [
-      ...(activity.schedules?.schedules ?? []).map((row) => ({
+      ...scheduleRows.map((row) => ({
         row,
-        kind: 'schedule',
+        kind: 'schedule' as const,
       })),
-      ...(activity.schedules?.triggers ?? []).map((row) => ({
+      ...triggerRows.map((row) => ({
         row,
-        kind: 'trigger',
+        kind: 'trigger' as const,
       })),
-    ].filter(({ row }) => row.name.toLowerCase().includes(query));
+    ].filter(
+      ({ row, kind }) =>
+        row.name.toLowerCase().includes(query) &&
+        scheduleNamesProject(scheduleProject, kind, row, files),
+    );
     listHtml(
       `<button class="activity-row" data-item="" aria-current="${!scheduledId}">New scheduled work</button>` +
         rows
@@ -383,12 +414,19 @@ function render() {
             return `<button class="activity-row" data-item="${esc(key)}" aria-current="${key === scheduledId}"><span><strong>${esc(row.name)}</strong><small>${kind} · ${row.paused ? 'Paused' : 'Active'}</small></span></button>`;
           })
           .join('') +
+        (scheduleProject && !rows.length
+          ? `<p class="activity-empty">No schedules for ${esc(scheduleProject)} on this page.</p>`
+          : '') +
         schedulePagingControls(state, 'schedules'),
     );
     $('#activity-list-note').textContent = activity.schedules?.schedulePage
       ?.loading
       ? 'Updating schedules…'
-      : `${rows.length} shown on this page · filter applies to this page · up to 100 recent account firings loaded`;
+      : scheduleProject
+        ? rows.length
+          ? `${rows.length} shown for ${scheduleProject} on this page`
+          : `No schedules for ${scheduleProject} on this page.`
+        : `${rows.length} shown on this page · filter applies to this page · up to 100 recent account firings loaded`;
   }
   $('#inbox-older').hidden = view !== 'inbox' || !inbox.more;
   $<HTMLButtonElement>('#inbox-older').disabled =
@@ -556,6 +594,12 @@ for (const next of ['definitions', 'builder'] as ActivityView[]) {
   });
 }
 $('#activity-search').addEventListener('input', render);
+window.addEventListener('storage', (event) => {
+  if (event.key !== applicationScheduleProjectKey) return;
+  listStamp = '';
+  detailStamp = '';
+  render();
+});
 $('#inbox-filter').addEventListener('change', () => {
   detailStamp = '';
   render();

@@ -4,6 +4,7 @@
 .main-area:has(#workspace-administration:not([hidden])) #filestore-notice { display: none; }
 .administration-shell { min-height: 100%; display: flex; flex-direction: column; }
 .administration-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding: 24px 28px; border-bottom: 1px solid var(--line); }
+.administration-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .administration-heading h1 { font-size: 21px; font-weight: 500; letter-spacing: -.3px; margin: 0 0 5px; }
 .administration-heading p { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
 .administration-layout { display: grid; grid-template-columns: 184px minmax(0, 1fr); flex: 1; min-height: 0; }

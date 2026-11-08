@@ -89,8 +89,9 @@ try {
   await expect(page.locator('#workspace-manage')).toBeVisible();
   await page.locator('[data-personal-section="Planning"]').click();
   await expect(page.locator('#workspace-manage')).toBeHidden();
-  await page.locator('[data-personal-path="Planning/plan.md"]').click();
-  await expect(page.locator('.personal-preview')).toHaveText('A useful personal plan.');
+  await page.locator('#personal-file-browser [data-personal-path="Planning/plan.md"]').click();
+  await expect(page.locator('#personal-file-browser [data-text]')).toHaveValue('A useful personal plan.');
+  await expect(page.locator('#personal-file-browser .file-browser-tree .file-browser-name .icon')).toHaveCount(await page.locator('#personal-file-browser [data-personal-path]').count());
   await page.locator('#personal-bots-files').click();
   await expect(page.locator('#personal-title')).toHaveText('Bots');
   await page.locator('#personal-bots-toggle').click();

@@ -117,7 +117,11 @@ export function installApplicationDeployment(
       select.append(option);
     }
   };
-  document.querySelector('#application-deploy-open')!.addEventListener(
+  const deployOpen = () =>
+    document.querySelector<HTMLButtonElement>(
+      '#workspace-administration #application-deploy-open',
+    )!;
+  deployOpen().addEventListener(
     'click',
     run(async () => {
       draftKey = key();
@@ -299,8 +303,7 @@ export function installApplicationDeployment(
         pending = undefined;
         status = undefined;
       }
-      document.querySelector<HTMLElement>('#application-deploy-open')!.hidden =
-        !state().connected || !state().serverAdmin;
+      deployOpen().hidden = !state().connected || !state().serverAdmin;
     },
   };
 }

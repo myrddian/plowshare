@@ -72,7 +72,7 @@ import org.junit.jupiter.api.Test;
  */
 class MigrationsAreImmutableTest {
 
-  private static final Path MIGRATIONS = Path.of("src/main/resources/db/migration");
+  private static final Path MIGRATIONS = Path.of("src/main/resources/db");
 
   /**
    * The line deployments run from, and therefore the line that freezes a file.
