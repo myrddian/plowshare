@@ -1,6 +1,11 @@
 import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import type { DesktopState, Reply, Request } from '../shared.ts';
 import { ownedEvent } from './events.ts';
+import {
+  installFileBrowser,
+  type FileBrowserHandle,
+  type FileBrowserPort,
+} from './file-browser.ts';
 
 const hubViews = [
   'overview',
@@ -18,7 +23,8 @@ const isHubView = (value: string): value is HubView =>
  * Application workflow hub and server source editor.
  * `open` lands on Overview with the file browser closed. Drafts stay in this
  * account and window only. Runtime, Memory and Boards stay on Overview;
- * Conversations returns to the chat stage.
+ * Conversations returns to the chat stage. Files mounts the reusable
+ * file-browser over application.files / read / save.
  */
 export function installApplication(
   host: HTMLElement,
@@ -35,38 +41,96 @@ export function installApplication(
     <section data-schedules hidden><p>Scheduled work opens for this Application. Rows that name it stay in that list; a page with none says so.</p></section>
     <section data-relay hidden><p>Relay opens with this Application selected as its scope.</p></section>
     <section data-access hidden><p>Membership for this Application opens in Access.</p></section>
-    <section data-source hidden><label data-area-label hidden>File location<select data-area aria-label="Application file location"></select></label><form data-location><label>Relative path<input data-path autocomplete="off" placeholder="Folder or file inside this Application"></label><button data-browse>Browse folder</button><button data-open>Read file</button></form>
-    <p data-status role="status"></p><p data-error role="alert" hidden></p><div data-entries></div>
-    <section data-editor hidden><h3 data-file-title></h3><p data-permission></p><label>File content<textarea data-text spellcheck="false" aria-label="Application file content"></textarea></label>
-    <div class="application-actions"><button data-read-current>Read current file</button><button data-use-current hidden>Use current file and discard draft</button><button data-save>Save file</button></div></section></section>`;
+    <section data-source hidden><label data-area-label hidden>File location<select data-area aria-label="Application file location"></select></label>
+    <div data-file-browser></div></section>`;
   const get = <T extends HTMLElement = HTMLElement>(selector: string) =>
     host.querySelector<T>(selector)!;
   let project = '',
     identity = '',
     shown = false,
-    files = false,
-    rendered = '';
+    files = false;
   let view: HubView = 'overview';
-  const drafts = new Map<
-    string,
-    { text: string; revision: string; original: string }
-  >();
   let location: FileStoreReference | undefined;
   const selectedLocation = () => (location ? { location } : {});
-  const documentKey = () =>
-    `${project}\0${JSON.stringify(location ?? null)}\0${state().applicationFiles?.document?.path ?? ''}`;
+
+  const port: FileBrowserPort = {
+    async list(path) {
+      await request({
+        action: 'application-files',
+        project,
+        path,
+        ...selectedLocation(),
+      });
+      const value = state().applicationFiles;
+      if (value?.error) throw new Error(value.error);
+      if (!value?.listing) throw new Error('The directory could not be read.');
+      return {
+        path: value.listing.path,
+        more: value.listing.more,
+        entries: value.listing.entries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          directory: entry.directory,
+        })),
+      };
+    },
+    async read(path) {
+      await request({
+        action: 'application-file-read',
+        project,
+        path,
+        ...selectedLocation(),
+      });
+      const value = state().applicationFiles;
+      if (value?.error) throw new Error(value.error);
+      if (!value?.document) throw new Error('The file could not be read.');
+      return {
+        path: value.document.path,
+        text: value.document.text,
+        revision: value.document.revision,
+        writable: value.document.writable,
+      };
+    },
+    async save(path, text, revision) {
+      await request({
+        action: 'application-file-save',
+        project,
+        path,
+        text,
+        revision,
+        ...selectedLocation(),
+      });
+      const value = state().applicationFiles;
+      if (value?.error) throw new Error(value.error);
+      if (!value?.document) throw new Error('The save did not return a file.');
+      return {
+        path: value.document.path,
+        text: value.document.text,
+        revision: value.document.revision,
+        writable: value.document.writable,
+      };
+    },
+  };
+
+  const browser: FileBrowserHandle = installFileBrowser(
+    get('[data-file-browser]'),
+    port,
+  );
+
   const run = (work: () => Promise<unknown> | void) =>
     ownedEvent(async () => {
       try {
         await work();
       } catch (reason) {
-        get('[data-error]').hidden = false;
-        get('[data-error]').textContent =
+        browser.session.error =
           reason instanceof Error
             ? reason.message
             : 'The Application view could not be opened.';
+        browser.render();
       }
     });
+  const scopeKey = () =>
+    `${project}\0${JSON.stringify(location ?? null)}`;
   get<HTMLSelectElement>('[data-area]').addEventListener(
     'change',
     run(async () => {
@@ -80,12 +144,9 @@ export function installApplication(
                 area.path !== row.applicationRoot?.path,
             )[index - 1]
           : undefined;
-      rendered = '';
-      await request({
-        action: 'application-files',
-        project,
-        ...selectedLocation(),
-      });
+      browser.session.setScope(scopeKey());
+      if (files) await browser.openRoot();
+      else browser.render();
     }),
   );
   const close = () => {
@@ -105,20 +166,18 @@ export function installApplication(
     if (project !== name) {
       location = undefined;
       get<HTMLSelectElement>('[data-area]').selectedIndex = 0;
+      browser.reset();
     }
     project = name;
     shown = true;
-    rendered = '';
+    browser.session.setScope(scopeKey());
   };
   // Same path as the Files control. Do not click that button: render disables
   // it while this Application's file load or save is in flight.
   const openFileBrowser = async () => {
     show('files');
-    await request({
-      action: 'application-files',
-      project,
-      ...selectedLocation(),
-    });
+    browser.session.setScope(scopeKey());
+    await browser.openRoot();
   };
   get('[data-close]').addEventListener('click', run(returnToConversations));
   host.addEventListener('click', (event) => {
@@ -171,75 +230,12 @@ export function installApplication(
     'click',
     run(() => request({ action: 'board-inspection', view: 'board', project })),
   );
-  get<HTMLFormElement>('[data-location]').addEventListener(
-    'submit',
-    (event) => {
-      event.preventDefault();
-      run(async () => {
-        await request({
-          action: 'application-files',
-          project,
-          ...selectedLocation(),
-          path: get<HTMLInputElement>('[data-path]').value,
-        });
-      })();
-    },
-  );
-  get('[data-open]').setAttribute('type', 'button');
-  get('[data-open]').addEventListener(
-    'click',
-    run(() =>
-      request({
-        action: 'application-file-read',
-        project,
-        ...selectedLocation(),
-        path: get<HTMLInputElement>('[data-path]').value,
-      }),
-    ),
-  );
-  get('[data-read-current]').addEventListener(
-    'click',
-    run(() =>
-      request({
-        action: 'application-file-read',
-        project,
-        ...selectedLocation(),
-        path: state().applicationFiles!.document!.path,
-      }),
-    ),
-  );
-  get('[data-use-current]').addEventListener('click', () => {
-    drafts.delete(documentKey());
-    rendered = '';
-    render();
-  });
-  get<HTMLTextAreaElement>('[data-text]').addEventListener('input', () => {
-    const draft = drafts.get(documentKey());
-    if (draft) draft.text = get<HTMLTextAreaElement>('[data-text]').value;
-    render();
-  });
-  get('[data-save]').addEventListener(
-    'click',
-    run(async () => {
-      const document = state().applicationFiles?.document,
-        draft = drafts.get(documentKey());
-      if (!document || !draft) return;
-      await request({
-        action: 'application-file-save',
-        project,
-        ...selectedLocation(),
-        path: document.path,
-        text: draft.text,
-        revision: draft.revision,
-      });
-    }),
-  );
   function render() {
     const current = state(),
       key = `${current.base}\0${current.handle}`;
     if (key !== identity) {
       identity = key;
-      drafts.clear();
+      browser.reset();
       close();
     }
     const row = current.projects.find(
@@ -270,7 +266,7 @@ export function installApplication(
         areaSelect.append(option);
       }
       location = undefined;
-      rendered = '';
+      browser.session.setScope(scopeKey());
     }
     get('[data-area-label]').hidden = areaSelect.options.length < 2;
     get('[data-overview]').hidden = view !== 'overview';
@@ -284,110 +280,17 @@ export function installApplication(
         button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     }
-    areaSelect.disabled =
-      !!current.applicationFiles?.loading || !!current.applicationFiles?.saving;
+    const loading =
+      browser.session.busy ||
+      !!current.applicationFiles?.loading ||
+      !!current.applicationFiles?.saving;
+    areaSelect.disabled = loading;
     get('[data-source]').hidden = !files;
-    const value =
-      current.applicationFiles?.project === project &&
-      current.applicationFiles.location?.store === location?.store &&
-      current.applicationFiles.location?.path === location?.path
-        ? current.applicationFiles
-        : undefined;
-    get('[data-error]').hidden = !value?.error;
-    get('[data-error]').textContent = value?.error ?? '';
-    get('[data-status]').textContent = value?.saving
-      ? 'Saving…'
-      : value?.loading
-        ? 'Reading server files…'
-        : value?.listing
-          ? `${value.listing.path || '/'}${value.listing.more ? ' · First 200 entries; use a relative path for other files.' : value.listing.entries.length ? '' : ' · This directory is empty.'}`
-          : '';
-    const entries = get('[data-entries]'),
-      listing = value?.listing;
-    const stamp = JSON.stringify([project, listing]);
-    if (entries.dataset.stamp !== stamp) {
-      get<HTMLInputElement>('[data-path]').value = listing?.path ?? '';
-      entries.dataset.stamp = stamp;
-      entries.replaceChildren();
-      if (listing?.path) {
-        const up = document.createElement('button');
-        up.textContent = 'Parent folder';
-        up.addEventListener(
-          'click',
-          run(() =>
-            request({
-              action: 'application-files',
-              project,
-              ...selectedLocation(),
-              path: listing.path.includes('/')
-                ? listing.path.slice(0, listing.path.lastIndexOf('/'))
-                : '',
-            }),
-          ),
-        );
-        entries.append(up);
-      }
-      for (const entry of listing?.entries ?? []) {
-        const button = document.createElement('button');
-        button.textContent = `${entry.directory ? 'Folder · ' : ''}${entry.name}`;
-        button.dataset.applicationPath = entry.path;
-        button.addEventListener(
-          'click',
-          run(() =>
-            request({
-              action: entry.directory
-                ? 'application-files'
-                : 'application-file-read',
-              project,
-              ...selectedLocation(),
-              path: entry.path,
-            }),
-          ),
-        );
-        entries.append(button);
-      }
-    }
     for (const button of host.querySelectorAll<HTMLButtonElement>(
-      '[data-entries] button, [data-files], [data-browse], [data-open], [data-read-current]',
+      '[data-files]',
     ))
-      button.disabled = !!value?.loading || !!value?.saving;
-    const source = value?.document;
-    get('[data-editor]').hidden = !source;
-    if (!source || !value) {
-      rendered = '';
-      return;
-    }
-    const draftKey = documentKey();
-    let draft = drafts.get(draftKey);
-    if (!draft || draft.text === draft.original || source.text === draft.text) {
-      draft = {
-        text: source.text,
-        original: source.text,
-        revision: source.revision,
-      };
-      drafts.set(draftKey, draft);
-    }
-    const changed = draft.revision !== source.revision;
-    const editor = get<HTMLTextAreaElement>('[data-text]');
-    if (rendered !== draftKey)
-      get<HTMLInputElement>('[data-path]').value = source.path;
-    if (rendered !== draftKey || editor.value !== draft.text)
-      editor.value = draft.text;
-    rendered = draftKey;
-    editor.readOnly = !source.writable || value.saving;
-    get('[data-file-title]').textContent = source.path;
-    get('[data-permission]').textContent = changed
-      ? 'The server file changed. Your draft is retained; read and review the current file before saving.'
-      : source.writable
-        ? 'Write allowed for this file.'
-        : 'Read only for your account or this workspace path.';
-    get<HTMLButtonElement>('[data-save]').disabled =
-      !source.writable ||
-      value.saving ||
-      value.uncertain === true ||
-      changed ||
-      draft.text === source.text;
-    get('[data-use-current]').hidden = !changed;
+      button.disabled = loading;
+    if (files) browser.render();
   }
   return {
     render,
