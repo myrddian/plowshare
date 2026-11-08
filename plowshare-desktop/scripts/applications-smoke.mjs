@@ -43,6 +43,16 @@ try {
   await expect(page.locator('#projects-toggle')).not.toContainText('Externals');
   await page.locator('[data-project="Chatbot"]').click();
   await expect(page.locator('#application-panel')).toBeVisible();
+  const hubNav = page.locator('#application-panel nav[aria-label="Application views"]');
+  await expect(hubNav.locator('[data-hub="overview"]')).toHaveAttribute('aria-current', 'page');
+  for (const name of ['Overview', 'Conversations', 'Schedules', 'Relay', 'Files', 'Access'])
+    await expect(hubNav.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of ['Runtime definitions', 'Memory', 'Boards'])
+    await expect(hubNav.getByRole('button', { name, exact: true })).toHaveCount(0);
+  await expect(page.locator('#application-panel [data-overview] [data-runtime]')).toBeVisible();
+  await expect(page.locator('#application-panel [data-overview] [data-memory]')).toBeVisible();
+  await expect(page.locator('#application-panel [data-overview] [data-board]')).toBeVisible();
+  await expect(page.locator('#application-panel [data-source]')).toBeHidden();
   await page.locator('#application-panel [data-files]').click();
   await page.locator('#application-panel [data-path]').fill('');
   await page.locator('#application-panel [data-browse]').click();
@@ -118,12 +128,43 @@ try {
     await expect.poll(() => fixture.frames.some(frame => frame.type === operation && frame.payload.project === 'Managed app')).toBe(true);
   }
   await page.locator('[data-project="Managed app"]').click();
+  await expect(page.locator('#application-panel')).toBeVisible();
+  const documentWith = async (urlPart, ready) => {
+    let found;
+    await expect.poll(async () => {
+      for (const candidate of app.windows()) {
+        if (!candidate.url().includes(urlPart)) continue;
+        if (await ready(candidate).catch(() => false)) {
+          found = candidate;
+          return true;
+        }
+      }
+      return false;
+    }, { timeout: 15000 }).toBe(true);
+    return found;
+  };
+  await page.locator('#application-panel nav [data-hub="schedules"]').click();
+  const schedules = await documentWith('activity.html', async candidate => (await candidate.locator('#activity-title').textContent()) === 'Scheduled work');
+  await expect(schedules.locator('#activity-list-note')).toContainText('No schedules for Managed app');
+  await page.locator('[data-project="Managed app"]').click();
+  await expect(page.locator('#application-panel')).toBeVisible();
+  await page.locator('#application-panel nav [data-hub="relay"]').click();
+  const relay = await documentWith('relay.html', async candidate => (await candidate.locator('#relay-scope').inputValue()) === 'Managed app');
+  await expect(relay.locator('#relay-scope')).toHaveValue('Managed app');
+  await page.locator('[data-project="Chatbot"]').click();
+  await expect(page.locator('#application-panel')).toBeVisible();
+  await page.locator('#application-panel nav [data-hub="conversations"]').click();
+  await expect(page.locator('#application-panel')).toBeHidden();
+  await expect(page.locator('#stage')).toBeVisible();
+  await expect(page.locator('#scope-caption')).toHaveText('Chatbot');
+  await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toHaveAttribute('aria-current', 'true');
+  await page.locator('[data-project="Managed app"]').click();
   fixture.removeServerProject('Managed app');
   await page.locator('#refresh').click();
   await expect(page.locator('#application-panel')).toBeHidden();
   await expect(page.locator('#application-conversations [data-project="Managed app"]')).toHaveCount(0);
   assert.deepEqual(errors, []);
-  console.log('Application workspace smoke passed: separate groups, server-active sidebar rows, application access, read-only and writable server files, stale revisions and retained drafts, scoped view shortcuts, revoked access, no local file claims and native window/sidebar resize.');
+  console.log('Application workspace smoke passed: separate groups, server-active sidebar rows, workflow hub, application access, read-only and writable server files, stale revisions and retained drafts, scoped view shortcuts, revoked access, no local file claims and native window/sidebar resize.');
 } finally {
   await app?.close();
   await fixture.close();

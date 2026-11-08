@@ -9,6 +9,11 @@ import { displayText } from 'plowshare-client-ts/binding/values';
 import { botDisplayName, botDetails } from './bot-details.ts';
 import { installPaneResize } from './pane-resize.ts';
 import { installApplication } from './application.ts';
+import {
+  applicationRelayScopeKey,
+  applicationScheduleProjectKey,
+  writeRelayScope,
+} from './application-hub.ts';
 import { installProjectAccess } from './project-access.ts';
 import { installToolConnections } from './tool-connections.ts';
 import { installServerAdmin } from './server-admin.ts';
@@ -115,7 +120,19 @@ const application = installApplication(
   () => state,
   request,
   chooseScope,
+  openApplicationSchedules,
+  openApplicationRelay,
 );
+function openApplicationSchedules(project: string) {
+  // Account-wide Scheduled work has no project field on schedule rows.
+  // Activity keeps this name and drops rows that cannot name the Application.
+  localStorage.setItem(applicationScheduleProjectKey, project);
+  action({ action: 'activity', view: 'schedules' });
+}
+function openApplicationRelay(project: string) {
+  writeRelayScope(project);
+  action({ action: 'relay' });
+}
 const approvalControls = installApprovalControls(
   document,
   () => state,
@@ -1433,10 +1450,14 @@ $('#runs-open').addEventListener('click', () =>
 $('#studio-open').addEventListener('click', () =>
   action({ action: 'activity', view: 'builder' }),
 );
-$('#relay-open').addEventListener('click', () => action({ action: 'relay' }));
-$('#schedules-open').addEventListener('click', () =>
-  action({ action: 'activity', view: 'schedules' }),
-);
+$('#relay-open').addEventListener('click', () => {
+  localStorage.removeItem(applicationRelayScopeKey);
+  action({ action: 'relay' });
+});
+$('#schedules-open').addEventListener('click', () => {
+  localStorage.removeItem(applicationScheduleProjectKey);
+  action({ action: 'activity', view: 'schedules' });
+});
 $('#memories-open').addEventListener('click', () =>
   action({ action: 'library', view: 'memories', project: scope || null }),
 );

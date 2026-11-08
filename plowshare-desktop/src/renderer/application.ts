@@ -2,15 +2,39 @@ import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores'
 import type { DesktopState, Reply, Request } from '../shared.ts';
 import { ownedEvent } from './events.ts';
 
-/** Application landing page and server source editor. Drafts stay in this account/window only. */
+const hubViews = [
+  'overview',
+  'conversations',
+  'schedules',
+  'relay',
+  'files',
+  'access',
+] as const;
+type HubView = (typeof hubViews)[number];
+const isHubView = (value: string): value is HubView =>
+  (hubViews as readonly string[]).includes(value);
+
+/**
+ * Application workflow hub and server source editor.
+ * `open` lands on Overview with the file browser closed. Drafts stay in this
+ * account and window only. Runtime, Memory and Boards stay on Overview;
+ * Conversations returns to the chat stage.
+ */
 export function installApplication(
   host: HTMLElement,
   state: () => DesktopState,
   request: (value: Request) => Promise<Reply>,
   conversations: (project: string) => Promise<void>,
+  openSchedules?: (project: string) => void,
+  openRelay?: (project: string) => void,
 ) {
-  host.innerHTML = `<header><div><div class="eyebrow">APPLICATION</div><h2 data-title></h2></div><button data-close>Conversations</button></header>
-    <p data-summary></p><nav aria-label="Application views"><button data-files>Files</button><button data-runtime>Runtime definitions</button><button data-memory>Memory</button><button data-board>Boards</button><button data-settings>Access</button></nav>
+  host.innerHTML = `<header><div><div class="eyebrow">APPLICATION</div><h2 data-title></h2></div><button type="button" data-close>Conversations</button></header>
+    <p data-summary></p><nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="conversations">Conversations</button><button type="button" data-hub="schedules">Schedules</button><button type="button" data-hub="relay">Relay</button><button type="button" data-hub="files" data-files>Files</button><button type="button" data-hub="access" data-settings>Access</button></nav>
+    <section data-overview><div data-overview-tiles><button type="button" data-hub="conversations"><strong>Conversations</strong><small>Chat scoped to this Application</small></button><button type="button" data-hub="schedules"><strong>Schedules</strong><small>Scheduled work that names this Application</small></button><button type="button" data-hub="relay"><strong>Relay</strong><small>Relay log scoped to this Application</small></button><button type="button" data-hub="files"><strong>Files</strong><small>Server source for this Application</small></button><button type="button" data-hub="access"><strong>Access</strong><small>Membership for this Application</small></button></div>
+    <div class="application-secondary" aria-label="More Application surfaces"><button type="button" data-runtime>Runtime definitions</button><button type="button" data-memory>Memory</button><button type="button" data-board>Boards</button></div></section>
+    <section data-schedules hidden><p>Scheduled work opens for this Application. Rows that name it stay in that list; a page with none says so.</p></section>
+    <section data-relay hidden><p>Relay opens with this Application selected as its scope.</p></section>
+    <section data-access hidden><p>Membership for this Application opens in Access.</p></section>
     <section data-source hidden><label data-area-label hidden>File location<select data-area aria-label="Application file location"></select></label><form data-location><label>Relative path<input data-path autocomplete="off" placeholder="Folder or file inside this Application"></label><button data-browse>Browse folder</button><button data-open>Read file</button></form>
     <p data-status role="status"></p><p data-error role="alert" hidden></p><div data-entries></div>
     <section data-editor hidden><h3 data-file-title></h3><p data-permission></p><label>File content<textarea data-text spellcheck="false" aria-label="Application file content"></textarea></label>
@@ -22,6 +46,7 @@ export function installApplication(
     shown = false,
     files = false,
     rendered = '';
+  let view: HubView = 'overview';
   const drafts = new Map<
     string,
     { text: string; revision: string; original: string }
@@ -30,7 +55,7 @@ export function installApplication(
   const selectedLocation = () => (location ? { location } : {});
   const documentKey = () =>
     `${project}\0${JSON.stringify(location ?? null)}\0${state().applicationFiles?.document?.path ?? ''}`;
-  const run = (work: () => Promise<unknown>) =>
+  const run = (work: () => Promise<unknown> | void) =>
     ownedEvent(async () => {
       try {
         await work();
@@ -67,25 +92,61 @@ export function installApplication(
     shown = false;
     host.hidden = true;
   };
-  get('[data-close]').addEventListener(
-    'click',
-    run(async () => {
-      close();
-      await conversations(project);
-    }),
-  );
-  get('[data-files]').addEventListener(
-    'click',
-    run(async () => {
-      files = true;
-      render();
-      await request({
-        action: 'application-files',
-        project,
-        ...selectedLocation(),
-      });
-    }),
-  );
+  const show = (next: HubView) => {
+    view = next;
+    files = next === 'files';
+    render();
+  };
+  const returnToConversations = () => {
+    close();
+    return conversations(project);
+  };
+  get('[data-close]').addEventListener('click', run(returnToConversations));
+  host.addEventListener('click', (event) => {
+    const hub = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-hub]',
+    )?.dataset.hub;
+    if (!hub || !isHubView(hub)) return;
+    if (hub === 'conversations') {
+      run(returnToConversations)();
+      return;
+    }
+    if (hub === 'access') {
+      show('access');
+      document
+        .querySelector<HTMLButtonElement>(
+          `[data-project-access="${CSS.escape(project)}"]`,
+        )
+        ?.click();
+      return;
+    }
+    if (hub === 'files') {
+      run(async () => {
+        show('files');
+        await request({
+          action: 'application-files',
+          project,
+          ...selectedLocation(),
+        });
+      })();
+      return;
+    }
+    if (hub === 'schedules') {
+      run(() => {
+        show('schedules');
+        openSchedules?.(project);
+      })();
+      return;
+    }
+    if (hub === 'relay') {
+      run(() => {
+        show('relay');
+        openRelay?.(project);
+      })();
+      return;
+    }
+    show('overview');
+  });
   get('[data-runtime]').addEventListener(
     'click',
     run(() => request({ action: 'application-runtime', project })),
@@ -97,13 +158,6 @@ export function installApplication(
   get('[data-board]').addEventListener(
     'click',
     run(() => request({ action: 'board-inspection', view: 'board', project })),
-  );
-  get('[data-settings]').addEventListener('click', () =>
-    document
-      .querySelector<HTMLButtonElement>(
-        `[data-project-access="${CSS.escape(project)}"]`,
-      )
-      ?.click(),
   );
   get<HTMLFormElement>('[data-location]').addEventListener(
     'submit',
@@ -207,6 +261,17 @@ export function installApplication(
       rendered = '';
     }
     get('[data-area-label]').hidden = areaSelect.options.length < 2;
+    get('[data-overview]').hidden = view !== 'overview';
+    get('[data-schedules]').hidden = view !== 'schedules';
+    get('[data-relay]').hidden = view !== 'relay';
+    get('[data-access]').hidden = view !== 'access';
+    for (const button of host.querySelectorAll<HTMLButtonElement>(
+      '[data-hub]',
+    )) {
+      if (button.dataset.hub === view)
+        button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    }
     areaSelect.disabled =
       !!current.applicationFiles?.loading || !!current.applicationFiles?.saving;
     get('[data-source]').hidden = !files;
@@ -325,6 +390,7 @@ export function installApplication(
       }
       project = name;
       shown = true;
+      view = 'overview';
       files = false;
       rendered = '';
       render();
