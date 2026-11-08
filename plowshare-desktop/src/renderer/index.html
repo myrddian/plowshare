@@ -82,6 +82,12 @@
           </section>
           <section id="info-commands" class="info-tab-panel" role="tabpanel" aria-labelledby="info-commands-tab" hidden><div id="agent-commands" aria-label="Agent commands"></div></section>
           <section id="info-files" class="info-tab-panel" role="tabpanel" aria-labelledby="info-files-tab" hidden>
+            <section id="app-files" hidden>
+              <h3>App files</h3>
+              <p id="app-files-description">This Application keeps its files on the server.</p>
+              <div class="dialog-actions"><button id="app-files-open" class="primary-button" type="button">Open App files</button></div>
+            </section>
+            <div id="project-files">
             <h3 id="files-title">Project file access</h3>
             <p id="files-description">Choose a folder to give agents access to its files.</p>
             <div id="files-actions" class="dialog-actions"><button id="files-recreate" class="secondary-button" hidden>Recreate Personal store</button><button id="files-withdraw" class="secondary-button" hidden><span data-icon="close"></span>Disconnect files</button><button id="files-reopen" class="secondary-button" hidden><span data-icon="refresh"></span>Reconnect files</button><button id="files-forget" class="secondary-button" hidden>Forget folder</button><button id="files-choose" class="primary-button"><span data-icon="folder"></span>Choose folder</button></div>
@@ -89,6 +95,7 @@
             <p class="dialog-note">Agents can read and change files within this folder. Commands use its .plowshare/environment.yml settings and the server’s approval flow. Each project runs in its own session. Added folders are remembered on this computer.</p>
             <div class="dialog-actions" aria-label="Project configuration"><button id="project-work-open" type="button">Project controls</button><button id="project-mcp-open" type="button">Client MCP settings</button><button id="project-server-tools-open" type="button">Server tools</button></div><section id="project-sync" hidden></section>
             <div id="files-error" role="alert" hidden></div>
+            </div>
           </section>
         </aside>
       </div>

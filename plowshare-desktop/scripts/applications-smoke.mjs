@@ -158,13 +158,34 @@ try {
   await expect(page.locator('#stage')).toBeVisible();
   await expect(page.locator('#scope-caption')).toHaveText('Chatbot');
   await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toHaveAttribute('aria-current', 'true');
+  // Opening an Application does not switch Info onto App files.
+  await expect(page.locator('#info-files-tab')).toHaveAttribute('aria-selected', 'false');
+  // Hub closed, Application still selected: Info offers App files, not Project sync.
+  await page.locator('#files-open').click();
+  await expect(page.locator('#info-files-tab')).toHaveText('App files');
+  await expect(page.locator('#app-files')).toBeVisible();
+  await expect(page.locator('#files-choose')).toBeHidden();
+  await expect(page.locator('#project-sync')).toBeHidden();
+  await expect(page.locator('#file-access-prompt')).toBeHidden();
+  await expect(page.locator('#files-open')).not.toHaveAttribute('title', 'Connect a local project folder');
+  await page.locator('#app-files-open').click();
+  await expect(page.locator('#application-panel nav [data-hub="files"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#application-panel [data-source]')).toBeVisible();
+  await page.locator('[data-project="Remote files"]').click();
+  await expect(page.locator('#application-panel')).toBeHidden();
+  await page.locator('#inspector-close').click();
+  await page.locator('#files-open').click();
+  await expect(page.locator('#info-files-tab')).toHaveText('Files');
+  await expect(page.locator('#app-files')).toBeHidden();
+  await expect(page.locator('#files-choose')).toBeVisible();
+  await expect(page.locator('#project-sync')).toBeVisible();
   await page.locator('[data-project="Managed app"]').click();
   fixture.removeServerProject('Managed app');
   await page.locator('#refresh').click();
   await expect(page.locator('#application-panel')).toBeHidden();
   await expect(page.locator('#application-conversations [data-project="Managed app"]')).toHaveCount(0);
   assert.deepEqual(errors, []);
-  console.log('Application workspace smoke passed: separate groups, server-active sidebar rows, workflow hub, application access, read-only and writable server files, stale revisions and retained drafts, scoped view shortcuts, revoked access, no local file claims and native window/sidebar resize.');
+  console.log('Application workspace smoke passed: separate groups, server-active sidebar rows, workflow hub, App files vs Project files, application access, read-only and writable server files, stale revisions and retained drafts, scoped view shortcuts, revoked access, no local file claims and native window/sidebar resize.');
 } finally {
   await app?.close();
   await fixture.close();

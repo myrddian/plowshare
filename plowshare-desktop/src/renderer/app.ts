@@ -2109,6 +2109,7 @@ document.addEventListener('keydown', (event) => {
 const navigation = installNavigation((): NavigationItem[] => {
   if (!state) return [];
   const available = state.mode === 'demo' || state.connected;
+  const applicationScope = selectedApplicationScope();
   return [
     ...[...state.conversations]
       .sort((a, b) => Number(b.id === selected) - Number(a.id === selected))
@@ -2231,8 +2232,10 @@ const navigation = installNavigation((): NavigationItem[] => {
     },
     {
       id: 'files',
-      title: 'Project files',
-      detail: 'Connect or disconnect a local folder',
+      title: applicationScope ? 'App files' : 'Project files',
+      detail: applicationScope
+        ? 'Open server source for this Application'
+        : 'Connect or disconnect a local folder',
       group: 'Actions',
       icon: 'folder',
       run: () => $('#files-open').click(),
@@ -2353,8 +2356,30 @@ let fileAccessError = '';
 let fileAccessScope = '';
 const deniedFileAccess = new Set<string>();
 const fileAccessKey = () => `${identity}:${scope}`;
+/** Applications use server source. Adding a Project folder still uses the local claim UI. */
+function selectedApplicationScope() {
+  return (
+    !addingProject &&
+    state.projects.find((row) => row.name === scope)?.kind === 'application'
+  );
+}
 function renderFiles() {
+  const applicationFiles = selectedApplicationScope();
   renderSync(state, scope, addingProject);
+  // Sync renders for any named live scope. Hide it again for Applications.
+  if (applicationFiles) $('#project-sync').hidden = true;
+  $('#info-files-tab').textContent = applicationFiles ? 'App files' : 'Files';
+  $('#app-files').hidden = !applicationFiles;
+  $('#project-files').hidden = applicationFiles;
+  if (applicationFiles) {
+    $('#file-access-prompt').hidden = true;
+    $('#app-files-description').textContent =
+      `${scope} keeps its files on the server. Open them in the Application hub. Folder connect and project sync stay with Projects.`;
+    $('#files-label').textContent = 'App files';
+    $('#files-open').title = `App files for ${scope}`;
+    $('#files-open').dataset.status = 'off';
+    return;
+  }
   const personal = scope === state.personal?.project && !addingProject;
   const folder = state.projectFolders?.find((row) => row.name === scope);
   const recorded = state.projects.find((row) => row.name === scope);
@@ -2503,6 +2528,25 @@ $('#files-open').addEventListener(
     $('#files-error').hidden = true;
     renderFiles();
     showInfoTab('files');
+  }),
+);
+$('#app-files-open').addEventListener(
+  'click',
+  ownedEvent(async () => {
+    const project = scope;
+    if (
+      state.projects.find((row) => row.name === project)?.kind !== 'application'
+    )
+      return;
+    await request({ action: 'workspace-chat' });
+    if (scope !== project) return;
+    application.open(project);
+    renderPersonal();
+    document
+      .querySelector<HTMLButtonElement>(
+        '#application-panel [data-hub-nav] [data-hub="files"]',
+      )
+      ?.click();
   }),
 );
 $('#file-access-allow').addEventListener(
