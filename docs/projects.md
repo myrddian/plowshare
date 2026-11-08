@@ -126,7 +126,7 @@ See [the lifecycle decision](decisions/0017-application-owned-service-provisioni
 ## Deploy, update and activate an Application
 
 A server administrator can upload a complete source folder using the CLI or
-Desktop **Applications → Deploy**. Configure a server FileStore first and grant
+Desktop **Server administration → Deploy**. Configure a server FileStore first and grant
 the administrator MANAGER access to its destination. Deployment retains MANAGED
 source under a dedicated `destination/revisions/<UUID>` directory; it does not
 start external processes. First deployment requires a project without an existing
@@ -257,7 +257,8 @@ An administrator creates an Application with explicit placement:
 bin/plowshare-cli application create '{"name":"mychatbot","applicationRoot":{"store":"applications","path":"mychatbot"},"writableAreas":[{"store":"outputs","path":"mychatbot/reports"}]}'
 ```
 
-Use the same command with `/` in the TUI. In Desktop **Add Application**, select
+Use the same command with `/` in the TUI. In Desktop **Server administration →
+Add Application**, select
 **Use server FileStore aliases**, enter `applications/mychatbot` as the source,
 and comma-separated `alias/path` writable areas. Blank writable areas are read
 only. This new `application.create` operation safely refuses on older servers.
@@ -295,7 +296,7 @@ a working directory cannot enforce these filesystem boundaries.
 
 CLI and TUI commands use the same authenticated WebSocket operation,
 `project.create`. In the TUI, prefix the command with `/`. In the desktop,
-connect as an administrator and choose **Add Application**.
+connect as an administrator, open **Server administration**, and choose **Add Application**.
 
 A `MANAGED` project provisions a server workspace and writes `plowshare.json` with an explicit `MANAGER` grant for the creator:
 
@@ -660,10 +661,19 @@ spaces remain private to their account owner. See [server administration](server
 ## Deployed Application files
 
 An authorized Application can be inspected without connecting a local folder. In
-Desktop, select it under **Applications** to open its workspace. **Conversations**
-returns to your scoped conversations; **Files** browses the deployed source.
-**Runtime definitions**, **Memory** and **Boards** open existing views with the
-Application selected. Conversation histories retain their account ownership.
+Desktop, each row under **Applications** reads as **Active on server** (and its
+type when shown). Opening one lands on the workflow hub **Overview**, with primary
+views **Conversations**, **Schedules**, **Relay**, **Files**, and **Access**.
+**Files** browses and edits the deployed server source; no local folder claim,
+union or checkout is required. **Runtime definitions**, **Memory** and **Boards**
+stay available as secondary actions from Overview. Hub **Conversations** returns
+to scoped conversations in the chat stage. Conversation histories retain their
+account ownership.
+
+While an Application is selected, Info → **App files** is a short companion that
+opens the hub **Files** view. Info does not offer Connect folder or Project sync
+for Applications. **Projects** and Personal spaces keep Info → **Files** for local
+folder claim and sync unchanged.
 The web console exposes **Files** on each Application card.
 
 CLI and TUI use the same WebSocket operations:
@@ -677,8 +687,7 @@ application save {"project":"mychatbot","path":"notes.md","text":"Updated notes"
 
 CLI `--project` and the TUI's current project supply the project when omitted.
 `application.files`, `application.file.read` and `application.file.save` are also
-available through the shared SDK operation contracts. No local file claim, union
-or checkout is needed. This capability applies to registered server Applications;
+available through the shared SDK operation contracts. This capability applies to registered server Applications;
 external Projects continue to use their existing file access path.
 
 The browser lists up to 200 entries per directory. An explicit relative path can

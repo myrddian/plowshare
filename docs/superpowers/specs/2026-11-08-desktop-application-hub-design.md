@@ -1,10 +1,9 @@
 # Desktop Application hub
 
-Status: design, 8 November 2026. Client UX redesign for Plowshare Desktop.
-This document describes intent and agreed product shape. It authorizes no
-implementation until approved. Verify claims against current Desktop code;
-existing manuals that still describe Deploy beside Applications or Application
-Files only as a blank landing page are historical relative to this design.
+Status: implemented in Plowshare Desktop, 8 November 2026. Client UX redesign for
+Plowshare Desktop. This document describes the shipped product shape. Verify
+claims against current Desktop code; operator manuals in `docs/manual/` and
+`docs/projects.md` reflect this behavior.
 
 ## Intent
 
