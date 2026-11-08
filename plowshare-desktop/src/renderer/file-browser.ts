@@ -3,6 +3,8 @@
  * Hosts supply a {@link FileBrowserPort}; Application/Project chrome stays outside.
  */
 
+import { icon } from './icons.ts';
+
 export interface FileBrowserEntry {
   readonly name: string;
   readonly path: string;
@@ -32,6 +34,11 @@ export interface FileBrowserPort {
     revision: string,
   ): Promise<FileBrowserDocument>;
 }
+
+export type FileBrowserOptions = {
+  /** Extra dataset key on row buttons (e.g. personalPath for smokes). */
+  pathDataset?: string;
+};
 
 type Draft = { text: string; revision: string; original: string };
 
@@ -78,7 +85,9 @@ export class FileBrowserSession {
   }
 
   get dirty() {
-    return !!this.current && !!this.draft && this.draft.text !== this.current.text;
+    return (
+      !!this.current && !!this.draft && this.draft.text !== this.current.text
+    );
   }
 
   get revisionConflict() {
@@ -265,21 +274,36 @@ export interface FileBrowserHandle {
 export function installFileBrowser(
   host: HTMLElement,
   port: FileBrowserPort,
+  options: FileBrowserOptions = {},
 ): FileBrowserHandle {
   const session = new FileBrowserSession(port);
+  const pathDataset = options.pathDataset;
+  const canSave = typeof port.save === 'function';
   host.classList.add('file-browser');
-  host.innerHTML = `<div class="file-browser-toolbar"><form data-jump><label>Jump to relative path<input data-path autocomplete="off" placeholder="Folder or file"></label><button type="submit" data-jump-go>Go</button></form>
-    <p data-status role="status"></p><p data-error role="alert" hidden></p></div>
+  host.innerHTML = `<div class="file-browser-toolbar">
+      <details class="file-browser-jump">
+        <summary>Jump to relative path</summary>
+        <form data-jump><input data-path autocomplete="off" placeholder="Folder or file" aria-label="Relative path"><button type="submit" data-jump-go>Go</button></form>
+      </details>
+      <p data-status role="status"></p>
+      <p data-error role="alert" hidden></p>
+    </div>
     <div class="file-browser-split">
       <div class="file-browser-tree" data-tree role="tree" aria-label="Files"></div>
-      <section class="file-browser-editor" data-editor hidden>
-        <h3 data-file-title></h3>
-        <p data-permission></p>
-        <label>File content<textarea data-text spellcheck="false" aria-label="File content"></textarea></label>
-        <div class="file-browser-actions">
-          <button type="button" data-read-current>Read current file</button>
-          <button type="button" data-use-current hidden>Use current file and discard draft</button>
-          <button type="button" data-save>Save file</button>
+      <section class="file-browser-editor" data-editor>
+        <div class="file-browser-empty-editor" data-editor-empty>
+          <span data-icon-slot>${icon('file')}</span>
+          <p>Select a file to open</p>
+        </div>
+        <div data-editor-body hidden>
+          <h3 data-file-title></h3>
+          <p data-permission></p>
+          <label>File content<textarea data-text class="personal-preview" spellcheck="false" aria-label="File content"></textarea></label>
+          <div class="file-browser-actions">
+            <button type="button" data-read-current>Read current file</button>
+            <button type="button" data-use-current hidden>Use current file and discard draft</button>
+            <button type="button" data-save ${canSave ? '' : 'hidden'}>Save file</button>
+          </div>
         </div>
       </section>
     </div>`;
@@ -323,6 +347,12 @@ export function installFileBrowser(
     run(() => session.save()),
   );
 
+  function markPath(button: HTMLElement, path: string) {
+    button.dataset.applicationPath = path;
+    button.dataset.personalPath = path;
+    if (pathDataset) button.dataset[pathDataset] = path;
+  }
+
   function renderTree() {
     const tree = get('[data-tree]');
     tree.replaceChildren();
@@ -340,8 +370,8 @@ export function installFileBrowser(
           row.setAttribute('aria-expanded', open ? 'true' : 'false');
           const toggle = document.createElement('button');
           toggle.type = 'button';
-          toggle.className = 'file-browser-toggle';
-          toggle.textContent = open ? '▾' : '▸';
+          toggle.className = `file-browser-toggle${open ? ' is-open' : ''}`;
+          toggle.innerHTML = icon('chevron');
           toggle.setAttribute(
             'aria-label',
             open ? `Collapse ${entry.name}` : `Expand ${entry.name}`,
@@ -356,8 +386,8 @@ export function installFileBrowser(
           const label = document.createElement('button');
           label.type = 'button';
           label.className = 'file-browser-name';
-          label.textContent = entry.name;
-          label.dataset.applicationPath = entry.path;
+          label.innerHTML = `${icon('folder')}<span>${escapeText(entry.name)}</span>`;
+          markPath(label, entry.path);
           label.addEventListener(
             'click',
             run(async () => {
@@ -378,8 +408,8 @@ export function installFileBrowser(
           const label = document.createElement('button');
           label.type = 'button';
           label.className = 'file-browser-name';
-          label.textContent = entry.name;
-          label.dataset.applicationPath = entry.path;
+          label.innerHTML = `${icon('file')}<span>${escapeText(entry.name)}</span>`;
+          markPath(label, entry.path);
           if (session.document?.path === entry.path)
             label.setAttribute('aria-current', 'true');
           label.addEventListener(
@@ -416,8 +446,10 @@ export function installFileBrowser(
       button.disabled = session.busy && !button.matches('[data-use-current]');
     renderTree();
     const source = session.document;
-    const editor = get('[data-editor]');
-    editor.hidden = !source;
+    const empty = get('[data-editor-empty]');
+    const body = get('[data-editor-body]');
+    empty.hidden = !!source;
+    body.hidden = !source;
     if (!source || session.draftText === undefined) {
       painted = '';
       return;
@@ -427,20 +459,22 @@ export function installFileBrowser(
     if (painted !== key || text.value !== session.draftText)
       text.value = session.draftText;
     painted = key;
-    text.readOnly = !source.writable || session.busy;
+    text.readOnly = !source.writable || session.busy || !canSave;
     get('[data-file-title]').textContent = source.path;
     get('[data-permission]').textContent = session.revisionConflict
       ? 'The server file changed. Your draft is retained; read and review the current file before saving.'
-      : source.writable
+      : source.writable && canSave
         ? 'Write allowed for this file.'
         : 'Read only for your account or this workspace path.';
+    get('[data-read-current]').hidden = !canSave;
+    get('[data-use-current]').hidden = !canSave || !session.revisionConflict;
+    get('[data-save]').hidden = !canSave;
     get<HTMLButtonElement>('[data-save]').disabled =
-      !port.save ||
+      !canSave ||
       !source.writable ||
       session.busy ||
       session.revisionConflict ||
       !session.dirty;
-    get('[data-use-current]').hidden = !session.revisionConflict;
   }
 
   return {
@@ -464,4 +498,12 @@ export function installFileBrowser(
         ?.focus();
     },
   };
+}
+
+function escapeText(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }

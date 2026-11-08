@@ -664,10 +664,12 @@ An authorized Application can be inspected without connecting a local folder. In
 Desktop, each row under **Applications** reads as **Active on server** (and its
 type when shown). Opening one lands on the workflow hub **Overview**, with primary
 views **Conversations**, **Schedules**, **Relay**, **Files**, and **Access**.
-**Files** opens a tree-and-editor browser over the deployed server source; no
-local folder claim, union or checkout is required. Folders expand in the tree;
-selecting a file opens it beside the tree. **Runtime definitions**, **Memory**
-and **Boards** stay available as secondary actions from Overview. Hub
+**Files** opens the shared Desktop tree-and-editor file browser over the deployed
+server source; no local folder claim, union or checkout is required. Folders
+expand in the tree with folder/file icons; selecting a file opens it beside the
+tree. The same browser chrome is used for Personal **Resources** (and other
+personal file sections), read-only. **Runtime definitions**, **Memory** and
+**Boards** stay available as secondary actions from Overview. Hub
 **Conversations** returns to scoped conversations in the chat stage. Conversation
 histories retain their account ownership.
 
