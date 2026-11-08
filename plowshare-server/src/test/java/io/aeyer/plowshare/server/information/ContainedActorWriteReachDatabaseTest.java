@@ -35,13 +35,25 @@ import org.testcontainers.junit.jupiter.*;
  * and one admitted outright. Per repository, what actually happened, and in what order:
  *
  * <ul>
- *   <li>{@code JdbcInformationNavigationRepository} — REFUSED, by an authority predicate. {@code
- *       create} and {@code remove} both recheck through {@code writable}, whose first act is {@code
- *       lockIdentity(acting, project)}: {@code SELECT handle FROM admins WHERE handle=? AND enabled
- *       AND NOT bootstrap FOR SHARE} is empty for a bare UUID, so it raised {@code
- *       NotFoundFault("information is unavailable in this selection")} before any statement wrote.
- *       Nothing was reached; {@code information_relationships.actor}'s foreign key into {@code
- *       admins} (V147:16) sits behind it and was never asked.
+ *   <li>{@code JdbcInformationNavigationRepository} — WRITES REFUSED, READS NOW ADMITTED, and the
+ *       two are refused by different things. {@code create} and {@code remove} recheck through
+ *       {@code writable}, whose first act is {@code lockIdentity(acting, project)}: {@code SELECT
+ *       handle FROM admins WHERE handle=? AND enabled AND NOT bootstrap FOR SHARE} is empty for a
+ *       bare UUID, so it raises {@code NotFoundFault("information is unavailable in this
+ *       selection")} before any statement writes. That refusal is now <em>deliberately kept</em>
+ *       rather than merely inherited: this repository writes five provenance columns that are each
+ *       {@code REFERENCES admins(handle)} — {@code information_relationships.actor} (V147:16),
+ *       {@code information_navigation_policies.actor}, and the {@code account} of {@code
+ *       information_navigation_views}, {@code information_navigation_receipts} and {@code
+ *       information_navigation_audit} — so admitting the lock turns a caller fault into a
+ *       constraint violation. Routing those five to {@code InformationContext.attribution} is what
+ *       finishing the write path means. The authority behind the lock is <strong>not</strong> what
+ *       refuses: {@code writable}'s {@code information_lock_knowledge(…,'WRITE')} reaches {@code
+ *       information_home_allows}, whose contained arm (V229:285) admits the child for its own home
+ *       and only for WRITE. Liveness is a separate question and {@code requireActive} now answers
+ *       it for a contained principal, which is the whole of what a navigation <em>read</em> needed;
+ *       {@link #navigationLivenessAdmitsAContainedPrincipalAndTheWritePathStillDoesNot} holds both
+ *       halves.
  *   <li>{@code JdbcInformationProjectionRepository} — REFUSED, by the write-gate reservation.
  *       {@code prepare} ran {@code capture}, which locks and reads only; {@code
  *       content.requireWrite} inside it <em>admitted</em> the child, because V229's write arm opens
@@ -413,6 +425,46 @@ class ContainedActorWriteReachDatabaseTest {
     work.inTransaction(
         () -> {
           interchange.lockDestination(container(), "imported.md");
+          return null;
+        });
+  }
+
+  /**
+   * Navigation liveness admits a contained principal now; the write path still refuses it, and this
+   * test is where the two walls are told apart.
+   *
+   * <p>{@code DocumentNavigation.read} calls {@code requireActive} and nothing else about the
+   * actor, so this is the whole of what a contained run needed to reach a navigation read — the
+   * scoping below it is V229's and V231's. {@code requireActive} asked only {@code admins}, and a
+   * contained principal has no row there by design (V218); for such a principal existence is
+   * liveness, because V218 gives {@code contained_principals} no revocation column and the row dies
+   * with its scope.
+   *
+   * <p>The mutate path is unchanged and {@link #navigationRefusesAContainedActorsWrite} still
+   * holds: {@code lockAccount} refuses, deliberately, because this repository's five provenance
+   * columns are each {@code REFERENCES admins(handle)} and admitting the lock would turn that
+   * refusal into a constraint violation. The ordering here is the point — liveness is answerable
+   * for a contained principal and provenance is not, and they were being refused by one statement.
+   */
+  @Test
+  void navigationLivenessAdmitsAContainedPrincipalAndTheWritePathStillDoesNot() {
+    // The container's own account: unchanged, and the control that says the admins arm still works.
+    assertDoesNotThrow(() -> active(HOLDER));
+
+    // The child's own principal: admitted on the contained arm, which is new.
+    assertDoesNotThrow(() -> active(childPrincipal));
+
+    // A UUID that is no live contained principal, and a handle that is no account: both refused, so
+    // the new arm is an existence test and not a shape test.
+    assertThrows(NotFoundFault.class, () -> active(UUID.randomUUID().toString()));
+    assertThrows(NotFoundFault.class, () -> active("nobody"));
+  }
+
+  /** requireActive in its own transaction, as DocumentNavigation.read calls it. */
+  private void active(String account) {
+    work.inTransaction(
+        () -> {
+          navigation.requireActive(account);
           return null;
         });
   }

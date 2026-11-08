@@ -57,12 +57,30 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     this.connectionsCache = Objects.requireNonNull(connectionsCache);
   }
 
+  /**
+   * Liveness of the acting identity, for either kind of principal.
+   *
+   * <p>The {@code admins} question is asked first and unchanged, so an ordinary request issues
+   * exactly the statement it always did. Only a principal that question already refused can be a
+   * contained one, so the second question costs nothing on the ordinary path — the shape {@code
+   * InformationAccess.ownsSelectedHome} arrived at for the same reason.
+   *
+   * <p>For a contained principal, existence <em>is</em> liveness. V218 gives {@code
+   * contained_principals} no revocation column and says why — "the absence is the structure, not a
+   * flag a call site must remember to honour" — and the row dies with its scope through {@code ON
+   * DELETE CASCADE}. {@code contained_knowledge_actor} is that existence test, regex-guarded so a
+   * non-UUID handle reaching here is false rather than a failed cast, and it is the same predicate
+   * V229's and V231's arms select on, so liveness here cannot drift from admission there.
+   */
   public void requireActive(String account) {
-    if (!Boolean.TRUE.equals(
+    if (Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT EXISTS(SELECT 1 FROM admins WHERE handle=? AND account_active(handle) AND NOT bootstrap)",
             Boolean.class,
-            account))) throw unavailable();
+            account))) return;
+    if (Boolean.TRUE.equals(
+        jdbc.queryForObject("SELECT contained_knowledge_actor(?)", Boolean.class, account))) return;
+    throw unavailable();
   }
 
   public void lockAccount(String account) {
@@ -197,6 +215,31 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     if (!canManage(account, target)) throw unavailable();
   }
 
+  /**
+   * Locks the acting identity's row, and refuses an identity that is not there.
+   *
+   * <p><strong>This is liveness and serialization, not authority.</strong> The membership statement
+   * discards its result: it takes a share lock so a concurrent membership change serializes with
+   * this transaction, and decides nothing. Write authority is {@link #writable}'s {@code
+   * information_lock_knowledge(…,'WRITE')}, whose contained arm is V229:285 — admitted only when
+   * the resource's {@code home_scope_id} is {@code contained_own_home}, and only for WRITE.
+   *
+   * <p><strong>Why this still refuses a contained principal, when {@link #requireActive} no longer
+   * does.</strong> Not authority, and not liveness: both of those are answerable for a contained
+   * principal and {@code requireActive} now answers them. It is the five provenance columns on this
+   * repository's write path — {@code information_relationships.actor}, {@code
+   * information_navigation_policies.actor}, {@code information_navigation_views.account}, {@code
+   * information_navigation_receipts.account} and {@code information_navigation_audit.account} —
+   * each of which is {@code REFERENCES admins(handle)}. A contained principal has no such row, so a
+   * write admitted here reaches an insert and fails on a foreign key, turning a clean {@code
+   * NotFoundFault} into a constraint violation. Refusing at the lock keeps the caller fault.
+   *
+   * <p>Finishing it is routing those five to {@code InformationContext.attribution} — the axis that
+   * exists for exactly this, since a contained principal passes V229's gate and fails every
+   * provenance key — and then admitting the contained branch here. That is a write-path change with
+   * its own tests, not a line of this one; {@code ContainedActorWriteReachDatabaseTest} records
+   * which of the two walls each operation currently meets.
+   */
   private void lockIdentity(String account, String project) {
     if (jdbc.queryForList(
             "SELECT handle FROM admins WHERE handle=? AND enabled AND NOT bootstrap FOR SHARE",

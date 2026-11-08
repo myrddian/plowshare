@@ -117,10 +117,12 @@ import org.testcontainers.junit.jupiter.*;
  * repository.lockAccount} → {@code lockIdentity}'s {@code SELECT handle FROM admins ... FOR SHARE}.
  * A contained principal has no {@code admins} row (V218), so every navigation operation a contained
  * run issues is refused there, before V231's new disjunct is evaluated. That disjunct is reachable
- * only from a direct repository call, which is what the tests here make. So navigation remains
- * closed to a contained run, and the information service gates above the repositories no longer
- * are: that is the one layer the second authorization path has opened, and navigation and the
- * memory gates below are the two that remain.
+ * only from a direct repository call, which is what the tests here make. Navigation's liveness gate
+ * has since been taught the contained principal, so a navigation <em>read</em> is no longer refused
+ * there; its mutation path still is, by the five provenance columns keyed on {@code admins(handle)}
+ * rather than by any authority predicate, which {@code ContainedActorWriteReachDatabaseTest}
+ * records. So: the information service gates are open, navigation reads are open, navigation writes
+ * and the memory gates are the two that remain.
  *
  * <p><strong>The memory half is proved at the store and nowhere above it.</strong> {@link
  * #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore} and V232's predicate
