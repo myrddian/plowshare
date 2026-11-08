@@ -12,7 +12,7 @@ await mkdir(join(source,'agents'));
 await writeFile(join(source,'agents','worker.md'),'Application-root source');
 const env={...process.env,PLOWSHARE_DESKTOP_CONFIG:join(profile,'config'),PLOWSHARE_CONFIG_DIR:join(profile,'credentials'),PLOWSHARE_DESKTOP_PROFILE:profile}; delete env.ELECTRON_RUN_AS_NODE;
 const revision='22222222-2222-2222-2222-222222222222'; let receipt, refuseStatus=false, storesMode="unavailable";
-const fixture=await protocolFixture({serverAdmin:true,fileStores() {
+const fixture=await protocolFixture({serverAdmin:true,configuration:true,fileStores() {
   if(storesMode==='unavailable') return {code:'BAD_REQUEST',said:'FileStores temporarily unavailable'};
   return {code:'OK',payload:{stores: storesMode==='empty' ? [] : [
     {alias:'applications',role:'MANAGER'}, {alias:'reports',role:'CONTRIBUTOR'}, {alias:'archive',role:'VIEWER'}
@@ -30,6 +30,10 @@ try {
   const page=await app.firstWindow(),errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.locator('#connect-sidebar').click();await page.locator('#server-url').fill(fixture.base);await page.locator('#handle').fill('fixture');await page.locator('#password').fill('fixture-password');await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText(/ · Connected$/);
+  await expect(page.locator('.sidebar-heading #application-deploy-open')).toHaveCount(0);
+  await expect(page.locator('.sidebar-heading #server-project-add')).toHaveCount(0);
+  await page.locator('#server-admin-open').click();
+  await expect(page.locator('#workspace-administration #application-deploy-open')).toBeVisible();
   await page.locator('#application-deploy-open').click();
   const dialog=page.locator('#application-deployment-dialog'); await expect(dialog).toBeVisible();
   await expect(dialog.locator('[data-stores-status]')).toContainText('could not be loaded');
@@ -49,7 +53,11 @@ try {
   await dialog.locator('[data-choose]').click();await expect(dialog.locator('[data-package]')).toContainText('2 source files');
   await dialog.locator('button[type=submit]').click();await expect(dialog.locator('[data-error]')).toContainText('unreadable');
   storesMode='unavailable';
-  await page.reload();await expect(page.locator('#connection-label')).toHaveText(/ · Connected$/);await page.locator('#application-deploy-open').click();
+  await page.reload();await expect(page.locator('#connection-label')).toHaveText(/ · Connected$/);
+  await expect(page.locator('.sidebar-heading #application-deploy-open')).toHaveCount(0);
+  await page.locator('#server-admin-open').click();
+  await expect(page.locator('#workspace-administration #application-deploy-open')).toBeVisible();
+  await page.locator('#application-deploy-open').click();
   await expect(dialog.locator('[data-request]')).toContainText(receipt.requestId);
   await expect(dialog.locator('[data-stores-status]')).toContainText('could not be loaded');
   await dialog.locator('[data-choose]').click();await expect(dialog.locator('[data-error]')).toContainText('pending receipt');

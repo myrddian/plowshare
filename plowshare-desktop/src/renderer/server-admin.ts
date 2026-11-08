@@ -32,7 +32,9 @@ export function installServerAdmin(
     | 'pricing'
     | 'audit'
     | 'work';
-  host.innerHTML = `<div class="administration-shell"><header class="administration-heading"><div><h1>Server administration</h1><p data-server-identity></p></div><button type="button" data-return>Return to conversation</button></header>
+  // Deploy and Add Application stay on these ids so the existing dialog openers
+  // can bind them. Visibility remains connected && serverAdmin.
+  host.innerHTML = `<div class="administration-shell"><header class="administration-heading"><div><h1>Server administration</h1><p data-server-identity></p></div><div class="administration-heading-actions"><button type="button" id="application-deploy-open" hidden>Deploy</button><button type="button" id="server-project-add" hidden title="Create a managed server Application">Add Application</button><button type="button" data-return>Return to conversation</button></div></header>
     <div class="administration-layout"><nav class="administration-navigation" aria-label="Administration sections"><button type="button" data-section="configuration">Configuration</button><div class="admin-nav-label">Identity &amp; access</div><button type="button" data-section="accounts">Accounts</button><button type="button" data-section="services" data-services>Service accounts</button><div class="admin-nav-label">Work &amp; tools</div><button type="button" data-section="work">Manage work</button><button type="button" data-section="tools">Server MCP</button><button type="button" data-section="pricing" data-pricing>Pricing</button><button type="button" data-section="audit">Audit history</button></nav><div class="administration-content"><p data-error role="alert" hidden></p><div data-panels></div></div></div></div>`;
   const panels = host.querySelector<HTMLElement>('[data-panels]')!;
   const accountsPanel = document.createElement('section');

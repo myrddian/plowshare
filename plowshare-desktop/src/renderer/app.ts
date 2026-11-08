@@ -419,7 +419,7 @@ function openConnect() {
   if (!dialog.open) dialog.showModal();
 }
 
-const deploymentControls = installApplicationDeployment(() => state, request);
+// The administration shell renders Deploy and Add before those dialogs bind them.
 const serverAdministration = installServerAdmin(
   request,
   $('#workspace-administration'),
@@ -437,6 +437,7 @@ const serverAdministration = installServerAdmin(
     },
   },
 );
+const deploymentControls = installApplicationDeployment(() => state, request);
 $('#server-admin-open').addEventListener('click', () =>
   action({ action: 'workspace-administration' }),
 );
@@ -484,7 +485,8 @@ function render() {
   recoveryWarning.textContent = state.personal?.warning ?? '';
   recoveryWarning.hidden = state.mode !== 'live' || !state.personal?.warning;
   renderFiles();
-  $('#server-project-add').hidden = !state.connected || !state.serverAdmin;
+  $('#workspace-administration #server-project-add').hidden =
+    !state.connected || !state.serverAdmin;
   deploymentControls.update();
   questionPopup.update(state, scope, selected);
   const filter = $<HTMLInputElement>(
@@ -2845,21 +2847,24 @@ serverPlacement.reload.addEventListener(
   ownedEvent(loadServerPlacement),
 );
 let serverProjectConnection = '';
-$('#server-project-add').addEventListener('click', () => {
-  serverProjectConnection = JSON.stringify([state.base, state.handle]);
-  $<HTMLFormElement>('#server-project-form').reset();
-  serverPlacement.reset();
-  $('#server-project-placement').hidden = true;
-  $<HTMLFieldSetElement>('#server-project-placement').disabled = true;
-  $('#server-project-legacy').hidden = false;
-  $('#server-project-error').hidden = true;
-  $<HTMLSelectElement>('#server-project-type').value = 'MANAGED';
-  $<HTMLInputElement>('#server-project-writes').value = '.';
-  $<HTMLInputElement>('#server-project-workspace').required = false;
-  $('#server-project-path-note').textContent =
-    'Leave the path blank to provision a server workspace.';
-  $<HTMLDialogElement>('#server-project-dialog').showModal();
-});
+$('#workspace-administration #server-project-add').addEventListener(
+  'click',
+  () => {
+    serverProjectConnection = JSON.stringify([state.base, state.handle]);
+    $<HTMLFormElement>('#server-project-form').reset();
+    serverPlacement.reset();
+    $('#server-project-placement').hidden = true;
+    $<HTMLFieldSetElement>('#server-project-placement').disabled = true;
+    $('#server-project-legacy').hidden = false;
+    $('#server-project-error').hidden = true;
+    $<HTMLSelectElement>('#server-project-type').value = 'MANAGED';
+    $<HTMLInputElement>('#server-project-writes').value = '.';
+    $<HTMLInputElement>('#server-project-workspace').required = false;
+    $('#server-project-path-note').textContent =
+      'Leave the path blank to provision a server workspace.';
+    $<HTMLDialogElement>('#server-project-dialog').showModal();
+  },
+);
 $('#server-project-filestore').addEventListener(
   'change',
   ownedEvent(async () => {
