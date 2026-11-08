@@ -573,12 +573,16 @@ function render() {
         const machine = recorded?.workspace
           ? (recorded.machine ?? 'Server')
           : folder?.machine;
-        const location = [
-          recorded?.type === 'DISJOINT' ? 'DISJOINT · no sync' : undefined,
-          path ? `${machine ?? 'Server'} · ${path}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(' · ');
+        // Applications stay on the server. Do not lead the row with a local
+        // folder or with sync status, and do not ask deployment status per row.
+        const location = application
+          ? ['Active on server', recorded?.type].filter(Boolean).join(' · ')
+          : [
+              recorded?.type === 'DISJOINT' ? 'DISJOINT · no sync' : undefined,
+              path ? `${machine ?? 'Server'} · ${path}` : undefined,
+            ]
+              .filter(Boolean)
+              .join(' · ');
         const expanded = filter
           ? (filterExpansion[project] ?? true)
           : (projectExpansion[project] ?? scope === project);
@@ -2943,10 +2947,11 @@ $('#server-project-form').addEventListener(
   }),
 );
 
-document.querySelector('#conversations')!.addEventListener('click', (event) => {
-  const button = (event.target as Element).closest<HTMLElement>(
-    '[data-project-access]',
-  );
-  if (button?.dataset.projectAccess)
-    projectAccess.open(button.dataset.projectAccess);
-});
+for (const navigation of ['#conversations', '#application-conversations'])
+  $(navigation).addEventListener('click', (event) => {
+    const button = (event.target as Element).closest<HTMLElement>(
+      '[data-project-access]',
+    );
+    if (button?.dataset.projectAccess)
+      projectAccess.open(button.dataset.projectAccess);
+  });

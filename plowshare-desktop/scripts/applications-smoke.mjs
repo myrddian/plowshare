@@ -26,6 +26,13 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.evaluate(base => window.plowshare.request({ action: 'connect', base, handle: 'fixture', password: 'fixture-password' }), fixture.base);
   await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toBeVisible();
+  const chatbotLocation = page.locator('#application-conversations [data-project="Chatbot"] .project-location');
+  await expect(chatbotLocation).toContainText('Active on server');
+  await expect(chatbotLocation).not.toContainText('DISJOINT · no sync');
+  await page.locator('#application-conversations [data-project-access="Chatbot"]').click();
+  await expect(page.locator('#project-access-dialog')).toBeVisible();
+  await expect(page.locator('#project-access-dialog [data-project]')).toHaveText('Chatbot');
+  await page.locator('#project-access-dialog [data-close]').click();
   await expect(page.locator('#conversations [data-project="Remote files"]')).toBeVisible();
   await expect(page.locator('#conversations [data-project="Chatbot"]')).toHaveCount(0);
   await expect(page.locator('#application-conversations [data-project="Managed app"]')).toBeVisible();
@@ -116,7 +123,7 @@ try {
   await expect(page.locator('#application-panel')).toBeHidden();
   await expect(page.locator('#application-conversations [data-project="Managed app"]')).toHaveCount(0);
   assert.deepEqual(errors, []);
-  console.log('Application workspace smoke passed: separate groups, read-only and writable server files, stale revisions and retained drafts, scoped view shortcuts, revoked access, no local file claims and native window/sidebar resize.');
+  console.log('Application workspace smoke passed: separate groups, server-active sidebar rows, application access, read-only and writable server files, stale revisions and retained drafts, scoped view shortcuts, revoked access, no local file claims and native window/sidebar resize.');
 } finally {
   await app?.close();
   await fixture.close();
