@@ -2540,13 +2540,9 @@ $('#app-files-open').addEventListener(
       return;
     await request({ action: 'workspace-chat' });
     if (scope !== project) return;
-    application.open(project);
+    const opening = application.openFiles(project);
     renderPersonal();
-    document
-      .querySelector<HTMLButtonElement>(
-        '#application-panel [data-hub-nav] [data-hub="files"]',
-      )
-      ?.click();
+    await opening;
   }),
 );
 $('#file-access-allow').addEventListener(

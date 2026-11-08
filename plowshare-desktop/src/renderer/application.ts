@@ -101,6 +101,25 @@ export function installApplication(
     close();
     return conversations(project);
   };
+  const useProject = (name: string) => {
+    if (project !== name) {
+      location = undefined;
+      get<HTMLSelectElement>('[data-area]').selectedIndex = 0;
+    }
+    project = name;
+    shown = true;
+    rendered = '';
+  };
+  // Same path as the Files control. Do not click that button: render disables
+  // it while this Application's file load or save is in flight.
+  const openFileBrowser = async () => {
+    show('files');
+    await request({
+      action: 'application-files',
+      project,
+      ...selectedLocation(),
+    });
+  };
   get('[data-close]').addEventListener('click', run(returnToConversations));
   host.addEventListener('click', (event) => {
     const hub = (event.target as HTMLElement | null)?.closest<HTMLElement>(
@@ -121,14 +140,7 @@ export function installApplication(
       return;
     }
     if (hub === 'files') {
-      run(async () => {
-        show('files');
-        await request({
-          action: 'application-files',
-          project,
-          ...selectedLocation(),
-        });
-      })();
+      run(openFileBrowser)();
       return;
     }
     if (hub === 'schedules') {
@@ -384,16 +396,14 @@ export function installApplication(
       return shown;
     },
     open(name: string) {
-      if (project !== name) {
-        location = undefined;
-        get<HTMLSelectElement>('[data-area]').selectedIndex = 0;
-      }
-      project = name;
-      shown = true;
+      useProject(name);
       view = 'overview';
       files = false;
-      rendered = '';
       render();
+    },
+    openFiles(name: string) {
+      useProject(name);
+      return openFileBrowser();
     },
   };
 }

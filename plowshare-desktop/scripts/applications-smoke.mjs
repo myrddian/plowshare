@@ -151,26 +151,37 @@ try {
   await page.locator('#application-panel nav [data-hub="relay"]').click();
   const relay = await documentWith('relay.html', async candidate => (await candidate.locator('#relay-scope').inputValue()) === 'Managed app');
   await expect(relay.locator('#relay-scope')).toHaveValue('Managed app');
-  await page.locator('[data-project="Chatbot"]').click();
-  await expect(page.locator('#application-panel')).toBeVisible();
-  await page.locator('#application-panel nav [data-hub="conversations"]').click();
-  await expect(page.locator('#application-panel')).toBeHidden();
-  await expect(page.locator('#stage')).toBeVisible();
-  await expect(page.locator('#scope-caption')).toHaveText('Chatbot');
-  await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toHaveAttribute('aria-current', 'true');
-  // Opening an Application does not switch Info onto App files.
-  await expect(page.locator('#info-files-tab')).toHaveAttribute('aria-selected', 'false');
-  // Hub closed, Application still selected: Info offers App files, not Project sync.
-  await page.locator('#files-open').click();
-  await expect(page.locator('#info-files-tab')).toHaveText('App files');
-  await expect(page.locator('#app-files')).toBeVisible();
-  await expect(page.locator('#files-choose')).toBeHidden();
-  await expect(page.locator('#project-sync')).toBeHidden();
-  await expect(page.locator('#file-access-prompt')).toBeHidden();
-  await expect(page.locator('#files-open')).not.toHaveAttribute('title', 'Connect a local project folder');
-  await page.locator('#app-files-open').click();
-  await expect(page.locator('#application-panel nav [data-hub="files"]')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('#application-panel [data-source]')).toBeVisible();
+  const hubFiles = page.locator('#application-panel nav [data-hub="files"]');
+  fixture.setPauseApplicationFiles(true);
+  try {
+    await page.locator('[data-project="Chatbot"]').click();
+    await expect(page.locator('#application-panel')).toBeVisible();
+    await page.locator('#application-panel nav [data-hub="files"]').click();
+    await expect(hubFiles).toBeDisabled();
+    await page.locator('#application-panel nav [data-hub="conversations"]').click();
+    await expect(page.locator('#application-panel')).toBeHidden();
+    await expect(page.locator('#stage')).toBeVisible();
+    await expect(page.locator('#scope-caption')).toHaveText('Chatbot');
+    await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toHaveAttribute('aria-current', 'true');
+    // Opening an Application does not switch Info onto App files.
+    await expect(page.locator('#info-files-tab')).toHaveAttribute('aria-selected', 'false');
+    // Hub closed, Application still selected: Info offers App files, not Project sync.
+    await page.locator('#files-open').click();
+    await expect(page.locator('#info-files-tab')).toHaveText('App files');
+    await expect(page.locator('#app-files')).toBeVisible();
+    await expect(page.locator('#files-choose')).toBeHidden();
+    await expect(page.locator('#project-sync')).toBeHidden();
+    await expect(page.locator('#file-access-prompt')).toBeHidden();
+    await expect(page.locator('#files-open')).not.toHaveAttribute('title', 'Connect a local project folder');
+    await page.locator('#app-files-open').click();
+    // Held application.files keeps the nav Files button disabled. Opening must still show Files.
+    await expect(hubFiles).toHaveAttribute('aria-current', 'page');
+    await expect(hubFiles).toBeDisabled();
+    await expect(page.locator('#application-panel [data-overview]')).toBeHidden();
+    await expect(page.locator('#application-panel [data-source]')).toBeVisible();
+  } finally {
+    fixture.setPauseApplicationFiles(false);
+  }
   await page.locator('[data-project="Remote files"]').click();
   await expect(page.locator('#application-panel')).toBeHidden();
   await page.locator('#inspector-close').click();
