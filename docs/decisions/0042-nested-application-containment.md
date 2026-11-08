@@ -1442,6 +1442,22 @@ authenticated driver per hop is exactly that brake. Opening a frame door to a
 credential-less principal would need the authority decision V218 forbids, so
 the limitation and the property are the same fact and neither is closed here.
 
+**Out of scope here, and what reopening it would need.** This restriction is left
+closed by the slice that made a contained run resolve its own information, and is
+not part of that scope. One correction to the argument above is recorded so a
+successor re-argues it rather than inheriting it: `ContainmentBounds(maxDepth,
+maxLiveDescendants)` is mandatory and fail-closed — `ContainmentConfig` refuses to
+start without both positive, "containment is not unbounded by omission" — and it
+covers recursion *and* width precisely, where an authenticated driver per hop
+covers them only incidentally. The authenticated driver is therefore the **second**
+brake on the anti-goal, not the only one. Separately, authority is **not** what
+blocks a child-driven hop: a frame needs a session and session creation allowlists
+`account_kind='USER'`, so no grant, role or derived identity for a contained
+principal would open this door. The requirements are collected in
+`docs/superpowers/plans/2026-11-08-self-similar-nesting-requirements.md`, which also
+records that `RetainedToolAccess.resources` would have to learn any hop tool's
+arguments or the tool would be confined by nothing.
+
 **A running child's own knowledge write had no Relay audience and the production
 publisher refused it. Fixed narrowly; the deep fix is still ADR 0039's question.**
 
