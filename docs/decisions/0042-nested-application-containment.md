@@ -291,7 +291,11 @@ first of two. The child's own scope *is* admitted by V223's self arm, but
 `knowledge_revision_readable` opened with `information_global_read_member(actor)`,
 which requires an `admins` row carrying the `GLOBAL_READ` role, and a contained
 principal holds no credential material by design (V218): its identifier is a bare
-UUID with no row in `admins`, `authority_accounts` or `service_tokens`. V223 left
+UUID with no row in `admins`, `authority_accounts` or `service_tokens`. (That
+"carrying the `GLOBAL_READ` role" describes the conjunct's *effect* here — V229
+widened exactly it — and not the predicate's body, which tests no grant of that
+role and no scope; the amendment under the knowledge-read limitations below states
+what it actually requires.) V223 left
 that as the **named prerequisite of the execution slice**, and slice three is that
 slice.
 
@@ -1055,6 +1059,138 @@ and no production path presents one, so no running child reads anything today.
 The authority decision slice two named as a prerequisite was made here (a
 baseline, not a membership); the wiring it needs to have an effect is named as the
 next one, in its own entry below.
+
+**"And its own memories" was over-claimed, and it is true now rather than then.**
+The sentence above was correct for documents after V229 and wrong for memories.
+V229 widened five knowledge functions and deliberately touched nothing in the
+archive: `MemoryStore`'s read pin, its write pin and the write authority behind it
+each opened on `authority_accounts` — by `legacy_handle` on the read side, by `id`
+on the write side — and a contained principal has no row there by design (V218),
+so each statement returned no row and the store refused before any predicate
+beside that join decided anything.
+
+**That account join is what closed the memory door — not general-read membership,
+and not scope.** `information_global_read_member` (V158:16) does answer false for a
+contained principal, but its body is `account_active` plus an `admins`-to-
+`authority_accounts` join and a `CROSS JOIN` onto the `GLOBAL_READ` role row: it
+never tests that the *account* holds a grant of that role and it names no scope at
+all, so it means "is this an ordinary active account" and its refusal here is the
+same missing-rows fact as the join's. Scope was never the barrier either —
+`information_project_readable`, the only conjunct that is about scope, already
+answered TRUE for the child's own contained project through V223's contained arm
+(V172:19 resolves it to `knowledge_scope_readable`). Recording global-read as the
+fence would have put a false statement in this record.
+
+V232 therefore adds one arm, `contained_memory_actor_allows`, beside each of the
+three statements: a contained principal reaches the memories of its own home and
+nothing else, bounded by `contained_own_home` to that one scope rather than by a
+walk, so neither an ancestor's nor a sibling's nor its own descendant's. An
+ancestor's read of a descendant's memories is the pre-existing upward walk and
+worked before this slice. No credential, role or grant row is created or consulted
+and `information_global_read_member` is still untouched. The `server_admin`
+requirement on the write path is *conditional* — reached only when the home has no
+project, which is the Global tier — and is left in force for every writer it
+already applied to; the Global tier and `SET_AUDIENCE` stay refused for a contained
+actor. `ContainedMemorySchemaTest` is the characterization: it records which
+predicate refused first on each path and holds as regressions the five assertions
+that passed before the widening. **The gate is open and the actor is still not
+wired**: no production path presents a contained principal to the archive.
+
+**"The actor is not wired" is no longer true, and every statement in this record
+that rests on it is listed below.** Slice four wired it: `JobRuntime` builds
+`InformationActor.contained` for a run whose own durable conversation record
+carries `Origin.CONTAINED` on a `contained:` home, resolves the acting principal
+through `ContainedPrincipals.principalOfProject`, and
+`InformationAccess.forRun` resolves that actor through a contained branch
+delegating to `InformationAccess.contained`. A production path therefore
+presents a contained principal to the knowledge predicates and to `MemoryStore`,
+and `contained_knowledge_actor` is true for an actor a running child presents.
+Every statement in this record that rests on "no production path presents one"
+describes slice three and not the current code. They are, besides the two
+paragraphs above: the `JdbcInformationEventRecords` inventory row and the
+paragraph introducing that inventory, the audience-defect paragraph's "a
+constructed context, which is the only kind there is", the
+documents-not-processed gap, and — the one this list first omitted while
+claiming to be complete — **"The arithmetic, so the split is checkable rather
+than assertable"**, whose correction of the Relay audience row rests on "no
+production path makes a contained principal the information actor". That clause
+is now false. The row's verdict and its reachability from a *production* path are
+nonetheless still unchanged, for the reason in the paragraph after next: a
+running child reaches no surface that would create a contained-home resource, so
+the arithmetic's conclusion survives its premise. The slice-three *behaviour* each of them reasons
+about is unchanged — the audience is still absent, the write path still declines
+processing, the refusals still refuse — and it is only the reachability claim
+that has moved: each of those paths now has the caller it was described as
+waiting for. The write path's own defect was closed in slice three before it
+acquired that caller, which is why wiring the actor did not turn it into an
+outage.
+
+**What a running child reaches is narrower than "the information tool", and the
+boundary is a Java one rather than a SQL one.** The SQL arms (V223, V229, V231,
+V232) admit the child to its own scope. One layer above them,
+`InformationAccess.requireSelection`, `requireWork` and `requireAudience` ask
+`ScopedPermissions` for a live project role, and a contained project carries no
+`PROJECT` scope and so grants none — to the principal or to its container. Every
+`InformationCatalogue` operation that calls one of those still refuses a
+contained context, and `BoundMemoryQueries.requireScope` and
+`BoundMemoryWrites.requireRecipient` ask the same question with the same answer.
+
+**Narrower again, and this correction matters because an earlier draft of this
+paragraph claimed otherwise.** It said a running child reaches "the navigation
+read path, the catalogue repository's write path and `MemoryStore` directly". It
+reaches none of those three through a production surface. The actor is wired and
+resolves correctly, and the repository and store layer is open to it, but every
+production entry point above that layer refuses it first, and each refusal has a
+name:
+
+- **Navigation.** `InformationTool` hands `actor.acting()` to
+  `DocumentNavigation.execute`. Its read path calls `repository.requireActive`
+  — `EXISTS(SELECT 1 FROM admins WHERE handle=? AND account_active(handle) AND NOT
+  bootstrap)` in `JdbcInformationNavigationRepository` — and its mutation path
+  calls `repository.lockAccount`, which is `lockIdentity`'s `SELECT handle FROM
+  admins … FOR SHARE`. A contained principal has no `admins` row by design (V218),
+  so every navigation operation a contained run issues is refused **before V231's
+  new disjunct is evaluated**. That disjunct is reachable only from a direct
+  repository call.
+- **The catalogue.** `InformationCatalogue.admit` calls `access.requireWork` as
+  its first statement, so the write path refuses at the role question before any
+  SQL arm.
+- **Memory.** The two `Bound*` entry points ask `ScopedPermissions` the same
+  question.
+
+`SET_AUDIENCE` is refused by exactly that absence, which is the outcome this
+record already requires. Whether those Java layers should admit a contained
+principal is an open authority decision and was not made in slice four;
+`ContainedInformationReachDatabaseTest` and `ContainedMemorySchemaTest` carry the
+characterization, asserting the refusals rather than leaving them implied.
+
+**One thing a running child's wiring did change, in a later fix wave.**
+`JobRuntime`'s memory bindings passed the *container's* identity into the field
+`MemoryStore` asks its authority questions about, so V232's arms had no
+production caller that could select them and the memory gate for a contained run
+was decided about the container. There are **three** such bindings, not two, and
+the third was found by a second review after the first fix: `MemoryTools.Recall`
+and `MemoryTools.Write` in `offeredTo`, and the automatic reminder's
+`reminding.forQueries(owner, home, …)` in `converse`, whose account goes straight
+into `MemoryQueries.Request.acting` by way of `Reminder.query` and
+`Archive.survey`. All three now pass the acting axis through
+`JobRuntime.memoryActingAxis`. It was fail-closed before only because
+`ScopedPermissions` resolves no role on a `contained:` project — a ceiling one
+layer up, not a property of the gate — which is a further reason that ceiling is
+an authority decision and not an oversight to be quietly relaxed. Note that
+`information_project_readable`'s ancestor walk (V223) answers TRUE for a
+container over its descendant's project, so had that ceiling opened, the
+container's handle would have selected the `authority_accounts` arm and read the
+*child's* memories inside the *child's* home.
+
+**V232's WRITE arm is genuinely evaluated by a production caller now; its READ
+arm is not.** On the write path `BoundMemoryWrites.write` calls
+`memories.pin(request)` before any recipient check, and `requireRecipient` is
+reached pre-commit through `open()` → `require(false)`, so the arm is asked with
+the child's principal and the operation then refuses one layer up without
+writing. On the read path `BoundMemoryQueries.requireScope` precedes `pin`, so
+the read arm is still reached only from a direct store call, which
+`ContainedMemorySchemaTest` makes.
 
 **The guarded set of catalogue mutators is closed over one criterion, and that
 criterion is narrower than "every write a confined Application could reach". It

@@ -152,23 +152,29 @@ public final class MemoryTools {
 
     private final Archive archive;
     private final ToolSchema schema;
-    private String account;
+    private String acting;
     private String log;
     private Runnable validity;
     private String call;
     private boolean globalRead;
 
-    /** Runtime-owned origin; the model cannot select an account, sandbox or spending source. */
-    public Recall forRun(String account, String log, Runnable validity) {
+    /**
+     * Runtime-owned origin; the model cannot select an account, sandbox or spending source.
+     *
+     * <p>{@code acting} is the principal the archive's read gate is asked about — see {@code
+     * MemoryQueries.Request#acting()} — and not an account a row is booked to, of which this path
+     * has none. A run inside a contained Application presents its child principal.
+     */
+    public Recall forRun(String acting, String log, Runnable validity) {
       var bound = new Recall(archive);
-      bound.account = account;
+      bound.acting = acting;
       bound.log = log;
       bound.validity = Objects.requireNonNull(validity);
       return bound;
     }
 
-    public Recall forRun(String account, String log, Runnable validity, boolean globalRead) {
-      var bound = forRun(account, log, validity);
+    public Recall forRun(String acting, String log, Runnable validity, boolean globalRead) {
+      var bound = forRun(acting, log, validity);
       bound.globalRead = globalRead;
       return bound;
     }
@@ -179,7 +185,7 @@ public final class MemoryTools {
     }
 
     private io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin origin() {
-      if (account == null || log == null || call == null || validity == null)
+      if (acting == null || log == null || call == null || validity == null)
         throw new IllegalStateException("Memory recall needs its retained invocation");
       return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
               "memory-tool:" + log + ":" + call, validity)
@@ -233,7 +239,7 @@ public final class MemoryTools {
           archive.querying()
               ? archive.recall(
                   new io.aeyer.plowshare.server.archive.MemoryQueries.Request(
-                      account,
+                      acting,
                       home,
                       io.aeyer.plowshare.server.archive.MemoryQueries.Kind.RECALL,
                       question,
@@ -518,21 +524,28 @@ public final class MemoryTools {
       this.schema = ToolSchema.from(WRITE_NAME, WRITE_DESCRIPTION, writeSchema());
     }
 
-    private String account;
+    private String acting;
     private String log;
     private String call;
     private Runnable alive;
     private Runnable authority;
 
-    /** Runtime supplies independent cancellation and caller/action fences. */
+    /**
+     * Runtime supplies independent cancellation and caller/action fences.
+     *
+     * <p>{@code acting} is the principal the archive's write gates are asked about — see {@code
+     * MemoryWrites.Request#acting()} — and not the account the written row is attributed to. The
+     * row's own author is {@code formed_by}, which {@link #author} reads from the model's
+     * arguments. A run inside a contained Application presents its child principal.
+     */
     public Write forRun(
         io.aeyer.plowshare.server.information.InformationJobs inputs,
         String log,
-        String account,
+        String acting,
         Runnable alive,
         Runnable authority) {
       Write copy = forRun(inputs, log);
-      copy.account = account;
+      copy.acting = acting;
       copy.log = log;
       copy.alive = Objects.requireNonNull(alive);
       copy.authority = Objects.requireNonNull(authority);
@@ -610,12 +623,12 @@ public final class MemoryTools {
       }
       Validation.check(proposal, archive.maxBodyChars());
       if (archive.writing()) {
-        if (account == null || log == null || call == null || alive == null || authority == null)
+        if (acting == null || log == null || call == null || alive == null || authority == null)
           throw new IllegalStateException("Memory write requires its retained origin");
         return render(
             archive.write(
                 new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
-                    account,
+                    acting,
                     home,
                     proposal,
                     new io.aeyer.plowshare.server.archive.MemoryWrites.Origin(

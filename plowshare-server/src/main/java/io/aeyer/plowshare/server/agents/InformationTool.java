@@ -28,7 +28,18 @@ public final class InformationTool implements AgentTool {
   private final java.util.function.Supplier<InformationCatalogue> catalogue;
   private final InformationAccess access;
   private final InformationJobs inputs;
-  private final String owner, log;
+
+  /**
+   * Both of the run's axes, carried as one value.
+   *
+   * <p>It replaces the single {@code String owner} this tool held: a gate is asked about the acting
+   * principal and a log is owned by the account accountable for it, and those were the same field.
+   * They still hold the same handle for every run that exists today — {@link InformationActor#of}
+   * is what the runtime presents — so naming them apart changes nothing yet.
+   */
+  private final InformationActor actor;
+
+  private final String log;
   private String session;
   private final java.util.function.Supplier<InformationContentTypes> contentTypes;
 
@@ -74,7 +85,7 @@ public final class InformationTool implements AgentTool {
       java.util.function.Supplier<InformationCatalogue> catalogue,
       InformationAccess access,
       InformationJobs inputs,
-      String owner,
+      InformationActor actor,
       String log,
       java.util.function.Supplier<InformationContentTypes> contentTypes,
       java.util.function.Supplier<InformationNavigationService> navigation) {
@@ -82,22 +93,44 @@ public final class InformationTool implements AgentTool {
     this.catalogue = catalogue;
     this.access = access;
     this.inputs = inputs;
-    this.owner = owner;
+    this.actor = actor;
     this.log = log;
     this.contentTypes = contentTypes;
     this.navigation = navigation;
   }
 
+  /**
+   * The handle-only binding, kept so that no caller outside the run wiring changes.
+   *
+   * <p>Deprecated by convention rather than by annotation: it means "both axes are this handle",
+   * which is true of every caller today but is not a thing a new caller should have to assume.
+   * Prefer the {@link InformationActor} overload.
+   */
   public InformationTool forRun(
       InformationAccess access, InformationJobs inputs, String owner, String log) {
-    return new InformationTool(
-            writing, catalogue, access, inputs, owner, log, contentTypes, navigation)
-        .withRetrieval(retrieval);
+    return forRun(access, inputs, owner == null ? null : InformationActor.of(owner), log);
   }
 
   public InformationTool forRun(
+      InformationAccess access, InformationJobs inputs, InformationActor actor, String log) {
+    return new InformationTool(
+            writing, catalogue, access, inputs, actor, log, contentTypes, navigation)
+        .withRetrieval(retrieval);
+  }
+
+  /** Handle-only, for the same reason as the four-argument overload above. */
+  public InformationTool forRun(
       InformationAccess access, InformationJobs inputs, String owner, String log, String session) {
-    var bound = forRun(access, inputs, owner, log);
+    return forRun(access, inputs, owner == null ? null : InformationActor.of(owner), log, session);
+  }
+
+  public InformationTool forRun(
+      InformationAccess access,
+      InformationJobs inputs,
+      InformationActor actor,
+      String log,
+      String session) {
+    var bound = forRun(access, inputs, actor, log);
     bound.session = session;
     return bound;
   }
@@ -355,14 +388,16 @@ public final class InformationTool implements AgentTool {
   @Override
   public String run(String arguments, Home home) {
     try {
-      if (access == null || inputs == null || log == null)
+      if (access == null || inputs == null || log == null || actor == null)
         throw new CallerFault("information capability needs an authenticated durable run");
-      inputs.requireLog(log, owner);
+      // A log belongs to the account accountable for it, so log ownership reads the
+      // attribution axis; the selection below is gated on the acting one.
+      inputs.requireLog(log, actor.attribution());
       Map<String, Object> args =
           JSON.readValue(arguments, new TypeReference<Map<String, Object>>() {});
       InformationContext context =
           access
-              .forRun(owner, home)
+              .forRun(actor, home)
               .withCorpus(
                   io.aeyer.plowshare.server.information.InformationInputs.corpus(
                       args.get("corpus")));
@@ -403,9 +438,10 @@ public final class InformationTool implements AgentTool {
                   "includeGlobal",
                   context.selection().includeGlobal()));
         var command = InformationNavigationInputs.command(operation, fields);
-        var result = navigation.get().execute(owner, command, context.readBoundary());
+        // Navigation is a read admitted against the acting principal.
+        var result = navigation.get().execute(actor.acting(), command, context.readBoundary());
         if (!writing) recordNavigationReads(context, result, command);
-        inputs.requireLog(log, owner);
+        inputs.requireLog(log, actor.attribution());
         return JSON.writeValueAsString(result);
       }
       Object result;
@@ -463,7 +499,7 @@ public final class InformationTool implements AgentTool {
           }
           case "report" -> {
             var dependencies = new LinkedHashSet<>(ids(args, "inputs"));
-            dependencies.addAll(inputs.inputsOf(log, owner));
+            dependencies.addAll(inputs.inputsOf(log, actor.attribution()));
             var admission =
                 service.reportDetailsForSession(
                     context,
@@ -616,7 +652,7 @@ public final class InformationTool implements AgentTool {
                   "information_read supports facets, list, status, acquisition, await, read, evidence, rank, search, outline and symbols");
         }
       }
-      inputs.requireLog(log, owner);
+      inputs.requireLog(log, actor.attribution());
       try {
         return JSON.writeValueAsString(result);
       } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
@@ -649,7 +685,7 @@ public final class InformationTool implements AgentTool {
             navigation
                 .get()
                 .execute(
-                    owner,
+                    actor.acting(),
                     new io.aeyer.plowshare.protocol.InformationRequest.DocumentGet(
                         new io.aeyer.plowshare.protocol.InformationRequest.Selection(
                             new io.aeyer.plowshare.protocol.InformationRequest.Scope(

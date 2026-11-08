@@ -12,9 +12,11 @@ public final class JdbcInformationInterchangeRepository
     implements InformationInterchangeRepository {
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private final JdbcTemplate jdbc;
+  private final ContainedActorGuard contained;
 
   public JdbcInformationInterchangeRepository(JdbcTemplate jdbc) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.contained = new ContainedActorGuard(jdbc);
   }
 
   public List<UUID> dependencies(UUID revision) {
@@ -75,7 +77,19 @@ public final class JdbcInformationInterchangeRepository
         .toList();
   }
 
+  /**
+   * Fences one import destination by name, and is where a confined Application's import stops.
+   *
+   * <p>This repository's only durable write, {@code retain}, takes no context and so cannot decide
+   * anything about the caller; this lock is the one call {@code PortableInformation.commit} makes
+   * here that holds one, and it runs before every destination's head is read. Characterized against
+   * real PostgreSQL by {@code ContainedActorWriteReachDatabaseTest}, a contained actor's import was
+   * <em>admitted</em> all the way through this call — nothing in the bundle path asks about the
+   * acting principal and the advisory lock is keyed on the selection's namespace, not on an account
+   * — so the refusal is placed here, ahead of the lock it would otherwise take.
+   */
   public void lockDestination(InformationContext context, String name) {
+    contained.requireUncontained(context, "import a portable bundle");
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
         Boolean.class,

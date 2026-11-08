@@ -27,6 +27,7 @@ import io.aeyer.plowshare.server.hooks.Tier;
 import io.aeyer.plowshare.server.hooks.ToolPost;
 import io.aeyer.plowshare.server.hooks.ToolPre;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.information.InformationActor;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
@@ -685,6 +686,188 @@ public final class JobRuntime {
 
   public void useLogOwners(java.util.function.Function<String, Optional<String>> owners) {
     this.logOwners = Objects.requireNonNull(owners, "owners");
+  }
+
+  /**
+   * The durable conversation record a run's containment is decided from, by id.
+   *
+   * <p>On {@link #useApprovalRoots}' shape, and read for one purpose: {@link
+   * #containedPrincipalOf}. It is the record itself and not a derived boolean because the decision
+   * is two facts about the same row and a caller that could be handed one without the other is a
+   * caller that could be handed half the rule.
+   */
+  private volatile java.util.function.Function<
+          String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
+      logRecords = ignored -> Optional.empty();
+
+  /** A contained project's live principal, narrowed from {@code ContainedPrincipals}. */
+  private volatile java.util.function.Function<String, Optional<java.util.UUID>>
+      containedPrincipals = ignored -> Optional.empty();
+
+  /**
+   * Both halves of the contained-run decision, wired together because neither is sound alone.
+   *
+   * <p>One setter rather than two, so the lookup of the record and the lookup of the principal
+   * cannot be half-wired. A deployment with the record and not the principal would read {@code
+   * Origin.CONTAINED} and resolve no actor; one with the principal and not the record would have no
+   * durable fact to decide containment from. {@link #informationActorFor} fails closed for both
+   * absences, but a setter that makes the pair expressible is a shape a later change can get wrong.
+   *
+   * <p>{@code principals} is taken as the typed {@code ContainedPrincipals} contract and narrowed
+   * to its one read here. The run loop must not hold {@code issue} or {@code revoke}: a service
+   * that may resolve a child's principal must not thereby acquire the ability to mint or retire
+   * one.
+   */
+  public void useContainedRuns(
+      java.util.function.Function<
+              String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
+          records,
+      io.aeyer.plowshare.server.applications.ContainedPrincipals principals) {
+    Objects.requireNonNull(principals, "principals");
+    this.logRecords = Objects.requireNonNull(records, "records");
+    this.containedPrincipals = principals::principalOfProject;
+  }
+
+  /**
+   * The contained principal a run in this log acts as, or empty when the run is not contained.
+   *
+   * <p><strong>The two-part test, as one rule.</strong> A run is contained when its conversation's
+   * origin is {@link io.aeyer.plowshare.server.archive.Origin#CONTAINED} <em>and</em> its home is a
+   * {@code contained:} project. That is {@code Turn.requireContainedLog}'s test verbatim and for
+   * its stated reason: only {@code ConversationStore.openContained} writes that origin and it only
+   * ever writes it on a contained home, but a rule that leaned on another method's behaviour to
+   * deny would be a rule a later change could quietly open. Both parts live in this one method so
+   * that a reader meets one rule rather than two conditions in sequence, and the executing-home
+   * agreement below is a third narrowing that cannot admit anything the two-part test refused.
+   *
+   * <p><strong>Decided from the durable record and from nothing a caller supplies.</strong> The
+   * origin and the home come off the stored row and the principal comes from {@code
+   * contained_principals} through the authority record. Nothing in the turn, the submission, the
+   * tool arguments or the agent definition can move this answer. That is the whole safety argument:
+   * the acting identity a contained run presents to every information gate is a fact about its log,
+   * not a claim about itself.
+   *
+   * <p>{@code executing} is the home the run is actually executing in and is compared rather than
+   * trusted: it can only make this method answer empty, never make it answer a principal it would
+   * not otherwise have answered. A run in one child's home must not act as another child's
+   * principal, and the two agree by construction because {@code ConversationStore.openContained}
+   * opens the log on the home the run then executes in.
+   *
+   * <p>One record read and one principal read, both only on the path that can need them. There is
+   * no second read of either: the record's home is the value compared, the value the principal is
+   * resolved from, and the value returned about.
+   */
+  private Optional<java.util.UUID> containedPrincipalOf(String conversation, String executing) {
+    if (conversation == null) return Optional.empty();
+    var record = logRecords.apply(conversation).orElse(null);
+    if (record == null
+        || record.origin() != io.aeyer.plowshare.server.archive.Origin.CONTAINED
+        || record.home().isGlobal()
+        || !io.aeyer.plowshare.protocol.ContainedProjects.name(record.home().project())
+        || !record.home().project().equals(executing)) return Optional.empty();
+    return containedPrincipals.apply(record.home().project());
+  }
+
+  /**
+   * Both of this run's information axes, decided once for the two bindings that take them.
+   *
+   * <p>An uncontained run presents one handle on both axes, exactly as it did before the carrier
+   * existed, so neither binding sees a value it did not see before. A contained run presents the
+   * child's principal acting and its container's handle accountable: the gates are keyed on the
+   * principal and the provenance columns' foreign keys require the account, and nothing anywhere
+   * issues the principal a handle or a credential — it is a bare UUID with no {@code admins},
+   * {@code authority_accounts} or {@code service_tokens} row, which is what makes eleven
+   * confinement surfaces shut by absence rather than by a check each call site must remember.
+   *
+   * <p>A handle-less run (an unauthenticated fixture, or a job bound before a caller is known)
+   * carried a null handle into both bindings and must keep doing so, so there is no actor to build;
+   * the bindings' own "needs an authenticated durable run" guards still decide what that means.
+   *
+   * <p><strong>The tool home narrows and never grants, which is what lets it be read at
+   * all.</strong> The record lookup is asked only for a run whose own tool home is a contained
+   * Application's. Two reasons, and the safety one comes first: a home that disagrees with the
+   * record can only make this method answer "no contained actor", never "yes", so reading it cannot
+   * manufacture containment — the origin and the contained principal still come off the stored row
+   * and nowhere else. The second reason is cost: every ordinary run reaches this line, and asking a
+   * {@code conversations} row per run to learn that the run is ordinary is a read whose answer its
+   * home already gives. The record's home must also equal the tool home: a run executing in one
+   * child's home must not act as another child's principal, and the two agree by construction
+   * because {@code ConversationStore.openContained} opens the log on the home the run then executes
+   * in.
+   *
+   * <p><strong>The refusal fails closed and is the important part.</strong> If the tool home is a
+   * contained Application's but the two-part test resolved no principal — an unwired lookup, a
+   * missing or non-{@code CONTAINED} record, a home that disagrees, a revoked principal — this
+   * returns no actor at all rather than the container's. Falling back to {@link
+   * InformationActor#of} there would hand a confined child its parent's authority inside the
+   * child's own home, which is the single escalation this wiring must not be able to produce.
+   *
+   * <p>A lookup that fails with an exception is left to propagate rather than caught as an absence,
+   * unlike {@link #ownerOf}'s tolerated absence: this decides an acting identity, and a run that
+   * cannot be told whose authority it holds must stop rather than continue as somebody.
+   *
+   * <p>Package-private rather than private so that {@code ContainedInformationActorTest} asserts
+   * this decision directly. Its only production caller is {@link #offeredTo}, and the alternative
+   * was a test that reproduced the rule instead of exercising it.
+   */
+  InformationActor informationActorFor(String callerHandle, String conversation, Home toolHome) {
+    if (callerHandle == null) return null;
+    if (toolHome == null
+        || toolHome.isGlobal()
+        || !io.aeyer.plowshare.protocol.ContainedProjects.name(toolHome.project()))
+      return InformationActor.of(callerHandle);
+    var principal = containedPrincipalOf(conversation, toolHome.project());
+    if (principal.isPresent())
+      return InformationActor.contained(principal.get().toString(), callerHandle);
+    log.warn(
+        "a run in the contained home of {} resolved no contained principal from its log {};"
+            + " it is offered no information actor rather than its container's",
+        toolHome.project(),
+        conversation);
+    return null;
+  }
+
+  /**
+   * Which of a run's two axes the archive is asked about: the ACTING one, always.
+   *
+   * <p>Named, and package-private, so the decision has one definition rather than three. It has
+   * exactly THREE callers, and each argues the choice at its own call site: the {@code
+   * MemoryTools.Recall} and {@code MemoryTools.Write} bindings in {@link #offeredTo}, and the
+   * automatic reminder's {@code reminding.forQueries} binding in {@code converse}.
+   *
+   * <p><strong>What a test covers, and what it does not.</strong> {@code
+   * ContainedInformationActorTest.aContainedRunsAutomaticReminderIsBoundToTheChildsPrincipal}
+   * drives a real run and fails if the reminder call site is reverted — measured — because {@code
+   * Reminding#forQueries} is a public seam {@code converse} calls directly. The two {@code
+   * offeredTo} call sites are <strong>not</strong> covered: they are inside a private method no
+   * seam reaches, so reverting either of them to {@code attribution()} or to the raw {@code
+   * callerHandle} fails no test in the suite. {@code ContainedInformationActorTest}'s {@code
+   * memoryActingAxis} assertion pins this method's BODY, not those call sites. Driving {@code
+   * offeredTo} was judged not worth the refactor; a reader should not take the named helper as
+   * coverage of its callers.
+   *
+   * <p>It is the acting axis because the identity a memory request carries is an authority subject
+   * and nothing else. {@code MemoryStore.pin} asks {@code authority_accounts a WHERE
+   * a.legacy_handle=?} of it on the read side and {@code a.id=(SELECT id FROM authority_accounts
+   * WHERE legacy_handle=?)} on the write side, with {@code contained_memory_actor_allows(?,?,…)}
+   * (V232) as the arm beside each; {@code MemoryStore.require}'s write-authority {@code EXISTS}
+   * asks it again; and {@code BoundMemoryQueries.requireScope} and {@code
+   * BoundMemoryWrites.requireRecipient} put it to {@code PersonalSpaces.requireOwn} and {@code
+   * ScopedPermissions.allows}. Nothing books a row to it: the archive's provenance is {@code
+   * memories.formed_by}, which comes from the model's own {@code formed_by} argument, and {@code
+   * embedding_queries.account_id} takes the id the pin's SQL projects. So the attribution axis has
+   * nothing on this path to be written to, and passing it would mean deciding a contained run's
+   * memory authority about its CONTAINER while every other gate in the slice decides it about the
+   * child — which is what this used to do.
+   *
+   * <p>Null in, null out, and that is the fail-closed clause: {@link #informationActorFor} returns
+   * null for a run in a contained home whose log resolves no principal, and all three bindings
+   * refuse before any archive call rather than falling back to the caller's handle. (At the
+   * reminder, "refuse" is {@code MemoryQueries.Request}'s own null check, which {@code Reminder}'s
+   * wide catch turns into a warning and an empty reminder.)
+   */
+  static String memoryActingAxis(InformationActor actor) {
+    return actor == null ? null : actor.acting();
   }
 
   /**
@@ -2574,7 +2757,24 @@ public final class JobRuntime {
     // the position this exists not to take.
     var memoryReminder =
         reminding.forQueries(
-            owner,
+            // THE THIRD memory-path site, and the acting axis for the same reason as the other
+            // two: Reminder.query puts this straight into MemoryQueries.Request.acting, which is
+            // the subject MemoryStore.pin's authority_accounts arm and V232's
+            // contained_memory_actor_allows arm are asked about. `owner` is the turn's account
+            // handle -- the CONTAINER's, for a run inside a contained Application -- and `home`
+            // here is the run's own home, which for such a run is its `contained:` project. So
+            // this asked the memory authority question about the container inside the child's
+            // home. It was fail-closed, because ScopedPermissions resolves no role on a
+            // contained: project and Reminder's wide catch turns the refusal into a warning and
+            // Optional.empty(); but information_project_readable's ancestor walk (V223) answers
+            // TRUE for a container over its descendant's project, so had that ceiling opened the
+            // container's handle would have selected the authority_accounts arm and read the
+            // CHILD's memories. canBeReminded() is canRecall() && no trajectory tool
+            // (AgentDefinition:1389) and carries no containment test, so the site is reachable.
+            //
+            // informationActorFor is given `owner` rather than callerHandle because that is the
+            // identity this site already used, so an uncontained run's request is unchanged.
+            memoryActingAxis(informationActorFor(owner, transcript.conversationId(), home)),
             home,
             () -> {
               if (operation == null
@@ -4459,6 +4659,15 @@ public final class JobRuntime {
         continue;
       }
       if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
+      // Both of this run's information axes, named once for the four bindings that take
+      // them. This is the site where the conversation record is in hand, so it is where
+      // the decision of WHICH actor to build belongs; informationActorFor carries the
+      // two-part containment test and the fail-closed clause, and argues both.
+      //
+      // Declared before the memory bindings rather than after them because they take the
+      // ACTING axis too. See the comment on the Recall binding.
+      InformationActor informationActor =
+          informationActorFor(callerHandle, transcript.conversationId(), toolHome);
       if (tool instanceof MemoryTools.Read read && operation != null)
         tool =
             read.forRun(
@@ -4480,7 +4689,16 @@ public final class JobRuntime {
       if (tool instanceof MemoryTools.Recall recall)
         tool =
             recall.forRun(
-                callerHandle,
+                // The ACTING axis, not the container's handle. MemoryQueries.Request's only
+                // caller-supplied identity is an authority subject: MemoryStore.pin asks
+                // `authority_accounts a WHERE a.legacy_handle=?` of it and, on V232's arm,
+                // `contained_memory_actor_allows(?,?,false)`. A contained run that presented
+                // its container here would have the memory read gate decided about the
+                // container while every other gate in this slice is decided about the child.
+                // A read books nothing to any provenance column, so there is no second axis
+                // to pass. A null actor means the run resolved none and must reach no archive:
+                // the origin() guard in MemoryTools.Recall refuses a null acting principal.
+                memoryActingAxis(informationActor),
                 transcript.conversationId(),
                 () -> {
                   if (operation == null
@@ -4532,7 +4750,17 @@ public final class JobRuntime {
             write.forRun(
                 informationInputs,
                 transcript.conversationId(),
-                callerHandle,
+                // The ACTING axis. MemoryWrites.Request's `acting` is the authority subject
+                // of MemoryStore.pin's `authority_accounts` arm, of V232's
+                // `contained_memory_actor_allows(?,?,true)` arm, of the write-authority EXISTS
+                // in MemoryStore.require and of PersonalSpaces.requireOwn plus
+                // ScopedPermissions.allows in BoundMemoryWrites.requireRecipient. It is NOT a
+                // provenance value: the archive's own provenance is memories.formed_by, which
+                // MemoryTools.Write reads from the model's `formed_by` argument, and
+                // embedding_queries.account_id takes the id MemoryStore's pin SQL projects.
+                // So this axis is the child's principal and the attribution axis has nothing
+                // on this path to be written to.
+                memoryActingAxis(informationActor),
                 () -> {
                   if (cancelled.getAsBoolean())
                     throw new IllegalStateException("Memory write run ended");
@@ -4555,7 +4783,7 @@ public final class JobRuntime {
                 .forRun(
                     runInformation,
                     informationInputs,
-                    callerHandle,
+                    informationActor,
                     transcript.conversationId(),
                     sessionId)
                 .withQueryValidity(

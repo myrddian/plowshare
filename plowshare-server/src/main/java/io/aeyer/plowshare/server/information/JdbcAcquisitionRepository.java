@@ -11,10 +11,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcAcquisitionRepository implements AcquisitionRepository {
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
   private final JdbcTemplate jdbc;
+  private final ContainedActorGuard contained;
   private final Clock clock;
 
   public JdbcAcquisitionRepository(JdbcTemplate jdbc, Clock clock) {
     this.jdbc = Objects.requireNonNull(jdbc);
+    this.contained = new ContainedActorGuard(jdbc);
     this.clock = Objects.requireNonNull(clock);
   }
 
@@ -109,6 +111,18 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
         .id();
   }
 
+  /**
+   * Admits one queued URL, and refuses a confined Application before the queue is touched.
+   *
+   * <p>The single entry point every {@code submit} overload above funnels into, so one guard covers
+   * them all. It is the only authority question this method asks: characterized against real
+   * PostgreSQL by {@code ContainedActorWriteReachDatabaseTest}, a contained actor was stopped
+   * solely by {@code information_acquisitions_account_fkey}, the {@code account} column's foreign
+   * key into {@code admins} — a server fault for a caller's act, after the advisory lock had been
+   * taken, and one that would evaporate if that column were ever written from {@code
+   * attribution()}. Nothing has decided that a confined Application may fetch from the network into
+   * a project, and no gate between here and the queue would have refused it.
+   */
   @Override
   public Ticket submitRetained(
       InformationContext context,
@@ -120,6 +134,7 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
       int total,
       String corpus,
       Intent intent) {
+    contained.requireUncontained(context, "queue a URL for acquisition");
     Objects.requireNonNull(context);
     Objects.requireNonNull(request);
     if (total < 1

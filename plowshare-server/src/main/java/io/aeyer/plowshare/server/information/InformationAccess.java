@@ -107,7 +107,70 @@ public final class InformationAccess {
     return InformationContext.Selection.project(PersonalSpaces.name(account));
   }
 
+  /**
+   * The handle-only run resolution, unchanged for every caller including a handle-less one.
+   *
+   * <p>The null and blank checks are here rather than left to {@link InformationActor#of} on
+   * purpose. {@code AskTool}, {@code DocumentTools.Search} and {@code DocumentTools.AgentList} all
+   * pass a run's {@code callerHandle} straight through and that handle is nullable (see {@code
+   * JobRuntime.ownerOf}, which exists to recover an owner when it is absent). The old body refused
+   * such a run with {@link PersonalSpaces}' caller-visible fault, and refused a Global home before
+   * ever looking at the handle; {@code InformationActor} rejects a blank acting principal as a
+   * programming error, which is right for the record and wrong for this entry point. So this method
+   * keeps its own precondition, in its original order, and builds the actor only once the handle is
+   * one an actor may hold.
+   */
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
+    if (home.isGlobal())
+      throw new CallerFault("A retained run needs an explicit Personal or project home");
+    if (account == null || account.isBlank()) throw unauthenticated(account);
+    return forRun(InformationActor.of(account), home);
+  }
+
+  /**
+   * {@link PersonalSpaces} owns this refusal's wording, so it is re-raised rather than copied.
+   *
+   * <p>The old {@code forRun} body reached {@code PersonalSpaces.name(account)} before anything
+   * else could reject a missing handle, which is the fault a handle-less run must keep receiving.
+   */
+  private static CallerFault unauthenticated(String account) {
+    PersonalSpaces.name(account);
+    throw new IllegalStateException("A missing account must not resolve a personal space name");
+  }
+
+  /**
+   * The same run resolution, with both of the run's axes named rather than one handle meaning both.
+   *
+   * <p>For an uncontained actor this <em>is</em> the single-argument body: the acting principal is
+   * resolved exactly as {@code account} was and {@link InformationContext#accountedTo} is never
+   * called, so the context is byte-identical to the one this method produced before the carrier
+   * existed — not merely equivalent. That is the whole of the behaviour change for every caller
+   * that exists today.
+   *
+   * <p><strong>A contained actor takes the branch below instead of this body.</strong> This body
+   * cannot resolve differing axes and must not pretend to: it resolves a selection from the acting
+   * handle alone and {@link InformationContext#accountedTo} is never called, so a contained actor
+   * arriving here could only be treated as its container — silently collapsing the two axes this
+   * carrier exists to keep apart. {@link #containedRun} is where it goes, and it delegates to
+   * {@link #contained(String, String, String)}.
+   *
+   * <p><strong>What actually stops a contained project name on this body is {@link
+   * #requireSelection}, inside {@link #resolve}, and it is the ROLE question.</strong> Not {@link
+   * PersonalSpaces}: {@link PersonalSpaces#resolveAddress} returns the project unchanged unless it
+   * starts with {@code "Personal:"}, and {@link PersonalSpaces#requireOwn} throws only for a {@code
+   * "personal:"} prefix, so a {@code "contained:"} project passes both of them in silence. The
+   * refusal arrives later, at {@code permissions.allows(...)} for {@code Action.READ} — "this
+   * account may not read the selected project's information" — because a contained project carries
+   * no {@code PROJECT} scope and so grants its container no role either. That is fail-closed, but
+   * it is a role answer and not a containment answer, which is precisely why the branch above is
+   * taken on the actor's axes rather than left to this body's refusal. {@code
+   * ContainedInformationActorTest.aContainedRunsSelectionIsItsOwnProjectWithGlobalExcluded} pins
+   * that message.
+   */
+  public InformationContext forRun(InformationActor actor, io.aeyer.plowshare.protocol.Home home) {
+    Objects.requireNonNull(actor, "actor");
+    if (!actor.uncontained()) return containedRun(actor, home);
+    String account = actor.acting();
     if (home.isGlobal())
       throw new CallerFault("A retained run needs an explicit Personal or project home");
     // A run's Personal home is a server-owned workspace project, while its retained information
@@ -130,6 +193,88 @@ public final class InformationAccess {
         .within(retained);
   }
 
+  /**
+   * The contained run's resolution: the child's principal acting, its container accountable.
+   *
+   * <p>This is {@link #forRun(InformationActor, io.aeyer.plowshare.protocol.Home)}'s other half and
+   * deliberately not a variation on it. The uncontained body resolves a <em>selection</em> from a
+   * handle — a personal-space address, an ownership check and a live project role — and every one
+   * of those steps is a question about a credentialed account. A contained principal is a bare UUID
+   * with no {@code admins}, {@code authority_accounts} or {@code service_tokens} row by design
+   * (V218), so each of those steps would refuse it, and widening any of them would amount to
+   * issuing the child credential authority. None of them is widened. The selection is instead
+   * <em>stated</em>: the child's own contained project, which is the only home a contained run has.
+   *
+   * <p><strong>How this reaches authority without a credential.</strong> The admission is the
+   * run's, not the principal's. {@code retained} is the {@link
+   * io.aeyer.plowshare.server.access.KnowledgeReadScope} the run was bound with — in production the
+   * run's own {@code OperationAuthority.Admission} home, narrowed across the containment hop before
+   * this method is ever called — and {@code requireHome} is what refuses a selection outside it.
+   * That is the same ceiling an uncontained run is held to, asked in the same place. What the
+   * contained principal supplies is the <em>subject</em> the SQL gates are keyed on (V223's
+   * contained arm, V229's read and write arms, V231's reference arm, V232's memory arm), each of
+   * which admits that principal to its own scope and to nothing else by walking {@code
+   * contained_scope_ancestors} upward from the descendant. So the authority comes from the run and
+   * the identity comes from the principal, and neither of them is a credential.
+   *
+   * <p><strong>No {@link #requireSelection} call, and that is not an omission.</strong> That gate
+   * asks {@link ScopedPermissions} for a live project role, and a contained project carries no
+   * {@code PROJECT} scope and therefore no role for anybody — not the principal and not its
+   * container. Calling it here would refuse every contained run, and relaxing it would hand a role
+   * to a principal the design says must hold none. The gates that do decide a contained run's reads
+   * and writes are the SQL arms named above, which are asked on every statement.
+   *
+   * <p><strong>No production surface above the repository layer admits a contained actor
+   * today.</strong> The actor is wired and resolves correctly, and the repository and store layer
+   * is open to it, but every entry point between them refuses it first, by name:
+   *
+   * <ul>
+   *   <li>Navigation. {@code InformationTool} hands {@code actor.acting()} to {@code
+   *       DocumentNavigation.execute}, whose read path calls {@code repository.requireActive} —
+   *       {@code EXISTS(SELECT 1 FROM admins WHERE handle=? AND account_active(handle) AND NOT
+   *       bootstrap)} in {@code JdbcInformationNavigationRepository} — and whose mutation path
+   *       calls {@code repository.lockAccount}, which is {@code lockIdentity}'s {@code SELECT
+   *       handle FROM admins ... FOR SHARE}. A contained principal has no {@code admins} row by
+   *       design (V218), so both refuse before V231's new disjunct is evaluated at all; that
+   *       disjunct is reachable only from a direct repository call.
+   *   <li>The catalogue. {@code InformationCatalogue.admit} calls {@code access.requireWork} first,
+   *       which is {@link #requireSelection} plus a {@code WRITE} role.
+   *   <li>Memory. {@code BoundMemoryQueries.requireScope} and {@code
+   *       BoundMemoryWrites.requireRecipient} ask {@link ScopedPermissions} the same role question.
+   * </ul>
+   *
+   * <p>So the SQL arms are open and the layers above them are not, and the boundary is recorded in
+   * {@code ContainedInformationReachDatabaseTest}. Whether it should open is an authority decision
+   * ADR 0042 does not grant.
+   *
+   * <p>The project-prefix refusal is {@link #contained(String, String, String)}'s and is reached
+   * through it rather than restated, so there is one definition of what a contained home is. The
+   * Global refusal is restated here because it must run before the home's project is read at all.
+   *
+   * <p><strong>Caveat on the ceiling (D3).</strong> {@code retained} falls back to {@code
+   * KnowledgeReadScope.homeOnly(home)} when {@code boundary} is null, and {@code requireHome} then
+   * asks the home about itself, so that call decides nothing. It is not a gap in production, where
+   * {@code InformationAccess} is always narrowed with the run's own admission before a run binding
+   * reaches here, but a caller that constructed this class unbounded would get no ceiling from this
+   * line. The SQL arms remain the admission in either case.
+   */
+  private InformationContext containedRun(
+      InformationActor actor, io.aeyer.plowshare.protocol.Home home) {
+    if (home.isGlobal())
+      throw new CallerFault("A retained run needs an explicit Personal or project home");
+    var retained =
+        boundary == null
+            ? io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(home)
+            : boundary;
+    retained.requireHome(home);
+    // includeGlobal stays false: contained(...) builds the scope-bound selection and
+    // retained.globalRead() is deliberately NOT folded in, because the global arm of every gate
+    // requires a credentialed general-read membership this principal does not have.
+    return contained(actor.acting(), actor.attribution(), home.project())
+        .withView(true)
+        .within(retained);
+  }
+
   /** Ordinary discovery includes Global READ for every authenticated principal type. */
   public static InformationContext.Selection projectSelection(String account, String project) {
     return InformationContext.Selection.project(project);
@@ -143,20 +288,46 @@ public final class InformationAccess {
    * child's own ephemeral principal, which is what V229's gates admit, and the accounting account
    * is its container's, which is what the provenance columns' foreign keys require.
    *
-   * <p><strong>No production path calls this.</strong> A contained run's information actor is
-   * {@code callerHandle} — the container's executor — because a containment hop keeps the parent's
-   * executor and account unchanged, and {@code SourceContainedApplications.run} issues the child's
-   * principal and deliberately does not pass it as the caller. So {@code contained_knowledge_actor}
-   * is false for every actor a production path presents, and a contained run reads and writes no
-   * knowledge and no memory today. This method, V229's read baseline, both of V229's write arms and
-   * every contained-actor guard in the catalogue repository are reachable only from a caller that
-   * builds this context, which at present is two tests.
+   * <p><strong>A production path calls this.</strong> {@link #containedRun} delegates here for
+   * every run whose own conversation record says it is a contained Application's: {@code
+   * JobRuntime} builds {@link InformationActor#contained} when the durable record's origin is
+   * {@code Origin.CONTAINED} and its home is a {@code contained:} project, and the information tool
+   * and all three memory bindings — {@code MemoryTools.Recall}, {@code MemoryTools.Write} and the
+   * automatic reminder's {@code Reminding#forQueries} — take that actor's acting axis through
+   * {@code JobRuntime.memoryActingAxis}. So {@code contained_knowledge_actor} is true for an actor
+   * a production path presents, and the acting axis a running child supplies now reaches the
+   * repository and store layer. The tests that also build this context directly are now three —
+   * {@code ContainedExecutionWriteDatabaseTest}, {@code ContainedActorWriteReachDatabaseTest} and
+   * {@code ContainedIntakeAnnouncementDatabaseTest} — and {@code
+   * ContainedInformationReachDatabaseTest} reaches it through {@link #forRun(InformationActor,
+   * io.aeyer.plowshare.protocol.Home)} as a run does.
    *
-   * <p>That is fail-closed and is the state ADR 0042 records: the gates are decided and the actor
-   * is not wired, because making one subsystem read a different identity from the one the run
-   * executes as is an authority decision rather than a wiring task. Wiring it is named there as the
-   * next slice's prerequisite. <strong>Until then, do not read this javadoc or the gates it
-   * describes as a description of what a running child does.</strong>
+   * <p><strong>Reaching the actor is not the same as reaching the gate, and the difference is the
+   * whole of what the next paragraph records.</strong> V229's read baseline, both of V229's write
+   * arms, V231's reference arm, V232's memory arms and the contained-actor guards in the
+   * information repositories are each reachable from a <em>direct repository or store call</em>
+   * with this context. Of the surfaces a running child actually calls, every one above the
+   * repository layer refuses it before its SQL arm is evaluated: navigation at {@code
+   * requireActive}/{@code lockIdentity}, the catalogue at {@code requireWork}, memory at {@link
+   * ScopedPermissions}. {@link #containedRun} enumerates them with the predicate each one asks.
+   *
+   * <p><strong>What a running child does and does not reach.</strong> The gates above are SQL arms
+   * and they admit the child to its own scope. Nothing a running child calls gets that far today.
+   * The service methods on this class — {@link #requireSelection}, {@link #requireWork}, {@link
+   * #requireAudience} — ask {@link ScopedPermissions} for a live project role, which a contained
+   * project grants nobody, so every {@code InformationCatalogue} operation that calls one of them
+   * still refuses a contained context; {@code InformationCatalogue.admit} calls {@code requireWork}
+   * as its first statement. {@code SET_AUDIENCE} is refused by exactly that absence and must stay
+   * refused. The same is true one layer above {@code MemoryStore}, where {@code
+   * BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites.requireRecipient} ask the same
+   * question. And the navigation path refuses earlier still and for a different reason — {@code
+   * DocumentNavigation} calls {@code requireActive} on reads and {@code lockAccount}/{@code
+   * lockIdentity} on mutations, both of which want an {@code admins} row (V218 gives a contained
+   * principal none), so V231's disjunct is not reached from {@code InformationTool} at all. Whether
+   * those layers should admit a contained principal is an open authority decision, not an
+   * oversight; the characterization is recorded in {@code ContainedInformationReachDatabaseTest}.
+   * <strong>Do not read this javadoc as a claim that a child drives the whole information
+   * tool.</strong>
    *
    * <p><strong>{@code includeGlobal} is false, deliberately.</strong> {@link
    * InformationContext.Selection#project} sets it true, which every ordinary caller wants and which

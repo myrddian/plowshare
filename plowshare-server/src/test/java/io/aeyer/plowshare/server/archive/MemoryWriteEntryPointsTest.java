@@ -45,8 +45,8 @@ class MemoryWriteEntryPointsTest {
         .write(new WriteMemoryRequest("project", proposal, null), "service");
     var requests = ArgumentCaptor.forClass(MemoryWrites.Request.class);
     verify(archive, times(2)).write(requests.capture());
-    assertEquals("writer", requests.getAllValues().getFirst().account());
-    assertEquals("service", requests.getAllValues().getLast().account());
+    assertEquals("writer", requests.getAllValues().getFirst().acting());
+    assertEquals("service", requests.getAllValues().getLast().acting());
     alive.set(false);
     assertThrows(
         IllegalStateException.class, requests.getAllValues().getFirst().origin().alive()::run);
@@ -175,7 +175,7 @@ class MemoryWriteEntryPointsTest {
         .thereIsMaterial();
     var request = ArgumentCaptor.forClass(MemoryWrites.Request.class);
     verify(archive).write(request.capture());
-    assertNull(request.getValue().account());
+    assertNull(request.getValue().acting());
     assertEquals("log", request.getValue().origin().learning().conversation());
     assertEquals(List.of(entry), request.getValue().origin().learning().entries());
     assertEquals(0, request.getValue().origin().learning().proposalOrdinal());

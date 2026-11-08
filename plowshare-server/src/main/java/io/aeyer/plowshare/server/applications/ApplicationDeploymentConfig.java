@@ -154,7 +154,16 @@ public class ApplicationDeploymentConfig {
       ContainedStaging staging,
       ObjectProvider<ContainmentConfig> containment,
       io.aeyer.plowshare.server.agents.Runs runs,
-      io.aeyer.plowshare.server.agents.CancellableRuns jobs) {
+      io.aeyer.plowshare.server.agents.CancellableRuns jobs,
+      ConversationStore conversations,
+      ObjectProvider<JobRuntime> runtime) {
+    // THE RUN LOOP'S HALF OF ADR 0042's INFORMATION ACTOR, wired here because this is the bean
+    // that already composes containment. A contained run resolves its information identity from
+    // its own durable conversation record (the origin) and from contained_principals (the acting
+    // principal); JobRuntime.useContainedRuns argues why the two arrive together and what happens
+    // when they do not. On AccountingConfig's ifAvailable shape, so a context standing this
+    // configuration up without a run loop is unaffected.
+    runtime.ifAvailable(loop -> loop.useContainedRuns(conversations::find, principals));
     return new SourceContainedApplications(
         records,
         projects,

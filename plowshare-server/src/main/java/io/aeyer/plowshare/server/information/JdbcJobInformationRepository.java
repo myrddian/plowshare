@@ -26,6 +26,21 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
         log);
   }
 
+  /**
+   * Writes this log's input selections, owned by the context's <em>attribution</em> axis.
+   *
+   * <p>{@code information_job_inputs.owner_handle} is {@code NOT NULL REFERENCES admins(handle)}
+   * (V83) and is the column {@code information_log_readable} compares the asking account against. A
+   * contained principal has no {@code admins} row by design (V218), so the acting axis cannot be
+   * stored here at all: a contained run binding an input would violate the foreign key before any
+   * authority question was reached. The log genuinely belongs to the container — that is the handle
+   * {@code ConversationStore} wrote as its owner — so attribution is both the only axis this column
+   * can hold and the correct one.
+   *
+   * <p>This is a change of which axis is read, not of what the column means and not of any
+   * predicate over it. Every uncontained caller's two axes hold one value, so the stored row is
+   * byte-identical to the one this statement wrote before.
+   */
   public void bind(String job, InformationContext context, List<UUID> revisions) {
     revisions = List.copyOf(revisions);
     // Bound parameter/JSON allocation while traversing the ancestor relation once per cohort.
@@ -40,7 +55,7 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
               + " INSERT INTO information_job_inputs SELECT p.id,?,s.revision_id,?,?,? FROM parents p CROSS JOIN selected s ON CONFLICT DO NOTHING",
           job,
           InformationJson.json(selected),
-          context.account(),
+          context.attribution(),
           context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
           context.selection().project(),
           context.selection().includeGlobal());

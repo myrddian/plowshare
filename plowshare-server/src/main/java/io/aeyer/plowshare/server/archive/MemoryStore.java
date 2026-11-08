@@ -47,6 +47,54 @@ import org.springframework.stereotype.Repository;
  * <p>Plain {@link JdbcTemplate} and hand-written SQL, following Anchor's {@code
  * DocumentRepositoryImpl}. Nothing here deletes, in any state, and there is deliberately no method
  * that could.
+ *
+ * <p><strong>Three admission statements, and what a contained Application's principal meets in
+ * them.</strong> {@link #pin(MemoryQueries.Request)}, {@link #pin(MemoryWrites.Request)} and the
+ * write authority in {@link #require(MemoryWrites.Request, QuerySources.Pin, boolean)} each opened
+ * on {@code authority_accounts} — by {@code legacy_handle} on the read side and by {@code id} on
+ * the write side. A contained principal is a bare UUID with no row in {@code admins}, {@code
+ * authority_accounts} or {@code service_tokens} by design (V218), so each statement returned no row
+ * and the archive was closed to it: not by general-read membership and not by scope, both of which
+ * {@code ContainedMemorySchemaTest} measures. Each statement therefore carries one added arm keyed
+ * on {@code contained_memory_actor_allows} (V232) — a {@code UNION ALL} branch where what was
+ * missing was a row, a top-level {@code OR} where what was missing was a true predicate — and every
+ * shipped arm beside it is unchanged, so no other principal's admission moves in either direction.
+ *
+ * <p><strong>A contained actor's {@link QuerySources.Pin#account()} is its own principal id, which
+ * is not an {@code authority_accounts} id.</strong> It is read in exactly two places: the write
+ * authority's {@code EXISTS}, which the contained arm sits outside of, and the inference-source
+ * fingerprint and {@code embedding_queries.account_id}, a column with no foreign key that keys
+ * accounting and the one-admission-per-invocation constraint. The branch projects the id by
+ * selecting the live {@code contained_principals} row rather than casting the caller's string, so
+ * the value is always a principal that exists; a reader who later joins this field against {@code
+ * authority_accounts} finds no row and refuses, which is the direction a mistake here should fail.
+ *
+ * <p><strong>Case, and why both pins also refuse a null account.</strong> {@code
+ * contained_knowledge_actor} (V229:30) admits case-INSENSITIVELY — {@code ~*}, and {@code ::uuid}
+ * accepts an uppercase UUID — while {@code c.id::text} always renders lowercase. A case-sensitive
+ * projection would therefore have made the arm true and the projected account NULL for a mixed-case
+ * actor string. The branches match on {@code lower(?)} so the projection is exactly as
+ * case-insensitive as the predicate admitting it, and both pins refuse a row with a null account as
+ * well as one with a null scope — so no {@link QuerySources.Pin} leaves this class without one, and
+ * the paragraph above is true rather than nearly true.
+ *
+ * <p>Both halves of that are this class's own, and they are not equally testable. {@code
+ * aMixedCaseActorStringNeverProducesANullAccountPin} calls {@link #pin} on a real store, which is
+ * what makes it a regression test for this code rather than for its own copy of these statements —
+ * the rest of {@code ContainedMemorySchemaTest} reproduces them, and {@code READ_PIN}'s javadoc
+ * there records why. Measured on 2026-11-08: replacing {@code lower(?)} with {@code ?} in the two
+ * statements above fails that test, so the projection half is held. Deleting the {@code
+ * rows.getFirst().account() == null} clause from both refusals does NOT fail it, and cannot — while
+ * the projection is correct an admitted row's account is never null, so that clause is unreachable.
+ * It is defence in depth against a future edit to the projection and no test can isolate it; do not
+ * read it as something the suite would notice the loss of.
+ *
+ * <p>{@code InformationActor.contained} now also canonicalises a UUID-shaped acting principal to
+ * one lower-case spelling, because the READ and WRITE gates below {@code
+ * contained_memory_actor_allows} do not agree about case with {@code contained_scope_readable}'s
+ * self arm (V223:158-160). That is a fix for a different symptom — a child admitted to write what
+ * it could not read — and it is upstream of here. It does not make the {@code lower(?)} above
+ * removable: this class is reached by callers that never pass through that carrier.
  */
 @Repository
 public class MemoryStore implements MemoryRepository {
@@ -62,6 +110,12 @@ public class MemoryStore implements MemoryRepository {
     informationProtected = true;
   }
 
+  /**
+   * The read admission. The second branch is V232's arm: a contained principal's own home, bounded
+   * by {@code contained_own_home} to that one scope, never an ancestor's or a sibling's. The first
+   * branch is the shipped one, unchanged; the two cannot both produce a row, which is what keeps
+   * the {@code rows.size() != 1} refusal below meaning what it meant.
+   */
   @Override
   public Selection pin(MemoryQueries.Request request) {
     if (!informationProtected)
@@ -75,6 +129,10 @@ public class MemoryStore implements MemoryRepository {
             WHERE a.legacy_handle=? AND information_global_read_member(?)
               AND (?::text IS NULL OR information_project_readable(
                 (SELECT id FROM projects WHERE name=?),?))
+            UNION ALL
+            SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=lower(?)),
+              (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?)
+            WHERE contained_memory_actor_allows(?,?,false)
             """,
             (row, n) ->
                 new QuerySources.Pin(
@@ -82,12 +140,16 @@ public class MemoryStore implements MemoryRepository {
             request.home().project(),
             BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
             request.home().project(),
-            request.account(),
-            request.account(),
+            request.acting(),
+            request.acting(),
             request.home().project(),
             request.home().project(),
-            request.account());
-    if (rows.size() != 1 || rows.getFirst().scope() == null)
+            request.acting(),
+            request.acting(),
+            request.home().project(),
+            request.acting(),
+            request.home().project());
+    if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
       throw new CallerFault("Memory query is outside live read authority");
     return new Selection(rows.getFirst(), request.readScope().memoryHomes());
   }
@@ -106,13 +168,13 @@ public class MemoryStore implements MemoryRepository {
     jdbc.queryForObject(
         "SELECT information_lock_scope(?,?) IS NULL",
         Boolean.class,
-        request.account(),
+        request.acting(),
         expected.pin().scope());
     if (expected.tiers().stream().anyMatch(Home::isGlobal) && !request.home().isGlobal())
       jdbc.queryForObject(
           "SELECT information_lock_scope(?,?) IS NULL",
           Boolean.class,
-          request.account(),
+          request.acting(),
           BuiltInIdentities.GLOBAL_KNOWLEDGE.value());
     // Source-before-provenance matches memory writes. Serialize short telemetry-bearing reads;
     // no provider IO occurs while these locks are held. Privacy evidence cannot change mid-read.
@@ -132,6 +194,10 @@ public class MemoryStore implements MemoryRepository {
     return Lifecycle.recordUse(memory, at);
   }
 
+  /**
+   * The write path's identity pin, with the same arm under {@code writing}. A learning write keeps
+   * its own SYSTEM authority and carries no account, for which the arm is false.
+   */
   @Override
   public QuerySources.Pin pin(MemoryWrites.Request request) {
     if (!informationProtected)
@@ -144,6 +210,10 @@ public class MemoryStore implements MemoryRepository {
           (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?) END
         FROM authority_accounts a WHERE a.id=CASE WHEN ? THEN ?::uuid ELSE
           (SELECT id FROM authority_accounts WHERE legacy_handle=?) END
+        UNION ALL
+        SELECT (SELECT c.id FROM contained_principals c WHERE c.id::text=lower(?)),
+          (SELECT memory_knowledge_scope(p.id) FROM projects p WHERE p.name=?)
+        WHERE contained_memory_actor_allows(?,?,true)
         """,
             (row, n) ->
                 new QuerySources.Pin(
@@ -153,8 +223,13 @@ public class MemoryStore implements MemoryRepository {
             request.home().project(),
             learning,
             BuiltInIdentities.SYSTEM.value(),
-            request.account());
-    if (rows.size() != 1 || rows.getFirst().scope() == null) throw writeDenied();
+            request.acting(),
+            request.acting(),
+            request.home().project(),
+            request.acting(),
+            request.home().project());
+    if (rows.size() != 1 || rows.getFirst().scope() == null || rows.getFirst().account() == null)
+      throw writeDenied();
     var pin = rows.getFirst();
     require(request, pin, false);
     return pin;
@@ -175,15 +250,22 @@ public class MemoryStore implements MemoryRepository {
             BuiltInIdentities.GLOBAL_KNOWLEDGE.value(),
             request.home().project()))) throw writeDenied();
     if (!processing && request.origin().learning() == null) {
+      // The administrator requirement in the EXISTS is conditional: `?::text IS NOT NULL` is the
+      // home's project, so only a Global-tier write reaches it. V232's disjunct sits OUTSIDE the
+      // EXISTS because the shipped arm is keyed on an authority_accounts id a contained principal
+      // has none of; it admits that principal's own project home only, never the Global tier, so
+      // the administrator requirement is left in force for every writer it already applied to.
       if (!Boolean.TRUE.equals(
           jdbc.queryForObject(
-              "SELECT EXISTS(SELECT 1 FROM authority_accounts a WHERE a.id=? AND a.legacy_handle=? AND information_global_read_member(?) AND (?::text IS NOT NULL OR EXISTS(SELECT 1 FROM admins u WHERE u.handle=? AND u.enabled AND u.server_admin AND NOT u.bootstrap AND u.account_kind='USER')))",
+              "SELECT EXISTS(SELECT 1 FROM authority_accounts a WHERE a.id=? AND a.legacy_handle=? AND information_global_read_member(?) AND (?::text IS NOT NULL OR EXISTS(SELECT 1 FROM admins u WHERE u.handle=? AND u.enabled AND u.server_admin AND NOT u.bootstrap AND u.account_kind='USER'))) OR contained_memory_actor_allows(?,?,true)",
               Boolean.class,
               pin.account(),
-              request.account(),
-              request.account(),
+              request.acting(),
+              request.acting(),
               request.home().project(),
-              request.account()))) throw writeDenied();
+              request.acting(),
+              request.acting(),
+              request.home().project()))) throw writeDenied();
     }
     var learning = request.origin().learning();
     if (learning != null) {
@@ -222,11 +304,11 @@ public class MemoryStore implements MemoryRepository {
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
         Boolean.class);
-    if (!processing && request.account() != null)
+    if (!processing && request.acting() != null)
       jdbc.queryForObject(
           "SELECT information_lock_scope(?,?) IS NULL",
           Boolean.class,
-          request.account(),
+          request.acting(),
           pin.scope());
     else {
       jdbc.queryForList(

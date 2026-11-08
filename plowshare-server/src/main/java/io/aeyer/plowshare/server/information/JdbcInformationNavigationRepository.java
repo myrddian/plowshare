@@ -789,6 +789,20 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     return weight;
   }
 
+  /**
+   * The write authority both relationship mutators recheck inside their own transaction.
+   *
+   * <p><strong>Why this repository carries no contained-actor guard.</strong> {@link #lockIdentity}
+   * below requires a row in {@code admins} for the <em>acting</em> principal — enabled and not
+   * bootstrap — and a confined Application's principal is a bare UUID with no such row by design
+   * (V218). Characterized against real PostgreSQL by {@code ContainedActorWriteReachDatabaseTest},
+   * both {@link #create} and {@link #remove} were refused here with {@code
+   * NotFoundFault("information is unavailable in this selection")}, before any statement wrote
+   * anything. That is an authority predicate asked about the acting axis and answered as a caller
+   * fault, not a provenance column's foreign key, so {@code ContainedActorGuard} is deliberately
+   * not called in front of it: a second refusal ahead of a sound one is a second thing to keep in
+   * step. The test holds the assertions that keep it sound.
+   */
   private UUID writable(InformationContext c, UUID resource) {
     var projects =
         jdbc.queryForList(

@@ -107,9 +107,9 @@ public final class BoundMemoryQueries implements MemoryQueries {
   private void requireScope(Request request) {
     if (!request.home().isGlobal()) {
       io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(
-          request.home().project(), request.account());
+          request.home().project(), request.acting());
       if (!permissions.allows(
-          new ScopedPermissions.Principal(request.account()),
+          new ScopedPermissions.Principal(request.acting()),
           new ScopedPermissions.ProjectTarget(request.home().project()),
           ScopedPermissions.Action.READ))
         throw new io.aeyer.plowshare.server.faults.CallerFault("Memory scope is not readable");
