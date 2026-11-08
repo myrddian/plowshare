@@ -1164,6 +1164,29 @@ principal is an open authority decision and was not made in slice four;
 `ContainedInformationReachDatabaseTest` and `ContainedMemorySchemaTest` carry the
 characterization, asserting the refusals rather than leaving them implied.
 
+**Since slice four (2026-11-08).** The three bullets above are slice four's
+characterization and are kept as written; the authority decision they left open
+has since been made, inside this record's own design rather than against it. Four
+Java layers now admit a contained run to its own home, each as a disjunct placed
+*before* the role question so that every ordinary decision is unchanged: the
+information service's `requireSelection` and `requireWork` through a new
+`ContainedHomes` contract; the two bound memory gates through the same contract;
+navigation's `requireActive`, which asks `admins` first and unchanged and only
+then `contained_knowledge_actor`; and navigation's relationship writes, where
+`lockIdentity` now takes the `InformationContext` and asks liveness of `acting()`
+while taking the share lock and writing `information_relationships.actor` from
+`attribution()`. No grant targets a contained scope, no contained principal holds
+a credential or a project role, and `CONTAINED` remains authority-free (V216) —
+the admission comes from containment, not from authority.
+
+`requireAudience` is **not** among them and `SET_AUDIENCE` stays refused. Nor are
+the navigation surfaces that take a bare handle (`DocumentNavigation.mutate`,
+`PortableInformation.commit`): their `account` columns — saved views, receipts,
+audit — are keys rather than labels, so attributing them to the container would
+merge a child's request identifiers into its container's idempotency namespace.
+Whose namespace a contained run's idempotency lives in is still open. Nesting
+remains out of scope, for the reason recorded above.
+
 **One thing a running child's wiring did change, in a later fix wave.**
 `JobRuntime`'s memory bindings passed the *container's* identity into the field
 `MemoryStore` asks its authority questions about, so V232's arms had no

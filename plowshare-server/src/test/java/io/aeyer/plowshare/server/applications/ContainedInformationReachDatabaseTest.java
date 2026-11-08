@@ -117,20 +117,25 @@ import org.testcontainers.junit.jupiter.*;
  * repository.lockAccount} → {@code lockIdentity}'s {@code SELECT handle FROM admins ... FOR SHARE}.
  * A contained principal has no {@code admins} row (V218), so every navigation operation a contained
  * run issues is refused there, before V231's new disjunct is evaluated. That disjunct is reachable
- * only from a direct repository call, which is what the tests here make. Navigation's liveness gate
- * has since been taught the contained principal, so a navigation <em>read</em> is no longer refused
- * there; its mutation path still is, by the five provenance columns keyed on {@code admins(handle)}
- * rather than by any authority predicate, which {@code ContainedActorWriteReachDatabaseTest}
- * records. So: the information service gates are open, navigation reads are open, navigation writes
- * and the memory gates are the two that remain.
+ * only from a direct repository call, which is what the tests here make. Both halves of that
+ * paragraph have since changed. {@code requireActive} was taught the contained principal, so a
+ * navigation <em>read</em> is no longer refused there; and of the five provenance columns that kept
+ * the mutation path closed, the one that is pure provenance — {@code
+ * information_relationships.actor} — now writes from {@code attribution()}, so {@code create} and
+ * {@code remove} are open to a contained run in its own home, with {@code
+ * information_lock_knowledge}'s contained arm as the whole of the confinement. The four columns
+ * that are <em>keys</em> rather than labels stay closed, and {@code
+ * ContainedActorWriteReachDatabaseTest} records both. So: the information service gates, navigation
+ * reads, navigation relationship writes and the memory gates are open; the bare-handle navigation
+ * mutate path and the three guarded repositories are not.
  *
- * <p><strong>The memory half is proved at the store and nowhere above it.</strong> {@link
- * #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore} and V232's predicate
- * directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code
- * BoundMemoryWrites.requireRecipient} ask the same {@link ScopedPermissions} question as the
- * information service gates, with no containment awareness, so a contained principal is refused
- * there — asserted in that test as the SQL fact the refusal rests on. Whether those two layers
- * should admit a contained principal is an open authority decision and is not this task's to make.
+ * <p><strong>The memory half is proved at the store, and the layer above it has since been
+ * opened.</strong> {@link #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore}
+ * and V232's predicate directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code
+ * BoundMemoryWrites.requireRecipient} asked only the {@link ScopedPermissions} question and so
+ * refused a contained principal; they now ask {@code ContainedHomes} first. That test's assertion
+ * about the role answer is unchanged and still true — it is the SQL fact, and a contained project
+ * grants nobody a role — but it is now one of two arms rather than the whole gate.
  */
 @Tag("full-db")
 @Testcontainers

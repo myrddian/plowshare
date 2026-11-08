@@ -4,18 +4,25 @@ Read this before the work graph. The graph and its findings register interleave
 shipped facts with proposals, which makes the boundary hard to see. This document
 is only the boundary.
 
-**One sentence.** Containment is built and tested **up to and including the
-repository and store layer**; **nothing above that layer admits a contained
-principal**; and **every proposal under discussion is about that layer and above**.
+**One sentence (as first written).** Containment is built and tested **up to and
+including the repository and store layer**; **nothing above that layer admits a
+contained principal**; and **every proposal under discussion is about that layer
+and above**.
+
+**One sentence (now).** Four of the layers above it have since been opened — the
+information service's two gates, the two bound memory gates, navigation's liveness
+gate and navigation's relationship writes — **and none of the proposals below was
+built to do it**. See category E.
 
 **Four categories, and the third is where confusion comes from:**
 
 | | What it is | Status |
 | --- | --- | --- |
 | **A** | Shipped on `main` | Live. Predates this work entirely. |
-| **B** | This branch, PR #174 ("slice four") | Code complete, tested, **unmerged**. |
+| **B** | PR #174 ("slice four") | **Merged.** Was unmerged when this was written. |
 | **C** | Proposals | **Zero code. Nothing written. Nothing decided.** |
-| **D** | Findings `F1`–`F17` | **Not proposals.** Verified statements about A and B, plus what they imply for C. |
+| **D** | Findings `F1`–`F20` | **Not proposals.** Verified statements about A and B, plus what they imply for C. |
+| **E** | PR #175, four increments | **Shipped on the branch.** The layers above, opened inside V216's design. |
 
 ---
 
@@ -56,11 +63,37 @@ additions:
 | 9 `Jdbc*Repository` classes, `InformationAccess` | Carry the actor through the repository layer. |
 | 8 new test classes | Characterization and reach tests, mostly `@Tag("full-db")`. |
 
-**What slice four did *not* do, and this is the crux:** it opened the repository
+**What slice four did *not* do, and this was the crux:** it opened the repository
 and store layer. It did not open `ScopedPermissions`, and it did not open
-`DocumentNavigation`. **No production caller reaches the code it added** — that
-limitation is stated in ADR 0042 as the "no-caller limitation" and it is not a
-defect in the slice, it is the slice's documented boundary.
+`DocumentNavigation`. **No production caller reached the code it added** — that
+limitation is stated in ADR 0042 as the "no-caller limitation" and was not a
+defect in the slice but its documented boundary. Category E is what closed it.
+
+## E — PR #175: the layers above, opened inside V216's design
+
+Four increments on `claude/containment-scope-notes`, each verified before the
+next. None of them widens `ScopedPermissions`, adds a grant, issues a credential
+or gives a contained principal a project role. Each adds a **disjunct in front of**
+the role question, so every ordinary decision is bit-for-bit the one it was.
+
+| Increment | What it opened | How |
+| --- | --- | --- |
+| `21f51929` | The information service's `requireSelection` (READ) and `requireWork` (WRITE) | A new narrow contract, `ContainedHomes`, dispatched before the role gate. A `contained:` prefix guard on the contract keeps the gates off the database on the ordinary path. |
+| `1e6ac271` | Navigation **reads** | `requireActive` asks `admins` first and unchanged, then `contained_knowledge_actor`. Existence is liveness for a contained principal (V218 has no revocation column). |
+| `783379a6` | Both bound memory gates | The same `ContainedHomes` contract. One arm covers READ and WRITE together, because V229 and V232 both admit a contained actor in its own home. |
+| `3a8d9f40` | Navigation **relationship writes** (`create`, `remove`) | `lockIdentity` takes the `InformationContext` and tells the two axes apart: liveness off `acting()`, the share lock and `information_relationships.actor` off `attribution()`. |
+
+**Still refused, deliberately:** `requireAudience` / `SET_AUDIENCE`; the three
+repositories behind `ContainedActorGuard` (projection, acquisition, content); and
+the bare-handle navigation mutate path (`DocumentNavigation.mutate`,
+`PortableInformation.commit`), whose `account` columns are **keys** rather than
+labels — saved views are counted per account and a receipt is the idempotency
+record for `(account, request_id)`, so attributing them would merge a child's
+request identifiers into its container's namespace. That one is an open design
+question, not a column to re-point.
+
+**Nesting stays out of scope** (ADR 0042), recorded in
+[the nesting requirements](2026-11-08-self-similar-nesting-requirements.md).
 
 ## C — Proposals. None of this exists.
 
@@ -110,8 +143,14 @@ Three of them matter most for orientation:
 Not "should we fix the ceiling." It is:
 
 **Should a contained scope carry RBAC authority at all?** V216 decided no. The
-proposals ask to reverse that so the layer slice four built becomes reachable. The
-alternative is the fallback, which opens only the container-facing half and leaves
-the child's own run unable to pass `ScopedPermissions`.
+proposals asked to reverse that so the layer slice four built becomes reachable.
 
-That decision has not been made, and nothing in categories A or B depends on it.
+**That decision has now been made, and it was to keep V216's answer.** Category E
+reached the same layers without authority: the admission comes from containment,
+asked of a typed contract beside the role gate, not from a grant or a role. So
+every proposal in category C remains unbuilt, and B2 — the four conjuncts in the
+schema's most sensitive constructs — was never relaxed. The proposals are not
+dead; they are no longer the only route, and the cheaper route is shipped.
+
+What is still open after E: whose namespace a contained run's idempotency lives
+in, and self-similar nesting.
