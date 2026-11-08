@@ -1,8 +1,8 @@
 # Desktop Application file tree
 
-Status: design, 8 November 2026 (amended: reusable file-browser component).
-Client UX redesign for Plowshare Desktop Application **Files**. It authorizes no
-implementation until approved. Builds on the Application hub in
+Status: implemented on `cursor/desktop-application-file-tree` (8 November 2026).
+Client UX redesign for Plowshare Desktop Application **Files**. Builds on the
+Application hub in
 [2026-11-08-desktop-application-hub-design.md](2026-11-08-desktop-application-hub-design.md).
 Verify claims against current Desktop code.
 

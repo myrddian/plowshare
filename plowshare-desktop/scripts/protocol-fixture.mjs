@@ -508,7 +508,19 @@ export async function protocolFixture(options = {}) {
           const files = applicationSources.get(payload.location ? JSON.stringify([payload.project, payload.location.store, payload.location.path]) : payload.project), row = projectRows.get(payload.project);
           if (!files || row?.kind !== 'application') { result = { code: 'FORBIDDEN', said: 'Application access unavailable' }; break; }
           const prefix = payload.path ? payload.path + '/' : '';
-          result.payload = { project: payload.project, path: payload.path ?? '', entries: [...files.keys()].filter(path => path.startsWith(prefix) && !path.slice(prefix.length).includes('/')).map(path => ({ path, name: path.slice(prefix.length), directory: false })), more: false, location: payload.location ?? null }; break;
+          const names = new Map();
+          for (const path of files.keys()) {
+            if (!path.startsWith(prefix)) continue;
+            const rest = path.slice(prefix.length);
+            if (!rest) continue;
+            const slash = rest.indexOf('/');
+            if (slash < 0) names.set(rest, { path: prefix + rest, name: rest, directory: false });
+            else {
+              const name = rest.slice(0, slash);
+              if (!names.has(name)) names.set(name, { path: prefix + name, name, directory: true });
+            }
+          }
+          result.payload = { project: payload.project, path: payload.path ?? '', entries: [...names.values()], more: false, location: payload.location ?? null }; break;
         }
         case 'application.file.read': case 'application.file.save': {
           const file = applicationSources.get(payload.location ? JSON.stringify([payload.project, payload.location.store, payload.location.path]) : payload.project)?.get(payload.path), row = projectRows.get(payload.project);
