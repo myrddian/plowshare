@@ -1,7 +1,8 @@
 # Plowshare
 
-Read the [Plowshare manual](docs/manual/README.md) for everyday use, functional
-guides and architecture. Its [Library installer](docs/manual/installation.md)
+Read the [Plowshare manual](https://plowshare.cc/manual) for everyday use, functional
+guides and architecture. The [manual in this checkout](docs/manual/README.md)
+matches the source here. Its [Library installer](docs/manual/installation.md)
 retains the Markdown chapters in the server's information system for users and agents.
 
 Plowshare is a general-purpose agent framework with a Java server and shared

@@ -44,6 +44,15 @@ complete trigger definition, event emission and lifecycle notification. Applicat
 event names start work through triggers; hook callback keys describe seams in that
 work, rather than additional event subscriptions.
 
+## Connect MCP tools
+
+Use Desktop **Settings → Client MCP** or TUI `/mcp` for client-hosted MCP
+connections. Saving a profile does not launch its process or share its tools
+with server work. Server-hosted connections and assignments are managed
+separately in **Server administration → Server MCP**. See the
+[native MCP guide](../native-mcp-hosting.md) for configuration locations, consent,
+account credentials and tool grants.
+
 ## SDKs
 
 SDK clients reach Plowshare operations over the authenticated WebSocket contract.

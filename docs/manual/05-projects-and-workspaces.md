@@ -50,7 +50,8 @@ registration can be an Application or an External, depending on its root
 manifest; another system owns that directory's lifecycle. Plowshare validates an
 existing Application manifest without rewriting it. Source writes default off,
 with runtime state kept separately. See [the project guide](../projects.md) for
-bounded write areas, manifest validation and routing.
+bounded write areas, manifest validation and routing. For the Desktop workflow
+hub and file browser, see [Open a server Application](02-clients-and-work.md#open-a-server-application).
 
 ## Choose the right filesystem ownership
 
