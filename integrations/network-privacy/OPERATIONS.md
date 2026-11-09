@@ -103,9 +103,11 @@ report projections are cached for 20 seconds. Visibility is an inspection result
 permissions and availability are still enforced by Plowshare on each tool call.
 A checklist highlights missing setup. The expiry notice warns within seven days.
 
-The first completed sweep establishes the device inventory for the saved scope.
-Each later sweep checks the saved addresses again. In **Devices**, filter for
-previously observed addresses or search by name, address, MAC, hostname or vendor.
+Saving a subnet adds its addresses as candidates. Each sweep checks the saved
+addresses. A completed sweep promotes an address into the device inventory when
+it finds an open TCP service or a Pi-hole association. A refusal alone leaves an
+address as a candidate. In **Devices**, switch between observed devices and
+candidate addresses, or search by name, address, MAC, hostname or vendor.
 The inventory reconstructs first and last TCP responses from retained scan receipts
 after a restart. A timed-out check updates the last check time, while the last
 response stays at the last successful or refused connection. The latest 50

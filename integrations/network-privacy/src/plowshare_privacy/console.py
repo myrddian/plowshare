@@ -31,7 +31,7 @@ from .contracts import (
     utc_now,
     uuid,
 )
-from .device_inventory import DeviceCard, device_inventory
+from .device_inventory import DeviceInventory, device_inventory
 from .discovery import DeviceDiscovery
 from .journal import Receipt
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
@@ -192,7 +192,7 @@ class OperatorConsole:
         self.cache_until = 0.0
         self._device_plan: CollectionPlan | None = None
         self._device_receipts: tuple[Receipt, ...] = ()
-        self._device_cards: tuple[DeviceCard, ...] = ()
+        self._device_inventory = DeviceInventory()
         self.journal = journal
 
     @property
@@ -216,7 +216,7 @@ class OperatorConsole:
             raise ValueError("Choose an observed finding")
         self.store.acknowledge(identity, expected)
 
-    def devices(self) -> tuple[DeviceCard, ...]:
+    def inventory(self) -> DeviceInventory:
         plan = self.worker.config.collection
         receipts = tuple(
             item for item in self.worker.receipts.all() if item.phase == "done"
@@ -231,10 +231,12 @@ class OperatorConsole:
                 for current, cached in zip(receipts, self._device_receipts)
             )
         ):
-            self._device_cards = device_inventory(plan.targets, plan.labels, receipts)
+            self._device_inventory = device_inventory(
+                plan.targets, plan.labels, receipts
+            )
             self._device_plan = plan
             self._device_receipts = receipts
-        return self._device_cards
+        return self._device_inventory
 
     async def health(self) -> Health:
         async with self.health_lock:
@@ -454,7 +456,7 @@ class OperatorConsole:
             if len(values) == 1
         }
         result = []
-        for card in self.devices():
+        for card in self.inventory().devices:
             identity = card.identity
             if identity is None:
                 continue

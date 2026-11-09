@@ -138,10 +138,13 @@ def application(
 
     async def overview(request: web.Request) -> web.Response:
         value = operator()
+        health = await value.health()
+        inventory = value.inventory()
         return web.json_response(
             {
-                "health": asdict(await value.health()),
-                "devices": [asdict(item) for item in value.devices()],
+                "health": asdict(health),
+                "devices": [asdict(item) for item in inventory.devices],
+                "candidates": [asdict(item) for item in inventory.candidates],
                 "findings": [asdict(item) for item in value.findings()],
                 "preferences": asdict(value.store.preferences),
                 "investigations": [asdict(item) for item in value.manual],

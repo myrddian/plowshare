@@ -246,7 +246,7 @@ byId('disconnect').addEventListener('click', async () => {
   monitoringDraft = false;
   bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings']) byId(id).replaceChildren();
-  byId('device-search').value = ''; byId('device-presence').value = 'all';
+  byId('device-search').value = ''; byId('device-presence').value = 'observed';
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
   byId('schedule-draft').hidden = true;
   renderScheduleControl(null, null, null);
@@ -331,9 +331,13 @@ function filterDevices() {
   const presence = byId('device-presence').value;
   const cards = [...byId('device-cards').querySelectorAll('.device-card')];
   for (const card of cards) {
-    card.hidden = !card.dataset.search.includes(query) || (presence !== 'all' && presence !== card.dataset.presence);
+    card.hidden = card.dataset.presence !== presence || !card.dataset.search.includes(query);
   }
-  byId('device-filter-empty').hidden = !cards.length || cards.some(card => !card.hidden);
+  const empty = byId('device-filter-empty');
+  empty.hidden = !cards.length || cards.some(card => !card.hidden);
+  empty.textContent = query ? 'No addresses match this search.'
+    : presence === 'candidate' ? 'No candidate addresses remain in this scope.'
+    : 'No devices observed yet. Candidate addresses are checked on each sweep.';
 }
 byId('device-search').addEventListener('input', filterDevices);
 byId('device-presence').addEventListener('change', filterDevices);
@@ -401,6 +405,7 @@ setInterval(() => {
 function renderOverview(value) {
   const health = value.health;
   byId('device-count').textContent = value.devices.length;
+  byId('candidate-count').textContent = value.candidates.length;
   byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : 'Connected to Plowshare';
   byId('setup-checklist').hidden = health.checklist.length === 0;
   renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
@@ -418,16 +423,16 @@ function renderOverview(value) {
     row.append(element('span', run.state, 'badge'), element('code', run.id));
     runs.append(row);
   }
-  const nextDeviceSignature = JSON.stringify(value.devices);
+  const nextDeviceSignature = JSON.stringify([value.devices, value.candidates]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
   const cards = byId('device-cards'); cards.replaceChildren();
-  if (!value.devices.length) cards.append(element('p', 'Choose devices in Settings to begin monitoring.'));
+  if (!value.devices.length && !value.candidates.length) cards.append(element('p', 'Choose addresses in Settings to begin monitoring.'));
   for (const device of value.devices) {
     const card = element('article', undefined, 'device-card');
     const current = device.identity?.source === 'pihole-v6' ? device.identity : null;
     const known = current || device.last_known_identity;
-    card.dataset.presence = known || device.last_response_at ? 'observed' : 'unobserved';
+    card.dataset.presence = 'observed';
     card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor].filter(Boolean).join(' ').toLowerCase();
     card.append(element('h3', device.name), element('p', device.address));
     if (known) {
@@ -449,6 +454,16 @@ function renderOverview(value) {
     const profile = element('button', 'Device profile');
     profile.addEventListener('click', () => openDeviceProfile(device.address).catch(error => notice(error.message, true)));
     card.append(history, profile); cards.append(card);
+  }
+  for (const candidate of value.candidates) {
+    const card = element('article', undefined, 'device-card');
+    card.dataset.presence = 'candidate';
+    card.dataset.search = [candidate.address, candidate.label].filter(Boolean).join(' ').toLowerCase();
+    card.append(element('h3', candidate.address), element('p', candidate.label || 'Candidate address'));
+    card.append(element('p', candidate.last_checked_at
+      ? 'Last checked ' + new Date(candidate.last_checked_at).toLocaleString()
+      : 'Awaiting first sweep', 'hint'));
+    cards.append(card);
   }
   }
   filterDevices();
