@@ -3,10 +3,13 @@ package io.aeyer.plowshare.server.orchestrations.scripted;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.hooks.script.HookEngine;
+import io.aeyer.plowshare.server.hooks.script.ScriptLocation;
 import io.aeyer.plowshare.server.llm.LlmJson;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.proxy.ProxyExecutable;
 
@@ -15,13 +18,14 @@ import org.graalvm.polyglot.proxy.ProxyExecutable;
  */
 public final class ScriptProgram {
   public static final String MARKER = "// plowshare-script v1";
+  private static final String SOURCE_NAME = "orchestration.mjs";
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final HookEngine ENGINE = new HookEngine();
 
   private ScriptProgram() {}
 
   public static boolean isScript(String source) {
-    return source.stripLeading().startsWith(MARKER);
+    return source != null && source.stripLeading().startsWith(MARKER);
   }
 
   public static JsonNode manifest(String source) {
@@ -32,9 +36,40 @@ public final class ScriptProgram {
     return evaluate(source, input);
   }
 
+  /** Keep the real script leaf when retained provenance has one, otherwise use its definition. */
+  public static String fileName(String definition, String origin) {
+    if (origin != null) {
+      String leaf =
+          origin.substring(Math.max(origin.lastIndexOf('/'), origin.lastIndexOf('\\')) + 1);
+      if (leaf.matches("[A-Za-z0-9_.-]+\\.(?:m?js|ts)")) return leaf;
+    }
+    return definition + ".js";
+  }
+
+  /** The sandbox position travels with the failure to the run that owns the execution context. */
+  public static final class Failure extends IllegalStateException {
+    private final transient Optional<ScriptLocation> location;
+
+    private Failure(PolyglotException cause, Source module) {
+      super(
+          "orchestration script failed: "
+              + (cause.isSyntaxError() ? "JavaScript syntax error" : cause.getMessage()),
+          cause);
+      location = ScriptLocation.in(cause, module);
+    }
+
+    public Optional<ScriptLocation> location() {
+      return location;
+    }
+  }
+
   private static JsonNode evaluate(String source, JsonNode input) {
     if (source.length() > 524288)
       throw new IllegalStateException("orchestration script exceeds 512 KiB");
+    var script =
+        Source.newBuilder("js", source, SOURCE_NAME)
+            .mimeType("application/javascript+module")
+            .buildLiteral();
     try (Context context = ENGINE.newContext();
         var timer = Executors.newSingleThreadScheduledExecutor()) {
       var deadline = timer.schedule(() -> context.close(true), 2, TimeUnit.SECONDS);
@@ -43,11 +78,7 @@ public final class ScriptProgram {
             "js",
             "globalThis.Date=undefined; Math.random=()=>{throw new Error(\"random is unavailable; use input.requestId\")};");
         installJsonUtility(context);
-        var module =
-            context.eval(
-                Source.newBuilder("js", source, "orchestration.mjs")
-                    .mimeType("application/javascript+module")
-                    .buildLiteral());
+        var module = context.eval(script);
         if (!module.hasMember("manifest")
             || !module.hasMember("step")
             || !module.getMember("step").canExecute())
@@ -71,6 +102,8 @@ public final class ScriptProgram {
       } finally {
         deadline.cancel(false);
       }
+    } catch (PolyglotException failed) {
+      throw new Failure(failed, script);
     } catch (Exception failed) {
       throw new IllegalStateException(
           "orchestration script failed: " + failed.getMessage(), failed);

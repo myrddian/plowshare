@@ -252,6 +252,15 @@ Do not delete an uncertain intent to make a retry button work. History is bounde
 512 acknowledgements, 128 manual intents and the existing 1,000-scan journal fence.
 Archive settled history deliberately; preserve identities for reconciliation.
 
+If an investigation reports **Report save blocked**, its review is retained in
+the run trajectory. After the write refusal is resolved, use Plowshare's
+orchestration **Resume** as the original run owner. For an automatically
+launched service-owned run, submit `orchestration.resume` through the public SDK
+with that service identity and a new resume request ID. The server retries the
+draft save using the retained review and source revisions. The original scan
+and model calls stay in the run history. A save with an uncertain outcome
+requires receipt reconciliation before another submission.
+
 ## Upgrade an existing collector
 
 Stop the foreground process or user service, preserve the private directory, then

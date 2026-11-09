@@ -276,8 +276,13 @@ public class InformationConfig {
   }
 
   @Bean
+  public InformationGateRepository informationGateRepository(JdbcTemplate jdbc) {
+    return new JdbcInformationGateRepository(jdbc, Clock.systemUTC());
+  }
+
+  @Bean
   public InformationWriteGates informationWriteGates(
-      JdbcTemplate jdbc,
+      InformationGateRepository receipts,
       UnitOfWork work,
       InformationAccess access,
       InformationJobs inputs,
@@ -290,8 +295,7 @@ public class InformationConfig {
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks) {
     var gates =
         new InformationWriteGates(
-            new io.aeyer.plowshare.server.information.JdbcInformationGateRepository(
-                jdbc, Clock.systemUTC()),
+            receipts,
             work,
             access,
             inputs,

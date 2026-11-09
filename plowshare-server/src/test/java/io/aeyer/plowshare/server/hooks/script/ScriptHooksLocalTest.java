@@ -615,7 +615,7 @@ class ScriptHooksLocalTest {
             ProjectHookSet.pool(
                 "10-guard.js",
                 first,
-                javascript,
+                HookScript.javascript(javascript),
                 engine,
                 properties,
                 now::get,
