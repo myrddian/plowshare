@@ -252,6 +252,12 @@ Do not delete an uncertain intent to make a retry button work. History is bounde
 512 acknowledgements, 128 manual intents and the existing 1,000-scan journal fence.
 Archive settled history deliberately; preserve identities for reconciliation.
 
+An investigation that stops with **Invalid analyst assessment** or **Invalid
+reviewed assessment** and reports raw model protocol markup has kept the
+original model response in its trajectory. It has stopped before saving a
+draft from that response. Inspect the retained delegate response before starting
+another investigation from the same evidence.
+
 If an investigation reports **Report save blocked**, its review is retained in
 the run trajectory. After the write refusal is resolved, use Plowshare's
 orchestration **Resume** as the original run owner. For an automatically
