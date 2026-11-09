@@ -24,6 +24,15 @@ function text(value, field, limit = MAX_ASSESSMENT) {
   if (typeof value !== 'string' || !value.trim() || value.length > limit) fail('Invalid ' + field);
   return value;
 }
+function assessmentText(value, field) {
+  const assessment = text(value, field);
+  // A provider can return an undecoded assistant frame as ordinary completion text.
+  // Keep it in the delegate receipt. The script must not execute it or pass it as prose.
+  if (/^(?:<\|start\|>assistant\b|<\|channel\|>(?:analysis|commentary|final)\b)/.test(assessment.trimStart())) {
+    fail('Invalid ' + field + ': raw model protocol markup; inspect the retained delegate response.');
+  }
+  return assessment;
+}
 function uuid(value, field) {
   if (typeof value !== 'string' || !UUID.test(value)) fail('Invalid ' + field);
   return value;
@@ -83,7 +92,7 @@ function reviewResult(result) {
     notes = notes.map(note => text(note, 'review note')).join('\n\n');
   }
   text(notes, 'review notes');
-  if (review.verdict !== 'not_checked') text(review.assessment, 'reviewed assessment');
+  if (review.verdict !== 'not_checked') assessmentText(review.assessment, 'reviewed assessment');
   else if (typeof review.assessment !== 'string' || review.assessment.length > MAX_ASSESSMENT) fail('Invalid unchecked assessment');
   return {verdict: review.verdict, assessment: review.assessment, notes};
 }
@@ -187,7 +196,7 @@ function consume(state, input, todo) {
       }
     }
   } else if (pending === 'analyst') {
-    state.assessment = text(toolResult(input.result), 'analyst assessment');
+    state.assessment = assessmentText(toolResult(input.result), 'analyst assessment');
   } else if (pending === 'reviewer') {
     state.review = reviewResult(input.result);
   } else if (pending === 'report') {
