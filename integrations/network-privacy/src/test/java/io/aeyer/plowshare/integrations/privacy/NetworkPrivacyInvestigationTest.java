@@ -29,6 +29,37 @@ class NetworkPrivacyInvestigationTest {
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test
+  void relay_completion_enters_the_evidence_stage_without_an_sdk_kind_field() throws Exception {
+    var host = new Host();
+    host.setRequest(
+        Map.of(
+            "subscription", "event",
+            "topic", "privacy.scan.completed",
+            "schemaVersion", 1,
+            "position", "1",
+            "payload", Map.of("text", host.completion)));
+    host.next();
+    host.ackTodo();
+    assertEquals("information_read", host.command.path("tool").asText());
+    assertEquals(
+        CURRENT, host.command.path("arguments").path("sources").get(0).path("revision").asText());
+  }
+
+  @Test
+  void untyped_payloads_require_the_completion_topic_and_schema() throws Exception {
+    var host = new Host();
+    var payload = Map.of("text", host.completion);
+    for (var invalid :
+        java.util.List.<Map<String, ?>>of(
+            Map.of("payload", payload),
+            Map.of("topic", "privacy.scan.requests", "schemaVersion", 1, "payload", payload),
+            Map.of("topic", "privacy.scan.completed", "schemaVersion", 2, "payload", payload))) {
+      host.setRequest(invalid);
+      assertThrows(IllegalStateException.class, host::next);
+    }
+  }
+
+  @Test
   void actual_assessment_and_complete_sources_cross_the_review_boundary_and_form_one_draft()
       throws Exception {
     var host = new Host();
@@ -175,6 +206,7 @@ class NetworkPrivacyInvestigationTest {
                 .resolve("orchestrations/investigate_network.js"));
     final ObjectNode input = JSON.createObjectNode();
     final Map<String, String> sources = new LinkedHashMap<>();
+    final String completion;
     JsonNode command;
     JsonNode report;
     String writeRequest;
@@ -208,7 +240,7 @@ class NetworkPrivacyInvestigationTest {
                   "tcp",
                   "padding",
                   "baseline evidence ".repeat(600))));
-      String completion =
+      completion =
           JSON.writeValueAsString(
               Map.of(
                   "version",
@@ -225,14 +257,17 @@ class NetworkPrivacyInvestigationTest {
                   java.util.List.of(),
                   "issues",
                   java.util.List.of("DNS unavailable")));
-      String request =
-          JSON.writeValueAsString(Map.of("payload", Map.of("kind", "TEXT", "text", completion)));
-      input.put("message", JSON.writeValueAsString(Map.of("request", request)));
+      setRequest(Map.of("payload", Map.of("kind", "TEXT", "text", completion)));
       input.putNull("state");
       input.putNull("result");
       var todos = input.putArray("todos");
       for (String stage : new String[] {"inspect", "assess", "retain"})
         todos.addObject().put("id", stage).put("stageId", stage).put("status", "pending");
+    }
+
+    void setRequest(Map<String, ?> request) throws Exception {
+      input.put(
+          "message", JSON.writeValueAsString(Map.of("request", JSON.writeValueAsString(request))));
     }
 
     void next() throws Exception {
