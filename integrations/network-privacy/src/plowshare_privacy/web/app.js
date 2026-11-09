@@ -20,6 +20,7 @@ let deviceSignature = null;
 let findingSignature = null;
 let profileEdit = null;
 let profileBlocked = false;
+let advisoriesAvailable = false;
 let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
@@ -202,6 +203,7 @@ async function refresh() {
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('device-profiles').hidden = !status.profiles_available;
+    advisoriesAvailable = !!status.advisories_available;
     issuesAvailable = !!status.issues_available;
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
@@ -402,6 +404,26 @@ setInterval(() => {
   if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => notice(error.message, true));
 }, 5000);
 
+function renderDeviceDetection(detection) {
+  const panel = element('details');
+  const title = detection.confidence === 'unknown' ? 'Device type unknown'
+    : 'Possible device type: ' + detection.device_type;
+  panel.append(element('summary', title));
+  if (detection.clues.length) {
+    const clues = element('ul');
+    clues.append(...detection.clues.map(clue => element('li', clue)));
+    panel.append(clues);
+  }
+  if (detection.confidence === 'corroborated') {
+    panel.append(element('p', 'The observed hostname and port agree.', 'hint'));
+  }
+  panel.append(element('p', 'Open ports suggest services. Verify the protocol, model, and firmware before assessing vulnerabilities.', 'hint'));
+  for (const exposure of detection.exposures) {
+    panel.append(element('p', 'TCP ' + exposure.ports.join(', ') + ' · Possible ' + exposure.possible_service + '. ' + exposure.risk_check, 'hint'));
+  }
+  return panel;
+}
+
 function renderOverview(value) {
   const health = value.health;
   byId('device-count').textContent = value.devices.length;
@@ -433,7 +455,7 @@ function renderOverview(value) {
     const current = device.identity?.source === 'pihole-v6' ? device.identity : null;
     const known = current || device.last_known_identity;
     card.dataset.presence = 'observed';
-    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor].filter(Boolean).join(' ').toLowerCase();
+    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type].filter(Boolean).join(' ').toLowerCase();
     card.append(element('h3', device.name), element('p', device.address));
     if (known) {
       const association = [known.hostname, known.mac, known.vendor].filter(Boolean).join(' · ') || 'Address observed';
@@ -448,6 +470,7 @@ function renderOverview(value) {
       card.append(element('p', `First TCP response ${new Date(device.first_response_at).toLocaleString()} · Last ${new Date(device.last_response_at).toLocaleString()}`, 'hint'));
     }
     card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
+    if (device.detection) card.append(renderDeviceDetection(device.detection));
     const destinations = element('details'); destinations.append(element('summary', `${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
@@ -634,6 +657,52 @@ async function loadProfiles() {
   if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
   return result.profiles;
 }
+function advisoryLookup(view) {
+  const panel = element('section');
+  panel.append(element('h3', 'Product advisories'));
+  const model = view.profile.fields.model.trim();
+  if (!model || !advisoriesAvailable) {
+    panel.append(element('p', model ? 'Advisory lookup is unavailable on this collector.'
+      : 'Save the public manufacturer and exact model to look up advisories.', 'hint'));
+    return panel;
+  }
+  panel.append(element('p', 'This lookup sends the saved public model name to NVD: ' + model + '.', 'hint'));
+  const results = element('div');
+  results.setAttribute('aria-live', 'polite');
+  const button = element('button', 'Look up advisories for saved model', 'secondary');
+  button.type = 'button';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    results.replaceChildren(element('p', 'Checking NVD…'));
+    try {
+      const path = '/api/profiles/' + encodeURIComponent(view.profile.profile_id)
+        + '/' + encodeURIComponent(view.revision) + '/advisories';
+      const page = await api(path, {method:'POST', body:JSON.stringify({model})});
+      const detail = page.total
+        ? 'Showing ' + page.advisories.length + ' of ' + page.total + ' keyword matches.'
+        : 'No keyword matches found.';
+      results.replaceChildren(element('p', detail + ' Checked '
+        + new Date(page.checked_at).toLocaleString() + '. Check the affected model, firmware and configuration in each advisory.', 'hint'));
+      for (const item of page.advisories) {
+        const link = element('a', item.cve);
+        link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(item.cve);
+        link.target = '_blank'; link.rel = 'noopener noreferrer';
+        const entry = element('article');
+        const metadata = [item.published_on, item.severity ? 'CVSS ' + item.severity.toLowerCase() : null,
+          item.known_exploited ? 'CISA lists known exploitation' : null].filter(Boolean);
+        entry.append(link, element('p', metadata.join(' · '), 'hint'), element('p', item.description));
+        results.append(entry);
+      }
+    } catch (error) {
+      results.replaceChildren(element('p', error.message, 'notice error'));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  panel.append(button, results);
+  return panel;
+}
+
 async function editProfile(view, address = null) {
   await profileReceipts();
   const settings = await api('/api/monitoring');
@@ -648,6 +717,7 @@ async function editProfile(view, address = null) {
   byId('profile-form').hidden = false; byId('device-profiles').open = true;
   const history = byId('profile-history'); history.replaceChildren(); byId('profile-markdown').hidden = true;
   if (view) {
+    history.append(advisoryLookup(view));
     history.append(element('h3', 'Retained profile revisions'));
     for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
       const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');

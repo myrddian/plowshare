@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from .contracts import DeviceIdentity, DeviceLabel, DnsObservation, TcpObservation
+from .device_detection import DeviceDetection, detect_device
 from .journal import Receipt
 
 
@@ -21,6 +22,7 @@ class DeviceCard:
     first_response_at: str | None
     last_response_at: str | None
     last_known_identity: DeviceIdentity | None
+    detection: DeviceDetection
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,7 @@ def device_inventory(
                 first_response_at=history.first_response_at,
                 last_response_at=history.last_response_at,
                 last_known_identity=history.last_known_identity,
+                detection=detect_device(history.identity, history.services),
             )
         )
     return DeviceInventory(tuple(devices), tuple(candidates))

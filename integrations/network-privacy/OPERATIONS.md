@@ -115,6 +115,25 @@ completed sweeps provide links to individual collections. An older Pi-hole
 association appears separately with its observation time when the latest sweep
 has no association. This history belongs to the address; DHCP reuse and randomized
 MACs can change which device holds it.
+
+Open a device's type panel to see the hostname and conventional TCP port clues
+from its latest completed sweep. Conflicting or insufficient clues leave the
+type unknown. Possible services have exposure checks you can verify locally.
+Port assignments are clues to check, and the collector sends no protocol probes
+to verify them. See the [IANA service registry](https://www.iana.org/assignments/service-names-port-numbers).
+
+For product advisories, save the public manufacturer and exact model in the
+device profile. To enable the lookup, set the collector's
+`PLOWSHARE_PRIVACY_NVD_ORIGIN` to the HTTPS origin of the NVD API
+(`https://services.nvd.nist.gov`) before starting the dashboard. Choose
+**Look up advisories for saved model** in the profile to send only that model
+name. The dashboard shows up to ten keyword matches, any primary CVSS rating
+reported by NVD, and any CISA known-exploitation flag reported there. Check the
+vendor advisory for the affected model, firmware and configuration before
+linking an issue to the device. A search without matches leaves applicability
+unknown. The lookup runs only on request and leaves scan evidence and profiles
+as saved.
+
 **Check moved devices** compares fresh Pi-hole associations with the last local
 LAN discovery, bounded to 256 addresses and read in 32-device batches. Confirm each suggested move
 explicitly. Confirmation rechecks the association and uses the normal idle/scope
@@ -343,8 +362,9 @@ core API or SDK changes. Whole-document authorization covers every section.
    issue, affected models, firmware versions (or explicitly unknown), relevant
    settings, one to four HTTPS source citations, their publication dates when
    known, and the date you checked them. These are operator-supplied sources: the
-   collector does not fetch arbitrary URLs, discover advisories or certify their
-   claims. Prefer original vendor notices or primary research and recheck stale
+   collector does not fetch arbitrary URLs or certify their claims. Use the
+   separate product lookup for NVD references. Prefer original vendor notices
+   or primary research and recheck stale
    claims before applying a change. No real vendor allegations ship as seed data.
 2. Include one proposed mitigation: a firewall rule, exact Pi-hole domain block,
    network segmentation or a device setting. Record why it addresses the issue,
