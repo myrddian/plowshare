@@ -49,8 +49,14 @@ function emit(state, pending, tool, args) {
 function initial(input) {
   const envelope = json(text(input.message, 'start envelope', 131072), 'start envelope');
   const request = json(text(envelope.request, 'Relay request', 65536), 'Relay request');
-  if (!request.payload || request.payload.kind !== 'TEXT') fail('Expected a TEXT completion envelope');
-  const completion = json(text(request.payload.text, 'completion', 32768), 'completion');
+  const payload = request?.payload;
+  // Relay work carries the routing event, whose text payload has no kind field.
+  // The dashboard's explicit start has no topic and supplies a TEXT marker.
+  const relay = request?.topic === 'privacy.scan.completed' && request.schemaVersion === 1
+    && payload?.kind === undefined;
+  const manual = request?.topic === undefined && payload?.kind === 'TEXT';
+  if ((!relay && !manual) || typeof payload?.text !== 'string') fail('Expected a TEXT completion envelope');
+  const completion = json(text(payload.text, 'completion', 32768), 'completion');
   if (completion.version !== 1 || !['tcp','fixture'].includes(completion.mode)) fail('Unsupported completion version or mode');
   uuid(completion.scan_id, 'scan_id');
   uuid(completion.revision, 'revision');
