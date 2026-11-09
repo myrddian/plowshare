@@ -2265,6 +2265,24 @@ public final class JobRuntime {
               scripts.prepareNext(
                   definition.prompt(), input, definition.nativeOnly() || !budget.exhausted());
         } catch (IllegalStateException failed) {
+          if (transcript.origin() == io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION) {
+            var block = scripts.blockedReport(owner, previous);
+            if (block.isPresent()) {
+              var refusal = block.get();
+              String reason = refusal.operatorMessage();
+              var diagnostic =
+                  new com.fasterxml.jackson.databind.ObjectMapper()
+                      .createObjectNode()
+                      .put("code", "REPORT_SAVE_BLOCKED")
+                      .put("command", refusal.sequence())
+                      .put("requestId", refusal.requestId().toString())
+                      .put("draftCommitted", false)
+                      .put("message", reason);
+              transcript.record(LoggedEntry.notice(diagnostic.toString()));
+              return new Outcome(
+                  Ending.UNAVAILABLE, reason, taken, budget.spent() - callsBefore, reason);
+            }
+          }
           // Script evaluation includes output validation. Keep its reason and the
           // completed work counts instead of falling through JobStore's last resort.
           String reason = "Script stopped before command " + sequence + ": " + failed.getMessage();
@@ -2357,6 +2375,21 @@ public final class JobRuntime {
         throw new IllegalStateException(
             "a hook changed a cached command's arguments; its paid result cannot be reused for a different request");
       if (raw == null) {
+        var retainedInputs =
+            pending.retryOfReport() == null
+                ? Optional.<Set<java.util.UUID>>empty()
+                : scripts.reportRetryInputs(owner, pending.retryOfReport());
+        if (pending.retryOfReport() != null
+            && (retainedInputs.isEmpty()
+                || !(tool instanceof InformationTool)
+                || !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
+                    arguments, pre.arguments()))) {
+          String reason =
+              "Report save retry blocked: the original receipt or exact reviewed command is unavailable.";
+          transcript.record(LoggedEntry.notice(reason));
+          return new Outcome(
+              Ending.UNAVAILABLE, reason, taken, budget.spent() - callsBefore, reason);
+        }
         scripts.started(conversation, pending.sequence(), pre.arguments());
         watch.scriptCommand(
             definition.name(), tool.schema().name(), taken, budget.spent() - callsBefore);
@@ -2369,12 +2402,17 @@ public final class JobRuntime {
         // The offered set enforces the admitted definition's internal grants. Each tool owns
         // resource/lifecycle checks; external proxies also recheck their provider authority.
         try {
-          raw =
-              usable(
-                  transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                      ? tool.run(pre.arguments(), home)
-                      : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
-                  name);
+          if (retainedInputs.isPresent() && tool instanceof InformationTool information) {
+            raw =
+                usable(information.retryReport(pre.arguments(), home, retainedInputs.get()), name);
+          } else {
+            raw =
+                usable(
+                    transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                        ? tool.run(pre.arguments(), home)
+                        : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
+                    name);
+          }
           if (operation != null) operations.require(operation);
         } catch (AgentRunTool.SubAgentFailed child) {
           // A dependency failure is an ordinary terminal child outcome, not a runtime bug.

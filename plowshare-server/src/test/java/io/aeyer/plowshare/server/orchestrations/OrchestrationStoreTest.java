@@ -19,6 +19,8 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
+import io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.todos.StageRules;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -26,6 +28,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
@@ -145,6 +148,41 @@ class OrchestrationStoreTest {
         () ->
             recovery.claim(
                 other.id(), "enzo", key, store.find(other.id()).orElseThrow().endedAt()));
+  }
+
+  @Test
+  void failed_report_append_rolls_back_the_resume_claim_and_receipt() {
+    var run = store.insert(newOrchestration(conductorConversation(), 2));
+    store.stop(run.id(), OrchestrationState.FAILED, "report blocked");
+    var recovery = new JdbcOrchestrationRecovery(jdbc, unitOfWork);
+    var scripts = new JdbcScriptStore(jdbc);
+    UUID resume = UUID.randomUUID();
+    UUID report = UUID.randomUUID();
+    String args = "{\"operation\":\"report\",\"requestId\":\"" + report + "\"}";
+    // A stale checkpoint cannot be appended. Its failure must roll back the enclosing claim.
+    var previous =
+        new ScriptStore.Step(
+            3,
+            "hash",
+            new ScriptStore.Tool("information_write", args, false),
+            "refused",
+            "refused",
+            true,
+            args);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            unitOfWork.inTransaction(
+                () -> {
+                  assertTrue(recovery.claim(run.id(), "enzo", resume, T0));
+                  scripts.prepareReportRetry(
+                      run.conductorConversation(),
+                      previous,
+                      new ScriptStore.ReportBlock(3, report, "refused"));
+                  return null;
+                }));
+    assertEquals(OrchestrationState.FAILED, store.find(run.id()).orElseThrow().state());
+    assertFalse(recovery.received(run.id(), "enzo", resume));
   }
 
   @Test

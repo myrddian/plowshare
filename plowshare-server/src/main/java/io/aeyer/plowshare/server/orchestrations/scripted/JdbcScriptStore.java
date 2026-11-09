@@ -2,8 +2,13 @@ package io.aeyer.plowshare.server.orchestrations.scripted;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.aeyer.plowshare.server.information.InformationGateRepository;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** A journal, not a mutable JavaScript stack. Raw paid results survive post-hook failure. */
@@ -11,9 +16,15 @@ public final class JdbcScriptStore implements ScriptStore {
   // Script input includes TodoItem.updatedAt; retain Java-time support at this JSON boundary.
   private static final ObjectMapper JSON = new ObjectMapper().registerModule(new JavaTimeModule());
   private final JdbcTemplate jdbc;
+  private final InformationGateRepository reportReceipts;
 
   public JdbcScriptStore(JdbcTemplate jdbc) {
+    this(jdbc, null);
+  }
+
+  public JdbcScriptStore(JdbcTemplate jdbc, InformationGateRepository reportReceipts) {
     this.jdbc = java.util.Objects.requireNonNull(jdbc, "jdbc");
+    this.reportReceipts = reportReceipts;
   }
 
   /** Raw state remains inside this journal/sandbox boundary, never in the job runtime. */
@@ -83,14 +94,83 @@ public final class JdbcScriptStore implements ScriptStore {
   }
 
   private static Step step(java.sql.ResultSet row) throws java.sql.SQLException {
+    JsonNode retained = decode(row.getString("command"));
+    UUID retryOfReport = null;
+    if (retained instanceof ObjectNode object && object.has("retryOfReport")) {
+      retryOfReport = UUID.fromString(object.remove("retryOfReport").textValue());
+    }
+    Command command = ScriptCommands.read(retained);
+    if (retryOfReport != null && ScriptCommands.reportRequest(command).isEmpty())
+      throw new IllegalStateException("report retry has an invalid retained command");
     return new Step(
         row.getInt("sequence"),
         row.getString("source_hash"),
-        ScriptCommands.read(decode(row.getString("command"))),
+        command,
         row.getString("raw_result"),
         row.getString("result"),
         row.getTimestamp("started_at") != null,
-        row.getString("effective_arguments"));
+        row.getString("effective_arguments"),
+        retryOfReport);
+  }
+
+  @Override
+  public Optional<ReportBlock> blockedReport(String account, Step step) {
+    if (reportReceipts == null
+        || step == null
+        || step.result() == null
+        || !step.result().equals(step.raw())
+        || !step.result().startsWith("Information request refused: ")
+        || !(step.command() instanceof Tool tool)
+        || !ScriptStore.sameArguments(tool.arguments(), step.arguments())) return Optional.empty();
+    return ScriptCommands.reportRequest(tool)
+        .flatMap(
+            request ->
+                reportReceipts
+                    .refusedReport(account, request)
+                    .filter(
+                        refusal ->
+                            step.raw().equals("Information request refused: " + refusal.reason()))
+                    .map(refusal -> new ReportBlock(step.sequence(), request, refusal.reason())));
+  }
+
+  @Override
+  public void prepareReportRetry(String conversation, Step previous, ReportBlock refusal) {
+    if (!(previous.command() instanceof Tool tool) || previous.sequence() != refusal.sequence())
+      throw new IllegalArgumentException("report retry requires the original completed command");
+    UUID request =
+        UUID.nameUUIDFromBytes(
+            (conversation + ":" + (previous.sequence() + 1)).getBytes(StandardCharsets.UTF_8));
+    String retry = ScriptCommands.retainedReportRetry(tool, refusal.requestId(), request);
+    // The original refusal is immutable. The resume claim and append commit together, so a
+    // duplicate Resume never schedules another command, even after a subsequent failure.
+    int inserted =
+        jdbc.update(
+            """
+        INSERT INTO orchestration_script_steps(conversation_id,sequence,source_hash,state,command)
+        SELECT conversation_id,sequence+1,source_hash,state,?::jsonb
+        FROM orchestration_script_steps previous
+        WHERE conversation_id=? AND sequence=? AND source_hash=? AND result=?
+          AND raw_result=result AND effective_arguments::jsonb=command->'arguments'
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_script_steps later
+            WHERE later.conversation_id=previous.conversation_id AND later.sequence>previous.sequence
+          )
+        """,
+            retry,
+            conversation,
+            previous.sequence(),
+            previous.hash(),
+            previous.result());
+    if (inserted != 1) throw new IllegalStateException("retained report command changed");
+  }
+
+  @Override
+  public Optional<Set<UUID>> reportRetryInputs(String account, UUID originalRequest) {
+    return reportReceipts == null
+        ? Optional.empty()
+        : reportReceipts
+            .refusedReport(account, originalRequest)
+            .map(InformationGateRepository.ReportRefusal::inputs);
   }
 
   private record Recovery(Step step, long failed, long answered, long missingAnswers) {}
@@ -137,6 +217,15 @@ public final class JdbcScriptStore implements ScriptStore {
     if (recovery.missingAnswers() > 0)
       throw new IllegalStateException("script delegation lost its answer");
     if (recovery.answered() == 1) return;
+    var report = ScriptCommands.reportRequest(step.command());
+    if (report.isPresent()
+        && step.command() instanceof Tool tool
+        && ScriptStore.sameArguments(tool.arguments(), step.arguments())) {
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "Report save has no execution receipt. Reconcile request "
+              + report.get()
+              + " before resuming. Another write was not submitted.");
+    }
     throw new io.aeyer.plowshare.server.faults.CallerFault(
         "The interrupted script command has no durable result; it may have run. Reconcile it before resuming; replay is refused.");
   }

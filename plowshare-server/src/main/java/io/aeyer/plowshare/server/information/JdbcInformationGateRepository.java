@@ -26,6 +26,33 @@ public final class JdbcInformationGateRepository implements InformationGateRepos
     return clock.instant().plusSeconds(300).atOffset(ZoneOffset.UTC);
   }
 
+  @Override
+  public Optional<ReportRefusal> refusedReport(String account, UUID request) {
+    return jdbc.query(
+        """
+        SELECT g.error,i.revision_id
+        FROM information_write_gates g
+        JOIN information_job_inputs i ON i.job_id=g.log_id AND i.owner_handle=g.account
+        WHERE g.account=? AND g.request_id=? AND g.operation='record.report'
+          AND g.state='blocked' AND g.error IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM information_requests r
+            WHERE r.account=g.account AND r.request_id=g.request_id
+          )
+        """,
+        rows -> {
+          if (!rows.next()) return Optional.empty();
+          String reason = rows.getString("error");
+          var dependencies = new HashSet<UUID>();
+          do {
+            dependencies.add(rows.getObject("revision_id", UUID.class));
+          } while (rows.next());
+          return Optional.of(new ReportRefusal(reason, dependencies));
+        },
+        Objects.requireNonNull(account),
+        Objects.requireNonNull(request));
+  }
+
   private static <T extends InformationGateResult> Receipt<T> receipt(
       Map<String, Object> row, Class<T> type) {
     T response = null;

@@ -286,10 +286,19 @@ public class OrchestrationsConfig {
       Checking checking,
       CallerAccess access,
       org.springframework.jdbc.core.JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.information.InformationGateRepository informationReceipts,
       io.aeyer.plowshare.server.access.OperationAuthority operations,
       io.aeyer.plowshare.server.allowances.AllowanceRepository allowances) {
-    var scripts = new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc);
+    var scripts =
+        new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(
+            jdbc, informationReceipts);
     runtime.useScripts(scripts);
+    turn.usePendingReportRetry(
+        conversation ->
+            scripts
+                .latest(conversation)
+                .filter(step -> step.retryOfReport() != null && step.result() == null)
+                .isPresent());
     Orchestrations orchestrations =
         new Orchestrations(
             store,

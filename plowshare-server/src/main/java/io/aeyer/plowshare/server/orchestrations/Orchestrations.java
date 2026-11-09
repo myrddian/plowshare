@@ -813,7 +813,18 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
     Rebuilt rebuilt = rebuild(run);
     if (rebuilt.conductor() == null) throw new CallerFault(rebuilt.failure());
     requireCapabilities(run, rebuilt.conductor());
-    if (budgetExhausted(run))
+    boolean scripted = ScriptProgram.isScript(run.definitionSource());
+    var checkpoint = scripted ? scripts.latest(run.conductorConversation()).orElse(null) : null;
+    var blockedReport =
+        checkpoint == null
+            ? Optional.<ScriptStore.ReportBlock>empty()
+            : scripts.blockedReport(account, checkpoint);
+    boolean reportOnly =
+        blockedReport.isPresent()
+            || checkpoint != null
+                && checkpoint.retryOfReport() != null
+                && checkpoint.result() == null;
+    if (!reportOnly && budgetExhausted(run))
       throw new CallerFault(
           "The run has no model calls left; resume requires remaining allowance.");
     // A known failed delegation can be continued in its own conversation. The journal only admits
@@ -821,7 +832,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
     String notice =
         "The person explicitly resumed this failed orchestration. Continue from its existing history and todos. The previous failure was: "
             + run.failure();
-    if (ScriptProgram.isScript(run.definitionSource())) {
+    if (scripted) {
       notice =
           scripts
               .resumeMessage(run.conductorConversation())
@@ -831,8 +842,18 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
     final String continuation = notice;
     var delegate = scripts.failedDelegate(run.conductorConversation());
     scripts.requireRecoverable(run.conductorConversation());
-    if (!recovery.claim(run.id(), account, ask.requestId(), run.endedAt()))
-      return store.find(run.id()).orElseThrow();
+    boolean claimed =
+        blockedReport.isEmpty()
+            ? recovery.claim(run.id(), account, ask.requestId(), run.endedAt())
+            : work.inTransaction(
+                () -> {
+                  if (!recovery.claim(run.id(), account, ask.requestId(), run.endedAt()))
+                    return false;
+                  scripts.prepareReportRetry(
+                      run.conductorConversation(), checkpoint, blockedReport.orElseThrow());
+                  return true;
+                });
+    if (!claimed) return store.find(run.id()).orElseThrow();
     var resumed = store.find(run.id()).orElseThrow();
     todos.forget(run.conductorConversation());
     recorder.runResumed(resumed, account, run.failure());
