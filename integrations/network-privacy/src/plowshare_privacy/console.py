@@ -76,6 +76,7 @@ class Health:
     recovery: tuple[str, ...]
     checklist: tuple[str, ...]
     credential_expires_at: str | None
+    unifi: str = "Optional: not configured"
 
 
 @dataclass(frozen=True)
@@ -270,16 +271,34 @@ class OperatorConsole:
                 if item.phase == "done" and item.evidence
             ]
             latest = completed[-1].evidence if completed else None
+            plan = self.worker.config.collection
+            current_scope = latest is not None and latest.scope == scope_fingerprint(
+                plan
+            )
             pihole = "Optional: not configured"
-            if self.worker.config.collection.pihole:
+            if plan.pihole:
                 pihole = "Configured; awaiting a collection"
-                if latest and latest.scope == scope_fingerprint(
-                    self.worker.config.collection
-                ):
+                if latest and current_scope:
                     pihole = (
                         "Coverage gaps: " + "; ".join(latest.issues)
                         if latest.issues
                         else "Latest collection retained; inspect its observation time and DNS window"
+                    )
+            unifi = "Optional: not configured"
+            if plan.unifi:
+                unifi = "Configured; awaiting a collection"
+                if latest and current_scope:
+                    issues = tuple(
+                        issue
+                        for issue in latest.issues
+                        if issue.startswith(("unifi_", "identity_conflict:"))
+                    )
+                    associated = sum(
+                        item.source == "unifi" for item in latest.snapshot.devices
+                    )
+                    unifi = (
+                        f"{associated} selected addresses associated in the latest sweep"
+                        + (". " + "; ".join(issues) if issues else "")
                     )
             recovery = []
             if self.worker.state == "attention_required":
@@ -331,6 +350,7 @@ class OperatorConsole:
                 tuple(recovery),
                 tuple(checklist),
                 self.credential_expires_at,
+                unifi,
             )
             self.cache_until = time.monotonic() + 20
             return self.cached

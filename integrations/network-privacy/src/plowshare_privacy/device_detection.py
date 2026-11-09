@@ -123,7 +123,7 @@ def detect_device(
         matched_name = bool(rule.name_words & words)
         clues = []
         if matched_name:
-            clues.append(f"Observed hostname suggests {rule.device_type.lower()}")
+            clues.append(f"Observed device name suggests {rule.device_type.lower()}")
         if matched_ports:
             ports = ", ".join(map(str, matched_ports))
             clues.append(

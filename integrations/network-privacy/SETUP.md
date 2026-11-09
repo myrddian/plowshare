@@ -149,6 +149,33 @@ Pi-hole exposes documentation for its installed version at `/api/docs`. The
 [connector details](README.md#pi-hole-v6-and-device-names) explain sample limits,
 freshness, optional evidence fields and attribution limits.
 
+## Connect UniFi Network
+
+UniFi adds the connected client's reported name and MAC address when its IP is in
+the saved collection scope. Keep Pi-hole connected for DNS observations.
+
+1. In **UniFi Network → Settings → Integrations**, create a local API key and
+   find the site's UUID using the installed API documentation's **List Local
+   Sites** request. Use the local HTTPS API base shown there, typically
+   `https://UNIFI_CONSOLE/proxy/network/integration/v1` on a UniFi Console.
+   See the [official UniFi API guide](https://help.ui.com/hc/en-us/articles/30076656117655-Getting-Started-with-the-Official-UniFi-API).
+2. Let outstanding scans and publications finish and stop the collector. Run:
+
+   ```sh
+   build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
+     --directory "$PRIVACY_PRIVATE" connect-unifi \
+     --api-base "$UNIFI_API_BASE" --site-id "$UNIFI_SITE_ID" \
+     --api-key-environment PRIVACY_UNIFI_API_KEY
+   ```
+
+   For a certificate issued by a private CA, supply `--ca-file` with its absolute
+   PEM path. The certificate must match the configured hostname. This command
+   updates the private collector configuration and preserves retained receipts.
+3. Set `PRIVACY_UNIFI_API_KEY` in the collector's service environment or secret
+   manager. Restart the collector and inspect **System health** after the next
+   sweep. Adding the source starts a new collection baseline. Rotate the key by
+   updating the same environment secret and restarting the collector.
+
 ## Understand the two parts
 
 | Part | Where it runs | What it does |

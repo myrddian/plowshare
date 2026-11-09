@@ -97,7 +97,7 @@ failures are reported separately from connection or activation problems.
 ## Read health, devices and findings
 
 **System health** shows collector state, last successful contact, last completed
-scan, Pi-hole coverage, project agents, projected dynamic tools,
+scan, Pi-hole and UniFi coverage, project agents, projected dynamic tools,
 recent project investigations and service credential expiry. Remote checks and
 report projections are cached for 20 seconds. Visibility is an inspection result;
 permissions and availability are still enforced by Plowshare on each tool call.
@@ -105,18 +105,25 @@ A checklist highlights missing setup. The expiry notice warns within seven days.
 
 Saving a subnet adds its addresses as candidates. Each sweep checks the saved
 addresses. A completed sweep promotes an address into the device inventory when
-it finds an open TCP service or a Pi-hole association. A refusal alone leaves an
+it finds an open TCP service or a Pi-hole or UniFi association. A refusal alone leaves an
 address as a candidate. In **Devices**, switch between observed devices and
 candidate addresses, or search by name, address, MAC, hostname or vendor.
 The inventory reconstructs first and last TCP responses from retained scan receipts
 after a restart. A timed-out check updates the last check time, while the last
 response stays at the last successful or refused connection. The latest 50
-completed sweeps provide links to individual collections. An older Pi-hole
+completed sweeps provide links to individual collections. An older device
 association appears separately with its observation time when the latest sweep
 has no association. This history belongs to the address; DHCP reuse and randomized
 MACs can change which device holds it.
 
-Open a device's type panel to see the hostname and conventional TCP port clues
+UniFi reads connected wired and wireless clients through the controller's local
+API. It keeps names and MACs for saved addresses only. The sweep withholds the
+association for an address if sources disagree on its MAC. A failed UniFi read
+appears under coverage gaps while TCP and other configured sources continue.
+An address missing from the connected-client list has unknown UniFi coverage for
+that sweep.
+
+Open a device's type panel to see the observed name and conventional TCP port clues
 from its latest completed sweep. Conflicting or insufficient clues leave the
 type unknown. Possible services have exposure checks you can verify locally.
 Port assignments are clues to check, and the collector sends no protocol probes

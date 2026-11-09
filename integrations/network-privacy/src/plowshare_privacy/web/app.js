@@ -309,7 +309,10 @@ async function loadSettings() {
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
-  byId('identity-source').textContent = settings.pihole_configured ? 'Pi-hole v6 is configured. A scan records fresh device associations and DNS activity; names below remain your own labels.' : 'Add your own device names, or connect Pi-hole v6 using the setup guide for observed hostnames, MAC addresses and DNS activity.';
+  const sources = [settings.pihole_configured && 'Pi-hole v6 for identity and DNS', settings.unifi_configured && 'UniFi for connected-client identity'].filter(Boolean);
+  byId('identity-source').textContent = sources.length
+    ? 'Configured sources: ' + sources.join(', ') + '. Names below are your own labels.'
+    : 'Add your own labels or connect Pi-hole or UniFi for observed device identity.';
   renderDevices(report);
   if (settings.ports.length) byId('ports').value = settings.ports.join(',');
   byId('monitoring').hidden = false;
@@ -415,7 +418,7 @@ function renderDeviceDetection(detection) {
     panel.append(clues);
   }
   if (detection.confidence === 'corroborated') {
-    panel.append(element('p', 'The observed hostname and port agree.', 'hint'));
+    panel.append(element('p', 'The observed name and port agree.', 'hint'));
   }
   panel.append(element('p', 'Open ports suggest services. Verify the protocol, model, and firmware before assessing vulnerabilities.', 'hint'));
   for (const exposure of detection.exposures) {
@@ -435,6 +438,11 @@ function renderOverview(value) {
   const grid = byId('health'); grid.replaceChildren();
   const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
   for (const [name, detail] of checks) {const card = element('article'); card.append(element('strong', name), element('p', detail)); grid.append(card);}
+  if (health.unifi) {
+    const card = element('article');
+    card.append(element('strong', 'UniFi'), element('p', health.unifi));
+    grid.append(card);
+  }
   grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
@@ -452,7 +460,7 @@ function renderOverview(value) {
   if (!value.devices.length && !value.candidates.length) cards.append(element('p', 'Choose addresses in Settings to begin monitoring.'));
   for (const device of value.devices) {
     const card = element('article', undefined, 'device-card');
-    const current = device.identity?.source === 'pihole-v6' ? device.identity : null;
+    const current = device.identity?.source === 'configured' ? null : device.identity;
     const known = current || device.last_known_identity;
     card.dataset.presence = 'observed';
     card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type].filter(Boolean).join(' ').toLowerCase();
@@ -460,7 +468,8 @@ function renderOverview(value) {
     if (known) {
       const association = [known.hostname, known.mac, known.vendor].filter(Boolean).join(' · ') || 'Address observed';
       const observedAt = new Date(known.observed_at).toLocaleString();
-      card.append(element('p', `${current ? 'Pi-hole association' : 'Last known Pi-hole association'} · ${association} · ${observedAt}`, 'hint'));
+      const source = known.source === 'unifi' ? 'UniFi' : 'Pi-hole';
+      card.append(element('p', (current ? '' : 'Last known ') + source + ' association · ' + association + ' · ' + observedAt, 'hint'));
     } else {
       card.append(element('p', 'Address only; no observed identity', 'hint'));
     }

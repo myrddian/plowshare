@@ -175,7 +175,7 @@ class DeviceIdentity:
     hostname: str | None
     mac: str | None
     vendor: str | None
-    source: Literal["configured", "pihole-v6"]
+    source: Literal["configured", "pihole-v6", "unifi"]
     observed_at: str
     last_seen: str | None
 
@@ -203,11 +203,15 @@ class DeviceIdentity:
         ):
             raise ValueError("Invalid device MAC address")
         expected = "mac:" + mac if mac else "ip:" + address
-        if row["device_id"] != expected or row["source"] not in {
+        source = row["source"]
+        if row["device_id"] != expected or source not in (
             "configured",
             "pihole-v6",
-        }:
+            "unifi",
+        ):
             raise ValueError("Invalid device identity provenance")
+        if source == "unifi" and mac is None:
+            raise ValueError("UniFi association requires a client MAC address")
         if row["source"] == "configured" and (
             mac is not None
             or row["hostname"] is not None
@@ -222,7 +226,11 @@ class DeviceIdentity:
             text(row["hostname"], 128) if row["hostname"] is not None else None,
             mac,
             text(row["vendor"], 96) if row["vendor"] is not None else None,
-            "pihole-v6" if row["source"] == "pihole-v6" else "configured",
+            "unifi"
+            if source == "unifi"
+            else "pihole-v6"
+            if source == "pihole-v6"
+            else "configured",
             timestamp(row["observed_at"]),
             timestamp(row["last_seen"]) if row["last_seen"] is not None else None,
         )
@@ -447,6 +455,45 @@ class PiHolePlan:
 
 
 @dataclass(frozen=True)
+class UniFiPlan:
+    api_base: str
+    site_id: str
+    api_key_environment: str
+    ca_file: Path | None
+
+    @classmethod
+    def decode(cls, value: object) -> UniFiPlan:
+        row = object_fields(
+            value, {"apiBase", "siteId", "apiKeyEnvironment"}, {"caFile"}
+        )
+        base = text(row["apiBase"], 2048).rstrip("/")
+        url = urlsplit(base)
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or url.path not in ("/proxy/network/integration/v1", "/integration/v1")
+            or any(c.isspace() for c in base)
+        ):
+            raise ValueError(
+                "Configure the local UniFi HTTPS Network Integration API base"
+            )
+        url.port
+        environment = text(row["apiKeyEnvironment"], 128)
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", environment):
+            raise ValueError("Invalid UniFi API key environment name")
+        ca_file = Path(text(row["caFile"], 4096)) if "caFile" in row else None
+        if ca_file is not None and (
+            not ca_file.is_absolute() or ca_file.resolve() != ca_file
+        ):
+            raise ValueError("UniFi CA file must be an absolute, unlinked path")
+        return cls(base, uuid(row["siteId"]), environment, ca_file)
+
+
+@dataclass(frozen=True)
 class CollectionPlan:
     mode: Literal["tcp", "fixture"]
     targets: tuple[str, ...]
@@ -458,6 +505,7 @@ class CollectionPlan:
     enabled: bool = True
     labels: tuple[DeviceLabel, ...] = ()
     pihole: PiHolePlan | None = None
+    unifi: UniFiPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -532,6 +580,7 @@ class Configuration:
                 "enabled",
                 "deviceLabels",
                 "pihole",
+                "unifi",
             },
         )
         mode = plan["mode"]
@@ -601,6 +650,7 @@ class Configuration:
                 enabled,
                 device_labels(plan.get("deviceLabels", {}), targets),
                 pihole,
+                UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),
@@ -608,6 +658,11 @@ class Configuration:
         )
         if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in tokens):
             raise ValueError("Invalid credential environment name")
+        if collection.unifi and collection.unifi.api_key_environment in (
+            *tokens,
+            collection.pihole.password_environment if collection.pihole else None,
+        ):
+            raise ValueError("Use a separate credential environment variable for UniFi")
         request_topic, result_topic = (
             identifier(row["requestTopic"]),
             identifier(row["resultTopic"]),
