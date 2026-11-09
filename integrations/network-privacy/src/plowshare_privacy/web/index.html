@@ -25,7 +25,7 @@
       </nav>
       <div class="view-heading"><div><h1 id="page-title" tabindex="-1">Network overview</h1><p id="page-description">Collection status, monitoring controls and recent activity.</p></div></div>
       <section id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
-      <div class="metrics"><article><span>Collection</span><strong id="state">Loading</strong><p id="detail">Reading collector status…</p></article><article><span>Monitored devices</span><strong id="device-count">—</strong><p>Addresses in the current scope</p></article><article><span>Latest changes</span><strong id="change-count">—</strong><p><button id="open-findings" class="metric-link" type="button">Review findings →</button></p></article><article><span>Investigation reports</span><strong id="report-count">—</strong><p>Retained in the Plowshare project</p></article></div>
+      <div class="metrics"><article><span>Collection</span><strong id="state">Loading</strong><p id="detail">Reading collector status…</p></article><article><span>Observed devices</span><strong id="device-count">—</strong><p><span id="candidate-count">—</span> candidate addresses</p></article><article><span>Latest changes</span><strong id="change-count">—</strong><p><button id="open-findings" class="metric-link" type="button">Review findings →</button></p></article><article><span>Investigation reports</span><strong id="report-count">—</strong><p>Retained in the Plowshare project</p></article></div>
       <section class="panel schedule-panel">
         <div class="panel-heading"><h2>Monitoring schedule</h2><span id="schedule-runtime">Checking schedule…</span></div>
         <div class="setup-content">
@@ -41,7 +41,15 @@
       <details id="system-health" class="panel diagnostics"><summary class="panel-heading"><h2>System health</h2><span id="health-summary">Checking connection…</span></summary><div class="setup-content"><div class="recovery-toolbar"><p class="hint">Connection, permissions and retained work.</p><button id="recover" class="secondary">Check retained work</button></div><div id="health" class="health-grid"></div><div id="recovery"></div></div></details>
       </section>
       <section id="view-devices" role="tabpanel" aria-labelledby="tab-devices" hidden>
-      <section class="panel setup-panel"><div class="panel-heading"><h2>Monitored devices</h2><button id="check-moves" class="secondary">Check moved devices</button></div><div class="device-search"><label for="device-search">Find a device</label><input id="device-search" type="search" placeholder="Name, IP, MAC address or vendor"></div><div id="device-cards" class="card-grid setup-content"></div><div id="moves" class="setup-content"></div></section>
+      <section class="panel setup-panel">
+        <div class="panel-heading"><h2>Device inventory</h2><button id="check-moves" class="secondary">Check moved devices</button></div>
+        <div class="device-search">
+          <div><label for="device-search">Find a device</label><input id="device-search" type="search" placeholder="Name, IP, MAC address or vendor"></div>
+          <div><label for="device-presence">Show</label><select id="device-presence"><option value="observed">Observed devices</option><option value="candidate">Candidate addresses</option></select></div>
+        </div>
+        <p id="device-filter-empty" class="setup-content hint" hidden>No addresses match these filters.</p>
+        <div id="device-cards" class="card-grid setup-content"></div><div id="moves" class="setup-content"></div>
+      </section>
       <details id="device-profiles" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary><div class="panel-body">
         <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
         <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button">Create device profile</button><button id="reconcile-profiles" type="button">Check retained writes</button></div>
@@ -109,7 +117,8 @@
           <p id="discovery-detail" class="hint">Checks only the chosen ports. No device settings are changed.</p>
           <div id="devices" class="devices"></div>
           <form id="monitor-form">
-            <label for="targets">Selected device addresses</label><input id="targets" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
+            <label for="targets">Addresses to watch</label><input id="targets" aria-describedby="targets-help" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
+            <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or a Pi-hole association adds the address to the device inventory.</p>
             <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea><p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 can add observed hostnames, MAC addresses and DNS activity.</p>
             <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
           </form>

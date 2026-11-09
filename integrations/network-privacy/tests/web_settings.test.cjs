@@ -191,6 +191,25 @@ test('reports open in Findings as Markdown without replacing selected collection
 });
 
 
+test('device inventory keeps candidates separate and searches the selected group', async () => {
+  const {node} = await dashboard();
+  const known = {dataset:{presence:'observed', search:'10.1.2.10 tv'}};
+  const silent = {dataset:{presence:'candidate', search:'10.1.2.22'}};
+  node('device-cards').querySelectorAll = () => [known, silent];
+  node('device-presence').value = 'observed';
+  node('device-presence').listeners.change();
+  assert.equal(known.hidden, false);
+  assert.equal(silent.hidden, true);
+  node('device-search').value = '10.1.2.22';
+  node('device-search').listeners.input();
+  assert.equal(node('device-filter-empty').hidden, false);
+  node('device-presence').value = 'candidate';
+  node('device-presence').listeners.change();
+  assert.equal(known.hidden, true);
+  assert.equal(silent.hidden, false);
+  assert.equal(node('device-filter-empty').hidden, true);
+});
+
 test('whole-subnet selection prepares scope without saving, enabling or starting work', async () => {
   const {context, node} = await dashboard();
   let requests = 0;

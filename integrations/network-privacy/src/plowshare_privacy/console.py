@@ -20,10 +20,9 @@ from plowshare import Delivery, Refusal, TransportError
 from .collection import scope_fingerprint
 from .console_port import Admission, AgentHealth, ConsolePort, RunSummary, ScheduleView
 from .contracts import (
+    CollectionPlan,
     DeviceIdentity,
-    DnsObservation,
     PiHolePlan,
-    TcpObservation,
     identifier,
     items,
     load_json,
@@ -32,24 +31,14 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_inventory import DeviceInventory, device_inventory
 from .discovery import DeviceDiscovery
+from .journal import Receipt
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Finding, OperatorStore, findings
 from .pihole import PiHoleV6
 from .private_files import replace_private
 from .worker import Worker
-
-
-@dataclass(frozen=True)
-class DeviceCard:
-    address: str
-    name: str
-    identity: DeviceIdentity | None
-    last_seen: str | None
-    services: tuple[TcpObservation, ...]
-    dns: tuple[DnsObservation, ...]
-    history: tuple[str, ...]
-    revision: str | None
 
 
 @dataclass(frozen=True)
@@ -201,6 +190,9 @@ class OperatorConsole:
         self.health_lock = asyncio.Lock()
         self.cached: Health | None = None
         self.cache_until = 0.0
+        self._device_plan: CollectionPlan | None = None
+        self._device_receipts: tuple[Receipt, ...] = ()
+        self._device_inventory = DeviceInventory()
         self.journal = journal
 
     @property
@@ -224,63 +216,27 @@ class OperatorConsole:
             raise ValueError("Choose an observed finding")
         self.store.acknowledge(identity, expected)
 
-    def devices(self) -> tuple[DeviceCard, ...]:
-        result: list[DeviceCard] = []
+    def inventory(self) -> DeviceInventory:
+        plan = self.worker.config.collection
         receipts = tuple(
-            item for item in self.worker.receipts.all()[-50:] if item.evidence
+            item for item in self.worker.receipts.all() if item.phase == "done"
         )
-        labels = {
-            item.address: item.label for item in self.worker.config.collection.labels
-        }
-        for address in self.worker.config.collection.targets:
-            latest = next(
-                (
-                    item
-                    for item in reversed(receipts)
-                    if item.evidence
-                    and address in {v.address for v in item.evidence.snapshot.tcp}
-                ),
-                None,
+        # The active plan fences visibility. Immutable receipts let the dashboard
+        # reuse one projection across refreshes without rescanning the evidence.
+        if (
+            plan != self._device_plan
+            or len(receipts) != len(self._device_receipts)
+            or any(
+                current is not cached
+                for current, cached in zip(receipts, self._device_receipts)
             )
-            evidence = latest.evidence if latest else None
-            identity = (
-                next(
-                    (v for v in evidence.snapshot.devices if v.address == address), None
-                )
-                if evidence
-                else None
+        ):
+            self._device_inventory = device_inventory(
+                plan.targets, plan.labels, receipts
             )
-            history = [
-                item.scan_id
-                for item in receipts
-                if item.evidence
-                and any(v.address == address for v in item.evidence.snapshot.tcp)
-            ]
-            result.append(
-                DeviceCard(
-                    address,
-                    labels.get(address)
-                    or (identity.hostname if identity else None)
-                    or "Unnamed device",
-                    identity,
-                    evidence.finished_at if evidence else None,
-                    tuple(
-                        item
-                        for item in evidence.snapshot.tcp
-                        if item.address == address
-                    )
-                    if evidence
-                    else (),
-                    tuple(
-                        item for item in evidence.snapshot.dns if item.device == address
-                    )
-                    if evidence
-                    else (),
-                    tuple(history),
-                    latest.revision if latest else None,
-                )
-            )
-        return tuple(result)
+            self._device_plan = plan
+            self._device_receipts = receipts
+        return self._device_inventory
 
     async def health(self) -> Health:
         async with self.health_lock:
@@ -500,7 +456,7 @@ class OperatorConsole:
             if len(values) == 1
         }
         result = []
-        for card in self.devices():
+        for card in self.inventory().devices:
             identity = card.identity
             if identity is None:
                 continue
