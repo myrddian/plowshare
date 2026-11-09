@@ -31,6 +31,7 @@ public final class BoundMemoryQueries implements MemoryQueries {
   private final Supplier<Integer> policy;
   private final Clock clock;
   private final ScopedPermissions permissions;
+  private final io.aeyer.plowshare.server.access.ContainedHomes containedHomes;
 
   @org.springframework.beans.factory.annotation.Autowired
   public BoundMemoryQueries(
@@ -41,7 +42,8 @@ public final class BoundMemoryQueries implements MemoryQueries {
       EmbeddingClient embeddings,
       org.springframework.beans.factory.ObjectProvider<DualEmbeddings> dual,
       EmbeddingProperties properties,
-      ScopedPermissions permissions) {
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes) {
     this(
         memories,
         sources,
@@ -51,7 +53,32 @@ public final class BoundMemoryQueries implements MemoryQueries {
         dual::getIfAvailable,
         properties::searchLimit,
         Clock.systemUTC(),
-        permissions);
+        permissions,
+        containedHomes);
+  }
+
+  /** Without a containment source: every contained principal is refused, as before it existed. */
+  public BoundMemoryQueries(
+      MemoryReadRepository memories,
+      QuerySources sources,
+      UnitOfWork transactions,
+      SemanticEmbedding foundation,
+      EmbeddingClient embeddings,
+      Supplier<DualEmbeddings> dual,
+      Supplier<Integer> policy,
+      Clock clock,
+      ScopedPermissions permissions) {
+    this(
+        memories,
+        sources,
+        transactions,
+        foundation,
+        embeddings,
+        dual,
+        policy,
+        clock,
+        permissions,
+        io.aeyer.plowshare.server.access.ContainedHomes.NONE);
   }
 
   public BoundMemoryQueries(
@@ -63,7 +90,9 @@ public final class BoundMemoryQueries implements MemoryQueries {
       Supplier<DualEmbeddings> dual,
       Supplier<Integer> policy,
       Clock clock,
-      ScopedPermissions permissions) {
+      ScopedPermissions permissions,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes) {
+    this.containedHomes = Objects.requireNonNull(containedHomes, "containedHomes");
     this.memories = Objects.requireNonNull(memories);
     this.sources = Objects.requireNonNull(sources);
     this.transactions = Objects.requireNonNull(transactions);
@@ -108,10 +137,14 @@ public final class BoundMemoryQueries implements MemoryQueries {
     if (!request.home().isGlobal()) {
       io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(
           request.home().project(), request.acting());
-      if (!permissions.allows(
-          new ScopedPermissions.Principal(request.acting()),
-          new ScopedPermissions.ProjectTarget(request.home().project()),
-          ScopedPermissions.Action.READ))
+      // The contained arm, as a disjunct before the role gate — the shape InformationAccess uses,
+      // for the same reason: a contained project resolves a role for nobody, and the confinement
+      // below is V232's memory arm plus MemoryStore.require, not this question.
+      if (!containedHomes.ownsContainedHome(request.acting(), request.home().project())
+          && !permissions.allows(
+              new ScopedPermissions.Principal(request.acting()),
+              new ScopedPermissions.ProjectTarget(request.home().project()),
+              ScopedPermissions.Action.READ))
         throw new io.aeyer.plowshare.server.faults.CallerFault("Memory scope is not readable");
     }
   }

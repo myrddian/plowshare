@@ -36,6 +36,7 @@ public final class BoundMemoryWrites implements MemoryWrites {
   private final ScopedPermissions permissions;
   private final ScopedAuthority authority;
   private final IdentityRepository identities;
+  private final io.aeyer.plowshare.server.access.ContainedHomes containedHomes;
 
   @org.springframework.beans.factory.annotation.Autowired
   public BoundMemoryWrites(
@@ -52,7 +53,8 @@ public final class BoundMemoryWrites implements MemoryWrites {
       ArchiveProperties properties,
       ScopedPermissions permissions,
       ScopedAuthority authority,
-      IdentityRepository identities) {
+      IdentityRepository identities,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes) {
     this(
         archive,
         scribe,
@@ -67,7 +69,8 @@ public final class BoundMemoryWrites implements MemoryWrites {
         properties::writeLimit,
         permissions,
         authority,
-        identities);
+        identities,
+        containedHomes);
   }
 
   public BoundMemoryWrites(
@@ -85,6 +88,41 @@ public final class BoundMemoryWrites implements MemoryWrites {
       ScopedPermissions permissions,
       ScopedAuthority authority,
       IdentityRepository identities) {
+    this(
+        archive,
+        scribe,
+        memories,
+        sources,
+        outputs,
+        transactions,
+        foundation,
+        system,
+        embeddings,
+        dual,
+        policy,
+        permissions,
+        authority,
+        identities,
+        io.aeyer.plowshare.server.access.ContainedHomes.NONE);
+  }
+
+  public BoundMemoryWrites(
+      MemoryFiling archive,
+      MemoryJudgements scribe,
+      MemoryWriteRepository memories,
+      QuerySources sources,
+      EmbeddingWorkRepository outputs,
+      UnitOfWork transactions,
+      SemanticEmbedding foundation,
+      SystemOperations system,
+      EmbeddingClient embeddings,
+      Supplier<DualEmbeddings> dual,
+      Supplier<Integer> policy,
+      ScopedPermissions permissions,
+      ScopedAuthority authority,
+      IdentityRepository identities,
+      io.aeyer.plowshare.server.access.ContainedHomes containedHomes) {
+    this.containedHomes = Objects.requireNonNull(containedHomes, "containedHomes");
     this.archive = Objects.requireNonNull(archive);
     this.scribe = Objects.requireNonNull(scribe);
     this.memories = Objects.requireNonNull(memories);
@@ -202,8 +240,13 @@ public final class BoundMemoryWrites implements MemoryWrites {
             request.home().project(), request.acting());
         var principal = new ScopedPermissions.Principal(request.acting());
         var target = new ScopedPermissions.ProjectTarget(request.home().project());
-        if (!permissions.allows(principal, target, ScopedPermissions.Action.READ)
-            || !permissions.allows(principal, target, ScopedPermissions.Action.WRITE))
+        // The contained arm covers both actions at once, which is correct and not a shortcut:
+        // V229's arm admits a contained actor for WRITE in its own home and the memory read arm
+        // (V232) admits it there too, so ownership answers the conjunction. memories.require below
+        // is the confinement, and it is asked either way.
+        if (!containedHomes.ownsContainedHome(request.acting(), request.home().project())
+            && (!permissions.allows(principal, target, ScopedPermissions.Action.READ)
+                || !permissions.allows(principal, target, ScopedPermissions.Action.WRITE)))
           throw new CallerFault("Memory scope is not writable");
       }
       memories.require(request, pin, false);

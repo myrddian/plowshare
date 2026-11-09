@@ -98,14 +98,15 @@ import org.testcontainers.junit.jupiter.*;
  * rather than merely refused; and that {@code SET_AUDIENCE} is shut both at the permission question
  * and at the repository guard.
  *
- * <p><strong>It does not prove that a child drives the information tool end to end.</strong> One
- * layer above these repositories, {@code InformationAccess.requireSelection}, {@code requireWork}
- * and {@code requireAudience} ask {@link ScopedPermissions} for a live project role; a contained
- * project carries no {@code PROJECT} scope and so grants none, to the principal or to its
- * container. Every {@code InformationCatalogue} operation that calls one of those still refuses a
- * contained context, which {@link #aContainedChildReadsAndWritesItsOwnDocuments} asserts rather
- * than leaves implied. {@code InformationCatalogue.admit} calls {@code requireWork} as its first
- * statement, so the catalogue write path refuses before any SQL arm is evaluated.
+ * <p><strong>The service gates admit a child to its own home now; this paragraph used to say they
+ * refused it.</strong> {@code InformationAccess.requireSelection} and {@code requireWork} ask
+ * {@link ScopedPermissions} for a live project role, which a contained project grants to nobody —
+ * so they refused every contained context, and {@code InformationCatalogue.admit} calls {@code
+ * requireWork} as its first statement, which refused the catalogue write path before any SQL arm
+ * was evaluated. Both now consult {@link io.aeyer.plowshare.server.access.ContainedHomes} first,
+ * and {@link #theServiceGatesAdmitAChildToItsOwnHomeOnly} drives that with the production source
+ * over these real rows. {@code requireAudience} deliberately still refuses: V229 admits WRITE for a
+ * contained actor and never SET_AUDIENCE.
  *
  * <p><strong>Nor does the navigation path reach V231's disjunct.</strong> An earlier draft of this
  * paragraph said a contained run reaches "the navigation read path, which calls no such gate". It
@@ -116,17 +117,25 @@ import org.testcontainers.junit.jupiter.*;
  * repository.lockAccount} → {@code lockIdentity}'s {@code SELECT handle FROM admins ... FOR SHARE}.
  * A contained principal has no {@code admins} row (V218), so every navigation operation a contained
  * run issues is refused there, before V231's new disjunct is evaluated. That disjunct is reachable
- * only from a direct repository call, which is what the tests here make. So: the actor is wired and
- * resolves correctly, the repository and store layer is open to it, and no production surface above
- * those layers admits it.
+ * only from a direct repository call, which is what the tests here make. Both halves of that
+ * paragraph have since changed. {@code requireActive} was taught the contained principal, so a
+ * navigation <em>read</em> is no longer refused there; and of the five provenance columns that kept
+ * the mutation path closed, the one that is pure provenance — {@code
+ * information_relationships.actor} — now writes from {@code attribution()}, so {@code create} and
+ * {@code remove} are open to a contained run in its own home, with {@code
+ * information_lock_knowledge}'s contained arm as the whole of the confinement. The four columns
+ * that are <em>keys</em> rather than labels stay closed, and {@code
+ * ContainedActorWriteReachDatabaseTest} records both. So: the information service gates, navigation
+ * reads, navigation relationship writes and the memory gates are open; the bare-handle navigation
+ * mutate path and the three guarded repositories are not.
  *
- * <p><strong>The memory half is proved at the store and nowhere above it.</strong> {@link
- * #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore} and V232's predicate
- * directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code
- * BoundMemoryWrites.requireRecipient} ask the same {@link ScopedPermissions} question as the
- * information service gates, with no containment awareness, so a contained principal is refused
- * there — asserted in that test as the SQL fact the refusal rests on. Whether those two layers
- * should admit a contained principal is an open authority decision and is not this task's to make.
+ * <p><strong>The memory half is proved at the store, and the layer above it has since been
+ * opened.</strong> {@link #aContainedChildReadsAndWritesItsOwnMemories} drives {@link MemoryStore}
+ * and V232's predicate directly. One layer up, {@code BoundMemoryQueries.requireScope} and {@code
+ * BoundMemoryWrites.requireRecipient} asked only the {@link ScopedPermissions} question and so
+ * refused a contained principal; they now ask {@code ContainedHomes} first. That test's assertion
+ * about the role answer is unchanged and still true — it is the SQL fact, and a contained project
+ * grants nobody a role — but it is now one of two arms rather than the whole gate.
  */
 @Tag("full-db")
 @Testcontainers
@@ -176,7 +185,14 @@ class ContainedInformationReachDatabaseTest {
     records = new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC(), events);
     memories = new MemoryStore(jdbc);
     permissions = permissions();
-    access = new InformationAccess(permissions);
+    // The production containment source over these real rows, not a stand-in: the point of the
+    // service-gate test below is that the gate and V229's arms agree about ownership.
+    access =
+        new InformationAccess(
+            permissions,
+            io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY,
+            io.aeyer.plowshare.server.information.AccountKnowledgePermissions.DENY,
+            new io.aeyer.plowshare.server.access.JdbcContainedHomes(jdbc));
 
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,must_change_password) VALUES (?,'fixture',FALSE)",
@@ -326,9 +342,15 @@ class ContainedInformationReachDatabaseTest {
     assertTrue(
         text.isPresent(), "including its bytes, which is a second statement and a second gate");
 
-    // THE BOUNDARY. These gates ask for a live project role and a contained project grants none.
-    assertThrows(CallerFault.class, () -> access.requireSelection(context));
-    assertThrows(CallerFault.class, () -> access.requireWork(context));
+    // THE BOUNDARY, MOVED. These two gates asked for a live project role, which a contained project
+    // grants to nobody, so both refused here. They now consult ContainedHomes first and admit a
+    // child to the home it owns; theServiceGatesAdmitAChildToItsOwnHomeOnly is where that is
+    // asserted, with a sibling's home and the container's project as the controls. Kept as an
+    // admission rather than deleted, so this test still says which layer decides.
+    assertDoesNotThrow(() -> access.requireSelection(context));
+    assertDoesNotThrow(() -> access.requireWork(context));
+    // Audience is unchanged and still refused: ownership of a home is not audience authority.
+    assertThrows(CallerFault.class, () -> access.requireAudience(context));
     assertNull(
         jdbc.queryForObject(
             "SELECT authority_project_role(?,?)", String.class, first.project(), first.principal()),
@@ -345,12 +367,14 @@ class ContainedInformationReachDatabaseTest {
    * <p>V232 gave {@link MemoryStore}'s three identity statements a contained arm, and this drives
    * the store and that predicate. The last block is the layer above: {@code
    * BoundMemoryQueries.requireScope} and {@code BoundMemoryWrites} ask {@link ScopedPermissions}
-   * about {@code request.account()}, which for a contained run is the principal, and the answer is
-   * read from {@code authority_project_role} — asserted null here. So a contained child's memory
-   * read or write <em>through those entry points</em> is refused, and nothing in this task changes
-   * that. Driving them to observe the refusal would need a {@code QueryEmbeddings.Origin}, an
-   * embedding pool and a {@code MemoryProposal}, none of which this assertion is about; the SQL
-   * fact the refusal rests on is the thing a later change would have to move.
+   * about {@code request.acting()}, which for a contained run is the principal, and the answer is
+   * read from {@code authority_project_role} — asserted null here, and still null. That answer was
+   * the whole gate when this was written; it is now one of two arms, because those entry points
+   * consult {@code ContainedHomes} first. The SQL fact was indeed "the thing a later change would
+   * have to move", and the change went around it rather than through it: the role answer is
+   * untouched and the admission comes from containment. {@code ContainedMemoryGateTest} drives the
+   * dispatch with a zero limit, which is what avoids the embedding pool this assertion could not
+   * stand up.
    */
   @Test
   void aContainedChildReadsAndWritesItsOwnMemories() {
@@ -387,13 +411,17 @@ class ContainedInformationReachDatabaseTest {
             second.project()),
         "and not a sibling's, which is what makes the arm a confinement and not an opening");
 
-    // THE LAYER ABOVE THE STORE, which has no containment awareness and is not opened here.
+    // THE SQL FACT THE OLD REFUSAL RESTED ON. Still false, and still worth asserting — but no
+    // longer the whole gate: BoundMemoryQueries.requireScope and BoundMemoryWrites.
+    // requireRecipient now consult ContainedHomes as a disjunct before asking this, so a contained
+    // principal reaches its own home while this answer stays exactly as it was.
     assertFalse(
         permissions.allows(
             new ScopedPermissions.Principal(first.principal()),
             new ScopedPermissions.ProjectTarget(first.project()),
             ScopedPermissions.Action.READ),
-        "so BoundMemoryQueries.requireScope refuses a contained principal");
+        "and no role appears for a contained principal, which is what the dispatch routes around"
+            + " rather than changes");
     assertFalse(
         permissions.allows(
             new ScopedPermissions.Principal(first.principal()),
@@ -636,5 +664,40 @@ class ContainedInformationReachDatabaseTest {
         null,
         null,
         home);
+  }
+
+  /**
+   * The gate this task opened, driven over real rows by the production source.
+   *
+   * <p>A child selects and works in its own home; a sibling's home and its container's project are
+   * both refused, which is what makes the admission containment's rather than a blanket opening.
+   * The audience refusal is asserted beside them because ownership of a home must not become
+   * audience authority — V229 admits WRITE for a contained actor and deliberately not SET_AUDIENCE.
+   *
+   * <p>The control matters: {@code permissions} here is the real {@code authority_project_role}
+   * question, and it answers nothing for any of these projects. So every admission below comes from
+   * the containment path and none of it from a role that the fixture accidentally granted.
+   */
+  @Test
+  void theServiceGatesAdmitAChildToItsOwnHomeOnly() {
+    var actor =
+        io.aeyer.plowshare.server.information.InformationActor.contained(first.principal(), HOLDER);
+    var own = access.forRun(actor, io.aeyer.plowshare.protocol.Home.of(first.project()));
+
+    assertDoesNotThrow(() -> access.requireSelection(own));
+    assertDoesNotThrow(() -> access.requireWork(own));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class, () -> access.requireAudience(own));
+
+    // A sibling's home: the actor is a live contained principal, so this is the ownership match
+    // failing rather than the contained gate failing.
+    var sibling = access.forRun(actor, io.aeyer.plowshare.protocol.Home.of(second.project()));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class, () -> access.requireSelection(sibling));
+
+    // And the container's own project is not a contained home at all.
+    assertFalse(
+        new io.aeyer.plowshare.server.access.JdbcContainedHomes(jdbc)
+            .ownsHome(first.principal(), "parent"));
   }
 }

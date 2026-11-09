@@ -57,12 +57,30 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     this.connectionsCache = Objects.requireNonNull(connectionsCache);
   }
 
+  /**
+   * Liveness of the acting identity, for either kind of principal.
+   *
+   * <p>The {@code admins} question is asked first and unchanged, so an ordinary request issues
+   * exactly the statement it always did. Only a principal that question already refused can be a
+   * contained one, so the second question costs nothing on the ordinary path — the shape {@code
+   * InformationAccess.ownsSelectedHome} arrived at for the same reason.
+   *
+   * <p>For a contained principal, existence <em>is</em> liveness. V218 gives {@code
+   * contained_principals} no revocation column and says why — "the absence is the structure, not a
+   * flag a call site must remember to honour" — and the row dies with its scope through {@code ON
+   * DELETE CASCADE}. {@code contained_knowledge_actor} is that existence test, regex-guarded so a
+   * non-UUID handle reaching here is false rather than a failed cast, and it is the same predicate
+   * V229's and V231's arms select on, so liveness here cannot drift from admission there.
+   */
   public void requireActive(String account) {
-    if (!Boolean.TRUE.equals(
+    if (Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT EXISTS(SELECT 1 FROM admins WHERE handle=? AND account_active(handle) AND NOT bootstrap)",
             Boolean.class,
-            account))) throw unavailable();
+            account))) return;
+    if (Boolean.TRUE.equals(
+        jdbc.queryForObject("SELECT contained_knowledge_actor(?)", Boolean.class, account))) return;
+    throw unavailable();
   }
 
   public void lockAccount(String account) {
@@ -195,6 +213,81 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     jdbc.queryForObject(
         "SELECT information_lock_scope(?,?)", Object.class, account, controlScope(target));
     if (!canManage(account, target)) throw unavailable();
+  }
+
+  /**
+   * Locks the acting identity's row, and refuses an identity that is not there.
+   *
+   * <p><strong>This is liveness and serialization, not authority.</strong> The membership statement
+   * discards its result: it takes a share lock so a concurrent membership change serializes with
+   * this transaction, and decides nothing. Write authority is {@link #writable}'s {@code
+   * information_lock_knowledge(…,'WRITE')}, whose contained arm is V229:285 — admitted only when
+   * the resource's {@code home_scope_id} is {@code contained_own_home}, and only for WRITE.
+   *
+   * <p>This overload is the one the relationship mutators take, and it is the only place the two
+   * axes of {@link InformationContext} are told apart on the write path. An ordinary context has
+   * {@code acting().equals(attribution())} — {@code InformationActor.of} sets both to one handle —
+   * so it reaches {@link #lockIdentity(String, String)} with the identical arguments it always did
+   * and issues the identical two statements. Only a contained context, which is the sole producer
+   * of two different axes, takes the second branch.
+   */
+  private void lockIdentity(InformationContext c, String project) {
+    if (c.acting().equals(c.attribution())) {
+      lockIdentity(c.acting(), project);
+      return;
+    }
+    lockContainedIdentity(c);
+  }
+
+  /**
+   * The same two guarantees for a contained principal, asked of the axis that can answer each.
+   *
+   * <p><strong>Liveness, of the child.</strong> {@code contained_knowledge_actor} is the existence
+   * test — V218 gives {@code contained_principals} no revocation column and the row dies with its
+   * scope through {@code ON DELETE CASCADE} — and it is the same predicate V229's and V231's arms
+   * select on, so a principal admitted here cannot be one those arms would refuse.
+   *
+   * <p><strong>Serialization and the foreign key, of the container.</strong> The {@code FOR SHARE}
+   * is taken on the <em>attribution</em> handle's {@code admins} row rather than the acting
+   * principal's, for two reasons that coincide: that row is what {@code
+   * information_relationships.actor} references (V147:16), so the share lock keeps the insert's
+   * foreign-key target from vanishing under it, and a container being disabled mid-write serializes
+   * with this transaction exactly as an ordinary caller's own disable does. A disabled or bootstrap
+   * container refuses the child, which is the containment relation and not an extra rule: a child
+   * writes on its container's standing or not at all.
+   *
+   * <p><strong>No membership statement.</strong> The ordinary overload's second lock is on {@code
+   * project_members} for the resource's project; a {@code contained:} project has no members and
+   * grants no role to anybody (V216 makes {@code CONTAINED} authority-free by design), so there is
+   * no membership row whose change this transaction could need to serialize with. The authority
+   * that replaces it is {@code information_lock_knowledge}'s contained arm, which {@link #writable}
+   * asks immediately after this returns.
+   *
+   * <p><strong>What this does not open.</strong> Four of this repository's five provenance columns
+   * are still closed to a contained principal, and not for want of routing: {@code
+   * information_navigation_policies.actor} belongs to policy management, which a contained run has
+   * no business doing and reaches through {@code requireManager}; and the {@code account} of {@code
+   * information_navigation_views}, {@code information_navigation_receipts} and {@code
+   * information_navigation_audit} is a <em>key</em>, not a label — saved views are counted and
+   * addressed per account and a receipt is the idempotency record for {@code (account,
+   * request_id)}. Writing those from {@code attribution()} would merge a child's saved views and
+   * request identifiers into its container's namespace, where a request id the child chose could
+   * collide with one the container chose and be answered from the wrong receipt. That is a design
+   * decision about whose namespace a contained run's idempotency lives in, not a column to
+   * re-point, so {@code DocumentNavigation.mutate} and {@code PortableInformation.commit} keep
+   * refusing at {@link #lockAccount}, which takes a bare handle and has no second axis to consult.
+   * {@code information_relationships.actor} is pure provenance — written, read back only as a
+   * column, and keyed by nothing — which is why it is the one that moves.
+   */
+  private void lockContainedIdentity(InformationContext c) {
+    if (jdbc.queryForList(
+            "SELECT handle FROM admins WHERE handle=? AND enabled AND NOT bootstrap FOR SHARE",
+            String.class,
+            c.attribution())
+        .isEmpty()) throw unavailable();
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject("SELECT contained_knowledge_actor(?)", Boolean.class, c.acting())))
+      throw unavailable();
   }
 
   private void lockIdentity(String account, String project) {
@@ -792,16 +885,16 @@ public final class JdbcInformationNavigationRepository implements InformationNav
   /**
    * The write authority both relationship mutators recheck inside their own transaction.
    *
-   * <p><strong>Why this repository carries no contained-actor guard.</strong> {@link #lockIdentity}
-   * below requires a row in {@code admins} for the <em>acting</em> principal — enabled and not
-   * bootstrap — and a confined Application's principal is a bare UUID with no such row by design
-   * (V218). Characterized against real PostgreSQL by {@code ContainedActorWriteReachDatabaseTest},
-   * both {@link #create} and {@link #remove} were refused here with {@code
-   * NotFoundFault("information is unavailable in this selection")}, before any statement wrote
-   * anything. That is an authority predicate asked about the acting axis and answered as a caller
-   * fault, not a provenance column's foreign key, so {@code ContainedActorGuard} is deliberately
-   * not called in front of it: a second refusal ahead of a sound one is a second thing to keep in
-   * step. The test holds the assertions that keep it sound.
+   * <p><strong>Why this repository carries no contained-actor guard.</strong> Because it does not
+   * need one: the two questions a guard would ask are both asked here, by the statements that have
+   * to run anyway. {@link #lockIdentity(InformationContext, String)} answers liveness and holds the
+   * provenance row, each off the axis that can answer it, and the {@code
+   * information_lock_knowledge(…,'WRITE')} below answers authority through V229:285 — a contained
+   * principal is admitted only for its own home and only for WRITE, so a child reaching for a
+   * sibling's or its container's resource is refused by the same predicate that admits it for its
+   * own. A guard in front of that would be a second refusal ahead of a sound one, and a second
+   * thing to keep in step. {@code ContainedActorWriteReachDatabaseTest} holds the assertions that
+   * keep it sound, including that a write outside the child's home is still refused.
    */
   private UUID writable(InformationContext c, UUID resource) {
     var projects =
@@ -811,7 +904,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
             resource);
     if (projects.isEmpty()) throw unavailable();
     String project = projects.getFirst();
-    lockIdentity(c.account(), project);
+    lockIdentity(c, project);
     var a = new ArrayList<Object>();
     a.add(resource);
     a.addAll(args(c));
@@ -857,7 +950,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
         target.resource(),
         target.revision(),
         relation,
-        c.account());
+        c.attribution());
     return new Relationship(id, source, target.resource(), target.revision(), relation, 1, false);
   }
 
