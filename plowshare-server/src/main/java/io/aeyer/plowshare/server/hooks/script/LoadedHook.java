@@ -2,7 +2,6 @@ package io.aeyer.plowshare.server.hooks.script;
 
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.hooks.Stage;
-import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,6 +58,8 @@ public final class LoadedHook implements PooledHook {
 
   private final Context context;
   private final String name;
+  private final Source source;
+  private final HookScript script;
   private final Map<Stage, List<String>> stages;
   private final Map<Stage, Value> stageObjects;
   private final Value invoke;
@@ -67,11 +68,15 @@ public final class LoadedHook implements PooledHook {
   private LoadedHook(
       Context context,
       String name,
+      Source source,
+      HookScript script,
       Map<Stage, List<String>> stages,
       Map<Stage, Value> stageObjects,
       Value invoke) {
     this.context = context;
     this.name = name;
+    this.source = source;
+    this.script = script;
     this.stages = stages;
     this.stageObjects = stageObjects;
     this.invoke = invoke;
@@ -84,7 +89,7 @@ public final class LoadedHook implements PooledHook {
    */
   public static LoadedHook load(HookEngine engine, String fileName, String javascript)
       throws HookFailure {
-    return evaluate(engine.newContext(), fileName, javascript);
+    return evaluate(engine.newContext(), fileName, HookScript.javascript(javascript));
   }
 
   /**
@@ -104,6 +109,16 @@ public final class LoadedHook implements PooledHook {
       HookEngine engine,
       String fileName,
       String javascript,
+      Duration limit,
+      ScheduledExecutorService timer)
+      throws HookFailure {
+    return load(engine, fileName, HookScript.javascript(javascript), limit, timer);
+  }
+
+  static LoadedHook load(
+      HookEngine engine,
+      String fileName,
+      HookScript script,
       Duration limit,
       ScheduledExecutorService timer)
       throws HookFailure {
@@ -130,7 +145,7 @@ public final class LoadedHook implements PooledHook {
           unschedulable);
     }
     try {
-      LoadedHook loaded = evaluate(context, fileName, javascript);
+      LoadedHook loaded = evaluate(context, fileName, script);
       if (!settled.compareAndSet(false, true)) {
         loaded.close();
         throw stoppedLoading(fileName, limit, null);
@@ -159,13 +174,13 @@ public final class LoadedHook implements PooledHook {
     }
   }
 
-  private static LoadedHook evaluate(Context context, String fileName, String javascript)
+  private static LoadedHook evaluate(Context context, String fileName, HookScript script)
       throws HookFailure {
+    Source source =
+        Source.newBuilder("js", script.code(), fileName)
+            .mimeType("application/javascript+module")
+            .buildLiteral();
     try {
-      Source source =
-          Source.newBuilder("js", javascript, fileName.replaceAll("\\.ts$", "") + ".mjs")
-              .mimeType("application/javascript+module")
-              .build();
       Value exports = context.eval(source);
       Value hook = exports.getMember("default");
       if (hook == null || hook.isNull() || !hook.hasMembers()) {
@@ -245,7 +260,8 @@ public final class LoadedHook implements PooledHook {
         objects.put(stage, object);
       }
       Value invoke = context.eval("js", INVOKE);
-      return new LoadedHook(context, named.asString(), Map.copyOf(stages), objects, invoke);
+      return new LoadedHook(
+          context, named.asString(), source, script, Map.copyOf(stages), objects, invoke);
     } catch (HookFailure failed) {
       closeQuietly(context);
       throw failed;
@@ -264,7 +280,7 @@ public final class LoadedHook implements PooledHook {
       // AND the source actually containing import syntax — before this is
       // reported as "imports something" rather than a plain evaluation
       // failure.
-      if (lower.contains("is not allowed") && IMPORT_SYNTAX.matcher(javascript).find()) {
+      if (lower.contains("is not allowed") && IMPORT_SYNTAX.matcher(script.code()).find()) {
         throw new HookFailure(
             fileName
                 + " imports something, and a server hook cannot:"
@@ -272,10 +288,11 @@ public final class LoadedHook implements PooledHook {
                 + said,
             unloadable);
       }
-      throw new HookFailure(fileName + " could not be evaluated: " + said, unloadable);
-    } catch (IOException impossible) {
-      closeQuietly(context);
-      throw new HookFailure(fileName + " could not be read as a source", impossible);
+      throw new HookFailure(
+          site(source, script, unloadable)
+              + " could not be evaluated: "
+              + (unloadable.isSyntaxError() ? "JavaScript syntax error" : said),
+          unloadable);
     } catch (RuntimeException broken) {
       closeQuietly(context);
       throw new HookFailure(fileName + " could not be loaded: " + broken.getMessage(), broken);
@@ -368,11 +385,24 @@ public final class LoadedHook implements PooledHook {
         alive = false;
         throw new HookFailure("the hook '" + name + "' was stopped at its time limit", failed);
       }
-      throw new HookFailure("the hook '" + name + "' threw: " + failed.getMessage(), failed);
+      var location = ScriptLocation.in(failed, source).flatMap(script::originalLocation);
+      String file = source.getName();
+      String site = location.map(at -> at.at(file)).orElse(file);
+      throw new HookFailure(
+          "the hook '" + name + "' threw at " + site + ": " + failed.getMessage(),
+          failed,
+          location.orElse(null));
     } catch (IllegalStateException closed) {
       alive = false;
       throw new HookFailure("the hook '" + name + "' was stopped at its time limit", closed);
     }
+  }
+
+  private static String site(Source source, HookScript script, PolyglotException failed) {
+    return ScriptLocation.in(failed, source)
+        .flatMap(script::originalLocation)
+        .map(position -> position.at(source.getName()))
+        .orElse(source.getName());
   }
 
   /**

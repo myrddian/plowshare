@@ -26,6 +26,7 @@ import io.aeyer.plowshare.server.hooks.StepPost;
 import io.aeyer.plowshare.server.hooks.Tier;
 import io.aeyer.plowshare.server.hooks.ToolPost;
 import io.aeyer.plowshare.server.hooks.ToolPre;
+import io.aeyer.plowshare.server.hooks.script.ScriptLocation;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.information.InformationActor;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
@@ -41,6 +42,7 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import java.time.Duration;
 import java.time.Instant;
@@ -2265,11 +2267,26 @@ public final class JobRuntime {
               scripts.prepareNext(
                   definition.prompt(), input, definition.nativeOnly() || !budget.exhausted());
         } catch (IllegalStateException failed) {
+          String file = ScriptProgram.fileName(definition.name(), definition.origin());
+          var location =
+              failed instanceof ScriptProgram.Failure script
+                  ? script.location()
+                  : Optional.<ScriptLocation>empty();
+          String site = location.map(at -> at.at(file)).orElse(file);
+          String identity =
+              "conversation=%s project=%s account=%s script=%s"
+                  .formatted(
+                      conversation, home.isGlobal() ? "(global)" : home.project(), owner, site);
           if (transcript.origin() == io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION) {
             var block = scripts.blockedReport(owner, previous);
             if (block.isPresent()) {
               var refusal = block.get();
-              String reason = refusal.operatorMessage();
+              String reason = refusal.operatorMessage() + " [" + identity + "]";
+              log.warn(
+                  "Report save blocked before command {} [{}] requestId={}",
+                  sequence,
+                  identity,
+                  refusal.requestId());
               var diagnostic =
                   new com.fasterxml.jackson.databind.ObjectMapper()
                       .createObjectNode()
@@ -2277,7 +2294,13 @@ public final class JobRuntime {
                       .put("command", refusal.sequence())
                       .put("requestId", refusal.requestId().toString())
                       .put("draftCommitted", false)
+                      .put("conversationId", conversation)
+                      .put("project", home.project())
+                      .put("account", owner)
+                      .put("script", file)
                       .put("message", reason);
+              location.ifPresent(
+                  at -> diagnostic.put("line", at.line()).put("column", at.column()));
               transcript.record(LoggedEntry.notice(diagnostic.toString()));
               return new Outcome(
                   Ending.UNAVAILABLE, reason, taken, budget.spent() - callsBefore, reason);
@@ -2285,8 +2308,24 @@ public final class JobRuntime {
           }
           // Script evaluation includes output validation. Keep its reason and the
           // completed work counts instead of falling through JobStore's last resort.
-          String reason = "Script stopped before command " + sequence + ": " + failed.getMessage();
-          log.warn("{} in {}", reason, conversation, failed);
+          String reason =
+              "Script stopped before command "
+                  + sequence
+                  + " ["
+                  + identity
+                  + "]: "
+                  + failed.getMessage();
+          if (failed instanceof ScriptProgram.Failure) {
+            log.warn(
+                "Script stopped before command {} [{}]: {}",
+                sequence,
+                identity,
+                failed.getMessage().replaceAll("\\p{Cntrl}", " "));
+            log.debug("Script failure cause [{}]", identity, failed);
+          } else {
+            log.warn(reason, failed);
+          }
+          transcript.record(LoggedEntry.notice(reason));
           return new Outcome(
               Ending.UNAVAILABLE,
               reason + ". Completed command results remain retained in the journal.",

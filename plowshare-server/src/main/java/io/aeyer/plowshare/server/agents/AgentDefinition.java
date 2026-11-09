@@ -1125,6 +1125,11 @@ public record AgentDefinition(
    */
   /** Copy with a pinned script as the driver, or an ordinary model prompt. */
   public AgentDefinition withPrompt(String prompt) {
+    return withPrompt(prompt, origin);
+  }
+
+  /** Copy with a replacement prompt and the provenance of that prompt. */
+  public AgentDefinition withPrompt(String prompt, String origin) {
     return new AgentDefinition(
         name,
         description,

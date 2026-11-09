@@ -195,14 +195,14 @@ final class ProjectHookSet implements AutoCloseable {
       List<Broken> broken,
       Map<String, String> seenNames) {
     try {
-      String javascript = Stripping.javascript(file, source);
+      HookScript script = Stripping.compile(file, source);
       // Bounded, both here and in the pool's loader below: a module's
       // top level is code that no call's limit covers, and an unbounded
       // `while (true) {}` there would hang this fire and every later one
       // queued behind it. `timeout` is the one limit an operator sets,
       // so it bounds a load as it bounds a call.
-      LoadedHook first = LoadedHook.load(engine, file, javascript, properties.getTimeout(), timer);
-      pool(file, first, javascript, engine, properties, clock, timer, working, broken, seenNames);
+      LoadedHook first = LoadedHook.load(engine, file, script, properties.getTimeout(), timer);
+      pool(file, first, script, engine, properties, clock, timer, working, broken, seenNames);
     } catch (HookFailure failed) {
       broken.add(new Broken(file, failed.getMessage()));
     }
@@ -216,7 +216,7 @@ final class ProjectHookSet implements AutoCloseable {
   static void pool(
       String file,
       LoadedHook first,
-      String javascript,
+      HookScript script,
       HookEngine engine,
       HooksProperties properties,
       Supplier<Instant> clock,
@@ -244,7 +244,7 @@ final class ProjectHookSet implements AutoCloseable {
           new ContextPool(
               first.name(),
               first,
-              () -> LoadedHook.load(engine, file, javascript, properties.getTimeout(), timer),
+              () -> LoadedHook.load(engine, file, script, properties.getTimeout(), timer),
               properties.getPoolMax(),
               properties.getIdle(),
               clock,

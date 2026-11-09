@@ -327,3 +327,11 @@ account, project and file channel. Exercise missing input, a denied hook, a fail
 check and a question requiring a person. Inspect the retained record and any
 partial result. Script journals do not authorize replaying an uncertain physical
 effect; repair through the existing identity and status contracts.
+
+### Script failures
+
+When a script throws, look up its conversation ID in the trajectory or server
+log. The failure identifies the project, account, script and command the
+runtime was preparing. A guest exception also reports the line and column in
+the pinned script when the engine can locate it. The retained command results
+remain available for inspection.

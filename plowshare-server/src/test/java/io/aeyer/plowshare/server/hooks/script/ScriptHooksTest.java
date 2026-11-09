@@ -297,8 +297,37 @@ class ScriptHooksTest {
     assertTrue(pre.isDenied());
     assertEquals(HookRecord.FAILED, pre.records().get(0).decision());
     assertTrue(post.result().startsWith("the result was withheld"), post.result());
+    assertTrue(
+        post.records().getFirst().reason().contains("spin.js:3:"), post.records().toString());
     assertEquals(List.of(), prompt.additions());
     assertEquals(HookRecord.FAILED, prompt.records().get(0).decision());
+  }
+
+  @Test
+  void a_typescript_exception_reports_the_original_source_line() throws Exception {
+    write(
+        "broken-policy.ts",
+        """
+        import type { Hook } from '@plowshare/hooks'
+
+        type OnlyForChecking = {
+          enabled: boolean
+        }
+
+        export default {
+          name: 'broken-policy',
+          stages: {
+            'prompt.pre': { handle() {
+              throw new Error('fixture failure')
+            } },
+          },
+        } satisfies Hook
+        """);
+
+    var failure = hooks.promptPre(LEDGER, "hi").records().getFirst();
+    assertEquals(HookRecord.FAILED, failure.decision());
+    assertTrue(failure.reason().contains("broken-policy.ts:11:"), failure.reason());
+    assertTrue(failure.reason().contains("fixture failure"), failure.reason());
   }
 
   /**
