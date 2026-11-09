@@ -3,9 +3,13 @@
 from .collection import NetworkCollector
 from .contracts import CollectionPlan
 from .pihole import PiHoleV6
+from .unifi import UniFiNetwork
 
 
 def configured_collector(collector: str, plan: CollectionPlan) -> NetworkCollector:
     return NetworkCollector(
-        collector, plan, PiHoleV6(plan.pihole) if plan.pihole else None
+        collector,
+        plan,
+        PiHoleV6(plan.pihole) if plan.pihole else None,
+        UniFiNetwork(plan.unifi) if plan.unifi else None,
     )

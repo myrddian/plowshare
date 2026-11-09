@@ -21,6 +21,7 @@ from .contracts import (
     load_json,
     utc_now,
 )
+from .identity_source import DeviceIdentitySource
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
 
@@ -49,6 +50,12 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
     else:
         values["pihole"]["password_file"] = (
             str(plan.pihole.password_file) if plan.pihole.password_file else None
+        )
+    if plan.unifi is None:
+        values.pop("unifi")
+    else:
+        values["unifi"]["ca_file"] = (
+            str(plan.unifi.ca_file) if plan.unifi.ca_file else None
         )
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
@@ -103,12 +110,16 @@ class NetworkCollector:
         collector: str,
         plan: CollectionPlan,
         device_source: DeviceDataSource | None = None,
+        identity_source: DeviceIdentitySource | None = None,
     ):
         if plan.pihole is not None and device_source is None:
             raise ValueError("Configured Pi-hole requires a device-data source")
+        if plan.unifi is not None and identity_source is None:
+            raise ValueError("Configured UniFi requires a device identity source")
         self.collector = collector
         self.plan = plan
         self.device_source = device_source
+        self.identity_source = identity_source
 
     async def collect(
         self,
@@ -191,7 +202,7 @@ class NetworkCollector:
                 )
             observed = utc_now()
             labels = {label.address: label.label for label in self.plan.labels}
-            devices = {
+            configured = {
                 address: DeviceIdentity(
                     address,
                     "ip:" + address,
@@ -205,6 +216,7 @@ class NetworkCollector:
                 )
                 for address in self.plan.targets
             }
+            devices = configured.copy()
             dns = imported.dns if imported else ()
             window = None
             if self.device_source is not None:
@@ -253,6 +265,37 @@ class NetworkCollector:
                         and not any(issue.startswith("dns_") for issue in issues),
                     )
                 issues = list(dict.fromkeys(issues))
+            if self.identity_source is not None:
+                sample = await self.identity_source.identify(
+                    self.plan.targets, observed
+                )
+                observed_addresses = {item.address for item in sample.devices}
+                if (
+                    len(observed_addresses) != len(sample.devices)
+                    or observed_addresses & sample.ambiguous_addresses
+                    or not (observed_addresses | sample.ambiguous_addresses)
+                    <= configured.keys()
+                ):
+                    raise ValueError(
+                        "Identity source returned addresses outside its scope or with ambiguous identity"
+                    )
+                issues.extend(sample.issues)
+                for address in sample.ambiguous_addresses:
+                    devices[address] = configured[address]
+                conflict = False
+                for item in sample.devices:
+                    previous_identity = devices[item.address]
+                    if previous_identity.mac and item.mac != previous_identity.mac:
+                        devices[item.address] = configured[item.address]
+                        conflict = True
+                    else:
+                        devices[item.address] = replace(
+                            item, label=labels.get(item.address)
+                        )
+                if conflict:
+                    issues.append(
+                        "identity_conflict: UniFi and Pi-hole disagreed on a selected IP's MAC address"
+                    )
             snapshot = Snapshot(
                 imported.observed_at if imported else observed,
                 tuple(observations),

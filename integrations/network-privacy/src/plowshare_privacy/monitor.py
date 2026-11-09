@@ -77,6 +77,7 @@ class MonitorView:
     labels: tuple[DeviceLabel, ...] = ()
     pihole_configured: bool = False
     pending: bool = False
+    unifi_configured: bool = False
 
 
 class MonitorSettings(Protocol):
@@ -139,6 +140,7 @@ class FileMonitorSettings:
             plan.labels,
             plan.pihole is not None,
             pending,
+            plan.unifi is not None,
         )
 
     def _blocked_detail(self, *, include_locks: bool = True) -> str | None:
@@ -216,6 +218,7 @@ class FileMonitorSettings:
                     "maxObservationAgeSeconds",
                     "deviceLabels",
                     "pihole",
+                    "unifi",
                 },
             )
             plan.update(

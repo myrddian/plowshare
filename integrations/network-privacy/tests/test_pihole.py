@@ -501,6 +501,7 @@ class PiHoleConfigurationTest(unittest.TestCase):
             old.pop("enabled")
             old.pop("labels")
             old.pop("pihole")
+            old.pop("unifi")
             old["observations_file"] = str(plan.observations_file)
             self.assertEqual(
                 scope_fingerprint(plan),
