@@ -26,6 +26,7 @@ from plowshare.contracts import (
 from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
+from .advisories import NvdAdvisories
 from .collector_factory import configured_collector
 from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
@@ -60,6 +61,12 @@ def credential(name: str) -> str:
 
 async def execute(args: argparse.Namespace) -> None:
     config = Configuration.read(Path(args.config))
+    advisory_origin = os.environ.get("PLOWSHARE_PRIVACY_NVD_ORIGIN")
+    advisories = (
+        NvdAdvisories(advisory_origin)
+        if args.command == "serve" and advisory_origin is not None
+        else None
+    )
     if args.command == "check":
         if config.collection.observations_file:
             Snapshot.decode(load_json(config.collection.observations_file))
@@ -380,6 +387,7 @@ async def execute(args: argparse.Namespace) -> None:
                     console=console,
                     profiles=profiles,
                     issues=issues,
+                    advisories=advisories,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
                     )
