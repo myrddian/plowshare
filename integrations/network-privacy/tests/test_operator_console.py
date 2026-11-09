@@ -23,7 +23,7 @@ from plowshare_privacy.console_port import (
     RunSummary,
     ScheduleView,
 )
-from plowshare_privacy.contracts import DeviceIdentity, PiHolePlan
+from plowshare_privacy.contracts import DeviceIdentity, PiHolePlan, TcpObservation
 from plowshare_privacy.discovery import (
     DiscoveredDevice,
     DiscoveryReport,
@@ -357,6 +357,73 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.store.set_preferences(Preferences(True, 50, 0, False))
         self.assertEqual(self.worker.completion_request(receipt).text, expected)
         self.assertEqual(findings(receipt, frozenset()), ())
+
+    def test_device_inventory_remembers_responses_without_reasserting_old_identity(
+        self,
+    ) -> None:
+        address, silent, unscanned = "10.1.2.10", "10.1.2.22", "10.1.2.33"
+        first, latest = "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"
+        identity = DeviceIdentity(
+            address,
+            "mac:02:00:00:00:00:01",
+            None,
+            "TV",
+            "02:00:00:00:00:01",
+            None,
+            "pihole-v6",
+            first,
+            first,
+        )
+        self.worker.config = replace(
+            self.config,
+            collection=replace(
+                self.config.collection, targets=(address, silent, unscanned)
+            ),
+        )
+        evidence = self.scan.evidence
+        assert evidence is not None
+        baseline = replace(
+            evidence,
+            finished_at=first,
+            snapshot=replace(
+                evidence.snapshot,
+                tcp=(TcpObservation(address, 443, "closed"),),
+                devices=(identity,),
+            ),
+        )
+        self.receipts.save(replace(self.scan, evidence=baseline))
+        self.assertEqual(self.console.devices()[0].identity, identity)
+
+        # An initial observation stays in inventory after its card link ages out.
+        for _ in range(51):
+            scan_id = str(uuid4())
+            unanswered = replace(
+                baseline,
+                scan_id=scan_id,
+                finished_at=latest,
+                snapshot=replace(
+                    baseline.snapshot,
+                    tcp=(
+                        TcpObservation(address, 443, "timeout"),
+                        TcpObservation(silent, 443, "unreachable"),
+                    ),
+                    devices=(),
+                ),
+            )
+            self.receipts.save(replace(self.scan, scan_id=scan_id, evidence=unanswered))
+        observed, never_responded, never_checked = self.console.devices()
+        self.assertEqual(observed.last_seen, latest)
+        self.assertEqual(
+            (observed.first_response_at, observed.last_response_at), (first, first)
+        )
+        self.assertIsNone(observed.identity)
+        self.assertEqual(observed.last_known_identity, identity)
+        self.assertEqual(observed.name, "Unnamed device")
+        self.assertEqual(len(observed.history), 50)
+        self.assertNotIn(self.scan.scan_id, observed.history)
+        self.assertEqual(never_responded.last_seen, latest)
+        self.assertIsNone(never_responded.last_response_at)
+        self.assertIsNone(never_checked.last_seen)
 
     async def test_move_requires_one_fresh_address_and_rechecks_before_accept(
         self,

@@ -103,10 +103,16 @@ report projections are cached for 20 seconds. Visibility is an inspection result
 permissions and availability are still enforced by Plowshare on each tool call.
 A checklist highlights missing setup. The expiry notice warns within seven days.
 
-The **Devices** search filters names, addresses, MACs, hostnames and vendors locally.
-Device cards show configured names, observed MAC/vendor associations, TCP service
-responses, sampled DNS destinations and collection history. History is explicitly
-at an address; a DHCP change or randomized MAC does not prove physical identity.
+The first completed sweep establishes the device inventory for the saved scope.
+Each later sweep checks the saved addresses again. In **Devices**, filter for
+previously observed addresses or search by name, address, MAC, hostname or vendor.
+The inventory reconstructs first and last TCP responses from retained scan receipts
+after a restart. A timed-out check updates the last check time, while the last
+response stays at the last successful or refused connection. The latest 50
+completed sweeps provide links to individual collections. An older Pi-hole
+association appears separately with its observation time when the latest sweep
+has no association. This history belongs to the address; DHCP reuse and randomized
+MACs can change which device holds it.
 **Check moved devices** compares fresh Pi-hole associations with the last local
 LAN discovery, bounded to 256 addresses and read in 32-device batches. Confirm each suggested move
 explicitly. Confirmation rechecks the association and uses the normal idle/scope

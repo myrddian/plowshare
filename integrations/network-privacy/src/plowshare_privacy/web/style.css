@@ -204,5 +204,5 @@ footer { display: flex; justify-content: space-between; gap: 12px; padding-top: 
   .view-nav button { font-size: 11px; padding-left: 4px; padding-right: 4px; }
 }
 
-.device-search { padding: 18px 22px 0; max-width: 600px; }
+.device-search { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; padding: 18px 22px 0; max-width: 660px; }
 .device-search label { margin-bottom: 6px; }

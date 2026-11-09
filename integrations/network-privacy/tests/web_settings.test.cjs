@@ -191,6 +191,24 @@ test('reports open in Findings as Markdown without replacing selected collection
 });
 
 
+test('device inventory combines the observation filter with address and identity search', async () => {
+  const {node} = await dashboard();
+  const known = {dataset:{presence:'observed', search:'10.1.2.10 tv'}};
+  const silent = {dataset:{presence:'unobserved', search:'10.1.2.22'}};
+  node('device-cards').querySelectorAll = () => [known, silent];
+  node('device-presence').value = 'observed';
+  node('device-presence').listeners.change();
+  assert.equal(known.hidden, false);
+  assert.equal(silent.hidden, true);
+  node('device-search').value = '10.1.2.22';
+  node('device-search').listeners.input();
+  assert.equal(node('device-filter-empty').hidden, false);
+  node('device-presence').value = 'all';
+  node('device-presence').listeners.change();
+  assert.equal(silent.hidden, false);
+  assert.equal(node('device-filter-empty').hidden, true);
+});
+
 test('whole-subnet selection prepares scope without saving, enabling or starting work', async () => {
   const {context, node} = await dashboard();
   let requests = 0;
