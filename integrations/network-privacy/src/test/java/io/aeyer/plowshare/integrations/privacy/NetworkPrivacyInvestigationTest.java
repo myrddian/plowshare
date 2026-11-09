@@ -110,6 +110,20 @@ class NetworkPrivacyInvestigationTest {
   }
 
   @Test
+  void review_note_lists_are_retained_in_order() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    host.accept(
+        """
+        {"verdict":"needs_corrections","assessment":"Corrected assessment",
+         "notes":["First correction","Remaining gap"]}
+        """);
+    host.finish();
+    assertEquals(1, host.writes);
+    assertTrue(host.report.path("text").asText().contains("First correction\n\nRemaining gap"));
+  }
+
+  @Test
   void absent_assessment_stops_before_review_or_report() throws Exception {
     var host = new Host();
     host.advanceTo("privacy_analyst");
@@ -128,6 +142,8 @@ class NetworkPrivacyInvestigationTest {
           "Information request refused: no access",
           "not JSON",
           "{\"verdict\":\"accepted\",\"notes\":\"ok\",\"assessment\":\"\"}",
+          "{\"verdict\":\"accepted\",\"notes\":[],\"assessment\":\"text\"}",
+          "{\"verdict\":\"accepted\",\"notes\":[\"ok\",{}],\"assessment\":\"text\"}",
           "{\"verdict\":\"guessed\",\"notes\":\"ok\",\"assessment\":\"text\"}"
         }) {
       var host = new Host();
