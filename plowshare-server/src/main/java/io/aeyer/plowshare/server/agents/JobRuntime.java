@@ -40,6 +40,7 @@ import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
+import io.aeyer.plowshare.server.llm.dispatch.ModelResponseRejected;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
@@ -3029,6 +3030,8 @@ public final class JobRuntime {
     int steps = 0;
     int modelCalls = 0;
     boolean answerReviewed = false;
+    boolean regenerateResponse = false;
+    boolean responseRetryUsed = false;
     // CALL FAILURES, per turn (spec 2026-09-28-call-failures §3-§4): a reply that writes a
     // call as text is held and warned about, each one in a row takes a warning from this
     // allowance, and a real tool call restores it. `mustCallNext` is one request's worth and
@@ -3150,6 +3153,8 @@ public final class JobRuntime {
       // calls are judged against it below.
       boolean forced = mustCallNext;
       mustCallNext = false;
+      boolean regenerating = regenerateResponse;
+      regenerateResponse = false;
       try {
         // Streamed, and the reason is a wall clock rather than a wish to
         // show tokens. Measured 2026-09-02 against qwen3.5-9b: a
@@ -3196,7 +3201,7 @@ public final class JobRuntime {
                 systemRequest(
                     requiring(
                         route
-                            .requestFor(history)
+                            .requestFor(regenerating ? regenerationHistory(history) : history)
                             .withAttribution(usageFor(transcript, definition, steps + 1))
                             .withAuthorization(
                                 operation == null
@@ -3205,16 +3210,51 @@ public final class JobRuntime {
                                     : inferenceCalls == null
                                         ? () -> operations.require(operation)
                                         : inferenceCalls.claimed(operation, claimed.orElseThrow()))
-                            .withTools(forced ? withTheWayOut(schemas) : schemas),
+                            .withTools(
+                                regenerating
+                                    ? List.of()
+                                    : forced ? withTheWayOut(schemas) : schemas),
                         extras,
                         schemas,
                         forced),
                     claimed.orElseThrow()),
                 timed.timing(
                     informationStream(
-                        watch.streaming() ? watching(watch) : DISCARDS,
+                        !regenerating && watch.streaming() ? watching(watch) : DISCARDS,
                         transcript.conversationId())),
                 cancelled);
+      } catch (ModelResponseRejected rejected) {
+        if (informationInputs != null
+            && !informationInputs.logAllowed(transcript.conversationId(), owner))
+          return stopped(
+              Ending.UNAVAILABLE,
+              "An information input became unavailable; no answer was delivered.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        steps++;
+        recordRejectedResponse(transcript, home, owner, rejected);
+        // A turn with a required tool cannot be repaired by accepting a prose answer.
+        // Re-enter the normal admission loop so the extra call spends its own allowance.
+        if (responseRetryUsed
+            || extras.requiresAToolCall()
+            || forced
+            || rejected.reason() == ModelResponseRejected.Reason.GUARD_UNAVAILABLE
+            || cap.stops(steps)
+            || budget.exhausted()
+            || cancelled.getAsBoolean()) {
+          return stopped(
+              Ending.UNAVAILABLE,
+              "The model returned an invalid response.",
+              trail,
+              steps,
+              modelCalls,
+              rejected.getMessage());
+        }
+        responseRetryUsed = true;
+        regenerateResponse = true;
+        continue;
       } catch (CallerAbandonedException cancelledMidStream) {
         // The run was cancelled while the model was still generating.
         //
@@ -3331,6 +3371,24 @@ public final class JobRuntime {
         transcript.answerMeasured(completionTokens);
       }
 
+      if (regenerating
+          && (!completion.toolCalls().isEmpty()
+              || completion.content().isBlank()
+              || "length".equals(completion.finishReason())
+              || WrittenCalls.writtenIn(completion.content(), offered).isPresent()
+              || WrittenCalls.writesToolEnvelope(completion.content()))) {
+        transcript.record(
+            LoggedEntry.diagnostic(
+                "Model response regeneration did not return a complete answer without tools."));
+        return stopped(
+            Ending.UNAVAILABLE,
+            "The model could not regenerate a complete answer without tools.",
+            trail,
+            steps,
+            modelCalls,
+            "");
+      }
+
       // The forced request answered with nothing but the way out: the call the held draft
       // wrote was an example, and the draft is the answer, delivered down the ordinary
       // answer path below -- prompt.post, the mandatory reviewer if any, the ANSWER entry.
@@ -3413,6 +3471,15 @@ public final class JobRuntime {
                 firstTokenMillis);
         route.called(call, modelCallTook);
         if (refusal.isPresent()) {
+          if (regenerating) {
+            return stopped(
+                Ending.UNAVAILABLE,
+                "The model declined to regenerate an answer.",
+                trail,
+                steps,
+                modelCalls,
+                "");
+          }
           Rerouting.Decision decision =
               route.refused(call, refusal.get(), completion.content(), modelCallTook);
           if (decision == Rerouting.Decision.REROUTED) {
@@ -5312,6 +5379,40 @@ public final class JobRuntime {
 
   private long tookMs(long began) {
     return Math.max(0, (ticker.getAsLong() - began) / 1_000_000);
+  }
+
+  private static List<ChatMessage> regenerationHistory(List<ChatMessage> history) {
+    List<ChatMessage> retry = new ArrayList<>(history);
+    retry.add(
+        ChatMessage.user(
+            "The previous response could not be parsed. Give a complete answer using the existing conversation "
+                + "and tool results. If the evidence is insufficient, say what is missing. "
+                + "Do not call tools, emit protocol markup, or claim a new action was performed."));
+    return retry;
+  }
+
+  private static void recordRejectedResponse(
+      Transcript transcript, Home home, String owner, ModelResponseRejected rejected) {
+    var completion = rejected.completion();
+    var served = completion.servedBy();
+    var receipt = completion.capture() == null ? null : completion.capture().callId();
+    String metadata =
+        "conversation=%s project=%s account=%s pool=%s model=%s receipt=%s"
+            .formatted(
+                transcript.conversationId(),
+                home.project(),
+                owner,
+                served == null ? null : served.pool(),
+                served == null ? null : served.wireModel(),
+                receipt);
+    log.warn("{} [{}]", rejected.getMessage(), metadata);
+    String content = completion.content();
+    // The filtered text stays in the authorized trajectory, never in the next prompt or server
+    // logs.
+    String excerpt =
+        content.length() <= 8192 ? content : content.substring(0, 8192) + "\n[truncated]";
+    transcript.record(
+        LoggedEntry.diagnostic(rejected.getMessage() + " [" + metadata + "]\n" + excerpt));
   }
 
   /**

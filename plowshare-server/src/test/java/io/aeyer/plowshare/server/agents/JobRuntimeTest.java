@@ -20,21 +20,28 @@ import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
+import io.aeyer.plowshare.server.llm.ModelMediaProfiles;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.Embeddings;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceAccounting;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransport;
+import io.aeyer.plowshare.server.llm.dispatch.ModelResponseGuards;
 import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
+import io.aeyer.plowshare.server.llm.dispatch.PromptImages;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
+import io.aeyer.plowshare.server.security.ChatFiltering;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -3042,6 +3049,103 @@ class JobRuntimeTest {
         20,
         40,
         "Use your tool.");
+  }
+
+  @Test
+  void response_guard_retries_once_from_the_tool_checkpoint_without_repeating_a_write()
+      throws Exception {
+    String malformed;
+    try (var fixture =
+        JobRuntimeTest.class.getResourceAsStream("/model-response-guards/harmony-retained.txt")) {
+      malformed = new String(fixture.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+    ToolCall original = call("original", "probe_write", "{}");
+    Completion corrected = answer("The retained write is complete.");
+    // The retry can answer, fail again, or disobey the tool-free request. None repeats the write.
+    for (Completion retry : List.of(corrected, answer(malformed), asking("", original))) {
+      Scripted transport =
+          new Scripted()
+              .then(() -> asking("", original))
+              .then(() -> asking(malformed, call("blocked", "probe_write", "{}")))
+              .then(() -> retry);
+      var write = Probe.returning("probe_write", "Retained write receipt");
+      var recorded = new Recorded(List.of());
+      try (var dispatcher = guardedDispatcher(transport, malformed)) {
+        Outcome result =
+            new JobRuntime(dispatcher, List.of(write))
+                .run(
+                    patient("probe_write"),
+                    "Record it once",
+                    Home.global(),
+                    Budget.of(8),
+                    () -> false,
+                    null,
+                    JobWatch.UNWATCHED,
+                    recorded);
+        assertEquals(retry == corrected ? Ending.ANSWERED : Ending.UNAVAILABLE, result.ending());
+        assertEquals(3, result.modelCalls());
+        assertEquals(List.of("{}"), write.seen());
+        assertEquals(3, transport.calls().size());
+        assertTrue(transport.calls().get(2).tools().isEmpty());
+        assertTrue(
+            transport.conversation(2).stream()
+                .anyMatch(
+                    m ->
+                        m.role() == ChatMessage.Role.TOOL
+                            && m.toolCallId().equals("original")
+                            && m.content().equals("Retained write receipt")));
+        assertFalse(
+            transport.conversation(2).stream().anyMatch(m -> m.content().contains(malformed)));
+        assertTrue(
+            recorded.entries().stream()
+                .anyMatch(
+                    e -> e.kind() == EntryKind.DIAGNOSTIC && e.content().contains(malformed)));
+        assertFalse(
+            recorded.entries().stream()
+                .anyMatch(e -> e.kind() == EntryKind.ANSWER && e.content().contains(malformed)));
+      }
+    }
+  }
+
+  @Test
+  void response_guard_does_not_regenerate_without_budget() {
+    String malformed = "<|channel|>analysis";
+    var transport = new Scripted().thenAlways(() -> answer(malformed));
+    try (var dispatcher = guardedDispatcher(transport, malformed)) {
+      Outcome result =
+          new JobRuntime(dispatcher, List.of())
+              .run(patient("probe_write"), "Assess it", Home.global(), Budget.of(1), null);
+      assertEquals(Ending.UNAVAILABLE, result.ending());
+      assertEquals(1, result.modelCalls());
+      assertEquals(1, transport.calls().size());
+      assertTrue(result.detail().contains("RAW_PROTOCOL_MARKUP"));
+    }
+  }
+
+  private static LlmDispatcher guardedDispatcher(Scripted transport, String malformed) {
+    var pool =
+        new LlmPool(
+            "scripted",
+            List.of("gpt-oss-120b"),
+            Map.of("fast", "gpt-oss-120b"),
+            1,
+            1,
+            Duration.ofSeconds(5),
+            transport);
+    var filter = new ModelResponseGuards.Guard("harmony", malformed::equals);
+    return new LlmDispatcher(
+        List.of(pool),
+        new NoOpTokenLedger(),
+        ignored -> "",
+        InferenceAccounting.NONE,
+        null,
+        null,
+        ChatFiltering.NONE,
+        InferenceBoundary.FIXTURE,
+        ModelMediaProfiles.NONE,
+        PromptImages.NONE,
+        new RatioTokenizer(4),
+        model -> "gpt-oss-120b".equals(model) ? Optional.of(filter) : Optional.empty());
   }
 
   /** The last message the {@code index}-th request carried. */
