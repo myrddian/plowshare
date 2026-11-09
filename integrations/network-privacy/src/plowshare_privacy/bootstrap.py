@@ -787,6 +787,7 @@ def connect_unifi(
     site_id: str,
     key_environment: str,
     ca_file: Path | None,
+    certificate_sha256: str | None = None,
 ) -> None:
     """Enroll a stopped collector using the same journal fence as a scope change."""
     config = Configuration.read(setup.collector)
@@ -806,6 +807,8 @@ def connect_unifi(
     }
     if ca_file is not None:
         source["caFile"] = str(ca_file)
+    if certificate_sha256 is not None:
+        source["certificateSha256"] = certificate_sha256
     plan["unifi"] = source
     configured = Configuration.decode(row, setup.collector)
     with FileReceipts(config) as receipts:
@@ -867,8 +870,13 @@ def main() -> None:
         required=True,
         help="Environment variable name, not the API key",
     )
-    unifi.add_argument(
+    unifi_tls = unifi.add_mutually_exclusive_group()
+    unifi_tls.add_argument(
         "--ca-file", type=Path, help="Absolute path to a private CA PEM file"
+    )
+    unifi_tls.add_argument(
+        "--certificate-sha256",
+        help="Independently verified SHA-256 digest of the controller leaf certificate",
     )
     commands.add_parser(
         "install",
@@ -1020,6 +1028,7 @@ def main() -> None:
                 args.site_id,
                 args.api_key_environment,
                 args.ca_file,
+                args.certificate_sha256,
             )
             return
         if args.command == "start":

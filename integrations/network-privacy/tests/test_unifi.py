@@ -2,12 +2,22 @@
 
 import json
 import os
+import shutil
+import ssl
+import subprocess
+import tempfile
 import unittest
 from collections.abc import AsyncIterator
+from dataclasses import asdict, replace
+from hashlib import sha256
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
-from plowshare_privacy.collection import NetworkCollector
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+
+from plowshare_privacy.collection import NetworkCollector, scope_fingerprint
 from plowshare_privacy.contracts import (
     CollectionPlan,
     DeviceIdentity,
@@ -82,6 +92,9 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
             {"siteId": "default"},
             {"apiKeyEnvironment": "invalid-key-name"},
             {"caFile": "relative.pem"},
+            {"certificateSha256": "aa" * 20},
+            {"certificateSha256": "gg" * 32},
+            {"certificateSha256": "aa" * 32, "caFile": "/trusted/ca.pem"},
             {"apiKey": "do-not-store"},
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
@@ -91,6 +104,91 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaisesRegex(ValueError, "environment"),
         ):
             UniFiNetwork(UniFiPlan.decode(configuration()))
+
+    def test_standard_tls_keeps_existing_receipt_scope(self) -> None:
+        unifi = UniFiPlan.decode(configuration())
+        plan = CollectionPlan("tcp", (FIRST,), (443,), 0.1, 1, None, 3600, unifi=unifi)
+        original = asdict(plan)
+        original.pop("enabled")
+        original.pop("labels")
+        original.pop("pihole")
+        original["unifi"].pop("certificate_sha256")
+        expected = sha256(json.dumps(original, sort_keys=True).encode()).hexdigest()
+        self.assertEqual(scope_fingerprint(plan), expected)
+        self.assertNotEqual(
+            scope_fingerprint(
+                replace(plan, unifi=replace(unifi, certificate_sha256="aa" * 32))
+            ),
+            expected,
+        )
+
+    @unittest.skipUnless(
+        shutil.which("openssl"), "requires OpenSSL for a local TLS fixture"
+    )
+    async def test_certificate_pin_verifies_before_sending_the_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cert = Path(directory) / "leaf.pem"
+            key = Path(directory) / "key.pem"
+            subprocess.run(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-days",
+                    "1",
+                    "-subj",
+                    "/CN=fixture.invalid",
+                    "-out",
+                    str(cert),
+                    "-keyout",
+                    str(key),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cert, key)
+            pin = sha256(ssl.PEM_cert_to_DER_cert(cert.read_text())).hexdigest()
+
+        received = []
+
+        async def connected_clients(request: web.Request) -> web.Response:
+            received.append(request.headers["X-API-Key"])
+            return web.json_response(
+                {
+                    "offset": 0,
+                    "limit": 100,
+                    "totalCount": 1,
+                    "count": 1,
+                    "data": [client(1, FIRST)],
+                }
+            )
+
+        app = web.Application()
+        app.router.add_get(f"/integration/v1/sites/{SITE}/clients", connected_clients)
+        server = TestServer(app)
+        await server.start_server(ssl=context)
+        self.addAsyncCleanup(server.close)
+        settings = configuration() | {
+            "apiBase": str(server.make_url("/integration/v1"))
+        }
+        with patch.dict(os.environ, {KEY: "fixture-key"}):
+            wrong = UniFiNetwork(
+                UniFiPlan.decode(settings | {"certificateSha256": "00" * 32})
+            )
+            refused = await wrong.identify((FIRST,), utc_now())
+            self.assertEqual(refused.devices, ())
+            self.assertIn("pin mismatch", refused.issues[0])
+            self.assertEqual(received, [])
+            right = UniFiNetwork(
+                UniFiPlan.decode(settings | {"certificateSha256": pin.upper()})
+            )
+            observed = await right.identify((FIRST,), utc_now())
+        self.assertEqual([device.address for device in observed.devices], [FIRST])
+        self.assertEqual(received, ["fixture-key"])
 
     async def test_paginates_only_connected_physical_clients_within_scope(self) -> None:
         with (

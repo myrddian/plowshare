@@ -6,7 +6,13 @@ import os
 import ssl
 from dataclasses import dataclass
 
-from aiohttp import ClientError, ClientSession, ClientTimeout
+from aiohttp import (
+    ClientError,
+    ClientSession,
+    ClientTimeout,
+    Fingerprint,
+    ServerFingerprintMismatch,
+)
 
 from .contracts import (
     DeviceIdentity,
@@ -45,14 +51,25 @@ class UniFiNetwork:
             raise ValueError("Set the configured UniFi API key environment variable")
         self._api_key = key
         self._clients = plan.api_base + "/sites/" + plan.site_id + "/clients"
-        self._tls = ssl.create_default_context()
-        if plan.ca_file is not None:
-            try:
-                if not plan.ca_file.is_file() or plan.ca_file.resolve() != plan.ca_file:
-                    raise ValueError("Invalid UniFi CA file")
-                self._tls.load_verify_locations(cafile=str(plan.ca_file))
-            except (OSError, ValueError):
-                raise ValueError("Configure a readable UniFi CA file") from None
+        if plan.certificate_sha256 is not None:
+            # aiohttp compares the exact peer certificate after the TLS handshake
+            # and before it sends HTTP headers. Redirects remain disabled.
+            self._tls: ssl.SSLContext | Fingerprint = Fingerprint(
+                bytes.fromhex(plan.certificate_sha256)
+            )
+        else:
+            context = ssl.create_default_context()
+            if plan.ca_file is not None:
+                try:
+                    if (
+                        not plan.ca_file.is_file()
+                        or plan.ca_file.resolve() != plan.ca_file
+                    ):
+                        raise ValueError("Invalid UniFi CA file")
+                    context.load_verify_locations(cafile=str(plan.ca_file))
+                except (OSError, ValueError):
+                    raise ValueError("Configure a readable UniFi CA file") from None
+            self._tls = context
 
     async def identify(
         self, targets: tuple[str, ...], observed_at: str
@@ -103,6 +120,10 @@ class UniFiNetwork:
                                 if ambiguous
                                 else (),
                             )
+        except ServerFingerprintMismatch:
+            return IdentitySample(
+                issues=("unifi_unavailable: UniFi controller certificate pin mismatch",)
+            )
         except (ClientError, TimeoutError, ValueError):
             # A partial page set may hide a conflicting association. Preserve the
             # other sources and report this source as unavailable for the sweep.

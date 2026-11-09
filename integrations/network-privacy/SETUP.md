@@ -169,8 +169,12 @@ the saved collection scope. Keep Pi-hole connected for DNS observations.
    ```
 
    For a certificate issued by a private CA, supply `--ca-file` with its absolute
-   PEM path. The certificate must match the configured hostname. This command
-   updates the private collector configuration and preserves retained receipts.
+   PEM path. The certificate must match the configured hostname. For a controller
+   with a factory certificate that cannot pass standard validation, supply
+   `--certificate-sha256` with the independently verified 64-character SHA-256
+   digest of its DER leaf certificate. Pin mode verifies the exact certificate
+   before sending the API key and refuses a replacement until the pin is reviewed.
+   This command updates the private configuration and preserves retained receipts.
 3. Set `PRIVACY_UNIFI_API_KEY` in the collector's service environment or secret
    manager. Restart the collector and inspect **System health** after the next
    sweep. Adding the source starts a new collection baseline. Rotate the key by

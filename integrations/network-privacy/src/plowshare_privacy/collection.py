@@ -57,6 +57,8 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         values["unifi"]["ca_file"] = (
             str(plan.unifi.ca_file) if plan.unifi.ca_file else None
         )
+        if plan.unifi.certificate_sha256 is None:
+            values["unifi"].pop("certificate_sha256")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )

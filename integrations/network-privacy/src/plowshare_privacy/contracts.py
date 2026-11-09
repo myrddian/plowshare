@@ -460,11 +460,14 @@ class UniFiPlan:
     site_id: str
     api_key_environment: str
     ca_file: Path | None
+    certificate_sha256: str | None = None
 
     @classmethod
     def decode(cls, value: object) -> UniFiPlan:
         row = object_fields(
-            value, {"apiBase", "siteId", "apiKeyEnvironment"}, {"caFile"}
+            value,
+            {"apiBase", "siteId", "apiKeyEnvironment"},
+            {"caFile", "certificateSha256"},
         )
         base = text(row["apiBase"], 2048).rstrip("/")
         url = urlsplit(base)
@@ -490,7 +493,16 @@ class UniFiPlan:
             not ca_file.is_absolute() or ca_file.resolve() != ca_file
         ):
             raise ValueError("UniFi CA file must be an absolute, unlinked path")
-        return cls(base, uuid(row["siteId"]), environment, ca_file)
+        fingerprint = (
+            text(row["certificateSha256"], 64).lower()
+            if "certificateSha256" in row
+            else None
+        )
+        if fingerprint is not None and not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise ValueError("UniFi certificate pin must be a SHA-256 hex digest")
+        if ca_file is not None and fingerprint is not None:
+            raise ValueError("Choose either a UniFi CA file or a certificate pin")
+        return cls(base, uuid(row["siteId"]), environment, ca_file, fingerprint)
 
 
 @dataclass(frozen=True)
