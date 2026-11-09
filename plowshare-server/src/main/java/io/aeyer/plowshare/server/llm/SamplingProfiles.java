@@ -108,7 +108,8 @@ public final class SamplingProfiles implements ModelMediaProfiles {
   private record Profile(
       int version,
       Map<String, Map<Sampling.Intent, Sampling>> modes,
-      Optional<ModelMediaCapabilities> media) {}
+      Optional<ModelMediaCapabilities> media,
+      Optional<String> responseGuard) {}
 
   /** One mapping row: which profile, and which of its modes. */
   private record Mapped(String profile, String mode, String source) {}
@@ -386,9 +387,19 @@ public final class SamplingProfiles implements ModelMediaProfiles {
       throw new IllegalStateException(where + " must declare integer version: 2 or omit version");
     }
     if (versioned) {
-      knownFields(where, document, Set.of("version", "modes", "media"));
+      knownFields(where, document, Set.of("version", "modes", "media", "response-guard"));
     } else if (document.containsKey("media")) {
       throw new IllegalStateException(where + " requires version: 2 for media declarations");
+    }
+    Optional<String> responseGuard = Optional.empty();
+    if (document.containsKey("response-guard")) {
+      if (!versioned
+          || !(document.get("response-guard") instanceof String id)
+          || !id.matches("[a-z][a-z0-9-]{0,63}")) {
+        throw new IllegalStateException(
+            where + " response-guard requires version: 2 and a valid guard name");
+      }
+      responseGuard = Optional.of(id);
     }
     Object modes = document.get("modes");
     if (!(modes instanceof Map<?, ?> rows) || rows.isEmpty()) {
@@ -455,7 +466,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
         document.containsKey("media")
             ? Optional.of(media(where, document.get("media")))
             : Optional.empty();
-    return new Profile(versioned ? 2 : 1, Map.copyOf(profile), media);
+    return new Profile(versioned ? 2 : 1, Map.copyOf(profile), media, responseGuard);
   }
 
   private static ModelMediaCapabilities media(String where, Object value) {
@@ -635,51 +646,62 @@ public final class SamplingProfiles implements ModelMediaProfiles {
    */
   public Resolved resolve(String wireModel, Sampling.Intent intent) {
     java.util.Objects.requireNonNull(intent, "intent");
-    if (wireModel == null) {
+    Mapped hit = mappingFor(wireModel);
+    if (hit == null) return Resolved.DEFAULT;
+    Profile loaded = profiles.get(hit.profile());
+    Map<String, Map<Sampling.Intent, Sampling>> profile = loaded.modes();
+    String mode = hit.mode();
+    if (mode == null || !profile.containsKey(mode)) {
+      if (mode != null) {
+        // §8.3's own fallback, said out loud. A mode a person named
+        // and a profile does not carry is a typo or a file half
+        // edited, and running silently at another mode's numbers is
+        // how a factor of two on temperature goes unnoticed.
+        log.warn(
+            "the sampling mapping runs '{}' in mode '{}', which the profile"
+                + " '{}' does not carry; its '{}' entry applies instead",
+            wireModel,
+            mode,
+            hit.profile(),
+            DEFAULT_MODE);
+      }
+      mode = DEFAULT_MODE;
+    }
+    Map<Sampling.Intent, Sampling> table = profile.get(mode);
+    if (table == null) {
+      log.warn(
+          "the profile '{}' has no '{}' mode, so nothing can be resolved for"
+              + " '{}' and no sampling parameters will be sent",
+          hit.profile(),
+          DEFAULT_MODE,
+          wireModel);
       return Resolved.DEFAULT;
     }
+    return new Resolved(hit.profile(), mode, table.get(intent), loaded.media());
+  }
+
+  /**
+   * Response guards follow the same exact/longest-prefix mapping as the serving model's profile.
+   */
+  public Optional<String> responseGuardFor(String wireModel) {
+    Mapped hit = mappingFor(wireModel);
+    return hit == null ? Optional.empty() : profiles.get(hit.profile()).responseGuard();
+  }
+
+  Set<String> responseGuardNames() {
+    return profiles.values().stream()
+        .flatMap(p -> p.responseGuard().stream())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  private Mapped mappingFor(String wireModel) {
+    if (wireModel == null) return null;
     String name = wireModel.toLowerCase(Locale.ROOT);
-    int slash = name.lastIndexOf('/');
-    if (slash >= 0) {
-      name = name.substring(slash + 1);
+    name = name.substring(name.lastIndexOf('/') + 1);
+    for (var candidate : mapping) {
+      if (name.startsWith(candidate.getKey())) return candidate.getValue();
     }
-    for (Map.Entry<String, Mapped> candidate : mapping) {
-      if (!name.startsWith(candidate.getKey())) {
-        continue;
-      }
-      Mapped hit = candidate.getValue();
-      Profile loaded = profiles.get(hit.profile());
-      Map<String, Map<Sampling.Intent, Sampling>> profile = loaded.modes();
-      String mode = hit.mode();
-      if (mode == null || !profile.containsKey(mode)) {
-        if (mode != null) {
-          // §8.3's own fallback, said out loud. A mode a person named
-          // and a profile does not carry is a typo or a file half
-          // edited, and running silently at another mode's numbers is
-          // how a factor of two on temperature goes unnoticed.
-          log.warn(
-              "the sampling mapping runs '{}' in mode '{}', which the profile"
-                  + " '{}' does not carry; its '{}' entry applies instead",
-              wireModel,
-              mode,
-              hit.profile(),
-              DEFAULT_MODE);
-        }
-        mode = DEFAULT_MODE;
-      }
-      Map<Sampling.Intent, Sampling> table = profile.get(mode);
-      if (table == null) {
-        log.warn(
-            "the profile '{}' has no '{}' mode, so nothing can be resolved for"
-                + " '{}' and no sampling parameters will be sent",
-            hit.profile(),
-            DEFAULT_MODE,
-            wireModel);
-        return Resolved.DEFAULT;
-      }
-      return new Resolved(hit.profile(), mode, table.get(intent), loaded.media());
-    }
-    return Resolved.DEFAULT;
+    return null;
   }
 
   /** Native declaration for the resolved model and mode, independent of sampling intent. */

@@ -1,0 +1,1 @@
+<|start|>assistant<|channel|>commentary to=functions.network_scan_list {"offset":0,"limit":10}<|call|>

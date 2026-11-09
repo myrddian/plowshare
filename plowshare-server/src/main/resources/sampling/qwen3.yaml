@@ -39,6 +39,9 @@
 #     than a setting, and picking a number inside a range a vendor left open is
 #     the kind of invention this whole design exists to stop.
 
+version: 2
+response-guard: qwen-hermes
+
 modes:
 
   # WHAT AN UNSTATED MODE GETS. Thinking, because that is how a reasoning-capable
