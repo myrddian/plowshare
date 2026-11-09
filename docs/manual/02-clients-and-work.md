@@ -183,6 +183,20 @@ local access without cancelling server work or replaying an uncertain submission
 See [shared local login](../client-login.md) for precedence, storage, migration,
 rename/remove and recovery behavior.
 
+## Open a server Application
+
+In Desktop, open **Applications** and select an entry marked **Active on server**.
+Its **Overview** leads to **Conversations**, **Schedules**, **Relay**, **Files**
+and **Access**. Open **Files** (also available through **Info → App files**) to
+browse the deployed source and any available writable areas in a tree beside the
+editor. You do not need to attach a local folder. Personal **Resources** uses the
+same browser layout for read-only viewing; external Projects keep their separate
+folder attachment and sync controls.
+
+The file view does not confer access. The server rechecks Application and
+FileStore permissions, the writable area and the file revision when you save.
+See [deployed Application files](../projects.md#deployed-application-files).
+
 ## Deploy an Application
 
 Connected server administrators open **Server administration** and choose

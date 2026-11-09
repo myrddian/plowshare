@@ -1,5 +1,9 @@
 # Install the manual in the Library
 
+To read without a server account, use the [public manual directory](https://plowshare.cc/manual).
+Install a Library copy when users need the manual in Desktop Help or agents need
+to read it through their server's information tools.
+
 The manual is checked-in Markdown plus a manifest of chapters. The installer
 uploads those chapters as ordinary information sources through the Node SDK,
 tags them for navigation, waits for retained text to be readable, and optionally
@@ -9,7 +13,7 @@ document projections. No separate documentation service or REST endpoint is adde
 ## Prepare and preview
 
 Use a checkout matching the manual edition you want. The repository's Java and
-TypeScript build prerequisites are Java 21, Node.js 22.12+ and pnpm. The offline
+TypeScript build prerequisites are Java 21, Node.js 22.13+ and pnpm. The offline
 preview needs only Node; it does not authenticate, create a local journal or submit
 work:
 

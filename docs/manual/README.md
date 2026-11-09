@@ -7,9 +7,12 @@ moving the agent runtime onto that client.
 
 This manual covers using, configuring and extending the current
 `0.1.0-SNAPSHOT` system. It describes implemented behavior and its limits; a
-capability still needs its configured models, permissions and tools. An installed
-manual is a retained snapshot of the Markdown in the checkout used to install it.
-It is not fetched from the internet or silently updated when the server restarts.
+capability still needs its configured models, permissions and tools.
+
+The [public manual directory](https://plowshare.cc/manual) is available without a
+Plowshare account and links to chapters from one published source revision. The
+manual in Desktop Help is a separate snapshot installed on the connected server.
+Publishing the website or restarting the server does not update that snapshot.
 
 ## Choose a starting point
 
@@ -57,13 +60,15 @@ chapters. These are the canonical references rather than duplicated copies:
 - [Model usage and accounting](../model-usage-accounting.md)
 - [SDKs](../sdks.md)
 - [A2A receiving](../a2a-receiving.md) and [A2A sending](../a2a-sending.md)
+- [Native MCP connections and sharing](../native-mcp-hosting.md)
+- [Relay publication, delivery and recovery](../relay.md)
 - [Integration runtime](../../integrations/runtime/README.md)
 - [Home Assistant](../../integrations/home-assistant/README.md)
 - [Distributions](../distributions.md) and [Docker deployment](../../deploy/docker/README.md)
 
 ## Read inside Plowshare
 
-After an operator runs the [installer](installation.md) with `--share`, click the
+After an operator runs the [installer](installation.md) with `--share` or `--global`, click the
 desktop **Help** question-mark icon. **Library → Manual** opens the index; follow
 chapter links to navigate. Chapters use stable supplied names such as
 `Plowshare manual / 13-hooks.md`; the reader resolves each link to its current
