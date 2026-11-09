@@ -43,7 +43,9 @@ function readerLinks(text, source, titles) {
  * A dry run needs no SDK, saved login, network request or database connection. */
 export async function loadManual(root = ROOT) {
   root = await realpath(root);
-  const manifest = JSON.parse(await readFile(join(root, 'docs/manual/manifest.json'), 'utf8'));
+  const manifestPath = await realpath(join(root, 'docs/manual/manifest.json'));
+  if (!inside(root, manifestPath)) throw new Error('The manual manifest must be inside the checkout.');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   if (!object(manifest) || manifest.formatVersion !== 1 || typeof manifest.edition !== 'string'
       || !/^[a-z0-9.-]{1,32}$/.test(manifest.edition) || !Array.isArray(manifest.chapters)
       || manifest.chapters.length < 1 || manifest.chapters.length > 64) {
@@ -323,10 +325,13 @@ async function saveJournal(path, journal) {
   } finally { await rm(temporary, { force: true }); }
 }
 
-export async function main(args = process.argv.slice(2), env = process.env) {
+/** Publishers can supply a separate checkout for the manual data while keeping the
+ * installer and its authenticated SDK pinned to a reviewed toolchain. */
+export async function main(args = process.argv.slice(2), env = process.env, manualRoot = ROOT) {
   const opts = options(args, env);
   if (opts.help) { process.stdout.write(HELP + '\n'); return; }
-  const plan = await loadManual();
+  const manualSource = await realpath(manualRoot);
+  const plan = await loadManual(manualSource);
   if (opts.dryRun) {
     for (const chapter of plan.chapters) process.stdout.write(`${chapter.id}\t${chapter.title}\t${Buffer.byteLength(chapter.text)} bytes\n`);
     process.stdout.write(`${plan.chapters.length} chapters validated; no requests or local journal writes.\n`);
@@ -350,9 +355,10 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     const scope = opts.global ? { kind: 'account', account: GLOBAL_ACCOUNT } : { kind: 'personal', includeGlobal: true };
     const filename = hash(JSON.stringify(opts.global ? [opts.url, session.handle, destination] : [opts.url, session.handle])) + '.json';
     const state = opts.state ?? join(dirname(credentialDirectory(env)), 'manual', filename);
-    if (inside(ROOT, resolve(state))) throw new Error('Keep the private manual journal outside the source checkout.');
+    const withinCheckout = path => inside(ROOT, path) || inside(manualSource, path);
+    if (withinCheckout(resolve(state))) throw new Error('Keep the private manual journal outside the source checkout.');
     await mkdir(dirname(state), { recursive: true, mode: 0o700 });
-    if (inside(await realpath(ROOT), await realpath(dirname(state)))) throw new Error('The journal directory resolves inside the checkout.');
+    if (withinCheckout(await realpath(dirname(state)))) throw new Error('The journal directory resolves inside the checkout.');
     const wantedLock = `${state}.lock`;
     try { await mkdir(wantedLock, { mode: 0o700 }); lock = wantedLock; }
     catch (error) {

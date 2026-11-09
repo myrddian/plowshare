@@ -85,10 +85,15 @@ test('manifest refuses escaping symlinks/duplicates, and Library links preserve 
   const outside = await mkdtemp(join(tmpdir(), 'manual-outside-'));
   try {
     await mkdir(join(root, 'docs/manual'), { recursive: true });
+    const manifestPath = join(root, 'docs/manual/manifest.json');
+    await writeFile(join(outside, 'manifest.json'), '{}');
+    await symlink(join(outside, 'manifest.json'), manifestPath);
+    await assert.rejects(loadManual(root), /manifest must be inside the checkout/);
+    await rm(manifestPath);
     await writeFile(join(outside, 'private.md'), '# Not a chapter\n');
     await symlink(join(outside, 'private.md'), join(root, 'docs/manual/linked.md'));
     const manifest = { formatVersion: 1, edition: '1', chapters: [{ id: 'one', title: 'One', path: 'docs/manual/linked.md' }] };
-    const save = () => writeFile(join(root, 'docs/manual/manifest.json'), JSON.stringify(manifest));
+    const save = () => writeFile(manifestPath, JSON.stringify(manifest));
     await save(); await assert.rejects(loadManual(root), /inside the checkout/);
     await writeFile(join(root, 'docs/manual/one.md'), '# One\n[Two](two.md)\n```md\n[Example](two.md)\n```\n');
     await writeFile(join(root, 'docs/manual/two.md'), '# Two\n');
