@@ -3,9 +3,10 @@
 import asyncio
 import ipaddress
 import os
-import re
 import ssl
+import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from aiohttp import (
     ClientError,
@@ -20,6 +21,7 @@ from .contracts import (
     UniFiPlan,
     integer,
     items,
+    mac_address,
     object_fields,
     parse_json,
     text,
@@ -39,6 +41,41 @@ class _ClientPage:
     devices: tuple[DeviceIdentity, ...]
 
 
+@dataclass(frozen=True)
+class _AdoptedDevice:
+    id: str
+    address: str | None
+    mac: str
+    name: str
+    product: ManagedProduct
+
+
+def _inventory_page(
+    value: object, offset: int, limit: int
+) -> tuple[tuple[object, ...], int]:
+    row = object_fields(value, {"offset", "limit", "count", "totalCount", "data"})
+    integer(row["offset"], offset, offset)
+    rows = tuple(items(row["data"], integer(row["limit"], 1, limit)))
+    count = integer(row["count"], len(rows), len(rows))
+    total = integer(row["totalCount"], offset + count, 2**31 - 1)
+    if not count and offset < total:
+        raise ValueError("UniFi returned an empty intermediate page")
+    return rows, total
+
+
+def _product(row: dict[str, object]) -> ManagedProduct:
+    firmware = row.get("firmwareVersion")
+    upgrade = row.get("firmwareUpdatable")
+    if upgrade is not None and type(upgrade) is not bool:
+        raise ValueError("Expected UniFi firmware update flag")
+    return ManagedProduct(
+        "Ubiquiti",
+        text(row.get("model"), 128),
+        text(firmware, 128) if firmware else None,
+        upgrade,
+    )
+
+
 class UniFiNetwork:
     """Read one bounded site snapshot, retaining only selected client addresses."""
 
@@ -54,6 +91,11 @@ class UniFiNetwork:
         site = plan.api_base + "/sites/" + plan.site_id
         self._clients = site + "/clients"
         self._devices = site + "/devices"
+        self._networks = site + "/networks"
+        self._gateway = plan.gateway
+        self._controller_host = urlsplit(plan.api_base).hostname
+        self._managed_keys: frozenset[tuple[str, str]] = frozenset()
+        self._managed_until = 0.0
         if plan.certificate_sha256 is not None:
             # aiohttp compares the exact peer certificate after the TLS handshake
             # and before it sends HTTP headers. Redirects remain disabled.
@@ -141,49 +183,231 @@ class UniFiNetwork:
             )
         )
 
+    def recently_managed(self, identity: DeviceIdentity) -> bool:
+        return (
+            time.monotonic() < self._managed_until
+            and (identity.address, identity.device_id) in self._managed_keys
+        )
+
+    async def _default_gateway(self, session: ClientSession, address: str) -> bool:
+        # The Network API can report WAN IP on the adopted gateway. A LAN alias
+        # requires both the operator's explicit binding and the controller's
+        # current default-network address. A model/name alone cannot join them.
+        rows, total = _inventory_page(
+            await self._read_page(
+                session, self._networks, {"offset": 0, "limit": _PAGE_SIZE}
+            ),
+            0,
+            _PAGE_SIZE,
+        )
+        if len(rows) != total:
+            raise ValueError("Incomplete UniFi network inventory")
+        networks = [
+            row
+            for row in rows
+            if isinstance(row, dict)
+            and row.get("default") is True
+            and row.get("enabled") is True
+            and row.get("management") == "GATEWAY"
+        ]
+        if len(networks) != 1:
+            return False
+        network_id = uuid(networks[0].get("id"))
+        detail = await self._read_page(session, self._networks + "/" + network_id, {})
+        if not isinstance(detail, dict) or detail.get("id") != network_id:
+            raise ValueError("Foreign UniFi gateway network")
+        ipv4 = detail.get("ipv4Configuration")
+        return (
+            detail.get("enabled") is True
+            and detail.get("management") == "GATEWAY"
+            and isinstance(ipv4, dict)
+            and ipv4.get("hostIpAddress") == address
+        )
+
+    async def _adopted_inventory(
+        self, session: ClientSession, targets: frozenset[str]
+    ) -> tuple[_AdoptedDevice, ...]:
+        gateway_host = (
+            self._controller_host
+            if self._gateway and self._controller_host in targets
+            else None
+        )
+        rows = []
+        ids: set[str] = set()
+        offset = 0
+        total = None
+        for _ in range(_MAX_PAGES):
+            raw, count = _inventory_page(
+                await self._read_page(
+                    session, self._devices, {"offset": offset, "limit": _PAGE_SIZE}
+                ),
+                offset,
+                _PAGE_SIZE,
+            )
+            if total is not None and count != total:
+                raise ValueError("UniFi adopted-device pagination changed")
+            total = count
+            for row in raw:
+                if not isinstance(row, dict):
+                    raise ValueError("Expected adopted UniFi device")
+                identity = uuid(row.get("id"))
+                if identity in ids:
+                    raise ValueError("Duplicate adopted UniFi device")
+                ids.add(identity)
+                if row.get("state") != "ONLINE":
+                    continue
+                address = row.get("ipAddress")
+                configured_gateway = (
+                    gateway_host is not None
+                    and self._gateway is not None
+                    and identity == self._gateway.device_id
+                )
+                if (
+                    isinstance(address, str)
+                    and address in targets
+                    or configured_gateway
+                ):
+                    rows.append(
+                        _AdoptedDevice(
+                            identity,
+                            address if isinstance(address, str) else None,
+                            mac_address(row.get("macAddress")),
+                            text(row.get("name"), 128),
+                            _product(row),
+                        )
+                    )
+            offset += len(raw)
+            if offset == total:
+                return tuple(rows)
+        raise ValueError("UniFi adopted-device inventory exceeded the page limit")
+
+    async def managed_sightings(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        scope = frozenset(targets)
+        devices: dict[str, DeviceIdentity] = {}
+        ambiguous: set[str] = set()
+        issues = []
+        try:
+            async with (
+                asyncio.timeout(15),
+                ClientSession(
+                    headers={"X-API-Key": self._api_key, "Accept": "application/json"},
+                    timeout=ClientTimeout(total=5),
+                ) as session,
+            ):
+                rows = await self._adopted_inventory(session, scope)
+                host = self._controller_host
+                gateway = self._gateway
+                gateway_row = next(
+                    (row for row in rows if gateway and row.id == gateway.device_id),
+                    None,
+                )
+                if gateway and host is not None and host in scope:
+                    try:
+                        if gateway_row is None or not await self._default_gateway(
+                            session, host
+                        ):
+                            issues.append(
+                                "unifi_gateway_unconfirmed: configured device and default LAN gateway could not be matched"
+                            )
+                        else:
+                            rows = (
+                                *rows,
+                                _AdoptedDevice(
+                                    gateway_row.id,
+                                    host,
+                                    gateway.lan_mac,
+                                    gateway_row.name,
+                                    gateway_row.product,
+                                ),
+                            )
+                    except (ClientError, TimeoutError, ValueError):
+                        issues.append(
+                            "unifi_gateway_unconfirmed: default LAN gateway could not be read"
+                        )
+        except (ClientError, TimeoutError, ValueError):
+            self._managed_keys = frozenset()
+            return IdentitySample(
+                issues=(
+                    "unifi_managed_unavailable: adopted-device inventory could not be read or validated",
+                )
+            )
+
+        for row in rows:
+            if row.address is None or row.address not in scope:
+                continue
+            existing = devices.get(row.address)
+            if existing is not None and existing.mac != row.mac:
+                ambiguous.add(row.address)
+                continue
+            devices[row.address] = DeviceIdentity(
+                row.address,
+                "mac:" + row.mac,
+                None,
+                row.name,
+                row.mac,
+                row.product.manufacturer,
+                "unifi",
+                observed_at,
+                observed_at,
+            )
+        if ambiguous:
+            issues.append(
+                "unifi_managed_ambiguous: adopted devices reported different MACs at a watched address"
+            )
+        accepted = tuple(
+            device for address, device in devices.items() if address not in ambiguous
+        )
+        self._managed_keys = frozenset(
+            (device.address, device.device_id) for device in accepted
+        )
+        self._managed_until = time.monotonic() + 360
+        return IdentitySample(accepted, frozenset(ambiguous), tuple(issues))
+
     async def managed_product(self, identity: DeviceIdentity) -> ManagedProduct | None:
-        mac = identity.mac
-        if mac is None or not re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", mac):
-            raise ValueError("Choose an observed device with a MAC address")
+        mac = mac_address(identity.mac)
         try:
             async with ClientSession(
                 headers={"X-API-Key": self._api_key, "Accept": "application/json"},
                 timeout=ClientTimeout(total=5),
             ) as session:
+                gateway = self._gateway
+                if (
+                    gateway
+                    and identity.address == self._controller_host
+                    and mac == gateway.lan_mac
+                ):
+                    raw = await self._read_page(
+                        session, self._devices + "/" + gateway.device_id, {}
+                    )
+                    if (
+                        not isinstance(raw, dict)
+                        or raw.get("id") != gateway.device_id
+                        or raw.get("state") != "ONLINE"
+                    ):
+                        return None
+                    if not await self._default_gateway(session, identity.address):
+                        return None
+                    return _product(raw)
                 raw = await self._read_page(
                     session,
                     self._devices,
                     {"offset": 0, "limit": 2, "filter": f"macAddress.eq('{mac}')"},
                 )
-            page = object_fields(
-                raw, {"offset", "limit", "count", "totalCount", "data"}
-            )
-            integer(page["offset"], 0, 0)
-            matches = items(page["data"], integer(page["limit"], 1, 2))
-            count = integer(page["count"], len(matches), len(matches))
-            if integer(page["totalCount"], count, 2**31 - 1) != 1 or count != 1:
+            matches, total = _inventory_page(raw, 0, 2)
+            if total != 1 or len(matches) != 1:
                 return None
             row = matches[0]
             if not isinstance(row, dict):
                 raise ValueError("Expected adopted UniFi device")
-            # Both identifiers must still agree on a live controller record.
-            # A reused IP, stale client or duplicate match cannot supply a model.
             if (
-                text(row.get("macAddress"), 17).lower() != mac
+                mac_address(row.get("macAddress")) != mac
                 or row.get("state") != "ONLINE"
                 or row.get("ipAddress") != identity.address
             ):
                 return None
-            firmware = row.get("firmwareVersion")
-            upgrade = row.get("firmwareUpdatable")
-            if upgrade is not None and type(upgrade) is not bool:
-                raise ValueError("Expected UniFi firmware update flag")
-            return ManagedProduct(
-                "Ubiquiti",
-                text(row.get("model"), 128),
-                text(firmware, 128) if firmware is not None else None,
-                upgrade,
-            )
+            return _product(row)
         except (ClientError, TimeoutError, ValueError):
             raise ManagedProductUnavailable(
                 "UniFi product details could not be read or validated."

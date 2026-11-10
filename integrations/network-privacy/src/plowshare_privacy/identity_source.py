@@ -40,3 +40,13 @@ class ManagedProductLookup(Protocol):
     async def managed_product(
         self, identity: DeviceIdentity
     ) -> ManagedProduct | None: ...
+
+
+@runtime_checkable
+class ManagedInventory(Protocol):
+    """Read watched adopted devices and prioritize those with current product evidence."""
+
+    async def managed_sightings(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample: ...
+    def recently_managed(self, identity: DeviceIdentity) -> bool: ...

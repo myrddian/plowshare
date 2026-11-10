@@ -40,3 +40,8 @@ Large scan texts may be explicit bounded projections. Check their counts and
 completeness; verify relevant omitted rows with the read-only network_evidence
 tool using section, offset and limit, following next_offset. Omission does not
 prove absence. Never request another scan to work around a context limit.
+
+For a profile with a confirmed MAC, require that MAC in the retained observation
+before applying its device expectations. A reused address alone cannot link the
+profile to another device. Older address-only profiles remain operator context
+whose identity requires confirmation.

@@ -165,6 +165,16 @@ class DnsObservation:
         )
 
 
+def mac_address(value: object) -> str:
+    mac = text(value, 17).lower()
+    if not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac) or mac in {
+        "00:00:00:00:00:00",
+        "ff:ff:ff:ff:ff:ff",
+    }:
+        raise ValueError("Invalid device MAC address")
+    return mac
+
+
 @dataclass(frozen=True)
 class DeviceIdentity:
     """A time-specific address association, not proof of a physical device's identity."""
@@ -196,12 +206,7 @@ class DeviceIdentity:
             },
         )
         address = str(ipaddress.ip_address(text(row["address"])))
-        mac = text(row["mac"], 17).lower() if row["mac"] is not None else None
-        if mac is not None and (
-            not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac)
-            or mac in {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"}
-        ):
-            raise ValueError("Invalid device MAC address")
+        mac = mac_address(row["mac"]) if row["mac"] is not None else None
         expected = "mac:" + mac if mac else "ip:" + address
         source = row["source"]
         if row["device_id"] != expected or source not in (
@@ -461,19 +466,31 @@ class PiHolePlan:
 
 
 @dataclass(frozen=True)
+class UniFiGateway:
+    device_id: str
+    lan_mac: str
+
+    @classmethod
+    def decode(cls, value: object) -> UniFiGateway:
+        row = object_fields(value, {"deviceId", "lanMac"})
+        return cls(uuid(row["deviceId"]), mac_address(row["lanMac"]))
+
+
+@dataclass(frozen=True)
 class UniFiPlan:
     api_base: str
     site_id: str
     api_key_environment: str
     ca_file: Path | None
     certificate_sha256: str | None = None
+    gateway: UniFiGateway | None = None
 
     @classmethod
     def decode(cls, value: object) -> UniFiPlan:
         row = object_fields(
             value,
             {"apiBase", "siteId", "apiKeyEnvironment"},
-            {"caFile", "certificateSha256"},
+            {"caFile", "certificateSha256", "gateway"},
         )
         base = text(row["apiBase"], 2048).rstrip("/")
         url = urlsplit(base)
@@ -508,7 +525,12 @@ class UniFiPlan:
             raise ValueError("UniFi certificate pin must be a SHA-256 hex digest")
         if ca_file is not None and fingerprint is not None:
             raise ValueError("Choose either a UniFi CA file or a certificate pin")
-        return cls(base, uuid(row["siteId"]), environment, ca_file, fingerprint)
+        gateway = UniFiGateway.decode(row["gateway"]) if "gateway" in row else None
+        if gateway is not None and not private_ipv4(url.hostname):
+            raise ValueError("A UniFi gateway binding requires a private IPv4 API host")
+        return cls(
+            base, uuid(row["siteId"]), environment, ca_file, fingerprint, gateway
+        )
 
 
 @dataclass(frozen=True)

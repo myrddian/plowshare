@@ -515,7 +515,7 @@ function renderOverview(value) {
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
     const profile = element('button', 'Device profile');
-    profile.addEventListener('click', () => openDeviceProfile(device.address).catch(error => notice(error.message, true)));
+    profile.addEventListener('click', () => openDeviceProfile(device.address, device.identity?.mac || null).catch(error => notice(error.message, true)));
     const research = element('button', 'Research device', 'secondary');
     research.addEventListener('click', () => openDeviceResearch(device));
     card.append(history, research, profile); cards.append(card);
@@ -803,7 +803,7 @@ byId('background-draft-editor').addEventListener('click', async () => {
   researchBusy = true;
   try {
     const entry = await api(backgroundDraftPath(id) + '/editor');
-    await openDeviceProfile(entry.identity.address);
+    await openDeviceProfile(entry.identity.address, entry.identity.mac, true);
     const draft = entry.draft;
     for (const [field, value] of [['name',draft.name],['model',entry.model],['purpose',draft.purpose],
       ['expected',draft.expected_services],['notes',draft.notes]]) {
@@ -894,7 +894,7 @@ byId('research-profile').addEventListener('click', async () => {
   const model = byId('research-model').value.trim();
   if (!device || !model) return;
   try {
-    await openDeviceProfile(device.address);
+    await openDeviceProfile(device.address, device.identity?.mac || null);
     if (device === researchDevice) byId('profile-model').value = model;
   } catch (error) {notice(error.message, true);}
 });
@@ -948,12 +948,19 @@ function advisoryLookup(view) {
   return panel;
 }
 
-async function editProfile(view, address = null) {
+async function editProfile(view, address = null, deviceMac = null) {
   await profileReceipts();
   const settings = await api('/api/monitoring');
   const fields = view ? view.profile.fields : {name:'',owner:'',model:'',purpose:'',expected_services:'',notes:'',addresses:address ? [address] : []};
-  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null};
+  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null, deviceMac:view?.profile.fields.device_mac || deviceMac};
+  byId('profile-mac').textContent = profileEdit.deviceMac
+    ? 'Confirmed device MAC · ' + profileEdit.deviceMac
+    : 'Address-only profile. A matching address alone does not establish device identity.';
   for (const [id, key] of [['profile-name','name'],['profile-owner','owner'],['profile-model','model'],['profile-purpose','purpose'],['profile-expected','expected_services'],['profile-notes','notes']]) byId(id).value = fields[key];
+  const macs = [...new Set((overview?.devices || []).filter(device => fields.addresses.includes(device.address))
+    .map(device => device.identity?.mac).filter(Boolean))];
+  byId('profile-bind-mac').hidden = !!profileEdit.deviceMac || macs.length !== 1;
+  profileEdit.observedMac = macs.length === 1 ? macs[0] : null;
   const choices = [...new Set([...settings.targets, ...fields.addresses])];
   byId('profile-addresses').replaceChildren(...choices.map(value => {const option = element('option', value); option.value = value; option.selected = fields.addresses.includes(value); return option;}));
   await renderIssueLinks(fields.issues || [], view?.evidence || []);
@@ -978,19 +985,30 @@ async function editProfile(view, address = null) {
   }
   byId('device-profiles').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
-async function openDeviceProfile(address) {
+async function openDeviceProfile(address, mac = null, bind = false) {
   const profiles = await loadProfiles();
-  const matches = profiles.filter(value => value.profile.fields.addresses.includes(address));
-  if (matches.length > 1) throw new Error('Several profiles claim this address. Review their retained documents before editing.');
-  await editProfile(matches[0] || null, address);
+  const matches = profiles.filter(value => mac
+    ? value.profile.fields.device_mac === mac
+    : !value.profile.fields.device_mac && value.profile.fields.addresses.includes(address));
+  const legacy = profiles.some(value => !value.profile.fields.device_mac && value.profile.fields.addresses.includes(address));
+  if (matches.length > 1) throw new Error('Several profiles claim this device. Review their retained documents before editing.');
+  if (mac && !matches.length && legacy) throw new Error('This address has a legacy profile. Review it in the knowledge base before confirming a MAC association.');
+  await editProfile(matches[0] || null, address, bind ? mac : null);
 }
+
+byId('profile-bind-mac').addEventListener('click', () => {
+  if (!profileEdit || profileEdit.deviceMac || !profileEdit.observedMac) return;
+  profileEdit.deviceMac = profileEdit.observedMac;
+  byId('profile-mac').textContent = 'Confirming MAC on save · ' + profileEdit.deviceMac;
+  byId('profile-bind-mac').hidden = true;
+});
 byId('load-profiles').addEventListener('click', () => loadProfiles().catch(error => notice(error.message,true)));
 byId('new-profile').addEventListener('click', () => editProfile(null).catch(error => notice(error.message,true)));
 byId('cancel-profile').addEventListener('click', () => {profileEdit = null; byId('profile-form').hidden = true;});
 byId('profile-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!profileEdit || profileBlocked) return;
   byId('save-profile').disabled = true;
-  const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value),issues:readIssueLinks()};
+  const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value),issues:readIssueLinks(),device_mac:profileEdit.deviceMac || null};
   try {
     const receipt = await api('/api/profiles', {method:'POST',body:JSON.stringify({profile_id:profileEdit.id,request_id:crypto.randomUUID(),expected_revision:profileEdit.revision,fields})});
     if (receipt.phase === 'confirmed') {profileEdit = null; byId('profile-form').hidden = true; notice('Device profile saved in Plowshare. Processing may still be pending; load profiles again when ready.');}
