@@ -157,6 +157,7 @@ class NetworkCollector:
             and identity.address not in connected.ambiguous_addresses
         }
         issues = list(connected.issues)
+        ambiguous = connected.ambiguous_addresses & scope
         remaining = tuple(
             address
             for address in plan.targets
@@ -173,9 +174,11 @@ class NetworkCollector:
                 )
             )
             eligible = frozenset(remaining)
+            ambiguous |= cached.ambiguous_addresses & eligible
             for identity in cached.devices:
                 if (
                     identity.address in eligible
+                    and identity.address not in ambiguous
                     and identity.last_seen is not None
                     and start < epoch(identity.last_seen) <= end
                 ):
@@ -208,7 +211,7 @@ class NetworkCollector:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
         return PresenceSample(
-            observed, tuple(sightings.values()), tuple(dict.fromkeys(issues))
+            observed, tuple(sightings.values()), tuple(dict.fromkeys(issues)), ambiguous
         )
 
     async def collect(
