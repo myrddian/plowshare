@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.orchestrations;
 
+import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -12,6 +13,25 @@ public interface OrchestrationRecovery {
    * from a later failed attempt. No remote work occurs in this transaction.
    */
   boolean claim(String id, String account, UUID requestId, Instant failureAt);
+
+  /** Checks a repair receipt including both hashes and the boundary sequence. */
+  default boolean received(String id, String account, UUID requestId, CheckpointRepair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
+
+  /**
+   * Atomically claims the failed checkpoint, records its original source, and pins the replacement.
+   */
+  default boolean claimRepair(
+      String id,
+      String account,
+      UUID requestId,
+      Instant failureAt,
+      CheckpointRepair repair,
+      String previousSource,
+      String replacementSource) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
 
   /** Checks a prior receipt without changing the run; rejects keys bound to another run. */
   boolean received(String id, String account, UUID requestId);

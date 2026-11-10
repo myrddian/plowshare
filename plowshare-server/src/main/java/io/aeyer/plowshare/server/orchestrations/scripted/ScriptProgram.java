@@ -24,6 +24,19 @@ public final class ScriptProgram {
 
   private ScriptProgram() {}
 
+  /** The pinned journal identity covers the complete UTF-8 source. */
+  public static String sourceHash(String source) {
+    try {
+      return "sha256:"
+          + java.util.HexFormat.of()
+              .formatHex(
+                  java.security.MessageDigest.getInstance("SHA-256")
+                      .digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    }
+  }
+
   public static boolean isScript(String source) {
     return source != null && source.stripLeading().startsWith(MARKER);
   }

@@ -76,6 +76,7 @@ class EventScriptRuntimeTest {
   }
 
   private JobRuntime runtime(ScriptStore.Command command) {
+    when(scripts.head(anyString())).thenCallRealMethod();
     when(tool.schema()).thenReturn(ToolSchema.from("probe", "fixture", Map.of("type", "object")));
     when(scripts.prepareNext(anyString(), any(), anyBoolean()))
         .thenAnswer(

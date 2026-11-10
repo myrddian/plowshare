@@ -88,6 +88,7 @@ const MUTATIONS = new Set<string>([
   'orchestration.answer',
   'orchestration.cancel',
   'orchestration.resume',
+  'orchestration.repair',
   'schedule.save',
   'schedule.sync',
   'schedule.define',

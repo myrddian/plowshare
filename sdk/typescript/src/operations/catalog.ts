@@ -586,6 +586,7 @@ export const CLI_OPERATIONS = {
   'orchestration status': 'orchestration.status',
   'orchestration answer': 'orchestration.answer',
   'orchestration resume': 'orchestration.resume',
+  'orchestration repair': 'orchestration.repair',
   'orchestration cancel': 'orchestration.cancel',
   'orchestration caps': 'orchestration.caps',
   'orchestration record': 'orchestration.record',

@@ -4,8 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
 import io.aeyer.plowshare.server.information.InformationGateRepository;
+import io.aeyer.plowshare.server.todos.TodoItem;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -29,21 +32,36 @@ public final class JdbcScriptStore implements ScriptStore {
 
   /** Raw state remains inside this journal/sandbox boundary, never in the job runtime. */
   public Preparation prepareNext(String source, Input input, boolean mayDelegate) {
+    var evaluated = evaluate(source, input, input.hash());
+    if (evaluated.command() instanceof Tool tool && tool.name().equals("agent_run") && !mayDelegate)
+      return new NeedsCall();
+    return persist(input, evaluated);
+  }
+
+  @Override
+  public Preparation prepareNext(String source, Input input, Repair repair) {
+    String previousHash =
+        input.sequence() == repair.boundary().sequence() + 1
+            ? repair.boundary().sourceHash()
+            : input.hash();
+    var evaluated = evaluate(source, input, previousHash);
+    requireRepairCommand(input, evaluated.command(), repair);
+    return persist(input, evaluated);
+  }
+
+  @Override
+  public void previewRepair(String source, Input input, Repair repair) {
+    requireRepairCommand(
+        input, evaluate(source, input, repair.boundary().sourceHash()).command(), repair);
+  }
+
+  private record Evaluated(Command command, String state, String encodedCommand) {}
+
+  private Evaluated evaluate(String source, Input input, String previousHash) {
     java.util.Objects.requireNonNull(input, "input");
     if (source == null || source.length() > 524288)
       throw new IllegalStateException("invalid script source size");
-    String actualHash;
-    try {
-      actualHash =
-          "sha256:"
-              + java.util.HexFormat.of()
-                  .formatHex(
-                      java.security.MessageDigest.getInstance("SHA-256")
-                          .digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-    } catch (java.security.NoSuchAlgorithmException impossible) {
-      throw new IllegalStateException(impossible);
-    }
-    if (!actualHash.equals(input.hash()))
+    if (!ScriptProgram.sourceHash(source).equals(input.hash()))
       throw new IllegalStateException("script source differs from the pinned journal");
     JsonNode state =
         input.previousSequence() == null
@@ -58,7 +76,7 @@ public final class JdbcScriptStore implements ScriptStore {
                 },
                 input.run(),
                 input.previousSequence(),
-                input.hash());
+                previousHash);
     var encoded = JSON.valueToTree(input);
     var object = (com.fasterxml.jackson.databind.node.ObjectNode) encoded;
     object.remove("previousSequence");
@@ -69,18 +87,116 @@ public final class JdbcScriptStore implements ScriptStore {
       throw new IllegalStateException("script step must return state and one command");
     if (evaluated.size() != 2)
       throw new IllegalStateException("script step has unsupported fields");
-    Command command = ScriptCommands.read(evaluated.get("command"));
-    if (command instanceof Tool tool && tool.name().equals("agent_run") && !mayDelegate)
-      return new NeedsCall();
-    Step step = new Step(input.sequence(), input.hash(), command, null, null, false, null);
+    return new Evaluated(
+        ScriptCommands.read(evaluated.get("command")),
+        evaluated.get("state").toString(),
+        evaluated.get("command").toString());
+  }
+
+  private Prepared persist(Input input, Evaluated evaluated) {
+    Step step =
+        new Step(input.sequence(), input.hash(), evaluated.command(), null, null, false, null);
     jdbc.update(
         "INSERT INTO orchestration_script_steps(conversation_id,sequence,source_hash,state,command) VALUES (?,?,?,?::jsonb,?::jsonb)",
         input.run(),
         step.sequence(),
         step.hash(),
-        evaluated.get("state").toString(),
-        evaluated.get("command").toString());
+        evaluated.state(),
+        evaluated.encodedCommand());
     return new Prepared(step);
+  }
+
+  @Override
+  public Set<UUID> repairEvidence(String conversation, int checkpoint) {
+    return Set.copyOf(
+        jdbc.query(
+            """
+        SELECT DISTINCT effective_arguments::jsonb->>'revision' AS revision
+        FROM orchestration_script_steps
+        WHERE conversation_id=? AND sequence<? AND completed_at IS NOT NULL
+          AND result LIKE '{%' AND command->>'tool'='information_read'
+          AND effective_arguments::jsonb->>'operation'='read'
+          AND effective_arguments::jsonb->>'revision' IS NOT NULL
+        """,
+            (row, n) -> UUID.fromString(row.getString("revision")), conversation, checkpoint));
+  }
+
+  private record PinnedHead(Step step, CheckpointRepair boundary) {}
+
+  @Override
+  public Head head(String conversation) {
+    var found =
+        jdbc.query(
+            """
+        SELECT s.*,r.checkpoint_sequence,r.previous_script_hash,r.replacement_script_hash
+        FROM (SELECT * FROM orchestration_script_steps WHERE conversation_id=?
+              ORDER BY sequence DESC LIMIT 1) s
+        LEFT JOIN orchestrations o ON o.conductor_conversation=s.conversation_id
+        LEFT JOIN orchestration_resume_receipts r ON r.run_id=o.id AND r.checkpoint_sequence IS NOT NULL
+        """,
+            (row, n) -> {
+              Integer sequence = row.getObject("checkpoint_sequence", Integer.class);
+              return new PinnedHead(
+                  step(row),
+                  sequence == null
+                      ? null
+                      : new CheckpointRepair(
+                          sequence,
+                          row.getString("previous_script_hash"),
+                          row.getString("replacement_script_hash")));
+            },
+            conversation);
+    if (found.isEmpty()) return new Head(Optional.empty(), Optional.empty());
+    var current = found.getFirst();
+    return new Head(
+        Optional.of(current.step()),
+        Optional.ofNullable(current.boundary())
+            .map(
+                boundary ->
+                    new Repair(boundary, repairEvidence(conversation, boundary.sequence()))));
+  }
+
+  @Override
+  public boolean repaired(String conversation) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+        SELECT EXISTS (SELECT 1 FROM orchestrations o JOIN orchestration_resume_receipts r ON r.run_id=o.id
+          WHERE o.conductor_conversation=? AND r.checkpoint_sequence IS NOT NULL)
+        """,
+            Boolean.class,
+            conversation));
+  }
+
+  private void requireRepairCommand(Input input, Command command, Repair repair) {
+    if (!(command instanceof Tool tool))
+      throw new IllegalStateException("Repaired checkpoints require a report continuation tool");
+    requireRepairEffect(input.run(), input.sequence(), tool, input.todos(), repair);
+  }
+
+  @Override
+  public void requireRepairEffect(
+      String conversation, int sequence, Tool command, List<TodoItem> todos, Repair repair) {
+    var effect = ReportRepairEffects.validate(command, conversation, sequence, todos, repair);
+    if (effect == ReportRepairEffects.Effect.STAGE) return;
+    // Check the journal, including any started write without a result. The current command
+    // is excluded so an undispatched prepared command remains recoverable.
+    var prior =
+        jdbc.query(
+            """
+        SELECT CASE WHEN completed_at IS NOT NULL THEN raw_result END FROM orchestration_script_steps
+        WHERE conversation_id=? AND sequence<? AND command->>'tool'='information_write'
+        ORDER BY sequence DESC LIMIT 1
+        """,
+            (row, n) -> row.getString(1),
+            conversation,
+            sequence);
+    if (effect == ReportRepairEffects.Effect.DRAFT && !prior.isEmpty())
+      throw new IllegalStateException("A repaired checkpoint cannot attempt another draft save");
+    if (effect == ReportRepairEffects.Effect.FINISH
+        && (prior.isEmpty() || !ReportRepairEffects.savedDraft(prior.getFirst())))
+      throw new IllegalStateException(
+          "A repaired checkpoint requires a confirmed draft before finish");
   }
 
   public Optional<Step> latest(String conversation) {

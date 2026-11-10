@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 292,
+    "registeredRequestFrames": 293,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 279,
-    "headlessCliOneShotFrames": 269,
+    "headlessCliRequestFrames": 280,
+    "headlessCliOneShotFrames": 270,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 292,
+    "typedRequestFrames": 293,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -5991,6 +5991,23 @@
       "legacyMcpTools": []
     },
     {
+      "frame": "orchestration.repair",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OrchestrationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "orchestration.resume",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OrchestrationFrames.java",
       "typescriptBuilders": [
@@ -8383,6 +8400,7 @@
             "orchestration.answer",
             "orchestration.cancel",
             "orchestration.resume",
+            "orchestration.repair",
             "orchestration.caps",
             "schedule.save",
             "schedule.sync",
@@ -8915,6 +8933,7 @@
           "orchestration.list",
           "orchestration.receipt",
           "orchestration.record",
+          "orchestration.repair",
           "orchestration.resume",
           "orchestration.start",
           "orchestration.status",
@@ -9009,7 +9028,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 269,
+        "count": 270,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -9021,9 +9040,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 292 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 293 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "279 WS operations: 269 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "280 WS operations: 270 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "acting.context.open": "physical-connection-subject-context",
         "acting.context.close": "physical-connection-subject-context",

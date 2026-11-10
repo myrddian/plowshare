@@ -2192,21 +2192,10 @@ public final class JobRuntime {
                     ? search.scripted()
                     : tool instanceof TodoTools.Write write ? write.scripted() : tool);
     HookContext context = declared.holding(offered.keySet());
-    String hash;
-    try {
-      hash =
-          "sha256:"
-              + java.util.HexFormat.of()
-                  .formatHex(
-                      java.security.MessageDigest.getInstance("SHA-256")
-                          .digest(
-                              definition
-                                  .prompt()
-                                  .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-    } catch (java.security.NoSuchAlgorithmException impossible) {
-      throw new IllegalStateException(impossible);
-    }
-    var previous = scripts.latest(conversation).orElse(null);
+    String hash = ScriptProgram.sourceHash(definition.prompt());
+    var head = scripts.head(conversation);
+    var repair = head.repair().orElse(null);
+    var previous = head.step().orElse(null);
     int callsBefore = budget.spent();
     int taken = 0;
     while (!cancelled.getAsBoolean()) {
@@ -2219,7 +2208,9 @@ public final class JobRuntime {
             budget.spent() - callsBefore,
             "");
       if (informationInputs != null) informationInputs.requireLog(conversation, owner);
-      if (previous != null && !previous.hash().equals(hash))
+      if (previous != null
+          && !previous.hash().equals(hash)
+          && (repair == null || !repair.crosses(previous, hash)))
         throw new IllegalStateException("script source differs from the pinned journal");
       boolean resuming = previous != null && previous.result() == null;
       if (resuming
@@ -2265,8 +2256,10 @@ public final class JobRuntime {
         io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Preparation next;
         try {
           next =
-              scripts.prepareNext(
-                  definition.prompt(), input, definition.nativeOnly() || !budget.exhausted());
+              repair == null
+                  ? scripts.prepareNext(
+                      definition.prompt(), input, definition.nativeOnly() || !budget.exhausted())
+                  : scripts.prepareNext(definition.prompt(), input, repair);
         } catch (IllegalStateException failed) {
           String file = ScriptProgram.fileName(definition.name(), definition.origin());
           var location =
@@ -2278,7 +2271,8 @@ public final class JobRuntime {
               "conversation=%s project=%s account=%s script=%s"
                   .formatted(
                       conversation, home.isGlobal() ? "(global)" : home.project(), owner, site);
-          if (transcript.origin() == io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION) {
+          if (repair == null
+              && transcript.origin() == io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION) {
             var block = scripts.blockedReport(owner, previous);
             if (block.isPresent()) {
               var refusal = block.get();
@@ -2415,6 +2409,19 @@ public final class JobRuntime {
         throw new IllegalStateException(
             "a hook changed a cached command's arguments; its paid result cannot be reused for a different request");
       if (raw == null) {
+        // Preparation checked the original command. Recheck a recovered prepared command or
+        // a hook rewrite against the current snapshot before any effect.
+        if (repair != null
+            && (resuming
+                || !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
+                    arguments, pre.arguments())))
+          scripts.requireRepairEffect(
+              conversation,
+              pending.sequence(),
+              new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool(
+                  name, pre.arguments(), command.readinessObserver()),
+              input.todos(),
+              repair);
         var retainedInputs =
             pending.retryOfReport() == null
                 ? Optional.<Set<java.util.UUID>>empty()

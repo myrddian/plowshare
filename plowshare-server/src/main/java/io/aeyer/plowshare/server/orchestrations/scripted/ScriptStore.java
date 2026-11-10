@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.orchestrations.scripted;
 
+import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
 import io.aeyer.plowshare.server.todos.TodoItem;
 import java.util.List;
 import java.util.Objects;
@@ -114,6 +115,55 @@ public interface ScriptStore {
    * unaffordable.
    */
   Preparation prepareNext(String source, Input input, boolean mayDelegate);
+
+  /** A repair permits a single source transition, with a fence on all subsequent effects. */
+  record Repair(CheckpointRepair boundary, Set<UUID> evidence) {
+    public Repair {
+      Objects.requireNonNull(boundary, "boundary");
+      evidence = Set.copyOf(evidence);
+      if (evidence.isEmpty())
+        throw new IllegalArgumentException("repair requires retained evidence");
+    }
+
+    public boolean crosses(Step previous, String nextHash) {
+      return previous.sequence() == boundary.sequence()
+          && previous.hash().equals(boundary.sourceHash())
+          && nextHash.equals(boundary.replacementHash())
+          && previous.result() != null;
+    }
+  }
+
+  /** Validate a candidate against the completed state before claiming the failed run. */
+  default void previewRepair(String source, Input input, Repair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
+
+  /** Collect only revisions from completed evidence reads preceding the exact checkpoint. */
+  default Set<UUID> repairEvidence(String conversation, int checkpoint) {
+    return Set.of();
+  }
+
+  record Head(Optional<Step> step, Optional<Repair> repair) {}
+
+  /** Resolve the boundary and latest command together at the start of a scripted turn. */
+  default Head head(String conversation) {
+    return new Head(latest(conversation), Optional.empty());
+  }
+
+  default boolean repaired(String conversation) {
+    return false;
+  }
+
+  /** Evaluate using the repair boundary only when crossing from the preceding source hash. */
+  default Preparation prepareNext(String source, Input input, Repair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
+
+  /** Authorize the effective arguments after hooks, before invoking a tool on a repaired run. */
+  default void requireRepairEffect(
+      String conversation, int sequence, Tool command, List<TodoItem> todos, Repair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
 
   Optional<Step> latest(String conversation);
 
