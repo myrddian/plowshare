@@ -950,6 +950,7 @@ export const SHAPES: Record<
   'orchestration.answer': [['id'], ['answer', 'choices']],
   'orchestration.cancel': [['id'], []],
   'orchestration.resume': [['id', 'requestId'], []],
+  'orchestration.repair': [['id', 'requestId', 'checkpoint'], []],
   'orchestration.caps': [['project'], []],
   'orchestration.record': [
     ['root'],
@@ -1190,6 +1191,7 @@ export function commandProblem(
     type === 'orchestration.start' ||
     type === 'orchestration.receipt' ||
     type === 'orchestration.resume' ||
+    type === 'orchestration.repair' ||
     type === 'board.post' ||
     type === 'board.open' ||
     type === 'board.retry' ||
@@ -1201,6 +1203,27 @@ export function commandProblem(
       !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(body['requestId'])
     )
       return 'requestId must be a UUID retained for receipt recovery';
+  }
+  if (type === 'orchestration.repair') {
+    const checkpoint = fields(body['checkpoint']);
+    const sequence = checkpoint?.['sequence'];
+    const sourceHash = checkpoint?.['sourceHash'];
+    const replacementHash = checkpoint?.['replacementHash'];
+    const hash = /^sha256:[a-f0-9]{64}$/;
+    if (
+      !checkpoint ||
+      Object.keys(checkpoint).length !== 3 ||
+      typeof sequence !== 'number' ||
+      !Number.isInteger(sequence) ||
+      sequence < 0 ||
+      sequence >= 2147483647 ||
+      typeof sourceHash !== 'string' ||
+      !hash.test(sourceHash) ||
+      typeof replacementHash !== 'string' ||
+      !hash.test(replacementHash) ||
+      sourceHash === replacementHash
+    )
+      return 'Repair requires the completed checkpoint sequence and two different SHA-256 source hashes';
   }
   if (type === 'application.create' || type === 'application.storage.set') {
     const root = body['applicationRoot'],

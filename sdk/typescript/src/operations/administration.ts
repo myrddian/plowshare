@@ -87,6 +87,14 @@ export interface AdministrativePayloads {
   };
   'orchestration.cancel': Id;
   'orchestration.resume': Id & { readonly requestId: string };
+  'orchestration.repair': Id & {
+    readonly requestId: string;
+    readonly checkpoint: {
+      readonly sequence: number;
+      readonly sourceHash: string;
+      readonly replacementHash: string;
+    };
+  };
   'orchestration.caps': { readonly project: string };
   'orchestration.record': {
     readonly root: string;

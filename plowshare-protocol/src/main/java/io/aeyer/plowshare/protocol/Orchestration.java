@@ -68,6 +68,32 @@ public final class Orchestration {
     }
   }
 
+  /** Explicit recovery under a reviewed installed script, using the same run and its journal. */
+  public record Repair(String id, UUID requestId, CheckpointRepair checkpoint) {
+    public Repair {
+      id = Orchestration.id(id);
+      Objects.requireNonNull(requestId, "requestId");
+      Objects.requireNonNull(checkpoint, "checkpoint");
+    }
+  }
+
+  /** Adopt the reviewed installed script after this exact completed report checkpoint. */
+  public record CheckpointRepair(int sequence, String sourceHash, String replacementHash) {
+    public CheckpointRepair {
+      if (sequence < 0 || sequence == Integer.MAX_VALUE)
+        throw new IllegalArgumentException("checkpoint sequence is outside its range");
+      requireHash(sourceHash);
+      requireHash(replacementHash);
+      if (sourceHash.equals(replacementHash))
+        throw new IllegalArgumentException("the replacement script hash must differ");
+    }
+
+    private static void requireHash(String value) {
+      if (value == null || !value.matches("sha256:[a-f0-9]{64}"))
+        throw new IllegalArgumentException("checkpoint script hashes must be lowercase SHA-256");
+    }
+  }
+
   public record Reference(String id) {
     public Reference {
       id = Orchestration.id(id);

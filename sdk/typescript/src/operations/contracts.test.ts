@@ -92,7 +92,7 @@ describe('typed requests cover the actual server contracts', () => {
       (frame) => !cli.has(frame),
     );
     expect([...cli, ...remaining].sort()).toEqual(typed);
-    expect(cli.size).toBe(279);
+    expect(cli.size).toBe(280);
     expect(remaining.sort()).toEqual([
       'acting.context.close',
       'acting.context.open',
@@ -130,6 +130,7 @@ describe('typed requests cover the actual server contracts', () => {
     ['orchestration.answer', 'protocol/Orchestration', 'Answer', []],
     ['orchestration.cancel', 'protocol/Orchestration', 'Reference', []],
     ['orchestration.resume', 'protocol/Orchestration', 'Resume', []],
+    ['orchestration.repair', 'protocol/Orchestration', 'Repair', []],
     ['orchestration.caps', 'ws/CapsFrames', 'CapsBody', []],
     ['orchestration.record', 'ws/RecordFrames', 'RecordWindow', []],
     ['message.instances', 'ws/MessageFrames', 'ListBody', []],

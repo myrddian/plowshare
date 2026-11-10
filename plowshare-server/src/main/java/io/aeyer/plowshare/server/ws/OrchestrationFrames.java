@@ -79,7 +79,8 @@ public class OrchestrationFrames implements FrameArea {
         FrameTypes.ORCHESTRATION_STATUS, this::status,
         FrameTypes.ORCHESTRATION_ANSWER, this::answer,
         FrameTypes.ORCHESTRATION_CANCEL, this::cancel,
-        FrameTypes.ORCHESTRATION_RESUME, this::resume);
+        FrameTypes.ORCHESTRATION_RESUME, this::resume,
+        FrameTypes.ORCHESTRATION_REPAIR, this::repair);
   }
 
   // -- wire records ----------------------------------------------------------------------
@@ -329,6 +330,30 @@ public class OrchestrationFrames implements FrameArea {
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_RESUME);
     owned(FrameTypes.ORCHESTRATION_RESUME, body.id(), handle);
     var run = orchestrations.resume(body, handle);
+    return Outcome.ok(new Changed(run.id(), run.state().wire()));
+  }
+
+  Outcome repair(Map<String, Object> payload, Asking asking) {
+    var operation = FrameTypes.ORCHESTRATION_REPAIR;
+    var body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, io.aeyer.plowshare.protocol.Orchestration.Repair.class, operation);
+    String handle = asking.requireHandle(operation);
+    if (inputs != null) inputs.requireLog(body.id(), handle);
+    // The repair service resolves the owned run before it evaluates the replacement lookup.
+    var run =
+        orchestrations.repair(
+            body,
+            handle,
+            retained -> {
+              if (inputs != null) inputs.requireLog(retained.conductorConversation(), handle);
+              var installed = resolver.getIfAvailable();
+              if (installed == null) return null;
+              var caller =
+                  new DefinitionResolver.Caller(
+                      RequestedProjectId.forListing(projects, retained.project()), null, handle);
+              return installed.forCaller(caller).get(retained.definitionName());
+            });
     return Outcome.ok(new Changed(run.id(), run.state().wire()));
   }
 

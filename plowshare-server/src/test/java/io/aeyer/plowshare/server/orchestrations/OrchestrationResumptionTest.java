@@ -22,11 +22,13 @@ import io.aeyer.plowshare.protocol.Orchestration;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.CallerAccess;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.OrchestrationRegistry;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.todos.StageSeeding;
 import io.aeyer.plowshare.server.todos.TodoLists;
@@ -75,12 +77,16 @@ class OrchestrationResumptionTest {
       """;
 
   private OrchestrationRecord run(OrchestrationState state, String parent) {
+    return run(state, parent, SOURCE);
+  }
+
+  private OrchestrationRecord run(OrchestrationState state, String parent, String source) {
     return new OrchestrationRecord(
         "orc_root",
         "retryable",
         OrchestrationDefinition.Tier.PROJECT,
-        "sha256:test",
-        SOURCE,
+        ScriptProgram.sourceHash(source),
+        source,
         "test",
         List.of(),
         3,
@@ -312,6 +318,70 @@ class OrchestrationResumptionTest {
     callback.get().accept(new Outcome(Outcome.Ending.ANSWERED, "recovered result", 1, 1, ""));
     verify(scripts).executed("cnv_conductor", 4, "recovered result");
     verify(voice).speak(eq("cnv_conductor"), any(), anyString(), eq("session"), isNull(), any());
+  }
+
+  @Test
+  void repair_checks_the_installed_origin_before_continuing_the_same_conductor() {
+    String original =
+        """
+        // plowshare-script v1
+        export const manifest = {name:'retryable', description:'Retryable task.', model:'reasoning',
+          'max-turns':10, 'max-model-calls':40, stages:[{id:'goal'}]};
+        export function step(input) { throw new Error('Invalid review notes'); }
+        """;
+    String fixed = original.replace("Invalid review notes", "unexpected checkpoint");
+    var failedRun = run(OrchestrationState.FAILED, null, original);
+    var resumed = run(OrchestrationState.RUNNING, null, fixed);
+    var boundary =
+        new Orchestration.CheckpointRepair(
+            30, failedRun.definitionHash(), resumed.definitionHash());
+    var repair = new Orchestration.Repair(failedRun.id(), UUID.randomUUID(), boundary);
+    when(store.find(failedRun.id())).thenReturn(Optional.of(failedRun));
+    when(scripts.resumeMessage(failedRun.conductorConversation()))
+        .thenReturn(Optional.of("original request"));
+    var review =
+        new ScriptStore.Step(
+            30,
+            failedRun.definitionHash(),
+            new ScriptStore.Tool("agent_run", "{}", false),
+            "paid review",
+            "paid review",
+            true,
+            "{}");
+    when(scripts.latest(failedRun.conductorConversation())).thenReturn(Optional.of(review));
+    when(scripts.repairEvidence(failedRun.conductorConversation(), 30))
+        .thenReturn(Set.of(UUID.randomUUID()));
+    var foreign =
+        OrchestrationRegistry.parsePinned(
+            "retryable", "elsewhere", fixed, Set.of(), OrchestrationDefinition.Tier.PROJECT);
+    var installed =
+        OrchestrationRegistry.parsePinned(
+            "retryable", "test", fixed, Set.of(), OrchestrationDefinition.Tier.PROJECT);
+    assertThrows(CallerFault.class, () -> engine.repair(repair, "owner", run -> foreign));
+    verify(recovery, never()).claimRepair(any(), any(), any(), any(), any(), any(), any());
+
+    when(recovery.claimRepair(
+            failedRun.id(), "owner", repair.requestId(), Instant.EPOCH, boundary, original, fixed))
+        .thenAnswer(
+            call -> {
+              when(store.find(failedRun.id())).thenReturn(Optional.of(resumed));
+              return true;
+            });
+    assertEquals(resumed, engine.repair(repair, "owner", run -> installed));
+    verify(scripts)
+        .previewRepair(
+            eq(fixed),
+            argThat(input -> input.sequence() == 31 && input.result().equals("paid review")),
+            any());
+    verify(scripts, never()).failedDelegate(any());
+    verify(voice)
+        .speak(
+            eq(failedRun.conductorConversation()),
+            argThat(agent -> agent.prompt().equals(fixed)),
+            eq("original request"),
+            eq("session"),
+            isNull(),
+            any());
   }
 
   @Test

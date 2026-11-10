@@ -379,6 +379,41 @@ class OrchestrationFramesTest {
     verify(orchestrations, never()).resume(any(), any());
   }
 
+  @Test
+  void repair_requires_exact_nested_checkpoint_and_dispatches_a_typed_request() {
+    var key = java.util.UUID.randomUUID();
+    String oldHash = "sha256:" + "a".repeat(64);
+    String newHash = "sha256:" + "b".repeat(64);
+    var repair =
+        new io.aeyer.plowshare.protocol.Orchestration.Repair(
+            "orc_1",
+            key,
+            new io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair(30, oldHash, newHash));
+    when(orchestrations.repair(eq(repair), eq("enzo"), any()))
+        .thenReturn(run("orc_1", "enzo", OrchestrationState.RUNNING));
+    String payload =
+        """
+        {"id":"orc_1","requestId":"%s","checkpoint":{"sequence":30,"sourceHash":"%s","replacementHash":"%s"}}
+        """
+            .formatted(key, oldHash, newHash);
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.ORCHESTRATION_REPAIR, payload.replace("30,", "30.5,")).code());
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.ORCHESTRATION_REPAIR, payload.replace("30,", "30, \"extra\":true,"))
+            .code());
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.ORCHESTRATION_REPAIR, payload.replace(oldHash, newHash)).code());
+    verify(orchestrations, never()).repair(any(), any(), any());
+    var result = route(FrameTypes.ORCHESTRATION_REPAIR, payload);
+    assertEquals(Code.OK, result.code());
+    assertEquals(new Changed("orc_1", "running"), result.payload());
+    verify(orchestrations).repair(eq(repair), eq("enzo"), any());
+    verify(orchestrations, never()).resume(any(), any());
+  }
+
   // -- definitions -----------------------------------------------------------------------
 
   @Test

@@ -795,15 +795,34 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    * failures. Uncertain script mutations remain protected by the script journal, never replayed.
    */
   public OrchestrationRecord resume(Orchestration.Resume ask, String account) {
+    return resume(ask.id(), ask.requestId(), null, account, ignored -> null);
+  }
+
+  /** The resolver supplies only the currently installed definition in the owner's scope. */
+  public OrchestrationRecord repair(
+      Orchestration.Repair ask,
+      String account,
+      java.util.function.Function<OrchestrationRecord, OrchestrationDefinition> replacementFor) {
+    return resume(ask.id(), ask.requestId(), ask.checkpoint(), account, replacementFor);
+  }
+
+  private OrchestrationRecord resume(
+      String id,
+      UUID requestId,
+      Orchestration.CheckpointRepair requestedRepair,
+      String account,
+      java.util.function.Function<OrchestrationRecord, OrchestrationDefinition> replacementFor) {
     var run =
         store
-            .find(ask.id())
+            .find(id)
             .filter(row -> Objects.equals(account, row.callerHandle()))
             .orElseThrow(
                 () -> new CallerFault("No orchestration with that id is owned by this account."));
     access.requireWork(run.project(), account);
     requireRetained(run);
-    if (recovery.received(run.id(), account, ask.requestId())) return run;
+    if (requestedRepair == null
+        ? recovery.received(run.id(), account, requestId)
+        : recovery.received(run.id(), account, requestId, requestedRepair)) return run;
     if (run.state() != OrchestrationState.FAILED || run.parent() != null)
       throw new CallerFault(
           "Only a failed root orchestration can be resumed; refresh its state or resume its root.");
@@ -819,8 +838,12 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
         checkpoint == null
             ? Optional.<ScriptStore.ReportBlock>empty()
             : scripts.blockedReport(account, checkpoint);
+    if (blockedReport.isPresent() && scripts.repaired(run.conductorConversation()))
+      throw new CallerFault(
+          "The repaired continuation already attempted its draft save. Inspect the retained receipt.");
     boolean reportOnly =
-        blockedReport.isPresent()
+        requestedRepair != null
+            || blockedReport.isPresent()
             || checkpoint != null
                 && checkpoint.retryOfReport() != null
                 && checkpoint.result() == null;
@@ -840,26 +863,47 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                   () -> new CallerFault("The failed script has no recorded input to continue."));
     }
     final String continuation = notice;
-    var delegate = scripts.failedDelegate(run.conductorConversation());
-    scripts.requireRecoverable(run.conductorConversation());
+    OrchestrationDefinition replacement =
+        requestedRepair == null
+            ? null
+            : checkReplacement(
+                run, requestedRepair, checkpoint, replacementFor.apply(run), continuation);
+    final AgentDefinition conductor =
+        replacement == null
+            ? rebuilt.conductor()
+            : rebuilt.conductor().withPrompt(replacement.source());
+    var delegate =
+        replacement == null
+            ? scripts.failedDelegate(run.conductorConversation())
+            : Optional.<ScriptStore.FailedDelegate>empty();
+    if (replacement == null) scripts.requireRecoverable(run.conductorConversation());
     boolean claimed =
-        blockedReport.isEmpty()
-            ? recovery.claim(run.id(), account, ask.requestId(), run.endedAt())
-            : work.inTransaction(
-                () -> {
-                  if (!recovery.claim(run.id(), account, ask.requestId(), run.endedAt()))
-                    return false;
-                  scripts.prepareReportRetry(
-                      run.conductorConversation(), checkpoint, blockedReport.orElseThrow());
-                  return true;
-                });
+        replacement != null
+            ? recovery.claimRepair(
+                run.id(),
+                account,
+                requestId,
+                run.endedAt(),
+                requestedRepair,
+                run.definitionSource(),
+                replacement.source())
+            : blockedReport.isEmpty()
+                ? recovery.claim(run.id(), account, requestId, run.endedAt())
+                : work.inTransaction(
+                    () -> {
+                      if (!recovery.claim(run.id(), account, requestId, run.endedAt()))
+                        return false;
+                      scripts.prepareReportRetry(
+                          run.conductorConversation(), checkpoint, blockedReport.orElseThrow());
+                      return true;
+                    });
     if (!claimed) return store.find(run.id()).orElseThrow();
     var resumed = store.find(run.id()).orElseThrow();
     todos.forget(run.conductorConversation());
     recorder.runResumed(resumed, account, run.failure());
     announce(run.id());
     try {
-      resumedListener.accept(resumed, ask.requestId());
+      resumedListener.accept(resumed, requestId);
     } catch (RuntimeException notificationFailed) {
       log.warn(
           "orchestration {}: notifying its resume listener failed", run.id(), notificationFailed);
@@ -878,7 +922,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
               if (outcome.ending() == Outcome.Ending.ANSWERED) {
                 try {
                   scripts.executed(run.conductorConversation(), child.sequence(), outcome.text());
-                  speakOrFail(resumed, rebuilt.conductor(), continuation, null);
+                  speakOrFail(resumed, conductor, continuation, null);
                 } catch (RuntimeException failedReceipt) {
                   failOnException(resumed, failedReceipt);
                 }
@@ -890,9 +934,75 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
         failOnException(resumed, failed);
       }
     } else {
-      speakOrFail(resumed, rebuilt.conductor(), continuation, null);
+      speakOrFail(resumed, conductor, continuation, null);
     }
     return store.find(run.id()).orElseThrow();
+  }
+
+  private OrchestrationDefinition checkReplacement(
+      OrchestrationRecord run,
+      Orchestration.CheckpointRepair request,
+      ScriptStore.Step checkpoint,
+      OrchestrationDefinition replacement,
+      String message) {
+    if (checkpoint == null
+        || checkpoint.sequence() != request.sequence()
+        || !request.sourceHash().equals(run.definitionHash())
+        || !request.sourceHash().equals(checkpoint.hash())
+        || checkpoint.result() == null
+        || checkpoint.raw() == null
+        || !checkpoint.started()
+        || !(checkpoint.command() instanceof ScriptStore.Tool tool)
+        || !tool.name().equals("agent_run"))
+      throw new CallerFault("Checkpoint repair requires the latest completed delegate receipt.");
+    if (run.tier() == OrchestrationDefinition.Tier.SESSION
+        || replacement == null
+        || !replacement.name().equals(run.definitionName())
+        || replacement.tier() != run.tier()
+        || !Objects.equals(replacement.origin(), run.definitionOrigin())
+        || !ScriptProgram.isScript(replacement.source())
+        || !request.replacementHash().equals(replacement.hash())
+        || !request.replacementHash().equals(ScriptProgram.sourceHash(replacement.source())))
+      throw new CallerFault(
+          "The reviewed replacement must be the installed script at the original definition origin.");
+    try {
+      if (!ScriptProgram.manifest(run.definitionSource())
+          .equals(ScriptProgram.manifest(replacement.source())))
+        throw new CallerFault("Checkpoint repair requires an unchanged orchestration manifest.");
+    } catch (IllegalStateException invalid) {
+      throw new CallerFault("Could not validate the replacement script manifest.");
+    }
+    // Stage gates can call a checker or run acceptance work. A report continuation cannot
+    // introduce these effects, even indirectly through an otherwise allowed stage update.
+    if (replacement.checker() != null
+        || replacement.stages().stream()
+            .anyMatch(
+                stage -> stage.checked() || stage.acceptance() != null || stage.holdsPhases()))
+      throw new CallerFault("Checkpoint repair requires stages without automatic acceptance work.");
+    String conversation = run.conductorConversation();
+    var evidence = scripts.repairEvidence(conversation, checkpoint.sequence());
+    if (evidence.isEmpty())
+      throw new CallerFault("Checkpoint repair requires completed reads of retained evidence.");
+    var repair = new ScriptStore.Repair(request, evidence);
+    int next = checkpoint.sequence() + 1;
+    var input =
+        new ScriptStore.Input(
+            conversation,
+            message,
+            next,
+            UUID.nameUUIDFromBytes(
+                (conversation + ":" + next).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            checkpoint.sequence(),
+            checkpoint.result(),
+            todos.list(conversation),
+            request.replacementHash());
+    try {
+      scripts.previewRepair(replacement.source(), input, repair);
+    } catch (IllegalArgumentException | IllegalStateException refused) {
+      throw new CallerFault(
+          "The replacement script could not produce a permitted next command from the retained checkpoint.");
+    }
+    return replacement;
   }
 
   private record CommittedStart(OrchestrationRecord run, boolean created) {}
