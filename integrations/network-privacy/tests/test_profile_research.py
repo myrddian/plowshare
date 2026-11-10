@@ -13,7 +13,11 @@ from support import MemoryReceipts
 
 from plowshare_privacy.advisories import Advisory, AdvisoryLookup, AdvisoryPage
 from plowshare_privacy.contracts import DeviceIdentity
-from plowshare_privacy.identity_source import ManagedProduct, ManagedProductLookup
+from plowshare_privacy.identity_source import (
+    IdentitySample,
+    ManagedProduct,
+    ManagedProductLookup,
+)
 from plowshare_privacy.presence import PresenceCount, PresenceView, Sighting
 from plowshare_privacy.profile_research import (
     DAILY_LIMIT,
@@ -160,6 +164,47 @@ class ProfileResearchTest(unittest.IsolatedAsyncioTestCase):
         self.advisories.search.assert_awaited_once_with(MODEL)
         self.assertIsNone(self.port.start.await_args_list[-1].args[1].public_model)
         self.assertIsNone(self.service.ledger.entries[0].model)
+
+    async def test_managed_devices_are_prioritized_ahead_of_unmatched_clients(
+        self,
+    ) -> None:
+        managed = replace(
+            IDENTITY,
+            address="192.168.8.21",
+            mac="02:00:00:00:00:02",
+            device_id="mac:02:00:00:00:00:02",
+            hostname="Adopted switch",
+        )
+        other = self.view(managed, 3)
+        self.presence = replace(
+            self.presence,
+            sightings={**self.presence.sightings, **other.sightings},
+            counts={**self.presence.counts, **other.counts},
+        )
+
+        class Inventory:
+            def recently_managed(self, identity: DeviceIdentity) -> bool:
+                return identity.device_id == managed.device_id
+
+            async def managed_product(
+                self, identity: DeviceIdentity
+            ) -> ManagedProduct | None:
+                return None
+
+            async def managed_sightings(
+                self, targets: tuple[str, ...], observed_at: str
+            ) -> IdentitySample:
+                return IdentitySample()
+
+        self.service.managed_products = lambda: Inventory()
+        self.service.enable(True)
+        await self.service.poll()
+        self.assertEqual(
+            self.service.ledger.entries[0].identity.device_id, managed.device_id
+        )
+        self.assertEqual(
+            self.port.start.await_args_list[0].args[1].name_hint, "Adopted switch"
+        )
 
     async def test_unknown_start_reconciles_by_receipt_after_restart(self) -> None:
         self.service.enable(True)

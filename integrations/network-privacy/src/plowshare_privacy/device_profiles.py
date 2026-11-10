@@ -21,6 +21,7 @@ from .contracts import (
     MAX_FILE_BYTES,
     items,
     load_json,
+    mac_address,
     object_fields,
     parse_json,
     text,
@@ -28,8 +29,9 @@ from .contracts import (
     utc_now,
     uuid,
 )
-from .journal import Receipts
+from .journal import Receipt, Receipts
 from .limits import MAX_TARGETS
+from .presence import PresenceView, epoch
 from .privacy_issues import IssueLink, PrivacyIssue
 from .private_files import replace_private
 from .worker import ReconciliationRequired
@@ -60,6 +62,7 @@ class ProfileFields:
     notes: str
     addresses: tuple[str, ...]
     issues: tuple[IssueLink, ...] = ()
+    device_mac: str | None = None
 
     def __post_init__(self) -> None:
         for value, limit in (
@@ -72,6 +75,11 @@ class ProfileFields:
         ):
             field(value, limit)
         field(self.name, 128, required=True)
+        if (
+            self.device_mac is not None
+            and mac_address(self.device_mac) != self.device_mac
+        ):
+            raise ValueError("Device MAC must be canonical")
         if len(self.issues) > 4 or len({v.issue_id for v in self.issues}) != len(
             self.issues
         ):
@@ -98,7 +106,7 @@ class ProfileFields:
                 "notes",
                 "addresses",
             },
-            {"issues"},
+            {"issues", "device_mac"},
         )
         addresses = tuple(
             str(ipaddress.IPv4Address(text(v, 64))) for v in items(row["addresses"], 32)
@@ -114,6 +122,9 @@ class ProfileFields:
             field(row["notes"], 2048),
             addresses,
             tuple(IssueLink.decode(v) for v in items(row.get("issues", []), 4)),
+            mac_address(row["device_mac"])
+            if row.get("device_mac") is not None
+            else None,
         )
 
 
@@ -130,7 +141,7 @@ class DeviceProfile:
         row = object_fields(
             value, {"version", "profile_id", "write_id", "updated_at", "fields"}
         )
-        if type(row["version"]) is not int or row["version"] not in {1, 2}:
+        if type(row["version"]) is not int or row["version"] not in {1, 2, 3}:
             raise ValueError("Unsupported profile version")
         return cls(
             row["version"],
@@ -143,18 +154,25 @@ class DeviceProfile:
     def markdown(self) -> str:
         values = self.fields
         metadata = asdict(self)
+        if self.version < 3:
+            if values.device_mac is not None:
+                raise ValueError("Legacy profiles cannot assert a MAC binding")
+            del metadata["fields"]["device_mac"]
         if self.version == 1:
             if values.issues:
                 raise ValueError("Legacy profiles cannot contain issue links")
             del metadata["fields"]["issues"]
         issue_section = ""
-        if self.version == 2:
+        if self.version >= 2:
             issue_section = "\n\n## Privacy issues and mitigation decisions\n\n"
             issue_section += (
                 "\n".join(link.markdown() for link in values.issues)
                 or "No issues linked."
             )
             issue_section += "\n\nStatuses and results are operator-reported at this profile revision's confirmation time. Linked issue revisions pin the reviewed plan; later issue edits do not change it."
+        confirmed_mac = (
+            f"Confirmed MAC: {values.device_mac}\n\n" if values.device_mac else ""
+        )
         result = (
             "# Device profile\n\n"
             + "## Identity and operator confirmation\n\n"
@@ -162,6 +180,7 @@ class DeviceProfile:
             + "Associated addresses: "
             + ", ".join(values.addresses)
             + "\n\n"
+            + confirmed_mac
             + f"Confirmed by the operator at {self.updated_at}. Address associations do not prove physical identity.\n\n"
             + "## Purpose\n\n"
             + (values.purpose or "Not supplied")
@@ -351,6 +370,20 @@ class IssueReferences(Protocol):
     async def read(self, identity: str, revision: str) -> str: ...
 
 
+def _profile_evidence(receipt: Receipt, fields: ProfileFields) -> bool:
+    if receipt.evidence is None:
+        return False
+    snapshot = receipt.evidence.snapshot
+    addresses = set(fields.addresses)
+    if fields.device_mac is not None:
+        addresses &= {
+            device.address
+            for device in snapshot.devices
+            if device.mac == fields.device_mac
+        }
+    return any(probe.address in addresses for probe in snapshot.tcp)
+
+
 class DeviceProfiles:
     def __init__(
         self,
@@ -359,6 +392,7 @@ class DeviceProfiles:
         receipts: Receipts,
         targets: Callable[[], tuple[str, ...]],
         issues: IssueReferences | None = None,
+        presence: Callable[[], PresenceView] | None = None,
     ):
         self.port, self.intents, self.receipts, self.targets = (
             port,
@@ -367,6 +401,7 @@ class DeviceProfiles:
             targets,
         )
         self.issues = issues
+        self.presence = presence
         self.lock = asyncio.Lock()
 
     def writes(self) -> tuple[ProfileIntent, ...]:
@@ -392,12 +427,7 @@ class DeviceProfiles:
             evidence = tuple(
                 v.revision
                 for v in self.receipts.all()[-50:]
-                if v.revision
-                and v.evidence
-                and any(
-                    t.address in profile.fields.addresses
-                    for t in v.evidence.snapshot.tcp
-                )
+                if v.revision and _profile_evidence(v, profile.fields)
             )
             result.append(
                 ProfileView(
@@ -465,8 +495,27 @@ class DeviceProfiles:
                 )
             if current is None and len(profiles) >= MAX_TARGETS:
                 raise ValueError("Device profile capacity reached")
+            if (
+                current
+                and current.profile.fields.device_mac
+                and fields.device_mac != current.profile.fields.device_mac
+            ):
+                raise ValueError(
+                    "A confirmed device profile cannot be reassigned to another MAC"
+                )
+            newly_bound = fields.device_mac is not None and (
+                current is None
+                or current.profile.fields.device_mac is None
+                or not set(fields.addresses) <= set(current.profile.fields.addresses)
+            )
             if any(
-                set(fields.addresses) & set(v.profile.fields.addresses)
+                (fields.device_mac and fields.device_mac == v.profile.fields.device_mac)
+                or (
+                    set(fields.addresses) & set(v.profile.fields.addresses)
+                    and (
+                        fields.device_mac is None or v.profile.fields.device_mac is None
+                    )
+                )
                 for v in profiles
                 if v.profile.profile_id != identity
             ):
@@ -484,9 +533,7 @@ class DeviceProfiles:
             evidence = {
                 v.revision
                 for v in self.receipts.all()[-50:]
-                if v.revision
-                and v.evidence
-                and any(t.address in fields.addresses for t in v.evidence.snapshot.tcp)
+                if v.revision and _profile_evidence(v, fields)
             }
             for link in fields.issues:
                 if self.issues is None:
@@ -502,7 +549,27 @@ class DeviceProfiles:
                 )
                 if not set(link.evidence) <= allowed_evidence:
                     raise ValueError("Choose this device's retained evidence revisions")
-            profile = DeviceProfile(2, identity, request, utc_now(), fields)
+            # Recheck live identity after issue reads and immediately before admission.
+            if newly_bound:
+                observed = self.presence() if self.presence else PresenceView()
+                now = epoch(utc_now())
+                required = set(fields.addresses)
+                if current and current.profile.fields.device_mac:
+                    required -= set(current.profile.fields.addresses)
+                confirmed = {
+                    address
+                    for address, sighting in observed.sightings.items()
+                    if sighting.identity is not None
+                    and sighting.identity.mac == fields.device_mac
+                    and 0 <= now - epoch(sighting.identity.observed_at) <= 720
+                }
+                if not required <= confirmed:
+                    raise ValueError(
+                        "Confirm a fresh matching MAC at each selected address before linking the profile"
+                    )
+            profile = DeviceProfile(
+                3 if fields.device_mac else 2, identity, request, utc_now(), fields
+            )
             intent = ProfileIntent(
                 request, identity, expected, profile.markdown(), "pending"
             )

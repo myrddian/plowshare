@@ -22,6 +22,7 @@ from plowshare.contracts import (
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration
 
 from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
+from plowshare_privacy.contracts import DeviceIdentity, utc_now
 from plowshare_privacy.device_profiles import (
     DeviceProfile,
     DeviceProfiles,
@@ -30,6 +31,7 @@ from plowshare_privacy.device_profiles import (
     ProfileVersion,
     source_name,
 )
+from plowshare_privacy.presence import PresenceView, Sighting
 from plowshare_privacy.profile_port import SdkProfilePort
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import ReconciliationRequired, Worker
@@ -98,6 +100,61 @@ class DeviceProfilesTest(unittest.IsolatedAsyncioTestCase):
             "Observed MAC can change",
             ("10.1.2.10",),
         )
+
+    async def test_confirmed_mac_survives_moves_and_reused_addresses_stay_separate(
+        self,
+    ) -> None:
+        first, second = "10.1.2.10", "10.1.2.11"
+        stamp = utc_now()
+        mac = "02:00:00:00:00:01"
+        identity = DeviceIdentity(
+            first, "mac:" + mac, None, "Switch", mac, None, "unifi", stamp, stamp
+        )
+        observed = PresenceView(sightings={first: Sighting(first, identity)})
+        self.profiles.presence = lambda: observed
+        fields = replace(self.fields, device_mac=mac)
+        saved = await self.profiles.save(self.identity, self.request, None, fields)
+        assert saved.revision is not None
+        source = await self.profiles.read(self.identity, saved.revision)
+        self.assertEqual(DeviceProfile.read(source).version, 3)
+        self.assertEqual(DeviceProfile.read(source).fields.device_mac, mac)
+        observed = PresenceView(
+            sightings={second: Sighting(second, replace(identity, address=second))}
+        )
+        moved = await self.profiles.save(
+            self.identity,
+            str(uuid4()),
+            saved.revision,
+            replace(fields, addresses=(second,)),
+        )
+        self.assertEqual(moved.phase, "confirmed")
+        reused = replace(
+            identity, mac="02:00:00:00:00:02", device_id="mac:02:00:00:00:00:02"
+        )
+        observed = PresenceView(
+            sightings={second: Sighting(second, replace(reused, address=second))}
+        )
+        other = await self.profiles.save(
+            str(uuid4()),
+            str(uuid4()),
+            None,
+            replace(fields, addresses=(second,), device_mac=reused.mac),
+        )
+        self.assertEqual(other.phase, "confirmed")
+        with self.assertRaises(ValueError):
+            await self.profiles.save(
+                self.identity,
+                str(uuid4()),
+                moved.revision,
+                replace(fields, addresses=(second,), device_mac=reused.mac),
+            )
+        self.assertEqual(len(await self.profiles.list()), 2)
+
+    async def test_confirming_a_mac_requires_a_fresh_matching_sighting(self) -> None:
+        fields = replace(self.fields, device_mac="02:00:00:00:00:01")
+        with self.assertRaises(ValueError):
+            await self.profiles.save(self.identity, self.request, None, fields)
+        self.assertEqual(self.remote.writes, 0)
 
     async def test_advisory_lookup_discloses_only_the_reviewed_saved_model(
         self,

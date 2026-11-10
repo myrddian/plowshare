@@ -276,3 +276,15 @@ test('a reviewed background draft fills only empty profile fields without saving
   assert.equal(node('profile-notes').value, 'Check firmware');
   assert.deepEqual(requests, [{url:'/api/profile-research/' + entry.request_id + '/editor',method:undefined}]);
 });
+
+test('device profile selection follows a confirmed MAC when its former IP is reused', async () => {
+  const {context} = await dashboard();
+  const profiles = [
+    {profile:{profile_id:'first',fields:{device_mac:'02:00:00:00:00:01',addresses:['192.168.1.10']}}},
+    {profile:{profile_id:'second',fields:{device_mac:'02:00:00:00:00:02',addresses:['192.168.1.20']}}},
+  ];
+  context.profiles = profiles;
+  vm.runInContext("loadProfiles = async () => profiles; editProfile = async (view) => { selectedProfile = view.profile.profile_id; };", context);
+  await vm.runInContext("openDeviceProfile('192.168.1.20','02:00:00:00:00:01')", context);
+  assert.equal(vm.runInContext('selectedProfile', context), 'first');
+});

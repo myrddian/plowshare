@@ -25,6 +25,7 @@ from plowshare_privacy.contracts import (
     DnsObservation,
     Evidence,
     PiHolePlan,
+    UniFiGateway,
     UniFiPlan,
     utc_now,
 )
@@ -96,6 +97,11 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
             {"certificateSha256": "gg" * 32},
             {"certificateSha256": "aa" * 32, "caFile": "/trusted/ca.pem"},
             {"apiKey": "do-not-store"},
+            {"gateway": {"deviceId": SITE, "lanMac": MAC}},
+            {
+                "apiBase": BASE.replace("unifi.example.invalid", "192.168.8.1"),
+                "gateway": {"deviceId": "default", "lanMac": MAC},
+            },
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 UniFiPlan.decode(configuration() | invalid)
@@ -163,6 +169,125 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
             {"offset": 0, "limit": 2, "filter": f"macAddress.eq('{MAC}')"},
         )
 
+    async def test_adopted_inventory_supplies_identity_and_marks_conflicts(
+        self,
+    ) -> None:
+        stamp = utc_now()
+
+        def device(index: int, address: str, mac: str) -> dict[str, object]:
+            return {
+                "id": str(UUID(int=index)),
+                "ipAddress": address,
+                "macAddress": mac,
+                "state": "ONLINE",
+                "name": "Office switch",
+                "model": "USW-Pro",
+                "firmwareVersion": "1.2.3",
+                "firmwareUpdatable": False,
+            }
+
+        rows = [
+            device(1, FIRST, MAC),
+            device(2, SECOND, OTHER_MAC),
+            device(3, SECOND, MAC),
+            device(4, "192.0.2.99", MAC),
+        ]
+        response = {
+            "offset": 0,
+            "limit": 100,
+            "count": 4,
+            "totalCount": 4,
+            "data": rows,
+        }
+        with patch.dict(os.environ, {KEY: "fixture-key"}):
+            unifi = UniFiNetwork(UniFiPlan.decode(configuration()))
+        with patch.object(unifi, "_read_page", AsyncMock(return_value=response)):
+            result = await unifi.managed_sightings((FIRST, SECOND), stamp)
+        self.assertEqual(
+            [(d.address, d.mac, d.hostname) for d in result.devices],
+            [(FIRST, MAC, "Office switch")],
+        )
+        self.assertEqual(result.ambiguous_addresses, frozenset({SECOND}))
+        self.assertTrue(unifi.recently_managed(result.devices[0]))
+        self.assertFalse(
+            unifi.recently_managed(replace(result.devices[0], address=SECOND))
+        )
+
+    async def test_gateway_lan_alias_requires_explicit_binding_and_network_confirmation(
+        self,
+    ) -> None:
+        gateway = "192.168.8.1"
+        gateway_id = str(UUID(int=9))
+        network_id = str(UUID(int=10))
+        gateway_row = {
+            "id": gateway_id,
+            "ipAddress": "203.0.113.10",
+            "macAddress": MAC,
+            "state": "ONLINE",
+            "name": "Gateway",
+            "model": "UCG",
+            "firmwareVersion": "1.2.3",
+        }
+        data = {
+            BASE + f"/sites/{SITE}/devices": {
+                "offset": 0,
+                "limit": 100,
+                "count": 1,
+                "totalCount": 1,
+                "data": [gateway_row],
+            },
+            BASE + f"/sites/{SITE}/networks": {
+                "offset": 0,
+                "limit": 100,
+                "count": 1,
+                "totalCount": 1,
+                "data": [
+                    {
+                        "id": network_id,
+                        "default": True,
+                        "enabled": True,
+                        "management": "GATEWAY",
+                    },
+                ],
+            },
+            BASE + f"/sites/{SITE}/networks/{network_id}": {
+                "id": network_id,
+                "enabled": True,
+                "management": "GATEWAY",
+                "ipv4Configuration": {"hostIpAddress": gateway},
+            },
+        }
+        with patch.dict(os.environ, {KEY: "fixture-key"}):
+            plan = UniFiPlan.decode(configuration())
+            unifi = UniFiNetwork(plan)
+            bound = UniFiNetwork(
+                replace(
+                    plan,
+                    api_base=BASE.replace("unifi.example.invalid", gateway),
+                    gateway=UniFiGateway(gateway_id, OTHER_MAC),
+                )
+            )
+
+        async def read(session: object, url: str, params: object) -> object:
+            return data[url.replace(gateway, "unifi.example.invalid")]
+
+        with patch.object(unifi, "_read_page", AsyncMock(side_effect=read)):
+            self.assertEqual(
+                (await unifi.managed_sightings((gateway,), utc_now())).devices, ()
+            )
+        with patch.object(bound, "_read_page", AsyncMock(side_effect=read)):
+            result = await bound.managed_sightings((gateway,), utc_now())
+        self.assertEqual(
+            [(d.address, d.mac) for d in result.devices], [(gateway, OTHER_MAC)]
+        )
+        data[BASE + f"/sites/{SITE}/networks/{network_id}"]["ipv4Configuration"] = {
+            "hostIpAddress": "192.168.9.1"
+        }
+        with patch.object(bound, "_read_page", AsyncMock(side_effect=read)):
+            invalid = await bound.managed_sightings((gateway,), utc_now())
+        self.assertEqual(invalid.devices, ())
+        self.assertTrue(any("gateway_unconfirmed" in issue for issue in invalid.issues))
+
     def test_standard_tls_keeps_existing_receipt_scope(self) -> None:
         unifi = UniFiPlan.decode(configuration())
         plan = CollectionPlan("tcp", (FIRST,), (443,), 0.1, 1, None, 3600, unifi=unifi)
@@ -172,6 +297,7 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         original.pop("labels")
         original.pop("pihole")
         original["unifi"].pop("certificate_sha256")
+        original["unifi"].pop("gateway")
         expected = sha256(json.dumps(original, sort_keys=True).encode()).hexdigest()
         self.assertEqual(scope_fingerprint(plan), expected)
         self.assertNotEqual(

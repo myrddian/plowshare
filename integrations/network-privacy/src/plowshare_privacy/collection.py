@@ -22,7 +22,7 @@ from .contracts import (
     private_ipv4,
     utc_now,
 )
-from .identity_source import DeviceIdentitySource, IdentitySample
+from .identity_source import DeviceIdentitySource, IdentitySample, ManagedInventory
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
 from .presence import PresenceSample, Sighting, epoch
@@ -63,6 +63,8 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         )
         if plan.unifi.certificate_sha256 is None:
             values["unifi"].pop("certificate_sha256")
+        # A controller alias enriches identity evidence without changing probe scope.
+        values["unifi"].pop("gateway")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )
@@ -130,6 +132,50 @@ class NetworkCollector:
         self.identity_source = identity_source
         self.pihole_presence = pihole_presence
 
+    async def _identity_sample(self, observed: str) -> IdentitySample:
+        if self.identity_source is None:
+            return IdentitySample()
+        samples = [await self.identity_source.identify(self.plan.targets, observed)]
+        if isinstance(self.identity_source, ManagedInventory):
+            samples.append(
+                await self.identity_source.managed_sightings(
+                    self.plan.targets, observed
+                )
+            )
+        devices: dict[str, DeviceIdentity] = {}
+        ambiguous: set[str] = set()
+        issues: list[str] = []
+        scope = frozenset(self.plan.targets)
+        for sample in samples:
+            addresses = {identity.address for identity in sample.devices}
+            if (
+                len(addresses) != len(sample.devices)
+                or addresses & sample.ambiguous_addresses
+                or not (addresses | sample.ambiguous_addresses) <= scope
+            ):
+                raise ValueError(
+                    "Identity source returned invalid or out-of-scope addresses"
+                )
+            issues.extend(sample.issues)
+            ambiguous.update(sample.ambiguous_addresses)
+            for identity in sample.devices:
+                prior = devices.get(identity.address)
+                if prior is not None and prior.mac != identity.mac:
+                    ambiguous.add(identity.address)
+                    issues.append(
+                        "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
+                    )
+                devices[identity.address] = identity
+        return IdentitySample(
+            tuple(
+                identity
+                for address, identity in devices.items()
+                if address not in ambiguous
+            ),
+            frozenset(ambiguous),
+            tuple(dict.fromkeys(issues)),
+        )
+
     async def collect_presence(self, since: str) -> PresenceSample:
         """Sample positive evidence only, without building or publishing a full scan."""
         plan = self.plan
@@ -144,24 +190,17 @@ class NetworkCollector:
             raise ValueError("Quick presence scans require enabled private monitoring")
         observed = utc_now()
         start, end = epoch(since), epoch(observed)
-        scope = frozenset(plan.targets)
-        connected = (
-            await self.identity_source.identify(plan.targets, observed)
-            if self.identity_source is not None
-            else IdentitySample()
-        )
+        connected = await self._identity_sample(observed)
         sightings = {
             identity.address: Sighting(identity.address, identity)
             for identity in connected.devices
-            if identity.address in scope
-            and identity.address not in connected.ambiguous_addresses
         }
         issues = list(connected.issues)
-        ambiguous = connected.ambiguous_addresses & scope
+        ambiguous = connected.ambiguous_addresses
         remaining = tuple(
             address
             for address in plan.targets
-            if address not in sightings and address not in connected.ambiguous_addresses
+            if address not in sightings and address not in ambiguous
         )
         if self.pihole_presence is not None and remaining:
             cached = await self.pihole_presence(remaining, observed)
@@ -359,19 +398,7 @@ class NetworkCollector:
                     )
                 issues = list(dict.fromkeys(issues))
             if self.identity_source is not None:
-                sample = await self.identity_source.identify(
-                    self.plan.targets, observed
-                )
-                observed_addresses = {item.address for item in sample.devices}
-                if (
-                    len(observed_addresses) != len(sample.devices)
-                    or observed_addresses & sample.ambiguous_addresses
-                    or not (observed_addresses | sample.ambiguous_addresses)
-                    <= configured.keys()
-                ):
-                    raise ValueError(
-                        "Identity source returned addresses outside its scope or with ambiguous identity"
-                    )
+                sample = await self._identity_sample(observed)
                 issues.extend(sample.issues)
                 for address in sample.ambiguous_addresses:
                     devices[address] = configured[address]

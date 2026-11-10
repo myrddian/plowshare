@@ -264,6 +264,7 @@ async def execute(args: argparse.Namespace) -> None:
                     receipts,
                     lambda: worker.config.collection.targets,
                     issues,
+                    worker.presence_view,
                 )
                 if operator_store
                 else None

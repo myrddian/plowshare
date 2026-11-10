@@ -155,6 +155,21 @@ appears under coverage gaps while TCP and other configured sources continue.
 An address missing from the connected-client list has unknown UniFi coverage for
 that sweep.
 
+Quick presence also reads the bounded adopted-device inventory. Online adopted
+switches and access points can supply watched identities even when they are
+absent from the connected-client list. Conflicting MACs stay unresolved, and
+managed devices with current product evidence take priority in the background
+research queue.
+
+A UniFi gateway can advertise its WAN IP in the adopted inventory. If the
+configured API host is the watched LAN gateway, stop the collector and use the
+bootstrap `bind-unifi-gateway --device-id <adopted UUID> --lan-mac <confirmed LAN MAC>`
+command. Obtain both values from the operator's controller and LAN records.
+The collector checks that the bound device is online and that the same site's
+enabled default gateway network advertises the configured private API host.
+It does not infer an alias from a device name or the final bytes of a MAC.
+The binding does not change the scan scope.
+
 Open a device's type panel to see the observed name and conventional TCP port clues
 from its latest completed sweep. Conflicting or insufficient clues leave the
 type unknown. Possible services have exposure checks you can verify locally.
@@ -402,6 +417,15 @@ Give it a name, responsible person, model, purpose, expected services/behaviour 
 operator notes. These are operator-confirmed expectations, separate from observed
 TCP/DNS evidence. A profile association records its confirmation time; a reused
 address or randomized MAC does not prove that two observations concern one device.
+
+When saving a reviewed device draft, its current MAC can be retained with the
+profile. The profile editor offers **Confirm observed MAC for this profile**
+for an existing address-only record. Saving a new binding requires a fresh
+matching sighting. A bound profile follows that MAC when opened from a device
+card. Address changes remain an operator edit, and an IP reused by a different
+MAC does not select the old profile. Retained evidence links require the same
+MAC in the recorded sweep. Older address-only profiles and their exact
+Markdown remain readable.
 
 Each profile has a stable Application-assigned UUID and a named Markdown resource
 `network-privacy-device/<UUID>.md` in the Application's Plowshare project. The

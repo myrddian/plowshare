@@ -35,6 +35,7 @@ from .contracts import (
 from .device_detection import detect_device
 from .device_profiles import field
 from .identity_source import (
+    ManagedInventory,
     ManagedProduct,
     ManagedProductLookup,
     ManagedProductUnavailable,
@@ -503,7 +504,16 @@ class ProfileResearch:
         )
         if len(admissions) >= DAILY_LIMIT:
             return
-        candidates = {identity.device_id: identity for identity in self._candidates()}
+        observed = self._candidates()
+        inventory = self.managed_products()
+        if isinstance(inventory, ManagedInventory):
+            observed = tuple(
+                sorted(
+                    observed,
+                    key=lambda identity: not inventory.recently_managed(identity),
+                )
+            )
+        candidates = {identity.device_id: identity for identity in observed}
         existing = {entry.identity.device_id: entry for entry in self.ledger.entries}
         queued = next(
             (

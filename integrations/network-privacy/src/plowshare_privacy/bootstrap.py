@@ -822,6 +822,37 @@ def connect_unifi(
     print("UniFi configured. Start the collector with the API key in its environment.")
 
 
+def bind_unifi_gateway(setup: Setup, device_id: str, lan_mac: str) -> None:
+    """Bind an operator-confirmed gateway on a stopped collector without changing scope."""
+    config = Configuration.read(setup.collector)
+    if config.collection.unifi is None:
+        raise SetupProblem("Configure UniFi before binding its gateway.")
+    pending = setup.collector.with_name(
+        setup.collector.stem + ".pending" + setup.collector.suffix
+    )
+    if pending.exists():
+        raise SetupProblem(
+            "Apply or review pending collector settings before binding a gateway."
+        )
+    row = load_json(setup.collector)
+    if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
+        raise SetupProblem("Invalid collector configuration")
+    unifi = plan.get("unifi")
+    if not isinstance(unifi, dict):
+        raise SetupProblem("Missing UniFi configuration")
+    unifi["gateway"] = {"deviceId": device_id, "lanMac": lan_mac}
+    Configuration.decode(row, setup.collector)
+    with FileReceipts(config):
+        if Configuration.read(setup.collector) != config:
+            raise SetupProblem(
+                "Collector configuration changed before the gateway binding was saved."
+            )
+        replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+    print(
+        "Gateway binding saved. Start the collector to verify the default LAN and adopted-device record."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -878,6 +909,12 @@ def main() -> None:
         "--certificate-sha256",
         help="Independently verified SHA-256 digest of the controller leaf certificate",
     )
+    gateway = commands.add_parser(
+        "bind-unifi-gateway",
+        help="Bind a confirmed adopted gateway UUID and LAN MAC on a stopped collector",
+    )
+    gateway.add_argument("--device-id", required=True)
+    gateway.add_argument("--lan-mac", required=True)
     commands.add_parser(
         "install",
         help="Deploy paused once, then issue its reserved service credential",
@@ -1030,6 +1067,9 @@ def main() -> None:
                 args.ca_file,
                 args.certificate_sha256,
             )
+            return
+        if args.command == "bind-unifi-gateway":
+            bind_unifi_gateway(setup, args.device_id, args.lan_mac)
             return
         if args.command == "start":
             saved = (

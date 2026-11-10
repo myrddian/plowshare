@@ -92,7 +92,7 @@
         <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
         <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button">Create device profile</button><button id="reconcile-profiles" type="button">Check retained writes</button></div>
         <p id="profile-detail" class="hint">Load existing profiles or create one for a monitored device.</p><div id="profile-records" class="entries"></div><div id="profile-intents" class="hint"></div>
-        <form id="profile-form" hidden><h3 id="profile-editor-title">Device profile</h3>
+        <form id="profile-form" hidden><h3 id="profile-editor-title">Device profile</h3><p id="profile-mac" class="hint"></p><button id="profile-bind-mac" type="button" class="secondary" hidden>Confirm observed MAC for this profile</button>
           <label>Name<input id="profile-name" maxlength="128" required></label><label>Owner or responsible person<input id="profile-owner" maxlength="128"></label><label>Model<input id="profile-model" maxlength="128"></label>
           <label>Associated monitored addresses<select id="profile-addresses" multiple required></select></label>
           <label>Purpose<textarea id="profile-purpose" maxlength="512" rows="2"></textarea></label>
