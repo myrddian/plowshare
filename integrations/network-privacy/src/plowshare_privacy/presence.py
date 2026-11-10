@@ -11,14 +11,19 @@ import time
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from itertools import groupby
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 
 from .contracts import CollectionPlan, DeviceIdentity, timestamp, utc_now
 
 WINDOW_SECONDS = 24 * 60 * 60
+MAX_DELAY_SECONDS = 300
+SAMPLE_TIMEOUT_SECONDS = 120
 # Keep disk growth bounded even if the wall clock moves backwards.
 MAX_SAMPLES = WINDOW_SECONDS // 120 + 1
+# One maximum timer delay plus the deadline of the preceding quick check.
+MAX_ATTRIBUTION_GAP = MAX_DELAY_SECONDS + SAMPLE_TIMEOUT_SECONDS
 
 
 def epoch(when: str) -> float:
@@ -40,6 +45,7 @@ class PresenceSample:
     checked_at: str
     sightings: tuple[Sighting, ...]
     issues: tuple[str, ...] = ()
+    ambiguous_addresses: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,46 @@ def _instant(value: float) -> str:
     )
 
 
+@dataclass(frozen=True)
+class _RetainedSweep:
+    id: int
+    checked: float
+    devices: frozenset[str]
+
+
+def _credit_before(
+    sweeps: list[_RetainedSweep],
+    index: int,
+    checked: float,
+    address: str,
+    device: str,
+    *,
+    previous: int | None = None,
+    legacy: bool = False,
+) -> list[tuple[str, int, str]]:
+    """Infer only a contiguous run ending at a confirmed association.
+
+    Once an address had an owner, require the same MAC on both sides of the
+    run. An address-only legacy record can hide an earlier owner, so legacy
+    inference also requires the run to start at the first retained check.
+    """
+    ip_key = "ip:" + address
+    credits: list[tuple[str, int, str]] = []
+    for offset in range(index - 1, -1, -1):
+        sweep = sweeps[offset]
+        if not 0 < checked - sweep.checked <= MAX_ATTRIBUTION_GAP:
+            break
+        if sweep.id == previous:
+            return credits
+        if ip_key not in sweep.devices or device in sweep.devices:
+            break
+        credits.append((device, sweep.id, ip_key))
+        checked = sweep.checked
+    else:
+        return credits if previous is None else []
+    return credits if previous is None and not legacy else []
+
+
 class PresenceHistory:
     """Atomically retain completed samples and their newest address associations.
 
@@ -112,12 +158,17 @@ class PresenceHistory:
                 CREATE INDEX IF NOT EXISTS sweep_scope_checked ON sweep (scope, checked);
                 CREATE TABLE IF NOT EXISTS seen (
                     sweep_id INTEGER REFERENCES sweep(id) ON DELETE CASCADE,
-                    device TEXT NOT NULL, PRIMARY KEY (sweep_id, device)
+                    device TEXT NOT NULL, credited_device TEXT,
+                    PRIMARY KEY (sweep_id, device)
                 );
                 CREATE TABLE IF NOT EXISTS latest (
                     scope TEXT NOT NULL, address TEXT NOT NULL, identity TEXT,
                     checked REAL NOT NULL,
                     PRIMARY KEY (scope, address)
+                );
+                CREATE TABLE IF NOT EXISTS address_anchor (
+                    scope TEXT NOT NULL, address TEXT NOT NULL, device TEXT,
+                    sweep_id INTEGER, PRIMARY KEY (scope, address)
                 );
             """)
         except sqlite3.Error:
@@ -125,13 +176,168 @@ class PresenceHistory:
             raise
         return connection
 
+    @staticmethod
+    def _has_credits(connection: sqlite3.Connection) -> bool:
+        return any(
+            row[1] == "credited_device"
+            for row in connection.execute("PRAGMA table_info(seen)")
+        )
+
+    @staticmethod
+    def _retained_sweeps(
+        connection: sqlite3.Connection, scope: str
+    ) -> list[_RetainedSweep]:
+        rows = connection.execute(
+            """
+            SELECT sweep.id, sweep.checked, seen.device
+            FROM sweep LEFT JOIN seen ON seen.sweep_id=sweep.id AND seen.credited_device IS NULL
+            WHERE sweep.scope=? ORDER BY sweep.id
+            """,
+            (scope,),
+        )
+        return [
+            _RetainedSweep(
+                sweep_id, checked, frozenset(row[2] for row in group if row[2])
+            )
+            for (sweep_id, checked), group in groupby(
+                rows, key=lambda row: (row[0], row[1])
+            )
+        ]
+
+    @staticmethod
+    def _save_credits(
+        connection: sqlite3.Connection, credits: list[tuple[str, int, str]]
+    ) -> None:
+        connection.executemany(
+            """
+            UPDATE seen SET credited_device=?
+            WHERE sweep_id=? AND device=? AND credited_device IS NULL
+            """,
+            credits,
+        )
+
+    def _upgrade_history(self, connection: sqlite3.Connection, scope: str) -> None:
+        # The old journal kept a MAC's address only in its latest positive
+        # association. Use that exact anchor where available, preserving raw
+        # sighting keys and leaving histories with unknown ownership separate.
+        connection.execute("ALTER TABLE seen ADD COLUMN credited_device TEXT")
+        sweeps = self._retained_sweeps(connection, scope)
+        by_time: dict[float, list[int]] = {}
+        for index, sweep in enumerate(sweeps):
+            by_time.setdefault(sweep.checked, []).append(index)
+        anchors: list[tuple[str, str, str | None, int | None]] = []
+        credits: list[tuple[str, int, str]] = []
+        for address, encoded, checked in connection.execute(
+            "SELECT address, identity, checked FROM latest WHERE scope=?", (scope,)
+        ):
+            identity = DeviceIdentity.decode(json.loads(encoded)) if encoded else None
+            matches = by_time.get(checked, [])
+            sweep_id = None
+            if identity and identity.mac and len(matches) == 1:
+                index = matches[0]
+                if identity.device_id in sweeps[index].devices:
+                    sweep_id = sweeps[index].id
+                    # A pruned legacy prefix could have held an earlier owner.
+                    # IDs begin at one and stay increasing across scope changes.
+                    if sweep_id == index + 1:
+                        credits.extend(
+                            _credit_before(
+                                sweeps,
+                                index,
+                                checked,
+                                address,
+                                identity.device_id,
+                                legacy=True,
+                            )
+                        )
+            anchors.append(
+                (
+                    scope,
+                    address,
+                    identity.device_id if sweep_id and identity else None,
+                    sweep_id,
+                )
+            )
+        self._save_credits(connection, credits)
+        connection.executemany(
+            "INSERT INTO address_anchor VALUES (?, ?, ?, ?)", anchors
+        )
+
+    def _record_associations(
+        self,
+        connection: sqlite3.Connection,
+        scope: str,
+        checked: float,
+        sample: PresenceSample,
+        sweep_id: int,
+        previous_id: int | None,
+    ) -> None:
+        identified = {
+            item.address: item.key
+            for item in sample.sightings
+            if item.identity
+            and item.identity.mac
+            and item.address not in sample.ambiguous_addresses
+        }
+        anchors = {
+            address: (device, sweep)
+            for address, device, sweep in connection.execute(
+                "SELECT address, device, sweep_id FROM address_anchor WHERE scope=?",
+                (scope,),
+            )
+        }
+        candidates = {
+            address: device
+            for address, device in identified.items()
+            if address not in anchors
+            or (anchors[address][0] == device and anchors[address][1] != previous_id)
+        }
+        if candidates and previous_id is not None:
+            # One bounded history read for all addresses changing from anonymous
+            # to identified, and no history read for steady identified devices.
+            sweeps = self._retained_sweeps(connection, scope)
+            credits = [
+                credit
+                for address, device in candidates.items()
+                for credit in _credit_before(
+                    sweeps,
+                    len(sweeps) - 1,
+                    checked,
+                    address,
+                    device,
+                    previous=anchors[address][1] if address in anchors else None,
+                )
+            ]
+            self._save_credits(connection, credits)
+        observations: dict[str, str | None] = dict(identified)
+        observations.update(dict.fromkeys(sample.ambiguous_addresses))
+        connection.executemany(
+            """
+            INSERT INTO address_anchor (scope, address, device, sweep_id) VALUES (?, ?, ?, ?)
+            ON CONFLICT (scope, address) DO UPDATE SET
+                device=excluded.device, sweep_id=excluded.sweep_id
+            """,
+            (
+                (scope, address, device, sweep_id)
+                for address, device in observations.items()
+            ),
+        )
+
     def record(self, scope: str, sample: PresenceSample) -> None:
         checked = epoch(timestamp(sample.checked_at))
         with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not self._has_credits(connection):
+                self._upgrade_history(connection, scope)
+            previous_id = connection.execute(
+                "SELECT max(id) FROM sweep WHERE scope=?", (scope,)
+            ).fetchone()[0]
             result = connection.execute(
                 "INSERT INTO sweep (scope, checked) VALUES (?, ?)", (scope, checked)
             )
             sweep = result.lastrowid
+            if sweep is None:
+                raise sqlite3.DatabaseError("No sweep identity was assigned")
             connection.executemany(
                 "INSERT INTO seen (sweep_id, device) VALUES (?, ?)",
                 ((sweep, key) for key in {item.key for item in sample.sightings}),
@@ -153,13 +359,17 @@ class PresenceHistory:
                     for item in sample.sightings
                 ),
             )
+            self._record_associations(
+                connection, scope, checked, sample, sweep, previous_id
+            )
             connection.execute(
                 "DELETE FROM sweep WHERE scope <> ? OR checked < ? OR id <= ?",
-                (scope, checked - WINDOW_SECONDS, (sweep or 0) - MAX_SAMPLES),
+                (scope, checked - WINDOW_SECONDS, sweep - MAX_SAMPLES),
             )
             # Only the active scope retains discovery metadata. Keep its last
             # sighting per address after a sample ages out of the rolling count.
             connection.execute("DELETE FROM latest WHERE scope <> ?", (scope,))
+            connection.execute("DELETE FROM address_anchor WHERE scope <> ?", (scope,))
 
     def view(self, scope: str, now: float) -> PresenceView:
         self._require_unlinked()
@@ -170,21 +380,27 @@ class PresenceHistory:
         with closing(
             sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
         ) as connection:
+            connection.execute("BEGIN")
             checks, last = connection.execute(
                 "SELECT count(*), max(checked) FROM sweep WHERE scope=? AND checked BETWEEN ? AND ?",
                 (scope, cutoff, now),
             ).fetchone()
             checked_at = _instant(last) if last is not None else None
+            device_key = (
+                "COALESCE(seen.credited_device, seen.device)"
+                if self._has_credits(connection)
+                else "seen.device"
+            )
             counts = {
                 key: PresenceCount(
                     count, checks, _instant(seen), key.startswith("ip:"), checked_at
                 )
                 for key, count, seen in connection.execute(
-                    """
-                    SELECT seen.device, count(*), max(sweep.checked)
+                    f"""
+                    SELECT {device_key}, count(DISTINCT sweep.id), max(sweep.checked)
                     FROM sweep JOIN seen ON seen.sweep_id=sweep.id
                     WHERE sweep.scope=? AND sweep.checked BETWEEN ? AND ?
-                    GROUP BY seen.device
+                    GROUP BY 1
                     """,
                     (scope, cutoff, now),
                 )
@@ -230,7 +446,7 @@ class PresenceWatch:
         *,
         monotonic: Callable[[], float] = time.monotonic,
         clock: Callable[[], str] = utc_now,
-        delay: Callable[[], float] = lambda: random.uniform(120, 300),
+        delay: Callable[[], float] = lambda: random.uniform(120, MAX_DELAY_SECONDS),
     ):
         self.history = history
         self.monotonic = monotonic
@@ -274,7 +490,7 @@ class PresenceWatch:
         self.since = self.clock()
         try:
             # One failed, cancelled or incomplete sweep never enters the denominator.
-            async with asyncio.timeout(120):
+            async with asyncio.timeout(SAMPLE_TIMEOUT_SECONDS):
                 sample = await collect.collect_presence(since)
             self.history.record(scope, sample)
             self._cached_until = 0.0

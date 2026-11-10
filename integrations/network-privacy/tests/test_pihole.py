@@ -111,6 +111,15 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.query_clients, [])
 
+    async def test_presence_exposes_conflicting_addresses_without_guessing_mac(
+        self,
+    ) -> None:
+        self.mode = "ambiguous"
+        result = await PiHoleV6(self.plan).presence((ADDRESS,), utc_now())
+        self.assertEqual(result.devices, ())
+        self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
+        self.assertEqual(self.query_clients, [])
+
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
         return web.json_response({})

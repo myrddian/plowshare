@@ -131,13 +131,22 @@ no DNS query history. Malformed network-table rows and unavailable sources are
 reported separately while the other sources continue.
 
 Device cards show sightings out of completed quick checks over the last
-24 hours. A known MAC follows the device across watched addresses, and a
-TCP-only sighting is counted against its address. A missed response means
-the check did not see the device. A failed or skipped check contributes no
-sample. The local private journal keeps the last positive association for each
-address in the active scope even after the rolling count expires. New scopes
-start their own history. Full-scan evidence and scheduled investigations keep
-their existing path.
+24 hours. A known MAC follows the device across watched addresses. When a MAC
+is first confirmed at an address, an uninterrupted run of preceding IP-only
+sightings can count toward that device. Once an address has an identified
+owner, a later IP-only run needs confirmation from the same MAC on both sides.
+A missed check, conflicting association, or gap over seven minutes breaks
+continuity. This infers presence from the available observations. An IP change
+of owner between two samples can go undetected. Retained journals from older
+collectors can credit only leading streaks in an intact history with a retained
+address-to-MAC observation at the transition.
+
+A missed response means the check did not see the device. A failed or skipped
+check contributes no sample. The local private journal keeps the last positive
+association and the latest MAC confirmation or conflict for each address in
+the active scope even after the rolling count expires. New scopes start their
+own history. Full-scan evidence and scheduled investigations keep their
+existing path.
 
 UniFi reads connected wired and wireless clients through the controller's local
 API. It keeps names and MACs for saved addresses only. The sweep withholds the

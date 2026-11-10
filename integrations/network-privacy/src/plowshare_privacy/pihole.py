@@ -156,7 +156,7 @@ class PiHoleV6:
 
     def _devices(
         self, raw: object, targets: tuple[str, ...], observed: float
-    ) -> tuple[tuple[DeviceIdentity, ...], tuple[str, ...]]:
+    ) -> IdentitySample:
         if not isinstance(raw, dict):
             raise ValueError("Expected a Pi-hole network table")
         result: dict[str, list[DeviceIdentity]] = {}
@@ -223,8 +223,10 @@ class PiHoleV6:
                     continue
                 result.setdefault(ip, []).append(identity)
         devices: list[DeviceIdentity] = []
-        for _, candidates in sorted(result.items()):
+        ambiguous: set[str] = set()
+        for address, candidates in sorted(result.items()):
             if len({c.device_id for c in candidates}) != 1:
+                ambiguous.add(address)
                 issues.add(
                     "identity_ambiguous: Pi-hole lists multiple devices for a selected address"
                 )
@@ -234,7 +236,9 @@ class PiHoleV6:
             issues.add(
                 "identity_unavailable: some selected addresses have no fresh unambiguous Pi-hole association"
             )
-        return tuple(devices), tuple(sorted(issues))
+        return IdentitySample(
+            tuple(devices), frozenset(ambiguous), tuple(sorted(issues))
+        )
 
     def _queries(
         self, raw: object, address: str, start: float, end: float
@@ -314,24 +318,26 @@ class PiHoleV6:
         )
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
-        return await self._read(targets, observed_at, queries=True)
+        sample, _ = await self._read(targets, observed_at, queries=True)
+        return sample
 
     async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """Operator-only identity checks; no DNS history is fetched or retained."""
         if len(targets) > BATCH_SIZE:
             raise ValueError("Pi-hole requires at most 32 unique selected addresses")
-        return await self._read(targets, observed_at, queries=False)
+        sample, _ = await self._read(targets, observed_at, queries=False)
+        return sample
 
     async def presence(
         self, targets: tuple[str, ...], observed_at: str
     ) -> IdentitySample:
         """Read the network table once for the watched scope, without querying DNS logs."""
-        sample = await self._read(targets, observed_at, queries=False)
-        return IdentitySample(devices=sample.devices, issues=sample.issues)
+        sample, ambiguous = await self._read(targets, observed_at, queries=False)
+        return IdentitySample(sample.devices, ambiguous, sample.issues)
 
     async def _read(
         self, targets: tuple[str, ...], observed_at: str, *, queries: bool
-    ) -> DeviceData:
+    ) -> tuple[DeviceData, frozenset[str]]:
         limit = BATCH_SIZE if queries else MAX_TARGETS
         if len(targets) > limit or len(set(targets)) != len(targets):
             raise ValueError(
@@ -340,7 +346,7 @@ class PiHoleV6:
         targets = tuple(str(ipaddress.ip_address(address)) for address in targets)
         end = datetime.fromisoformat(observed_at.replace("Z", "+00:00")).timestamp()
         start = end - self.plan.lookback_seconds
-        devices: tuple[DeviceIdentity, ...] = ()
+        identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
         window: DnsWindow | None = None
         issues: set[str] = set()
@@ -365,7 +371,7 @@ class PiHoleV6:
                     )
                 sid = text(accepted["sid"], 256)
                 try:
-                    devices, gaps = self._devices(
+                    identity = self._devices(
                         await self._request(
                             session,
                             "GET",
@@ -376,7 +382,7 @@ class PiHoleV6:
                         targets,
                         end,
                     )
-                    issues.update(gaps)
+                    issues.update(identity.issues)
                 except (
                     PiHoleUnavailable,
                     ValueError,
@@ -465,4 +471,7 @@ class PiHoleV6:
                         issues.add(
                             "pihole_session_cleanup_failed: the API session may remain until expiry"
                         )
-        return DeviceData(devices, dns, window, tuple(sorted(issues)))
+        return (
+            DeviceData(identity.devices, dns, window, tuple(sorted(issues))),
+            identity.ambiguous_addresses,
+        )

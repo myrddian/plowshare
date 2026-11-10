@@ -2,9 +2,11 @@
 
 import asyncio
 import errno
+import json
+import sqlite3
 import tempfile
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -26,6 +28,7 @@ from plowshare_privacy.worker import Worker
 
 A, B, C, D = ("192.168.10.1", "192.168.10.2", "192.168.10.3", "192.168.10.4")
 MAC = "02:01:02:03:04:05"
+OTHER_MAC = "02:01:02:03:04:06"
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 PLAN = CollectionPlan(
     "tcp", (A, B, C, D), (443, 80, 22), 1, 4, None, 0, quick_scan=True
@@ -36,12 +39,12 @@ def at(seconds: int) -> str:
     return (START + timedelta(seconds=seconds)).isoformat()
 
 
-def identity(address: str, source: str, seen: int) -> DeviceIdentity:
+def identity(address: str, source: str, seen: int, mac: str = MAC) -> DeviceIdentity:
     return DeviceIdentity.decode(
         {
             "address": address,
-            "device_id": "mac:" + MAC,
-            "mac": MAC,
+            "device_id": "mac:" + mac,
+            "mac": mac,
             "label": None,
             "hostname": "fixture-device",
             "vendor": None,
@@ -68,6 +71,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                     identity(C, "pihole-v6", 120),
                     identity("192.168.99.1", "pihole-v6", 200),
                 ),
+                ambiguous_addresses=frozenset({D}),
                 issues=("identity_partial: sample omitted an invalid row",),
             )
         )
@@ -92,6 +96,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             {(C, 443), (D, 443), (D, 80)},
         )
         self.assertIn("identity_partial", sample.issues[0])
+        self.assertEqual(sample.ambiguous_addresses, frozenset({D}))
 
     async def test_worker_jitters_after_completion_excludes_failures_and_never_publishes(
         self,
@@ -182,6 +187,183 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                 expired.counts["mac:" + MAC].last_seen,
                 view.counts["mac:" + MAC].last_seen,
             )
+
+    async def test_first_mac_credits_only_the_recent_uninterrupted_ip_run(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            history = PresenceHistory(root)
+            history.record("scope", PresenceSample(at(0), (Sighting(A),)))
+            history.record("scope", PresenceSample(at(120), ()))
+            history.record("scope", PresenceSample(at(240), (Sighting(A), Sighting(B))))
+            history.record("scope", PresenceSample(at(360), (Sighting(A), Sighting(B))))
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(480),
+                    (
+                        Sighting(A, identity(A, "pihole-v6", 475)),
+                        Sighting(B, identity(B, "unifi", 480)),
+                    ),
+                ),
+            )
+
+            view = PresenceHistory(root).view("scope", epoch(at(481)))
+            count = view.counts["mac:" + MAC]
+            self.assertEqual(
+                (count.seen, count.checked, count.address_only), (3, 5, False)
+            )
+            self.assertEqual(view.counts["ip:" + A].seen, 1)
+            self.assertNotIn("ip:" + B, view.counts)
+            inventory = device_inventory(PLAN.targets, (), (), view)
+            self.assertEqual([card.presence for card in inventory.devices], [count])
+
+    async def test_dhcp_reuse_does_not_credit_the_ambiguous_run_to_either_mac(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            history = PresenceHistory(root)
+            history.record(
+                "scope", PresenceSample(at(0), (Sighting(A, identity(A, "unifi", 0)),))
+            )
+            history.record("scope", PresenceSample(at(120), (Sighting(A),)))
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(240), (Sighting(A, identity(A, "unifi", 240, OTHER_MAC)),)
+                ),
+            )
+            history.record("scope", PresenceSample(at(360), (Sighting(A),)))
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(480), (Sighting(A, identity(A, "pihole-v6", 475, OTHER_MAC)),)
+                ),
+            )
+            view = PresenceHistory(root).view("scope", epoch(at(481)))
+            self.assertEqual(view.counts["mac:" + MAC].seen, 1)
+            self.assertEqual(view.counts["mac:" + OTHER_MAC].seen, 3)
+            self.assertEqual(view.counts["ip:" + A].seen, 1)
+
+    async def test_old_owner_and_reported_conflict_fence_backfill(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            history = PresenceHistory(root)
+            history.record(
+                "scope", PresenceSample(at(0), (Sighting(A, identity(A, "unifi", 0)),))
+            )
+            later = 24 * 60 * 60
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(later + 120),
+                    (Sighting(A), Sighting(B)),
+                    ambiguous_addresses=frozenset({B}),
+                ),
+            )
+            history.record("scope", PresenceSample(at(later + 240), (Sighting(B),)))
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(later + 360),
+                    (
+                        Sighting(A, identity(A, "unifi", later + 360, OTHER_MAC)),
+                        Sighting(B, identity(B, "unifi", later + 360)),
+                    ),
+                ),
+            )
+            view = PresenceHistory(root).view("scope", epoch(at(later + 361)))
+            self.assertEqual(view.counts["mac:" + OTHER_MAC].seen, 1)
+            self.assertEqual(view.counts["mac:" + MAC].seen, 1)
+            self.assertEqual(view.counts["ip:" + A].seen, 1)
+            self.assertEqual(view.counts["ip:" + B].seen, 2)
+
+    async def test_restart_gap_and_mac_seen_elsewhere_do_not_link_earlier_ip(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            history = PresenceHistory(root)
+            history.record("scope", PresenceSample(at(0), (Sighting(A), Sighting(C))))
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(600),
+                    (
+                        Sighting(A),
+                        Sighting(B, identity(B, "unifi", 600)),
+                        Sighting(C, identity(C, "unifi", 600, OTHER_MAC)),
+                    ),
+                ),
+            )
+            history.record(
+                "scope",
+                PresenceSample(at(720), (Sighting(A, identity(A, "unifi", 720)),)),
+            )
+            view = PresenceHistory(root).view("scope", epoch(at(721)))
+            self.assertEqual(view.counts["mac:" + MAC].seen, 2)
+            self.assertEqual(view.counts["mac:" + OTHER_MAC].seen, 1)
+            self.assertEqual(view.counts["ip:" + A].seen, 2)
+            self.assertEqual(view.counts["ip:" + C].seen, 1)
+
+    async def test_old_journal_upgrades_without_guessing_ambiguous_ownership(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            history = PresenceHistory(root)
+            history.path.touch(mode=0o600)
+            with sqlite3.connect(history.path) as db:
+                db.executescript("""
+                    CREATE TABLE sweep (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, checked REAL NOT NULL);
+                    CREATE TABLE seen (
+                        sweep_id INTEGER REFERENCES sweep(id) ON DELETE CASCADE,
+                        device TEXT NOT NULL, PRIMARY KEY (sweep_id, device)
+                    );
+                    CREATE TABLE latest (
+                        scope TEXT NOT NULL, address TEXT NOT NULL, identity TEXT,
+                        checked REAL NOT NULL, PRIMARY KEY (scope, address)
+                    );
+                """)
+                db.executemany(
+                    "INSERT INTO sweep VALUES (?, 'scope', ?)",
+                    [(index, epoch(at(index * 120))) for index in range(1, 4)],
+                )
+                db.executemany(
+                    "INSERT INTO seen VALUES (?, ?)",
+                    [
+                        (1, "ip:" + A),
+                        (1, "mac:" + OTHER_MAC),
+                        (2, "ip:" + A),
+                        (2, "ip:" + B),
+                        (3, "mac:" + MAC),
+                    ],
+                )
+                db.executemany(
+                    "INSERT INTO latest VALUES ('scope', ?, ?, ?)",
+                    [
+                        (
+                            A,
+                            json.dumps(asdict(identity(A, "pihole-v6", 355))),
+                            epoch(at(360)),
+                        ),
+                        (B, None, epoch(at(240))),
+                    ],
+                )
+            self.assertEqual(
+                history.view("scope", epoch(at(361))).counts["mac:" + MAC].seen, 1
+            )
+            history.record(
+                "scope",
+                PresenceSample(
+                    at(480), (Sighting(B, identity(B, "unifi", 480, OTHER_MAC)),)
+                ),
+            )
+            view = PresenceHistory(root).view("scope", epoch(at(481)))
+            self.assertEqual(view.counts["mac:" + MAC].seen, 3)
+            self.assertEqual(view.counts["mac:" + OTHER_MAC].seen, 2)
+            self.assertEqual(view.counts["ip:" + B].seen, 1)
+            self.assertNotIn("ip:" + A, view.counts)
 
     async def test_failed_transport_cannot_turn_a_missing_route_into_an_absence(
         self,
