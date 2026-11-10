@@ -306,6 +306,7 @@ async function loadSettings() {
   const settings = await api('/api/monitoring');
   const report = await api('/api/discovery');
   byId('enabled').checked = settings.enabled;
+  byId('quick-scan').checked = settings.quick_scan === true;
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
@@ -327,7 +328,7 @@ byId('use-subnet').addEventListener('click', () => {
   for (const checkbox of byId('devices').querySelectorAll('input')) checkbox.checked = false;
   byId('settings-detail').textContent = 'Subnet scope prepared. Save monitoring to validate and retain it; no scan has started.';
 });
-for (const id of ['targets','ports','device-labels','enabled']) byId(id).addEventListener('input', () => {
+for (const id of ['targets','ports','device-labels','enabled','quick-scan']) byId(id).addEventListener('input', () => {
   monitoringDraft = true;
   byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
 });
@@ -370,7 +371,7 @@ byId('monitor-form').addEventListener('submit', async event => {
       if (separator < 1 || !name  || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
       labels[address] = name;
     }
-    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
+    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked})});
     monitoringDraft = false;
     renderMonitorSettings(result);
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
@@ -453,6 +454,12 @@ function renderOverview(value) {
     row.append(element('span', run.state, 'badge'), element('code', run.id));
     runs.append(row);
   }
+  const presenceStatus = value.quick_presence;
+  const quickStatus = byId('quick-presence-status');
+  quickStatus.textContent = presenceStatus?.enabled
+    ? (presenceStatus.last_checked ? 'Last quick check ' + new Date(presenceStatus.last_checked).toLocaleString() + '.' : 'Waiting for the first quick check.')
+      + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
+    : 'Quick presence checks are off.';
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
@@ -474,7 +481,16 @@ function renderOverview(value) {
       card.append(element('p', 'Address only; no observed identity', 'hint'));
     }
     const responded = device.services.some(item => item.status === 'open' || item.status === 'closed');
-    card.append(element('p', device.last_seen ? `Last checked ${new Date(device.last_seen).toLocaleString()} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first sweep', 'hint'));
+    card.append(element('p', device.last_seen ? `Last checked ${new Date(device.last_seen).toLocaleString()} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first full sweep', 'hint'));
+    const presence = device.presence;
+    if (presence?.checked > 0) {
+      const percent = Math.round(100 * presence.seen / presence.checked);
+      const subject = presence.address_only ? 'Address seen' : 'Device seen';
+      const last = presence.last_seen ? ' · Last seen ' + new Date(presence.last_seen).toLocaleString() : '';
+      card.append(element('p', `${subject} in ${presence.seen} of ${presence.checked} quick checks (${percent}%) over 24 hours${last}`, 'hint'));
+    } else if (presence?.last_seen) {
+      card.append(element('p', 'Last quick sighting ' + new Date(presence.last_seen).toLocaleString(), 'hint'));
+    }
     if (device.last_response_at) {
       card.append(element('p', `First TCP response ${new Date(device.first_response_at).toLocaleString()} · Last ${new Date(device.last_response_at).toLocaleString()}`, 'hint'));
     }
@@ -540,6 +556,7 @@ function renderPiHoleSaved(configured, pending = false) {
 function renderMonitorSettings(settings) {
   monitorEditable = settings.editable;
   byId('save-monitoring').disabled = !monitorEditable;
+  byId('quick-scan').disabled = !monitorEditable;
   byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
   renderPiHoleSaved(settings.pihole_configured, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;

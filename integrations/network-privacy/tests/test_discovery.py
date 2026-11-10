@@ -210,6 +210,7 @@ class DeferredCollectionTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             plan = configuration(Path(directory)).collection
             legacy = asdict(plan)
+            legacy.pop("quick_scan")
             legacy.pop("enabled")
             legacy.pop("labels")
             legacy.pop("pihole")

@@ -116,6 +116,29 @@ association appears separately with its observation time when the latest sweep
 has no association. This history belongs to the address; DHCP reuse and randomized
 MACs can change which device holds it.
 
+Enable **Quick presence checks every 2–5 minutes** in **Settings → Choose what
+to monitor** alongside ordinary collection. File-managed collectors can set
+`collection.quickScan` to `true`. The option defaults to off. The collector chooses a new random
+delay after each quick check and waits for the normal collection lock. A restart
+starts a fresh delay. The quick check covers only saved private IPv4 addresses
+and never publishes evidence, fires the scan schedule, or starts an investigation.
+
+Quick checks use connected UniFi clients first, then a Pi-hole v6 network-table
+sighting whose address timestamp falls within the current sampling interval.
+Remaining addresses get up to two short probes on the first configured TCP
+ports. Only an open connection counts as a TCP sighting. The Pi-hole path reads
+no DNS query history. Malformed network-table rows and unavailable sources are
+reported separately while the other sources continue.
+
+Device cards show sightings out of completed quick checks over the last
+24 hours. A known MAC follows the device across watched addresses, and a
+TCP-only sighting is counted against its address. A missed response means
+the check did not see the device. A failed or skipped check contributes no
+sample. The local private journal keeps the last positive association for each
+address in the active scope even after the rolling count expires. New scopes
+start their own history. Full-scan evidence and scheduled investigations keep
+their existing path.
+
 UniFi reads connected wired and wireless clients through the controller's local
 API. It keeps names and MACs for saved addresses only. The sweep withholds the
 association for an address if sources disagree on its MAC. A failed UniFi read

@@ -315,6 +315,16 @@ class Snapshot:
         return cls(timestamp(row["observed_at"]), tcp, dns, devices, window)
 
 
+_PRIVATE_IPV4 = tuple(
+    ipaddress.IPv4Network(block)
+    for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+
+
+def private_ipv4(address: str) -> bool:
+    return any(ipaddress.ip_address(address) in block for block in _PRIVATE_IPV4)
+
+
 def expand_targets(value: object) -> tuple[str, ...]:
     """Expand an explicit private IPv4 CIDR, preserving a bounded, frozen scope.
 
@@ -323,16 +333,12 @@ def expand_targets(value: object) -> tuple[str, ...]:
     caller intent. Explicit historical address configurations remain supported.
     """
     result: list[str] = []
-    private = tuple(
-        ipaddress.IPv4Network(block)
-        for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-    )
     for entry in items(value, MAX_TARGETS):
         address = text(entry, 64)
         if "/" in address:
             network = ipaddress.IPv4Network(address, strict=True)
             if network.num_addresses > MAX_TARGETS or not any(
-                network.subnet_of(block) for block in private
+                network.subnet_of(block) for block in _PRIVATE_IPV4
             ):
                 raise ValueError(
                     "Choose a private IPv4 subnet of at most 256 addresses (/24 or smaller)"
@@ -518,6 +524,7 @@ class CollectionPlan:
     labels: tuple[DeviceLabel, ...] = ()
     pihole: PiHolePlan | None = None
     unifi: UniFiPlan | None = None
+    quick_scan: bool = False
 
 
 @dataclass(frozen=True)
@@ -593,6 +600,7 @@ class Configuration:
                 "deviceLabels",
                 "pihole",
                 "unifi",
+                "quickScan",
             },
         )
         mode = plan["mode"]
@@ -613,6 +621,9 @@ class Configuration:
             collection = CollectionPlan("fixture", (), (), 1.0, 1, observations, 0)
         else:
             enabled = plan.get("enabled", True)
+            quick_scan = plan.get("quickScan", False)
+            if type(quick_scan) is not bool:
+                raise ValueError("Quick presence scan must be a boolean")
             if type(enabled) is not bool:
                 raise ValueError("TCP collection enabled must be a boolean")
             if not {"targets", "ports", "timeoutSeconds", "concurrency"} <= set(plan):
@@ -620,6 +631,8 @@ class Configuration:
                     "TCP collection requires explicit targets, ports and limits"
                 )
             targets = expand_targets(plan["targets"])
+            if quick_scan and not all(private_ipv4(address) for address in targets):
+                raise ValueError("Quick presence scans require private IPv4 addresses")
             ports = tuple(
                 integer(item, 1, 65535) for item in items(plan["ports"], MAX_PORTS)
             )
@@ -663,6 +676,7 @@ class Configuration:
                 device_labels(plan.get("deviceLabels", {}), targets),
                 pihole,
                 UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
+                quick_scan,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),

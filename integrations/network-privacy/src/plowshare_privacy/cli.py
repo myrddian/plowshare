@@ -43,6 +43,7 @@ from .operator_state import FileOperatorStore
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
+from .presence import PresenceHistory, PresenceWatch
 from .profile_port import SdkProfilePort
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
@@ -165,6 +166,7 @@ async def execute(args: argparse.Namespace) -> None:
                 receipts,
                 configured_collector(config.collector, config.collection),
                 operator_store,
+                PresenceWatch(PresenceHistory(config.state_directory)),
             )
             peer = (
                 IntegrationPeer(

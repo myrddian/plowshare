@@ -89,6 +89,27 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         with FileReceipts(self.worker.config) as reopened:
             self.assertEqual(reopened.all(), ())
 
+    async def test_quick_scan_setting_defaults_off_and_survives_older_settings_clients(
+        self,
+    ) -> None:
+        self.assertFalse(self.settings.view().quick_scan)
+        saved = await self.settings.save(replace(CHOICE, quick_scan=True))
+        self.assertTrue(saved.quick_scan)
+        self.assertFalse(self.worker.config.collection.quick_scan)
+        await self.settings.apply_pending()
+        await self.settings.save(CHOICE)
+        await self.settings.apply_pending()
+        self.assertTrue(Configuration.read(self.path).collection.quick_scan)
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            MonitorChoice.decode(
+                {
+                    "enabled": True,
+                    "targets": ["192.168.0.12"],
+                    "ports": [443],
+                    "quickScan": None,
+                }
+            )
+
     async def test_completed_evidence_survives_scope_change_and_restart(self) -> None:
         await self.settings.save(CHOICE)
         await self.settings.apply_pending()
