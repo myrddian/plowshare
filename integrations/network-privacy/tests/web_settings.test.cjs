@@ -253,3 +253,26 @@ test('research sends the observed identity only to the local controller route an
   assert.equal(node('profile-model').value, 'Ubiquiti USW-Pro');
   assert.equal(calls.length, 2);
 });
+
+test('a reviewed background draft fills only empty profile fields without saving or using a guessed model', async () => {
+  const {context, node} = await dashboard();
+  const requests = [];
+  const entry = {
+    request_id:'11111111-1111-4111-8111-111111111111', phase:'review',
+    identity:{address:'192.168.1.2'}, model:null,
+    draft:{name:'Fixture switch',model_hypothesis:'Unconfirmed X1',purpose:'Switching',expected_services:'HTTPS',notes:'Check firmware'},
+  };
+  context.fetch = async (url, options) => {
+    requests.push({url, method:options.method});
+    return {ok:true,json:async()=>entry};
+  };
+  context.entry = entry;
+  node('profile-purpose').value = 'Operator-provided purpose';
+  vm.runInContext("selectedResearch = entry; openDeviceProfile = async () => {};", context);
+  await node('background-draft-editor').listeners.click();
+  assert.equal(node('profile-name').value, 'Fixture switch');
+  assert.equal(node('profile-model').value, '');
+  assert.equal(node('profile-purpose').value, 'Operator-provided purpose');
+  assert.equal(node('profile-notes').value, 'Check firmware');
+  assert.deepEqual(requests, [{url:'/api/profile-research/' + entry.request_id + '/editor',method:undefined}]);
+});

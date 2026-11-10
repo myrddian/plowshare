@@ -45,8 +45,10 @@ from .operator_state import FileOperatorStore
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
-from .presence import PresenceHistory, PresenceWatch
+from .presence import PresenceHistory, PresenceView, PresenceWatch
 from .profile_port import SdkProfilePort
+from .profile_research import ProfileResearch, ResearchJournal
+from .profile_research_port import SdkResearchPort
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tool_journal_upgrade import open_tool_journal
@@ -390,6 +392,27 @@ async def execute(args: argparse.Namespace) -> None:
                     return collector.identity_source
                 return None
 
+            def research_presence() -> PresenceView:
+                plan = worker.config.collection
+                return (
+                    worker.presence_view()
+                    if (plan.enabled and plan.quick_scan and worker.state == "ready")
+                    else PresenceView()
+                )
+
+            research = (
+                ProfileResearch(
+                    ResearchJournal(config.state_directory),
+                    SdkResearchPort(lambda: client, config.project),
+                    research_presence,
+                    receipts,
+                    managed_products,
+                    advisories,
+                )
+                if operator_store is not None and config.collection.mode == "tcp"
+                else None
+            )
+
             runner = web.AppRunner(
                 application(
                     worker,
@@ -402,6 +425,7 @@ async def execute(args: argparse.Namespace) -> None:
                     issues=issues,
                     advisories=advisories,
                     managed_products=managed_products,
+                    profile_research=research,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
                     )
@@ -412,6 +436,7 @@ async def execute(args: argparse.Namespace) -> None:
             )
             await runner.setup()
             task: asyncio.Task[None] | None = None
+            research_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
@@ -454,15 +479,20 @@ async def execute(args: argparse.Namespace) -> None:
                         settings.apply_pending if settings else None,
                     )
                 )
+                if research is not None:
+                    research_task = asyncio.create_task(research.run(stop))
                 await stop.wait()
             finally:
                 stop.set()
-                if task:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+                for running in (research_task, task):
+                    if running is not None:
+                        running.cancel()
+                for running in (research_task, task):
+                    if running is not None:
+                        try:
+                            await running
+                        except asyncio.CancelledError:
+                            pass
                 await runner.cleanup()
                 if owns_handoff:
                     handoff.unlink(missing_ok=True)

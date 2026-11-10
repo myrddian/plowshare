@@ -573,7 +573,8 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("\nmodel: local-model\n", path.read_text())
         scripts = tuple((setup.output / "application/orchestrations").glob("*.js"))
         self.assertEqual(
-            {path.stem for path in scripts}, {"privacy_tick", "investigate_network"}
+            {path.stem for path in scripts},
+            {"privacy_tick", "investigate_network", "profile_network_device"},
         )
         for path in scripts:
             if path.name == "privacy_tick.js":

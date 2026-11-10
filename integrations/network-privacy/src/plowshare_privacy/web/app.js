@@ -22,6 +22,8 @@ let profileEdit = null;
 let profileBlocked = false;
 let advisoriesAvailable = false;
 let researchDevice = null;
+let selectedResearch = null;
+let researchBusy = false;
 let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
@@ -204,6 +206,10 @@ async function refresh() {
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('device-profiles').hidden = !status.profiles_available;
+    byId('background-research').hidden = !status.profile_research_available;
+    if (!researchBusy) byId('background-research-enabled').checked = !!status.profile_research_enabled;
+    const waitingDrafts = status.profile_drafts_waiting || 0;
+    byId('background-research-count').textContent = waitingDrafts ? String(waitingDrafts) + ' awaiting review' : '';
     advisoriesAvailable = !!status.advisories_available;
     byId('research-search-status').textContent = advisoriesAvailable
       ? 'Advisory search sends only this public model name to NVD. Review it before searching.'
@@ -248,6 +254,7 @@ byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
   clearIssueEditor();
   clearDeviceResearch();
+  clearBackgroundResearch();
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
@@ -405,6 +412,7 @@ async function connectLocal() {
 connectLocal().catch(error => {
   clearIssueEditor();
   clearDeviceResearch();
+  clearBackgroundResearch();
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
@@ -692,6 +700,121 @@ async function loadProfiles() {
   if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
   return result.profiles;
 }
+function clearBackgroundDraft() {
+  selectedResearch = null;
+  byId('background-draft').hidden = true;
+  byId('background-draft-title').textContent = '';
+  byId('background-draft-content').replaceChildren();
+  byId('background-draft-model').value = '';
+  byId('background-draft-feedback').value = '';
+}
+function clearBackgroundResearch() {
+  clearBackgroundDraft();
+  byId('background-research-list').replaceChildren();
+  byId('background-research-detail').textContent = '';
+  byId('background-research-count').textContent = '';
+  byId('background-research-enabled').checked = false;
+}
+const researchPhases = {queued:'Queued for research',pending:'Awaiting admission receipt',running:'Research running',review:'Ready for review',failed:'Needs attention'};
+async function loadBackgroundResearch() {
+  const queue = await api('/api/profile-research');
+  const list = byId('background-research-list');
+  if (!researchBusy) byId('background-research-enabled').checked = queue.enabled;
+  byId('background-research-detail').textContent = queue.detail || (queue.enabled ? 'Background research enabled.' : 'Background research paused.');
+  list.replaceChildren();
+  if (!queue.entries.length) list.append(element('p', 'No drafts or research activity to review.', 'hint'));
+  for (const entry of queue.entries) {
+    const name = entry.label || entry.model || entry.address;
+    const button = element('button', name + ' · ' + researchPhases[entry.phase], 'entry');
+    button.type = 'button';
+    button.addEventListener('click', () => openBackgroundDraft(entry.request_id).catch(error => notice(error.message, true)));
+    list.append(button);
+  }
+}
+function backgroundDraftPath(id) {return '/api/profile-research/' + encodeURIComponent(id);}
+async function openBackgroundDraft(id) {
+  const entry = await api(backgroundDraftPath(id));
+  selectedResearch = entry;
+  const draft = entry.draft;
+  byId('background-draft-title').textContent = entry.identity.hostname || entry.model || entry.identity.address;
+  byId('background-draft-model').value = entry.model || '';
+  byId('background-draft-feedback').value = '';
+  const output = byId('background-draft-content');
+  output.replaceChildren(element('p', [entry.identity.address, entry.identity.mac, researchPhases[entry.phase], entry.run_id].filter(Boolean).join(' · '), 'hint'));
+  if (draft) {
+    const nvdCoverage = {
+      searched: 'NVD searched for the confirmed model. Keyword results require an applicability check.',
+      model_unconfirmed: 'NVD lookup awaits a confirmed public model.',
+      not_configured: 'NVD lookup is disabled on this collector.',
+      unavailable: 'NVD lookup was unavailable during this run.',
+    };
+    output.append(element('p', nvdCoverage[entry.nvd_status] || 'NVD coverage unavailable.', 'hint'));
+    for (const [heading, value] of [
+      ['Name', draft.name], ['Model hypothesis', draft.model_hypothesis],
+      ['Purpose', draft.purpose], ['Expected services', draft.expected_services],
+      ['Research notes', draft.notes], ['Questions for you', draft.questions],
+    ]) if (value) output.append(element('h4', heading), element('p', value));
+    for (const cve of entry.advisory_ids) {
+      const link = element('a', cve, 'entry');
+      link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(cve);
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      output.append(link);
+    }
+  }
+  byId('background-draft-research').hidden = !['review','failed'].includes(entry.phase);
+  byId('background-draft-editor').hidden = entry.phase !== 'review' || byId('device-profiles').hidden;
+  byId('background-draft-reviewed').hidden = entry.phase !== 'review';
+  byId('background-draft-dismiss').hidden = !['review','failed','queued'].includes(entry.phase);
+  byId('background-draft').hidden = false;
+}
+byId('background-research-load').addEventListener('click', () => loadBackgroundResearch().catch(error => notice(error.message, true)));
+byId('background-research-enabled').addEventListener('change', async () => {
+  const toggle = byId('background-research-enabled');
+  if (researchBusy) return;
+  researchBusy = true; toggle.disabled = true;
+  try {
+    const saved = await api('/api/profile-research', {method:'POST',body:JSON.stringify({enabled:toggle.checked})});
+    toggle.checked = saved.enabled;
+    await loadBackgroundResearch();
+  } catch (error) {notice(error.message, true);}
+  finally {researchBusy = false; toggle.disabled = false;}
+});
+async function reviewBackgroundDraft(action) {
+  if (!selectedResearch || researchBusy) return;
+  const id = selectedResearch.request_id;
+  const model = action === 'research' ? byId('background-draft-model').value.trim() || null : null;
+  const feedback = action === 'research' ? byId('background-draft-feedback').value.trim() : '';
+  researchBusy = true;
+  try {
+    await api(backgroundDraftPath(id), {method:'POST',body:JSON.stringify({action,model,feedback})});
+    if (selectedResearch?.request_id === id) clearBackgroundDraft();
+    await loadBackgroundResearch();
+  } catch (error) {notice(error.message, true);}
+  finally {researchBusy = false;}
+}
+byId('background-draft').addEventListener('submit', event => {
+  event.preventDefault(); reviewBackgroundDraft('research');
+});
+byId('background-draft-reviewed').addEventListener('click', () => reviewBackgroundDraft('reviewed'));
+byId('background-draft-dismiss').addEventListener('click', () => reviewBackgroundDraft('dismissed'));
+byId('background-draft-editor').addEventListener('click', async () => {
+  if (!selectedResearch || researchBusy) return;
+  const id = selectedResearch.request_id;
+  researchBusy = true;
+  try {
+    const entry = await api(backgroundDraftPath(id) + '/editor');
+    await openDeviceProfile(entry.identity.address);
+    const draft = entry.draft;
+    for (const [field, value] of [['name',draft.name],['model',entry.model],['purpose',draft.purpose],
+      ['expected',draft.expected_services],['notes',draft.notes]]) {
+      const input = byId('profile-' + field);
+      if (value && !input.value.trim()) input.value = value;
+    }
+    notice('Draft copied into empty profile fields. Confirm the identity and review before saving.');
+  } catch (error) {notice(error.message, true);}
+  finally {researchBusy = false;}
+});
+
 function clearDeviceResearch() {
   researchDevice = null;
   byId('device-research').hidden = true;

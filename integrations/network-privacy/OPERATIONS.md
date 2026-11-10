@@ -365,6 +365,35 @@ Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.
 
+## Background device profiles
+
+Under **Devices → Background device profiles**, enable research after enabling
+quick presence checks and deploying the matching Application source and collector.
+It starts off. The collector admits one profile research run at a time, with up
+to four admissions per UTC day. A candidate needs a fresh MAC association and
+at least three associated quick sightings. Model work is separate from network
+investigations. It uses retained evidence and starts no new network scan.
+
+The collector reads the configured UniFi adopted inventory for the current IP
+and MAC when available. Full-sweep port clues are used only when a retained sweep
+observed the same MAC at that address. If the controller confirms a public model,
+or you enter one during review, the configured NVD lookup checks that model
+automatically. Configure `PLOWSHARE_PRIVACY_NVD_ORIGIN` as described above.
+Unknown models still get a draft and may ask you for identifying details.
+The Plowshare profiler receives local name, vendor and port clues, the public
+advisory results and your feedback. Its project Information tool is read-only.
+NVD receives only the confirmed public model.
+
+Use **Load drafts and activity** to review results and see retained Plowshare run
+IDs. **Research with feedback** queues another bounded run for the same MAC.
+**Use draft in profile editor** requires a fresh association and fills empty
+fields. Review the device and choose **Save profile** explicitly to publish a
+profile. **Mark reviewed** and **Dismiss** keep the decision and prevent automatic
+repeat research for that MAC. Suspending research stops new starts and continues
+receipt reads for admitted work. An uncertain start is reconciled by the original
+request UUID, with later admissions held until it settles. The private journal
+holds up to 256 device records.
+
 ## Device knowledge base
 
 Open **Device knowledge base** or choose **Device profile** on a device card.

@@ -65,6 +65,29 @@
           <div id="research-results" aria-live="polite"></div>
         </div>
       </section>
+      <section id="background-research" class="panel setup-panel" hidden>
+        <div class="panel-heading"><h2>Background device profiles</h2><span id="background-research-count"></span></div>
+        <div class="panel-body">
+          <p>Use recent quick sightings to draft profiles with Plowshare. The model sees device-name, vendor and service clues. NVD receives only confirmed public model names.</p>
+          <label><input type="checkbox" id="background-research-enabled"> Enable background profile research</label>
+          <p class="hint">Requires quick presence checks. One draft runs at a time, up to four admissions per UTC day. Review each draft before saving a profile.</p>
+          <button type="button" id="background-research-load" class="secondary">Load drafts and activity</button>
+          <p id="background-research-detail" role="status" class="hint"></p>
+          <div id="background-research-list" class="entries"></div>
+          <form id="background-draft" hidden>
+            <h3 id="background-draft-title"></h3>
+            <div id="background-draft-content"></div>
+            <label>Confirmed public model, if known<input id="background-draft-model" maxlength="128"></label>
+            <label>Feedback for the model<textarea id="background-draft-feedback" maxlength="512" rows="2"></textarea></label>
+            <div class="row">
+              <button type="submit" id="background-draft-research">Research with feedback</button>
+              <button type="button" id="background-draft-editor" class="secondary">Use draft in profile editor</button>
+              <button type="button" id="background-draft-reviewed" class="secondary">Mark reviewed</button>
+              <button type="button" id="background-draft-dismiss" class="secondary">Dismiss</button>
+            </div>
+          </form>
+        </div>
+      </section>
       <details id="device-profiles" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary><div class="panel-body">
         <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
         <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button">Create device profile</button><button id="reconcile-profiles" type="button">Check retained writes</button></div>
