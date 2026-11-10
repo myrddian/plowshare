@@ -50,7 +50,12 @@ def public_model(value: str) -> str:
     if (
         not _MODEL.fullmatch(model)
         or not re.search(r"[A-Za-z]", model)
-        or re.search(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b|\.local\b", model, re.I)
+        or re.search(
+            r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b|\.(?:local|lan|home\.arpa)\b"
+            r"|\b(?:[0-9a-f]{2}-){5}[0-9a-f]{2}\b",
+            model,
+            re.I,
+        )
     ):
         raise ValueError(
             "Save the public manufacturer and model name before looking up advisories"

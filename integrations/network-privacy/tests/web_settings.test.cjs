@@ -14,7 +14,7 @@ async function dashboard() {
     return nodes.get(id);
   }
   const context = vm.createContext({
-    document:{getElementById:node}, location:{hash:''}, URLSearchParams,
+    document:{getElementById:node, createElement:tag=>({tag, append(){}})}, location:{hash:''}, URLSearchParams,
     CSS:{escape:value=>value}, PrivacyMarkdown:{render:source=>({source})},
     setInterval() {}, fetch:async () => ({ok:false, status:401}),
   });
@@ -224,4 +224,32 @@ test('whole-subnet selection prepares scope without saving, enabling or starting
   vm.runInContext("renderMonitorSettings({editable:true,pending:false,pihole_configured:true,detail:'Saved settings are active.'})",context);
   assert.match(node('settings-detail').textContent,/not saved/);
   assert.equal(node('targets').value,'192.168.0.0/24');
+});
+
+test('research sends the observed identity only to the local controller route and the reviewed model only to search', async () => {
+  const {context, node} = await dashboard();
+  const calls = [];
+  context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push({url,body});
+    if (url.endsWith('/product')) return {ok:true,json:async()=>({available:true,product:{
+      manufacturer:'Ubiquiti',model:'USW-Pro',firmware:'1.2.3',firmware_updatable:true,
+    }})};
+    return {ok:true,json:async()=>({total:0,advisories:[],checked_at:'2026-01-01T00:00:00Z'})};
+  };
+  vm.runInContext("advisoriesAvailable = true; openDeviceResearch({address:'192.168.1.10',name:'Private',identity:{source:'unifi',mac:'02:00:00:00:00:01',device_id:'mac:02:00:00:00:00:01',hostname:'private-device.lan'}});", context);
+  assert.equal(node('research-model').value, '');
+  assert.equal(calls.length, 0);
+  await node('research-unifi').listeners.click();
+  assert.match(node('research-unifi-result').textContent, /Firmware 1.2.3/);
+  assert.equal(node('research-model').value, 'Ubiquiti USW-Pro');
+  await node('research-form').listeners.submit({preventDefault(){}});
+  assert.deepEqual(calls, [
+    {url:'/api/devices/192.168.1.10/product',body:{device_id:'mac:02:00:00:00:00:01'}},
+    {url:'/api/devices/192.168.1.10/advisories',body:{model:'Ubiquiti USW-Pro'}},
+  ]);
+  vm.runInContext("openDeviceProfile = async () => {};", context);
+  await node('research-profile').listeners.click();
+  assert.equal(node('profile-model').value, 'Ubiquiti USW-Pro');
+  assert.equal(calls.length, 2);
 });

@@ -105,6 +105,64 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         ):
             UniFiNetwork(UniFiPlan.decode(configuration()))
 
+    async def test_managed_product_requires_a_unique_online_mac_and_address_match(
+        self,
+    ) -> None:
+        stamp = utc_now()
+        identity = DeviceIdentity(
+            FIRST, "mac:" + MAC, None, None, MAC, None, "unifi", stamp, stamp
+        )
+        adopted = {
+            "ipAddress": FIRST,
+            "macAddress": MAC,
+            "state": "ONLINE",
+            "model": "USW-Pro",
+            "firmwareVersion": "1.2.3",
+            "firmwareUpdatable": True,
+        }
+        with patch.dict(os.environ, {KEY: "fixture-key"}):
+            unifi = UniFiNetwork(UniFiPlan.decode(configuration()))
+        for total, rows in (
+            (1, [adopted | {"ipAddress": SECOND}]),
+            (1, [adopted | {"macAddress": OTHER_MAC}]),
+            (1, [adopted | {"state": "OFFLINE"}]),
+            (2, [adopted, adopted]),
+        ):
+            read = AsyncMock(
+                return_value={
+                    "offset": 0,
+                    "limit": 2,
+                    "count": len(rows),
+                    "totalCount": total,
+                    "data": rows,
+                }
+            )
+            with patch.object(unifi, "_read_page", read):
+                self.assertIsNone(await unifi.managed_product(identity))
+        read = AsyncMock(
+            return_value={
+                "offset": 0,
+                "limit": 2,
+                "count": 1,
+                "totalCount": 1,
+                "data": [adopted],
+            }
+        )
+        with patch.object(unifi, "_read_page", read):
+            result = await unifi.managed_product(identity)
+        assert result is not None
+        self.assertEqual(
+            (result.manufacturer, result.model, result.firmware),
+            ("Ubiquiti", "USW-Pro", "1.2.3"),
+        )
+        call = read.await_args
+        assert call is not None
+        self.assertEqual(call.args[1], BASE + f"/sites/{SITE}/devices")
+        self.assertEqual(
+            call.args[2],
+            {"offset": 0, "limit": 2, "filter": f"macAddress.eq('{MAC}')"},
+        )
+
     def test_standard_tls_keeps_existing_receipt_scope(self) -> None:
         unifi = UniFiPlan.decode(configuration())
         plan = CollectionPlan("tcp", (FIRST,), (443,), 0.1, 1, None, 3600, unifi=unifi)

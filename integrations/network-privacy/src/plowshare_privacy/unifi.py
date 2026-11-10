@@ -3,6 +3,7 @@
 import asyncio
 import ipaddress
 import os
+import re
 import ssl
 from dataclasses import dataclass
 
@@ -24,7 +25,7 @@ from .contracts import (
     text,
     uuid,
 )
-from .identity_source import IdentitySample
+from .identity_source import IdentitySample, ManagedProduct, ManagedProductUnavailable
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 8
@@ -50,7 +51,9 @@ class UniFiNetwork:
         ):
             raise ValueError("Set the configured UniFi API key environment variable")
         self._api_key = key
-        self._clients = plan.api_base + "/sites/" + plan.site_id + "/clients"
+        site = plan.api_base + "/sites/" + plan.site_id
+        self._clients = site + "/clients"
+        self._devices = site + "/devices"
         if plan.certificate_sha256 is not None:
             # aiohttp compares the exact peer certificate after the TLS handshake
             # and before it sends HTTP headers. Redirects remain disabled.
@@ -138,6 +141,54 @@ class UniFiNetwork:
             )
         )
 
+    async def managed_product(self, identity: DeviceIdentity) -> ManagedProduct | None:
+        mac = identity.mac
+        if mac is None or not re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", mac):
+            raise ValueError("Choose an observed device with a MAC address")
+        try:
+            async with ClientSession(
+                headers={"X-API-Key": self._api_key, "Accept": "application/json"},
+                timeout=ClientTimeout(total=5),
+            ) as session:
+                raw = await self._read_page(
+                    session,
+                    self._devices,
+                    {"offset": 0, "limit": 2, "filter": f"macAddress.eq('{mac}')"},
+                )
+            page = object_fields(
+                raw, {"offset", "limit", "count", "totalCount", "data"}
+            )
+            integer(page["offset"], 0, 0)
+            matches = items(page["data"], integer(page["limit"], 1, 2))
+            count = integer(page["count"], len(matches), len(matches))
+            if integer(page["totalCount"], count, 2**31 - 1) != 1 or count != 1:
+                return None
+            row = matches[0]
+            if not isinstance(row, dict):
+                raise ValueError("Expected adopted UniFi device")
+            # Both identifiers must still agree on a live controller record.
+            # A reused IP, stale client or duplicate match cannot supply a model.
+            if (
+                text(row.get("macAddress"), 17).lower() != mac
+                or row.get("state") != "ONLINE"
+                or row.get("ipAddress") != identity.address
+            ):
+                return None
+            firmware = row.get("firmwareVersion")
+            upgrade = row.get("firmwareUpdatable")
+            if upgrade is not None and type(upgrade) is not bool:
+                raise ValueError("Expected UniFi firmware update flag")
+            return ManagedProduct(
+                "Ubiquiti",
+                text(row.get("model"), 128),
+                text(firmware, 128) if firmware is not None else None,
+                upgrade,
+            )
+        except (ClientError, TimeoutError, ValueError):
+            raise ManagedProductUnavailable(
+                "UniFi product details could not be read or validated."
+            ) from None
+
     async def _page(
         self,
         session: ClientSession,
@@ -145,20 +196,25 @@ class UniFiNetwork:
         scope: frozenset[str],
         observed_at: str,
     ) -> _ClientPage:
+        raw = await self._read_page(
+            session, self._clients, {"offset": offset, "limit": _PAGE_SIZE}
+        )
+        return _decode_page(raw, offset, scope, observed_at)
+
+    async def _read_page(
+        self, session: ClientSession, url: str, params: dict[str, int | str]
+    ) -> object:
         async with session.get(
-            self._clients,
-            params={"offset": offset, "limit": _PAGE_SIZE},
-            ssl=self._tls,
-            allow_redirects=False,
+            url, params=params, ssl=self._tls, allow_redirects=False
         ) as response:
             if response.status != 200:
-                raise ValueError("UniFi client inventory request failed")
+                raise ValueError("UniFi inventory request failed")
             body = bytearray()
             async for chunk in response.content.iter_chunked(16384):
                 body.extend(chunk)
                 if len(body) > _MAX_BYTES:
-                    raise ValueError("UniFi client page exceeded the response limit")
-        return _decode_page(parse_json(bytes(body)), offset, scope, observed_at)
+                    raise ValueError("UniFi inventory page exceeded the response limit")
+        return parse_json(bytes(body))
 
 
 def _decode_page(

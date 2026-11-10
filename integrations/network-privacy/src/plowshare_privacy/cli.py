@@ -27,6 +27,7 @@ from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
 from .advisories import NvdAdvisories
+from .collection import NetworkCollector
 from .collector_factory import configured_collector
 from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
@@ -34,6 +35,7 @@ from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
 from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
+from .identity_source import ManagedProductLookup
 from .issue_port import SdkIssuePort
 from .issue_records import FileIssueIntents, PrivacyIssues
 from .journal import FileReceipts
@@ -379,6 +381,15 @@ async def execute(args: argparse.Namespace) -> None:
                 # Capture the connection cell: recovery replaces client without retaining a stale socket.
                 return SdkScheduleRuntime(client, current)
 
+            def managed_products() -> ManagedProductLookup | None:
+                # Settings can replace the active collector and its configured controller.
+                collector = worker.collector
+                if isinstance(collector, NetworkCollector) and isinstance(
+                    collector.identity_source, ManagedProductLookup
+                ):
+                    return collector.identity_source
+                return None
+
             runner = web.AppRunner(
                 application(
                     worker,
@@ -390,6 +401,7 @@ async def execute(args: argparse.Namespace) -> None:
                     profiles=profiles,
                     issues=issues,
                     advisories=advisories,
+                    managed_products=managed_products,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
                     )

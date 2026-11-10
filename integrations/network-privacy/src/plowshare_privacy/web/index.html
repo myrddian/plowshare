@@ -51,6 +51,20 @@
         <p id="device-filter-empty" class="setup-content hint" hidden>No addresses match these filters.</p>
         <div id="device-cards" class="card-grid setup-content"></div><div id="moves" class="setup-content"></div>
       </section>
+      <section id="device-research" class="panel setup-panel" aria-labelledby="research-title" hidden>
+        <div class="panel-heading"><h2 id="research-title">Research a device</h2><button id="close-research" type="button" class="secondary">Close</button></div>
+        <div class="panel-body">
+          <p id="research-observation" class="hint"></p>
+          <button id="research-unifi" type="button" class="secondary">Read UniFi product details</button>
+          <p id="research-unifi-result" role="status" class="hint"></p>
+          <form id="research-form">
+            <label>Public manufacturer and exact model<input id="research-model" maxlength="128" required></label>
+            <p class="hint" id="research-search-status">Advisory search sends only this public model name to NVD. Review it before searching.</p>
+            <div class="row"><button id="research-search" type="submit">Look up advisories</button><button id="research-profile" type="button" class="secondary">Use model in profile editor</button></div>
+          </form>
+          <div id="research-results" aria-live="polite"></div>
+        </div>
+      </section>
       <details id="device-profiles" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary><div class="panel-body">
         <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
         <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button">Create device profile</button><button id="reconcile-profiles" type="button">Check retained writes</button></div>

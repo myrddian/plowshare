@@ -161,8 +161,20 @@ type unknown. Possible services have exposure checks you can verify locally.
 Port assignments are clues to check, and the collector sends no protocol probes
 to verify them. See the [IANA service registry](https://www.iana.org/assignments/service-names-port-numbers).
 
-For product advisories, save the public manufacturer and exact model in the
-device profile. To enable the lookup, set the collector's
+Choose **Research device** on an observed card to review the local identity and
+device-type clues. **Read UniFi product details** looks up the observed MAC in the
+adopted-device inventory and checks that the record is online at the same IP.
+Supported adopted switches, access points and gateways can supply model and
+firmware, and UniFi may report an available firmware update. Connected-client
+names and Pi-hole hostnames, MAC vendors and timestamps are identification clues.
+For other devices, confirm the public model from a label or management page.
+
+Review the public manufacturer and exact model before choosing **Look up
+advisories**. This sends only the model to NVD and works before a profile is
+saved. **Use model in profile editor** fills the existing profile form for review.
+These actions leave the full-scan schedule and investigation activity untouched.
+
+To enable advisory lookup, set the collector's
 `PLOWSHARE_PRIVACY_NVD_ORIGIN` to the HTTPS origin of the NVD API
 (`https://services.nvd.nist.gov`) before starting the dashboard. Choose
 **Look up advisories for saved model** in the profile to send only that model

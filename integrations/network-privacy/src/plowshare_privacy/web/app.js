@@ -21,6 +21,7 @@ let findingSignature = null;
 let profileEdit = null;
 let profileBlocked = false;
 let advisoriesAvailable = false;
+let researchDevice = null;
 let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
@@ -204,6 +205,10 @@ async function refresh() {
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('device-profiles').hidden = !status.profiles_available;
     advisoriesAvailable = !!status.advisories_available;
+    byId('research-search-status').textContent = advisoriesAvailable
+      ? 'Advisory search sends only this public model name to NVD. Review it before searching.'
+      : 'Enable the collector’s NVD lookup to search here. You can still review product clues and edit a profile.';
+    if (!researchDevice) byId('research-search').disabled = !advisoriesAvailable;
     issuesAvailable = !!status.issues_available;
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
@@ -242,6 +247,7 @@ byId('refresh').addEventListener('click', () => {refresh().catch(error => notice
 byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
   clearIssueEditor();
+  clearDeviceResearch();
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
@@ -398,6 +404,7 @@ async function connectLocal() {
 }
 connectLocal().catch(error => {
   clearIssueEditor();
+  clearDeviceResearch();
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
@@ -501,7 +508,9 @@ function renderOverview(value) {
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
     const profile = element('button', 'Device profile');
     profile.addEventListener('click', () => openDeviceProfile(device.address).catch(error => notice(error.message, true)));
-    card.append(history, profile); cards.append(card);
+    const research = element('button', 'Research device', 'secondary');
+    research.addEventListener('click', () => openDeviceResearch(device));
+    card.append(history, research, profile); cards.append(card);
   }
   for (const candidate of value.candidates) {
     const card = element('article', undefined, 'device-card');
@@ -683,6 +692,107 @@ async function loadProfiles() {
   if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
   return result.profiles;
 }
+function clearDeviceResearch() {
+  researchDevice = null;
+  byId('device-research').hidden = true;
+  byId('research-model').value = '';
+  byId('research-title').textContent = 'Research a device';
+  byId('research-observation').textContent = '';
+  byId('research-unifi-result').textContent = '';
+  byId('research-results').replaceChildren();
+}
+function openDeviceResearch(device) {
+  clearDeviceResearch();
+  researchDevice = device;
+  byId('research-title').textContent = 'Research ' + device.name;
+  const identity = device.identity?.source === 'configured' ? null : device.identity;
+  const known = identity || device.last_known_identity;
+  const clues = [known?.hostname, known?.vendor, ...((device.detection?.clues) || [])].filter(Boolean);
+  byId('research-observation').textContent = clues.length
+    ? 'Observed clues. Confirm the product before searching. ' + clues.join(' · ')
+    : 'No model evidence yet. Enter the public model from the device label or its management page.';
+  byId('research-unifi').disabled = !identity?.mac;
+  byId('research-search').disabled = !advisoriesAvailable;
+  byId('research-profile').disabled = byId('device-profiles').hidden;
+  byId('device-research').hidden = false;
+  byId('device-research').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function researchPath(device, operation) {
+  return '/api/devices/' + encodeURIComponent(device.address) + '/' + operation;
+}
+byId('close-research').addEventListener('click', clearDeviceResearch);
+byId('research-unifi').addEventListener('click', async () => {
+  const device = researchDevice;
+  if (!device?.identity?.mac) return;
+  const result = byId('research-unifi-result');
+  byId('research-unifi').disabled = true;
+  result.textContent = 'Checking the controller…';
+  try {
+    const {available, product} = await api(researchPath(device, 'product'), {
+      method:'POST', body:JSON.stringify({device_id:device.identity.device_id})
+    });
+    if (device !== researchDevice) return;
+    if (!product) {
+      result.textContent = available
+        ? 'No online adopted UniFi device matched both the observed IP and MAC.'
+        : 'UniFi is unavailable on this collector.';
+      return;
+    }
+    const model = product.manufacturer + ' ' + product.model;
+    const firmware = product.firmware ? ' · Firmware ' + product.firmware : '';
+    const update = product.firmware_updatable ? ' · UniFi reports an update is available' : '';
+    result.textContent = 'Confirmed by UniFi · ' + model + firmware + update;
+    if (!byId('research-model').value.trim()) byId('research-model').value = model;
+  } catch (error) {
+    if (device === researchDevice) result.textContent = error.message;
+  } finally {
+    if (device === researchDevice) byId('research-unifi').disabled = false;
+  }
+});
+byId('research-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const device = researchDevice;
+  const model = byId('research-model').value.trim();
+  if (!device || !model || !advisoriesAvailable) return;
+  const results = byId('research-results');
+  byId('research-search').disabled = true;
+  results.replaceChildren(element('p', 'Checking NVD…'));
+  try {
+    const page = await api(researchPath(device, 'advisories'), {method:'POST', body:JSON.stringify({model})});
+    if (device === researchDevice) renderAdvisoryPage(results, page);
+  } catch (error) {
+    if (device === researchDevice) results.replaceChildren(element('p', error.message, 'notice error'));
+  } finally {
+    if (device === researchDevice) byId('research-search').disabled = !advisoriesAvailable;
+  }
+});
+byId('research-profile').addEventListener('click', async () => {
+  const device = researchDevice;
+  const model = byId('research-model').value.trim();
+  if (!device || !model) return;
+  try {
+    await openDeviceProfile(device.address);
+    if (device === researchDevice) byId('profile-model').value = model;
+  } catch (error) {notice(error.message, true);}
+});
+function renderAdvisoryPage(results, page) {
+  const detail = page.total
+    ? 'Showing ' + page.advisories.length + ' of ' + page.total + ' keyword matches.'
+    : 'No keyword matches found.';
+  results.replaceChildren(element('p', detail + ' Checked '
+    + new Date(page.checked_at).toLocaleString() + '. Check the affected model, firmware and configuration in each advisory.', 'hint'));
+  for (const item of page.advisories) {
+    const link = element('a', item.cve);
+    link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(item.cve);
+    link.target = '_blank'; link.rel = 'noopener noreferrer';
+    const entry = element('article');
+    const metadata = [item.published_on, item.severity ? 'CVSS ' + item.severity.toLowerCase() : null,
+      item.known_exploited ? 'CISA lists known exploitation' : null].filter(Boolean);
+    entry.append(link, element('p', metadata.join(' · '), 'hint'), element('p', item.description));
+    results.append(entry);
+  }
+}
+
 function advisoryLookup(view) {
   const panel = element('section');
   panel.append(element('h3', 'Product advisories'));
@@ -704,21 +814,7 @@ function advisoryLookup(view) {
       const path = '/api/profiles/' + encodeURIComponent(view.profile.profile_id)
         + '/' + encodeURIComponent(view.revision) + '/advisories';
       const page = await api(path, {method:'POST', body:JSON.stringify({model})});
-      const detail = page.total
-        ? 'Showing ' + page.advisories.length + ' of ' + page.total + ' keyword matches.'
-        : 'No keyword matches found.';
-      results.replaceChildren(element('p', detail + ' Checked '
-        + new Date(page.checked_at).toLocaleString() + '. Check the affected model, firmware and configuration in each advisory.', 'hint'));
-      for (const item of page.advisories) {
-        const link = element('a', item.cve);
-        link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(item.cve);
-        link.target = '_blank'; link.rel = 'noopener noreferrer';
-        const entry = element('article');
-        const metadata = [item.published_on, item.severity ? 'CVSS ' + item.severity.toLowerCase() : null,
-          item.known_exploited ? 'CISA lists known exploitation' : null].filter(Boolean);
-        entry.append(link, element('p', metadata.join(' · '), 'hint'), element('p', item.description));
-        results.append(entry);
-      }
+      renderAdvisoryPage(results, page);
     } catch (error) {
       results.replaceChildren(element('p', error.message, 'notice error'));
     } finally {
