@@ -139,7 +139,7 @@ class NetworkCollector:
         if isinstance(self.identity_source, ManagedInventory):
             samples.append(
                 await self.identity_source.managed_sightings(
-                    self.plan.targets, observed
+                    self.plan.targets, observed, samples[0].devices
                 )
             )
         devices: dict[str, DeviceIdentity] = {}

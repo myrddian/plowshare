@@ -157,9 +157,11 @@ that sweep.
 
 Quick presence also reads the bounded adopted-device inventory. Online adopted
 switches and access points can supply watched identities even when they are
-absent from the connected-client list. Conflicting MACs stay unresolved, and
-managed devices with current product evidence take priority in the background
-research queue.
+absent from the connected-client list. A unique matching MAC joins the adopted
+name and product details to the connected client's current address, even when
+the adopted record reports a different address. Conflicting MACs at one
+address stay unresolved. Managed devices with current product evidence take
+priority in the background research queue.
 
 A UniFi gateway can advertise its WAN IP in the adopted inventory. If the
 configured API host is the watched LAN gateway, stop the collector and use the
@@ -178,7 +180,7 @@ to verify them. See the [IANA service registry](https://www.iana.org/assignments
 
 Choose **Research device** on an observed card to review the local identity and
 device-type clues. **Read UniFi product details** looks up the observed MAC in the
-adopted-device inventory and checks that the record is online at the same IP.
+adopted-device inventory and checks for a unique online match.
 Supported adopted switches, access points and gateways can supply model and
 firmware, and UniFi may report an available firmware update. Connected-client
 names and Pi-hole hostnames, MAC vendors and timestamps are identification clues.
@@ -389,8 +391,8 @@ to four admissions per UTC day. A candidate needs a fresh MAC association and
 at least three associated quick sightings. Model work is separate from network
 investigations. It uses retained evidence and starts no new network scan.
 
-The collector reads the configured UniFi adopted inventory for the current IP
-and MAC when available. Full-sweep port clues are used only when a retained sweep
+The collector matches the observed MAC to the configured UniFi adopted inventory
+when available. Full-sweep port clues are used only when a retained sweep
 observed the same MAC at that address. If the controller confirms a public model,
 or you enter one during review, the configured NVD lookup checks that model
 automatically. Configure `PLOWSHARE_PRIVACY_NVD_ORIGIN` as described above.

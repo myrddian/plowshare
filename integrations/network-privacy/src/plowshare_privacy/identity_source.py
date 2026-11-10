@@ -47,6 +47,9 @@ class ManagedInventory(Protocol):
     """Read watched adopted devices and prioritize those with current product evidence."""
 
     async def managed_sightings(
-        self, targets: tuple[str, ...], observed_at: str
+        self,
+        targets: tuple[str, ...],
+        observed_at: str,
+        clients: tuple[DeviceIdentity, ...] = (),
     ) -> IdentitySample: ...
     def recently_managed(self, identity: DeviceIdentity) -> bool: ...

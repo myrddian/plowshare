@@ -192,7 +192,10 @@ class ProfileResearchTest(unittest.IsolatedAsyncioTestCase):
                 return None
 
             async def managed_sightings(
-                self, targets: tuple[str, ...], observed_at: str
+                self,
+                targets: tuple[str, ...],
+                observed_at: str,
+                clients: tuple[DeviceIdentity, ...] = (),
             ) -> IdentitySample:
                 return IdentitySample()
 

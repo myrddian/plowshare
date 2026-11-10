@@ -5,6 +5,7 @@ import ipaddress
 import os
 import ssl
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -94,7 +95,7 @@ class UniFiNetwork:
         self._networks = site + "/networks"
         self._gateway = plan.gateway
         self._controller_host = urlsplit(plan.api_base).hostname
-        self._managed_keys: frozenset[tuple[str, str]] = frozenset()
+        self._managed_keys: frozenset[str] = frozenset()
         self._managed_until = 0.0
         if plan.certificate_sha256 is not None:
             # aiohttp compares the exact peer certificate after the TLS handshake
@@ -186,7 +187,7 @@ class UniFiNetwork:
     def recently_managed(self, identity: DeviceIdentity) -> bool:
         return (
             time.monotonic() < self._managed_until
-            and (identity.address, identity.device_id) in self._managed_keys
+            and identity.device_id in self._managed_keys
         )
 
     async def _default_gateway(self, session: ClientSession, address: str) -> bool:
@@ -225,7 +226,10 @@ class UniFiNetwork:
         )
 
     async def _adopted_inventory(
-        self, session: ClientSession, targets: frozenset[str]
+        self,
+        session: ClientSession,
+        targets: frozenset[str],
+        client_macs: frozenset[str],
     ) -> tuple[_AdoptedDevice, ...]:
         gateway_host = (
             self._controller_host
@@ -257,6 +261,7 @@ class UniFiNetwork:
                 if row.get("state") != "ONLINE":
                     continue
                 address = row.get("ipAddress")
+                raw_mac = row.get("macAddress")
                 configured_gateway = (
                     gateway_host is not None
                     and self._gateway is not None
@@ -265,13 +270,15 @@ class UniFiNetwork:
                 if (
                     isinstance(address, str)
                     and address in targets
+                    or isinstance(raw_mac, str)
+                    and raw_mac.lower() in client_macs
                     or configured_gateway
                 ):
                     rows.append(
                         _AdoptedDevice(
                             identity,
                             address if isinstance(address, str) else None,
-                            mac_address(row.get("macAddress")),
+                            mac_address(raw_mac),
                             text(row.get("name"), 128),
                             _product(row),
                         )
@@ -282,9 +289,16 @@ class UniFiNetwork:
         raise ValueError("UniFi adopted-device inventory exceeded the page limit")
 
     async def managed_sightings(
-        self, targets: tuple[str, ...], observed_at: str
+        self,
+        targets: tuple[str, ...],
+        observed_at: str,
+        clients: tuple[DeviceIdentity, ...] = (),
     ) -> IdentitySample:
         scope = frozenset(targets)
+        client_addresses: dict[str, list[str]] = defaultdict(list)
+        for client in clients:
+            if client.mac and client.address in scope:
+                client_addresses[client.mac].append(client.address)
         devices: dict[str, DeviceIdentity] = {}
         ambiguous: set[str] = set()
         issues = []
@@ -296,7 +310,14 @@ class UniFiNetwork:
                     timeout=ClientTimeout(total=5),
                 ) as session,
             ):
-                rows = await self._adopted_inventory(session, scope)
+                rows = await self._adopted_inventory(
+                    session, scope, frozenset(client_addresses)
+                )
+                duplicate_macs = {
+                    mac
+                    for mac, count in Counter(row.mac for row in rows).items()
+                    if count > 1
+                }
                 host = self._controller_host
                 gateway = self._gateway
                 gateway_row = next(
@@ -335,22 +356,30 @@ class UniFiNetwork:
             )
 
         for row in rows:
-            if row.address is None or row.address not in scope:
+            # Connected-client data owns the live address of a matching MAC.
+            # An adopted record's address may be a different interface or stale.
+            addresses = client_addresses.get(row.mac)
+            if addresses and row.mac in duplicate_macs:
                 continue
-            existing = devices.get(row.address)
-            if existing is not None and existing.mac != row.mac:
-                ambiguous.add(row.address)
-                continue
-            devices[row.address] = DeviceIdentity(
-                row.address,
-                "mac:" + row.mac,
-                None,
-                row.name,
-                row.mac,
-                row.product.manufacturer,
-                "unifi",
-                observed_at,
-                observed_at,
+            for address in addresses or ([row.address] if row.address in scope else []):
+                existing = devices.get(address)
+                if existing is not None and existing.mac != row.mac:
+                    ambiguous.add(address)
+                    continue
+                devices[address] = DeviceIdentity(
+                    address,
+                    "mac:" + row.mac,
+                    None,
+                    row.name,
+                    row.mac,
+                    row.product.manufacturer,
+                    "unifi",
+                    observed_at,
+                    observed_at,
+                )
+        if duplicate_macs & client_addresses.keys():
+            issues.append(
+                "unifi_managed_ambiguous: multiple adopted records matched a watched client MAC"
             )
         if ambiguous:
             issues.append(
@@ -360,7 +389,7 @@ class UniFiNetwork:
             device for address, device in devices.items() if address not in ambiguous
         )
         self._managed_keys = frozenset(
-            (device.address, device.device_id) for device in accepted
+            device.device_id for device in accepted if device.mac not in duplicate_macs
         )
         self._managed_until = time.monotonic() + 360
         return IdentitySample(accepted, frozenset(ambiguous), tuple(issues))
@@ -404,7 +433,6 @@ class UniFiNetwork:
             if (
                 mac_address(row.get("macAddress")) != mac
                 or row.get("state") != "ONLINE"
-                or row.get("ipAddress") != identity.address
             ):
                 return None
             return _product(row)
