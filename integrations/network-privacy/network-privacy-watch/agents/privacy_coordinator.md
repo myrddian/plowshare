@@ -5,7 +5,7 @@ model: reasoning
 dynamic: true
 tools: [information_read, information_write, memory_recall, memory_read, agent_run, relay_tool_read]
 calls: [privacy_analyst, privacy_reviewer]
-orchestrations: [privacy_tick, investigate_network]
+orchestrations: [privacy_tick, investigate_network, profile_network_device]
 exported: true
 max-turns: 60
 max-model-calls: 40

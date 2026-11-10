@@ -28,7 +28,7 @@ from .contracts import (
     uuid,
 )
 from .device_inventory import DeviceCard
-from .device_profiles import DeviceProfile, ProfileFields, ProfileManagement
+from .device_profiles import DeviceProfile, ProfileFields, ProfileManagement, field
 from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
 from .identity_source import ManagedProductLookup, ManagedProductUnavailable
@@ -37,6 +37,7 @@ from .journal import Publication
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
+from .profile_research import ResearchReview
 from .schedule_editor import ScheduleManagement
 from .tools import DEFINITIONS, PrivacyTools, WorkerTools, decode_call
 from .worker import ReconciliationRequired, Worker
@@ -55,6 +56,7 @@ def application(
     issues: IssueManagement | None = None,
     advisories: AdvisoryLookup | None = None,
     managed_products: Callable[[], ManagedProductLookup | None] | None = None,
+    profile_research: ResearchReview | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -414,6 +416,65 @@ def application(
             )
         return web.json_response(asdict(await advisories.search(model)))
 
+    def research_service() -> ResearchReview:
+        if profile_research is None:
+            raise web.HTTPNotFound(text="Background profile research is not available")
+        return profile_research
+
+    async def research_list(request: web.Request) -> web.Response:
+        service = research_service()
+        return web.json_response(
+            {
+                "enabled": service.ledger.enabled,
+                "detail": service.error,
+                "entries": [
+                    {
+                        "request_id": entry.request_id,
+                        "address": entry.identity.address,
+                        "label": entry.identity.label or entry.identity.hostname,
+                        "model": entry.model,
+                        "phase": entry.phase,
+                        "run_id": entry.run_id,
+                    }
+                    for entry in reversed(service.ledger.entries)
+                    if entry.phase not in {"reviewed", "dismissed"}
+                ],
+            }
+        )
+
+    async def research_setting(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"enabled"})
+        if type(row["enabled"]) is not bool:
+            raise ValueError("Choose whether to enable background device research")
+        research_service().enable(row["enabled"])
+        return web.json_response({"enabled": row["enabled"]})
+
+    async def research_detail(request: web.Request) -> web.Response:
+        return web.json_response(
+            asdict(research_service().entry(uuid(request.match_info["identity"])))
+        )
+
+    async def research_editor(request: web.Request) -> web.Response:
+        return web.json_response(
+            asdict(
+                research_service().draft_for_editor(
+                    uuid(request.match_info["identity"])
+                )
+            )
+        )
+
+    async def research_review(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()), {"action", "model", "feedback"}
+        )
+        research_service().review(
+            uuid(request.match_info["identity"]),
+            text(row["action"], 16),
+            text(row["model"], 128) if row["model"] is not None else None,
+            field(row["feedback"], 512),
+        )
+        return web.json_response({"updated": True})
+
     async def profile_advisories(request: web.Request) -> web.Response:
         if advisories is None:
             raise web.HTTPNotFound(text="Advisory lookup is not configured")
@@ -604,6 +665,14 @@ def application(
                 "settings_available": settings is not None,
                 "profiles_available": profiles is not None,
                 "advisories_available": profiles is not None and advisories is not None,
+                "profile_research_available": profile_research is not None,
+                "profile_research_enabled": profile_research is not None
+                and profile_research.ledger.enabled,
+                "profile_drafts_waiting": sum(
+                    entry.phase == "review" for entry in profile_research.ledger.entries
+                )
+                if profile_research is not None
+                else 0,
                 "issues_available": issues is not None,
                 "state": worker.state,
                 "detail": worker.detail,
@@ -749,6 +818,11 @@ def application(
     app.router.add_post("/api/issues", issue_save)
     app.router.add_post("/api/issues/reconcile", issue_reconcile)
     app.router.add_get("/api/profile-intents", profile_intents)
+    app.router.add_get("/api/profile-research", research_list)
+    app.router.add_post("/api/profile-research", research_setting)
+    app.router.add_get("/api/profile-research/{identity}", research_detail)
+    app.router.add_get("/api/profile-research/{identity}/editor", research_editor)
+    app.router.add_post("/api/profile-research/{identity}", research_review)
     app.router.add_post("/api/devices/{address}/product", device_product)
     app.router.add_post("/api/devices/{address}/advisories", device_advisories)
     app.router.add_get("/api/profiles", profile_list)
