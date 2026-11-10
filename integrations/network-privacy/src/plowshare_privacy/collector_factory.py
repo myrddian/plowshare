@@ -7,9 +7,11 @@ from .unifi import UniFiNetwork
 
 
 def configured_collector(collector: str, plan: CollectionPlan) -> NetworkCollector:
+    pihole = PiHoleV6(plan.pihole) if plan.pihole else None
     return NetworkCollector(
         collector,
         plan,
-        PiHoleV6(plan.pihole) if plan.pihole else None,
+        pihole,
         UniFiNetwork(plan.unifi) if plan.unifi else None,
+        pihole.presence if pihole else None,
     )

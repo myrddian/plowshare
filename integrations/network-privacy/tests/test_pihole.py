@@ -88,6 +88,29 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.query_clients, [])
         self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
 
+    async def test_presence_reads_one_table_and_keeps_valid_rows_in_partial_response(
+        self,
+    ) -> None:
+        self.mode = "partial_identity"
+        targets = (ADDRESS, *(f"192.0.2.{n}" for n in range(30, 90)))
+        result = await PiHoleV6(self.plan).presence(targets, utc_now())
+        self.assertEqual(
+            [(device.address, device.mac) for device in result.devices],
+            [(ADDRESS, MAC)],
+        )
+        self.assertTrue(
+            any(issue.startswith("identity_partial:") for issue in result.issues)
+        )
+        self.assertEqual(
+            self.calls,
+            [
+                ("POST", "/api/auth"),
+                ("GET", "/api/network/devices"),
+                ("DELETE", "/api/auth"),
+            ],
+        )
+        self.assertEqual(self.query_clients, [])
+
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
         return web.json_response({})
@@ -155,6 +178,14 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         if self.mode == "no_mac":
             devices[0]["hwaddr"] = "ip-" + ADDRESS
             devices[0]["macVendor"] = ""
+        if self.mode == "partial_identity":
+            return web.json_response(
+                {
+                    "devices": [{"ips": None}, *devices],
+                    "took": 0.01,
+                    "newField": "ignored",
+                }
+            )
         return web.json_response({"devices": devices, "took": 0.01})
 
     async def queries(self, request: web.Request) -> web.Response:
@@ -498,6 +529,7 @@ class PiHoleConfigurationTest(unittest.TestCase):
             config = configuration(Path(folder))
             plan = config.collection
             old = asdict(plan)
+            old.pop("quick_scan")
             old.pop("enabled")
             old.pop("labels")
             old.pop("pihole")

@@ -37,6 +37,7 @@ from .journal import Receipt
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Finding, OperatorStore, findings
 from .pihole import PiHoleV6
+from .presence import PresenceView
 from .private_files import replace_private
 from .worker import Worker
 
@@ -194,6 +195,7 @@ class OperatorConsole:
         self._device_plan: CollectionPlan | None = None
         self._device_receipts: tuple[Receipt, ...] = ()
         self._device_inventory = DeviceInventory()
+        self._device_presence: PresenceView | None = None
         self.journal = journal
 
     @property
@@ -222,10 +224,12 @@ class OperatorConsole:
         receipts = tuple(
             item for item in self.worker.receipts.all() if item.phase == "done"
         )
+        presence = self.worker.presence_view()
         # The active plan fences visibility. Immutable receipts let the dashboard
         # reuse one projection across refreshes without rescanning the evidence.
         if (
             plan != self._device_plan
+            or presence is not self._device_presence
             or len(receipts) != len(self._device_receipts)
             or any(
                 current is not cached
@@ -233,8 +237,9 @@ class OperatorConsole:
             )
         ):
             self._device_inventory = device_inventory(
-                plan.targets, plan.labels, receipts
+                plan.targets, plan.labels, receipts, presence
             )
+            self._device_presence = presence
             self._device_plan = plan
             self._device_receipts = receipts
         return self._device_inventory

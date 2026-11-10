@@ -31,6 +31,8 @@ from .contracts import (
     parse_json,
     text,
 )
+from .identity_source import IdentitySample
+from .limits import BATCH_SIZE, MAX_TARGETS
 
 
 @dataclass(frozen=True)
@@ -155,62 +157,70 @@ class PiHoleV6:
     def _devices(
         self, raw: object, targets: tuple[str, ...], observed: float
     ) -> tuple[tuple[DeviceIdentity, ...], tuple[str, ...]]:
-        row = object_fields(raw, {"devices"}, {"took"})
+        if not isinstance(raw, dict):
+            raise ValueError("Expected a Pi-hole network table")
         result: dict[str, list[DeviceIdentity]] = {}
         issues: set[str] = set()
-        values = items(row["devices"], 256)
+        scope = frozenset(targets)
+        values = items(raw.get("devices"), 256)
+        partial = "identity_partial: Pi-hole returned an invalid network-table record"
         if len(values) == 256:
             issues.add("identity_partial: Pi-hole network-device limit reached")
         for value in values:
-            device = object_fields(
-                value,
-                {"hwaddr", "ips"},
-                {
-                    "id",
-                    "interface",
-                    "firstSeen",
-                    "lastQuery",
-                    "numQueries",
-                    "macVendor",
-                },
-            )
-            hardware = text(device["hwaddr"], 128).lower()
-            mac = (
-                hardware
-                if re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", hardware)
-                and hardware not in {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"}
-                else None
-            )
-            for address_value in items(device["ips"], 16):
-                address = object_fields(
-                    address_value, {"ip", "lastSeen"}, {"name", "nameUpdated"}
+            try:
+                if not isinstance(value, dict):
+                    raise ValueError("Expected Pi-hole device metadata")
+                addresses = items(value.get("ips"), 16)
+                hardware = value.get("hwaddr")
+                mac = (
+                    hardware.lower()
+                    if isinstance(hardware, str)
+                    and re.fullmatch(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}", hardware)
+                    and hardware.lower()
+                    not in {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"}
+                    else None
                 )
-                ip = str(ipaddress.ip_address(text(address["ip"], 64)))
-                if ip not in targets:
-                    continue
-                seen = epoch(address["lastSeen"])
-                if seen > observed + 5 or observed - seen > self.plan.max_identity_age:
-                    issues.add(
-                        "identity_stale: Pi-hole address associations are outside the freshness window"
+            except ValueError:
+                issues.add(partial)
+                continue
+            if len(addresses) == 16:
+                issues.add("identity_partial: Pi-hole per-device address limit reached")
+            for address in addresses:
+                try:
+                    if not isinstance(address, dict):
+                        raise ValueError("Expected Pi-hole address metadata")
+                    ip = str(ipaddress.ip_address(text(address.get("ip"), 64)))
+                    if ip not in scope:
+                        continue
+                    seen = epoch(address.get("lastSeen"))
+                    if (
+                        seen > observed + 5
+                        or observed - seen > self.plan.max_identity_age
+                    ):
+                        issues.add(
+                            "identity_stale: Pi-hole address associations are outside the freshness window"
+                        )
+                        continue
+                    hostname = address.get("name")
+                    vendor = value.get("macVendor")
+                    identity = DeviceIdentity.decode(
+                        {
+                            "address": ip,
+                            "device_id": "mac:" + mac if mac else "ip:" + ip,
+                            "label": None,
+                            "hostname": hostname
+                            if hostname not in ("", None)
+                            else None,
+                            "mac": mac,
+                            "vendor": vendor if vendor not in ("", None) else None,
+                            "source": "pihole-v6",
+                            "observed_at": instant(observed),
+                            "last_seen": instant(seen),
+                        }
                     )
+                except ValueError:
+                    issues.add(partial)
                     continue
-                identity = DeviceIdentity.decode(
-                    {
-                        "address": ip,
-                        "device_id": "mac:" + mac if mac else "ip:" + ip,
-                        "label": None,
-                        "hostname": None
-                        if address.get("name") == ""
-                        else address.get("name"),
-                        "mac": mac,
-                        "vendor": None
-                        if device.get("macVendor") == ""
-                        else device.get("macVendor"),
-                        "source": "pihole-v6",
-                        "observed_at": instant(observed),
-                        "last_seen": instant(seen),
-                    }
-                )
                 result.setdefault(ip, []).append(identity)
         devices: list[DeviceIdentity] = []
         for _, candidates in sorted(result.items()):
@@ -219,7 +229,7 @@ class PiHoleV6:
                     "identity_ambiguous: Pi-hole lists multiple devices for a selected address"
                 )
                 continue
-            devices.append(candidates[0])
+            devices.append(max(candidates, key=lambda device: device.last_seen or ""))
         if {d.address for d in devices} != set(targets):
             issues.add(
                 "identity_unavailable: some selected addresses have no fresh unambiguous Pi-hole association"
@@ -308,13 +318,25 @@ class PiHoleV6:
 
     async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """Operator-only identity checks; no DNS history is fetched or retained."""
+        if len(targets) > BATCH_SIZE:
+            raise ValueError("Pi-hole requires at most 32 unique selected addresses")
         return await self._read(targets, observed_at, queries=False)
+
+    async def presence(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        """Read the network table once for the watched scope, without querying DNS logs."""
+        sample = await self._read(targets, observed_at, queries=False)
+        return IdentitySample(devices=sample.devices, issues=sample.issues)
 
     async def _read(
         self, targets: tuple[str, ...], observed_at: str, *, queries: bool
     ) -> DeviceData:
-        if len(targets) > 32 or len(set(targets)) != len(targets):
-            raise ValueError("Pi-hole requires at most 32 unique selected addresses")
+        limit = BATCH_SIZE if queries else MAX_TARGETS
+        if len(targets) > limit or len(set(targets)) != len(targets):
+            raise ValueError(
+                f"Pi-hole requires at most {limit} unique selected addresses"
+            )
         targets = tuple(str(ipaddress.ip_address(address)) for address in targets)
         end = datetime.fromisoformat(observed_at.replace("Z", "+00:00")).timestamp()
         start = end - self.plan.lookback_seconds
@@ -423,12 +445,13 @@ class PiHoleV6:
                         not any(issue.startswith("dns_") for issue in issues),
                     )
             except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
-                issues.update(
-                    {
-                        "dns_unavailable: Pi-hole authentication or connection failed",
-                        "identity_unavailable: Pi-hole authentication or connection failed",
-                    }
+                issues.add(
+                    "identity_unavailable: Pi-hole authentication or connection failed"
                 )
+                if queries:
+                    issues.add(
+                        "dns_unavailable: Pi-hole authentication or connection failed"
+                    )
             finally:
                 if sid is not None:
                     try:

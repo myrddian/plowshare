@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from .contracts import DeviceIdentity, DeviceLabel, DnsObservation, TcpObservation
 from .device_detection import DeviceDetection, detect_device
 from .journal import Receipt
+from .presence import PresenceCount, PresenceView, epoch
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class DeviceCard:
     last_response_at: str | None
     last_known_identity: DeviceIdentity | None
     detection: DeviceDetection
+    presence: PresenceCount | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ def device_inventory(
     targets: tuple[str, ...],
     labels: tuple[DeviceLabel, ...],
     receipts: tuple[Receipt, ...],
+    presence: PresenceView | None = None,
 ) -> DeviceInventory:
     """Read completed sweeps in journal order. History belongs to an address.
 
@@ -64,6 +67,7 @@ def device_inventory(
     a candidate. An earlier association cannot substitute for a current identity
     when suggesting scope changes.
     """
+    presence = presence if presence is not None else PresenceView()
     names = {item.address: item.label for item in labels}
     addresses = {address: _AddressHistory() for address in targets}
     recent_start = max(0, len(receipts) - 50)
@@ -105,11 +109,41 @@ def device_inventory(
     devices = []
     candidates = []
     for address, history in addresses.items():
-        if not history.open_service_observed and history.last_known_identity is None:
-            candidates.append(
-                CandidateAddress(address, names.get(address), history.last_checked_at)
+        quick = presence.sightings.get(address)
+        quick_identity = quick.identity if quick else None
+        if quick_identity is not None:
+            sampled = epoch(quick_identity.observed_at)
+            if history.last_known_identity is None or sampled > epoch(
+                history.last_known_identity.observed_at
+            ):
+                history.last_known_identity = quick_identity
+            if history.last_checked_at is None or sampled > epoch(
+                history.last_checked_at
+            ):
+                history.identity = quick_identity
+        if (
+            not quick
+            and not history.open_service_observed
+            and history.last_known_identity is None
+        ):
+            checked = max(
+                (
+                    value
+                    for value in (history.last_checked_at, presence.checked_at)
+                    if value
+                ),
+                key=epoch,
+                default=None,
             )
+            candidates.append(CandidateAddress(address, names.get(address), checked))
             continue
+        known = history.last_known_identity
+        key = known.device_id if known and known.mac else "ip:" + address
+        count = presence.counts.get(key)
+        if count is None and presence.checked_at:
+            count = PresenceCount(
+                0, presence.checks, None, key.startswith("ip:"), presence.checked_at
+            )
         devices.append(
             DeviceCard(
                 address=address,
@@ -126,6 +160,7 @@ def device_inventory(
                 last_response_at=history.last_response_at,
                 last_known_identity=history.last_known_identity,
                 detection=detect_device(history.identity, history.services),
+                presence=count,
             )
         )
     return DeviceInventory(tuple(devices), tuple(candidates))

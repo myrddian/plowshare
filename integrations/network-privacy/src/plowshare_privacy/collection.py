@@ -8,7 +8,7 @@ import hashlib
 import json
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 
 from .contracts import (
     CollectionPlan,
@@ -19,11 +19,13 @@ from .contracts import (
     Snapshot,
     TcpObservation,
     load_json,
+    private_ipv4,
     utc_now,
 )
-from .identity_source import DeviceIdentitySource
+from .identity_source import DeviceIdentitySource, IdentitySample
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
+from .presence import PresenceSample, Sighting, epoch
 
 
 class Collector(Protocol):
@@ -40,6 +42,8 @@ class Collector(Protocol):
 
 def scope_fingerprint(plan: CollectionPlan) -> str:
     values = asdict(plan)
+    # Local presence sampling does not change full collection evidence or receipts.
+    values.pop("quick_scan")
     # Default-enabled plans retain their historical fingerprints and journal identity.
     if plan.enabled:
         values.pop("enabled")
@@ -113,6 +117,8 @@ class NetworkCollector:
         plan: CollectionPlan,
         device_source: DeviceDataSource | None = None,
         identity_source: DeviceIdentitySource | None = None,
+        pihole_presence: Callable[[tuple[str, ...], str], Awaitable[IdentitySample]]
+        | None = None,
     ):
         if plan.pihole is not None and device_source is None:
             raise ValueError("Configured Pi-hole requires a device-data source")
@@ -122,6 +128,88 @@ class NetworkCollector:
         self.plan = plan
         self.device_source = device_source
         self.identity_source = identity_source
+        self.pihole_presence = pihole_presence
+
+    async def collect_presence(self, since: str) -> PresenceSample:
+        """Sample positive evidence only, without building or publishing a full scan."""
+        plan = self.plan
+        if not (
+            plan.mode == "tcp"
+            and plan.enabled
+            and plan.quick_scan
+            and plan.targets
+            and plan.ports
+            and all(private_ipv4(address) for address in plan.targets)
+        ):
+            raise ValueError("Quick presence scans require enabled private monitoring")
+        observed = utc_now()
+        start, end = epoch(since), epoch(observed)
+        scope = frozenset(plan.targets)
+        connected = (
+            await self.identity_source.identify(plan.targets, observed)
+            if self.identity_source is not None
+            else IdentitySample()
+        )
+        sightings = {
+            identity.address: Sighting(identity.address, identity)
+            for identity in connected.devices
+            if identity.address in scope
+            and identity.address not in connected.ambiguous_addresses
+        }
+        issues = list(connected.issues)
+        remaining = tuple(
+            address
+            for address in plan.targets
+            if address not in sightings and address not in connected.ambiguous_addresses
+        )
+        if self.pihole_presence is not None and remaining:
+            cached = await self.pihole_presence(remaining, observed)
+            # Ordinary absence/staleness is expected when watching every address on a subnet.
+            issues.extend(
+                issue
+                for issue in cached.issues
+                if not issue.startswith(
+                    ("identity_stale:", "identity_unavailable: some selected")
+                )
+            )
+            eligible = frozenset(remaining)
+            for identity in cached.devices:
+                if (
+                    identity.address in eligible
+                    and identity.last_seen is not None
+                    and start < epoch(identity.last_seen) <= end
+                ):
+                    sightings[identity.address] = Sighting(identity.address, identity)
+
+        pending = tuple(address for address in plan.targets if address not in sightings)
+        semaphore = asyncio.Semaphore(plan.concurrency)
+        # Low-concurrency subnet plans use one probe to bound the time they hold
+        # the ordinary collector's lock even if every address is silent.
+        ports = plan.ports[: 1 if len(pending) > 64 * plan.concurrency else 2]
+
+        async def responding(address: str) -> bool:
+            async with semaphore:
+                for port in ports:
+                    if await _quick_connect(address, port, min(plan.timeout, 0.25)):
+                        return True
+                return False
+
+        for start_at in range(0, len(pending), BATCH_SIZE):
+            batch = pending[start_at : start_at + BATCH_SIZE]
+            tasks = [asyncio.create_task(responding(address)) for address in batch]
+            try:
+                for address, seen in zip(
+                    batch, await asyncio.gather(*tasks), strict=True
+                ):
+                    if seen:
+                        sightings[address] = Sighting(address)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+        return PresenceSample(
+            observed, tuple(sightings.values()), tuple(dict.fromkeys(issues))
+        )
 
     async def collect(
         self,
@@ -364,3 +452,24 @@ class NetworkCollector:
                 "Evidence exceeds the retained artifact size limit; reduce optional metadata or scope"
             )
         return evidence
+
+
+async def _quick_connect(address: str, port: int, timeout: float) -> bool:
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(address, port), timeout
+        )
+    except TimeoutError:
+        return False
+    except OSError as error:
+        if error.errno in {errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ETIMEDOUT}:
+            return False
+        # A missing route, permission failure or socket exhaustion is a failed sweep,
+        # not evidence that all of its devices were absent.
+        raise
+    writer.close()
+    try:
+        await asyncio.wait_for(writer.wait_closed(), timeout)
+    except (TimeoutError, ConnectionError):
+        pass
+    return True
