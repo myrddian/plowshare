@@ -16,6 +16,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from plowshare import Delivery, TransportError
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
 
+from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.console_port import (
     Admission,
@@ -29,11 +30,13 @@ from plowshare_privacy.contracts import (
     PiHolePlan,
     TcpObservation,
 )
+from plowshare_privacy.device_inventory import DeviceInventory, device_inventory
 from plowshare_privacy.discovery import (
     DiscoveredDevice,
     DiscoveryReport,
     LocalDeviceDiscovery,
 )
+from plowshare_privacy.identity_source import ManagedProduct, ManagedProductLookup
 from plowshare_privacy.journal import FileReceipts, Receipt
 from plowshare_privacy.monitor import MonitorChoice, MonitorView
 from plowshare_privacy.operator_state import (
@@ -43,6 +46,7 @@ from plowshare_privacy.operator_state import (
     findings,
 )
 from plowshare_privacy.pihole import DeviceData
+from plowshare_privacy.presence import PresenceView, Sighting
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
 
@@ -432,6 +436,107 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(never_responded.last_checked_at, latest)
         self.assertEqual(never_checked.address, unscanned)
         self.assertIsNone(never_checked.last_checked_at)
+
+    async def test_device_research_checks_identity_and_searches_only_reviewed_model(
+        self,
+    ) -> None:
+        address = "192.168.90.2"
+        candidate = "192.168.90.3"
+        stamp = "2026-01-01T00:00:00Z"
+        mac = "02:00:00:00:00:01"
+        identity = DeviceIdentity(
+            address,
+            "mac:" + mac,
+            None,
+            "private-name",
+            mac,
+            None,
+            "unifi",
+            stamp,
+            stamp,
+        )
+        sightings = PresenceView(sightings={address: Sighting(address, identity)})
+        inventory: DeviceInventory = device_inventory(
+            (address, candidate), (), (), sightings
+        )
+        products = AsyncMock(spec=ManagedProductLookup)
+        products.managed_product.return_value = ManagedProduct(
+            "Example", "Switch 10G", "1.2.3", True
+        )
+        advisories = AsyncMock(spec=AdvisoryLookup)
+        model = "Example Switch 10G"
+        advisories.search.return_value = AdvisoryPage(model, stamp, 0, ())
+        headers = {"Authorization": "Bearer " + TOKEN}
+        product_path = f"/api/devices/{address}/product"
+        search_path = f"/api/devices/{address}/advisories"
+        with patch.object(self.console, "inventory", return_value=inventory):
+            async with TestClient(
+                TestServer(
+                    application(
+                        self.worker,
+                        TOKEN,
+                        console=self.console,
+                        advisories=advisories,
+                        managed_products=lambda: products,
+                    )
+                )
+            ) as client:
+                self.assertEqual(
+                    (
+                        await client.post(
+                            product_path, json={"device_id": identity.device_id}
+                        )
+                    ).status,
+                    401,
+                )
+                self.assertEqual(
+                    (
+                        await client.post(
+                            product_path,
+                            headers=headers,
+                            json={"device_id": "mac:02:00:00:00:00:02"},
+                        )
+                    ).status,
+                    409,
+                )
+                products.managed_product.assert_not_awaited()
+                product = await client.post(
+                    product_path,
+                    headers=headers,
+                    json={"device_id": identity.device_id},
+                )
+                self.assertEqual((await product.json())["product"]["firmware"], "1.2.3")
+                products.managed_product.assert_awaited_once_with(identity)
+                for body in (
+                    {"model": model, "mac": mac},
+                    {"model": address},
+                    {"model": "private-name"},
+                    {"model": "private-name.lan"},
+                ):
+                    self.assertEqual(
+                        (
+                            await client.post(search_path, headers=headers, json=body)
+                        ).status,
+                        400,
+                    )
+                self.assertEqual(
+                    (
+                        await client.post(
+                            f"/api/devices/{candidate}/advisories",
+                            headers=headers,
+                            json={"model": model},
+                        )
+                    ).status,
+                    404,
+                )
+                advisories.search.assert_not_awaited()
+                response = await client.post(
+                    search_path, headers=headers, json={"model": model}
+                )
+                self.assertEqual((await response.json())["model"], model)
+                advisories.search.assert_awaited_once_with(model)
+        self.assertEqual(self.remote.starts, 0)
+        self.assertEqual(self.receipts.all(), (self.scan,))
 
     async def test_subnet_addresses_only_become_devices_with_observed_evidence(
         self,

@@ -176,8 +176,13 @@ class NetworkPrivacyWatchTest {
     var agents = AgentRegistry.of(definitions.resolve("agents"), TOOLS, Set.of());
     assertTrue(agents.disabled().isEmpty(), agents.disabled().toString());
     assertEquals(
-        Set.of("privacy_coordinator", "privacy_analyst", "privacy_reviewer"), agents.names());
-    for (String name : Set.of("investigate_network", "privacy_tick")) {
+        Set.of(
+            "privacy_coordinator",
+            "privacy_analyst",
+            "privacy_reviewer",
+            "privacy_device_profiler"),
+        agents.names());
+    for (String name : Set.of("investigate_network", "privacy_tick", "profile_network_device")) {
       String suffix = ".js";
       Path source = definitions.resolve("orchestrations/" + name + suffix);
       var loaded =
@@ -217,6 +222,49 @@ class NetworkPrivacyWatchTest {
     }
     assertTrue(ScriptProgram.manifest(source).path("tools").isEmpty());
     assertTrue(ScriptProgram.manifest(source).path("calls").isEmpty());
+  }
+
+  @Test
+  void profile_research_delegates_once_and_retains_a_validated_draft() throws Exception {
+    String source =
+        Files.readString(application.resolve("orchestrations/profile_network_device.js"));
+    var json = new ObjectMapper();
+    var input = json.createObjectNode();
+    input.put(
+        "message",
+        json.createObjectNode().put("request", "{\"nvd_status\":\"searched\"}").toString());
+    var todo =
+        input.putArray("todos").addObject().put("stageId", "draft").put("id", "fixture-todo");
+    todo.put("status", "pending");
+    var start = ScriptProgram.step(source, input);
+    assertEquals("todo_write", start.path("command").path("tool").asText());
+    input.set("state", start.path("state"));
+    todo.put("status", "in_progress");
+    var delegation = ScriptProgram.step(source, input);
+    assertEquals("agent_run", delegation.path("command").path("tool").asText());
+    assertEquals(
+        "privacy_device_profiler",
+        delegation.path("command").path("arguments").path("agent").asText());
+    input.set("state", delegation.path("state"));
+    var draft =
+        json.createObjectNode()
+            .put("name", "Fixture switch")
+            .put("model_hypothesis", "")
+            .put("purpose", "")
+            .put("expected_services", "")
+            .put("notes", "")
+            .put("questions", "");
+    input.put("result", "<tool_call>" + draft);
+    assertThrows(IllegalStateException.class, () -> ScriptProgram.step(source, input));
+    input.put("result", draft.toString());
+    var retained = ScriptProgram.step(source, input);
+    assertEquals("todo_write", retained.path("command").path("tool").asText());
+    input.set("state", retained.path("state"));
+    todo.put("status", "done");
+    var finish = ScriptProgram.step(source, input).path("command");
+    assertEquals("orchestration_finish", finish.path("tool").asText());
+    assertEquals(draft, json.readTree(finish.path("arguments").path("result").asText()));
+    assertTrue(ScriptProgram.manifest(source).path("tools").isEmpty());
   }
 
   @Test

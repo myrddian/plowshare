@@ -161,8 +161,20 @@ type unknown. Possible services have exposure checks you can verify locally.
 Port assignments are clues to check, and the collector sends no protocol probes
 to verify them. See the [IANA service registry](https://www.iana.org/assignments/service-names-port-numbers).
 
-For product advisories, save the public manufacturer and exact model in the
-device profile. To enable the lookup, set the collector's
+Choose **Research device** on an observed card to review the local identity and
+device-type clues. **Read UniFi product details** looks up the observed MAC in the
+adopted-device inventory and checks that the record is online at the same IP.
+Supported adopted switches, access points and gateways can supply model and
+firmware, and UniFi may report an available firmware update. Connected-client
+names and Pi-hole hostnames, MAC vendors and timestamps are identification clues.
+For other devices, confirm the public model from a label or management page.
+
+Review the public manufacturer and exact model before choosing **Look up
+advisories**. This sends only the model to NVD and works before a profile is
+saved. **Use model in profile editor** fills the existing profile form for review.
+These actions leave the full-scan schedule and investigation activity untouched.
+
+To enable advisory lookup, set the collector's
 `PLOWSHARE_PRIVACY_NVD_ORIGIN` to the HTTPS origin of the NVD API
 (`https://services.nvd.nist.gov`) before starting the dashboard. Choose
 **Look up advisories for saved model** in the profile to send only that model
@@ -352,6 +364,35 @@ requires a deployment-administrator login because it changes Application source.
 Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.
+
+## Background device profiles
+
+Under **Devices → Background device profiles**, enable research after enabling
+quick presence checks and deploying the matching Application source and collector.
+It starts off. The collector admits one profile research run at a time, with up
+to four admissions per UTC day. A candidate needs a fresh MAC association and
+at least three associated quick sightings. Model work is separate from network
+investigations. It uses retained evidence and starts no new network scan.
+
+The collector reads the configured UniFi adopted inventory for the current IP
+and MAC when available. Full-sweep port clues are used only when a retained sweep
+observed the same MAC at that address. If the controller confirms a public model,
+or you enter one during review, the configured NVD lookup checks that model
+automatically. Configure `PLOWSHARE_PRIVACY_NVD_ORIGIN` as described above.
+Unknown models still get a draft and may ask you for identifying details.
+The Plowshare profiler receives local name, vendor and port clues, the public
+advisory results and your feedback. Its project Information tool is read-only.
+NVD receives only the confirmed public model.
+
+Use **Load drafts and activity** to review results and see retained Plowshare run
+IDs. **Research with feedback** queues another bounded run for the same MAC.
+**Use draft in profile editor** requires a fresh association and fills empty
+fields. Review the device and choose **Save profile** explicitly to publish a
+profile. **Mark reviewed** and **Dismiss** keep the decision and prevent automatic
+repeat research for that MAC. Suspending research stops new starts and continues
+receipt reads for admitted work. An uncertain start is reconciled by the original
+request UUID, with later admissions held until it settles. The private journal
+holds up to 256 device records.
 
 ## Device knowledge base
 
