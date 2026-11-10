@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -160,6 +161,12 @@ public final class Turn {
   }
 
   private volatile AutomaticLimits automaticLimits = AutomaticLimits.NONE;
+  private volatile Predicate<String> pendingReportRetry = ignored -> false;
+
+  /** Only a host-prepared journal checkpoint can start a save-only turn with a spent budget. */
+  public void usePendingReportRetry(Predicate<String> pendingReportRetry) {
+    this.pendingReportRetry = Objects.requireNonNull(pendingReportRetry);
+  }
 
   public void useAutomaticLimits(AutomaticLimits limits) {
     this.automaticLimits = Objects.requireNonNull(limits);
@@ -1160,14 +1167,21 @@ public final class Turn {
       // row correctly, and it died one line later. Inside the branch the
       // limit is safe to name, because a budget with no ceiling is never
       // exhausted and so never gets here.
+      boolean savingRetainedReport =
+          budget.exhausted()
+              && record.origin() == Origin.ORCHESTRATION
+              && io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
+                  definition.prompt())
+              && pendingReportRetry.test(id);
       boolean automaticBudgetGrant =
           admission == null
               && given == null
+              && !savingRetainedReport
               && budget.durable()
               && !definition.nativeOnly()
               && budget.exhausted()
               && automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
-      if (budget.exhausted() && !definition.nativeOnly()) {
+      if (budget.exhausted() && !definition.nativeOnly() && !savingRetainedReport) {
         throw new Refused(
             "conversation "
                 + id

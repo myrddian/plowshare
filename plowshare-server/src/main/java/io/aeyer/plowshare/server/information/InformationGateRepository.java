@@ -19,6 +19,17 @@ public interface InformationGateRepository {
     }
   }
 
+  /** A definitive report refusal with the exact dependency set bound before the write. */
+  record ReportRefusal(String reason, Set<UUID> inputs) {
+    public ReportRefusal {
+      Objects.requireNonNull(reason);
+      inputs = Set.copyOf(inputs);
+    }
+  }
+
+  /** Returns proof only for an account-owned, blocked report with no admitted revision. */
+  Optional<ReportRefusal> refusedReport(String account, UUID request);
+
   /**
    * Serializes request identity, refuses collisions, and claims expired work without refiring
    * approved hooks.

@@ -803,5 +803,12 @@
       "id": "o",
       "state": "running"
     }
+  },
+  "orchestration.repair": {
+    "code": "OK",
+    "payload": {
+      "id": "o",
+      "state": "running"
+    }
   }
 }

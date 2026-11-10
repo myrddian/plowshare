@@ -7,13 +7,16 @@ import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -944,7 +947,15 @@ public final class JobStore
           }
           transcript.startedAs(id);
         },
-        causation);
+        causation,
+        callerHandle == null
+            ? Optional.ofNullable(transcript.usage())
+                .map(UsageAttribution::accountHandle)
+                .orElse(null)
+            : callerHandle,
+        ScriptProgram.isScript(definition.prompt())
+            ? ScriptProgram.fileName(definition.name(), definition.origin())
+            : null);
   }
 
   /**
@@ -1111,7 +1122,10 @@ public final class JobStore
         null,
         outcome -> {},
         (watch, cancelled) -> work.apply(cancelled),
-        id -> informationJobs.bind(id, context, inputs));
+        id -> informationJobs.bind(id, context, inputs),
+        null,
+        context.attribution(),
+        null);
   }
 
   private String start(
@@ -1147,6 +1161,8 @@ public final class JobStore
         ended,
         work,
         beforeStart,
+        null,
+        null,
         null);
   }
 
@@ -1160,7 +1176,9 @@ public final class JobStore
       Consumer<Outcome> ended,
       BiFunction<JobWatch, BooleanSupplier, Outcome> work,
       Consumer<String> beforeStart,
-      RelayCausation causation) {
+      RelayCausation causation,
+      String account,
+      String script) {
     // ONE INSTANT, READ ONCE, and both the id and the row's `started_at`
     // come from it. MemoryIds' javadoc names what two readings would cost:
     // an id whose embedded timestamp disagrees with the timestamp beside it
@@ -1238,7 +1256,15 @@ public final class JobStore
               // then rethrown untouched, because an Error means the JVM
               // is in a state where swallowing it would be worse than the
               // hung poller.
-              log.error("the job runtime failed running '{}' as job {}", name, id, bug);
+              log.error(
+                  "Job runtime failed [job={} conversation={} project={} account={} agent={} script={}]",
+                  id,
+                  conversation,
+                  home.isGlobal() ? "(global)" : home.project(),
+                  account,
+                  name,
+                  script,
+                  bug);
               finish(
                   job,
                   watch,

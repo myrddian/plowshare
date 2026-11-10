@@ -8,15 +8,21 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.hooks.*;
+import io.aeyer.plowshare.server.information.*;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -136,11 +142,15 @@ class ScriptRuntimeTest {
   }
 
   Outcome run(int cap) {
+    return run(cap, Budget.of(10));
+  }
+
+  Outcome run(int cap, Budget budget) {
     return runtime.run(
         definition,
         "begin",
         Home.global(),
-        Budget.of(10),
+        budget,
         () -> false,
         null,
         JobWatch.UNWATCHED,
@@ -169,6 +179,157 @@ class ScriptRuntimeTest {
     assertEquals(Outcome.Ending.ANSWERED, run(2).ending());
     assertEquals(1, effects.get());
     assertEquals(1, store.latest(conversation).orElseThrow().sequence());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"unchanged", "changed inputs", "interrupted write"})
+  void report_recovery_reuses_the_retained_review_and_checks_the_exact_inputs(String scenario)
+      throws Exception {
+    UUID evidence = UUID.randomUUID();
+    UUID inherited = UUID.randomUUID();
+    String refusal = "information is unavailable in this selection";
+    String script =
+        ScriptProgram.MARKER
+            + """
+        \nexport const manifest={name:'fixture',description:'Review and report fixture',model:'fast',
+          tools:['probe','agent_run','information_write'],calls:[],scopes:[],
+          'max-turns':10,'max-model-calls':10,stages:[{id:'one'}]};
+        export function step(input) {
+          if (!input.state) return {state:{stage:0},command:{tool:'probe',arguments:{}}};
+          if (input.state.stage < 2) return {state:{stage:input.state.stage+1},
+            command:{tool:'agent_run',arguments:{agent:input.state.stage===0?'analyst':'reviewer'}}};
+          if (input.state.stage===2) return {state:{stage:3},command:{tool:'information_write',
+            arguments:{operation:'report',requestId:input.requestId,name:'draft',
+              text:input.result,inputs:['%s']}}};
+          if (input.result.startsWith('Information request refused:')) throw new Error(input.result);
+          return {state:{stage:4},command:{tool:'orchestration_finish',arguments:{result:'saved'}}};
+        }
+        """
+                .formatted(evidence);
+    var gates = mock(InformationGateRepository.class);
+    store = new JdbcScriptStore(jdbc, gates);
+    var access = mock(InformationAccess.class);
+    when(access.within(any())).thenReturn(access);
+    when(access.forRun(any(InformationActor.class), any(Home.class)))
+        .thenReturn(
+            new InformationContext("alice", InformationContext.Selection.project("fixture")));
+    var inputs = mock(InformationJobs.class);
+    when(inputs.inputsOf(conversation, "alice")).thenReturn(List.of(inherited));
+    when(inputs.reads(eq(conversation), any())).thenReturn(revision -> {});
+    var catalogue = mock(InformationCatalogue.class);
+    var writes = new java.util.ArrayList<UUID>();
+    when(catalogue.reportDetailsForSession(
+            any(),
+            any(),
+            eq("draft"),
+            eq("reviewed text"),
+            eq(List.of(evidence, inherited)),
+            eq(List.of()),
+            isNull(),
+            isNull(),
+            any(),
+            eq(conversation),
+            isNull(),
+            isNull()))
+        .thenAnswer(
+            invocation -> {
+              UUID request = invocation.getArgument(1);
+              writes.add(request);
+              if (writes.size() == 1) {
+                when(gates.refusedReport("alice", request))
+                    .thenReturn(
+                        Optional.of(
+                            new InformationGateRepository.ReportRefusal(
+                                refusal, Set.of(evidence, inherited))));
+                throw new NotFoundFault(refusal);
+              }
+              return new InformationCatalogue.Admission(UUID.randomUUID(), UUID.randomUUID(), true);
+            });
+    var agents = new AtomicInteger();
+    AgentTool scan =
+        new AgentTool() {
+          public ToolSchema schema() {
+            return ToolSchema.from("probe", "scan", Map.of("type", "object"));
+          }
+
+          public String run(String arguments, Home home) {
+            effects.incrementAndGet();
+            return "evidence";
+          }
+        };
+    AgentTool model =
+        new AgentTool() {
+          public ToolSchema schema() {
+            return ToolSchema.from("agent_run", "delegate", Map.of("type", "object"));
+          }
+
+          public String run(String arguments, Home home) {
+            return agents.incrementAndGet() == 1 ? "analysis" : "reviewed text";
+          }
+        };
+    runtime =
+        new JobRuntime(
+            dispatcher, List.of(scan, model, new InformationTool(true, () -> catalogue)));
+    runtime.useScripts(store);
+    runtime.useInformationAccess(access);
+    runtime.useInformationInputs(inputs);
+    runtime.useRunExtras(
+        context ->
+            new RunExtras.Extras(
+                List.of(
+                    endingTool(ConductorTools.FINISH_NAME, Outcome.Ending.ANSWERED, context.end())),
+                context.end(),
+                false));
+    definition =
+        OrchestrationRegistry.parsePinned(
+                "fixture",
+                "fixture.js",
+                script,
+                Set.of("probe", "agent_run", "information_write"),
+                OrchestrationDefinition.Tier.SHIPPED)
+            .conductor();
+
+    var failed = run(10);
+    assertEquals(Outcome.Ending.UNAVAILABLE, failed.ending());
+    assertTrue(failed.text().contains("Report save blocked at command 3"), failed.text());
+    var previous = store.latest(conversation).orElseThrow();
+    var block = store.blockedReport("alice", previous).orElseThrow();
+    assertEquals(writes.getFirst(), block.requestId());
+    store.prepareReportRetry(conversation, previous, block);
+    var retry = store.latest(conversation).orElseThrow();
+    assertEquals(block.requestId(), retry.retryOfReport());
+    assertFalse(retry.started());
+    assertEquals(
+        previous.raw(),
+        jdbc.queryForObject(
+            "SELECT raw_result FROM orchestration_script_steps WHERE conversation_id=? AND sequence=3",
+            String.class,
+            conversation));
+    if (scenario.equals("interrupted write")) {
+      var report = assertInstanceOf(ScriptStore.Tool.class, retry.command());
+      store.started(conversation, retry.sequence(), report.arguments());
+      var refused =
+          assertThrows(
+              io.aeyer.plowshare.server.faults.CallerFault.class,
+              () -> store.requireRecoverable(conversation));
+      assertTrue(
+          refused
+              .getMessage()
+              .contains(ScriptCommands.reportRequest(report).orElseThrow().toString()));
+      assertEquals(1, writes.size());
+      return;
+    }
+    boolean drift = scenario.equals("changed inputs");
+    if (drift)
+      when(inputs.inputsOf(conversation, "alice"))
+          .thenReturn(List.of(inherited, UUID.randomUUID()));
+    var finished = run(10, Budget.noCalls());
+    assertEquals(drift ? Outcome.Ending.UNAVAILABLE : Outcome.Ending.ANSWERED, finished.ending());
+    assertEquals(drift ? 1 : 2, writes.size());
+    if (!drift) assertNotEquals(writes.getFirst(), writes.getLast());
+    assertEquals(1, effects.get());
+    assertEquals(2, agents.get());
+    assertEquals(0, finished.modelCalls());
   }
 
   @Test

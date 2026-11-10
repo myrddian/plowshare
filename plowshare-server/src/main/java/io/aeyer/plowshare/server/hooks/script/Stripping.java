@@ -57,7 +57,11 @@ public final class Stripping {
   private Stripping() {}
 
   public static String javascript(String fileName, String source) throws HookFailure {
-    return javascript(fileName, source, Stripping::swc4j);
+    return compile(fileName, source).code();
+  }
+
+  static HookScript compile(String fileName, String source) throws HookFailure {
+    return compile(fileName, source, Stripping::swc4j);
   }
 
   /**
@@ -66,8 +70,13 @@ public final class Stripping {
    */
   static String javascript(String fileName, String source, Supplier<Swc4j> stripper)
       throws HookFailure {
+    return compile(fileName, source, stripper).code();
+  }
+
+  private static HookScript compile(String fileName, String source, Supplier<Swc4j> stripper)
+      throws HookFailure {
     if (!fileName.endsWith(".ts")) {
-      return source;
+      return HookScript.javascript(source);
     }
     try {
       URL specifier = URI.create("file:///" + fileName).toURL();
@@ -77,8 +86,10 @@ public final class Stripping {
           new Swc4jTranspileOptions()
               .setMediaType(Swc4jMediaType.TypeScript)
               .setSpecifier(specifier)
-              .setSourceMap(Swc4jSourceMapOption.None);
-      return swc.transpile(source, options).getCode();
+              .setSourceMap(Swc4jSourceMapOption.Separate)
+              .setInlineSources(false);
+      var output = swc.transpile(source, options);
+      return HookScript.typescript(output.getCode(), output.getSourceMap());
     } catch (MalformedURLException impossible) {
       throw new HookFailure(fileName + " has a name that cannot be a module specifier", impossible);
     } catch (HookFailure refused) {

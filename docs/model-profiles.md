@@ -95,6 +95,42 @@ Adding `media` requires integer `version: 2`; quoting the version is invalid.
 Use a profile-aware server: older binaries may ignore these new fields rather
 than enforce them. No shipped model's media support is assumed from its name.
 
+## Model response guards
+
+A version 2 profile can select a JavaScript response guard with
+`response-guard: harmony` alongside `modes` and `media`. Shipped GPT-OSS
+and Qwen 3 profiles select `harmony` and `qwen-hermes`, respectively.
+Resolution uses the selected route's wire model and the same exact and
+longest-prefix matching as sampling. For a Qwen endpoint with a different
+chat template, map the exact model to a profile that selects the right
+guard or omits the field.
+
+Place operator-owned filters in `response-guards/<name>.mjs` inside the
+sampling directory. A local file of the same name overrides the shipped
+filter. The server loads referenced modules at startup. Each module exports
+`reject(text)` and returns a boolean. The function receives the assembled
+response text, runs in the existing no-I/O JavaScript sandbox with a
+two-second deadline and has no access to tools, credentials, or previous
+invocations. The name is a lowercase identifier using letters, digits and
+hyphens. Unknown, unreadable, or invalid modules fail startup. A guard that
+fails during evaluation withholds the response.
+
+The dispatcher buffers guarded streams until the assembled response passes.
+A successful response delivers any reasoning the caller had opted to receive
+under its existing disclosure policy.
+It also refuses a completion that claims to have called a tool but has
+no structured calls. Provider usage is still accounted. The agent runtime
+stores a bounded excerpt of a rejected response after disclosure checks in
+the authorized, non-projecting trajectory, together with the guard and
+inference receipt. Server logs carry only diagnostic metadata.
+
+A turn can spend one remaining model call on regeneration from its current
+history, including completed tool results. The regeneration request offers
+no tools, and the runtime rejects any attempt to call one. Required-tool turns,
+guard failures, exhausted budgets and cancelled turns do not regenerate.
+If the retry fails, the turn stops without publishing the malformed response.
+Other dispatcher consumers receive the typed refusal and own their recovery.
+
 ## Model declarations and effective harness support
 
 Model support and harness support are separate projections. A profile declares

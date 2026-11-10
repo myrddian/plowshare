@@ -1,9 +1,11 @@
 package io.aeyer.plowshare.server.orchestrations.scripted;
 
+import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
 import io.aeyer.plowshare.server.todos.TodoItem;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -78,7 +80,19 @@ public interface ScriptStore {
       String raw,
       String result,
       boolean started,
-      String arguments) {
+      String arguments,
+      UUID retryOfReport) {
+    public Step(
+        int sequence,
+        String hash,
+        Command command,
+        String raw,
+        String result,
+        boolean started,
+        String arguments) {
+      this(sequence, hash, command, raw, result, started, arguments, null);
+    }
+
     public Step {
       if (sequence < 0) throw new IllegalArgumentException("invalid script sequence");
       hash = identity(hash, "source hash");
@@ -102,7 +116,84 @@ public interface ScriptStore {
    */
   Preparation prepareNext(String source, Input input, boolean mayDelegate);
 
+  /** A repair permits a single source transition, with a fence on all subsequent effects. */
+  record Repair(CheckpointRepair boundary, Set<UUID> evidence) {
+    public Repair {
+      Objects.requireNonNull(boundary, "boundary");
+      evidence = Set.copyOf(evidence);
+      if (evidence.isEmpty())
+        throw new IllegalArgumentException("repair requires retained evidence");
+    }
+
+    public boolean crosses(Step previous, String nextHash) {
+      return previous.sequence() == boundary.sequence()
+          && previous.hash().equals(boundary.sourceHash())
+          && nextHash.equals(boundary.replacementHash())
+          && previous.result() != null;
+    }
+  }
+
+  /** Validate a candidate against the completed state before claiming the failed run. */
+  default void previewRepair(String source, Input input, Repair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
+
+  /** Collect only revisions from completed evidence reads preceding the exact checkpoint. */
+  default Set<UUID> repairEvidence(String conversation, int checkpoint) {
+    return Set.of();
+  }
+
+  record Head(Optional<Step> step, Optional<Repair> repair) {}
+
+  /** Resolve the boundary and latest command together at the start of a scripted turn. */
+  default Head head(String conversation) {
+    return new Head(latest(conversation), Optional.empty());
+  }
+
+  default boolean repaired(String conversation) {
+    return false;
+  }
+
+  /** Evaluate using the repair boundary only when crossing from the preceding source hash. */
+  default Preparation prepareNext(String source, Input input, Repair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
+
+  /** Authorize the effective arguments after hooks, before invoking a tool on a repaired run. */
+  default void requireRepairEffect(
+      String conversation, int sequence, Tool command, List<TodoItem> todos, Repair repair) {
+    throw new UnsupportedOperationException("script checkpoint repair is unavailable");
+  }
+
   Optional<Step> latest(String conversation);
+
+  /** The report gate confirmed refusal and no draft revision was admitted. */
+  record ReportBlock(int sequence, UUID requestId, String reason) {
+    public String operatorMessage() {
+      return "Report save blocked at command "
+          + sequence
+          + " (request "
+          + requestId
+          + "). No draft was committed. "
+          + reason
+          + ". After resolving the refusal, Resume retries only the draft save from the retained review.";
+    }
+  }
+
+  /** Recognizes a definitive refusal from the Information receipt, including older script steps. */
+  default Optional<ReportBlock> blockedReport(String account, Step step) {
+    return Optional.empty();
+  }
+
+  /** Appends a fresh report command and its retained state within the owning resume transaction. */
+  default void prepareReportRetry(String conversation, Step previous, ReportBlock refusal) {
+    throw new UnsupportedOperationException("script report recovery is unavailable");
+  }
+
+  /** Reads the immutable dependency snapshot of the original refused report. */
+  default Optional<Set<UUID>> reportRetryInputs(String account, UUID originalRequest) {
+    return Optional.empty();
+  }
 
   /** The latest failed turn's input, retained verbatim for deterministic script continuation. */
   default Optional<String> resumeMessage(String conversation) {

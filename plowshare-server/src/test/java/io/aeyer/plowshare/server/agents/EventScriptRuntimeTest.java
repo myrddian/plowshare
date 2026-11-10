@@ -4,12 +4,15 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.llm.dispatch.*;
 import io.aeyer.plowshare.server.orchestrations.scripted.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Handler effects use the real script driver; the persistence journal and model are mocked. */
 class EventScriptRuntimeTest {
@@ -73,6 +76,7 @@ class EventScriptRuntimeTest {
   }
 
   private JobRuntime runtime(ScriptStore.Command command) {
+    when(scripts.head(anyString())).thenCallRealMethod();
     when(tool.schema()).thenReturn(ToolSchema.from("probe", "fixture", Map.of("type", "object")));
     when(scripts.prepareNext(anyString(), any(), anyBoolean()))
         .thenAnswer(
@@ -121,6 +125,89 @@ class EventScriptRuntimeTest {
     verify(tool, never()).run(anyString(), any());
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void script_exception_names_the_real_file_and_admitted_run(boolean blockedReport)
+      throws Exception {
+    var runtime = runtime(new ScriptStore.Finish("done"));
+    var definition =
+        agent()
+            .withPrompt(
+                """
+            // plowshare-script v1
+            export const manifest = {};
+            export function step() {
+              throw new Error('fixture failure');
+            }
+            """,
+                "/private/definitions/inspect-network.js");
+    var json = new ObjectMapper();
+    doAnswer(call -> ScriptProgram.step(call.getArgument(0), json.createObjectNode()))
+        .when(scripts)
+        .prepareNext(anyString(), any(), anyBoolean());
+    var request = UUID.randomUUID();
+    if (blockedReport) {
+      var report = new ScriptStore.Tool("information_write", "{}", false);
+      var retained =
+          new ScriptStore.Step(
+              0,
+              hash(definition.prompt()),
+              report,
+              "fixture refusal",
+              "fixture refusal",
+              true,
+              "{}");
+      when(scripts.latest("cnv_event_script")).thenReturn(Optional.of(retained));
+      when(scripts.blockedReport("operator", retained))
+          .thenReturn(Optional.of(new ScriptStore.ReportBlock(0, request, "fixture refusal")));
+    }
+
+    Outcome outcome =
+        runtime.run(
+            definition,
+            "event input",
+            new Home("watch-project"),
+            Budget.of(5),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            transcript(blockedReport ? Origin.ORCHESTRATION : Origin.EVENT),
+            TurnCap.of(10),
+            List.of(),
+            "operator");
+
+    assertEquals(Outcome.Ending.UNAVAILABLE, outcome.ending());
+    String failure = outcome.detail();
+    assertTrue(failure.contains("conversation=cnv_event_script"), failure);
+    assertTrue(failure.contains("project=watch-project"), failure);
+    assertTrue(failure.contains("account=operator"), failure);
+    assertTrue(failure.contains("script=inspect-network.js:4:"), failure);
+    assertFalse(failure.contains("/private/definitions"), failure);
+    String notice =
+        entries.stream()
+            .filter(entry -> entry.kind() == EntryKind.NOTICE)
+            .findFirst()
+            .orElseThrow()
+            .content();
+    if (blockedReport) {
+      var diagnostic = json.readTree(notice);
+      assertEquals("REPORT_SAVE_BLOCKED", diagnostic.path("code").textValue());
+      assertEquals(request.toString(), diagnostic.path("requestId").textValue());
+      assertEquals("cnv_event_script", diagnostic.path("conversationId").textValue());
+      assertEquals("watch-project", diagnostic.path("project").textValue());
+      assertEquals("operator", diagnostic.path("account").textValue());
+      assertEquals("inspect-network.js", diagnostic.path("script").textValue());
+      assertEquals(4, diagnostic.path("line").intValue());
+      assertTrue(diagnostic.path("column").intValue() > 0);
+    } else {
+      assertTrue(failure.contains("before command 0"), failure);
+      assertTrue(failure.contains("fixture failure"), failure);
+      assertEquals(failure, notice);
+    }
+    verify(scripts, never()).started(anyString(), anyInt(), anyString());
+    verifyNoInteractions(models);
+  }
+
   @Test
   void a_conductor_cannot_finish_without_using_its_stage_gate() {
     var runtime = runtime(new ScriptStore.Finish("done"));
@@ -144,20 +231,28 @@ class EventScriptRuntimeTest {
   @Test
   void interrupted_effects_without_a_receipt_are_never_replayed() throws Exception {
     var runtime = runtime(new ScriptStore.Tool("probe", "{}", false));
-    String hash =
-        "sha256:"
-            + HexFormat.of()
-                .formatHex(
-                    java.security.MessageDigest.getInstance("SHA-256")
-                        .digest(SOURCE.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     when(scripts.latest("cnv_event_script"))
         .thenReturn(
             Optional.of(
                 new ScriptStore.Step(
-                    0, hash, new ScriptStore.Tool("probe", "{}", false), null, null, true, "{}")));
+                    0,
+                    hash(SOURCE),
+                    new ScriptStore.Tool("probe", "{}", false),
+                    null,
+                    null,
+                    true,
+                    "{}")));
     assertThrows(IllegalStateException.class, () -> run(runtime, Origin.EVENT));
     verify(scripts, never()).prepareNext(anyString(), any(), anyBoolean());
     verify(tool, never()).run(anyString(), any());
+  }
+
+  private static String hash(String source) throws java.security.NoSuchAlgorithmException {
+    return "sha256:"
+        + HexFormat.of()
+            .formatHex(
+                java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
   }
 
   private AgentDefinition nativeAgent() {

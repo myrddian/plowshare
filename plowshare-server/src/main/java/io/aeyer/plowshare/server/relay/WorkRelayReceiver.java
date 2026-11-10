@@ -109,7 +109,7 @@ public final class WorkRelayReceiver implements RelayReceiver {
       if (!ScriptProgram.isScript(branch.handler().source())) throw new Refused("handler-format");
       // Validate exports in the pure sandbox before recording intent. No manifest field is a grant.
       ScriptProgram.manifest(branch.handler().source());
-      agent = scripted(agent, branch.handler().source());
+      agent = scripted(agent, branch.handler().source(), branch.handler().path());
     }
     return new Resolved(agent, home, session, definition, destinationId);
   }
@@ -215,7 +215,7 @@ public final class WorkRelayReceiver implements RelayReceiver {
     return new Settled(new RelayDeliveries.Accepted(receipt));
   }
 
-  private static AgentDefinition scripted(AgentDefinition agent, String source) {
-    return agent.withPrompt(source);
+  private static AgentDefinition scripted(AgentDefinition agent, String source, String path) {
+    return agent.withPrompt(source, path);
   }
 }

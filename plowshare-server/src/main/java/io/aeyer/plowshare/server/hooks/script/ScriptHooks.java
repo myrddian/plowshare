@@ -48,6 +48,8 @@ import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A project's own hooks, from {@code projects/<id>/hooks/}, as the second layer of the chain (spec
@@ -63,6 +65,8 @@ import java.util.function.Supplier;
  * per hook where one hook is to blame, and at the stage's entry where none is.
  */
 public final class ScriptHooks implements Hooks, AutoCloseable {
+
+  private static final Logger log = LoggerFactory.getLogger(ScriptHooks.class);
 
   private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -294,7 +298,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       }
       Instant started = clock.get();
       try {
-        Decision decision = call(hook, Stage.PROMPT_PRE, event);
+        Decision decision = call(hook, Stage.PROMPT_PRE, context, event);
         if (decision instanceof Decision.Add add) {
           additions.add(new Addition(hook.name(), add.text(), add.mode()));
           records.add(
@@ -353,7 +357,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       event.set("tools", JSON.valueToTree(toolsAsked));
       Instant started = clock.get();
       try {
-        Decision decision = call(hook, Stage.PROMPT_POST, event);
+        Decision decision = call(hook, Stage.PROMPT_POST, context, event);
         if (decision instanceof Decision.Redact redact) {
           records.add(
               record(
@@ -443,7 +447,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       event.set("args", arguments(current));
       Instant started = clock.get();
       try {
-        Decision decision = call(hook, Stage.TOOL_PRE, event);
+        Decision decision = call(hook, Stage.TOOL_PRE, context, event);
         if (decision instanceof Decision.Deny deny) {
           records.add(
               record(
@@ -580,7 +584,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       event.put("result", current);
       Instant started = clock.get();
       try {
-        Decision decision = call(hook, Stage.TOOL_POST, event);
+        Decision decision = call(hook, Stage.TOOL_POST, context, event);
         if (decision instanceof Decision.Redact redact) {
           records.add(
               record(hook, Stage.TOOL_POST, tool, HookRecord.REDACT, null, null, current, started));
@@ -670,7 +674,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       }
       Instant started = clock.get();
       try {
-        Decision decision = call(hook, Stage.STEP_POST, event);
+        Decision decision = call(hook, Stage.STEP_POST, context, event);
         if (decision instanceof Decision.Note note) {
           notes.add(note.text());
           records.add(
@@ -973,7 +977,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       }
       Instant started = clock.get();
       try {
-        Decision decision = call(hook, stage, event);
+        Decision decision = call(hook, stage, context, event);
         if (decision instanceof Decision.Deny deny) {
           records.add(
               record(hook, stage, null, HookRecord.DENY, deny.reason(), null, null, started));
@@ -1119,6 +1123,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
             call(
                 hook,
                 stage,
+                context,
                 event,
                 limit,
                 sharedLimit == null ? null : "the time left of " + sharedLimit);
@@ -1285,9 +1290,10 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
 
   // --- calling ------------------------------------------------------------------------
 
-  private Decision call(ProjectHookSet.Working hook, Stage stage, ObjectNode event)
+  private Decision call(
+      ProjectHookSet.Working hook, Stage stage, HookContext context, ObjectNode event)
       throws HookFailure {
-    return call(hook, stage, event, properties.getTimeout(), null);
+    return call(hook, stage, context, event, properties.getTimeout(), null);
   }
 
   /**
@@ -1295,10 +1301,28 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
    *     N ms"
    */
   private Decision call(
-      ProjectHookSet.Working hook, Stage stage, ObjectNode event, Duration limit, String limitNamed)
+      ProjectHookSet.Working hook,
+      Stage stage,
+      HookContext context,
+      ObjectNode event,
+      Duration limit,
+      String limitNamed)
       throws HookFailure {
-    String decided = hook.pool().call(stage, event.toString(), limit, limitNamed);
-    return Decision.read(stage, decided);
+    try {
+      String decided = hook.pool().call(stage, event.toString(), limit, limitNamed);
+      return Decision.read(stage, decided);
+    } catch (HookFailure failed) {
+      // The authorized hook record retains the guest message, which can contain event data.
+      String site = failed.location().map(at -> at.at(hook.file())).orElse(hook.file());
+      log.warn(
+          "Hook failed [conversation={} project={} account={} script={} stage={}]",
+          context.conversation(),
+          context.project() == null ? "(global)" : context.project(),
+          context.usage().accountHandle(),
+          site,
+          stage.wireName());
+      throw failed;
+    }
   }
 
   /**

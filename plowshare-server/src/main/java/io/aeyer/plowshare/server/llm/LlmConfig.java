@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.llm.accounting.PricingCatalog;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceAccounting;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
+import io.aeyer.plowshare.server.llm.dispatch.ModelResponseGuards;
 import io.aeyer.plowshare.server.llm.dispatch.TokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.UnknownSpecifierException;
 import io.aeyer.plowshare.server.llm.lmstudio.LmStudio;
@@ -181,6 +182,11 @@ public class LlmConfig implements EnvironmentAware {
   }
 
   @Bean(destroyMethod = "close")
+  ModelResponseGuards modelResponseGuards(LlmProperties props, SamplingProfiles profiles) {
+    return new ScriptedModelResponseGuards(profiles, Path.of(props.getSamplingDirectory()));
+  }
+
+  @Bean(destroyMethod = "close")
   public LlmDispatcher llmDispatcher(
       LlmProperties props,
       ObjectMapper mapper,
@@ -190,7 +196,8 @@ public class LlmConfig implements EnvironmentAware {
       io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary inferenceBoundary,
       ModelMediaProfiles mediaProfiles,
       ObjectProvider<io.aeyer.plowshare.server.llm.dispatch.PromptImages> promptImages,
-      Tokenizer tokenizer) {
+      Tokenizer tokenizer,
+      ModelResponseGuards responseGuards) {
     return buildDispatcher(
         props,
         mapper,
@@ -200,7 +207,8 @@ public class LlmConfig implements EnvironmentAware {
         java.util.Objects.requireNonNull(inferenceBoundary),
         mediaProfiles,
         promptImages.getIfAvailable(() -> io.aeyer.plowshare.server.llm.dispatch.PromptImages.NONE),
-        tokenizer);
+        tokenizer,
+        responseGuards);
   }
 
   /** Own local tokenizer resources separately from chat's explicitly estimated context meter. */
@@ -232,7 +240,8 @@ public class LlmConfig implements EnvironmentAware {
         ModelMediaProfiles.NONE,
         io.aeyer.plowshare.server.llm.dispatch.PromptImages.NONE,
         new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(
-            io.aeyer.plowshare.server.llm.tokens.RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN));
+            io.aeyer.plowshare.server.llm.tokens.RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN),
+        ModelResponseGuards.NONE);
   }
 
   private LlmDispatcher buildDispatcher(
@@ -244,7 +253,8 @@ public class LlmConfig implements EnvironmentAware {
       io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary inferenceBoundary,
       ModelMediaProfiles mediaProfiles,
       io.aeyer.plowshare.server.llm.dispatch.PromptImages promptImages,
-      Tokenizer tokenizer) {
+      Tokenizer tokenizer,
+      ModelResponseGuards responseGuards) {
 
     var dual =
         environment == null
@@ -383,7 +393,8 @@ public class LlmConfig implements EnvironmentAware {
               inferenceBoundary,
               mediaProfiles,
               promptImages,
-              tokenizer);
+              tokenizer,
+              responseGuards);
       requireEmbeddingModelIsServed(dispatcher, props);
       if (dual != null && dual.enabled()) dispatcher.requireServed(dual.code().modelId());
       log.info(

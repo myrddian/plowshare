@@ -35,13 +35,27 @@ import org.testcontainers.junit.jupiter.*;
  * and one admitted outright. Per repository, what actually happened, and in what order:
  *
  * <ul>
- *   <li>{@code JdbcInformationNavigationRepository} — REFUSED, by an authority predicate. {@code
- *       create} and {@code remove} both recheck through {@code writable}, whose first act is {@code
- *       lockIdentity(acting, project)}: {@code SELECT handle FROM admins WHERE handle=? AND enabled
- *       AND NOT bootstrap FOR SHARE} is empty for a bare UUID, so it raised {@code
- *       NotFoundFault("information is unavailable in this selection")} before any statement wrote.
- *       Nothing was reached; {@code information_relationships.actor}'s foreign key into {@code
- *       admins} (V147:16) sits behind it and was never asked.
+ *   <li>{@code JdbcInformationNavigationRepository} — RELATIONSHIP WRITES AND READS NOW ADMITTED,
+ *       the rest of the repository's writes still refused. The characterization's refusal was
+ *       {@code writable}'s first act, {@code lockIdentity(acting, project)}: {@code SELECT handle
+ *       FROM admins WHERE handle=? AND enabled AND NOT bootstrap FOR SHARE} is empty for a bare
+ *       UUID. What made that refusal worth keeping at the time was the five provenance columns
+ *       below it, each {@code REFERENCES admins(handle)}, which would have turned an admitted lock
+ *       into a constraint violation. One of the five — {@code information_relationships.actor}
+ *       (V147:16) — is pure provenance, keyed by nothing, and now writes from {@code
+ *       InformationContext.attribution}, so {@code lockIdentity} takes the context and holds the
+ *       container's row for a contained write. The other four stay closed on purpose and not for
+ *       want of routing: {@code information_navigation_policies.actor} is policy management, and
+ *       the {@code account} of {@code information_navigation_views}, {@code
+ *       information_navigation_receipts} and {@code information_navigation_audit} is a key rather
+ *       than a label, so attributing them would merge a child's saved views and request identifiers
+ *       into its container's namespace. Authority was never what refused here: {@code
+ *       information_lock_knowledge(…,'WRITE')} reaches {@code information_home_allows}, whose
+ *       contained arm (V229:285) admits the child for its own home and only for WRITE — which is
+ *       now the whole of the confinement on this path, pinned by {@link
+ *       #aContainedActorStillCannotWriteIntoItsContainersProject}. Liveness is a separate question
+ *       that {@code requireActive} answers, which was the whole of what a navigation <em>read</em>
+ *       needed; {@link #navigationLivenessAdmitsAContainedPrincipalOnItsOwnArm} holds that half.
  *   <li>{@code JdbcInformationProjectionRepository} — REFUSED, by the write-gate reservation.
  *       {@code prepare} ran {@code capture}, which locks and reads only; {@code
  *       content.requireWrite} inside it <em>admitted</em> the child, because V229's write arm opens
@@ -73,14 +87,15 @@ import org.testcontainers.junit.jupiter.*;
  * the container's account to hold, so that move is likely rather than hypothetical, and {@code
  * capture}'s own {@code requireWrite} had already admitted the child.
  *
- * <p>Navigation alone got no guard, and a Javadoc paragraph instead. {@code lockIdentity} is its
- * mutators' first statement, asks about the acting principal, and answers as a caller-visible
- * {@code NotFoundFault} — an authority predicate, which cannot evaporate the way a foreign key can.
- * A second refusal in front of a sound one is a second thing to keep in step.
+ * <p>Navigation alone got no guard, and a Javadoc paragraph instead. Its refusal was a
+ * caller-visible {@code NotFoundFault} from a predicate, not a foreign key, so it could not
+ * evaporate the way the other three could — and when the relationship path was opened, the
+ * predicate that replaced the lock's refusal was the one already admitting the child for its own
+ * home, so there was still nothing for a guard to add.
  *
  * <p>So the assertions below are asymmetric on purpose. Four name the guard's exact message; the
- * navigation one names the refusal that was already there, and failing it means that refusal has
- * moved and the repository now needs the guard too.
+ * navigation ones name what the repository's own SQL decides, and the confinement assertion is the
+ * line that would fail if {@code information_home_allows} ever widened.
  *
  * <p>Not covered here: whether the service layer above these repositories would have refused a
  * contained actor earlier. It is still unverified, and these are the repositories' own contracts.
@@ -225,13 +240,22 @@ class ContainedActorWriteReachDatabaseTest {
         UUID.randomUUID());
   }
 
+  /**
+   * The navigation write path, now open to a contained run in its own home.
+   *
+   * <p>Real PostgreSQL is required and not a convenience here: every one of the three facts below
+   * is a property of the database. That {@code create} now reaches its insert is a {@code FOR
+   * SHARE} lock resolving against a row the acting principal does not own; that the insert lands at
+   * all is {@code information_relationships_actor_fkey} being satisfied by the attribution handle;
+   * and that a write outside the child's home is still refused is {@code
+   * information_lock_knowledge}'s contained arm (V229:285) reading a trigger-resolved {@code
+   * home_scope_id}. None of the three is observable through a mock of this repository, because all
+   * three are the repository's SQL.
+   */
   @Test
-  void navigationRefusesAContainedActorsWrite() {
+  void navigationAdmitsAContainedActorsWriteInItsOwnHomeAccountedToItsContainer() {
     var source = admit(contained(), "child-source.md");
     var target = admit(contained(), "child-target.md");
-    // An edge out of the child's own document, inserted by hand because creating one is the very
-    // call under test. Its actor is the container's handle, which is the only kind the column's
-    // foreign key admits.
     var edge = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO information_relationships(id,source,target,relation,actor) VALUES(?,?,?,'mentions',?)",
@@ -240,10 +264,55 @@ class ContainedActorWriteReachDatabaseTest {
         target.resource(),
         HOLDER);
 
-    // No guard here, and this is the assertion that says why: lockIdentity has already refused the
-    // acting principal on an admins row it cannot have, as a caller fault, before any write. If
-    // this starts admitting, this repository needs ContainedActorGuard.
-    var created =
+    // ADMITTED. lockIdentity's contained branch holds the container's admins row and tests the
+    // child's liveness, and information_lock_knowledge's contained arm supplies the authority.
+    var created = UUID.randomUUID();
+    var relationship =
+        work.inTransaction(
+            () ->
+                navigation.create(
+                    contained(),
+                    created,
+                    source.resource(),
+                    new io.aeyer.plowshare.protocol.InformationNavigation.Target(
+                        target.resource(), null),
+                    "mentions",
+                    source.revision()));
+    assertEquals(created, relationship.id());
+    assertEquals(1, relationship.version());
+
+    // The row the child wrote is accounted to its container, which is the only value
+    // information_relationships.actor's foreign key into admins(handle) can hold. This is the
+    // assertion that would have been a DataIntegrityViolationException had the insert kept using
+    // the acting axis.
+    assertEquals(
+        HOLDER,
+        jdbc.queryForObject(
+            "SELECT actor FROM information_relationships WHERE id=?", String.class, created),
+        "the child's edge is attributed to its container");
+
+    // And removal, which writes no provenance of its own but meets the same lock.
+    assertEquals(2, work.inTransaction(() -> navigation.remove(contained(), edge, 1)).version());
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT removed FROM information_relationships WHERE id=?", Boolean.class, edge));
+  }
+
+  /**
+   * The confinement the admission above rests on: opening the lock did not open the home.
+   *
+   * <p>{@code lockContainedIdentity} ignores the resource's project — a {@code contained:} project
+   * has no members to serialize against — so the whole of what keeps the child inside its own home
+   * on this path is {@code information_lock_knowledge}'s contained arm. If that arm ever widened,
+   * this is the test that fails, and the repository would then need {@code ContainedActorGuard}
+   * after all.
+   */
+  @Test
+  void aContainedActorStillCannotWriteIntoItsContainersProject() {
+    var ours = admit(contained(), "child-own.md");
+    var theirs = admit(container(), "parent-own.md");
+
+    var refused =
         assertThrows(
             NotFoundFault.class,
             () ->
@@ -252,22 +321,38 @@ class ContainedActorWriteReachDatabaseTest {
                         navigation.create(
                             contained(),
                             UUID.randomUUID(),
-                            source.resource(),
+                            theirs.resource(),
                             new io.aeyer.plowshare.protocol.InformationNavigation.Target(
-                                target.resource(), null),
+                                ours.resource(), null),
                             "mentions",
-                            source.revision())));
-    assertEquals("information is unavailable in this selection", created.getMessage());
+                            theirs.revision())));
+    assertEquals("information is unavailable in this selection", refused.getMessage());
+    assertEquals(
+        0,
+        (long)
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_relationships WHERE source=?",
+                Long.class,
+                theirs.resource()),
+        "and nothing was written out of the container's document");
 
-    var removed =
-        assertThrows(
-            NotFoundFault.class,
-            () -> work.inTransaction(() -> navigation.remove(contained(), edge, 1)));
-    assertEquals("information is unavailable in this selection", removed.getMessage());
-    assertFalse(
-        jdbc.queryForObject(
-            "SELECT removed FROM information_relationships WHERE id=?", Boolean.class, edge),
-        "and the edge the child tried to remove is untouched");
+    // Asked of the predicate directly, so the refusal above is pinned to this arm rather than
+    // inferred from a message two gates share. The same call, the same acting principal and the
+    // same selection: true for the child's own revision, false for its container's.
+    assertTrue(write(ours.revision()), "the child's own home is writable");
+    assertFalse(write(theirs.revision()), "its container's project is not");
+  }
+
+  /** {@code information_lock_knowledge(…,'WRITE')} as {@code writable} asks it, for the child. */
+  private boolean write(UUID revision) {
+    return work.inTransaction(
+        () ->
+            jdbc.queryForObject(
+                "SELECT information_lock_knowledge(?,?,'project',?,false,'WRITE')",
+                Boolean.class,
+                revision,
+                childPrincipal,
+                childProject));
   }
 
   @Test
@@ -413,6 +498,49 @@ class ContainedActorWriteReachDatabaseTest {
     work.inTransaction(
         () -> {
           interchange.lockDestination(container(), "imported.md");
+          return null;
+        });
+  }
+
+  /**
+   * Navigation liveness, on the arm that answers for a contained principal.
+   *
+   * <p>{@code DocumentNavigation.read} calls {@code requireActive} and nothing else about the
+   * actor, so this is the whole of what a contained run needed to reach a navigation read — the
+   * scoping below it is V229's and V231's. {@code requireActive} asked only {@code admins}, and a
+   * contained principal has no row there by design (V218); for such a principal existence is
+   * liveness, because V218 gives {@code contained_principals} no revocation column and the row dies
+   * with its scope.
+   *
+   * <p>The same predicate is now {@code lockContainedIdentity}'s liveness test on the relationship
+   * write path, which is why it is asserted here as an existence test rather than a shape test: the
+   * two refusals below are what keep a well-formed UUID that is nobody, and a handle that is no
+   * account, out of both.
+   *
+   * <p>What {@code lockAccount(String)} still refuses is a separate path and a separate reason.
+   * {@code DocumentNavigation.mutate} and {@code PortableInformation.commit} take a bare handle,
+   * have no second axis to consult, and write the three {@code account} columns that are keys
+   * rather than labels — saved views, receipts and audit — so there is nothing there to re-point.
+   */
+  @Test
+  void navigationLivenessAdmitsAContainedPrincipalOnItsOwnArm() {
+    // The container's own account: unchanged, and the control that says the admins arm still works.
+    assertDoesNotThrow(() -> active(HOLDER));
+
+    // The child's own principal: admitted on the contained arm, which is new.
+    assertDoesNotThrow(() -> active(childPrincipal));
+
+    // A UUID that is no live contained principal, and a handle that is no account: both refused, so
+    // the new arm is an existence test and not a shape test.
+    assertThrows(NotFoundFault.class, () -> active(UUID.randomUUID().toString()));
+    assertThrows(NotFoundFault.class, () -> active("nobody"));
+  }
+
+  /** requireActive in its own transaction, as DocumentNavigation.read calls it. */
+  private void active(String account) {
+    work.inTransaction(
+        () -> {
+          navigation.requireActive(account);
           return null;
         });
   }

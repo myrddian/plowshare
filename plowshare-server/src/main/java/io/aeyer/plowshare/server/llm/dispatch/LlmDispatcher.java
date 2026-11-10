@@ -43,6 +43,7 @@ public final class LlmDispatcher implements AutoCloseable {
   private final InferenceBoundary boundary;
   private final TokenLedger ledger;
   private final ModelMediaProfiles mediaProfiles;
+  private final ModelResponseGuards responseGuards;
   private final InferenceAccounting accounting;
   private final Duration promptTimeout;
   private final Duration foldTimeout;
@@ -239,6 +240,36 @@ public final class LlmDispatcher implements AutoCloseable {
       ModelMediaProfiles mediaProfiles,
       PromptImages promptImages,
       io.aeyer.plowshare.server.llm.tokens.Tokenizer tokenizer) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        filtering,
+        boundary,
+        mediaProfiles,
+        promptImages,
+        tokenizer,
+        ModelResponseGuards.NONE);
+  }
+
+  /** Response filters are immutable for the lifetime of this dispatcher. */
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering,
+      InferenceBoundary boundary,
+      ModelMediaProfiles mediaProfiles,
+      PromptImages promptImages,
+      io.aeyer.plowshare.server.llm.tokens.Tokenizer tokenizer,
+      ModelResponseGuards responseGuards) {
+    this.responseGuards = Objects.requireNonNull(responseGuards);
     this.tokenizer = Objects.requireNonNull(tokenizer);
     this.promptImages = Objects.requireNonNull(promptImages);
     this.mediaProfiles = Objects.requireNonNull(mediaProfiles);
@@ -377,12 +408,12 @@ public final class LlmDispatcher implements AutoCloseable {
                 filtered.submitTimeout(),
                 observer,
                 promptTimeout);
-    Completion approved =
-        filtering.output(
-            recorded(routing, filtered.specifier(), Lane.CHAT, completion)
-                .captured(observer.capture()));
-    boundary.require(filtered.authorization());
-    return approved;
+    return approved(
+        routing,
+        filtered,
+        completion,
+        observer.capture(),
+        responseGuards.forModel(routing.wireModel()));
   }
 
   /**
@@ -481,28 +512,28 @@ public final class LlmDispatcher implements AutoCloseable {
           observer,
           routing,
           () -> routing.pool().countChat(routing.wireModel(), filtered.withSampling(sampling)));
+    var guard = responseGuards.forModel(routing.wireModel());
+    boolean disclosureBuffer =
+        filtering.bufferOutput() || filtered.authorization().binding() != null;
+    boolean buffered = guard.isPresent() || disclosureBuffer;
+    var deferred = guard.isPresent() && !disclosureBuffer ? new DeferredReasoning() : null;
     Completion completion =
         routing.pool().stream(
             routing.wireModel(),
             filtered.messages(),
             sampling,
             filtered.tools(),
-            filtering.bufferOutput() || filtered.authorization().binding() != null
-                ? Deltas.DISCARDING
-                : sink,
+            deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink,
             abandoned,
             filtered.toolChoice(),
             filtered.submitTimeout(),
             observer,
             fold ? foldTimeoutFor(routing.pool()) : promptTimeout);
-    Completion approved =
-        filtering.output(
-            recorded(routing, filtered.specifier(), Lane.CHAT, completion)
-                .captured(observer.capture()));
-    boundary.require(filtered.authorization());
-    if ((filtering.bufferOutput() || filtered.authorization().binding() != null)
-        && !approved.content().isEmpty()
-        && !abandoned.getAsBoolean()) sink.answered(approved.content());
+    Completion approved = approved(routing, filtered, completion, observer.capture(), guard);
+    if (buffered && !abandoned.getAsBoolean()) {
+      if (deferred != null) deferred.deliverTo(sink);
+      if (!approved.content().isEmpty()) sink.answered(approved.content());
+    }
     return approved;
   }
 
@@ -1053,28 +1084,28 @@ public final class LlmDispatcher implements AutoCloseable {
     else if (named.automaticCounting())
       preflight(
           observer, routing, () -> named.countChat(wireModel, filtered.withSampling(sampling)));
+    var guard = responseGuards.forModel(routing.wireModel());
+    boolean disclosureBuffer =
+        filtering.bufferOutput() || filtered.authorization().binding() != null;
+    boolean buffered = guard.isPresent() || disclosureBuffer;
+    var deferred = guard.isPresent() && !disclosureBuffer ? new DeferredReasoning() : null;
     Completion completion =
         named.stream(
             wireModel,
             filtered.messages(),
             sampling,
             filtered.tools(),
-            filtering.bufferOutput() || filtered.authorization().binding() != null
-                ? Deltas.DISCARDING
-                : sink,
+            deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink,
             abandoned,
             filtered.toolChoice(),
             filtered.submitTimeout(),
             observer,
             promptTimeout);
-    Completion approved =
-        filtering.output(
-            recorded(routing, filtered.specifier(), Lane.CHAT, completion)
-                .captured(observer.capture()));
-    boundary.require(filtered.authorization());
-    if ((filtering.bufferOutput() || filtered.authorization().binding() != null)
-        && !approved.content().isEmpty()
-        && !abandoned.getAsBoolean()) sink.answered(approved.content());
+    Completion approved = approved(routing, filtered, completion, observer.capture(), guard);
+    if (buffered && !abandoned.getAsBoolean()) {
+      if (deferred != null) deferred.deliverTo(sink);
+      if (!approved.content().isEmpty()) sink.answered(approved.content());
+    }
     return approved;
   }
 
@@ -1304,6 +1335,60 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   private static boolean isSystemSpecifier(String specifier) {
     return specifier.equals(SYSTEM) || specifier.startsWith(SYSTEM_PREFIX);
+  }
+
+  /** The guard holds both streams. Preserve opted-in reasoning after a successful check. */
+  private static final class DeferredReasoning implements Deltas {
+    private final StringBuilder thinking = new StringBuilder();
+
+    @Override
+    public void answered(String delta) {
+      // The approved completion supplies the answer.
+    }
+
+    @Override
+    public void thought(String delta) {
+      thinking.append(delta);
+    }
+
+    void deliverTo(Deltas sink) {
+      if (!thinking.isEmpty()) sink.thought(thinking.toString());
+    }
+  }
+
+  private Completion approved(
+      Routing routing,
+      ChatRequest request,
+      Completion completion,
+      InferenceCapture capture,
+      Optional<ModelResponseGuards.Guard> guard) {
+    Completion raw =
+        recorded(routing, request.specifier(), Lane.CHAT, completion).captured(capture);
+    // Classify the raw text, but retain only what the ordinary disclosure policy allows.
+    var reason = responseProblem(raw, guard);
+    Completion approved = filtering.output(raw);
+    boundary.require(request.authorization());
+    if (reason != null) {
+      throw new ModelResponseRejected(
+          reason, guard.map(ModelResponseGuards.Guard::name).orElse("wire-contract"), approved);
+    }
+    return approved;
+  }
+
+  private static ModelResponseRejected.Reason responseProblem(
+      Completion completion, Optional<ModelResponseGuards.Guard> guard) {
+    if (completion.toolCalls().isEmpty()
+        && ("tool_calls".equals(completion.finishReason())
+            || "function_call".equals(completion.finishReason()))) {
+      return ModelResponseRejected.Reason.MISSING_STRUCTURED_TOOL_CALLS;
+    }
+    try {
+      return guard.isPresent() && guard.get().rejects().test(completion.content())
+          ? ModelResponseRejected.Reason.RAW_PROTOCOL_MARKUP
+          : null;
+    } catch (RuntimeException failed) {
+      return ModelResponseRejected.Reason.GUARD_UNAVAILABLE;
+    }
   }
 
   private Completion recorded(Routing routing, String specifier, Lane lane, Completion completion) {

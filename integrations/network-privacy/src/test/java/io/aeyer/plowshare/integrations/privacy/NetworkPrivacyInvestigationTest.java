@@ -26,6 +26,9 @@ class NetworkPrivacyInvestigationTest {
       "## Facts\nActual analyst response: \"timeout\", not closed.\n\nGap: DNS unavailable.";
   private static final String CORRECTION =
       "## Facts\nTCP timeout; no claim of a closed port or exfiltration.\n\nGap: DNS unavailable.";
+  private static final String RAW_TOOL_CALL =
+      "<|start|>assistant<|channel|>commentary to=functions.network_scan_list"
+          + " {\"offset\":0,\"limit\":10}<|call|>";
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test
@@ -110,10 +113,56 @@ class NetworkPrivacyInvestigationTest {
   }
 
   @Test
+  void review_note_lists_are_retained_in_order() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    host.accept(
+        """
+        {"verdict":"needs_corrections","assessment":"Corrected assessment",
+         "notes":["First correction","Remaining gap"]}
+        """);
+    host.finish();
+    assertEquals(1, host.writes);
+    assertTrue(host.report.path("text").asText().contains("First correction\n\nRemaining gap"));
+  }
+
+  @Test
   void absent_assessment_stops_before_review_or_report() throws Exception {
     var host = new Host();
     host.advanceTo("privacy_analyst");
     assertThrows(IllegalStateException.class, () -> host.accept(" \n "));
+    assertEquals(0, host.writes);
+  }
+
+  @Test
+  void raw_tool_call_text_stops_before_review_or_report() throws Exception {
+    for (String response :
+        new String[] {
+          RAW_TOOL_CALL, " \n" + RAW_TOOL_CALL.substring("<|start|>assistant".length())
+        }) {
+      var host = new Host();
+      host.advanceTo("privacy_analyst");
+      var failure = assertThrows(IllegalStateException.class, () -> host.accept(response));
+      assertTrue(
+          failure.getMessage().contains("Invalid analyst assessment: raw model protocol markup"));
+      assertFalse(failure.getMessage().contains("network_scan_list"));
+      assertTrue(host.input.path("state").path("assessment").isNull());
+      assertEquals("privacy_analyst", host.command.path("arguments").path("agent").asText());
+      assertEquals(0, host.writes);
+    }
+  }
+
+  @Test
+  void raw_tool_call_text_in_a_review_cannot_become_a_draft() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    String review =
+        JSON.writeValueAsString(
+            Map.of(
+                "verdict", "needs_corrections", "assessment", RAW_TOOL_CALL, "notes", "Reviewed"));
+    var failure = assertThrows(IllegalStateException.class, () -> host.accept(review));
+    assertTrue(
+        failure.getMessage().contains("Invalid reviewed assessment: raw model protocol markup"));
     assertEquals(0, host.writes);
   }
 
@@ -128,6 +177,8 @@ class NetworkPrivacyInvestigationTest {
           "Information request refused: no access",
           "not JSON",
           "{\"verdict\":\"accepted\",\"notes\":\"ok\",\"assessment\":\"\"}",
+          "{\"verdict\":\"accepted\",\"notes\":[],\"assessment\":\"text\"}",
+          "{\"verdict\":\"accepted\",\"notes\":[\"ok\",{}],\"assessment\":\"text\"}",
           "{\"verdict\":\"guessed\",\"notes\":\"ok\",\"assessment\":\"text\"}"
         }) {
       var host = new Host();

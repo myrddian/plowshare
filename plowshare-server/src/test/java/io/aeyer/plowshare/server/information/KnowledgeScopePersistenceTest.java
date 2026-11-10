@@ -72,6 +72,11 @@ class KnowledgeScopePersistenceTest {
 
   InformationCatalogue.Admission admit(
       InformationContext context, String name, UUID expected, List<UUID> inputs) {
+    return admit(context, name, expected, inputs, "source");
+  }
+
+  InformationCatalogue.Admission admit(
+      InformationContext context, String name, UUID expected, List<UUID> inputs, String kind) {
     byte[] bytes = ("body " + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8);
     return records.admit(
         context,
@@ -81,7 +86,7 @@ class KnowledgeScopePersistenceTest {
             bytes,
             "text/markdown",
             null,
-            "source",
+            kind,
             inputs,
             null,
             10,
@@ -424,9 +429,9 @@ class KnowledgeScopePersistenceTest {
             copied.revision()));
   }
 
-  @Test
-  void scoped_service_token_is_bounded_by_owner_and_current_token_ceiling() {
-    var first = original();
+  private record Worker(String principal, UUID token) {}
+
+  private Worker projectWorker() {
     String principal = "@service/" + UUID.randomUUID();
     UUID token = UUID.randomUUID();
     jdbc.update(
@@ -441,6 +446,15 @@ class KnowledgeScopePersistenceTest {
     jdbc.update(
         "INSERT INTO service_token_scopes(token_id,project_id,role) SELECT ?,id,'CONTRIBUTOR' FROM projects WHERE name='one'",
         token);
+    return new Worker(principal, token);
+  }
+
+  @Test
+  void scoped_service_token_is_bounded_by_owner_and_current_token_ceiling() {
+    var first = original();
+    var worker = projectWorker();
+    String principal = worker.principal();
+    UUID token = worker.token();
     assertNotNull(
         work.inTransaction(
             () -> records.lockResource(project(principal), first.revision(), false)));
@@ -457,6 +471,91 @@ class KnowledgeScopePersistenceTest {
         () ->
             work.inTransaction(
                 () -> records.lockResource(project(principal), first.revision(), false)));
+  }
+
+  @Test
+  void service_report_writes_into_its_project_and_retains_shared_read_dependencies() {
+    var worker = projectWorker();
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'creator','MANAGER' FROM projects WHERE name='two'");
+    var otherProject =
+        new InformationContext("creator", InformationContext.Selection.project("two"))
+            .withView(true);
+    var shared = work.inTransaction(() -> admit(otherProject, "reference.md", null, List.of()));
+    work.inTransaction(
+        () -> {
+          records.share(otherProject, shared.revision(), true);
+          return null;
+        });
+    var run =
+        new InformationContext(
+                worker.principal(),
+                new InformationContext.Selection(InformationContext.Scope.PROJECT, "one", true))
+            .withView(true);
+    assertTrue(records.readable(run, shared.revision()));
+    var draft =
+        work.inTransaction(
+            () -> admit(run, "draft.md", null, List.of(shared.revision()), "report"));
+    assertEquals(
+        "project:one",
+        jdbc.queryForObject(
+            "SELECT namespace FROM information_resources WHERE id=?",
+            String.class,
+            draft.resource()));
+    assertEquals(
+        List.of(shared.revision()),
+        jdbc.queryForList(
+            "SELECT input_revision FROM information_inputs WHERE derived_revision=?",
+            UUID.class,
+            draft.revision()));
+    assertThrows(
+        NotFoundFault.class,
+        () -> work.inTransaction(() -> admit(run, "source.md", null, List.of())));
+    jdbc.update("UPDATE service_token_scopes SET role='VIEWER' WHERE token_id=?", worker.token());
+    assertThrows(
+        NotFoundFault.class,
+        () ->
+            work.inTransaction(
+                () -> admit(run, "second-draft.md", null, List.of(shared.revision()), "report")));
+    work.inTransaction(
+        () -> {
+          records.share(otherProject, shared.revision(), false);
+          return null;
+        });
+    assertFalse(records.readable(project("reader"), draft.revision()));
+  }
+
+  @Test
+  void report_refusal_proof_comes_from_the_owned_gate_and_its_bound_dependencies() {
+    var revision = original().revision();
+    var receipts = new JdbcInformationGateRepository(jdbc, Clock.systemUTC());
+    UUID request = UUID.randomUUID();
+    var gate =
+        work.inTransaction(
+            () ->
+                receipts.claim(
+                    "creator",
+                    request,
+                    "1".repeat(64),
+                    "record.report",
+                    InformationCatalogue.Admission.class));
+    var log =
+        new ConversationStore(jdbc)
+            .log(
+                Origin.SUBMISSION,
+                Home.of("one"),
+                "document_pipeline",
+                null,
+                io.aeyer.plowshare.server.agents.Budget.of(1),
+                "creator");
+    new JdbcJobInformationRepository(jdbc).bind(log.id(), project("creator"), List.of(revision));
+    receipts.opened("creator", request, log.id());
+    assertTrue(receipts.refusedReport("creator", request).isEmpty());
+    receipts.blocked("creator", request, gate.token(), "Report refused");
+    assertTrue(receipts.refusedReport("writer", request).isEmpty());
+    assertEquals(
+        new InformationGateRepository.ReportRefusal("Report refused", Set.of(revision)),
+        receipts.refusedReport("creator", request).orElseThrow());
   }
 
   @Test

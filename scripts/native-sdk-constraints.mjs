@@ -169,6 +169,14 @@ export function constrain(graph) {
         );
       if (k === 'requestId') add(v, { pattern: uuid });
     }
+    if (op === 'orchestration.repair') {
+      const checkpoint = nested(s, 'checkpoint');
+      const digest = { pattern: '^sha256:[a-f0-9]{64}$' };
+      field(checkpoint, 'sequence', integer(0, 2147483646));
+      field(checkpoint, 'sourceHash', digest);
+      field(checkpoint, 'replacementHash', digest);
+      rules(s, not({ eq: [g('checkpoint.sourceHash'), g('checkpoint.replacementHash')] }));
+    }
     if (op === 'outgoing.report') {
       field(s, 'revision', integer(0, 9007199254740991));
       field(s, 'error', text(2000));
