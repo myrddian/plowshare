@@ -210,9 +210,11 @@ class DeferredCollectionTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             plan = configuration(Path(directory)).collection
             legacy = asdict(plan)
+            legacy.pop("quick_scan")
             legacy.pop("enabled")
             legacy.pop("labels")
             legacy.pop("pihole")
+            legacy.pop("unifi")
             legacy["observations_file"] = str(plan.observations_file)
             expected = hashlib.sha256(
                 json.dumps(legacy, sort_keys=True).encode()

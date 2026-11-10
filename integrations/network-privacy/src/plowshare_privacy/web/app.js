@@ -20,6 +20,7 @@ let deviceSignature = null;
 let findingSignature = null;
 let profileEdit = null;
 let profileBlocked = false;
+let advisoriesAvailable = false;
 let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
@@ -202,6 +203,7 @@ async function refresh() {
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('device-profiles').hidden = !status.profiles_available;
+    advisoriesAvailable = !!status.advisories_available;
     issuesAvailable = !!status.issues_available;
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
@@ -304,10 +306,14 @@ async function loadSettings() {
   const settings = await api('/api/monitoring');
   const report = await api('/api/discovery');
   byId('enabled').checked = settings.enabled;
+  byId('quick-scan').checked = settings.quick_scan === true;
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
-  byId('identity-source').textContent = settings.pihole_configured ? 'Pi-hole v6 is configured. A scan records fresh device associations and DNS activity; names below remain your own labels.' : 'Add your own device names, or connect Pi-hole v6 using the setup guide for observed hostnames, MAC addresses and DNS activity.';
+  const sources = [settings.pihole_configured && 'Pi-hole v6 for identity and DNS', settings.unifi_configured && 'UniFi for connected-client identity'].filter(Boolean);
+  byId('identity-source').textContent = sources.length
+    ? 'Configured sources: ' + sources.join(', ') + '. Names below are your own labels.'
+    : 'Add your own labels or connect Pi-hole or UniFi for observed device identity.';
   renderDevices(report);
   if (settings.ports.length) byId('ports').value = settings.ports.join(',');
   byId('monitoring').hidden = false;
@@ -322,7 +328,7 @@ byId('use-subnet').addEventListener('click', () => {
   for (const checkbox of byId('devices').querySelectorAll('input')) checkbox.checked = false;
   byId('settings-detail').textContent = 'Subnet scope prepared. Save monitoring to validate and retain it; no scan has started.';
 });
-for (const id of ['targets','ports','device-labels','enabled']) byId(id).addEventListener('input', () => {
+for (const id of ['targets','ports','device-labels','enabled','quick-scan']) byId(id).addEventListener('input', () => {
   monitoringDraft = true;
   byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
 });
@@ -365,7 +371,7 @@ byId('monitor-form').addEventListener('submit', async event => {
       if (separator < 1 || !name  || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
       labels[address] = name;
     }
-    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
+    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked})});
     monitoringDraft = false;
     renderMonitorSettings(result);
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
@@ -402,6 +408,26 @@ setInterval(() => {
   if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => notice(error.message, true));
 }, 5000);
 
+function renderDeviceDetection(detection) {
+  const panel = element('details');
+  const title = detection.confidence === 'unknown' ? 'Device type unknown'
+    : 'Possible device type: ' + detection.device_type;
+  panel.append(element('summary', title));
+  if (detection.clues.length) {
+    const clues = element('ul');
+    clues.append(...detection.clues.map(clue => element('li', clue)));
+    panel.append(clues);
+  }
+  if (detection.confidence === 'corroborated') {
+    panel.append(element('p', 'The observed name and port agree.', 'hint'));
+  }
+  panel.append(element('p', 'Open ports suggest services. Verify the protocol, model, and firmware before assessing vulnerabilities.', 'hint'));
+  for (const exposure of detection.exposures) {
+    panel.append(element('p', 'TCP ' + exposure.ports.join(', ') + ' · Possible ' + exposure.possible_service + '. ' + exposure.risk_check, 'hint'));
+  }
+  return panel;
+}
+
 function renderOverview(value) {
   const health = value.health;
   byId('device-count').textContent = value.devices.length;
@@ -413,6 +439,11 @@ function renderOverview(value) {
   const grid = byId('health'); grid.replaceChildren();
   const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
   for (const [name, detail] of checks) {const card = element('article'); card.append(element('strong', name), element('p', detail)); grid.append(card);}
+  if (health.unifi) {
+    const card = element('article');
+    card.append(element('strong', 'UniFi'), element('p', health.unifi));
+    grid.append(card);
+  }
   grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
@@ -423,6 +454,12 @@ function renderOverview(value) {
     row.append(element('span', run.state, 'badge'), element('code', run.id));
     runs.append(row);
   }
+  const presenceStatus = value.quick_presence;
+  const quickStatus = byId('quick-presence-status');
+  quickStatus.textContent = presenceStatus?.enabled
+    ? (presenceStatus.last_checked ? 'Last quick check ' + new Date(presenceStatus.last_checked).toLocaleString() + '.' : 'Waiting for the first quick check.')
+      + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
+    : 'Quick presence checks are off.';
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
@@ -430,24 +467,35 @@ function renderOverview(value) {
   if (!value.devices.length && !value.candidates.length) cards.append(element('p', 'Choose addresses in Settings to begin monitoring.'));
   for (const device of value.devices) {
     const card = element('article', undefined, 'device-card');
-    const current = device.identity?.source === 'pihole-v6' ? device.identity : null;
+    const current = device.identity?.source === 'configured' ? null : device.identity;
     const known = current || device.last_known_identity;
     card.dataset.presence = 'observed';
-    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor].filter(Boolean).join(' ').toLowerCase();
+    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type].filter(Boolean).join(' ').toLowerCase();
     card.append(element('h3', device.name), element('p', device.address));
     if (known) {
       const association = [known.hostname, known.mac, known.vendor].filter(Boolean).join(' · ') || 'Address observed';
       const observedAt = new Date(known.observed_at).toLocaleString();
-      card.append(element('p', `${current ? 'Pi-hole association' : 'Last known Pi-hole association'} · ${association} · ${observedAt}`, 'hint'));
+      const source = known.source === 'unifi' ? 'UniFi' : 'Pi-hole';
+      card.append(element('p', (current ? '' : 'Last known ') + source + ' association · ' + association + ' · ' + observedAt, 'hint'));
     } else {
       card.append(element('p', 'Address only; no observed identity', 'hint'));
     }
     const responded = device.services.some(item => item.status === 'open' || item.status === 'closed');
-    card.append(element('p', device.last_seen ? `Last checked ${new Date(device.last_seen).toLocaleString()} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first sweep', 'hint'));
+    card.append(element('p', device.last_seen ? `Last checked ${new Date(device.last_seen).toLocaleString()} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first full sweep', 'hint'));
+    const presence = device.presence;
+    if (presence?.checked > 0) {
+      const percent = Math.round(100 * presence.seen / presence.checked);
+      const subject = presence.address_only ? 'Address seen' : 'Device seen';
+      const last = presence.last_seen ? ' · Last seen ' + new Date(presence.last_seen).toLocaleString() : '';
+      card.append(element('p', `${subject} in ${presence.seen} of ${presence.checked} quick checks (${percent}%) over 24 hours${last}`, 'hint'));
+    } else if (presence?.last_seen) {
+      card.append(element('p', 'Last quick sighting ' + new Date(presence.last_seen).toLocaleString(), 'hint'));
+    }
     if (device.last_response_at) {
       card.append(element('p', `First TCP response ${new Date(device.first_response_at).toLocaleString()} · Last ${new Date(device.last_response_at).toLocaleString()}`, 'hint'));
     }
     card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
+    if (device.detection) card.append(renderDeviceDetection(device.detection));
     const destinations = element('details'); destinations.append(element('summary', `${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
@@ -508,6 +556,7 @@ function renderPiHoleSaved(configured, pending = false) {
 function renderMonitorSettings(settings) {
   monitorEditable = settings.editable;
   byId('save-monitoring').disabled = !monitorEditable;
+  byId('quick-scan').disabled = !monitorEditable;
   byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
   renderPiHoleSaved(settings.pihole_configured, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;
@@ -634,6 +683,52 @@ async function loadProfiles() {
   if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
   return result.profiles;
 }
+function advisoryLookup(view) {
+  const panel = element('section');
+  panel.append(element('h3', 'Product advisories'));
+  const model = view.profile.fields.model.trim();
+  if (!model || !advisoriesAvailable) {
+    panel.append(element('p', model ? 'Advisory lookup is unavailable on this collector.'
+      : 'Save the public manufacturer and exact model to look up advisories.', 'hint'));
+    return panel;
+  }
+  panel.append(element('p', 'This lookup sends the saved public model name to NVD: ' + model + '.', 'hint'));
+  const results = element('div');
+  results.setAttribute('aria-live', 'polite');
+  const button = element('button', 'Look up advisories for saved model', 'secondary');
+  button.type = 'button';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    results.replaceChildren(element('p', 'Checking NVD…'));
+    try {
+      const path = '/api/profiles/' + encodeURIComponent(view.profile.profile_id)
+        + '/' + encodeURIComponent(view.revision) + '/advisories';
+      const page = await api(path, {method:'POST', body:JSON.stringify({model})});
+      const detail = page.total
+        ? 'Showing ' + page.advisories.length + ' of ' + page.total + ' keyword matches.'
+        : 'No keyword matches found.';
+      results.replaceChildren(element('p', detail + ' Checked '
+        + new Date(page.checked_at).toLocaleString() + '. Check the affected model, firmware and configuration in each advisory.', 'hint'));
+      for (const item of page.advisories) {
+        const link = element('a', item.cve);
+        link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(item.cve);
+        link.target = '_blank'; link.rel = 'noopener noreferrer';
+        const entry = element('article');
+        const metadata = [item.published_on, item.severity ? 'CVSS ' + item.severity.toLowerCase() : null,
+          item.known_exploited ? 'CISA lists known exploitation' : null].filter(Boolean);
+        entry.append(link, element('p', metadata.join(' · '), 'hint'), element('p', item.description));
+        results.append(entry);
+      }
+    } catch (error) {
+      results.replaceChildren(element('p', error.message, 'notice error'));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  panel.append(button, results);
+  return panel;
+}
+
 async function editProfile(view, address = null) {
   await profileReceipts();
   const settings = await api('/api/monitoring');
@@ -648,6 +743,7 @@ async function editProfile(view, address = null) {
   byId('profile-form').hidden = false; byId('device-profiles').open = true;
   const history = byId('profile-history'); history.replaceChildren(); byId('profile-markdown').hidden = true;
   if (view) {
+    history.append(advisoryLookup(view));
     history.append(element('h3', 'Retained profile revisions'));
     for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
       const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');

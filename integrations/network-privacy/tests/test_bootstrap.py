@@ -31,6 +31,7 @@ from plowshare_privacy.bootstrap import (
     application_files,
     configure,
     connect_pihole,
+    connect_unifi,
     deploy,
     inspect,
     install,
@@ -694,3 +695,38 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         configured = Configuration.read(self.config)
         with FileReceipts(configured) as receipts:
             self.assertEqual(receipts.all(), ())
+
+    async def test_connect_unifi_preserves_receipts_and_can_coexist_with_pihole(
+        self,
+    ) -> None:
+        config = self.tcp_configuration()
+        site = "00000000-0000-4000-8000-000000000001"
+        base = "https://unifi.example.invalid/proxy/network/integration/v1"
+        evidence = await CountingCollector(configuration(self.root)).collect(
+            SECOND, FIRST, None, None
+        )
+        with FileReceipts(config) as receipts:
+            with self.assertRaises(BlockingIOError):
+                connect_unifi(self.setup, base, site, "UNIFI_TEST_KEY", None)
+            receipts.save(
+                Receipt(
+                    SECOND,
+                    FIRST,
+                    config.request_topic,
+                    utc_now(),
+                    "done",
+                    evidence,
+                    SECOND,
+                )
+            )
+            receipts.save_publication(Publication(FIRST, utc_now(), "published"))
+        connect_unifi(self.setup, base, site, "UNIFI_TEST_KEY", None)
+        configured = Configuration.read(self.config)
+        assert configured.collection.unifi is not None
+        self.assertEqual(configured.collection.unifi.site_id, site)
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        both_sources = Configuration.read(self.config)
+        self.assertEqual(both_sources.collection.unifi, configured.collection.unifi)
+        with FileReceipts(both_sources) as receipts:
+            self.assertEqual(receipts.all()[0].evidence, evidence)
+            self.assertEqual(receipts.publications()[0].state, "published")

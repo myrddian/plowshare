@@ -43,6 +43,7 @@
       <section id="view-devices" role="tabpanel" aria-labelledby="tab-devices" hidden>
       <section class="panel setup-panel">
         <div class="panel-heading"><h2>Device inventory</h2><button id="check-moves" class="secondary">Check moved devices</button></div>
+        <p id="quick-presence-status" class="hint" role="status"></p>
         <div class="device-search">
           <div><label for="device-search">Find a device</label><input id="device-search" type="search" placeholder="Name, IP, MAC address or vendor"></div>
           <div><label for="device-presence">Show</label><select id="device-presence"><option value="observed">Observed devices</option><option value="candidate">Candidate addresses</option></select></div>
@@ -118,9 +119,9 @@
           <div id="devices" class="devices"></div>
           <form id="monitor-form">
             <label for="targets">Addresses to watch</label><input id="targets" aria-describedby="targets-help" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
-            <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or a Pi-hole association adds the address to the device inventory.</p>
-            <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea><p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 can add observed hostnames, MAC addresses and DNS activity.</p>
-            <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
+            <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or an observed identity adds the address to the device inventory.</p>
+            <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea><p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 and UniFi can add observed device identities.</p>
+            <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><label class="check"><input id="quick-scan" type="checkbox">Quick presence checks every 2–5 minutes</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
           </form>
         </div>
       </section>

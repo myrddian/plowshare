@@ -97,7 +97,7 @@ failures are reported separately from connection or activation problems.
 ## Read health, devices and findings
 
 **System health** shows collector state, last successful contact, last completed
-scan, Pi-hole coverage, project agents, projected dynamic tools,
+scan, Pi-hole and UniFi coverage, project agents, projected dynamic tools,
 recent project investigations and service credential expiry. Remote checks and
 report projections are cached for 20 seconds. Visibility is an inspection result;
 permissions and availability are still enforced by Plowshare on each tool call.
@@ -105,16 +105,65 @@ A checklist highlights missing setup. The expiry notice warns within seven days.
 
 Saving a subnet adds its addresses as candidates. Each sweep checks the saved
 addresses. A completed sweep promotes an address into the device inventory when
-it finds an open TCP service or a Pi-hole association. A refusal alone leaves an
+it finds an open TCP service or a Pi-hole or UniFi association. A refusal alone leaves an
 address as a candidate. In **Devices**, switch between observed devices and
 candidate addresses, or search by name, address, MAC, hostname or vendor.
 The inventory reconstructs first and last TCP responses from retained scan receipts
 after a restart. A timed-out check updates the last check time, while the last
 response stays at the last successful or refused connection. The latest 50
-completed sweeps provide links to individual collections. An older Pi-hole
+completed sweeps provide links to individual collections. An older device
 association appears separately with its observation time when the latest sweep
 has no association. This history belongs to the address; DHCP reuse and randomized
 MACs can change which device holds it.
+
+Enable **Quick presence checks every 2–5 minutes** in **Settings → Choose what
+to monitor** alongside ordinary collection. File-managed collectors can set
+`collection.quickScan` to `true`. The option defaults to off. The collector chooses a new random
+delay after each quick check and waits for the normal collection lock. A restart
+starts a fresh delay. The quick check covers only saved private IPv4 addresses
+and never publishes evidence, fires the scan schedule, or starts an investigation.
+
+Quick checks use connected UniFi clients first, then a Pi-hole v6 network-table
+sighting whose address timestamp falls within the current sampling interval.
+Remaining addresses get up to two short probes on the first configured TCP
+ports. Only an open connection counts as a TCP sighting. The Pi-hole path reads
+no DNS query history. Malformed network-table rows and unavailable sources are
+reported separately while the other sources continue.
+
+Device cards show sightings out of completed quick checks over the last
+24 hours. A known MAC follows the device across watched addresses, and a
+TCP-only sighting is counted against its address. A missed response means
+the check did not see the device. A failed or skipped check contributes no
+sample. The local private journal keeps the last positive association for each
+address in the active scope even after the rolling count expires. New scopes
+start their own history. Full-scan evidence and scheduled investigations keep
+their existing path.
+
+UniFi reads connected wired and wireless clients through the controller's local
+API. It keeps names and MACs for saved addresses only. The sweep withholds the
+association for an address if sources disagree on its MAC. A failed UniFi read
+appears under coverage gaps while TCP and other configured sources continue.
+An address missing from the connected-client list has unknown UniFi coverage for
+that sweep.
+
+Open a device's type panel to see the observed name and conventional TCP port clues
+from its latest completed sweep. Conflicting or insufficient clues leave the
+type unknown. Possible services have exposure checks you can verify locally.
+Port assignments are clues to check, and the collector sends no protocol probes
+to verify them. See the [IANA service registry](https://www.iana.org/assignments/service-names-port-numbers).
+
+For product advisories, save the public manufacturer and exact model in the
+device profile. To enable the lookup, set the collector's
+`PLOWSHARE_PRIVACY_NVD_ORIGIN` to the HTTPS origin of the NVD API
+(`https://services.nvd.nist.gov`) before starting the dashboard. Choose
+**Look up advisories for saved model** in the profile to send only that model
+name. The dashboard shows up to ten keyword matches, any primary CVSS rating
+reported by NVD, and any CISA known-exploitation flag reported there. Check the
+vendor advisory for the affected model, firmware and configuration before
+linking an issue to the device. A search without matches leaves applicability
+unknown. The lookup runs only on request and leaves scan evidence and profiles
+as saved.
+
 **Check moved devices** compares fresh Pi-hole associations with the last local
 LAN discovery, bounded to 256 addresses and read in 32-device batches. Confirm each suggested move
 explicitly. Confirmation rechecks the association and uses the normal idle/scope
@@ -358,8 +407,9 @@ core API or SDK changes. Whole-document authorization covers every section.
    issue, affected models, firmware versions (or explicitly unknown), relevant
    settings, one to four HTTPS source citations, their publication dates when
    known, and the date you checked them. These are operator-supplied sources: the
-   collector does not fetch arbitrary URLs, discover advisories or certify their
-   claims. Prefer original vendor notices or primary research and recheck stale
+   collector does not fetch arbitrary URLs or certify their claims. Use the
+   separate product lookup for NVD references. Prefer original vendor notices
+   or primary research and recheck stale
    claims before applying a change. No real vendor allegations ship as seed data.
 2. Include one proposed mitigation: a firewall rule, exact Pi-hole domain block,
    network segmentation or a device setting. Record why it addresses the issue,

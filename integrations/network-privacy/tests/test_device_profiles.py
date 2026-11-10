@@ -21,6 +21,7 @@ from plowshare.contracts import (
 )
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration
 
+from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
 from plowshare_privacy.device_profiles import (
     DeviceProfile,
     DeviceProfiles,
@@ -97,6 +98,44 @@ class DeviceProfilesTest(unittest.IsolatedAsyncioTestCase):
             "Observed MAC can change",
             ("10.1.2.10",),
         )
+
+    async def test_advisory_lookup_discloses_only_the_reviewed_saved_model(
+        self,
+    ) -> None:
+        model = "Example Camera X100"
+        saved = await self.profiles.save(
+            self.identity, self.request, None, replace(self.fields, model=model)
+        )
+        advisory = AsyncMock(spec=AdvisoryLookup)
+        advisory.search.return_value = AdvisoryPage(model, STAMP, 0, ())
+        worker = Worker(
+            self.config,
+            FixturePort(self.config),
+            self.receipts,
+            CountingCollector(self.config),
+        )
+        path = f"/api/profiles/{self.identity}/{saved.revision}/advisories"
+        async with TestClient(
+            TestServer(
+                application(worker, TOKEN, profiles=self.profiles, advisories=advisory)
+            )
+        ) as client:
+            response = await client.post(path, json={"model": model})
+            self.assertEqual(response.status, 401)
+            headers = {"Authorization": "Bearer " + TOKEN}
+            for body in (
+                {"model": model, "address": "10.1.2.10"},
+                {"model": "Different model"},
+                {"model": "router.local"},
+            ):
+                response = await client.post(path, json=body, headers=headers)
+                self.assertEqual(response.status, 400)
+            advisory.search.assert_not_awaited()
+            response = await client.post(path, json={"model": model}, headers=headers)
+            self.assertEqual(response.status, 200)
+            self.assertEqual((await response.json())["model"], model)
+            advisory.search.assert_awaited_once_with(model)
+            self.assertEqual(self.remote.writes, 1)
 
     async def test_create_edit_retains_stable_id_and_old_document(self) -> None:
         first = await self.profiles.save(self.identity, self.request, None, self.fields)

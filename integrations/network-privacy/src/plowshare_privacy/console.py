@@ -37,6 +37,7 @@ from .journal import Receipt
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Finding, OperatorStore, findings
 from .pihole import PiHoleV6
+from .presence import PresenceView
 from .private_files import replace_private
 from .worker import Worker
 
@@ -76,6 +77,7 @@ class Health:
     recovery: tuple[str, ...]
     checklist: tuple[str, ...]
     credential_expires_at: str | None
+    unifi: str = "Optional: not configured"
 
 
 @dataclass(frozen=True)
@@ -193,6 +195,7 @@ class OperatorConsole:
         self._device_plan: CollectionPlan | None = None
         self._device_receipts: tuple[Receipt, ...] = ()
         self._device_inventory = DeviceInventory()
+        self._device_presence: PresenceView | None = None
         self.journal = journal
 
     @property
@@ -221,10 +224,12 @@ class OperatorConsole:
         receipts = tuple(
             item for item in self.worker.receipts.all() if item.phase == "done"
         )
+        presence = self.worker.presence_view()
         # The active plan fences visibility. Immutable receipts let the dashboard
         # reuse one projection across refreshes without rescanning the evidence.
         if (
             plan != self._device_plan
+            or presence is not self._device_presence
             or len(receipts) != len(self._device_receipts)
             or any(
                 current is not cached
@@ -232,8 +237,9 @@ class OperatorConsole:
             )
         ):
             self._device_inventory = device_inventory(
-                plan.targets, plan.labels, receipts
+                plan.targets, plan.labels, receipts, presence
             )
+            self._device_presence = presence
             self._device_plan = plan
             self._device_receipts = receipts
         return self._device_inventory
@@ -270,16 +276,34 @@ class OperatorConsole:
                 if item.phase == "done" and item.evidence
             ]
             latest = completed[-1].evidence if completed else None
+            plan = self.worker.config.collection
+            current_scope = latest is not None and latest.scope == scope_fingerprint(
+                plan
+            )
             pihole = "Optional: not configured"
-            if self.worker.config.collection.pihole:
+            if plan.pihole:
                 pihole = "Configured; awaiting a collection"
-                if latest and latest.scope == scope_fingerprint(
-                    self.worker.config.collection
-                ):
+                if latest and current_scope:
                     pihole = (
                         "Coverage gaps: " + "; ".join(latest.issues)
                         if latest.issues
                         else "Latest collection retained; inspect its observation time and DNS window"
+                    )
+            unifi = "Optional: not configured"
+            if plan.unifi:
+                unifi = "Configured; awaiting a collection"
+                if latest and current_scope:
+                    issues = tuple(
+                        issue
+                        for issue in latest.issues
+                        if issue.startswith(("unifi_", "identity_conflict:"))
+                    )
+                    associated = sum(
+                        item.source == "unifi" for item in latest.snapshot.devices
+                    )
+                    unifi = (
+                        f"{associated} selected addresses associated in the latest sweep"
+                        + (". " + "; ".join(issues) if issues else "")
                     )
             recovery = []
             if self.worker.state == "attention_required":
@@ -331,6 +355,7 @@ class OperatorConsole:
                 tuple(recovery),
                 tuple(checklist),
                 self.credential_expires_at,
+                unifi,
             )
             self.cache_until = time.monotonic() + 20
             return self.cached

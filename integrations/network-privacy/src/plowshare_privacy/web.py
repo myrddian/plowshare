@@ -16,9 +16,10 @@ from plowshare import Refusal, TransportError
 from plowshare.contracts import InformationRevisionDto
 from plowshare.tools import ToolAttention
 
+from .advisories import AdvisoryLookup, AdvisoryUnavailable, public_model
 from .console import OperatorConsole
 from .contracts import integer, items, object_fields, parse_json, text, uuid
-from .device_profiles import ProfileFields, ProfileManagement
+from .device_profiles import DeviceProfile, ProfileFields, ProfileManagement
 from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
 from .issue_records import IssueManagement
@@ -42,6 +43,7 @@ def application(
     schedule_editor: ScheduleManagement | None = None,
     profiles: ProfileManagement | None = None,
     issues: IssueManagement | None = None,
+    advisories: AdvisoryLookup | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -102,6 +104,8 @@ def application(
             )
         except IssueValidation as error:
             response = web.json_response({"error": str(error)}, status=400)
+        except AdvisoryUnavailable as error:
+            response = web.json_response({"error": str(error)}, status=503)
         except ValueError:
             response = web.json_response(
                 {"error": "Invalid request or unavailable evidence"}, status=400
@@ -143,6 +147,7 @@ def application(
         return web.json_response(
             {
                 "health": asdict(health),
+                "quick_presence": asdict(worker.presence_status()),
                 "devices": [asdict(item) for item in inventory.devices],
                 "candidates": [asdict(item) for item in inventory.candidates],
                 "findings": [asdict(item) for item in value.findings()],
@@ -331,6 +336,19 @@ def application(
             }
         )
 
+    async def profile_advisories(request: web.Request) -> web.Response:
+        if advisories is None:
+            raise web.HTTPNotFound(text="Advisory lookup is not configured")
+        row = object_fields(parse_json(await request.read()), {"model"})
+        reviewed_model = public_model(text(row["model"], 128))
+        source = await profile_service().read(
+            uuid(request.match_info["identity"]), uuid(request.match_info["revision"])
+        )
+        saved_model = public_model(DeviceProfile.read(source).fields.model)
+        if reviewed_model != saved_model:
+            raise ValueError("Review the saved model before sending an advisory lookup")
+        return web.json_response(asdict(await advisories.search(saved_model)))
+
     async def profile_save(request: web.Request) -> web.Response:
         row = object_fields(
             parse_json(await request.read()),
@@ -507,6 +525,7 @@ def application(
                 "collection_enabled": worker.config.collection.enabled,
                 "settings_available": settings is not None,
                 "profiles_available": profiles is not None,
+                "advisories_available": profiles is not None and advisories is not None,
                 "issues_available": issues is not None,
                 "state": worker.state,
                 "detail": worker.detail,
@@ -654,6 +673,9 @@ def application(
     app.router.add_get("/api/profile-intents", profile_intents)
     app.router.add_get("/api/profiles", profile_list)
     app.router.add_get("/api/profiles/{identity}/{revision}", profile_source)
+    app.router.add_post(
+        "/api/profiles/{identity}/{revision}/advisories", profile_advisories
+    )
     app.router.add_post("/api/profiles", profile_save)
     app.router.add_post("/api/profiles/reconcile", profile_reconcile)
     app.router.add_get("/api/reports", reports)

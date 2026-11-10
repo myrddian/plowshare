@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -20,6 +19,7 @@ from .contracts import (
     items,
     load_json,
     object_fields,
+    private_ipv4,
 )
 from .journal import FileReceipts
 from .private_files import replace_private as replace_private
@@ -36,25 +36,27 @@ class MonitorChoice:
     targets: tuple[str, ...]
     ports: tuple[int, ...]
     labels: tuple[DeviceLabel, ...] | None = None
+    quick_scan: bool | None = None
 
     @classmethod
     def decode(cls, value: object) -> MonitorChoice:
-        row = object_fields(value, {"enabled", "targets", "ports"}, {"labels"})
+        row = object_fields(
+            value, {"enabled", "targets", "ports"}, {"labels", "quickScan"}
+        )
         if type(row["enabled"]) is not bool:
             raise ValueError("Monitoring enabled must be a boolean")
+        if "quickScan" in row:
+            quick_scan = row["quickScan"]
+            if type(quick_scan) is not bool:
+                raise ValueError("Quick presence scan must be a boolean")
+        else:
+            quick_scan = None
         targets = expand_targets(row["targets"])
         ports = tuple(integer(item, 1, 65535) for item in items(row["ports"], 8))
-        private = tuple(
-            ipaddress.IPv4Network(block)
-            for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-        )
         if (
             len(set(targets)) != len(targets)
             or len(set(ports)) != len(ports)
-            or any(
-                not any(ipaddress.IPv4Address(target) in block for block in private)
-                for target in targets
-            )
+            or not all(private_ipv4(target) for target in targets)
             or row["enabled"]
             and (not targets or not ports)
         ):
@@ -64,6 +66,7 @@ class MonitorChoice:
             targets,
             ports,
             device_labels(row["labels"], targets) if "labels" in row else None,
+            quick_scan,
         )
 
 
@@ -77,6 +80,8 @@ class MonitorView:
     labels: tuple[DeviceLabel, ...] = ()
     pihole_configured: bool = False
     pending: bool = False
+    unifi_configured: bool = False
+    quick_scan: bool = False
 
 
 class MonitorSettings(Protocol):
@@ -139,6 +144,8 @@ class FileMonitorSettings:
             plan.labels,
             plan.pihole is not None,
             pending,
+            plan.unifi is not None,
+            plan.quick_scan,
         )
 
     def _blocked_detail(self, *, include_locks: bool = True) -> str | None:
@@ -216,6 +223,8 @@ class FileMonitorSettings:
                     "maxObservationAgeSeconds",
                     "deviceLabels",
                     "pihole",
+                    "unifi",
+                    "quickScan",
                 },
             )
             plan.update(
@@ -223,6 +232,8 @@ class FileMonitorSettings:
                 targets=list(choice.targets),
                 ports=list(choice.ports),
             )
+            if choice.quick_scan is not None:
+                plan["quickScan"] = choice.quick_scan
             labels = (
                 choice.labels
                 if choice.labels is not None
