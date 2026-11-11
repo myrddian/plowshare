@@ -46,8 +46,10 @@ try {
   await page.locator('[data-project="Chatbot"]').click();
   await expect(page.locator('#application-panel')).toBeVisible();
   const hubNav = page.locator('#application-panel nav[aria-label="Application views"]');
-  await expect(hubNav.locator('[data-hub="overview"]')).toHaveAttribute('aria-current', 'page');
-  for (const name of ['Overview', 'Activity', 'Schedules', 'Relay', 'Files', 'Runtime', 'Memory', 'Boards', 'Access'])
+  // The hub lands on Activity; there is no Overview.
+  await expect(hubNav.locator('[data-hub="activity"]')).toHaveAttribute('aria-current', 'page');
+  await expect(hubNav.getByRole('button', { name: 'Overview', exact: true })).toHaveCount(0);
+  for (const name of ['Activity', 'Schedules', 'Relay', 'Files', 'Runtime', 'Memory', 'Boards', 'Access'])
     await expect(hubNav.getByRole('button', { name, exact: true })).toBeVisible();
   await expect(hubNav.getByRole('button', { name: 'Conversations', exact: true })).toHaveCount(0);
   await expect(hubNav.getByRole('button', { name: 'Runs', exact: true })).toHaveCount(0);
@@ -55,10 +57,8 @@ try {
   await expect(page.locator('#application-panel [data-activity]')).toBeVisible();
   await expect(page.locator('#application-panel [data-activity-tree]')).toBeVisible();
   await expect(page.locator('#application-panel [data-activity-tree]')).toContainText('No LLM activity for this Application yet.');
-  await page.locator('#application-panel nav [data-hub="overview"]').click();
-  await expect(page.locator('#application-panel [data-overview]')).toBeVisible();
-  for (const name of ['runtime', 'memory', 'boards'])
-    await expect(page.locator(`#application-panel [data-overview] [data-hub="${name}"]`)).toBeVisible();
+  await expect(page.locator('#application-panel [data-activity-hide-documents]')).not.toBeChecked();
+  await expect(page.locator('#application-panel [data-activity-order]')).toHaveValue('newest');
   // Runtime, Memory and Boards are hub views hosting their pages in a slot.
   for (const name of ['runtime', 'memory', 'boards']) {
     await page.locator(`#application-panel nav [data-hub="${name}"]`).click();
@@ -66,7 +66,7 @@ try {
     await expect(page.locator(`#application-panel [data-workspace-slot="${name}"]`)).toBeVisible();
     await expect(page.locator('#workspace-view-host')).toBeHidden();
   }
-  await page.locator('#application-panel nav [data-hub="overview"]').click();
+  await page.locator('#application-panel nav [data-hub="activity"]').click();
   await expect(page.locator('#application-panel [data-source]')).toBeHidden();
   await page.locator('#application-panel [data-files]').click();
   await expect(page.locator('#application-panel [data-file-browser] .file-browser-tree')).toBeVisible();
@@ -143,7 +143,7 @@ try {
   await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toBeVisible();
   for (const [view, operation] of [['runtime', 'orchestration.definitions'], ['memory', 'memory.index'], ['boards', 'board.topics']]) {
     await page.locator('[data-project="Managed app"]').click();
-    await page.locator(`#application-panel [data-overview] [data-hub="${view}"]`).click();
+    await page.locator(`#application-panel nav [data-hub="${view}"]`).click();
     await expect(page.locator(`#application-panel [data-workspace-slot="${view}"]`)).toBeVisible();
     await expect.poll(() => fixture.frames.some(frame => frame.type === operation && frame.payload.project === 'Managed app')).toBe(true);
   }
@@ -211,7 +211,7 @@ try {
     // Held application.files keeps the nav Files button disabled. Opening must still show Files.
     await expect(hubFiles).toHaveAttribute('aria-current', 'page');
     await expect(hubFiles).toBeDisabled();
-    await expect(page.locator('#application-panel [data-overview]')).toBeHidden();
+    await expect(page.locator('#application-panel [data-activity]')).toBeHidden();
     await expect(page.locator('#application-panel [data-source]')).toBeVisible();
   } finally {
     fixture.setPauseApplicationFiles(false);

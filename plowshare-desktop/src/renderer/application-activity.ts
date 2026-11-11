@@ -14,7 +14,34 @@ export type ActivityListRow = {
   agent: string | null;
   nestChat: boolean;
   current: boolean;
+  /** Work of the shipped document-ingestion pipeline (see below). */
+  document: boolean;
 };
+
+/** Newest first keeps live work on top; oldest first is plain chronology. */
+export type ActivityOrder = 'newest' | 'oldest';
+
+/**
+ * Agents of the shipped document-ingestion pipeline: submission, the
+ * summariser tree and tagging. The server marks no category for this work,
+ * so the hub classifies by these names to let people hide the (often
+ * voluminous) background processing. Application-defined agents that reuse
+ * a name here are classified the same way.
+ */
+const documentAgents = new Set([
+  'document_pipeline',
+  'document_summariser',
+  'chapter_summariser',
+  'section_summariser',
+  'paragraph_summariser',
+  'span_summariser',
+  'information_tagger',
+  'information_tag_grouper',
+]);
+
+export function isDocumentProcessing(row: Pick<ProcConversation, 'agent'>) {
+  return !!row.agent && documentAgents.has(row.agent);
+}
 
 const liveStates = new Set(['RUNNING', 'PROCESSING']);
 
@@ -31,8 +58,10 @@ export function isLiveProcState(state: string) {
 const stamp = (row: ProcConversation) => row.lastTurnAt ?? row.createdAt;
 
 /**
- * Application Activity list from proc inventory: live work first, then newest
- * logs. Person titles overlay when conversation.list supplied them.
+ * Application Activity list from proc inventory. Newest order puts live work
+ * first, then newest logs; oldest order is ascending by time. `hideDocuments`
+ * drops document-ingestion work. Person titles overlay when
+ * conversation.list supplied them.
  */
 export function applicationActivityRows(
   items: readonly ProcConversation[],
@@ -40,14 +69,21 @@ export function applicationActivityRows(
     titles?: Record<string, string>;
     selected?: string;
     handle?: string;
+    order?: ActivityOrder;
+    hideDocuments?: boolean;
   } = {},
 ): ActivityListRow[] {
-  const ranked = [...items].sort((a, b) => {
-    const live =
-      Number(isLiveProcState(b.state)) - Number(isLiveProcState(a.state));
-    if (live) return live;
-    return stamp(b).localeCompare(stamp(a)) || a.id.localeCompare(b.id);
-  });
+  const oldest = options.order === 'oldest';
+  const ranked = items
+    .filter((row) => !options.hideDocuments || !isDocumentProcessing(row))
+    .sort((a, b) => {
+      if (oldest)
+        return stamp(a).localeCompare(stamp(b)) || a.id.localeCompare(b.id);
+      const live =
+        Number(isLiveProcState(b.state)) - Number(isLiveProcState(a.state));
+      if (live) return live;
+      return stamp(b).localeCompare(stamp(a)) || a.id.localeCompare(b.id);
+    });
   return ranked.map((row) => {
     const title =
       options.titles?.[row.id]?.trim() ||
@@ -74,6 +110,7 @@ export function applicationActivityRows(
         row.origin === 'turn' &&
         (!!options.titles?.[row.id] || row.owner === options.handle),
       current: options.selected === row.id,
+      document: isDocumentProcessing(row),
     };
   });
 }
